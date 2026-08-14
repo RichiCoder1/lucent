@@ -1,0 +1,38 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const extensionRoot = path.resolve(__dirname, '..');
+
+function readJson(relativePath) {
+    return JSON.parse(fs.readFileSync(path.join(extensionRoot, relativePath), 'utf8'));
+}
+
+test('manifest registers .lui and the Lucent grammar', () => {
+    const manifest = readJson('package.json');
+    const language = manifest.contributes.languages.find(
+        (entry) => entry.id === 'lucent');
+    const grammar = manifest.contributes.grammars.find(
+        (entry) => entry.language === 'lucent');
+
+    assert.ok(language);
+    assert.deepEqual(language.extensions, ['.lui']);
+    assert.equal(grammar.scopeName, 'source.lucent');
+    assert.equal(grammar.path, './syntaxes/lucent.tmLanguage.json');
+});
+
+test('grammar and language configuration are valid JSON with Lucent constructs', () => {
+    const grammar = readJson('syntaxes/lucent.tmLanguage.json');
+    const configuration = readJson('language-configuration.json');
+
+    assert.equal(grammar.scopeName, 'source.lucent');
+    assert.match(
+        grammar.repository.keywords.patterns[0].match,
+        /component/);
+    assert.match(
+        grammar.repository.properties.patterns[0].match,
+        /onClick/);
+    assert.deepEqual(configuration.brackets[0], ['{', '}']);
+    assert.equal(configuration.comments.lineComment, '//');
+});

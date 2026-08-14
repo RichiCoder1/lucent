@@ -1,0 +1,364 @@
+using System.Text.Json;
+using Lucent.Compiler;
+
+namespace Lucent.LanguageServer;
+
+/// <summary>
+/// Minimal LSP server for the Lucent compiler frontend.
+/// </summary>
+public static class LanguageServer
+{
+    public static Task<int> RunAsync(
+        Stream input,
+        Stream output,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+
+        return new ServerSession(input, output).RunAsync(cancellationToken);
+    }
+
+    private sealed class ServerSession(Stream input, Stream output)
+    {
+        private readonly JsonRpcConnection _connection = new(input, output);
+        private readonly Dictionary<string, DocumentState> _documents =
+            new(StringComparer.Ordinal);
+
+        private bool _shutdownRequested;
+
+        public async Task<int> RunAsync(CancellationToken cancellationToken)
+        {
+            while (true)
+            {
+                JsonDocument? message;
+                try
+                {
+                    message = await _connection.ReadAsync(cancellationToken);
+                }
+                catch (JsonException)
+                {
+                    // A malformed message cannot be associated with a request ID.
+                    // Keep the stream alive so a client can recover with a later
+                    // well-formed message.
+                    continue;
+                }
+
+                if (message is null)
+                {
+                    return _shutdownRequested ? 0 : 1;
+                }
+
+                using (message)
+                {
+                    var result = await HandleMessageAsync(
+                        message.RootElement,
+                        cancellationToken);
+                    if (result.HasValue)
+                    {
+                        return result.Value;
+                    }
+                }
+            }
+        }
+
+        private async Task<int?> HandleMessageAsync(
+            JsonElement message,
+            CancellationToken cancellationToken)
+        {
+            if (!message.TryGetProperty("method", out var methodElement) ||
+                methodElement.ValueKind != JsonValueKind.String)
+            {
+                if (message.TryGetProperty("id", out var invalidId))
+                {
+                    await _connection.WriteErrorAsync(
+                        invalidId,
+                        -32600,
+                        "The JSON-RPC message must contain a method.",
+                        cancellationToken);
+                }
+
+                return null;
+            }
+
+            var method = methodElement.GetString()!;
+            var hasId = message.TryGetProperty("id", out var idElement);
+            var id = hasId ? idElement.Clone() : (JsonElement?)null;
+            message.TryGetProperty("params", out var parameters);
+
+            try
+            {
+                switch (method)
+                {
+                    case "initialize":
+                        if (hasId)
+                        {
+                            await _connection.WriteResponseAsync(
+                                id!.Value,
+                                new
+                                {
+                                    capabilities = new
+                                    {
+                                        textDocumentSync = new
+                                        {
+                                            openClose = true,
+                                            change = 1,
+                                        },
+                                        positionEncoding = "utf-16",
+                                    },
+                                    serverInfo = new
+                                    {
+                                        name = "Lucent Language Server",
+                                        version = "0.1.0",
+                                    },
+                                },
+                                cancellationToken);
+                        }
+
+                        break;
+
+                    case "initialized":
+                        break;
+
+                    case "shutdown":
+                        _shutdownRequested = true;
+                        if (hasId)
+                        {
+                            await _connection.WriteResponseAsync(
+                                id!.Value,
+                                result: null,
+                                cancellationToken);
+                        }
+
+                        break;
+
+                    case "exit":
+                        return _shutdownRequested ? 0 : 1;
+
+                    case "textDocument/didOpen":
+                        await DidOpenAsync(parameters, cancellationToken);
+                        break;
+
+                    case "textDocument/didChange":
+                        await DidChangeAsync(parameters, cancellationToken);
+                        break;
+
+                    case "textDocument/didClose":
+                        await DidCloseAsync(parameters, cancellationToken);
+                        break;
+
+                    default:
+                        if (hasId)
+                        {
+                            await _connection.WriteErrorAsync(
+                                id!.Value,
+                                -32601,
+                                $"Method '{method}' is not supported.",
+                                cancellationToken);
+                        }
+
+                        break;
+                }
+            }
+            catch (Exception exception) when (
+                exception is JsonException or InvalidOperationException)
+            {
+                if (hasId)
+                {
+                    await _connection.WriteErrorAsync(
+                        id!.Value,
+                        -32602,
+                        "The request parameters were invalid.",
+                        cancellationToken);
+                }
+            }
+
+            return null;
+        }
+
+        private async Task DidOpenAsync(
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var textDocument = parameters.GetProperty("textDocument");
+            var uri = textDocument.GetProperty("uri").GetString()
+                ?? throw new InvalidOperationException("A document URI is required.");
+            var text = textDocument.GetProperty("text").GetString() ?? string.Empty;
+            var version = textDocument.TryGetProperty("version", out var versionElement)
+                ? versionElement.GetInt32()
+                : (int?)null;
+
+            _documents[uri] = new DocumentState(text, version);
+            await PublishDiagnosticsAsync(uri, text, cancellationToken);
+        }
+
+        private async Task DidChangeAsync(
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var textDocument = parameters.GetProperty("textDocument");
+            var uri = textDocument.GetProperty("uri").GetString()
+                ?? throw new InvalidOperationException("A document URI is required.");
+            var current = _documents.TryGetValue(uri, out var document)
+                ? document.Text
+                : string.Empty;
+
+            foreach (var change in parameters.GetProperty("contentChanges").EnumerateArray())
+            {
+                var replacement = change.GetProperty("text").GetString() ?? string.Empty;
+                if (!change.TryGetProperty("range", out var range) ||
+                    range.ValueKind == JsonValueKind.Null)
+                {
+                    current = replacement;
+                    continue;
+                }
+
+                var start = GetOffset(current, range.GetProperty("start"));
+                var end = GetOffset(current, range.GetProperty("end"));
+                if (end < start)
+                {
+                    throw new InvalidOperationException(
+                        "A text change range must end after it starts.");
+                }
+
+                current = string.Concat(
+                    current.AsSpan(0, start),
+                    replacement,
+                    current.AsSpan(end));
+            }
+
+            var version = textDocument.TryGetProperty("version", out var versionElement)
+                ? versionElement.GetInt32()
+                : document?.Version;
+            _documents[uri] = new DocumentState(current, version);
+            await PublishDiagnosticsAsync(uri, current, cancellationToken);
+        }
+
+        private async Task DidCloseAsync(
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var uri = parameters
+                .GetProperty("textDocument")
+                .GetProperty("uri")
+                .GetString()
+                ?? throw new InvalidOperationException("A document URI is required.");
+
+            _documents.Remove(uri);
+            await _connection.WriteNotificationAsync(
+                "textDocument/publishDiagnostics",
+                new
+                {
+                    uri,
+                    diagnostics = Array.Empty<object>(),
+                },
+                cancellationToken);
+        }
+
+        private async Task PublishDiagnosticsAsync(
+            string uri,
+            string text,
+            CancellationToken cancellationToken)
+        {
+            var result = LucentCompiler.Compile(text, GetSourcePath(uri));
+            var diagnostics = result.Diagnostics
+                .Select(diagnostic => new PublishedDiagnostic(
+                    ToRange(text, diagnostic.Span),
+                    diagnostic.Severity == LucentDiagnosticSeverity.Error ? 1 : 2,
+                    diagnostic.Code,
+                    diagnostic.Message,
+                    "lucent"))
+                .ToArray();
+
+            await _connection.WriteNotificationAsync(
+                "textDocument/publishDiagnostics",
+                new
+                {
+                    uri,
+                    diagnostics,
+                },
+                cancellationToken);
+        }
+
+        private static string GetSourcePath(string uri)
+        {
+            if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed) &&
+                parsed.IsFile)
+            {
+                return parsed.LocalPath;
+            }
+
+            return uri;
+        }
+
+        private static LspRange ToRange(string text, SourceSpan span)
+        {
+            var start = Math.Clamp(span.Start, 0, text.Length);
+            var end = Math.Clamp(span.End, start, text.Length);
+            return new LspRange(
+                ToPosition(text, start),
+                ToPosition(text, end));
+        }
+
+        private static LspPosition ToPosition(string text, int offset)
+        {
+            var line = 0;
+            var lineStart = 0;
+            for (var index = 0; index < offset; index++)
+            {
+                if (text[index] == '\n')
+                {
+                    line++;
+                    lineStart = index + 1;
+                }
+            }
+
+            return new LspPosition(line, offset - lineStart);
+        }
+
+        private static int GetOffset(string text, JsonElement position)
+        {
+            var line = Math.Max(0, position.GetProperty("line").GetInt32());
+            var character = Math.Max(
+                0,
+                position.GetProperty("character").GetInt32());
+            var lineStart = 0;
+            var currentLine = 0;
+
+            for (var index = 0; index < text.Length && currentLine < line; index++)
+            {
+                if (text[index] == '\n')
+                {
+                    currentLine++;
+                    lineStart = index + 1;
+                }
+            }
+
+            if (currentLine < line)
+            {
+                return text.Length;
+            }
+
+            var lineEnd = text.IndexOf('\n', lineStart);
+            if (lineEnd < 0)
+            {
+                lineEnd = text.Length;
+            }
+
+            return Math.Min(lineStart + character, lineEnd);
+        }
+
+        private sealed record DocumentState(string Text, int? Version);
+
+        private sealed record LspPosition(int Line, int Character);
+
+        private sealed record LspRange(LspPosition Start, LspPosition End);
+
+        private sealed record PublishedDiagnostic(
+            LspRange Range,
+            int Severity,
+            string Code,
+            string Message,
+            string Source);
+    }
+}

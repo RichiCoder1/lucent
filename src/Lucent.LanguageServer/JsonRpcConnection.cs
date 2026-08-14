@@ -1,0 +1,140 @@
+using System.Buffers;
+using System.Text;
+using System.Text.Json;
+
+namespace Lucent.LanguageServer;
+
+internal sealed class JsonRpcConnection(Stream input, Stream output)
+{
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
+    private readonly Stream _input = input;
+    private readonly Stream _output = output;
+
+    public async Task<JsonDocument?> ReadAsync(CancellationToken cancellationToken)
+    {
+        var header = new ArrayBufferWriter<byte>();
+        var oneByte = new byte[1];
+
+        while (true)
+        {
+            var read = await _input.ReadAsync(
+                oneByte.AsMemory(),
+                cancellationToken);
+            if (read == 0)
+            {
+                return header.WrittenCount == 0
+                    ? null
+                    : throw new InvalidDataException(
+                        "The JSON-RPC header ended before EOF.");
+            }
+
+            header.Write(oneByte);
+            if (header.WrittenCount >= 4 &&
+                header.WrittenSpan[^4..].SequenceEqual("\r\n\r\n"u8))
+            {
+                break;
+            }
+
+            if (header.WrittenCount > 64 * 1024)
+            {
+                throw new InvalidDataException("The JSON-RPC header is too large.");
+            }
+        }
+
+        var contentLength = ParseContentLength(header.WrittenSpan[..^4]);
+        var payload = new byte[contentLength];
+        await _input.ReadExactlyAsync(payload, cancellationToken);
+        return JsonDocument.Parse(payload);
+    }
+
+    public Task WriteResponseAsync(
+        JsonElement id,
+        object? result,
+        CancellationToken cancellationToken) =>
+        WriteMessageAsync(
+            new
+            {
+                jsonrpc = "2.0",
+                id,
+                result,
+            },
+            cancellationToken);
+
+    public Task WriteErrorAsync(
+        JsonElement id,
+        int code,
+        string message,
+        CancellationToken cancellationToken) =>
+        WriteMessageAsync(
+            new
+            {
+                jsonrpc = "2.0",
+                id,
+                error = new
+                {
+                    code,
+                    message,
+                },
+            },
+            cancellationToken);
+
+    public Task WriteNotificationAsync(
+        string method,
+        object parameters,
+        CancellationToken cancellationToken) =>
+        WriteMessageAsync(
+            new
+            {
+                jsonrpc = "2.0",
+                method,
+                @params = parameters,
+            },
+            cancellationToken);
+
+    private async Task WriteMessageAsync(
+        object message,
+        CancellationToken cancellationToken)
+    {
+        var payload = JsonSerializer.SerializeToUtf8Bytes(
+            message,
+            SerializerOptions);
+        var header = Encoding.ASCII.GetBytes(
+            $"Content-Length: {payload.Length}\r\n\r\n");
+
+        await _output.WriteAsync(header, cancellationToken);
+        await _output.WriteAsync(payload, cancellationToken);
+        await _output.FlushAsync(cancellationToken);
+    }
+
+    private static int ParseContentLength(ReadOnlySpan<byte> header)
+    {
+        foreach (var line in Encoding.ASCII.GetString(header).Split("\r\n"))
+        {
+            var separator = line.IndexOf(':');
+            if (separator < 0 ||
+                !line[..separator].Equals(
+                    "Content-Length",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (int.TryParse(
+                    line[(separator + 1)..].Trim(),
+                    out var length) &&
+                length >= 0)
+            {
+                return length;
+            }
+
+            break;
+        }
+
+        throw new InvalidDataException(
+            "Every JSON-RPC message must contain a valid Content-Length header.");
+    }
+}

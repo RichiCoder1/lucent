@@ -23,20 +23,19 @@ public static class LucentCompiler
 
         var source = new SourceDocument(sourceText, sourcePath);
         var emissionDiagnostics = new DiagnosticBag(source);
-        var model = new CounterBinder(emissionDiagnostics).Bind(syntax);
-        diagnostics.AddRange(emissionDiagnostics.Items);
+        var model = new GeneralBinder(emissionDiagnostics).Bind(syntax);
+        var generatedSource = model is null
+            ? null
+            : GeneralCSharpEmitter.Emit(model, sourcePath, sourceText);
 
-        if (model is null || HasErrors(diagnostics))
+        diagnostics.AddRange(emissionDiagnostics.Items);
+        if (generatedSource is null || HasErrors(diagnostics))
         {
             return new CompilationResult(syntax, null, diagnostics);
         }
 
-        return new CompilationResult(
-            syntax,
-            CSharpEmitter.Emit(model, sourcePath),
-            diagnostics);
+        return new CompilationResult(syntax, generatedSource, diagnostics);
     }
-
     private static bool HasErrors(IEnumerable<LucentDiagnostic> diagnostics) =>
         diagnostics.Any(diagnostic =>
             diagnostic.Severity == LucentDiagnosticSeverity.Error);

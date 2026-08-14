@@ -5,7 +5,7 @@
 Lucent is an experimental C#-superset language and UI framework for building cross-platform desktop applications on Avalonia. It aims to provide React-like components, compiler-managed fine-grained updates, CSS-native styling, and normal .NET interoperability without exposing a virtual DOM or requiring XAML.
 
 > [!IMPORTANT]
-> Lucent is in the design and proof-of-concept stage. The repository contains only a narrow Counter compiler; there is no general-purpose compiler, stable runtime, package, or compatibility promise yet.
+> Lucent is in the design and proof-of-concept stage. The repository contains a narrow compiler for the initial `Column`, `Text`, and `Button` projection; there is no general-purpose compiler, stable runtime, package, or compatibility promise yet.
 
 ```csharp
 component Counter()
@@ -74,7 +74,7 @@ The goal is not C# punctuation wrapped around XAML semantics. Lucent owns a smal
 
 ## Repository status
 
-This repository contains the project definition, a narrow [Lucent compiler](src/Lucent.Compiler), its [CLI adapter](src/Lucent.Compiler.Cli), the [Counter source](examples/counter/Counter.lui), and a runnable Avalonia host in [`src/Lucent.Poc`](src/Lucent.Poc). The compiler now parses the Counter subset and emits the C# compiled by the desktop POC.
+This repository contains a shared [Lucent compiler](src/Lucent.Compiler), [CLI](src/Lucent.Compiler.Cli) and [MSBuild](src/Lucent.Compiler.MSBuild) adapters, a basic [language server](src/Lucent.LanguageServer) and [VS Code extension](editors/vscode), the [Counter source](examples/counter/Counter.lui), and a runnable Avalonia host in [`src/Lucent.Poc`](src/Lucent.Poc). The POC now generates its compiled C# from `.lui` under `obj` during the normal build.
 
 Run the desktop POC with:
 
@@ -91,6 +91,16 @@ dotnet run --project src/Lucent.Compiler.Cli/Lucent.Compiler.Cli.csproj -- gener
 dotnet run --project src/Lucent.Compiler.Cli/Lucent.Compiler.Cli.csproj -- verify --input examples/counter/Counter.lui --output src/Lucent.Poc/Generated/CounterComponent.g.cs
 ```
 
-See [POC 0002 notes](docs/poc/0002-counter-compiler.md) for the supported grammar, compiler interface, verification contract, and issues discovered. The next milestone deepens the shared frontend rather than broadening the language all at once.
+Prepare and test the experimental VS Code extension with:
+
+```powershell
+Push-Location editors/vscode
+npm install
+npm test
+npm run prepare-server
+Pop-Location
+```
+
+See [POC 0002](docs/poc/0002-counter-compiler.md) for the original compiler checkpoint and [POC 0003](docs/poc/0003-shared-compiler-tooling.md) for the generalized binder, bounded C# islands, source mapping, MSBuild adapter, and editor foundation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing syntax or architecture changes. Lucent has deliberately deferred several design choices, and examples should not quietly turn those possibilities into promises.

@@ -21,6 +21,7 @@ Proof-of-concept notes:
 
 - [POC 0001: Code-only desktop window](poc/0001-desktop-window.md)
 - [POC 0002: Counter compiler](poc/0002-counter-compiler.md)
+- [POC 0003: Shared compiler and tooling foundation](poc/0003-shared-compiler-tooling.md)
 
 Architectural decisions:
 

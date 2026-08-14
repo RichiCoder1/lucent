@@ -90,7 +90,7 @@ internal sealed class Lexer(SourceDocument source, DiagnosticBag diagnostics)
             '>' => CreateToken(TokenKind.GreaterThan, start),
             '=' => CreateToken(TokenKind.Equals, start),
             '+' => CreateToken(TokenKind.Plus, start),
-            _ => BadToken(start, current),
+            _ => CreateToken(TokenKind.Unknown, start),
         };
     }
 
@@ -115,7 +115,7 @@ internal sealed class Lexer(SourceDocument source, DiagnosticBag diagnostics)
                 break;
             }
 
-            if (current is '\r' or '\n')
+            if (!isInterpolated && current is ('\r' or '\n'))
             {
                 break;
             }
@@ -134,15 +134,6 @@ internal sealed class Lexer(SourceDocument source, DiagnosticBag diagnostics)
                 ? TokenKind.InterpolatedString
                 : TokenKind.String,
             start);
-    }
-
-    private SyntaxToken BadToken(int start, char character)
-    {
-        diagnostics.Add(
-            "LUC0001",
-            $"Unexpected character '{character}'.",
-            new SourceSpan(start, 1));
-        return CreateToken(TokenKind.Bad, start);
     }
 
     private SyntaxToken CreateToken(TokenKind kind, int start) =>

@@ -32,13 +32,23 @@ The current implementation targets .NET 9. Restore, verify generated output, bui
 dotnet restore Lucent.sln
 dotnet run --project src/Lucent.Compiler.Cli/Lucent.Compiler.Cli.csproj -- verify --input examples/counter/Counter.lui --output src/Lucent.Poc/Generated/CounterComponent.g.cs
 dotnet build Lucent.sln --no-restore
-dotnet test tests/Lucent.Compiler.Tests/Lucent.Compiler.Tests.csproj --no-build
+dotnet test Lucent.sln --no-build
 ```
 
 Run the native Avalonia verification from an interactive desktop session:
 
 ```powershell
 dotnet run --project src/Lucent.Poc/Lucent.Poc.csproj -- --smoke-test
+```
+
+Verify the VS Code grammar, manifest, and bundled language server with:
+
+```powershell
+Push-Location editors/vscode
+npm install
+npm test
+npm run prepare-server
+Pop-Location
 ```
 
 Implementation work should include the smallest useful test at the same layer:

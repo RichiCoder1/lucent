@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <LucentCompilerEnabled Condition="'$(LucentCompilerEnabled)' == ''">true</LucentCompilerEnabled>
+    <LucentCompilerOutputDirectory Condition="'$(LucentCompilerOutputDirectory)' == ''">$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/Lucent/</LucentCompilerOutputDirectory>
+    <LucentCompilerTaskAssembly Condition="'$(LucentCompilerTaskAssembly)' == ''">$(MSBuildThisFileDirectory)../src/Lucent.Compiler.MSBuild/bin/$(Configuration)/net9.0/Lucent.Compiler.MSBuild.dll</LucentCompilerTaskAssembly>
+    <LucentCompilerCoreAssembly Condition="'$(LucentCompilerCoreAssembly)' == ''">$(MSBuildThisFileDirectory)../src/Lucent.Compiler/bin/$(Configuration)/net9.0/Lucent.Compiler.dll</LucentCompilerCoreAssembly>
+  </PropertyGroup>
+</Project>

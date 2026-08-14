@@ -1,0 +1,102 @@
+{
+  "name": "Lucent",
+  "scopeName": "source.lucent",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#controls"
+    },
+    {
+      "include": "#properties"
+    },
+    {
+      "include": "#punctuation"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.lucent",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.lucent",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.lucent",
+          "begin": "\\$?\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.lucent",
+              "match": "\\\\."
+            },
+            {
+              "name": "punctuation.definition.interpolation.begin.lucent",
+              "match": "\\{"
+            },
+            {
+              "name": "punctuation.definition.interpolation.end.lucent",
+              "match": "\\}"
+            }
+          ]
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "storage.type.lucent",
+          "match": "\\b(namespace|component|Fragment|Render|State|private|readonly|return|new)\\b"
+        },
+        {
+          "name": "keyword.control.lucent",
+          "match": "\\b(if|else|foreach|slot|yield|context|using)\\b"
+        }
+      ]
+    },
+    "controls": {
+      "patterns": [
+        {
+          "name": "support.class.component.lucent",
+          "match": "\\b[A-Z][A-Za-z0-9_]*(?=\\s*(?:\\(|\\{))"
+        }
+      ]
+    },
+    "properties": {
+      "patterns": [
+        {
+          "name": "entity.other.attribute-name.lucent",
+          "match": "\\b(class|text|onClick)\\b(?=\\s*:)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.lucent",
+          "match": "[;:,.]"
+        },
+        {
+          "name": "punctuation.definition.block.lucent",
+          "match": "[{}()]"
+        }
+      ]
+    }
+  }
+}

@@ -44,11 +44,15 @@ Build the syntax tree, diagnostics, component symbols, namespace and import reso
 
 The compiler module already exposes a side-effect-free syntax/diagnostic result used by the CLI. This milestone must deepen that seam with bounded Roslyn C# islands, stronger recovery, semantic control descriptors, and the symbol model needed by the language server.
 
+The first shared-frontend slice is complete: CLI, MSBuild, and LSP adapters now consume the same compiler interface; bounded Roslyn syntax islands, recursive control descriptors, absolute diagnostics, and generated `#line` mappings are executable. Cross-file symbols, imports, type-aware island binding, and a public semantic-query interface remain before this milestone is fully complete. See [POC 0003](poc/0003-shared-compiler-tooling.md).
+
 Exit condition: the compiler has no private parser or symbol model that the language server would need to reproduce.
 
 ### 2. Minimal language server
 
 Add document recognition, diagnostics, symbols, hover, component completion, and go-to-definition.
+
+The stdio protocol, document synchronization, push diagnostics, UTF-16 range mapping, VS Code registration, and TextMate grammar are now implemented. Symbols, hover, completion, and navigation remain, so this milestone's exit condition is not yet met.
 
 Exit condition: the Counter source is meaningfully editable without reading generated code.
 

@@ -1,0 +1,27 @@
+<Project>
+  <UsingTask
+    TaskName="Lucent.Compiler.MSBuild.CompileLucent"
+    AssemblyFile="$(LucentCompilerTaskAssembly)" />
+
+  <ItemGroup>
+    <LucentGenerated Include="@(LucentSource->'$(LucentCompilerOutputDirectory)%(Filename)Component.g.cs')" />
+    <FileWrites Include="@(LucentGenerated)" />
+    <Compile Include="@(LucentGenerated)" AutoGen="true" />
+  </ItemGroup>
+
+  <Target
+    Name="GenerateLucent"
+    BeforeTargets="CoreCompile"
+    DependsOnTargets="ResolveProjectReferences"
+    Condition="'$(LucentCompilerEnabled)' == 'true' and '@(LucentSource)' != '' and '$(DesignTimeBuild)' != 'true'"
+    Inputs="@(LucentSource);$(LucentCompilerTaskAssembly);$(LucentCompilerCoreAssembly)"
+    Outputs="@(LucentGenerated)">
+    <MakeDir Directories="$(LucentCompilerOutputDirectory)" />
+
+    <CompileLucent
+      Sources="@(LucentSource)"
+      OutputDirectory="$(LucentCompilerOutputDirectory)">
+      <Output TaskParameter="GeneratedFiles" ItemName="_LucentGeneratedFiles" />
+    </CompileLucent>
+  </Target>
+</Project>

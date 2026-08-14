@@ -6,9 +6,22 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <Import Project="..\..\build\Lucent.Compiler.props" />
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference
+      Include="..\Lucent.Compiler.MSBuild\Lucent.Compiler.MSBuild.csproj"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all" />
+    <LucentSource Include="..\..\examples\counter\Counter.lui" />
+    <Compile Remove="Generated\CounterComponent.g.cs" />
+  </ItemGroup>
+
+  <Import Project="..\..\build\Lucent.Compiler.targets" />
 </Project>

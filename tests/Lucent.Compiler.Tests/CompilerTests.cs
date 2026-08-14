@@ -17,8 +17,10 @@ public sealed class CompilerTests
         Assert.IsNotNull(result.Syntax);
         Assert.AreEqual("Lucent.Examples.Counter", result.Syntax.NamespaceName);
         Assert.AreEqual("Counter", result.Syntax.Component.Name);
-        Assert.AreEqual("count", result.Syntax.Component.State.Name);
-        Assert.AreEqual(0, result.Syntax.Component.State.InitialValue);
+        var state = result.Syntax.Component.State
+            ?? throw new AssertFailedException("Counter state member was not parsed.");
+        Assert.AreEqual("count", state.Name);
+        Assert.AreEqual(0, state.InitialValue);
 
         var root = result.Syntax.Component.RenderMethod.Root;
         Assert.AreEqual("Column", root.Name);
@@ -45,8 +47,9 @@ public sealed class CompilerTests
         var source = File.ReadAllText(RepositoryPaths.CounterSource);
         var expected = File.ReadAllText(RepositoryPaths.GeneratedCounter);
 
-        var first = LucentCompiler.Compile(source, RepositoryPaths.CounterSource);
-        var second = LucentCompiler.Compile(source, RepositoryPaths.CounterSource);
+        const string logicalSourcePath = "examples/counter/Counter.lui";
+        var first = LucentCompiler.Compile(source, logicalSourcePath);
+        var second = LucentCompiler.Compile(source, logicalSourcePath);
 
         Assert.IsTrue(first.Succeeded);
         Assert.AreEqual(expected, first.GeneratedSource);

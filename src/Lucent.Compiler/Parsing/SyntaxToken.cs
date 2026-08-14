@@ -20,6 +20,7 @@ internal enum TokenKind
     GreaterThan,
     Equals,
     Plus,
+    Unknown,
 }
 
 internal readonly record struct SyntaxToken(

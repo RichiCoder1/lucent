@@ -1,0 +1,66 @@
+{
+  "name": "lucent-vscode",
+  "displayName": "Lucent",
+  "description": "Language support for the Lucent compiled declarative UI language.",
+  "version": "0.1.0",
+  "publisher": "lucent",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "language-configuration.json",
+    "syntaxes",
+    "server"
+  ],
+  "activationEvents": [
+    "onLanguage:lucent"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "lucent",
+        "aliases": [
+          "Lucent",
+          "lui"
+        ],
+        "extensions": [
+          ".lui"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lucent",
+        "scopeName": "source.lucent",
+        "path": "./syntaxes/lucent.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "Lucent",
+      "properties": {
+        "lucent.languageServer.command": {
+          "type": "string",
+          "default": "dotnet",
+          "description": "Executable used to launch the Lucent language server."
+        },
+        "lucent.languageServer.path": {
+          "type": "string",
+          "default": "server/Lucent.LanguageServer.dll",
+          "description": "Path to the net9 Lucent language-server assembly, relative to this extension when not absolute."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "prepare-server": "pwsh -NoProfile -File scripts/prepare-server.ps1",
+    "vscode:prepublish": "npm run prepare-server"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.0"
+  }
+}

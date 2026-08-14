@@ -1,5 +1,8 @@
 # POC 0002: Counter compiler
 
+> [!NOTE]
+> This document records the original Counter-only checkpoint. [POC 0003](0003-shared-compiler-tooling.md) supersedes its current-state limitations with the generalized binder, Roslyn islands, source mapping, MSBuild adapter, and editor foundation.
+
 This slice implements the first executable Lucent compiler path:
 
 ```text
