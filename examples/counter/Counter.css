@@ -1,0 +1,12 @@
+:root {
+    --accent: #7357e6;
+}
+
+.counter {
+    padding: 16px;
+    gap: 8px;
+}
+
+.primary {
+    background: var(--accent);
+}

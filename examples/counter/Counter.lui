@@ -1,0 +1,26 @@
+namespace Lucent.Examples.Counter;
+
+component Counter()
+{
+    private readonly State<int> count = new(0);
+
+    Fragment Render()
+    {
+        return Column {
+            class: "counter";
+
+            Text {
+                text: $"Count: {count.Value}";
+            }
+
+            Button {
+                class: "primary";
+                text: "Increment";
+
+                onClick: {
+                    count.Update(count.Value + 1);
+                }
+            }
+        };
+    }
+}

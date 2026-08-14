@@ -1,0 +1,136 @@
+using Lucent.Compiler.Syntax;
+
+namespace Lucent.Compiler.Tests;
+
+[TestClass]
+public sealed class CompilerTests
+{
+    [TestMethod]
+    public void Counter_parses_and_generates_without_diagnostics()
+    {
+        var source = File.ReadAllText(RepositoryPaths.CounterSource);
+
+        var result = LucentCompiler.Compile(source, RepositoryPaths.CounterSource);
+
+        Assert.IsTrue(result.Succeeded);
+        Assert.HasCount(0, result.Diagnostics);
+        Assert.IsNotNull(result.Syntax);
+        Assert.AreEqual("Lucent.Examples.Counter", result.Syntax.NamespaceName);
+        Assert.AreEqual("Counter", result.Syntax.Component.Name);
+        Assert.AreEqual("count", result.Syntax.Component.State.Name);
+        Assert.AreEqual(0, result.Syntax.Component.State.InitialValue);
+
+        var root = result.Syntax.Component.RenderMethod.Root;
+        Assert.AreEqual("Column", root.Name);
+        CollectionAssert.AreEqual(
+            new[] { "Text", "Button" },
+            root.Children.Select(child => child.Name).ToArray());
+
+        var text = root.Children.First();
+        var textProperty = text.Properties.Single(property =>
+            property.Name == "text");
+        Assert.IsInstanceOfType<StringValueSyntax>(textProperty.Value);
+        Assert.IsTrue(
+            ((StringValueSyntax)textProperty.Value).IsInterpolated);
+
+        var button = root.Children.Last();
+        var clickProperty = button.Properties.Single(property =>
+            property.Name == "onClick");
+        Assert.IsInstanceOfType<EventBlockValueSyntax>(clickProperty.Value);
+    }
+
+    [TestMethod]
+    public void Counter_generation_matches_checked_in_snapshot()
+    {
+        var source = File.ReadAllText(RepositoryPaths.CounterSource);
+        var expected = File.ReadAllText(RepositoryPaths.GeneratedCounter);
+
+        var first = LucentCompiler.Compile(source, RepositoryPaths.CounterSource);
+        var second = LucentCompiler.Compile(source, RepositoryPaths.CounterSource);
+
+        Assert.IsTrue(first.Succeeded);
+        Assert.AreEqual(expected, first.GeneratedSource);
+        Assert.AreEqual(first.GeneratedSource, second.GeneratedSource);
+        Assert.IsFalse(first.GeneratedSource!.Contains("FontSize", StringComparison.Ordinal));
+        Assert.IsFalse(first.GeneratedSource.Contains("Padding", StringComparison.Ordinal));
+        Assert.IsFalse(first.GeneratedSource.Contains(
+            "Text = \"Lucent\"",
+            StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Interpolated_string_braces_do_not_terminate_the_ui_element()
+    {
+        var source = File.ReadAllText(RepositoryPaths.CounterSource);
+
+        var result = LucentCompiler.Compile(source, RepositoryPaths.CounterSource);
+
+        Assert.IsTrue(result.Succeeded);
+        var root = result.Syntax!.Component.RenderMethod.Root;
+        Assert.HasCount(2, root.Children);
+        Assert.AreEqual("Button", root.Children.Last().Name);
+    }
+
+    [TestMethod]
+    public void Missing_property_semicolon_reports_a_source_diagnostic_and_recovers()
+    {
+        var source = File.ReadAllText(RepositoryPaths.CounterSource)
+            .Replace(
+                "text: \"Increment\";",
+                "text: \"Increment\"",
+                StringComparison.Ordinal);
+
+        var result = LucentCompiler.Compile(source, "MissingSemicolon.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        var diagnostic = result.Diagnostics.Single(candidate =>
+            candidate.Code == "LUC1001" &&
+            candidate.Message.Contains(
+                "property value",
+                StringComparison.Ordinal));
+        Assert.IsTrue(diagnostic.Line > 0);
+        Assert.IsTrue(diagnostic.Column > 0);
+        Assert.IsNotNull(result.Syntax);
+        Assert.AreEqual(
+            "Button",
+            result.Syntax.Component.RenderMethod.Root.Children.Last().Name);
+    }
+
+    [TestMethod]
+    public void Unsupported_property_reports_a_semantic_diagnostic()
+    {
+        var source = File.ReadAllText(RepositoryPaths.CounterSource)
+            .Replace(
+                "class: \"primary\";",
+                "class: \"primary\";\n                tooltip: \"Not supported\";",
+                StringComparison.Ordinal);
+
+        var result = LucentCompiler.Compile(source, "UnsupportedProperty.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "LUC2001" &&
+            diagnostic.Message.Contains(
+                "tooltip",
+                StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Duplicate_optional_property_reports_a_semantic_diagnostic()
+    {
+        var source = File.ReadAllText(RepositoryPaths.CounterSource)
+            .Replace(
+                "class: \"primary\";",
+                "class: \"primary\";\n                class: \"secondary\";",
+                StringComparison.Ordinal);
+
+        var result = LucentCompiler.Compile(source, "DuplicateClass.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "LUC2001" &&
+            diagnostic.Message.Contains(
+                "only one 'class'",
+                StringComparison.Ordinal)));
+    }
+}
