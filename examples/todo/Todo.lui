@@ -1,0 +1,188 @@
+namespace Lucent.Examples.Todo;
+using System.Linq;
+using Avalonia.Layout;
+
+component Todo()
+{
+    private readonly State<string> draft = new("");
+    private readonly State<TodoItem[]> todos = new([
+        new TodoItem(1, "Surface native Avalonia controls", true),
+        new TodoItem(2, "Add keyed Lucent regions", false),
+        new TodoItem(3, "Ship the TodoMVC proof of concept", false)
+    ]);
+    private readonly State<TodoFilter> filter = new(TodoFilter.All);
+
+    Fragment Render()
+    {
+        return Border {
+            Padding: 32;
+            MaxWidth: 760;
+            HorizontalAlignment: HorizontalAlignment.Center;
+            VerticalAlignment: VerticalAlignment.Center;
+
+            StackPanel {
+                Spacing: 14;
+
+                TextBlock {
+                    Text: "Todos";
+                    FontSize: 30;
+                    FontWeight: Avalonia.Media.FontWeight.Bold;
+                }
+
+                TextBlock {
+                    Text: "A TodoMVC-style app composed directly from Avalonia controls.";
+                    Opacity: 0.7;
+                }
+
+                StackPanel {
+                    Orientation: Orientation.Horizontal;
+                    Spacing: 8;
+
+                    TextBox {
+                        Width: 500;
+                        Text: draft.Value;
+                        PlaceholderText: "What needs doing?";
+                        TextChanged: {
+                            draft.Update(((TextBox)sender!).Text ?? "");
+                        }
+                    }
+
+                    Button {
+                        Content: "Add task";
+                        IsEnabled: !string.IsNullOrWhiteSpace(draft.Value);
+                        Click: {
+                            var title = draft.Value.Trim();
+                            if (title.Length > 0)
+                            {
+                                var id = todos.Value.Length == 0
+                                    ? 1
+                                    : todos.Value.Max(item => item.Id) + 1;
+                                todos.Update([
+                                    .. todos.Value,
+                                    new TodoItem(id, title, false)
+                                ]);
+                                draft.Update("");
+                            }
+                        }
+                    }
+                }
+
+                CheckBox {
+                    Content: "Mark all complete";
+                    IsEnabled: todos.Value.Length > 0;
+                    IsChecked: todos.Value.Length > 0 &&
+                        todos.Value.All(item => item.Completed);
+                    Click: {
+                        var completed = ((CheckBox)sender!).IsChecked == true;
+                        todos.Update(todos.Value
+                            .Select(item => item with { Completed = completed })
+                            .ToArray());
+                    }
+                }
+
+                StackPanel {
+                    Spacing: 8;
+
+                    foreach (var todo in todos.Value.Where(item =>
+                        filter.Value == TodoFilter.All ||
+                        (filter.Value == TodoFilter.Active && !item.Completed) ||
+                        (filter.Value == TodoFilter.Completed && item.Completed)))
+                    keyed by todo.Id {
+                        Border {
+                            Padding: (12, 8);
+                            CornerRadius: 8;
+                            Background: todo.Completed
+                                ? Avalonia.Media.Brushes.LightGreen
+                                : Avalonia.Media.Brushes.LightBlue;
+
+                            StackPanel {
+                                Orientation: Orientation.Horizontal;
+                                Spacing: 10;
+
+                                CheckBox {
+                                    IsChecked: todo.Completed;
+                                    VerticalAlignment: VerticalAlignment.Center;
+                                    Click: {
+                                        todos.Update(todos.Value
+                                            .Select(item => item.Id == todo.Id
+                                                ? item with { Completed = !item.Completed }
+                                                : item)
+                                            .ToArray());
+                                    }
+                                }
+
+                                TextBox {
+                                    Width: 500;
+                                    Text: todo.Title;
+                                    TextChanged: {
+                                        var title = ((TextBox)sender!).Text ?? "";
+                                        todos.Update(todos.Value
+                                            .Select(item => item.Id == todo.Id
+                                                ? item with { Title = title }
+                                                : item)
+                                            .ToArray());
+                                    }
+                                }
+
+                                Button {
+                                    Content: "Delete";
+                                    Click: {
+                                        todos.Update(todos.Value
+                                            .Where(item => item.Id != todo.Id)
+                                            .ToArray());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                TextBlock {
+                    Text: todos.Value.Length == 0
+                        ? "No tasks yet."
+                        : $"{todos.Value.Count(item => !item.Completed)} item(s) left";
+                }
+
+                StackPanel {
+                    Orientation: Orientation.Horizontal;
+                    Spacing: 8;
+
+                    Button {
+                        Content: "All";
+                        IsEnabled: filter.Value != TodoFilter.All;
+                        Click: { filter.Update(TodoFilter.All); }
+                    }
+
+                    Button {
+                        Content: "Active";
+                        IsEnabled: filter.Value != TodoFilter.Active;
+                        Click: { filter.Update(TodoFilter.Active); }
+                    }
+
+                    Button {
+                        Content: "Completed";
+                        IsEnabled: filter.Value != TodoFilter.Completed;
+                        Click: { filter.Update(TodoFilter.Completed); }
+                    }
+
+                    Button {
+                        Content: "Clear completed";
+                        IsEnabled: todos.Value.Any(item => item.Completed);
+                        Click: {
+                            todos.Update(items => items
+                                .Where(item => !item.Completed)
+                                .ToArray());
+                        }
+                    }
+                }
+
+                ProgressBar {
+                    Minimum: 0;
+                    Maximum: todos.Value.Length == 0 ? 1 : todos.Value.Length;
+                    Value: todos.Value.Count(item => item.Completed);
+                    Height: 6;
+                }
+            }
+        };
+    }
+}

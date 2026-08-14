@@ -17,6 +17,9 @@ This page separates project direction from illustrative syntax. Update it when a
 | Options | Do not promote option-record members into component arguments or add implicit object merging. |
 | Styling | Use CSS as the authoring language and compile it toward a typed style representation. |
 | Interop | Keep raw Avalonia and .NET integration available, but do not let legacy observable types define the native model. |
+| Controls | Make direct Avalonia controls and exact native members the default surface; infer native child placement from Avalonia content metadata. Optional Lucent controls must add substantial semantics rather than wrap controls one-for-one. See [ADR 0004](adr/0004-native-avalonia-controls.md). |
+| Native content | Allow both explicit `Content: value` and concise trailing scalar content; both occupy the same resolved Avalonia content route. |
+| Native values | Apply convenience conversion from the resolved target .NET type. Keep explicit C# unchanged and do not infer from control/property names. |
 | Tooling | Share frontend infrastructure between the compiler and language server; include a minimal language server in the proof of concept. |
 | Scope | Prove one Avalonia backend and a narrow language before pursuing other platforms or broad compatibility. |
 
@@ -30,6 +33,7 @@ This page separates project direction from illustrative syntax. Update it when a
 | Compiler strategy | Dedicated frontend, generated C#, then Roslyn | Replace only if expression integration or source mapping proves unworkable. |
 | State surface | Explicit `State<T>` members with `.Value` and `.Update`; concise `state T name = value` member sugar remains a candidate | Validate that sugar removes ceremony without hiding ownership, initialization, or invalidation. |
 | Component identity | Lexical call site for static structure, call site plus key for repeated structure | Validate with stateful conditional and reordered-list tests. |
+| Initial keyed loops | Require `keyed by`, one native row root, and a dedicated native collection host; retain controls by key without a virtual DOM. | Expand only after nested regions and component-row lifetime have executable coverage. |
 | Context syntax | `context Theme = value` and `using context Theme` | Finalize after symbol, shadowing, and type-inference experiments. |
 | Token model | CSS variables with typed compiler representations where possible | Validate against Avalonia property conversion and theme changes. |
 

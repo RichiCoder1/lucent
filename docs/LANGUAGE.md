@@ -75,7 +75,42 @@ component Badge(string text) =>
 
 This is shorthand for the same `Fragment Render()` contract, not a second component model. The exact literal syntax for an explicit zero- or multiple-root fragment remains a working choice.
 
-Controls and components share composition syntax but not an implementation model. A control ultimately maps to Avalonia, while a component may produce zero, one, or many controls without becoming a heavyweight control itself.
+Controls and components share composition syntax but not an implementation model. A native control resolves to its real Avalonia type and members, while a component may produce zero, one, or many controls without becoming a heavyweight control itself. Nested content on a native control follows Avalonia's content metadata; trailing content supplied to a Lucent component remains a Lucent slot.
+
+Native scalar content may be written explicitly or with trailing literal
+content when the control has an unambiguous scalar content route:
+
+```csharp
+Button { Content: "Add task"; }
+Button { "Add task"; }
+```
+
+Both forms target Avalonia's `ContentControl.Content`; the explicit spelling is
+available when floating text would be less clear. Explicit content and nested
+implicit content cannot be combined.
+
+The language rule is that literal conveniences are selected from the resolved
+target property type, not from a control or property-name table. The current
+proof of concept approximates that future semantic rule with a bounded
+descriptor for the Avalonia properties used by the Todo:
+
+```csharp
+Border {
+    Padding: 24;
+    CornerRadius: 8;
+}
+
+Border {
+    Padding: (16, 8);
+}
+```
+
+Those recognized values lower to typed `Thickness` and `CornerRadius`
+construction, while the same numeric literal remains numeric for a property
+such as `Width`. Explicit C# construction always remains available. General
+target-type selection, plus string parsing for enums, brushes, colors, and
+`GridLength`, waits for the project-aware symbol binder so conversion errors
+can be reported against the actual property type.
 
 ## UI declarations and control flow
 
@@ -98,6 +133,13 @@ Fragment Render() =>
 ```
 
 Normal C# conditionals and loops express structural UI. `keyed by` adds the logical identity needed to preserve item state through insertion, deletion, and movement.
+
+The initial executable keyed-loop subset requires one native control root
+inside the loop and a dedicated `Panel` or `ItemsControl` child region. Existing
+keys retain their native controls, changed item values refresh row properties,
+new keys create rows, removed keys dispose their subscriptions, and source
+order determines native child order. Nested structural control flow remains
+deferred.
 
 Complete C# expressions remain valid in property values, arguments, event callbacks, conditions, and other defined C# positions. The frontend must preserve their C# meaning rather than silently reinterpret them as Lucent declarations.
 

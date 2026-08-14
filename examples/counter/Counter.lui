@@ -6,18 +6,18 @@ component Counter()
 
     Fragment Render()
     {
-        return Column {
+        return StackPanel {
             class: "counter";
 
-            Text {
-                text: $"Count: {count.Value}";
+            TextBlock {
+                Text: $"Count: {count.Value}";
             }
 
             Button {
                 class: "primary";
-                text: "Increment";
+                "Increment";
 
-                onClick: {
+                Click: {
                     count.Update(count.Value + 1);
                 }
             }

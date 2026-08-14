@@ -28,7 +28,13 @@ internal sealed partial class Parser
     {
         var start = Current.Span.Start;
         var namespaceName = ParseNamespace();
+        var usings = new List<UsingDirectiveSyntax>();
         var components = new List<ComponentDeclarationSyntax>();
+
+        while (IsIdentifier("using"))
+        {
+            usings.Add(ParseUsingDirective());
+        }
 
         while (Current.Kind != TokenKind.EndOfFile)
         {
@@ -58,7 +64,8 @@ internal sealed partial class Parser
             namespaceName,
             components[0],
             SpanFrom(start, Current.Span.End),
-            components);
+            components,
+            usings);
     }
 
     private string ParseNamespace()
@@ -91,6 +98,21 @@ internal sealed partial class Parser
 
         Expect(TokenKind.Semicolon, "';' after the namespace declaration");
         return string.Join(".", parts);
+    }
+
+    private UsingDirectiveSyntax ParseUsingDirective()
+    {
+        var start = Current.Span.Start;
+        while (Current.Kind is not TokenKind.Semicolon and not TokenKind.EndOfFile)
+        {
+            NextToken();
+        }
+
+        var semicolon = Expect(TokenKind.Semicolon, "';' after the using directive");
+        var end = semicolon.Span.End;
+        return new UsingDirectiveSyntax(
+            Slice(start, end).Trim(),
+            SpanFrom(start, end));
     }
 
     private ComponentDeclarationSyntax ParseComponent()
@@ -261,7 +283,15 @@ internal sealed partial class Parser
         {
             var before = _position;
 
-            if (Current.Kind == TokenKind.Identifier &&
+            if (IsIdentifier("foreach"))
+            {
+                members.Add(ParseForEach());
+            }
+            else if (Current.Kind is TokenKind.String or TokenKind.InterpolatedString)
+            {
+                members.Add(ParseImplicitContent());
+            }
+            else if (Current.Kind == TokenKind.Identifier &&
                 Peek(1).Kind == TokenKind.Colon)
             {
                 members.Add(ParseProperty());
@@ -291,6 +321,113 @@ internal sealed partial class Parser
             name.Text,
             members,
             SpanFrom(start, closeBrace.Span.End));
+    }
+
+    private UiForEachSyntax ParseForEach()
+    {
+        var start = ExpectIdentifier("foreach").Span.Start;
+        var openParen = Expect(TokenKind.OpenParen, "'(' after foreach");
+        var headerStart = openParen.Span.End;
+        var headerEnd = ScanMatchingDelimiter(
+            headerStart,
+            TokenKind.OpenParen,
+            TokenKind.CloseParen);
+        var header = Slice(headerStart, headerEnd);
+        AdvanceTo(headerEnd);
+        Expect(TokenKind.CloseParen, "')' after the foreach header");
+
+        var match = ForEachHeaderPattern().Match(header);
+        var itemName = match.Success ? match.Groups["item"].Value : "item";
+        var sourceText = match.Success ? match.Groups["source"].Value.Trim() : header.Trim();
+        var sourceOffset = match.Success
+            ? header.IndexOf(match.Groups["source"].Value, StringComparison.Ordinal) +
+              (match.Groups["source"].Value.Length - match.Groups["source"].Value.TrimStart().Length)
+            : header.Length - header.TrimStart().Length;
+        var sourceSpan = new SourceSpan(
+            headerStart + Math.Max(0, sourceOffset),
+            sourceText.Length);
+
+        if (!match.Success)
+        {
+            AddSyntax(
+                SpanFrom(headerStart, headerEnd),
+                "A loop must use 'foreach (var item in expression) keyed by keyExpression'.");
+        }
+        else
+        {
+            ValidateCSharpIsland(
+                sourceText,
+                sourceSpan.Start,
+                CSharpIslandKind.Expression);
+        }
+
+        ExpectIdentifier("keyed");
+        ExpectIdentifier("by");
+        var keyStart = Current.Span.Start;
+        while (Current.Kind is not TokenKind.OpenBrace and not TokenKind.EndOfFile)
+        {
+            NextToken();
+        }
+
+        var rawKey = Slice(keyStart, Current.Span.Start);
+        var keyText = rawKey.Trim();
+        var keyTrim = rawKey.Length - rawKey.TrimStart().Length;
+        var keySpan = new SourceSpan(keyStart + keyTrim, keyText.Length);
+        ValidateCSharpIsland(keyText, keySpan.Start, CSharpIslandKind.Expression);
+
+        Expect(TokenKind.OpenBrace, "'{' to open the foreach body");
+        UiElementSyntax body;
+        if (Current.Kind == TokenKind.Identifier &&
+            Peek(1).Kind == TokenKind.OpenBrace)
+        {
+            body = ParseElement();
+        }
+        else
+        {
+            AddSyntax(Current.Span, "A keyed foreach body must contain one UI element.");
+            body = new UiElementSyntax(
+                "Missing",
+                [],
+                new SourceSpan(Current.Span.Start, 0));
+        }
+
+        while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
+        {
+            AddUnsupported(
+                Current.Span,
+                "The initial keyed foreach supports one root UI element.");
+            NextToken();
+        }
+
+        var closeBrace = Expect(TokenKind.CloseBrace, "'}' to close the foreach body");
+        return new UiForEachSyntax(
+            itemName,
+            sourceText,
+            sourceSpan,
+            keyText,
+            keySpan,
+            body,
+            SpanFrom(start, closeBrace.Span.End));
+    }
+
+    private UiContentSyntax ParseImplicitContent()
+    {
+        var token = NextToken();
+        var value = new StringValueSyntax(
+            token.Text,
+            token.Kind == TokenKind.InterpolatedString,
+            token.Span);
+        ValidateCSharpIsland(value.Text, value.Span.Start, CSharpIslandKind.Expression);
+
+        var end = token.Span.End;
+        if (Current.Kind == TokenKind.Semicolon)
+        {
+            end = NextToken().Span.End;
+        }
+
+        return new UiContentSyntax(
+            value,
+            SpanFrom(token.Span.Start, end));
     }
 
     private UiPropertySyntax ParseProperty()
@@ -739,13 +876,101 @@ internal sealed partial class Parser
         var openChar = open == TokenKind.OpenParen ? '(' : '{';
         var closeChar = close == TokenKind.CloseParen ? ')' : '}';
         var depth = 1;
+        var inString = '\0';
+        var verbatim = false;
+        var lineComment = false;
+        var blockComment = false;
         for (var index = start; index < _source.Text.Length; index++)
         {
-            if (_source.Text[index] == openChar)
+            var current = _source.Text[index];
+            var next = index + 1 < _source.Text.Length
+                ? _source.Text[index + 1]
+                : '\0';
+
+            if (lineComment)
+            {
+                if (current is '\r' or '\n')
+                {
+                    lineComment = false;
+                }
+
+                continue;
+            }
+
+            if (blockComment)
+            {
+                if (current == '*' && next == '/')
+                {
+                    blockComment = false;
+                    index++;
+                }
+
+                continue;
+            }
+
+            if (inString != '\0')
+            {
+                if (!verbatim && current == '\\')
+                {
+                    index++;
+                    continue;
+                }
+
+                if (current == inString)
+                {
+                    if (verbatim && next == '"')
+                    {
+                        index++;
+                        continue;
+                    }
+
+                    inString = '\0';
+                }
+
+                continue;
+            }
+
+            if (current == '/' && next == '/')
+            {
+                lineComment = true;
+                index++;
+                continue;
+            }
+
+            if (current == '/' && next == '*')
+            {
+                blockComment = true;
+                index++;
+                continue;
+            }
+
+            var rawStringEnd = ScanRawString(index);
+            if (rawStringEnd >= 0)
+            {
+                index = rawStringEnd;
+                continue;
+            }
+
+            if (current is '"' or '\'')
+            {
+                inString = current;
+                verbatim = false;
+                continue;
+            }
+
+            if (current == '@' && next == '"')
+            {
+                inString = '"';
+                verbatim = true;
+                index++;
+                continue;
+            }
+
+            if (current == openChar)
             {
                 depth++;
             }
-            else if (_source.Text[index] == closeChar &&
+            else if (current == closeChar &&
                      --depth == 0)
             {
                 return index;
@@ -930,7 +1155,12 @@ internal sealed partial class Parser
         new(start, Math.Max(0, end - start));
 
     [GeneratedRegex(
-        @"\bState\s*<\s*(?<type>[^>]+)\s*>\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*new\s*\(\s*(?<initializer>[^)]*)\s*\)",
-        RegexOptions.CultureInvariant)]
+        @"\bState\s*<\s*(?<type>.+)\s*>\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*new\s*\(\s*(?<initializer>.*)\s*\)\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex StatePattern();
+
+    [GeneratedRegex(
+        @"^\s*var\s+(?<item>[A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?<source>.+)\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline)]
+    private static partial Regex ForEachHeaderPattern();
 }

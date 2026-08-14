@@ -66,7 +66,7 @@
         },
         {
           "name": "keyword.control.lucent",
-          "match": "\\b(if|else|foreach|slot|yield|context|using)\\b"
+          "match": "\\b(if|else|foreach|keyed|by|slot|yield|context|using)\\b"
         }
       ]
     },
@@ -82,7 +82,7 @@
       "patterns": [
         {
           "name": "entity.other.attribute-name.lucent",
-          "match": "\\b(class|text|onClick)\\b(?=\\s*:)"
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b(?=\\s*:)"
         }
       ]
     },

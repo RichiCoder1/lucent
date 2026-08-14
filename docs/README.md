@@ -22,12 +22,14 @@ Proof-of-concept notes:
 - [POC 0001: Code-only desktop window](poc/0001-desktop-window.md)
 - [POC 0002: Counter compiler](poc/0002-counter-compiler.md)
 - [POC 0003: Shared compiler and tooling foundation](poc/0003-shared-compiler-tooling.md)
+- [POC 0004: Direct native Avalonia controls](poc/0004-native-controls-todo.md)
 
 Architectural decisions:
 
 - [ADR 0001: Require explicit render regions](adr/0001-explicit-render-regions.md) — superseded by ADR 0003
 - [ADR 0002: Make named slot supply explicit and single-site](adr/0002-explicit-single-site-slots.md)
 - [ADR 0003: Use class-shaped components with an explicit Render method](adr/0003-class-shaped-components.md)
+- [ADR 0004: Make native Avalonia controls the default control surface](adr/0004-native-avalonia-controls.md)
 
 ## Status language
 

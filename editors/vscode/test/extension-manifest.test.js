@@ -38,8 +38,11 @@ test('grammar and language configuration are valid JSON with Lucent constructs',
         grammar.repository.keywords.patterns[0].match,
         /component/);
     assert.match(
+        grammar.repository.keywords.patterns[1].match,
+        /keyed/);
+    assert.match(
         grammar.repository.properties.patterns[0].match,
-        /onClick/);
+        /A-Za-z/);
     assert.deepEqual(configuration.brackets[0], ['{', '}']);
     assert.equal(configuration.comments.lineComment, '//');
 });

@@ -6,6 +6,97 @@ namespace Lucent.Compiler.Tests;
 public sealed class GeneralCompilerTests
 {
     [TestMethod]
+    public void Native_controls_properties_content_and_events_are_lowered_directly()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Todo()
+            {
+                private readonly State<int> clicks = new(0);
+                Fragment Render()
+                {
+                    return Border {
+                        Padding: new Avalonia.Thickness(8);
+                        StackPanel {
+                            Spacing: 6;
+                            TextBlock { Text: $"Clicks: {clicks.Value}"; }
+                            Button {
+                                "Add";
+                                Click: { clicks.Update(clicks.Value + 1); }
+                            }
+                        }
+                    };
+                }
+            }
+            """,
+            "native-todo.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.IsNotNull(result.GeneratedSource);
+        StringAssert.Contains(result.GeneratedSource, "private Border? _control1;");
+        StringAssert.Contains(result.GeneratedSource, "private StackPanel? _control2;");
+        StringAssert.Contains(result.GeneratedSource, ".Padding = new Avalonia.Thickness(8);");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            ".Spacing = 6;");
+        StringAssert.Contains(result.GeneratedSource, ".Content = \"Add\";");
+        StringAssert.Contains(result.GeneratedSource, "AttachChild(_control1!, _control2!);");
+        StringAssert.Contains(result.GeneratedSource, ".Click += OnControl4Click;");
+    }
+
+    [TestMethod]
+    public void Scalar_native_content_conflicts_with_a_nested_child_in_either_order()
+    {
+        foreach (var body in new[]
+        {
+            "\"Add\"; TextBlock { Text: \"child\"; }",
+            "TextBlock { Text: \"child\"; } Content: \"Add\";",
+        })
+        {
+            var result = LucentCompiler.Compile(
+                $$"""
+                namespace Demo;
+                component Main()
+                {
+                    Fragment Render()
+                    {
+                        return Button { {{body}} };
+                    }
+                }
+                """,
+                "content-conflict.lui");
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+                diagnostic.Code == "LUC2001" &&
+                diagnostic.Message.Contains("child", StringComparison.OrdinalIgnoreCase)));
+        }
+    }
+
+    [TestMethod]
+    public void Text_controls_reject_nested_control_content()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return TextBlock { Button { "No"; } };
+                }
+            }
+            """,
+            "text-child.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(
+            result.Diagnostics.Single(diagnostic => diagnostic.Code == "LUC2001").Message,
+            "does not accept nested controls");
+    }
+
+    [TestMethod]
     public void Nested_controls_and_expression_event_are_lowered()
     {
         var result = LucentCompiler.Compile(
@@ -154,5 +245,366 @@ public sealed class GeneralCompilerTests
 
         Assert.AreEqual(bodyStart + 13, diagnostic.Span.Start);
         Assert.AreEqual(8, diagnostic.Line);
+    }
+
+    [TestMethod]
+    public void Native_panel_properties_and_children_are_lowered_directly()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return StackPanel {
+                        Orientation: Orientation.Horizontal;
+                        Spacing: 8;
+                        TextBlock { Text: "Todo"; }
+                    };
+                }
+            }
+            """,
+            "native-panel.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, "private StackPanel? _control1;");
+        StringAssert.Contains(result.GeneratedSource, "_control1!.Orientation = Orientation.Horizontal;");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "_control1!.Spacing = 8;");
+        StringAssert.Contains(result.GeneratedSource, "AttachChild(_control1!, _control2!);");
+    }
+
+    [TestMethod]
+    public void Native_decorator_child_uses_the_direct_child_slot()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return Border {
+                        Padding: 4;
+                        TextBlock { Text: "Todo"; }
+                    };
+                }
+            }
+            """,
+            "native-border.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, "private Border? _control1;");
+        StringAssert.Contains(result.GeneratedSource, "AttachChild(_control1!, _control2!);");
+        StringAssert.Contains(result.GeneratedSource, "AttachChild(Decorator parent, Control child)");
+    }
+
+    [TestMethod]
+    public void Native_button_accepts_implicit_scalar_content()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return Button { "Add task" };
+                }
+            }
+            """,
+            "native-button-content.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, "_control1!.Content = \"Add task\";");
+    }
+
+    [TestMethod]
+    public void Native_button_accepts_explicit_content_with_the_same_lowering()
+    {
+        var implicitResult = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return Button { "Add task" };
+                }
+            }
+            """,
+            "implicit-content.lui");
+        var explicitResult = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return Button { Content: "Add task"; };
+                }
+            }
+            """,
+            "explicit-content.lui");
+
+        Assert.IsTrue(implicitResult.Succeeded);
+        Assert.IsTrue(explicitResult.Succeeded);
+        StringAssert.Contains(implicitResult.GeneratedSource, "_control1!.Content = \"Add task\";");
+        StringAssert.Contains(explicitResult.GeneratedSource, "_control1!.Content = \"Add task\";");
+    }
+
+    [TestMethod]
+    public void Explicit_and_implicit_scalar_content_conflict_in_either_order()
+    {
+        foreach (var body in new[]
+        {
+            "\"Add\"; Content: \"Other\";",
+            "Content: \"Other\"; \"Add\";",
+        })
+        {
+            var result = LucentCompiler.Compile(
+                $$"""
+                namespace Demo;
+                component Main()
+                {
+                    Fragment Render()
+                    {
+                        return Button { {{body}} };
+                    }
+                }
+                """,
+                "duplicate-content.lui");
+
+            Assert.IsFalse(result.Succeeded);
+            StringAssert.Contains(
+                result.Diagnostics.Single(diagnostic => diagnostic.Code == "LUC2001").Message,
+                "only one");
+        }
+    }
+
+    [TestMethod]
+    public void Numeric_and_tuple_literals_are_adapted_from_the_target_property_type()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return Border {
+                        Padding: (12, 8);
+                        CornerRadius: 6;
+                        TextBlock { FontSize: 24; }
+                    };
+                }
+            }
+            """,
+            "typed-values.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "_control1!.Padding = new global::Avalonia.Thickness(12, 8)");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "_control1!.CornerRadius = new global::Avalonia.CornerRadius(6)");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "_control2!.FontSize = 24;");
+    }
+
+    [TestMethod]
+    public void General_state_and_keyed_foreach_emit_a_retained_native_region()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            using System.Linq;
+
+            component Main()
+            {
+                private readonly State<string> title = new("Todos");
+                private readonly State<int[]> items = new([1, 2, 3]);
+
+                Fragment Render()
+                {
+                    return StackPanel {
+                        foreach (var item in items.Value.Where(value => value > 1))
+                        keyed by item {
+                            Button {
+                                Content: $"{title.Value}: {item}";
+                                Click: { items.Update(current => current.Append(item).ToArray()); }
+                            }
+                        }
+                    };
+                }
+            }
+            """,
+            "keyed-region.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.HasCount(1, result.Syntax!.AllUsings);
+        Assert.IsInstanceOfType<UiForEachSyntax>(
+            result.Syntax.Component.RenderMethod.Root.Members.Single());
+        StringAssert.Contains(result.GeneratedSource, "private string _title = \"Todos\";");
+        StringAssert.Contains(result.GeneratedSource, "private int[] _items = [1, 2, 3];");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "private readonly Dictionary<object, ILoopEntry> _region1 = new();");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "var sourceItems = (_items.Where(value => value > 1)).ToArray();");
+        StringAssert.Contains(result.GeneratedSource, "foreach (var item in sourceItems)");
+        StringAssert.Contains(result.GeneratedSource, "entry.Update(item);");
+        StringAssert.Contains(result.GeneratedSource, "_control1!.Children.Add(entry.Root);");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "ReferenceEquals(_control1!.Children[index], nextEntries[index].Root)");
+        StringAssert.Contains(result.GeneratedSource, "if (orderChanged)");
+        StringAssert.Contains(result.GeneratedSource, "Dispatcher.UIThread.CheckAccess()");
+        Assert.IsTrue(
+            result.GeneratedSource.IndexOf(
+                "duplicate key",
+                StringComparison.Ordinal) <
+            result.GeneratedSource.IndexOf(
+                "_region1.TryGetValue",
+                StringComparison.Ordinal),
+            "All keys should be validated before the existing region is mutated.");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "private void SetItems(Func<int[], int[]> update)");
+    }
+
+    [TestMethod]
+    public void Native_click_event_is_hooked_by_exact_event_name()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<int> count = new(0);
+
+                Fragment Render()
+                {
+                    return Button {
+                        Click: { count.Update(count.Value + 1); }
+                    };
+                }
+            }
+            """,
+            "native-click.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, "_control1!.Click += OnControl1Click;");
+        StringAssert.Contains(result.GeneratedSource, "SetCount(_count + 1);");
+        StringAssert.Contains(result.GeneratedSource, "#line");
+    }
+
+    [TestMethod]
+    public void Expression_events_reject_parameter_names_that_cannot_be_preserved_yet()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return Button {
+                        Click: (button, args) => Console.WriteLine(button);
+                    };
+                }
+            }
+            """,
+            "event-parameters.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(
+            result.Diagnostics.Single(diagnostic => diagnostic.Code == "LUC2001").Message,
+            "statement block");
+    }
+
+    [TestMethod]
+    public void Events_without_deterministic_cleanup_are_rejected_in_the_native_poc()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return Border {
+                        Loaded: { Console.WriteLine("loaded"); }
+                    };
+                }
+            }
+            """,
+            "unsupported-event.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(
+            result.Diagnostics.Single(diagnostic => diagnostic.Code == "LUC2001").Message,
+            "not a native event");
+    }
+
+    [TestMethod]
+    public void State_rewriting_ignores_strings_and_qualified_member_names()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<string> title = new("Todos");
+
+                Fragment Render()
+                {
+                    return StackPanel {
+                        TextBlock { Text: "title.Value"; }
+                        TextBlock { Text: other.title.Value; }
+                        TextBlock { Text: title.Value; }
+                    };
+                }
+            }
+            """,
+            "state-rewrite.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, ".Text = \"title.Value\";");
+        StringAssert.Contains(result.GeneratedSource, ".Text = other.title.Value;");
+        StringAssert.Contains(result.GeneratedSource, ".Text = _title;");
+    }
+
+    [TestMethod]
+    public void Foreach_header_scanning_ignores_parentheses_inside_strings()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<string[]> items = new(["a)"]);
+
+                Fragment Render()
+                {
+                    return StackPanel {
+                        foreach (var value in items.Value.Where(item => item.Contains(")")))
+                        keyed by value {
+                            TextBlock { Text: value; }
+                        }
+                    };
+                }
+            }
+            """,
+            "foreach-string-delimiter.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, "Contains(\")\")");
+        StringAssert.Contains(result.GeneratedSource, "loopValue =>");
     }
 }

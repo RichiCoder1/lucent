@@ -20,6 +20,8 @@
       ReferenceOutputAssembly="false"
       PrivateAssets="all" />
     <LucentSource Include="..\..\examples\counter\Counter.lui" />
+    <LucentSource Include="..\..\examples\todo\Todo.lui" />
+    <Compile Include="..\..\examples\todo\TodoModel.cs" Link="TodoModel.cs" />
     <Compile Remove="Generated\CounterComponent.g.cs" />
   </ItemGroup>
 

@@ -23,21 +23,21 @@ public sealed class CompilerTests
         Assert.AreEqual(0, state.InitialValue);
 
         var root = result.Syntax.Component.RenderMethod.Root;
-        Assert.AreEqual("Column", root.Name);
+        Assert.AreEqual("StackPanel", root.Name);
         CollectionAssert.AreEqual(
-            new[] { "Text", "Button" },
+            new[] { "TextBlock", "Button" },
             root.Children.Select(child => child.Name).ToArray());
 
         var text = root.Children.First();
         var textProperty = text.Properties.Single(property =>
-            property.Name == "text");
+            property.Name == "Text");
         Assert.IsInstanceOfType<StringValueSyntax>(textProperty.Value);
         Assert.IsTrue(
             ((StringValueSyntax)textProperty.Value).IsInterpolated);
 
         var button = root.Children.Last();
         var clickProperty = button.Properties.Single(property =>
-            property.Name == "onClick");
+            property.Name == "Click");
         Assert.IsInstanceOfType<EventBlockValueSyntax>(clickProperty.Value);
     }
 
@@ -79,8 +79,8 @@ public sealed class CompilerTests
     {
         var source = File.ReadAllText(RepositoryPaths.CounterSource)
             .Replace(
-                "text: \"Increment\";",
-                "text: \"Increment\"",
+                "Text: $\"Count: {count.Value}\";",
+                "Text: $\"Count: {count.Value}\"",
                 StringComparison.Ordinal);
 
         var result = LucentCompiler.Compile(source, "MissingSemicolon.lui");
@@ -100,22 +100,18 @@ public sealed class CompilerTests
     }
 
     [TestMethod]
-    public void Unsupported_property_reports_a_semantic_diagnostic()
+    public void Arbitrary_native_property_is_preserved_for_project_compilation()
     {
         var source = File.ReadAllText(RepositoryPaths.CounterSource)
             .Replace(
                 "class: \"primary\";",
-                "class: \"primary\";\n                tooltip: \"Not supported\";",
+                "class: \"primary\";\n                MinWidth: 120;",
                 StringComparison.Ordinal);
 
-        var result = LucentCompiler.Compile(source, "UnsupportedProperty.lui");
+        var result = LucentCompiler.Compile(source, "NativeProperty.lui");
 
-        Assert.IsFalse(result.Succeeded);
-        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
-            diagnostic.Code == "LUC2001" &&
-            diagnostic.Message.Contains(
-                "tooltip",
-                StringComparison.Ordinal)));
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, ".MinWidth = 120;");
     }
 
     [TestMethod]

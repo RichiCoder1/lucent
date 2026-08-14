@@ -8,12 +8,19 @@ public sealed record CompilationUnitSyntax(
     string NamespaceName,
     ComponentDeclarationSyntax Component,
     SourceSpan Span,
-    IReadOnlyList<ComponentDeclarationSyntax>? Components = null)
+    IReadOnlyList<ComponentDeclarationSyntax>? Components = null,
+    IReadOnlyList<UsingDirectiveSyntax>? Usings = null)
     : LucentSyntaxNode(Span)
 {
     public IReadOnlyList<ComponentDeclarationSyntax> AllComponents =>
         Components ?? [Component];
+
+    public IReadOnlyList<UsingDirectiveSyntax> AllUsings => Usings ?? [];
 }
+
+public sealed record UsingDirectiveSyntax(
+    string Text,
+    SourceSpan Span) : LucentSyntaxNode(Span);
 
 public sealed record ComponentDeclarationSyntax(
     string Name,
@@ -72,6 +79,19 @@ public sealed record UiPropertySyntax(
 
 public sealed record UiChildSyntax(
     UiElementSyntax Element,
+    SourceSpan Span) : UiMemberSyntax(Span);
+
+public sealed record UiContentSyntax(
+    UiValueSyntax Value,
+    SourceSpan Span) : UiMemberSyntax(Span);
+
+public sealed record UiForEachSyntax(
+    string ItemName,
+    string SourceExpression,
+    SourceSpan SourceExpressionSpan,
+    string KeyExpression,
+    SourceSpan KeyExpressionSpan,
+    UiElementSyntax Body,
     SourceSpan Span) : UiMemberSyntax(Span);
 
 public abstract record UiValueSyntax(

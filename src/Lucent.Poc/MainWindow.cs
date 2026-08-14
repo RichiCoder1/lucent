@@ -1,32 +1,27 @@
 using Avalonia;
 using Avalonia.Controls;
-using Lucent.Examples.Counter;
+using Lucent.Examples.Todo;
 
 namespace Lucent.Poc;
 
 internal sealed class MainWindow : Window
 {
-    private readonly CounterComponent _counter = new();
+    private readonly TodoComponent _todo = new();
 
     public MainWindow()
     {
-        Title = "Lucent POC";
-        Width = 480;
-        Height = 320;
-        MinWidth = 360;
-        MinHeight = 240;
+        Title = "Lucent Native Controls Todo";
+        Width = 760;
+        Height = 720;
+        MinWidth = 560;
+        MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-
-        Content = new Border
-        {
-            Padding = new Thickness(32),
-            Child = _counter.Mount(),
-        };
+        Content = _todo.Mount();
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        _counter.Dispose();
+        _todo.Dispose();
         base.OnClosed(e);
     }
 }

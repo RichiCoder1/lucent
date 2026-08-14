@@ -60,11 +60,21 @@ Exit condition: the Counter source is meaningfully editable without reading gene
 
 Introduce the initial component IR, component-owned `State<T>` members, dependency analysis, event lowering, and direct property invalidation.
 
+The Counter and TodoMVC slices now execute generalized `State<T>`, direct
+property refresh, explicit reverse event updates, and deterministic cleanup for
+the native `Click` and `TextChanged` events used by the examples. Dependency
+tracking is still lexical and conservative rather than symbol-bound.
+
 Exit condition: clicking the Counter button updates the existing Avalonia text property and preserves component state.
 
 ### 4. Structural UI and identity
 
 Add reactive `if` and `else`, keyed loops, subtree lifetime, insertion, removal, movement, and state preservation.
+
+The first keyed-loop subset is executable: a dedicated native panel reconciles
+one-root rows by key, retains existing Avalonia controls, refreshes changed row
+properties, reorders roots, and disposes removed row subscriptions. Conditional
+regions, nested loops, component rows, and optimized move operations remain.
 
 Exit condition: a keyed list can reorder stateful rows without recreating their logical state.
 
@@ -82,7 +92,11 @@ Exit condition: the Counter example builds with statically validated CSS and app
 
 ### 7. Interop and developer experience
 
-Add raw and third-party Avalonia control projection, property and collection notification adapters, formatting, richer completion, source mapping, debugging support, and hot-reload experiments.
+Complete project-aware native and third-party Avalonia control resolution,
+property and collection notification adapters, formatting, richer completion,
+source mapping, debugging support, and hot-reload experiments. Direct native
+controls are the default surface rather than a late raw-control escape hatch;
+see [ADR 0004](adr/0004-native-avalonia-controls.md).
 
 Exit condition: the dogfood application can use an existing control without hiding it behind a Lucent-specific rewrite.
 
