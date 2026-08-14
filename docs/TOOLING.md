@@ -30,6 +30,14 @@ Required capabilities:
 
 Useful follow-ups include Lucent-to-C# navigation, parameter and property completion, signature help, CSS class and token completion, references, rename, and reactive dependency inspection.
 
+The current server implements document synchronization, shared compiler
+diagnostics, native control/property/event hover, and source navigation for
+project-defined controls and members. It discovers the owning `.csproj`, uses
+design-time MSBuild to obtain C# sources and resolved references, and feeds that
+context to the same Roslyn-backed binder used by the build. Metadata-as-source,
+completion, document symbols, and Lucent component navigation remain follow-up
+work.
+
 ## Diagnostics
 
 Diagnostics should describe the user's component and style model, not expose internal parser codes or generated C# accidents.

@@ -42,15 +42,15 @@ component Todo()
                         Width: 500;
                         Text: draft.Value;
                         PlaceholderText: "What needs doing?";
-                        TextChanged: {
-                            draft.Update(((TextBox)sender!).Text ?? "");
-                        }
+                        TextChanged: (sender, e) => {
+                            draft.Update(sender.Text ?? "");
+                        };
                     }
 
                     Button {
                         Content: "Add task";
                         IsEnabled: !string.IsNullOrWhiteSpace(draft.Value);
-                        Click: {
+                        Click: (sender, e) => {
                             var title = draft.Value.Trim();
                             if (title.Length > 0)
                             {
@@ -63,7 +63,7 @@ component Todo()
                                 ]);
                                 draft.Update("");
                             }
-                        }
+                        };
                     }
                 }
 
@@ -72,12 +72,12 @@ component Todo()
                     IsEnabled: todos.Value.Length > 0;
                     IsChecked: todos.Value.Length > 0 &&
                         todos.Value.All(item => item.Completed);
-                    Click: {
-                        var completed = ((CheckBox)sender!).IsChecked == true;
+                    Click: (sender, e) => {
+                        var completed = sender.IsChecked == true;
                         todos.Update(todos.Value
                             .Select(item => item with { Completed = completed })
                             .ToArray());
-                    }
+                    };
                 }
 
                 StackPanel {
@@ -102,35 +102,35 @@ component Todo()
                                 CheckBox {
                                     IsChecked: todo.Completed;
                                     VerticalAlignment: VerticalAlignment.Center;
-                                    Click: {
+                                    Click: (sender, e) => {
                                         todos.Update(todos.Value
                                             .Select(item => item.Id == todo.Id
                                                 ? item with { Completed = !item.Completed }
                                                 : item)
                                             .ToArray());
-                                    }
+                                    };
                                 }
 
                                 TextBox {
                                     Width: 500;
                                     Text: todo.Title;
-                                    TextChanged: {
-                                        var title = ((TextBox)sender!).Text ?? "";
+                                    TextChanged: (sender, e) => {
+                                        var title = sender.Text ?? "";
                                         todos.Update(todos.Value
                                             .Select(item => item.Id == todo.Id
                                                 ? item with { Title = title }
                                                 : item)
                                             .ToArray());
-                                    }
+                                    };
                                 }
 
                                 Button {
                                     Content: "Delete";
-                                    Click: {
+                                    Click: (sender, e) => {
                                         todos.Update(todos.Value
                                             .Where(item => item.Id != todo.Id)
                                             .ToArray());
-                                    }
+                                    };
                                 }
                             }
                         }
@@ -150,29 +150,29 @@ component Todo()
                     Button {
                         Content: "All";
                         IsEnabled: filter.Value != TodoFilter.All;
-                        Click: { filter.Update(TodoFilter.All); }
+                        Click: () => filter.Update(TodoFilter.All);
                     }
 
                     Button {
                         Content: "Active";
                         IsEnabled: filter.Value != TodoFilter.Active;
-                        Click: { filter.Update(TodoFilter.Active); }
+                        Click: () => filter.Update(TodoFilter.Active);
                     }
 
                     Button {
                         Content: "Completed";
                         IsEnabled: filter.Value != TodoFilter.Completed;
-                        Click: { filter.Update(TodoFilter.Completed); }
+                        Click: () => filter.Update(TodoFilter.Completed);
                     }
 
                     Button {
                         Content: "Clear completed";
                         IsEnabled: todos.Value.Any(item => item.Completed);
-                        Click: {
+                        Click: () => {
                             todos.Update(items => items
                                 .Where(item => !item.Completed)
                                 .ToArray());
-                        }
+                        };
                     }
                 }
 

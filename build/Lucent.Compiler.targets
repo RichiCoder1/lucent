@@ -12,15 +12,18 @@
   <Target
     Name="GenerateLucent"
     BeforeTargets="CoreCompile"
-    DependsOnTargets="ResolveProjectReferences"
+    DependsOnTargets="ResolveReferences;GenerateGlobalUsings"
     Condition="'$(LucentCompilerEnabled)' == 'true' and '@(LucentSource)' != '' and '$(DesignTimeBuild)' != 'true'"
-    Inputs="@(LucentSource);$(LucentCompilerTaskAssembly);$(LucentCompilerCoreAssembly)"
+    Inputs="@(LucentSource);@(Compile);@(ReferencePathWithRefAssemblies);$(LucentCompilerTaskAssembly);$(LucentCompilerCoreAssembly)"
     Outputs="@(LucentGenerated)">
     <MakeDir Directories="$(LucentCompilerOutputDirectory)" />
 
     <CompileLucent
       Sources="@(LucentSource)"
-      OutputDirectory="$(LucentCompilerOutputDirectory)">
+      OutputDirectory="$(LucentCompilerOutputDirectory)"
+      References="@(ReferencePathWithRefAssemblies)"
+      CSharpSources="@(Compile)"
+      ProjectPath="$(MSBuildProjectFullPath)">
       <Output TaskParameter="GeneratedFiles" ItemName="_LucentGeneratedFiles" />
     </CompileLucent>
   </Target>

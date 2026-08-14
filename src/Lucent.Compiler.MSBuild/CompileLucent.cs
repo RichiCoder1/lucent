@@ -28,6 +28,22 @@ public sealed class CompileLucent : Task
     public string OutputDirectory { get; set; } = string.Empty;
 
     /// <summary>
+    /// The consuming project's resolved metadata references.
+    /// </summary>
+    public ITaskItem[] References { get; set; } = [];
+
+    /// <summary>
+    /// The consuming project's C# source files. These let Lucent resolve
+    /// project-defined controls and members in the same compilation.
+    /// </summary>
+    public ITaskItem[] CSharpSources { get; set; } = [];
+
+    /// <summary>
+    /// The consuming project path, used to identify the semantic context.
+    /// </summary>
+    public string? ProjectPath { get; set; }
+
+    /// <summary>
     /// Generated C# files written by the task.
     /// </summary>
     [Output]
@@ -58,6 +74,10 @@ public sealed class CompileLucent : Task
         var pendingOutputs = new List<PendingOutput>(Sources.Length);
         var outputPaths = new HashSet<string>(GetPathComparer());
         var succeeded = true;
+        var projectContext = new LucentProjectContext(
+            ProjectPath,
+            GetExistingPaths(References),
+            GetExistingPaths(CSharpSources));
 
         foreach (var sourceItem in Sources)
         {
@@ -71,7 +91,10 @@ public sealed class CompileLucent : Task
             try
             {
                 var sourceText = File.ReadAllText(sourcePath);
-                var result = LucentCompiler.Compile(sourceText, sourcePath);
+                var result = LucentCompiler.Compile(
+                    sourceText,
+                    sourcePath,
+                    projectContext);
                 LogDiagnostics(sourcePath, result.Diagnostics);
 
                 if (!result.Succeeded || result.GeneratedSource is null)
@@ -202,6 +225,18 @@ public sealed class CompileLucent : Task
         var outputDirectory = Path.GetFullPath(OutputDirectory);
         return Path.Combine(outputDirectory, $"{sourceName}Component.g.cs");
     }
+
+    private static IReadOnlyList<string> GetExistingPaths(
+        IEnumerable<ITaskItem> items) =>
+        items.Select(item =>
+            string.IsNullOrWhiteSpace(item.GetMetadata("FullPath"))
+                ? item.ItemSpec
+                : item.GetMetadata("FullPath"))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Where(File.Exists)
+            .Distinct(GetPathComparer())
+            .ToArray();
 
     private void LogDiagnostics(
         string sourcePath,

@@ -91,8 +91,7 @@ implicit content cannot be combined.
 
 The language rule is that literal conveniences are selected from the resolved
 target property type, not from a control or property-name table. The current
-proof of concept approximates that future semantic rule with a bounded
-descriptor for the Avalonia properties used by the Todo:
+proof of concept implements that rule for `Thickness` and `CornerRadius`:
 
 ```csharp
 Border {
@@ -108,9 +107,28 @@ Border {
 Those recognized values lower to typed `Thickness` and `CornerRadius`
 construction, while the same numeric literal remains numeric for a property
 such as `Width`. Explicit C# construction always remains available. General
-target-type selection, plus string parsing for enums, brushes, colors, and
-`GridLength`, waits for the project-aware symbol binder so conversion errors
-can be reported against the actual property type.
+target-type conversion beyond those two framework primitives, including string
+parsing for enums, brushes, colors, and `GridLength`, remains deferred.
+
+Native events are always visibly C# lambdas. A zero-argument lambda ignores the
+delegate arguments; a two-argument lambda receives them:
+
+```csharp
+Button {
+    Click: () => AddTask();
+}
+
+TextBox {
+    TextChanged: (sender, e) => {
+        draft.Update(sender.Text ?? "");
+    };
+}
+```
+
+The compiler resolves the actual Avalonia delegate, generates its concrete
+signature, and narrows `sender` to the control type before running the body.
+A bare statement block is rejected because it hides both the function boundary
+and its arguments. One-argument event lambdas are also rejected as ambiguous.
 
 ## UI declarations and control flow
 

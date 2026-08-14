@@ -1,5 +1,10 @@
 # POC 0003: Shared compiler and tooling foundation
 
+> [!NOTE]
+> This is a historical checkpoint. Native controls and members are now resolved
+> through project-aware Roslyn symbols, and event values require explicit
+> lambdas. The bounded tables and event blocks below describe the earlier slice.
+
 This slice replaces the Counter-shaped compiler path with one shared frontend,
 recursive binder, and emitter used by every adapter:
 

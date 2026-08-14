@@ -17,9 +17,9 @@ component Counter()
                 class: "primary";
                 "Increment";
 
-                Click: {
+                Click: (sender, e) => {
                     count.Update(count.Value + 1);
-                }
+                };
             }
         };
     }

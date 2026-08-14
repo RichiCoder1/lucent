@@ -7,6 +7,8 @@ public sealed record CompilationResult(
     string? GeneratedSource,
     IReadOnlyList<LucentDiagnostic> Diagnostics)
 {
+    public IReadOnlyList<LucentSemanticSymbol> Symbols { get; init; } = [];
+
     public bool Succeeded =>
         GeneratedSource is not null &&
         Diagnostics.All(diagnostic =>

@@ -17,9 +17,15 @@ internal sealed record BoundStateModel(
 
 internal sealed record BoundControlModel(
     string Name,
+    string TypeName,
     IReadOnlyList<BoundControlMember> Members,
     SourceSpan Span,
-    BoundControlKind Kind = BoundControlKind.Unknown);
+    BoundControlKind Kind = BoundControlKind.Unknown,
+    BoundContentRoute? ContentRoute = null);
+
+internal sealed record BoundContentRoute(
+    string PropertyName,
+    bool IsCollection);
 
 internal enum BoundControlKind
 {
@@ -61,7 +67,11 @@ internal sealed record BoundEventMember(
     string EventName,
     string BodyText,
     SourceSpan BodySpan,
-    bool IsExpression,
+    string DelegateTypeName,
+    string DelegateSenderTypeName,
+    string EventArgsTypeName,
+    string? SenderParameterName,
+    string? EventArgsParameterName,
     SourceSpan Span) : BoundControlMember(Span);
 
 internal sealed record BoundForEachMember(

@@ -47,10 +47,12 @@ type or forwards its properties does not earn a place in the library.
 
 - Avalonia documentation, DevTools, accessibility peers, themes, and third-party
   control APIs remain directly relevant to Lucent authors.
-- The compiler needs project-aware Roslyn symbols to resolve control types,
-  properties, events, conversions, attached properties, and content metadata.
-- The MSBuild adapter must supply consuming-project references, and the language
-  server eventually needs project context for equivalent native diagnostics.
+- The compiler uses project-aware Roslyn symbols to resolve control types,
+  properties, events, primitive conversions, and content metadata. Attached
+  properties remain a later syntax/lowering slice.
+- The MSBuild adapter supplies consuming-project references and C# sources; the
+  language server discovers equivalent design-time project context for native
+  diagnostics, hover, and project-source navigation.
 - Direct property assignments are Avalonia local values and therefore retain
   Avalonia's value-precedence behavior; styling and `SetCurrentValue` remain a
   separate lowering concern.

@@ -1,5 +1,9 @@
 # POC 0001: Code-only desktop window
 
+> [!NOTE]
+> This is a historical checkpoint. Native event values now require explicit
+> `() =>` or `(sender, e) =>` lambdas; bare event blocks are no longer accepted.
+
 This first executable slice originally proved only that the repository could restore, build, and launch a code-only Avalonia desktop application. POC 0002 subsequently replaced its hand-maintained Counter stand-in with compiler-generated C# while retaining the same host boundary.
 
 ## Scope

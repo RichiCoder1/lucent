@@ -53,6 +53,18 @@ public sealed class LanguageServerProtocolTests
                 .GetProperty("capabilities")
                 .GetProperty("positionEncoding")
                 .GetString());
+        Assert.IsTrue(
+            initialize.RootElement
+                .GetProperty("result")
+                .GetProperty("capabilities")
+                .GetProperty("hoverProvider")
+                .GetBoolean());
+        Assert.IsTrue(
+            initialize.RootElement
+                .GetProperty("result")
+                .GetProperty("capabilities")
+                .GetProperty("definitionProvider")
+                .GetBoolean());
 
         var published = messages.Single(message =>
             message.RootElement.TryGetProperty("method", out var method) &&
@@ -133,6 +145,99 @@ public sealed class LanguageServerProtocolTests
         Assert.AreEqual(0, output.Length);
     }
 
+    [TestMethod]
+    public async Task Hover_and_definition_use_project_semantic_symbols()
+    {
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-lsp-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+
+        try
+        {
+            var projectPath = Path.Combine(temporaryDirectory, "Demo.csproj");
+            var controlPath = Path.Combine(temporaryDirectory, "FancyControl.cs");
+            var sourcePath = Path.Combine(temporaryDirectory, "Custom.lui");
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+                "<TargetFramework>net9.0</TargetFramework></PropertyGroup>" +
+                "<ItemGroup><LucentSource Include=\"Custom.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(
+                controlPath,
+                "namespace Demo.Controls; public sealed class FancyControl : " +
+                "Avalonia.Controls.ContentControl { public string? Accent { get; set; } }");
+            const string source =
+                "namespace Demo;\r\n" +
+                "using Demo.Controls;\r\n" +
+                "component Custom()\r\n" +
+                "{\r\n" +
+                "    Fragment Render()\r\n" +
+                "    {\r\n" +
+                "        return FancyControl { Accent: \"blue\"; };\r\n" +
+                "    }\r\n" +
+                "}\r\n";
+            await File.WriteAllTextAsync(sourcePath, source);
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            var rootUri = new Uri(temporaryDirectory + Path.DirectorySeparatorChar).AbsoluteUri;
+            var accentPosition = PositionOf(source, "Accent");
+            var input = BuildInput(
+                Request(1, "initialize", new
+                {
+                    rootUri,
+                    capabilities = new { },
+                }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new
+                {
+                    textDocument = new
+                    {
+                        uri,
+                        languageId = "lucent",
+                        version = 1,
+                        text = source,
+                    },
+                }),
+                Request(2, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = accentPosition,
+                }),
+                Request(3, "textDocument/definition", new
+                {
+                    textDocument = new { uri },
+                    position = accentPosition,
+                }),
+                Request(4, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            var exitCode = await LanguageServer.RunAsync(input, output);
+            var messages = ReadMessages(output.ToArray());
+
+            Assert.AreEqual(0, exitCode);
+            var hover = Response(messages, 2).GetProperty("result");
+            StringAssert.Contains(
+                hover.GetProperty("contents").GetProperty("value").GetString()!,
+                "FancyControl.Accent");
+            var definition = Response(messages, 3).GetProperty("result");
+            Assert.AreEqual(
+                new Uri(controlPath).AbsoluteUri,
+                definition.GetProperty("uri").GetString());
+            Assert.AreEqual(
+                0,
+                definition.GetProperty("range")
+                    .GetProperty("start")
+                    .GetProperty("line")
+                    .GetInt32());
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
     private static MemoryStream BuildInput(params byte[][] messages) =>
         new(messages.SelectMany(message => message).ToArray());
 
@@ -197,6 +302,25 @@ public sealed class LanguageServerProtocolTests
         return messages;
     }
 
+    private static JsonElement Response(
+        IReadOnlyList<JsonDocument> messages,
+        int id) =>
+        messages.Single(message =>
+                message.RootElement.TryGetProperty("id", out var responseId) &&
+                responseId.ValueKind == JsonValueKind.Number &&
+                responseId.GetInt32() == id)
+            .RootElement;
+
+    private static object PositionOf(string text, string value)
+    {
+        var offset = text.IndexOf(value, StringComparison.Ordinal);
+        Assert.IsGreaterThanOrEqualTo(0, offset);
+        var prefix = text[..offset];
+        var line = prefix.Count(character => character == '\n');
+        var lineStart = prefix.LastIndexOf('\n') + 1;
+        return new { line, character = offset - lineStart };
+    }
+
     private const string InvalidSource =
         "namespace N;\r\n" +
         "component Counter()\r\n" +
@@ -209,7 +333,7 @@ public sealed class LanguageServerProtocolTests
         "            Button {\r\n" +
         "                class: \"primary\";\r\n" +
         "                text: \"Increment\";\r\n" +
-        "                onClick: { count.Update(count.Value + 1); }\r\n" +
+        "                onClick: () => count.Update(count.Value + 1);\r\n" +
         "            }\r\n" +
         "        };\r\n" +
         "    }\r\n" +
@@ -227,7 +351,7 @@ public sealed class LanguageServerProtocolTests
         "            Button {\r\n" +
         "                class: \"primary\";\r\n" +
         "                text: \"Increment\";\r\n" +
-        "                onClick: { count.Update(count.Value + 1); }\r\n" +
+        "                onClick: () => count.Update(count.Value + 1);\r\n" +
         "            }\r\n" +
         "        };\r\n" +
         "    }\r\n" +

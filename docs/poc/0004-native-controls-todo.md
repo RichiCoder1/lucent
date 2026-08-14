@@ -10,7 +10,7 @@ controls:
   `PlaceholderText`, `IsChecked`, and `Value`;
 - native `Click` and `TextChanged` events;
 - explicit `Content: value` and implicit string content;
-- bounded native numeric and tuple conveniences for `Thickness` and
+- target-type native numeric and tuple conveniences for `Thickness` and
   `CornerRadius`; and
 - a keyed `foreach` whose rows retain their concrete Avalonia controls.
 
@@ -26,29 +26,20 @@ Avalonia publishes its intended nested-content target with
 `Panel.Children`, `ContentControl.Content`, `Decorator.Child`, and
 `ItemsControl.Items`.
 
-The completed PoC uses a bounded compile-time classifier plus generated typed
-attachment overloads to validate the authoring and runtime model:
+The binder now reads that metadata from the consuming project's Roslyn symbols
+and records the exact scalar or collection route. Generated code writes it
+directly:
 
 ```csharp
-private static void AttachChild(Panel parent, Control child) =>
-    parent.Children.Add(child);
-
-private static void AttachChild(Decorator parent, Control child) =>
-    parent.Child = child;
-
-private static void AttachChild(ContentControl parent, Control child) =>
-    parent.Content = child;
-
-private static void AttachChild(ItemsControl parent, Control child) =>
-    parent.Items.Add(child);
+panel.Children.Add(child);
+decorator.Child = child;
+contentControl.Content = child;
+itemsControl.Items.Add(child);
 ```
 
-These helpers do not create or wrap controls. C# overload resolution still
-checks the concrete parent/child relationship in the consuming build. The next
-hardening step is to remove the bounded classifier and resolve the consuming
-project's real Roslyn symbols and `[Content]` metadata. That will provide the
-same behavior for custom and third-party controls and will move errors from the
-generated C# build into source-spanned Lucent diagnostics.
+This works for custom and third-party controls that are visible in the project
+context and moves incompatible content errors into source-spanned Lucent
+diagnostics. No runtime reflection or child adapter is involved.
 
 Native content routes are not Lucent slots. A native control receives content
 through Avalonia metadata; a Lucent component receives an implicit `children`
@@ -66,8 +57,8 @@ form with another scalar value or nested control is a source error.
 
 ## Type-directed native values
 
-The PoC binder records a bounded native value kind for the Avalonia properties
-it understands and the emitter constructs that type directly:
+The PoC binder selects primitive convenience lowering from the resolved target
+.NET type and the emitter constructs that type directly:
 
 ```csharp
 Border {
@@ -79,9 +70,26 @@ Border {
 `Padding` selects `Thickness` construction, `CornerRadius` selects
 `CornerRadius` construction, and a numeric property such as `Width` remains an
 ordinary C# expression. This proves the intended source experience without
-wrapping every assignment in a runtime adapter. The project-aware binder should
-eventually resolve and validate these conversions before emission and extend
-the same provider model to enums, brushes, colors, and `GridLength`.
+wrapping every assignment in a runtime adapter. The same model can later extend
+to enums, brushes, colors, and `GridLength`.
+
+## Native events
+
+Event values are explicit lambdas rather than magical statement blocks:
+
+```csharp
+TextBox {
+    TextChanged: (sender, e) => {
+        draft.Update(sender.Text ?? "");
+    };
+}
+```
+
+The binder resolves the actual event delegate. Generated handlers use that
+delegate's parameter types and narrow `sender` to the concrete control type,
+so the source does not need a manual cast. `() => ...` is the concise form when
+neither argument is needed. Bare blocks and ambiguous one-argument lambdas are
+diagnosed.
 
 ## TodoMVC keyed region
 
@@ -125,33 +133,36 @@ SMOKE: app-exit
 
 The full solution builds without warnings and the compiler, MSBuild, and LSP
 test suites cover direct native properties, nested panel/decorator content,
-implicit scalar content, native events, content conflicts, and TextBlock child
-rejection.
+implicit scalar content, native events, content conflicts, TextBlock child
+rejection, project-defined controls, semantic hover, and source definition
+navigation.
 
 ## Remaining limits
 
-- The compiler is not project-aware yet. Unknown control types, properties,
-  conversions, and third-party metadata are still validated by the generated
-  C# build rather than by the standalone compiler or LSP.
-- The temporary native event set is bounded. Project-aware symbol resolution
-  should replace it and validate the real event delegate.
+- Project-aware binding currently consumes resolved references and C# source
+  paths as a batch compilation. It does not yet model multi-target selection,
+  conditional compilation options, using aliases, or unsaved C# editor buffers.
 - State dependencies are still found lexically and invalidation conservatively
   refreshes all bindings and the keyed region.
 - The keyed subset does not yet support nested loops, conditional regions,
   component rows, multiple dynamic siblings, or optimized native collection
   moves.
-- The PoC recognizes removable `Click` and `TextChanged` handlers. Arbitrary
-  event delegate resolution and deterministic cleanup require project symbols.
-- The bounded value descriptor currently covers `Border.Padding` with scalar,
-  two-value, or four-value `Thickness` construction and `Border.CornerRadius`
-  with scalar or four-value construction. Static string conversion for enums,
-  brushes, colors, and `GridLength` is deferred to the semantic binder.
+- Native events with ordinary two-parameter `void` delegates are resolved and
+  cleaned up generically. Async delegates, routed-event options, and unusual
+  delegate shapes remain deferred.
+- Target-type conversion currently covers scalar, two-value, or four-value
+  `Thickness` construction and scalar or four-value `CornerRadius`
+  construction. Static string conversion for enums, brushes, colors, and
+  `GridLength` is deferred.
 - Attached properties such as `Grid.Row` need qualified member syntax and
   symbol-aware lowering.
 - Direct assignments establish Avalonia local values and can outrank styles or
   pseudo-class setters. Styling ownership remains a separate IR decision.
 - Templates, resources, namescopes, and advanced routed-event options are not
   ordinary child controls and need explicit language semantics.
+- Hover covers resolved native controls, properties, and events. Definition
+  navigation works for source-backed project symbols; metadata-as-source for
+  Avalonia and third-party assemblies is not implemented.
 
 See Avalonia's documentation for [content properties](https://docs.avaloniaui.net/docs/xaml),
 [ContentControl](https://docs.avaloniaui.net/controls/data-display/contentcontrol),

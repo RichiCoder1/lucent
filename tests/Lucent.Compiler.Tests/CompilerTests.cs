@@ -38,7 +38,7 @@ public sealed class CompilerTests
         var button = root.Children.Last();
         var clickProperty = button.Properties.Single(property =>
             property.Name == "Click");
-        Assert.IsInstanceOfType<EventBlockValueSyntax>(clickProperty.Value);
+        Assert.IsInstanceOfType<CSharpExpressionValueSyntax>(clickProperty.Value);
     }
 
     [TestMethod]

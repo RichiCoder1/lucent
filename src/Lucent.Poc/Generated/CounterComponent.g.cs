@@ -13,14 +13,9 @@ namespace Lucent.Examples.Counter;
 
 internal sealed class CounterComponent : IDisposable
 {
-    private StackPanel? _control1;
-    private TextBlock? _control2;
-    private Button? _control3;
-
-    private static void AttachChild(Panel parent, Control child) => parent.Children.Add(child);
-    private static void AttachChild(Decorator parent, Control child) => parent.Child = child;
-    private static void AttachChild(ContentControl parent, Control child) => parent.Content = child;
-    private static void AttachChild(ItemsControl parent, Control child) => parent.Items.Add(child);
+    private global::Avalonia.Controls.StackPanel? _control1;
+    private global::Avalonia.Controls.TextBlock? _control2;
+    private global::Avalonia.Controls.Button? _control3;
     private int _count = 0;
     private bool _disposed;
     private bool _mounted;
@@ -36,9 +31,9 @@ internal sealed class CounterComponent : IDisposable
 
         _mounted = true;
 
-        _control1 = new StackPanel();
-        _control2 = new TextBlock();
-        _control3 = new Button();
+        _control1 = new global::Avalonia.Controls.StackPanel();
+        _control2 = new global::Avalonia.Controls.TextBlock();
+        _control3 = new global::Avalonia.Controls.Button();
 
         #line 10 "examples/counter/Counter.lui"
         _control1!.Classes.Add("counter");
@@ -49,8 +44,8 @@ internal sealed class CounterComponent : IDisposable
         #line 18 "examples/counter/Counter.lui"
         _control3!.Content = "Increment";
         #line default
-        AttachChild(_control1!, _control2!);
-        AttachChild(_control1!, _control3!);
+        _control1!.Children.Add(_control2!);
+        _control1!.Children.Add(_control3!);
         _control3!.Click += OnControl3Click;
 
         UpdateBindings();
@@ -73,8 +68,10 @@ internal sealed class CounterComponent : IDisposable
         _disposed = true;
     }
 
-    private void OnControl3Click(object? sender, RoutedEventArgs e)
+    private void OnControl3Click(object? __sender, global::Avalonia.Interactivity.RoutedEventArgs __eventArgs)
     {
+        var sender = (global::Avalonia.Controls.Button)__sender!;
+        var e = __eventArgs;
         #line 20 "examples/counter/Counter.lui"
         SetCount(_count + 1);
         #line default

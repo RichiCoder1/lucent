@@ -69,6 +69,31 @@ public sealed class CompileLucentTests
         Assert.IsFalse(buildEngine.Errors.Any(error => error.Code == "LUC9002"));
     }
 
+    [TestMethod]
+    public void Project_sources_are_available_to_native_symbol_binding()
+    {
+        using var temporary = new TemporaryDirectory();
+        var controlPath = Path.Combine(temporary.Path, "FancyControl.cs");
+        var sourcePath = Path.Combine(temporary.Path, "Custom.lui");
+        File.WriteAllText(
+            controlPath,
+            "namespace Demo.Controls; public sealed class FancyControl : " +
+            "Avalonia.Controls.ContentControl { public string? Accent { get; set; } }");
+        File.WriteAllText(
+            sourcePath,
+            "namespace Demo; using Demo.Controls; component Custom() { " +
+            "Fragment Render() { return FancyControl { Accent: \"blue\"; }; } }");
+        var (task, buildEngine) = CreateTask(temporary, sourcePath);
+        task.CSharpSources = [new TaskItem(controlPath)];
+        task.ProjectPath = Path.Combine(temporary.Path, "Demo.csproj");
+
+        Assert.IsTrue(task.Execute());
+        Assert.HasCount(0, buildEngine.Errors);
+        StringAssert.Contains(
+            File.ReadAllText(task.GeneratedFiles.Single().ItemSpec),
+            "new global::Demo.Controls.FancyControl()");
+    }
+
     private static (CompileLucent Task, CapturingBuildEngine BuildEngine) CreateTask(
         TemporaryDirectory temporary,
         string sourcePath)

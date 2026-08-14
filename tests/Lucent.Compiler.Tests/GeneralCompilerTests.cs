@@ -23,7 +23,7 @@ public sealed class GeneralCompilerTests
                             TextBlock { Text: $"Clicks: {clicks.Value}"; }
                             Button {
                                 "Add";
-                                Click: { clicks.Update(clicks.Value + 1); }
+                                Click: (sender, e) => clicks.Update(clicks.Value + 1);
                             }
                         }
                     };
@@ -34,14 +34,18 @@ public sealed class GeneralCompilerTests
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.IsNotNull(result.GeneratedSource);
-        StringAssert.Contains(result.GeneratedSource, "private Border? _control1;");
-        StringAssert.Contains(result.GeneratedSource, "private StackPanel? _control2;");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "private global::Avalonia.Controls.Border? _control1;");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "private global::Avalonia.Controls.StackPanel? _control2;");
         StringAssert.Contains(result.GeneratedSource, ".Padding = new Avalonia.Thickness(8);");
         StringAssert.Contains(
             result.GeneratedSource,
             ".Spacing = 6;");
         StringAssert.Contains(result.GeneratedSource, ".Content = \"Add\";");
-        StringAssert.Contains(result.GeneratedSource, "AttachChild(_control1!, _control2!);");
+        StringAssert.Contains(result.GeneratedSource, "_control1!.Child = _control2!;");
         StringAssert.Contains(result.GeneratedSource, ".Click += OnControl4Click;");
     }
 
@@ -93,7 +97,7 @@ public sealed class GeneralCompilerTests
         Assert.IsFalse(result.Succeeded);
         StringAssert.Contains(
             result.Diagnostics.Single(diagnostic => diagnostic.Code == "LUC2001").Message,
-            "does not accept nested controls");
+            "does not accept a native Control");
     }
 
     [TestMethod]
@@ -268,12 +272,14 @@ public sealed class GeneralCompilerTests
             "native-panel.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource, "private StackPanel? _control1;");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "private global::Avalonia.Controls.StackPanel? _control1;");
         StringAssert.Contains(result.GeneratedSource, "_control1!.Orientation = Orientation.Horizontal;");
         StringAssert.Contains(
             result.GeneratedSource,
             "_control1!.Spacing = 8;");
-        StringAssert.Contains(result.GeneratedSource, "AttachChild(_control1!, _control2!);");
+        StringAssert.Contains(result.GeneratedSource, "_control1!.Children.Add(_control2!);");
     }
 
     [TestMethod]
@@ -296,9 +302,11 @@ public sealed class GeneralCompilerTests
             "native-border.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource, "private Border? _control1;");
-        StringAssert.Contains(result.GeneratedSource, "AttachChild(_control1!, _control2!);");
-        StringAssert.Contains(result.GeneratedSource, "AttachChild(Decorator parent, Control child)");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "private global::Avalonia.Controls.Border? _control1;");
+        StringAssert.Contains(result.GeneratedSource, "_control1!.Child = _control2!;");
+        Assert.IsFalse(result.GeneratedSource.Contains("AttachChild", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -436,7 +444,9 @@ public sealed class GeneralCompilerTests
                         keyed by item {
                             Button {
                                 Content: $"{title.Value}: {item}";
-                                Click: { items.Update(current => current.Append(item).ToArray()); }
+                                Click: (sender, e) => {
+                                    items.Update(current => current.Append(item).ToArray());
+                                };
                             }
                         }
                     };
@@ -459,10 +469,10 @@ public sealed class GeneralCompilerTests
             "var sourceItems = (_items.Where(value => value > 1)).ToArray();");
         StringAssert.Contains(result.GeneratedSource, "foreach (var item in sourceItems)");
         StringAssert.Contains(result.GeneratedSource, "entry.Update(item);");
-        StringAssert.Contains(result.GeneratedSource, "_control1!.Children.Add(entry.Root);");
+        StringAssert.Contains(result.GeneratedSource, "nativeItems.Add(entry.Root);");
         StringAssert.Contains(
             result.GeneratedSource,
-            "ReferenceEquals(_control1!.Children[index], nextEntries[index].Root)");
+            "ReferenceEquals(nativeItems[index], nextEntries[index].Root)");
         StringAssert.Contains(result.GeneratedSource, "if (orderChanged)");
         StringAssert.Contains(result.GeneratedSource, "Dispatcher.UIThread.CheckAccess()");
         Assert.IsTrue(
@@ -491,7 +501,7 @@ public sealed class GeneralCompilerTests
                 Fragment Render()
                 {
                     return Button {
-                        Click: { count.Update(count.Value + 1); }
+                        Click: (sender, e) => count.Update(count.Value + 1);
                     };
                 }
             }
@@ -505,7 +515,7 @@ public sealed class GeneralCompilerTests
     }
 
     [TestMethod]
-    public void Expression_events_reject_parameter_names_that_cannot_be_preserved_yet()
+    public void Explicit_event_lambda_preserves_parameters_and_narrows_sender()
     {
         var result = LucentCompiler.Compile(
             """
@@ -522,14 +532,16 @@ public sealed class GeneralCompilerTests
             """,
             "event-parameters.lui");
 
-        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(
-            result.Diagnostics.Single(diagnostic => diagnostic.Code == "LUC2001").Message,
-            "statement block");
+            result.GeneratedSource,
+            "var button = (global::Avalonia.Controls.Button)__sender!;");
+        StringAssert.Contains(result.GeneratedSource, "var args = __eventArgs;");
+        StringAssert.Contains(result.GeneratedSource, "Console.WriteLine(button);");
     }
 
     [TestMethod]
-    public void Events_without_deterministic_cleanup_are_rejected_in_the_native_poc()
+    public void Resolved_native_events_use_deterministic_named_cleanup()
     {
         var result = LucentCompiler.Compile(
             """
@@ -539,17 +551,44 @@ public sealed class GeneralCompilerTests
                 Fragment Render()
                 {
                     return Border {
-                        Loaded: { Console.WriteLine("loaded"); }
+                        Loaded: (sender, e) => Console.WriteLine(sender);
                     };
                 }
             }
             """,
             "unsupported-event.lui");
 
-        Assert.IsFalse(result.Succeeded);
-        StringAssert.Contains(
-            result.Diagnostics.Single(diagnostic => diagnostic.Code == "LUC2001").Message,
-            "not a native event");
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, ".Loaded += OnControl1Loaded;");
+        StringAssert.Contains(result.GeneratedSource, ".Loaded -= OnControl1Loaded;");
+    }
+
+    [TestMethod]
+    public void Bare_event_blocks_and_one_parameter_lambdas_are_rejected()
+    {
+        foreach (var handler in new[]
+        {
+            "{ Console.WriteLine(\"loaded\"); }",
+            "sender => Console.WriteLine(sender)",
+        })
+        {
+            var result = LucentCompiler.Compile(
+                $$"""
+                namespace Demo;
+                component Main()
+                {
+                    Fragment Render()
+                    {
+                        return Border { Loaded: {{handler}}; };
+                    }
+                }
+                """,
+                "explicit-events.lui");
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+                diagnostic.Code == "LUC2001"));
+        }
     }
 
     [TestMethod]

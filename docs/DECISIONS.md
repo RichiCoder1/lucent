@@ -20,6 +20,7 @@ This page separates project direction from illustrative syntax. Update it when a
 | Controls | Make direct Avalonia controls and exact native members the default surface; infer native child placement from Avalonia content metadata. Optional Lucent controls must add substantial semantics rather than wrap controls one-for-one. See [ADR 0004](adr/0004-native-avalonia-controls.md). |
 | Native content | Allow both explicit `Content: value` and concise trailing scalar content; both occupy the same resolved Avalonia content route. |
 | Native values | Apply convenience conversion from the resolved target .NET type. Keep explicit C# unchanged and do not infer from control/property names. |
+| Native events | Require explicit zero- or two-argument lambdas. Resolve the real delegate and narrow `sender` to the concrete control type; reject magical bare blocks. |
 | Tooling | Share frontend infrastructure between the compiler and language server; include a minimal language server in the proof of concept. |
 | Scope | Prove one Avalonia backend and a narrow language before pursuing other platforms or broad compatibility. |
 

@@ -24,6 +24,7 @@ public static class LanguageServer
         private readonly JsonRpcConnection _connection = new(input, output);
         private readonly Dictionary<string, DocumentState> _documents =
             new(StringComparer.Ordinal);
+        private readonly ProjectContextLoader _projectContexts = new();
 
         private bool _shutdownRequested;
 
@@ -91,6 +92,7 @@ public static class LanguageServer
                 switch (method)
                 {
                     case "initialize":
+                        _projectContexts.Configure(parameters);
                         if (hasId)
                         {
                             await _connection.WriteResponseAsync(
@@ -104,6 +106,8 @@ public static class LanguageServer
                                             openClose = true,
                                             change = 1,
                                         },
+                                        hoverProvider = true,
+                                        definitionProvider = true,
                                         positionEncoding = "utf-16",
                                     },
                                     serverInfo = new
@@ -147,6 +151,28 @@ public static class LanguageServer
                         await DidCloseAsync(parameters, cancellationToken);
                         break;
 
+                    case "textDocument/hover":
+                        if (hasId)
+                        {
+                            await HoverAsync(
+                                id!.Value,
+                                parameters,
+                                cancellationToken);
+                        }
+
+                        break;
+
+                    case "textDocument/definition":
+                        if (hasId)
+                        {
+                            await DefinitionAsync(
+                                id!.Value,
+                                parameters,
+                                cancellationToken);
+                        }
+
+                        break;
+
                     default:
                         if (hasId)
                         {
@@ -188,8 +214,9 @@ public static class LanguageServer
                 ? versionElement.GetInt32()
                 : (int?)null;
 
-            _documents[uri] = new DocumentState(text, version);
-            await PublishDiagnosticsAsync(uri, text, cancellationToken);
+            var analysis = await AnalyzeAsync(uri, text, cancellationToken);
+            _documents[uri] = new DocumentState(text, version, analysis);
+            await PublishDiagnosticsAsync(uri, text, analysis, cancellationToken);
         }
 
         private async Task DidChangeAsync(
@@ -230,8 +257,13 @@ public static class LanguageServer
             var version = textDocument.TryGetProperty("version", out var versionElement)
                 ? versionElement.GetInt32()
                 : document?.Version;
-            _documents[uri] = new DocumentState(current, version);
-            await PublishDiagnosticsAsync(uri, current, cancellationToken);
+            var analysis = await AnalyzeAsync(uri, current, cancellationToken);
+            _documents[uri] = new DocumentState(current, version, analysis);
+            await PublishDiagnosticsAsync(
+                uri,
+                current,
+                analysis,
+                cancellationToken);
         }
 
         private async Task DidCloseAsync(
@@ -258,9 +290,9 @@ public static class LanguageServer
         private async Task PublishDiagnosticsAsync(
             string uri,
             string text,
+            CompilationResult result,
             CancellationToken cancellationToken)
         {
-            var result = LucentCompiler.Compile(text, GetSourcePath(uri));
             var diagnostics = result.Diagnostics
                 .Select(diagnostic => new PublishedDiagnostic(
                     ToRange(text, diagnostic.Span),
@@ -278,6 +310,99 @@ public static class LanguageServer
                     diagnostics,
                 },
                 cancellationToken);
+        }
+
+        private async Task<CompilationResult> AnalyzeAsync(
+            string uri,
+            string text,
+            CancellationToken cancellationToken)
+        {
+            var sourcePath = GetSourcePath(uri);
+            var projectContext = await _projectContexts.LoadAsync(
+                sourcePath,
+                cancellationToken);
+            return LucentCompiler.Compile(text, sourcePath, projectContext);
+        }
+
+        private async Task HoverAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var (document, symbol) = FindSymbol(parameters);
+            if (document is null || symbol is null)
+            {
+                await _connection.WriteResponseAsync(id, null, cancellationToken);
+                return;
+            }
+
+            var documentation = string.IsNullOrWhiteSpace(symbol.Documentation)
+                ? string.Empty
+                : $"\n\n{symbol.Documentation}";
+            await _connection.WriteResponseAsync(
+                id,
+                new
+                {
+                    contents = new
+                    {
+                        kind = "markdown",
+                        value = $"```csharp\n{symbol.Display}\n```{documentation}",
+                    },
+                    range = ToRange(document.Text, symbol.ReferenceSpan),
+                },
+                cancellationToken);
+        }
+
+        private async Task DefinitionAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var (_, symbol) = FindSymbol(parameters);
+            if (symbol?.Definition is not { } definition ||
+                !File.Exists(definition.SourcePath))
+            {
+                await _connection.WriteResponseAsync(id, null, cancellationToken);
+                return;
+            }
+
+            var definitionUri = new Uri(definition.SourcePath).AbsoluteUri;
+            var definitionText = _documents.TryGetValue(definitionUri, out var openDocument)
+                ? openDocument.Text
+                : await File.ReadAllTextAsync(
+                    definition.SourcePath,
+                    cancellationToken);
+            await _connection.WriteResponseAsync(
+                id,
+                new
+                {
+                    uri = definitionUri,
+                    range = ToRange(definitionText, definition.Span),
+                },
+                cancellationToken);
+        }
+
+        private (DocumentState? Document, LucentSemanticSymbol? Symbol) FindSymbol(
+            JsonElement parameters)
+        {
+            var uri = parameters
+                .GetProperty("textDocument")
+                .GetProperty("uri")
+                .GetString()
+                ?? throw new InvalidOperationException("A document URI is required.");
+            if (!_documents.TryGetValue(uri, out var document))
+            {
+                return (null, null);
+            }
+
+            var offset = GetOffset(document.Text, parameters.GetProperty("position"));
+            var symbol = document.Analysis.Symbols
+                .Where(candidate =>
+                    offset >= candidate.ReferenceSpan.Start &&
+                    offset <= candidate.ReferenceSpan.End)
+                .OrderBy(candidate => candidate.ReferenceSpan.Length)
+                .FirstOrDefault();
+            return (document, symbol);
         }
 
         private static string GetSourcePath(string uri)
@@ -348,7 +473,10 @@ public static class LanguageServer
             return Math.Min(lineStart + character, lineEnd);
         }
 
-        private sealed record DocumentState(string Text, int? Version);
+        private sealed record DocumentState(
+            string Text,
+            int? Version,
+            CompilationResult Analysis);
 
         private sealed record LspPosition(int Line, int Character);
 

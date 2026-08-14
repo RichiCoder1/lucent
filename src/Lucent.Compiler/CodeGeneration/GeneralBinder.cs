@@ -1,42 +1,27 @@
 using Lucent.Compiler.Parsing;
+using Lucent.Compiler.Semantics;
 using Lucent.Compiler.Syntax;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Lucent.Compiler.CodeGeneration;
 
-internal sealed class GeneralBinder(DiagnosticBag diagnostics)
+internal sealed class GeneralBinder(
+    DiagnosticBag diagnostics,
+    LucentProjectContext? projectContext = null)
 {
-    private static readonly IReadOnlyDictionary<string, (string TypeName, BoundControlKind Kind)> LegacyControls =
-        new Dictionary<string, (string, BoundControlKind)>(StringComparer.Ordinal)
-        {
-            ["Column"] = ("StackPanel", BoundControlKind.Panel),
-            ["Text"] = ("TextBlock", BoundControlKind.Text),
-            ["Button"] = ("Button", BoundControlKind.ContentControl),
-        };
+    private readonly List<LucentSemanticSymbol> _symbols = [];
+    private NativeSymbolResolver? _resolver;
 
-    private static readonly IReadOnlySet<string> NativeEvents = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "Click", "TextChanged", "KeyDown", "KeyUp", "PointerPressed", "PointerReleased",
-        "PointerMoved", "PointerEntered", "PointerExited", "PointerWheelChanged", "GotFocus",
-        "LostFocus", "GotKeyboardFocus", "LostKeyboardFocus", "Loaded", "Unloaded",
-        "AttachedToVisualTree", "DetachedFromVisualTree", "Tapped", "DoubleTapped", "RightTapped",
-        "Holding", "DragEnter", "DragLeave", "DragOver", "Drop", "SelectionChanged", "Checked",
-        "Unchecked", "Indeterminate", "IsCheckedChanged", "ValueChanged", "ScrollChanged", "Opened",
-        "Closed", "Closing", "ContextMenuOpening", "ContextMenuClosing", "TemplateApplied",
-        "EffectiveViewportChanged", "LayoutUpdated", "SizeChanged", "DataContextChanged",
-        "PropertyChanged", "ItemsChanged",
-    };
-
-    private static readonly IReadOnlySet<string> DetachableNativeEvents =
-        new HashSet<string>(StringComparer.Ordinal)
-        {
-            "Click",
-            "TextChanged",
-        };
+    public IReadOnlyList<LucentSemanticSymbol> Symbols => _symbols;
 
     public BoundComponentModel? Bind(Lucent.Compiler.Syntax.CompilationUnitSyntax syntax)
     {
+        _resolver = new NativeSymbolResolver(
+            syntax.NamespaceName,
+            syntax.AllUsings.Select(directive => directive.Text).ToArray(),
+            projectContext);
+
         foreach (var additional in syntax.AllComponents.Skip(1))
         {
             AddUnsupported(
@@ -72,28 +57,34 @@ internal sealed class GeneralBinder(DiagnosticBag diagnostics)
                 root);
     }
 
-    private BoundStateModel? BindState(StateMemberSyntax state)
-    {
-        return new BoundStateModel(
+    private static BoundStateModel BindState(StateMemberSyntax state) =>
+        new(
             state.TypeName,
             state.Name,
             state.InitializerText ?? state.InitialValue.ToString(),
             state.Span);
-    }
 
     private BoundControlModel? BindControl(
         UiElementSyntax element,
         bool insideLoop = false)
     {
-        if (!TryGetControlKind(element.Name, out var kind) &&
-            (element.Name.Length == 0 || !char.IsUpper(element.Name[0])))
+        var resolver = _resolver!;
+        var resolvedControl = resolver.ResolveControl(element.Name);
+        if (resolvedControl is null)
         {
             AddUnsupported(
-                element.Span,
-                $"Control '{element.Name}' is not a native Avalonia control name (use PascalCase).");
+                ControlNameSpan(element),
+                $"Control '{element.Name}' could not be resolved to one accessible, concrete Avalonia Control in the project context.");
             return null;
         }
 
+        _symbols.Add(resolver.ToSemanticSymbol(resolvedControl, ControlNameSpan(element)));
+        var kind = ClassifyControl(resolver, resolvedControl);
+        var contentRoute = resolvedControl.ContentRoute is null
+            ? null
+            : new BoundContentRoute(
+                resolvedControl.ContentRoute.Property.Name,
+                resolvedControl.ContentRoute.IsCollection);
         var members = new List<BoundControlMember>();
         var seenMembers = new HashSet<string>(StringComparer.Ordinal);
         var childCount = 0;
@@ -104,134 +95,23 @@ internal sealed class GeneralBinder(DiagnosticBag diagnostics)
             switch (member)
             {
                 case UiContentSyntax content:
-                    var contentTarget = ImplicitContentTarget(kind);
-                    if (contentTarget is null)
-                    {
-                        AddUnsupported(
-                            content.Span,
-                            $"Control '{element.Name}' does not have an implicit scalar content slot.");
-                        continue;
-                    }
-
-                    if (childCount > 0)
-                    {
-                        AddUnsupported(
-                            content.Span,
-                            $"Control '{element.Name}' cannot combine implicit content with a nested child.");
-                        continue;
-                    }
-
-                    if (!seenMembers.Add(contentTarget))
-                    {
-                        AddUnsupported(
-                            content.Span,
-                            $"{element.Name} may contain only one '{contentTarget}' member.");
-                        continue;
-                    }
-
-                    var contentValue = (StringValueSyntax)content.Value;
-                    members.Add(
-                        new BoundContentMember(
-                            contentValue.Text,
-                            contentValue.Span,
-                            contentValue.IsInterpolated,
-                            content.Span));
+                    BindImplicitContent(
+                        element,
+                        content,
+                        resolvedControl,
+                        seenMembers,
+                        childCount,
+                        members);
                     break;
 
                 case UiPropertySyntax property:
-                    var eventName = GetEventName(property.Name);
-                    var memberName = CanonicalMemberName(element.Name, property.Name, eventName);
-
-                    if (eventName is null &&
-                        childCount > 0 &&
-                        string.Equals(memberName, ImplicitContentTarget(kind), StringComparison.Ordinal))
-                    {
-                        AddUnsupported(
-                            property.Span,
-                            $"Control '{element.Name}' cannot combine explicit '{property.Name}' with a nested child.");
-                        continue;
-                    }
-
-                    if (!seenMembers.Add(memberName))
-                    {
-                        AddUnsupported(
-                            property.Span,
-                            $"{element.Name} may contain only one '{property.Name}' member.");
-                        continue;
-                    }
-
-                    if (eventName is not null)
-                    {
-                        if (property.Value is EventBlockValueSyntax eventBlock)
-                        {
-                            members.Add(
-                                new BoundEventMember(
-                                    property.Name,
-                                    eventName,
-                                    eventBlock.Text,
-                                    eventBlock.Span,
-                                    IsExpression: false,
-                                    property.Span));
-                            continue;
-                        }
-
-                        if (property.Value is not CSharpExpressionValueSyntax expression ||
-                            !expression.Text.Contains("=>", StringComparison.Ordinal))
-                        {
-                            AddUnsupported(
-                                property.Span,
-                                $"Event '{property.Name}' must use a lambda expression or a statement block.");
-                            continue;
-                        }
-
-                        if (SyntaxFactory.ParseExpression(expression.Text) is not
-                            ParenthesizedLambdaExpressionSyntax
-                            {
-                                ParameterList.Parameters.Count: 0,
-                            })
-                        {
-                            AddUnsupported(
-                                property.Span,
-                                $"Expression event '{property.Name}' must use a parameterless lambda; use a statement block for the generated 'sender' and 'e' values.");
-                            continue;
-                        }
-
-                        members.Add(
-                            new BoundEventMember(
-                                property.Name,
-                                eventName,
-                                property.Value.Text,
-                                property.Value.Span,
-                                IsExpression: true,
-                                property.Span));
-                        continue;
-                    }
-
-                    if (property.Value is EventBlockValueSyntax)
-                    {
-                        AddUnsupported(
-                            property.Span,
-                            $"Block-valued property '{property.Name}' is not a native event.");
-                        continue;
-                    }
-
-                    if (!IsAllowedProperty(element.Name, property.Name))
-                    {
-                        AddUnsupported(
-                            property.Span,
-                            $"Property '{property.Name}' is not a native PascalCase property on {element.Name}.");
-                        continue;
-                    }
-
-                    members.Add(
-                        new BoundPropertyMember(
-                            property.Name,
-                            property.Value.Text,
-                            property.Value.Span,
-                            property.Value is StringValueSyntax,
-                            property.Value is StringValueSyntax { IsInterpolated: true },
-                            property.Span,
-                            GetNativeValueKind(element.Name, memberName)));
+                    BindProperty(
+                        element,
+                        property,
+                        resolvedControl,
+                        seenMembers,
+                        childCount,
+                        members);
                     break;
 
                 case UiChildSyntax child:
@@ -243,28 +123,28 @@ internal sealed class GeneralBinder(DiagnosticBag diagnostics)
                         continue;
                     }
 
-                    if (kind == BoundControlKind.Text)
+                    var route = resolvedControl.ContentRoute;
+                    if (route is null || !resolver.ContentAcceptsControl(route))
                     {
                         AddUnsupported(
                             child.Span,
-                            $"Control '{element.Name}' does not accept nested controls as content.");
+                            $"Control '{element.Name}' does not accept a native Control through its Avalonia content property.");
                         continue;
                     }
 
-                    if (kind is BoundControlKind.Decorator or BoundControlKind.ContentControl && childCount > 0)
+                    if (!route.IsCollection && childCount > 0)
                     {
                         AddUnsupported(
                             child.Span,
-                            $"Control '{element.Name}' can contain only one child.");
+                            $"Control '{element.Name}' can contain only one child through '{route.Property.Name}'.");
                         continue;
                     }
 
-                    if (kind is BoundControlKind.Decorator or BoundControlKind.ContentControl &&
-                        seenMembers.Contains("Content"))
+                    if (!route.IsCollection && seenMembers.Contains(route.Property.Name))
                     {
                         AddUnsupported(
                             child.Span,
-                            $"Control '{element.Name}' can contain only one content child.");
+                            $"Control '{element.Name}' cannot combine explicit '{route.Property.Name}' with a nested child.");
                         continue;
                     }
 
@@ -286,11 +166,12 @@ internal sealed class GeneralBinder(DiagnosticBag diagnostics)
                         continue;
                     }
 
-                    if (kind is not BoundControlKind.Panel and not BoundControlKind.ItemsControl)
+                    if (resolvedControl.ContentRoute is not { IsCollection: true } loopRoute ||
+                        !resolver.ContentAcceptsControl(loopRoute))
                     {
                         AddUnsupported(
                             loop.Span,
-                            $"Control '{element.Name}' cannot host a keyed foreach; use a Panel or ItemsControl.");
+                            $"Control '{element.Name}' cannot host a keyed foreach because its Avalonia content route is not a compatible collection.");
                         continue;
                     }
 
@@ -321,105 +202,270 @@ internal sealed class GeneralBinder(DiagnosticBag diagnostics)
             }
         }
 
-        return new BoundControlModel(element.Name, members, element.Span, kind);
+        return new BoundControlModel(
+            element.Name,
+            resolvedControl.TypeName,
+            members,
+            element.Span,
+            kind,
+            contentRoute);
     }
 
-    private static bool TryGetControlKind(string name, out BoundControlKind kind)
+    private void BindImplicitContent(
+        UiElementSyntax element,
+        UiContentSyntax content,
+        ResolvedNativeControl control,
+        HashSet<string> seenMembers,
+        int childCount,
+        List<BoundControlMember> members)
     {
-        if (LegacyControls.TryGetValue(name, out var legacy))
+        var resolver = _resolver!;
+        var route = control.ContentRoute;
+        if (route is null || route.IsCollection || !resolver.ContentAcceptsString(route))
         {
-            kind = legacy.Kind;
-            return true;
+            AddUnsupported(
+                content.Span,
+                $"Control '{element.Name}' does not have an implicit scalar content property that accepts a string.");
+            return;
         }
 
-        kind = name switch
+        if (childCount > 0)
         {
-            "Panel" or "StackPanel" or "DockPanel" or "Canvas" or "Grid" or "WrapPanel" or
-                "UniformGrid" or "RelativePanel" => BoundControlKind.Panel,
-            "Decorator" or "Border" or "AdornerDecorator" or "Viewbox" => BoundControlKind.Decorator,
-            "ContentControl" or "Button" or "CheckBox" or "RadioButton" or "ToggleButton" or
-                "RepeatButton" or "HyperlinkButton" or "Label" or "ListBoxItem" or "TreeViewItem" or
-                "TabItem" or "Expander" or "GroupBox" or "UserControl" or "Window" or "ScrollViewer" =>
-                BoundControlKind.ContentControl,
-            "ItemsControl" or "ListBox" or "ComboBox" or "TreeView" or "TabControl" or "DataGrid" or
-                "Menu" or "ContextMenu" or "SelectingItemsControl" or "HeaderedItemsControl" or
-                "HeaderedSelectingItemsControl" => BoundControlKind.ItemsControl,
-            "TextBlock" or "TextBox" or "PasswordBox" or "MaskedTextBox" or "AccessText" =>
-                BoundControlKind.Text,
-            _ => BoundControlKind.Unknown,
-        };
+            AddUnsupported(
+                content.Span,
+                $"Control '{element.Name}' cannot combine implicit content with a nested child.");
+            return;
+        }
 
-        return kind != BoundControlKind.Unknown;
+        if (!seenMembers.Add(route.Property.Name))
+        {
+            AddUnsupported(
+                content.Span,
+                $"{element.Name} may contain only one '{route.Property.Name}' member.");
+            return;
+        }
+
+        var contentValue = (StringValueSyntax)content.Value;
+        members.Add(
+            new BoundContentMember(
+                contentValue.Text,
+                contentValue.Span,
+                contentValue.IsInterpolated,
+                content.Span));
     }
 
-    private static string? ImplicitContentTarget(BoundControlKind kind) =>
-        kind switch
-        {
-            BoundControlKind.Text => "Text",
-            BoundControlKind.ContentControl => "Content",
-            BoundControlKind.ItemsControl => "Items",
-            _ => null,
-        };
-
-    private static BoundNativeValueKind GetNativeValueKind(
-        string controlName,
-        string propertyName) =>
-        (controlName, propertyName) switch
-        {
-            ("Border", "Padding") => BoundNativeValueKind.Thickness,
-            ("Border", "CornerRadius") => BoundNativeValueKind.CornerRadius,
-            _ => BoundNativeValueKind.None,
-        };
-
-    private static bool IsAllowedProperty(string controlName, string propertyName)
+    private void BindProperty(
+        UiElementSyntax element,
+        UiPropertySyntax property,
+        ResolvedNativeControl control,
+        HashSet<string> seenMembers,
+        int childCount,
+        List<BoundControlMember> members)
     {
-        if (propertyName.Length > 0 && char.IsUpper(propertyName[0]))
+        var resolver = _resolver!;
+        var resolvedEvent = resolver.ResolveEvent(control, property.Name);
+        if (resolvedEvent is not null)
         {
-            return true;
-        }
-
-        return propertyName == "class" ||
-            (controlName, propertyName) switch
+            if (!seenMembers.Add(resolvedEvent.Name))
             {
-                ("Text", "text") => true,
-                ("Button", "text") => true,
-                _ => false,
-            };
-    }
+                AddUnsupported(
+                    property.Span,
+                    $"{element.Name} may contain only one '{property.Name}' member.");
+                return;
+            }
 
-    private static string CanonicalMemberName(string controlName, string propertyName, string? eventName)
-    {
-        if (eventName is not null)
-        {
-            return eventName;
+            var boundEvent = BindEvent(property, control, resolvedEvent);
+            if (boundEvent is not null)
+            {
+                members.Add(boundEvent);
+                _symbols.Add(
+                    resolver.ToSemanticSymbol(
+                        control,
+                        resolvedEvent,
+                        PropertyNameSpan(property)));
+            }
+
+            return;
         }
 
-        return (controlName, propertyName) switch
+        if (property.Value is EventBlockValueSyntax)
         {
-            ("Text", "text") => "Text",
-            ("Button", "text") => "Content",
-            _ => propertyName,
+            AddUnsupported(
+                property.Span,
+                $"Member '{property.Name}' must be assigned an explicit C# lambda; bare event blocks are not supported.");
+            return;
+        }
+
+        if (property.Name == "class")
+        {
+            if (!seenMembers.Add("class"))
+            {
+                AddUnsupported(property.Span, $"{element.Name} may contain only one 'class' member.");
+                return;
+            }
+
+            members.Add(
+                new BoundPropertyMember(
+                    "class",
+                    property.Value.Text,
+                    property.Value.Span,
+                    property.Value is StringValueSyntax,
+                    property.Value is StringValueSyntax { IsInterpolated: true },
+                    property.Span));
+            return;
+        }
+
+        var resolvedProperty = resolver.ResolveProperty(control, property.Name);
+        if (resolvedProperty is null)
+        {
+            AddUnsupported(
+                PropertyNameSpan(property),
+                $"Property '{property.Name}' could not be resolved on {control.TypeName}.");
+            return;
+        }
+
+        if (resolvedProperty.Symbol.SetMethod is not { DeclaredAccessibility: Microsoft.CodeAnalysis.Accessibility.Public })
+        {
+            AddUnsupported(
+                PropertyNameSpan(property),
+                $"Property '{resolvedProperty.Name}' on {control.TypeName} is read-only.");
+            return;
+        }
+
+        if (childCount > 0 &&
+            string.Equals(
+                resolvedProperty.Name,
+                control.ContentRoute?.Property.Name,
+                StringComparison.Ordinal))
+        {
+            AddUnsupported(
+                property.Span,
+                $"Control '{element.Name}' cannot combine explicit '{property.Name}' with a nested child.");
+            return;
+        }
+
+        if (!seenMembers.Add(resolvedProperty.Name))
+        {
+            AddUnsupported(
+                property.Span,
+                $"{element.Name} may contain only one '{property.Name}' member.");
+            return;
+        }
+
+        members.Add(
+            new BoundPropertyMember(
+                resolvedProperty.Name,
+                property.Value.Text,
+                property.Value.Span,
+                property.Value is StringValueSyntax,
+                property.Value is StringValueSyntax { IsInterpolated: true },
+                property.Span,
+                resolvedProperty.NativeValueKind));
+        _symbols.Add(
+            resolver.ToSemanticSymbol(
+                control,
+                resolvedProperty,
+                PropertyNameSpan(property)));
+    }
+
+    private BoundEventMember? BindEvent(
+        UiPropertySyntax property,
+        ResolvedNativeControl control,
+        ResolvedNativeEvent @event)
+    {
+        if (property.Value is EventBlockValueSyntax)
+        {
+            AddUnsupported(
+                property.Span,
+                $"Event '{property.Name}' must use an explicit lambda such as '(sender, e) => {{ ... }}'.");
+            return null;
+        }
+
+        if (property.Value is not CSharpExpressionValueSyntax expression ||
+            SyntaxFactory.ParseExpression(expression.Text) is not LambdaExpressionSyntax lambda)
+        {
+            AddUnsupported(
+                property.Span,
+                $"Event '{property.Name}' must use an explicit C# lambda.");
+            return null;
+        }
+
+        var parameters = lambda switch
+        {
+            ParenthesizedLambdaExpressionSyntax parenthesized =>
+                parenthesized.ParameterList.Parameters.ToArray(),
+            SimpleLambdaExpressionSyntax simple => [simple.Parameter],
+            _ => [],
         };
+        if (parameters.Length is not 0 and not 2)
+        {
+            AddUnsupported(
+                property.Span,
+                $"Event '{property.Name}' must use either '() => ...' or '(sender, e) => ...'; one-parameter handlers are ambiguous.");
+            return null;
+        }
+
+        if (parameters.Any(parameter => parameter.Type is not null))
+        {
+            AddUnsupported(
+                property.Span,
+                $"Event '{property.Name}' lambda parameters are inferred from the resolved Avalonia event and must not declare explicit types.");
+            return null;
+        }
+
+        var body = lambda.Body switch
+        {
+            BlockSyntax block => string.Join(
+                Environment.NewLine,
+                block.Statements.Select(statement => statement.ToFullString().TrimEnd())),
+            ExpressionSyntax bodyExpression => bodyExpression.ToFullString().Trim() + ";",
+            _ => string.Empty,
+        };
+        return new BoundEventMember(
+            property.Name,
+            @event.Name,
+            body,
+            property.Value.Span,
+            @event.DelegateTypeName,
+            @event.SenderTypeName,
+            @event.EventArgsTypeName,
+            parameters.Length == 2 ? parameters[0].Identifier.ValueText : null,
+            parameters.Length == 2 ? parameters[1].Identifier.ValueText : null,
+            property.Span);
     }
 
-    private static string? GetEventName(string memberName)
+    private static BoundControlKind ClassifyControl(
+        NativeSymbolResolver resolver,
+        ResolvedNativeControl control)
     {
-        if (NativeEvents.Contains(memberName) &&
-            DetachableNativeEvents.Contains(memberName))
+        var route = control.ContentRoute;
+        if (route is null)
         {
-            return memberName;
+            return BoundControlKind.Unknown;
         }
 
-        if (memberName.StartsWith("on", StringComparison.Ordinal) &&
-            memberName.Length > 2 &&
-            NativeEvents.Contains(memberName[2..]) &&
-            DetachableNativeEvents.Contains(memberName[2..]))
+        if (route.IsCollection)
         {
-            return memberName[2..];
+            return route.Property.Name == "Items"
+                ? BoundControlKind.ItemsControl
+                : BoundControlKind.Panel;
         }
 
-        return null;
+        if (resolver.ContentAcceptsControl(route))
+        {
+            return route.Property.Name == "Child"
+                ? BoundControlKind.Decorator
+                : BoundControlKind.ContentControl;
+        }
+
+        return BoundControlKind.Text;
     }
+
+    private static SourceSpan ControlNameSpan(UiElementSyntax element) =>
+        new(element.Span.Start, element.Name.Length);
+
+    private static SourceSpan PropertyNameSpan(UiPropertySyntax property) =>
+        new(property.Span.Start, property.Name.Length);
 
     private bool HasErrors =>
         diagnostics.Items.Any(diagnostic =>
