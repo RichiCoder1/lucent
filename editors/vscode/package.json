@@ -12,6 +12,7 @@
   "files": [
     "extension.js",
     "language-configuration.json",
+    "node_modules",
     "syntaxes",
     "server"
   ],

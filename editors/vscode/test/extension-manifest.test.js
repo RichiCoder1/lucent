@@ -22,6 +22,13 @@ test('manifest registers .lui and the Lucent grammar', () => {
     assert.equal(grammar.path, './syntaxes/lucent.tmLanguage.json');
 });
 
+test('manifest packages the language client runtime', () => {
+    const manifest = readJson('package.json');
+
+    assert.ok(manifest.files.includes('node_modules'));
+    assert.equal(manifest.dependencies['vscode-languageclient'], '10.1.0');
+});
+
 test('grammar and language configuration are valid JSON with Lucent constructs', () => {
     const grammar = readJson('syntaxes/lucent.tmLanguage.json');
     const configuration = readJson('language-configuration.json');
