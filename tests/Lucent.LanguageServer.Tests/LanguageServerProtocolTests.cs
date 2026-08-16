@@ -9,6 +9,71 @@ namespace Lucent.LanguageServer.Tests;
 public sealed class LanguageServerProtocolTests
 {
     [TestMethod]
+    public async Task Project_implicit_usings_preserve_method_group_conversions()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-implicit-usings",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var projectPath = Path.Combine(directory, "Demo.csproj");
+            var sourcePath = Path.Combine(directory, "App.lui");
+            await File.WriteAllTextAsync(projectPath, """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net9.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+                  <ItemGroup><PackageReference Include="Avalonia" Version="12.1.1" /><LucentSource Include="App.lui" /></ItemGroup>
+                </Project>
+                """);
+            await File.WriteAllTextAsync(Path.Combine(directory, "DelegateCommand.cs"), """
+                using System.Windows.Input;
+                namespace Demo;
+                internal sealed class DelegateCommand(Action execute, Func<bool>? canExecute = null) : ICommand
+                {
+                    public bool CanExecute(object? parameter) => canExecute?.Invoke() ?? true;
+                    public void Execute(object? parameter) => execute();
+                    public event EventHandler? CanExecuteChanged;
+                }
+                """);
+            const string source = """
+                namespace Demo;
+                component App()
+                {
+                    private readonly DelegateCommand command = new DelegateCommand(Execute, CanExecute);
+                    private void Execute() { }
+                    private bool CanExecute() => true;
+                    Fragment Render() => Border {};
+                }
+                """;
+            await File.WriteAllTextAsync(sourcePath, source);
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new
+                {
+                    textDocument = new { uri, languageId = "lucent", version = 1, text = source },
+                }),
+                Request(2, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var diagnostics = PublishedDiagnostics(ReadMessages(output.ToArray()), uri)
+                .SelectMany(items => items.EnumerateArray())
+                .ToArray();
+            Assert.IsFalse(diagnostics.Any(diagnostic =>
+                diagnostic.GetProperty("message").GetString()?.Contains(
+                    "cannot convert from 'method group'", StringComparison.Ordinal) == true),
+                string.Join(Environment.NewLine, diagnostics.Select(diagnostic =>
+                    diagnostic.GetProperty("message").GetString())));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task Event_islands_complete_hover_and_define_ordinary_component_members()
     {
         var sourcePath = Path.Combine(Path.GetTempPath(), $"lucent-members-{Guid.NewGuid():N}.lui");

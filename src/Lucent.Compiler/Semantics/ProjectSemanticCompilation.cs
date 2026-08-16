@@ -116,13 +116,21 @@ internal sealed class ProjectSemanticCompilation
         var references = referencePaths.Values
             .Select(path => MetadataReference.CreateFromFile(path))
             .ToImmutableArray();
-        var syntaxTrees = (context?.Sources ?? [])
+        var syntaxTrees = new List<SyntaxTree>();
+        if (context?.GlobalUsings.Count > 0)
+        {
+            syntaxTrees.Add(CSharpSyntaxTree.ParseText(
+                string.Join(Environment.NewLine,
+                    context.GlobalUsings.Select(directive => $"global using {directive};")),
+                CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
+                "Lucent.ProjectGlobalUsings.g.cs"));
+        }
+        syntaxTrees.AddRange((context?.Sources ?? [])
             .Where(File.Exists)
             .Select(path => CSharpSyntaxTree.ParseText(
                 File.ReadAllText(path),
                 CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
-                path))
-            .ToArray();
+                path)));
 
         return CSharpCompilation.Create(
             "Lucent.ProjectSemantics",

@@ -281,6 +281,7 @@ internal sealed class ProjectContextLoader
         startInfo.ArgumentList.Add("-getTargetResult:ResolveReferences");
         startInfo.ArgumentList.Add("-getItem:Compile");
         startInfo.ArgumentList.Add("-getItem:LucentSource");
+        startInfo.ArgumentList.Add("-getItem:Using");
         startInfo.ArgumentList.Add("-p:DesignTimeBuild=true");
         startInfo.ArgumentList.Add("-p:BuildingProject=false");
         startInfo.ArgumentList.Add("-nologo");
@@ -338,8 +339,13 @@ internal sealed class ProjectContextLoader
                     .Where(path => path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
                     .ToArray()
                 : [];
+        var globalUsings = root.TryGetProperty("Items", out items) &&
+            items.TryGetProperty("Using", out var usingItems)
+                ? ReadUsingItems(usingItems).ToArray()
+                : [];
 
-        return new LucentProjectContext(projectPath, references, sources, lucentSources);
+        return new LucentProjectContext(
+            projectPath, references, sources, lucentSources, globalUsings);
     }
 
     private static LucentProjectContext CreateFallbackContext(string projectPath)
@@ -400,6 +406,31 @@ internal sealed class ProjectContextLoader
             {
                 yield return Path.GetFullPath(path);
             }
+        }
+    }
+
+    private static IEnumerable<string> ReadUsingItems(JsonElement items)
+    {
+        foreach (var item in items.EnumerateArray())
+        {
+            var identity = item.GetProperty("Identity").GetString();
+            if (string.IsNullOrWhiteSpace(identity))
+            {
+                continue;
+            }
+
+            var alias = item.TryGetProperty("Alias", out var aliasElement)
+                ? aliasElement.GetString()
+                : null;
+            if (!string.IsNullOrWhiteSpace(alias))
+            {
+                yield return $"{alias} = {identity}";
+                continue;
+            }
+
+            var isStatic = item.TryGetProperty("Static", out var staticElement) &&
+                string.Equals(staticElement.GetString(), "true", StringComparison.OrdinalIgnoreCase);
+            yield return isStatic ? $"static {identity}" : identity;
         }
     }
 
