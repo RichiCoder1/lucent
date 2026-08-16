@@ -2,8 +2,6 @@ using Lucent.Compiler.Parsing;
 using Lucent.Compiler.Semantics;
 using Lucent.Compiler.Syntax;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using LucentCompilationUnitSyntax = Lucent.Compiler.Syntax.CompilationUnitSyntax;
 
 namespace Lucent.Compiler;
@@ -17,7 +15,7 @@ internal static class EditorIntelligence
     {
         var syntax = analysis.Syntax;
         var resolver = analysis.Resolver;
-        if (IsComponentExpressionPosition(syntax, offset))
+        if (IsComponentExpressionPosition(analysis, offset))
         {
             return GetExpressionCompletions(sourceText, offset, analysis);
         }
@@ -126,23 +124,17 @@ internal static class EditorIntelligence
     }
 
     private static bool IsComponentExpressionPosition(
-        LucentCompilationUnitSyntax syntax,
+        ComponentSemanticAnalysis analysis,
         int offset) =>
-        syntax.Component.AllStateMembers.Any(member =>
-            member.InitializerSpan is { } span &&
-            offset >= span.Start &&
-            offset <= span.End) ||
-        syntax.Component.AllComputedMembers.Any(member =>
-            offset >= member.InitializerSpan.Start &&
-            offset <= member.InitializerSpan.End) ||
-        EnumerateLoops(syntax.Component.RenderMethod.Root).Any(loop =>
-            (offset >= loop.SourceExpressionSpan.Start &&
-             offset <= loop.SourceExpressionSpan.End) ||
-            (offset >= loop.KeyExpressionSpan.Start &&
-             offset <= loop.KeyExpressionSpan.End)) ||
-        EnumerateConditionals(syntax.Component.RenderMethod.Root).Any(conditional =>
-            offset >= conditional.ConditionSpan.Start &&
-            offset <= conditional.ConditionSpan.End);
+        analysis.EditorScopes.Any(scope =>
+            scope.Role is (CSharpIslandRole.StateInitializer or
+                CSharpIslandRole.ComputedInitialValue or
+                CSharpIslandRole.ComputedFactory or
+                CSharpIslandRole.LoopSource or
+                CSharpIslandRole.LoopKey or
+                CSharpIslandRole.Condition) &&
+            offset >= scope.Span.Start &&
+            offset <= scope.Span.End);
 
     public static LucentSemanticSymbol? GetExpressionSymbol(
         string sourceText,
@@ -270,7 +262,7 @@ internal static class EditorIntelligence
             current = member.Type;
         }
 
-        return GetMembers(current, resolver)
+        var members = GetMembers(current, resolver)
             .Select(member => new LucentCompletionItem(
                 member.Name,
                 member.Symbol switch
@@ -286,215 +278,39 @@ internal static class EditorIntelligence
                 member.Name,
                 member.Documentation))
             .ToArray();
+        return members;
     }
 
     private static IReadOnlyList<ExpressionVariable> BuildExpressionScope(
         ComponentSemanticAnalysis analysis,
         int offset)
     {
-        var syntax = analysis.Syntax;
-        var resolver = analysis.Resolver;
-        var variables = syntax.Component.AllStateMembers
-            .Select(state => (Member: state, Type: resolver.ResolveTypeName(state.TypeName)))
-            .Where(candidate => candidate.Type is not null)
-            .Select(candidate => new ExpressionVariable(
-                candidate.Member.Name,
-                candidate.Type!,
-                ExpressionContainer.State,
-                $"private readonly State<{candidate.Member.TypeName}> {candidate.Member.Name}"))
-            .Concat(syntax.Component.AllComputedMembers
-                .Select(computed => (Member: computed, Type: resolver.ResolveTypeName(computed.TypeName)))
-                .Where(candidate => candidate.Type is not null)
-                .Select(candidate => new ExpressionVariable(
-                    candidate.Member.Name,
-                    candidate.Type!,
-                    ExpressionContainer.Computed,
-                    $"private readonly Computed<{candidate.Member.TypeName}> {candidate.Member.Name}")))
-            .ToList();
-
-        var computedInitializer = syntax.Component.AllComputedMembers.FirstOrDefault(member =>
-            offset >= member.InitializerSpan.Start &&
-            offset <= member.InitializerSpan.End);
-        var lambdaParameter = computedInitializer is null
-            ? null
-            : GetLeadingLambdaParameter(computedInitializer.InitializerText);
-        var cancellationTokenType = resolver.ResolveTypeName(
-            "global::System.Threading.CancellationToken");
-        if (lambdaParameter is not null && cancellationTokenType is not null)
-        {
-            variables.Add(new ExpressionVariable(
-                lambdaParameter,
-                cancellationTokenType,
-                ExpressionContainer.Local,
-                $"CancellationToken {lambdaParameter}"));
-        }
+        var variables = analysis.EditorVariables.Select(variable => new ExpressionVariable(
+            variable.Name,
+            variable.Type,
+            variable.Kind switch
+            {
+                BoundEditorVariableKind.State => ExpressionContainer.State,
+                BoundEditorVariableKind.Computed => ExpressionContainer.Computed,
+                _ => ExpressionContainer.Local,
+            },
+            variable.Display)).ToList();
 
         foreach (var scope in analysis.EditorScopes.Where(scope =>
                      offset >= scope.Span.Start && offset <= scope.Span.End))
         {
-            variables.AddRange(scope.Locals.Select(local => new ExpressionVariable(
+            variables.AddRange(scope.Context.LookupLocals(offset)
+                .GroupBy(local => local.Name, StringComparer.Ordinal)
+                .Select(group => group.OrderBy(local =>
+                    local.Type.TypeKind == TypeKind.Dynamic).First())
+                .Select(local => new ExpressionVariable(
                 local.Name,
                 local.Type,
                 ExpressionContainer.Local,
                 $"{local.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {local.Name}")));
         }
-        AddEventVariables(syntax, offset, resolver, variables);
-
-        foreach (var loop in EnumerateLoops(syntax.Component.RenderMethod.Root)
-                     .Where(loop =>
-                         (offset >= loop.Body.Span.Start &&
-                          offset <= loop.Body.Span.End) ||
-                         (offset >= loop.KeyExpressionSpan.Start &&
-                          offset <= loop.KeyExpressionSpan.End))
-                     .OrderByDescending(loop => loop.Body.Span.Length))
-        {
-            var sourceType = ResolveExpressionType(loop.SourceExpression, variables, resolver);
-            var itemType = sourceType is null
-                ? null
-                : NativeSymbolResolver.GetEnumerableElementType(sourceType.Type);
-            if (itemType is not null)
-            {
-                variables.Add(new ExpressionVariable(
-                    loop.ItemName,
-                    itemType,
-                    ExpressionContainer.Local,
-                    $"{itemType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {loop.ItemName}"));
-            }
-        }
 
         return variables;
-    }
-
-    private static void AddEventVariables(
-        LucentCompilationUnitSyntax syntax,
-        int offset,
-        NativeSymbolResolver resolver,
-        List<ExpressionVariable> variables)
-    {
-        var context = EnumerateElements(syntax.Component.RenderMethod.Root)
-            .SelectMany(element => element.Properties.Select(property => (Element: element, Property: property)))
-            .FirstOrDefault(candidate =>
-                offset >= candidate.Property.Value.Span.Start &&
-                offset <= candidate.Property.Value.Span.End);
-        if (context.Property?.Value is not CSharpExpressionValueSyntax expression ||
-            SyntaxFactory.ParseExpression(expression.Text) is not LambdaExpressionSyntax lambda ||
-            resolver.ResolveControl(context.Element.Name) is not { } control ||
-            resolver.ResolveEvent(control, context.Property.Name) is not { } @event)
-        {
-            return;
-        }
-
-        var parameters = lambda switch
-        {
-            ParenthesizedLambdaExpressionSyntax parenthesized => parenthesized.ParameterList.Parameters,
-            SimpleLambdaExpressionSyntax simple => [simple.Parameter],
-            _ => [],
-        };
-        var parameterTypes = new[]
-        {
-            resolver.ResolveTypeName(control.TypeName),
-            resolver.ResolveTypeName(@event.EventArgsTypeName),
-        };
-        for (var index = 0; index < Math.Min(parameters.Count, parameterTypes.Length); index++)
-        {
-            if (parameterTypes[index] is not { } type)
-            {
-                continue;
-            }
-
-            var name = parameters[index].Identifier.ValueText;
-            variables.Add(new ExpressionVariable(
-                name,
-                type,
-                ExpressionContainer.Local,
-                $"{type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {name}"));
-        }
-
-        if (lambda.Body is not BlockSyntax block)
-        {
-            return;
-        }
-
-        var relativeOffset = offset - expression.Span.Start;
-        foreach (var declaration in block.Statements
-                     .OfType<LocalDeclarationStatementSyntax>()
-                     .Where(statement => statement.SpanStart < relativeOffset))
-        {
-            foreach (var variable in declaration.Declaration.Variables)
-            {
-                var type = declaration.Declaration.Type.IsVar
-                    ? variable.Initializer is null
-                        ? null
-                        : ResolveExpressionType(variable.Initializer.Value.ToString(), variables, resolver)?.Type
-                    : resolver.ResolveTypeName(declaration.Declaration.Type.ToString());
-                if (type is null)
-                {
-                    continue;
-                }
-
-                var name = variable.Identifier.ValueText;
-                variables.Add(new ExpressionVariable(
-                    name,
-                    type,
-                    ExpressionContainer.Local,
-                    $"{type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {name}"));
-            }
-        }
-    }
-
-    private static string? GetLeadingLambdaParameter(string initializer)
-    {
-        var arrow = initializer.IndexOf("=>", StringComparison.Ordinal);
-        if (arrow < 0)
-        {
-            return null;
-        }
-
-        var left = initializer[..arrow].Trim().Trim('(', ')').Trim();
-        return left.All(character => char.IsLetterOrDigit(character) || character == '_')
-            ? left
-            : null;
-    }
-
-    private static ResolvedExpressionType? ResolveExpressionType(
-        string expression,
-        IReadOnlyList<ExpressionVariable> scope,
-        NativeSymbolResolver resolver)
-    {
-        ResolvedExpressionType? Resolve(ExpressionSyntax syntax) => syntax switch
-        {
-            IdentifierNameSyntax identifier => scope
-                .Where(variable => variable.Name == identifier.Identifier.ValueText)
-                .Select(variable => new ResolvedExpressionType(variable.Type, variable.Container))
-                .LastOrDefault() ??
-                (resolver.ResolveTypeName(identifier.Identifier.ValueText) is { } type
-                    ? new ResolvedExpressionType(type, ExpressionContainer.Type)
-                    : null),
-            MemberAccessExpressionSyntax access => Resolve(access.Expression) is { } target
-                ? ResolveMember(target, access.Name.Identifier.ValueText, resolver)?.Type
-                : null,
-            InvocationExpressionSyntax invocation => Resolve(invocation.Expression),
-            ObjectCreationExpressionSyntax creation =>
-                resolver.ResolveTypeName(creation.Type.ToString()) is { } createdType
-                    ? new ResolvedExpressionType(createdType, ExpressionContainer.Local)
-                    : null,
-            LiteralExpressionSyntax literal => literal.Kind() switch
-            {
-                SyntaxKind.StringLiteralExpression => ResolveSpecial("string"),
-                SyntaxKind.NumericLiteralExpression => ResolveSpecial("int"),
-                SyntaxKind.TrueLiteralExpression or SyntaxKind.FalseLiteralExpression => ResolveSpecial("bool"),
-                _ => null,
-            },
-            ParenthesizedExpressionSyntax parenthesized => Resolve(parenthesized.Expression),
-            _ => null,
-        };
-
-        ResolvedExpressionType? ResolveSpecial(string typeName) =>
-            resolver.ResolveTypeName(typeName) is { } type
-                ? new ResolvedExpressionType(type, ExpressionContainer.Local)
-                : null;
-
-        return Resolve(SyntaxFactory.ParseExpression(expression));
     }
 
     private static ExpressionMember? ResolveMember(
@@ -747,78 +563,6 @@ internal static class EditorIntelligence
                 foreach (var descendant in EnumerateElements(falseRoot))
                 {
                     yield return descendant;
-                }
-            }
-        }
-    }
-
-    private static IEnumerable<UiForEachSyntax> EnumerateLoops(UiElementSyntax element)
-    {
-        foreach (var member in element.Members)
-        {
-            if (member is UiForEachSyntax loop)
-            {
-                yield return loop;
-                foreach (var nested in EnumerateLoops(loop.Body))
-                {
-                    yield return nested;
-                }
-            }
-            else if (member is UiChildSyntax child)
-            {
-                foreach (var nested in EnumerateLoops(child.Element))
-                {
-                    yield return nested;
-                }
-            }
-            else if (member is UiIfSyntax conditional)
-            {
-                foreach (var nested in EnumerateLoops(conditional.TrueRoot))
-                {
-                    yield return nested;
-                }
-                if (conditional.FalseRoot is not null)
-                {
-                    foreach (var nested in EnumerateLoops(conditional.FalseRoot))
-                    {
-                        yield return nested;
-                    }
-                }
-            }
-        }
-    }
-
-    private static IEnumerable<UiIfSyntax> EnumerateConditionals(UiElementSyntax element)
-    {
-        foreach (var member in element.Members)
-        {
-            if (member is UiIfSyntax conditional)
-            {
-                yield return conditional;
-                foreach (var nested in EnumerateConditionals(conditional.TrueRoot))
-                {
-                    yield return nested;
-                }
-                if (conditional.FalseRoot is not null)
-                {
-                    foreach (var nested in EnumerateConditionals(conditional.FalseRoot))
-                    {
-                        yield return nested;
-                    }
-                }
-            }
-            else if (member is UiChildSyntax child)
-            {
-                foreach (var nested in EnumerateConditionals(child.Element))
-                {
-                    yield return nested;
-                }
-            }
-            else if (member is UiForEachSyntax loop)
-            {
-                foreach (var nested in EnumerateConditionals(loop.Body))
-                {
-                    yield return nested;
                 }
             }
         }

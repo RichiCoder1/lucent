@@ -4,6 +4,74 @@ namespace Lucent.Compiler.Tests;
 public sealed class ProjectSemanticBindingTests
 {
     [TestMethod]
+    public void Editor_semantics_tolerate_unresolved_types_and_loop_sources()
+    {
+        const string source = """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<MissingType> value = new();
+                Fragment Render() { return StackPanel {
+                    foreach (var item in MissingItems) keyed by item { TextBlock { Text: item.ToString(); } }
+                }; }
+            }
+            """;
+
+        _ = LucentCompiler.GetCompletions(
+            source,
+            source.IndexOf("item.ToString", StringComparison.Ordinal) + "item.T".Length,
+            "unresolved-editor.lui");
+    }
+
+    [TestMethod]
+    public void Shared_island_semantics_cover_conditional_branches_and_local_shadowing()
+    {
+        const string source = """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<string> title = new("state");
+                private readonly State<bool> visible = new(true);
+                Fragment Render()
+                {
+                    return ContentControl {
+                        if (visible.Value) {
+                            Button {
+                                Content: title.Value;
+                                Click: (sender, e) => {
+                                    var title = sender.Content;
+                                    title.ToString();
+                                };
+                            }
+                        } else {
+                            TextBlock { Text: title.Value; }
+                        }
+                    };
+                }
+            }
+            """;
+
+        foreach (var occurrence in new[] { source.IndexOf("title.Value", StringComparison.Ordinal),
+                     source.LastIndexOf("title.Value", StringComparison.Ordinal) })
+        {
+            var members = LucentCompiler.GetCompletions(
+                source,
+                occurrence + "title.V".Length,
+                "conditional-editor.lui");
+            Assert.IsTrue(members.Any(item => item.Label == "Value"));
+        }
+
+        var shadowedOffset = source.IndexOf("title.ToString", StringComparison.Ordinal) +
+            "title.T".Length;
+        var shadowedMembers = LucentCompiler.GetCompletions(
+            source,
+            shadowedOffset,
+            "conditional-editor.lui");
+        Assert.IsTrue(shadowedMembers.Any(item => item.Label == "ToString"));
+        Assert.IsFalse(shadowedMembers.Any(item => item.Label == "Value"));
+    }
+
+    [TestMethod]
     public void Expression_completion_and_hover_resolve_keyed_loop_items()
     {
         var temporaryDirectory = Path.Combine(
@@ -34,9 +102,11 @@ public sealed class ProjectSemanticBindingTests
                     {
                         return StackPanel {
                             TextBlock { Text: query.Value; }
-                            foreach (var package in packages.Value)
-                            keyed by package.Id {
-                                TextBlock { Text: package.Name; }
+                            StackPanel {
+                                foreach (var package in packages.Value)
+                                keyed by package.Id {
+                                    TextBlock { Text: package.Name; }
+                                }
                             }
                         };
                     }

@@ -45,11 +45,14 @@ public sealed class CompilerTests
     public void Counter_generation_matches_checked_in_snapshot()
     {
         var source = File.ReadAllText(RepositoryPaths.CounterSource);
+        var style = File.ReadAllText(RepositoryPaths.CounterStyle);
         var expected = File.ReadAllText(RepositoryPaths.GeneratedCounter);
 
         const string logicalSourcePath = "examples/counter/Counter.lui";
-        var first = LucentCompiler.Compile(source, logicalSourcePath);
-        var second = LucentCompiler.Compile(source, logicalSourcePath);
+        var first = LucentCompiler.Compile(
+            source, logicalSourcePath, projectContext: null, style, "examples/counter/Counter.css");
+        var second = LucentCompiler.Compile(
+            source, logicalSourcePath, projectContext: null, style, "examples/counter/Counter.css");
 
         Assert.IsTrue(first.Succeeded);
         Assert.AreEqual(expected, first.GeneratedSource);
@@ -131,5 +134,47 @@ public sealed class CompilerTests
             diagnostic.Message.Contains(
                 "only one 'Class'",
                 StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Conditional_generation_matches_checked_in_snapshot()
+    {
+        var source = File.ReadAllText(RepositoryPaths.ConditionalSnapshotSource);
+        var expected = File.ReadAllText(RepositoryPaths.GeneratedConditionalSnapshot);
+        const string logicalSourcePath = "tests/Lucent.Compiler.Tests/Snapshots/ConditionalRegion.lui";
+
+        var first = LucentCompiler.Compile(source, logicalSourcePath);
+        var second = LucentCompiler.Compile(source, logicalSourcePath);
+
+        Assert.IsTrue(first.Succeeded, string.Join(Environment.NewLine, first.Diagnostics));
+        Assert.AreEqual(expected, first.GeneratedSource);
+        Assert.AreEqual(first.GeneratedSource, second.GeneratedSource);
+    }
+
+    [TestMethod]
+    public void Conditional_parser_preserves_multiple_branch_roots_for_the_binder()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return StackPanel {
+                        if (true) { TextBlock { } Border { } }
+                    };
+                }
+            }
+            """,
+            "conditional-roots.lui");
+
+        var conditional = Assert.IsInstanceOfType<UiIfSyntax>(
+            result.Syntax!.Component.RenderMethod.Root.Members.Single());
+        Assert.HasCount(2, conditional.TrueBranch.Roots);
+        Assert.IsFalse(result.Diagnostics.Any(diagnostic => diagnostic.Code == "LUC1001"));
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "LUC2001" &&
+            diagnostic.Message.Contains("exactly one native control root", StringComparison.Ordinal)));
     }
 }

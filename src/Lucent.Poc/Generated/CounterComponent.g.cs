@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Lucent.Runtime;
+using Avalonia.Styling;
 
 namespace Lucent.Examples.Counter;
 
@@ -39,6 +40,33 @@ internal sealed class CounterComponent : IDisposable
         _control1 = new global::Avalonia.Controls.StackPanel();
         _control2 = new global::Avalonia.Controls.TextBlock();
         _control3 = new global::Avalonia.Controls.Button();
+
+        _control1!.Styles.Add(new global::Avalonia.Styling.Style(x => x.OfType<global::Avalonia.Controls.StackPanel>().Class("counter"))
+        {
+            Setters =
+            {
+                new global::Avalonia.Styling.Setter(global::Avalonia.Controls.StackPanel.MarginProperty, new global::Avalonia.Thickness(16d)),
+                new global::Avalonia.Styling.Setter(global::Avalonia.Controls.StackPanel.SpacingProperty, 8d),
+            },
+        });
+
+        _control1!.Styles.Add(new global::Avalonia.Styling.Style(x => x.OfType<global::Avalonia.Controls.Button>().Class("primary"))
+        {
+            Setters =
+            {
+                new global::Avalonia.Styling.Setter(global::Avalonia.Controls.Button.BackgroundProperty, new global::Avalonia.Media.SolidColorBrush(global::Avalonia.Media.Color.FromRgb(0x73, 0x57, 0xe6))),
+                new global::Avalonia.Styling.Setter(global::Avalonia.Controls.Button.OpacityProperty, 0.84d),
+                new global::Avalonia.Styling.Setter(global::Avalonia.Animation.Animatable.TransitionsProperty, new global::Avalonia.Animation.Transitions { new global::Avalonia.Animation.DoubleTransition { Property = global::Avalonia.Controls.Button.OpacityProperty, Duration = global::System.TimeSpan.FromMilliseconds(150d), Easing = new global::Avalonia.Animation.Easings.QuadraticEaseOut() } }),
+            },
+        });
+
+        _control1!.Styles.Add(new global::Avalonia.Styling.Style(x => x.OfType<global::Avalonia.Controls.Button>().Class("primary").Class(":pointerover"))
+        {
+            Setters =
+            {
+                new global::Avalonia.Styling.Setter(global::Avalonia.Controls.Button.OpacityProperty, 1d),
+            },
+        });
 
         #line 10 "examples/counter/Counter.lui"
         _control1!.Classes.Add("counter");

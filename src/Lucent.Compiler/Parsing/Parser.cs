@@ -454,39 +454,38 @@ internal sealed partial class Parser
         ValidateCSharpIsland(condition, conditionSpan.Start, CSharpIslandKind.Expression);
         AdvanceTo(conditionEnd);
         Expect(TokenKind.CloseParen, "')' after the condition");
-        var trueRoot = ParseConditionalBranch();
-        UiElementSyntax? falseRoot = null;
+        var trueBranch = ParseConditionalBranch();
+        UiConditionalBranchSyntax? falseBranch = null;
         if (IsIdentifier("else"))
         {
             NextToken();
-            falseRoot = ParseConditionalBranch();
+            falseBranch = ParseConditionalBranch();
         }
 
-        var end = falseRoot?.Span.End ?? trueRoot.Span.End;
-        return new UiIfSyntax(condition, conditionSpan, trueRoot, falseRoot, SpanFrom(start, end));
+        var end = falseBranch?.Span.End ?? trueBranch.Span.End;
+        return new UiIfSyntax(condition, conditionSpan, trueBranch, falseBranch, SpanFrom(start, end));
     }
 
-    private UiElementSyntax ParseConditionalBranch()
+    private UiConditionalBranchSyntax ParseConditionalBranch()
     {
-        Expect(TokenKind.OpenBrace, "'{' to open the conditional branch");
-        UiElementSyntax root;
-        if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.OpenBrace)
-        {
-            root = ParseElement();
-        }
-        else
-        {
-            AddSyntax(Current.Span, "A conditional branch must contain exactly one native control root.");
-            root = new UiElementSyntax("Missing", [], new SourceSpan(Current.Span.Start, 0));
-        }
+        var openBrace = Expect(TokenKind.OpenBrace, "'{' to open the conditional branch");
+        var roots = new List<UiElementSyntax>();
 
         while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
         {
-            AddUnsupported(Current.Span, "A conditional branch must contain exactly one native control root.");
-            NextToken();
+            if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.OpenBrace)
+            {
+                roots.Add(ParseElement());
+                continue;
+            }
+
+            AddSyntax(Current.Span, "Expected a native control root in the conditional branch.");
+            SynchronizeUiMember();
         }
-        Expect(TokenKind.CloseBrace, "'}' to close the conditional branch");
-        return root;
+        var closeBrace = Expect(TokenKind.CloseBrace, "'}' to close the conditional branch");
+        return new UiConditionalBranchSyntax(
+            roots,
+            SpanFrom(openBrace.Span.Start, closeBrace.Span.End));
     }
 
     private UiContentSyntax ParseImplicitContent()

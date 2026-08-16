@@ -108,9 +108,22 @@ public sealed record UiForEachSyntax(
 public sealed record UiIfSyntax(
     string Condition,
     SourceSpan ConditionSpan,
-    UiElementSyntax TrueRoot,
-    UiElementSyntax? FalseRoot,
-    SourceSpan Span) : UiMemberSyntax(Span);
+    UiConditionalBranchSyntax TrueBranch,
+    UiConditionalBranchSyntax? FalseBranch,
+    SourceSpan Span) : UiMemberSyntax(Span)
+{
+    public UiElementSyntax TrueRoot => TrueBranch.Roots.FirstOrDefault() ??
+        new UiElementSyntax("Missing", [], new SourceSpan(TrueBranch.Span.Start, 0));
+
+    public UiElementSyntax? FalseRoot => FalseBranch is null
+        ? null
+        : FalseBranch.Roots.FirstOrDefault() ??
+          new UiElementSyntax("Missing", [], new SourceSpan(FalseBranch.Span.Start, 0));
+}
+
+public sealed record UiConditionalBranchSyntax(
+    IReadOnlyList<UiElementSyntax> Roots,
+    SourceSpan Span) : LucentSyntaxNode(Span);
 
 public abstract record UiValueSyntax(
     string Text,

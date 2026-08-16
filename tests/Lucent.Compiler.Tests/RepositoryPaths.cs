@@ -7,6 +7,9 @@ internal static class RepositoryPaths
     public static string CounterSource =>
         Path.Combine(Root, "examples", "counter", "Counter.lui");
 
+    public static string CounterStyle =>
+        Path.Combine(Root, "examples", "counter", "Counter.css");
+
     public static string GeneratedCounter =>
         Path.Combine(
             Root,
@@ -14,6 +17,12 @@ internal static class RepositoryPaths
             "Lucent.Poc",
             "Generated",
             "CounterComponent.g.cs");
+
+    public static string ConditionalSnapshotSource =>
+        Path.Combine(Root, "tests", "Lucent.Compiler.Tests", "Snapshots", "ConditionalRegion.lui");
+
+    public static string GeneratedConditionalSnapshot =>
+        Path.Combine(Root, "tests", "Lucent.Compiler.Tests", "Snapshots", "ConditionalRegion.g.cs.snap");
 
     private static string FindRoot()
     {

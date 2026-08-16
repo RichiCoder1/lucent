@@ -135,6 +135,10 @@ internal static class GeneralCSharpEmitter
 
         writer.Line("private readonly ComponentOwner _owner;");
         writer.Line("private bool _mounted;");
+        if (model.Computed.Count > 0)
+        {
+            writer.Line("private bool _startingComputedWork;");
+        }
         writer.Line();
         writer.Line($"internal {model.ComponentName}Component(IUiDispatcher? dispatcher = null)");
         writer.Line("{");
@@ -221,9 +225,24 @@ internal static class GeneralCSharpEmitter
         {
             writer.Line($"UpdateConditional{conditional.Index}();");
         }
-        foreach (var computed in model.Computed)
+        if (model.Computed.Count > 0)
         {
-            writer.Line($"Refresh{Pascal(computed.Name)}();");
+            writer.Line("_startingComputedWork = true;");
+            writer.Line("try");
+            writer.Line("{");
+            writer.Indent();
+            foreach (var computed in model.Computed)
+            {
+                writer.Line($"Refresh{Pascal(computed.Name)}();");
+            }
+            writer.Unindent();
+            writer.Line("}");
+            writer.Line("finally");
+            writer.Line("{");
+            writer.Indent();
+            writer.Line("_startingComputedWork = false;");
+            writer.Unindent();
+            writer.Line("}");
         }
         writer.Line();
         writer.Line("return _control1!;");
@@ -820,7 +839,7 @@ internal static class GeneralCSharpEmitter
             foreach (var computed in model.Computed.Where(candidate =>
                          candidate.Factory.Dependencies.Contains(sourceItem.Id)))
             {
-                writer.Line($"Refresh{Pascal(computed.Name)}();");
+                writer.Line($"if (!_startingComputedWork) Refresh{Pascal(computed.Name)}();");
             }
             writer.Unindent();
             writer.Line("}");
@@ -831,17 +850,15 @@ internal static class GeneralCSharpEmitter
     private static IEnumerable<(BoundControlModel Control, string Name)> ConditionalControls(
         BoundConditionalRegion region)
     {
-        foreach (var item in Flatten(region.Member.TrueRoot)
-                     .Select((control, index) => (control, $"_conditional{region.Index}TrueControl{index + 1}")))
+        foreach (var item in ConditionalBranchControls(region, region.Member.TrueRoot, "True"))
         {
-            yield return (item.control, item.Item2);
+            yield return (item.Control, item.Name);
         }
         if (region.Member.FalseRoot is not null)
         {
-            foreach (var item in Flatten(region.Member.FalseRoot)
-                         .Select((control, index) => (control, $"_conditional{region.Index}FalseControl{index + 1}")))
+            foreach (var item in ConditionalBranchControls(region, region.Member.FalseRoot, "False"))
             {
-                yield return (item.control, item.Item2);
+                yield return (item.Control, item.Name);
             }
         }
     }
@@ -849,15 +866,15 @@ internal static class GeneralCSharpEmitter
     private static IEnumerable<BoundBinding> ConditionalBindings(BoundConditionalRegion region)
     {
         IEnumerable<BoundBinding> Branch(BoundControlModel root, string side) =>
-            Flatten(root).SelectMany((control, controlIndex) => control.Members
+            ConditionalBranchControls(region, root, side).SelectMany(item => item.Control.Members
                 .Where(member => member switch
                 {
                     BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
                     BoundContentMember content => content.Expression.Dependencies.Count > 0,
                     _ => false,
                 })
-                .Select(member => new BoundBinding(control,
-                    $"_conditional{region.Index}{side}Control{controlIndex + 1}",
+                .Select(member => new BoundBinding(item.Control,
+                    item.Name,
                     member, region.Index, 0)));
 
         return Branch(region.Member.TrueRoot, "True")
@@ -931,10 +948,10 @@ internal static class GeneralCSharpEmitter
             int branch,
             SourceDocument sourceDocument)
         {
-            var controls = Flatten(root)
-                .Select((control, index) => (control,
-                    Name: $"_conditional{conditional.Index}{side}Control{index + 1}"))
-                .ToArray();
+            var controls = ConditionalBranchControls(conditional, root, side);
+            output.Line($"if (_conditional{conditional.Index}!.ActiveBranch != {branch})");
+            output.Line("{");
+            output.Indent();
             output.Line($"_conditional{conditional.Index}!.Show({branch}, branchOwner =>");
             output.Line("{");
             output.Indent();
@@ -982,7 +999,7 @@ internal static class GeneralCSharpEmitter
             {
                 foreach (var child in control.Members.OfType<BoundChildMember>())
                 {
-                    var childName = controls.First(candidate => ReferenceEquals(candidate.control, child.Child)).Name;
+                    var childName = controls.First(candidate => ReferenceEquals(candidate.Control, child.Child)).Name;
                     var route = control.ContentRoute!;
                     output.Line(route.IsCollection
                         ? $"{name}!.{route.PropertyName}.Add({childName}!);"
@@ -1013,8 +1030,20 @@ internal static class GeneralCSharpEmitter
             {
                 output.Line($"UpdateBinding{binding.Index}();");
             }
+            output.Unindent();
+            output.Line("}");
         }
     }
+
+    private static ConditionalControl[] ConditionalBranchControls(
+        BoundConditionalRegion region,
+        BoundControlModel root,
+        string side) =>
+        Flatten(root)
+            .Select((control, index) => new ConditionalControl(
+                control,
+                $"_conditional{region.Index}{side}Control{index + 1}"))
+            .ToArray();
 
     private static void EmitEventHandler(
         CodeWriter writer,
@@ -1635,6 +1664,8 @@ internal static class GeneralCSharpEmitter
         BoundControlMember Member,
         int? ConditionalIndex,
         int Index);
+
+    private sealed record ConditionalControl(BoundControlModel Control, string Name);
 
     private static string EscapeLinePath(string path) =>
         path.Replace("\\", "\\\\", StringComparison.Ordinal)

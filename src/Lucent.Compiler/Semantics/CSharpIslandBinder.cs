@@ -21,7 +21,7 @@ internal enum CSharpIslandRole
     Condition,
 }
 
-internal sealed record BoundLocal(string Name, ITypeSymbol Type);
+internal sealed record BoundLocal(string Name, ITypeSymbol Type, string? SourceExpression = null);
 
 internal sealed record CSharpIslandRequest(
     int Id,
@@ -30,7 +30,8 @@ internal sealed record CSharpIslandRequest(
     CSharpIslandKind Kind,
     CSharpIslandRole Role,
     ITypeSymbol? ExpectedType,
-    IReadOnlyList<BoundLocal> Locals);
+    IReadOnlyList<BoundLocal> Locals,
+    SourceSpan EditorSpan);
 
 internal sealed record BoundCSharpIsland(
     string SourceText,
@@ -41,6 +42,10 @@ internal sealed record BoundCSharpIsland(
     IReadOnlyList<BoundReactiveRead> ReactiveReads);
 
 internal sealed record BoundReactiveRead(int SourceId, SourceSpan Span);
+
+internal sealed record CSharpIslandBindingResult(
+    IReadOnlyDictionary<int, BoundCSharpIsland> Islands,
+    IReadOnlyList<BoundIslandScope> EditorScopes);
 
 internal sealed class CSharpIslandBinder(
     ProjectSemanticCompilation project,
@@ -53,12 +58,13 @@ internal sealed class CSharpIslandBinder(
             SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers |
             SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
 
-    public IReadOnlyDictionary<int, BoundCSharpIsland> BindAll(
+    public CSharpIslandBindingResult BindAll(
         IReadOnlyList<CSharpIslandRequest> requests)
     {
         if (requests.Count == 0)
         {
-            return new Dictionary<int, BoundCSharpIsland>();
+            return new CSharpIslandBindingResult(
+                new Dictionary<int, BoundCSharpIsland>(), []);
         }
 
         var text = new System.Text.StringBuilder("#nullable enable\n");
@@ -85,12 +91,29 @@ internal sealed class CSharpIslandBinder(
             var returnType = request.Kind == CSharpIslandKind.StatementBlock
                 ? "void"
                 : request.ExpectedType?.ToDisplayString(TypeFormat) ?? "object?";
+            var inferredLocal = request.Locals.FirstOrDefault(local =>
+                local.Type.TypeKind == TypeKind.Dynamic && local.SourceExpression is not null);
             text.Append("private ").Append(returnType).Append(" __Island")
                 .Append(request.Id).Append('(')
-                .Append(string.Join(", ", request.Locals.Select(local =>
+                .Append(string.Join(", ", request.Locals.Where(local => local != inferredLocal).Select(local =>
                     $"{FormatType(local.Type)} {local.Name}")))
                 .Append(')');
-            if (request.Kind == CSharpIslandKind.StatementBlock)
+            if (inferredLocal is not null)
+            {
+                text.Append(" { foreach (var ").Append(inferredLocal.Name).Append(" in ")
+                    .Append(inferredLocal.SourceExpression).Append(") {");
+                if (request.Kind != CSharpIslandKind.StatementBlock)
+                {
+                    text.Append("return ");
+                }
+                var start = text.Length;
+                text.Append(request.Text);
+                mappings.Add(request.Id, new TextSpan(start, request.Text.Length));
+                text.Append(request.Kind == CSharpIslandKind.StatementBlock
+                    ? "\n} }\n"
+                    : ";\n} return default!; }\n");
+            }
+            else if (request.Kind == CSharpIslandKind.StatementBlock)
             {
                 text.Append(" {\n");
                 var start = text.Length;
@@ -130,17 +153,8 @@ internal sealed class CSharpIslandBinder(
 
         foreach (var diagnostic in compilation.GetDiagnostics()
                      .Where(item => item.Severity == DiagnosticSeverity.Error &&
-                                    item.Location.SourceTree == tree &&
-                                    item.Id is not "CS1973"))
+                                    item.Location.SourceTree == tree))
         {
-            if (diagnostic.Id == "CS0103" &&
-                tree.GetText().ToString(diagnostic.Location.SourceSpan) is { Length: > 0 } missing &&
-                char.IsUpper(missing[0]))
-            {
-                // Opaque project type/member calls remain snapshots when no project context is supplied.
-                continue;
-            }
-
             var mapping = mappings.FirstOrDefault(candidate =>
                 candidate.Value.IntersectsWith(diagnostic.Location.SourceSpan));
             if (mapping.Value == default)
@@ -164,10 +178,13 @@ internal sealed class CSharpIslandBinder(
         foreach (var request in requests)
         {
             var mapping = mappings[request.Id];
-            SyntaxNode node = request.Kind == CSharpIslandKind.StatementBlock
-                ? root.FindNode(mapping).AncestorsAndSelf().OfType<BlockSyntax>().First()
-                : root.FindNode(mapping, getInnermostNodeForTie: true)
-                    .AncestorsAndSelf().OfType<ArrowExpressionClauseSyntax>().First().Expression;
+            var node = FindRequestNode(root, mapping, request.Kind);
+            if (node is null)
+            {
+                results.Add(request.Id, new BoundCSharpIsland(
+                    request.Text, request.Text, request.Span, request.Kind, [], []));
+                continue;
+            }
             var reads = new List<BoundReactiveRead>();
             var rewriter = new ReactiveRewriter(model, sourceFields, request, mapping, reads);
             var rewritten = rewriter.Visit(node)!;
@@ -187,7 +204,60 @@ internal sealed class CSharpIslandBinder(
                 reads));
         }
 
-        return results;
+        var loopTypes = requests
+            .Where(request => request.Role == CSharpIslandRole.LoopSource)
+            .ToDictionary(
+                request => request.Id,
+                request => GetExpressionType(root, model, mappings[request.Id]));
+        var editorScopes = requests.Select(request =>
+        {
+            var resolvedLocals = request.Locals.Select(local =>
+            {
+                var sourceRequest = local.SourceExpression is null
+                    ? null
+                    : requests.FirstOrDefault(candidate =>
+                        candidate.Role == CSharpIslandRole.LoopSource &&
+                        candidate.Text == local.SourceExpression);
+                var itemType = sourceRequest is null ||
+                               loopTypes[sourceRequest.Id] is not { } sourceType
+                    ? null
+                    : NativeSymbolResolver.GetEnumerableElementType(sourceType);
+                return itemType is null ? local : local with { Type = itemType };
+            }).ToArray();
+            var localTypes = resolvedLocals.ToDictionary(local => local.Name, local => local.Type);
+
+            return new BoundIslandScope(
+                request.EditorSpan,
+                resolvedLocals,
+                new BoundIslandSemanticContext(
+                    model,
+                    mappings[request.Id],
+                    request.Span,
+                    localTypes),
+                request.Role);
+        }).ToArray();
+        return new CSharpIslandBindingResult(results, editorScopes);
+    }
+
+    private static ITypeSymbol? GetExpressionType(
+        SyntaxNode root,
+        SemanticModel model,
+        TextSpan mapping) =>
+        FindRequestNode(root, mapping, CSharpIslandKind.Expression) is { } expression
+            ? model.GetTypeInfo(expression).Type
+            : null;
+
+    private static SyntaxNode? FindRequestNode(
+        SyntaxNode root,
+        TextSpan mapping,
+        CSharpIslandKind kind)
+    {
+        var node = root.FindNode(mapping, getInnermostNodeForTie: true);
+        return kind == CSharpIslandKind.StatementBlock
+            ? node.AncestorsAndSelf().OfType<BlockSyntax>().FirstOrDefault()
+            : node.AncestorsAndSelf().OfType<ExpressionSyntax>()
+                .FirstOrDefault(expression => expression.Span == mapping) ??
+              node.AncestorsAndSelf().OfType<ExpressionSyntax>().FirstOrDefault();
     }
 
     private static string FormatType(ITypeSymbol type) =>

@@ -40,6 +40,27 @@ public sealed class ConditionalRegion : IDisposable
             throw DisposeAfterFailure(nextOwner, mountFailure);
         }
 
+        Publish(nextRoot, nextOwner, branch);
+    }
+
+    public void Clear()
+    {
+        if (ActiveBranch is null)
+        {
+            return;
+        }
+
+        Publish(null, null, null);
+    }
+
+    public void Dispose()
+    {
+        var oldOwner = ClearState();
+        oldOwner?.Dispose();
+    }
+
+    private void Publish(Control? nextRoot, ComponentOwner? nextOwner, int? nextBranch)
+    {
         var oldOwner = _branchOwner;
         var oldRoot = _root;
         try
@@ -54,69 +75,31 @@ public sealed class ConditionalRegion : IDisposable
             }
             catch (Exception restorationFailure)
             {
-                _branchOwner = null;
-                _root = null;
-                ActiveBranch = null;
+                ClearState();
                 var failures = new List<Exception> { publicationFailure, restorationFailure };
                 DisposeInto(nextOwner, failures);
                 DisposeInto(oldOwner, failures);
                 throw new AggregateException(failures);
             }
 
-            throw DisposeAfterFailure(nextOwner, publicationFailure);
+            throw nextOwner is null
+                ? publicationFailure
+                : DisposeAfterFailure(nextOwner, publicationFailure);
         }
 
         _branchOwner = nextOwner;
         _root = nextRoot;
-        ActiveBranch = branch;
+        ActiveBranch = nextBranch;
         oldOwner?.Dispose();
     }
 
-    public void Clear()
-    {
-        if (ActiveBranch is null)
-        {
-            return;
-        }
-
-        var oldOwner = _branchOwner;
-        var oldRoot = _root;
-        try
-        {
-            _setRoot(null);
-        }
-        catch (Exception publicationFailure)
-        {
-            try
-            {
-                _setRoot(oldRoot);
-            }
-            catch (Exception restorationFailure)
-            {
-                _branchOwner = null;
-                _root = null;
-                ActiveBranch = null;
-                var failures = new List<Exception> { publicationFailure, restorationFailure };
-                DisposeInto(oldOwner, failures);
-                throw new AggregateException(failures);
-            }
-
-            throw;
-        }
-
-        _branchOwner = null;
-        _root = null;
-        ActiveBranch = null;
-        oldOwner?.Dispose();
-    }
-
-    public void Dispose()
+    private ComponentOwner? ClearState()
     {
         var oldOwner = _branchOwner;
         _branchOwner = null;
         _root = null;
         ActiveBranch = null;
-        oldOwner?.Dispose();
+        return oldOwner;
     }
 
     private static Exception DisposeAfterFailure(ComponentOwner owner, Exception failure)

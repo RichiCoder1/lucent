@@ -19,7 +19,10 @@ The package catalog is local and deterministic. Each query waits 850 ms. The
 query `fail` produces an error; rapid query changes exercise cancellation and
 late-result suppression.
 
-## Proven behavior
+## Verified prototype behavior
+
+These claims describe the implemented Plan 002 subset, not final general
+fragment or conditional syntax.
 
 - MSBuild and `lucentc` discover a CSS file beside its `.lui` source.
 - CSS variables, type/class selectors, one Avalonia pseudo-class, common typed

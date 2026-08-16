@@ -745,7 +745,7 @@ public sealed class GeneralCompilerTests
             {
                 private readonly State<string> query = new("lucent");
                 private readonly Computed<string[]> results = new(
-                    cancellationToken => Catalog.SearchAsync(query.Value, cancellationToken),
+                    cancellationToken => Task.FromResult(new[] { query.Value }),
                     []);
 
                 Fragment Render()
@@ -773,7 +773,7 @@ public sealed class GeneralCompilerTests
             "CreateLinkedTokenSource(_owner.CancellationToken)");
         StringAssert.Contains(result.GeneratedSource, "_owner.Dispatch(() =>");
         Assert.IsFalse(result.GeneratedSource.Contains("Dispatcher.UIThread", StringComparison.Ordinal));
-        StringAssert.Contains(result.GeneratedSource, "Catalog.SearchAsync(_query, cancellationToken)");
+        StringAssert.Contains(result.GeneratedSource, "Task.FromResult(new[] { _query })");
         StringAssert.Contains(result.GeneratedSource, "var sourceItems = (_results).ToArray();");
     }
 
@@ -991,6 +991,8 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(source, "private ConditionalRegion? _conditional1;");
         StringAssert.Contains(source, "_conditional1!.Show(0, branchOwner =>");
         StringAssert.Contains(source, "_conditional1!.Show(1, branchOwner =>");
+        StringAssert.Contains(source, "if (_conditional1!.ActiveBranch != 0)");
+        StringAssert.Contains(source, "if (_conditional1!.ActiveBranch != 1)");
         StringAssert.Contains(Method(source, "private void InvalidateSource0()"), "UpdateConditional1();");
         StringAssert.Contains(Method(source, "private void InvalidateSource1()"), "UpdateBinding1();");
     }
@@ -1004,6 +1006,10 @@ public sealed class GeneralCompilerTests
             "StackPanel { if (true) { StackPanel { if (true) { TextBlock { Text: \"nested\"; } } } } }",
             "StackPanel { foreach (var item in new[] { 1 }) keyed by item { StackPanel { if (true) { TextBlock { Text: item.ToString(); } } } } }",
             "TextBlock { if (true) { TextBlock { Text: \"no route\"; } } }",
+            "ContentControl { if (true) { TextBlock { Text: \"branch\"; } } Content: \"later\"; }",
+            "Border { if (true) { TextBlock { Text: \"branch\"; } } Child: new TextBlock(); }",
+            "StackPanel { if (true) { TextBlock { } Border { } } }",
+            "StackPanel { if (true) { TextBlock { } } else { TextBlock { } Border { } } }",
         })
         {
             var result = LucentCompiler.Compile(
@@ -1018,6 +1024,32 @@ public sealed class GeneralCompilerTests
             Assert.IsFalse(result.Succeeded, root);
             Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Code == "LUC2001"), root);
         }
+    }
+
+    [TestMethod]
+    public void Initial_computed_startup_does_not_recursively_start_dependents()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<int> first = new(ct => Task.FromResult(1), 0);
+                private readonly Computed<int> second = new(ct => Task.FromResult(first.Value + 1), 0);
+                Fragment Render() { return TextBlock { Text: second.Value.ToString(); }; }
+            }
+            """,
+            "computed-startup.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var source = result.GeneratedSource!;
+        StringAssert.Contains(source, "_startingComputedWork = true;");
+        StringAssert.Contains(Method(source, "private void InvalidateSource0()"),
+            "if (!_startingComputedWork) RefreshSecond();");
+        Assert.AreEqual(1, Method(source, "public Control Mount()")
+            .Split("RefreshFirst();", StringSplitOptions.None).Length - 1);
+        Assert.AreEqual(1, Method(source, "public Control Mount()")
+            .Split("RefreshSecond();", StringSplitOptions.None).Length - 1);
     }
 
     [TestMethod]
@@ -1082,6 +1114,39 @@ public sealed class GeneralCompilerTests
         Assert.IsFalse(unknown.Succeeded);
         Assert.IsTrue(unknown.Diagnostics.Any(diagnostic =>
             diagnostic.Code == "LUC3001" && diagnostic.Span.Start > 0));
+
+        var uppercaseUnknown = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main() { Fragment Render() { return TextBlock { Text: MissingValue; }; } }
+            """,
+            "uppercase-unknown-name.lui");
+        Assert.IsFalse(uppercaseUnknown.Succeeded);
+        Assert.IsTrue(uppercaseUnknown.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "LUC3001" && diagnostic.Message.Contains("MissingValue", StringComparison.Ordinal)));
+
+        var invalidDynamicExtension = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<dynamic[]> items = new([]);
+                private readonly State<int[]> numbers = new([]);
+                Fragment Render()
+                {
+                    return StackPanel {
+                        foreach (var item in items.Value) keyed by item {
+                            TextBlock { Text: numbers.Value.Append(item).Count().ToString(); }
+                        }
+                    };
+                }
+            }
+            """,
+            "dynamic-extension.lui");
+        Assert.IsFalse(invalidDynamicExtension.Succeeded);
+        Assert.IsTrue(invalidDynamicExtension.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "LUC3001" &&
+            diagnostic.Message.Contains("dynamically dispatched", StringComparison.Ordinal)));
     }
 
     [TestMethod]

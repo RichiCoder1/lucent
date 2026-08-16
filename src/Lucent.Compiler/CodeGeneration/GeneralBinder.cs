@@ -12,7 +12,7 @@ internal sealed class GeneralBinder
     private readonly DiagnosticBag _diagnostics;
     private readonly List<LucentSemanticSymbol> _symbols = [];
     private readonly List<CSharpIslandRequest> _requests = [];
-    private readonly List<BoundIslandScope> _editorScopes = [];
+    private IReadOnlyList<BoundIslandScope> _editorScopes = [];
     private readonly LucentProjectContext? _projectContext;
     private readonly ProjectSemanticCompilation? _semanticCompilation;
     private NativeSymbolResolver? _resolver;
@@ -32,6 +32,7 @@ internal sealed class GeneralBinder
 
     public IReadOnlyList<LucentSemanticSymbol> Symbols => _symbols;
     public IReadOnlyList<BoundIslandScope> EditorScopes => _editorScopes;
+    public IReadOnlyList<BoundEditorVariable> EditorVariables { get; private set; } = [];
 
     public BoundComponentModel? Bind(Lucent.Compiler.Syntax.CompilationUnitSyntax syntax)
     {
@@ -60,6 +61,17 @@ internal sealed class GeneralBinder
             .Select((source, id) => new BoundReactiveSource(
                 id, source.Name, source.Kind, source.Type, source.Span))
             .ToArray();
+        EditorVariables = _sources
+            .Select(source => (Source: source, Type: _resolver.ResolveTypeName(source.ValueTypeName)))
+            .Where(candidate => candidate.Type is not null)
+            .Select(candidate => new BoundEditorVariable(
+                candidate.Source.Name,
+                candidate.Type!,
+                candidate.Source.Kind == BoundReactiveSourceKind.State
+                    ? BoundEditorVariableKind.State
+                    : BoundEditorVariableKind.Computed,
+                $"private readonly {candidate.Source.Kind}<{candidate.Source.ValueTypeName}> {candidate.Source.Name}"))
+            .ToArray();
         var states = component.AllStateMembers
             .Select(BindState)
             .Where(state => state is not null)
@@ -82,7 +94,9 @@ internal sealed class GeneralBinder
             return null;
         }
 
-        var islands = new CSharpIslandBinder(project, _sources, _diagnostics).BindAll(_requests);
+        var islandBinding = new CSharpIslandBinder(project, _sources, _diagnostics).BindAll(_requests);
+        _editorScopes = islandBinding.EditorScopes;
+        var islands = islandBinding.Islands;
         var model = new BoundComponentModel(
                 syntax.NamespaceName,
                 component.Name,
@@ -283,7 +297,10 @@ internal sealed class GeneralBinder
                         continue;
                     }
 
-                    var loopLocals = new[] { new BoundLocal(loop.ItemName, _dynamicType!) };
+                    var loopLocals = new[]
+                    {
+                        new BoundLocal(loop.ItemName, _dynamicType!, loop.SourceExpression),
+                    };
                     var boundBody = BindControl(loop.Body, insideLoop: true, loopLocals);
                     if (boundBody is not null)
                     {
@@ -328,15 +345,31 @@ internal sealed class GeneralBinder
                         continue;
                     }
 
+                    if (conditional.TrueBranch.Roots.Count != 1 ||
+                        conditional.FalseBranch is { Roots.Count: not 1 })
+                    {
+                        if (conditional.TrueBranch.Roots.Count != 1)
+                        {
+                            AddUnsupported(conditional.TrueBranch.Span,
+                                "A conditional branch must contain exactly one native control root.");
+                        }
+                        if (conditional.FalseBranch is { Roots.Count: not 1 } falseBranch)
+                        {
+                            AddUnsupported(falseBranch.Span,
+                                "A conditional branch must contain exactly one native control root.");
+                        }
+                        continue;
+                    }
+
                     var conditionalId = _nextConditionalId++;
-                    var trueRoot = BindControl(conditional.TrueRoot, locals: locals,
+                    var trueRoot = BindControl(conditional.TrueBranch.Roots[0], locals: locals,
                         insideConditional: true);
-                    var falseRoot = conditional.FalseRoot is null
+                    var falseRoot = conditional.FalseBranch is null
                         ? null
-                        : BindControl(conditional.FalseRoot, locals: locals,
+                        : BindControl(conditional.FalseBranch.Roots[0], locals: locals,
                             insideConditional: true);
                     if (trueRoot is not null &&
-                        (conditional.FalseRoot is null || falseRoot is not null))
+                        (conditional.FalseBranch is null || falseRoot is not null))
                     {
                         members.Add(new BoundConditionalMember(
                             conditionalId,
@@ -346,6 +379,7 @@ internal sealed class GeneralBinder
                             trueRoot,
                             falseRoot,
                             conditional.Span));
+                        seenMembers.Add(conditionalRoute.Property.Name);
                         hasStructuralRegion = true;
                     }
                     break;
@@ -599,12 +633,11 @@ internal sealed class GeneralBinder
             locals.Add(new BoundLocal(parameters[1].Identifier.ValueText,
                 _resolver.ResolveTypeName(@event.EventArgsTypeName)!));
         }
-        _editorScopes.Add(new BoundIslandScope(property.Value.Span, locals));
         return new BoundEventMember(
             property.Name,
             @event.Name,
             Request(body, bodySpan, CSharpIslandKind.StatementBlock,
-                CSharpIslandRole.EventBody, null, locals),
+                CSharpIslandRole.EventBody, null, locals, expression.Span),
             @event.DelegateTypeName,
             @event.SenderTypeName,
             @event.EventArgsTypeName,
@@ -652,10 +685,12 @@ internal sealed class GeneralBinder
         CSharpIslandKind kind,
         CSharpIslandRole role,
         ITypeSymbol? expectedType,
-        IReadOnlyList<BoundLocal>? locals = null)
+        IReadOnlyList<BoundLocal>? locals = null,
+        SourceSpan? editorSpan = null)
     {
         var id = _requests.Count;
-        _requests.Add(new CSharpIslandRequest(id, text, span, kind, role, expectedType, locals ?? []));
+        _requests.Add(new CSharpIslandRequest(
+            id, text, span, kind, role, expectedType, locals ?? [], editorSpan ?? span));
         return new BoundCSharpIsland(text, $"__request:{id}", span, kind, [], []);
     }
 
