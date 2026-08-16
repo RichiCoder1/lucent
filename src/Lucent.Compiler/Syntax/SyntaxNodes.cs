@@ -105,6 +105,13 @@ public sealed record UiForEachSyntax(
     UiElementSyntax Body,
     SourceSpan Span) : UiMemberSyntax(Span);
 
+public sealed record UiIfSyntax(
+    string Condition,
+    SourceSpan ConditionSpan,
+    UiElementSyntax TrueRoot,
+    UiElementSyntax? FalseRoot,
+    SourceSpan Span) : UiMemberSyntax(Span);
+
 public abstract record UiValueSyntax(
     string Text,
     SourceSpan Span,

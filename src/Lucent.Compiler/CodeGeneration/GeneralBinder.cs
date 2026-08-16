@@ -1,26 +1,46 @@
 using Lucent.Compiler.Parsing;
 using Lucent.Compiler.Semantics;
 using Lucent.Compiler.Syntax;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Lucent.Compiler.CodeGeneration;
 
-internal sealed class GeneralBinder(
-    DiagnosticBag diagnostics,
-    LucentProjectContext? projectContext = null)
+internal sealed class GeneralBinder
 {
+    private readonly DiagnosticBag _diagnostics;
     private readonly List<LucentSemanticSymbol> _symbols = [];
+    private readonly List<CSharpIslandRequest> _requests = [];
+    private readonly List<BoundIslandScope> _editorScopes = [];
+    private readonly LucentProjectContext? _projectContext;
+    private readonly ProjectSemanticCompilation? _semanticCompilation;
     private NativeSymbolResolver? _resolver;
+    private ITypeSymbol? _dynamicType;
+    private int _nextConditionalId;
+    private IReadOnlyList<BoundReactiveSource> _sources = [];
+
+    public GeneralBinder(
+        DiagnosticBag diagnostics,
+        LucentProjectContext? projectContext = null,
+        ProjectSemanticCompilation? semanticCompilation = null)
+    {
+        _diagnostics = diagnostics;
+        _projectContext = projectContext;
+        _semanticCompilation = semanticCompilation;
+    }
 
     public IReadOnlyList<LucentSemanticSymbol> Symbols => _symbols;
+    public IReadOnlyList<BoundIslandScope> EditorScopes => _editorScopes;
 
     public BoundComponentModel? Bind(Lucent.Compiler.Syntax.CompilationUnitSyntax syntax)
     {
-        _resolver = new NativeSymbolResolver(
+        var project = _semanticCompilation ?? new ProjectSemanticCompilation(
             syntax.NamespaceName,
             syntax.AllUsings.Select(directive => directive.Text).ToArray(),
-            projectContext);
+            _projectContext);
+        _resolver = new NativeSymbolResolver(project);
+        _dynamicType = project.Compilation.DynamicType;
 
         foreach (var additional in syntax.AllComponents.Skip(1))
         {
@@ -30,6 +50,16 @@ internal sealed class GeneralBinder(
         }
 
         var component = syntax.Component;
+        _sources = component.AllStateMembers
+            .Select(state => (Name: state.Name, Kind: BoundReactiveSourceKind.State,
+                Type: state.TypeName, state.Span))
+            .Concat(component.AllComputedMembers.Select(computed =>
+                (Name: computed.Name, Kind: BoundReactiveSourceKind.Computed,
+                    Type: computed.TypeName, Span: computed.Span)))
+            .OrderBy(source => source.Span.Start)
+            .Select((source, id) => new BoundReactiveSource(
+                id, source.Name, source.Kind, source.Type, source.Span))
+            .ToArray();
         var states = component.AllStateMembers
             .Select(BindState)
             .Where(state => state is not null)
@@ -52,23 +82,37 @@ internal sealed class GeneralBinder(
             return null;
         }
 
-        return HasErrors
-            ? null
-            : new BoundComponentModel(
+        var islands = new CSharpIslandBinder(project, _sources, _diagnostics).BindAll(_requests);
+        var model = new BoundComponentModel(
                 syntax.NamespaceName,
                 component.Name,
                 syntax.AllUsings.Select(directive => directive.Text).ToArray(),
-                states,
-                computed,
-                root);
+                _sources,
+                states.Select(state => state with { Initializer = Resolve(state.Initializer, islands) }).ToArray(),
+                computed.Select(value => value with
+                {
+                    Factory = Resolve(value.Factory, islands),
+                    InitialValue = Resolve(value.InitialValue, islands),
+                }).ToArray(),
+                FinalizeControl(root, islands));
+        DetectComputedCycles(model);
+        return HasErrors ? null : model;
     }
 
-    private static BoundStateModel BindState(StateMemberSyntax state) =>
-        new(
+    private BoundStateModel BindState(StateMemberSyntax state)
+    {
+        var span = state.InitializerSpan ?? state.Span;
+        return new(
             state.TypeName,
             state.Name,
-            state.InitializerText ?? state.InitialValue.ToString(),
+            Request(
+                state.InitializerText ?? state.InitialValue.ToString(),
+                span,
+                CSharpIslandKind.Expression,
+                CSharpIslandRole.StateInitializer,
+                _resolver!.ResolveTypeName(state.TypeName)),
             state.Span);
+    }
 
     private BoundComputedModel? BindComputed(ComputedMemberSyntax computed)
     {
@@ -83,17 +127,36 @@ internal sealed class GeneralBinder(
             return null;
         }
 
+        var factorySyntax = arguments.Arguments[0].Expression;
+        var initialSyntax = arguments.Arguments[1].Expression;
+        var baseStart = computed.InitializerSpan.Start - 1;
+        var valueType = _resolver!.ResolveTypeName(computed.TypeName);
+        var factoryType = _resolver.ResolveTypeName(
+            $"global::System.Func<global::System.Threading.CancellationToken, " +
+            $"global::System.Threading.Tasks.Task<{computed.TypeName}>>");
         return new BoundComputedModel(
             computed.TypeName,
             computed.Name,
-            arguments.Arguments[0].Expression.ToFullString().Trim(),
-            arguments.Arguments[1].Expression.ToFullString().Trim(),
+            Request(
+                factorySyntax.ToFullString().Trim(),
+                new SourceSpan(baseStart + factorySyntax.SpanStart, factorySyntax.Span.Length),
+                CSharpIslandKind.Expression,
+                CSharpIslandRole.ComputedFactory,
+                factoryType),
+            Request(
+                initialSyntax.ToFullString().Trim(),
+                new SourceSpan(baseStart + initialSyntax.SpanStart, initialSyntax.Span.Length),
+                CSharpIslandKind.Expression,
+                CSharpIslandRole.ComputedInitialValue,
+                valueType),
             computed.Span);
     }
 
     private BoundControlModel? BindControl(
         UiElementSyntax element,
-        bool insideLoop = false)
+        bool insideLoop = false,
+        IReadOnlyList<BoundLocal>? locals = null,
+        bool insideConditional = false)
     {
         var resolver = _resolver!;
         var resolvedControl = resolver.ResolveControl(element.Name);
@@ -115,10 +178,17 @@ internal sealed class GeneralBinder(
         var members = new List<BoundControlMember>();
         var seenMembers = new HashSet<string>(StringComparer.Ordinal);
         var childCount = 0;
-        var hasStructuralLoop = false;
+        var hasStructuralRegion = false;
 
         foreach (var member in element.Members)
         {
+            if (hasStructuralRegion && member is not UiPropertySyntax)
+            {
+                AddUnsupported(member.Span,
+                    $"Control '{element.Name}' must dedicate its child region to one structural member.");
+                continue;
+            }
+
             switch (member)
             {
                 case UiContentSyntax content:
@@ -128,7 +198,8 @@ internal sealed class GeneralBinder(
                         resolvedControl,
                         seenMembers,
                         childCount,
-                        members);
+                        members,
+                        locals ?? []);
                     break;
 
                 case UiPropertySyntax property:
@@ -138,15 +209,16 @@ internal sealed class GeneralBinder(
                         resolvedControl,
                         seenMembers,
                         childCount,
-                        members);
+                        members,
+                        locals ?? []);
                     break;
 
                 case UiChildSyntax child:
-                    if (hasStructuralLoop)
+                    if (hasStructuralRegion)
                     {
                         AddUnsupported(
                             child.Span,
-                            $"Control '{element.Name}' cannot mix a keyed foreach with ordinary child controls in the initial compiler.");
+                            $"Control '{element.Name}' cannot mix a structural region with ordinary child controls in this compiler subset.");
                         continue;
                     }
 
@@ -175,7 +247,7 @@ internal sealed class GeneralBinder(
                         continue;
                     }
 
-                    var boundChild = BindControl(child.Element, insideLoop);
+                    var boundChild = BindControl(child.Element, insideLoop, locals, insideConditional);
                     if (boundChild is not null)
                     {
                         members.Add(new BoundChildMember(boundChild, child.Span));
@@ -185,11 +257,11 @@ internal sealed class GeneralBinder(
                     break;
 
                 case UiForEachSyntax loop:
-                    if (insideLoop)
+                    if (insideLoop || insideConditional)
                     {
                         AddUnsupported(
                             loop.Span,
-                            "Nested keyed foreach regions are not supported in the initial compiler.");
+                            "Keyed foreach regions are not supported inside another structural region.");
                         continue;
                     }
 
@@ -202,7 +274,8 @@ internal sealed class GeneralBinder(
                         continue;
                     }
 
-                    if (hasStructuralLoop || childCount > 0)
+                    if (hasStructuralRegion || childCount > 0 ||
+                        seenMembers.Contains(loopRoute.Property.Name))
                     {
                         AddUnsupported(
                             loop.Span,
@@ -210,21 +283,71 @@ internal sealed class GeneralBinder(
                         continue;
                     }
 
-                    var boundBody = BindControl(loop.Body, insideLoop: true);
+                    var loopLocals = new[] { new BoundLocal(loop.ItemName, _dynamicType!) };
+                    var boundBody = BindControl(loop.Body, insideLoop: true, loopLocals);
                     if (boundBody is not null)
                     {
                         members.Add(
                             new BoundForEachMember(
                                 loop.ItemName,
-                                loop.SourceExpression,
-                                loop.SourceExpressionSpan,
-                                loop.KeyExpression,
-                                loop.KeyExpressionSpan,
+                                Request(loop.SourceExpression, loop.SourceExpressionSpan,
+                                    CSharpIslandKind.Expression, CSharpIslandRole.LoopSource, null),
+                                Request(loop.KeyExpression, loop.KeyExpressionSpan,
+                                    CSharpIslandKind.Expression, CSharpIslandRole.LoopKey, null,
+                                    loopLocals),
                                 boundBody,
                                 loop.Span));
-                        hasStructuralLoop = true;
+                        hasStructuralRegion = true;
                     }
 
+                    break;
+
+                case UiIfSyntax conditional:
+                    if (insideLoop)
+                    {
+                        AddUnsupported(conditional.Span, "Conditionals inside keyed rows are not supported in this compiler subset.");
+                        continue;
+                    }
+                    if (insideConditional)
+                    {
+                        AddUnsupported(conditional.Span, "Nested conditionals are not supported in this compiler subset.");
+                        continue;
+                    }
+                    if (resolvedControl.ContentRoute is not { } conditionalRoute ||
+                        !resolver.ContentAcceptsControl(conditionalRoute))
+                    {
+                        AddUnsupported(conditional.Span,
+                            $"Control '{element.Name}' cannot host a conditional because it has no compatible native content route.");
+                        continue;
+                    }
+                    if (hasStructuralRegion || childCount > 0 ||
+                        seenMembers.Contains(conditionalRoute.Property.Name))
+                    {
+                        AddUnsupported(conditional.Span,
+                            $"Control '{element.Name}' must dedicate its child region to one conditional.");
+                        continue;
+                    }
+
+                    var conditionalId = _nextConditionalId++;
+                    var trueRoot = BindControl(conditional.TrueRoot, locals: locals,
+                        insideConditional: true);
+                    var falseRoot = conditional.FalseRoot is null
+                        ? null
+                        : BindControl(conditional.FalseRoot, locals: locals,
+                            insideConditional: true);
+                    if (trueRoot is not null &&
+                        (conditional.FalseRoot is null || falseRoot is not null))
+                    {
+                        members.Add(new BoundConditionalMember(
+                            conditionalId,
+                            Request(conditional.Condition, conditional.ConditionSpan,
+                                CSharpIslandKind.Expression, CSharpIslandRole.Condition,
+                                resolver.ResolveTypeName("bool"), locals),
+                            trueRoot,
+                            falseRoot,
+                            conditional.Span));
+                        hasStructuralRegion = true;
+                    }
                     break;
             }
         }
@@ -244,7 +367,8 @@ internal sealed class GeneralBinder(
         ResolvedNativeControl control,
         HashSet<string> seenMembers,
         int childCount,
-        List<BoundControlMember> members)
+        List<BoundControlMember> members,
+        IReadOnlyList<BoundLocal> locals)
     {
         var resolver = _resolver!;
         var route = control.ContentRoute;
@@ -275,10 +399,11 @@ internal sealed class GeneralBinder(
         var contentValue = (StringValueSyntax)content.Value;
         members.Add(
             new BoundContentMember(
-                contentValue.Text,
-                contentValue.Span,
+                Request(contentValue.Text, contentValue.Span,
+                    CSharpIslandKind.Expression, CSharpIslandRole.Content, route.ValueType, locals),
                 contentValue.IsInterpolated,
-                content.Span));
+                content.Span,
+                route.ValueType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)));
     }
 
     private void BindProperty(
@@ -287,7 +412,8 @@ internal sealed class GeneralBinder(
         ResolvedNativeControl control,
         HashSet<string> seenMembers,
         int childCount,
-        List<BoundControlMember> members)
+        List<BoundControlMember> members,
+        IReadOnlyList<BoundLocal> locals)
     {
         var resolver = _resolver!;
         var resolvedEvent = resolver.ResolveEvent(control, property.Name);
@@ -301,7 +427,7 @@ internal sealed class GeneralBinder(
                 return;
             }
 
-            var boundEvent = BindEvent(property, control, resolvedEvent);
+            var boundEvent = BindEvent(property, control, resolvedEvent, locals);
             if (boundEvent is not null)
             {
                 members.Add(boundEvent);
@@ -334,8 +460,8 @@ internal sealed class GeneralBinder(
             members.Add(
                 new BoundPropertyMember(
                     "Class",
-                    property.Value.Text,
-                    property.Value.Span,
+                    Request(property.Value.Text, property.Value.Span,
+                        CSharpIslandKind.Expression, CSharpIslandRole.Property, null, locals),
                     property.Value is StringValueSyntax,
                     property.Value is StringValueSyntax { IsInterpolated: true },
                     property.Span));
@@ -382,12 +508,17 @@ internal sealed class GeneralBinder(
         members.Add(
             new BoundPropertyMember(
                 resolvedProperty.Name,
-                property.Value.Text,
-                property.Value.Span,
+                Request(property.Value.Text, property.Value.Span,
+                    CSharpIslandKind.Expression, CSharpIslandRole.Property,
+                    resolvedProperty.NativeValueKind == BoundNativeValueKind.None
+                        ? resolvedProperty.Symbol.Type
+                        : null,
+                    locals),
                 property.Value is StringValueSyntax,
                 property.Value is StringValueSyntax { IsInterpolated: true },
                 property.Span,
-                resolvedProperty.NativeValueKind));
+                resolvedProperty.NativeValueKind,
+                resolvedProperty.TypeName));
         _symbols.Add(
             resolver.ToSemanticSymbol(
                 control,
@@ -402,7 +533,8 @@ internal sealed class GeneralBinder(
     private BoundEventMember? BindEvent(
         UiPropertySyntax property,
         ResolvedNativeControl control,
-        ResolvedNativeEvent @event)
+        ResolvedNativeEvent @event,
+        IReadOnlyList<BoundLocal> enclosingLocals)
     {
         if (property.Value is EventBlockValueSyntax)
         {
@@ -452,11 +584,27 @@ internal sealed class GeneralBinder(
             ExpressionSyntax bodyExpression => bodyExpression.ToFullString().Trim() + ";",
             _ => string.Empty,
         };
+        var bodySpan = lambda.Body is BlockSyntax bodyBlock
+            ? new SourceSpan(
+                expression.Span.Start + bodyBlock.OpenBraceToken.Span.End,
+                bodyBlock.CloseBraceToken.SpanStart - bodyBlock.OpenBraceToken.Span.End)
+            : new SourceSpan(
+                expression.Span.Start + lambda.Body.SpanStart,
+                lambda.Body.Span.Length);
+        var locals = enclosingLocals.ToList();
+        if (parameters.Length == 2)
+        {
+            locals.Add(new BoundLocal(parameters[0].Identifier.ValueText,
+                _resolver!.ResolveTypeName(control.TypeName)!));
+            locals.Add(new BoundLocal(parameters[1].Identifier.ValueText,
+                _resolver.ResolveTypeName(@event.EventArgsTypeName)!));
+        }
+        _editorScopes.Add(new BoundIslandScope(property.Value.Span, locals));
         return new BoundEventMember(
             property.Name,
             @event.Name,
-            body,
-            property.Value.Span,
+            Request(body, bodySpan, CSharpIslandKind.StatementBlock,
+                CSharpIslandRole.EventBody, null, locals),
             @event.DelegateTypeName,
             @event.SenderTypeName,
             @event.EventArgsTypeName,
@@ -498,12 +646,100 @@ internal sealed class GeneralBinder(
     private static SourceSpan PropertyNameSpan(UiPropertySyntax property) =>
         new(property.Span.Start, property.Name.Length);
 
+    private BoundCSharpIsland Request(
+        string text,
+        SourceSpan span,
+        CSharpIslandKind kind,
+        CSharpIslandRole role,
+        ITypeSymbol? expectedType,
+        IReadOnlyList<BoundLocal>? locals = null)
+    {
+        var id = _requests.Count;
+        _requests.Add(new CSharpIslandRequest(id, text, span, kind, role, expectedType, locals ?? []));
+        return new BoundCSharpIsland(text, $"__request:{id}", span, kind, [], []);
+    }
+
+    private static BoundCSharpIsland Resolve(
+        BoundCSharpIsland island,
+        IReadOnlyDictionary<int, BoundCSharpIsland> islands) =>
+        island.LoweredText.StartsWith("__request:", StringComparison.Ordinal)
+            ? islands[int.Parse(island.LoweredText[10..], System.Globalization.CultureInfo.InvariantCulture)]
+            : island;
+
+    private static BoundControlModel FinalizeControl(
+        BoundControlModel control,
+        IReadOnlyDictionary<int, BoundCSharpIsland> islands) =>
+        control with
+        {
+            Members = control.Members.Select(member => member switch
+            {
+                BoundPropertyMember property => property with { Expression = Resolve(property.Expression, islands) },
+                BoundContentMember content => content with { Expression = Resolve(content.Expression, islands) },
+                BoundEventMember eventMember => eventMember with { Body = Resolve(eventMember.Body, islands) },
+                BoundForEachMember loop => loop with
+                {
+                    SourceExpression = Resolve(loop.SourceExpression, islands),
+                    KeyExpression = Resolve(loop.KeyExpression, islands),
+                    Body = FinalizeControl(loop.Body, islands),
+                },
+                BoundConditionalMember conditional => conditional with
+                {
+                    Condition = Resolve(conditional.Condition, islands),
+                    TrueRoot = FinalizeControl(conditional.TrueRoot, islands),
+                    FalseRoot = conditional.FalseRoot is null
+                        ? null
+                        : FinalizeControl(conditional.FalseRoot, islands),
+                },
+                BoundChildMember child => child with { Child = FinalizeControl(child.Child, islands) },
+                _ => member,
+            }).ToArray(),
+        };
+
+    private void DetectComputedCycles(BoundComponentModel model)
+    {
+        var computedById = model.Computed.ToDictionary(
+            computed => model.Sources.First(source => source.Name == computed.Name).Id);
+        var visiting = new HashSet<int>();
+        var visited = new HashSet<int>();
+        void Visit(int id)
+        {
+            if (!visiting.Add(id))
+            {
+                return;
+            }
+
+            foreach (var dependency in computedById[id].Factory.Dependencies.Where(computedById.ContainsKey))
+            {
+                if (visiting.Contains(dependency))
+                {
+                    foreach (var read in computedById[id].Factory.ReactiveReads
+                                 .Where(candidate => candidate.SourceId == dependency))
+                    {
+                        _diagnostics.Add("LUC2001", "Computed dependencies must not contain a self-reference or cycle.", read.Span);
+                    }
+                }
+                else if (!visited.Contains(dependency))
+                {
+                    Visit(dependency);
+                }
+            }
+
+            visiting.Remove(id);
+            visited.Add(id);
+        }
+
+        foreach (var id in computedById.Keys)
+        {
+            Visit(id);
+        }
+    }
+
     private bool HasErrors =>
-        diagnostics.Items.Any(diagnostic =>
+        _diagnostics.Items.Any(diagnostic =>
             diagnostic.Severity == LucentDiagnosticSeverity.Error);
 
     private void AddUnsupported(SourceSpan span, string message) =>
-        diagnostics.Add("LUC2001", message, span);
+        _diagnostics.Add("LUC2001", message, span);
 }
 
 internal sealed record BoundChildMember(

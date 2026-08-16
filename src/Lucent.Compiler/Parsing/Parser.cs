@@ -307,7 +307,11 @@ internal sealed partial class Parser
         {
             var before = _position;
 
-            if (IsIdentifier("foreach"))
+            if (IsIdentifier("if"))
+            {
+                members.Add(ParseIf());
+            }
+            else if (IsIdentifier("foreach"))
             {
                 members.Add(ParseForEach());
             }
@@ -432,6 +436,57 @@ internal sealed partial class Parser
             keySpan,
             body,
             SpanFrom(start, closeBrace.Span.End));
+    }
+
+    private UiIfSyntax ParseIf()
+    {
+        var start = ExpectIdentifier("if").Span.Start;
+        var openParen = Expect(TokenKind.OpenParen, "'(' after if");
+        var conditionStart = openParen.Span.End;
+        var conditionEnd = ScanMatchingDelimiter(
+            conditionStart,
+            TokenKind.OpenParen,
+            TokenKind.CloseParen);
+        var rawCondition = Slice(conditionStart, conditionEnd);
+        var condition = rawCondition.Trim();
+        var trim = rawCondition.Length - rawCondition.TrimStart().Length;
+        var conditionSpan = new SourceSpan(conditionStart + trim, condition.Length);
+        ValidateCSharpIsland(condition, conditionSpan.Start, CSharpIslandKind.Expression);
+        AdvanceTo(conditionEnd);
+        Expect(TokenKind.CloseParen, "')' after the condition");
+        var trueRoot = ParseConditionalBranch();
+        UiElementSyntax? falseRoot = null;
+        if (IsIdentifier("else"))
+        {
+            NextToken();
+            falseRoot = ParseConditionalBranch();
+        }
+
+        var end = falseRoot?.Span.End ?? trueRoot.Span.End;
+        return new UiIfSyntax(condition, conditionSpan, trueRoot, falseRoot, SpanFrom(start, end));
+    }
+
+    private UiElementSyntax ParseConditionalBranch()
+    {
+        Expect(TokenKind.OpenBrace, "'{' to open the conditional branch");
+        UiElementSyntax root;
+        if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.OpenBrace)
+        {
+            root = ParseElement();
+        }
+        else
+        {
+            AddSyntax(Current.Span, "A conditional branch must contain exactly one native control root.");
+            root = new UiElementSyntax("Missing", [], new SourceSpan(Current.Span.Start, 0));
+        }
+
+        while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
+        {
+            AddUnsupported(Current.Span, "A conditional branch must contain exactly one native control root.");
+            NextToken();
+        }
+        Expect(TokenKind.CloseBrace, "'}' to close the conditional branch");
+        return root;
     }
 
     private UiContentSyntax ParseImplicitContent()

@@ -30,6 +30,10 @@ late-result suppression.
 - Completions and errors commit through `Dispatcher.UIThread`.
 - Component disposal cancels owned work and queued commits check disposal.
 - Package rows retain keyed native controls while replacement results reconcile.
+- Binder-derived dependencies invalidate only the affected bindings, keyed
+  regions, conditional regions, and computed factories.
+- Dedicated conditional hosts render initial loading, failure, and empty-result
+  messages while stale keyed results remain mounted during refresh.
 
 ## Avalonia concessions
 
@@ -45,11 +49,8 @@ Transitions use Avalonia's animation priority. Lucent generates typed
 
 ## Deliberate limits
 
-- Every state change currently refreshes every computed member. Symbol-derived
-  dependencies should replace this once components contain several computations.
 - `Computed<T>` requires an initial value and exposes `Value`, `IsPending`, and
-  `ErrorMessage`. Structural loading/error boundaries remain the intended final
-  interface.
+  `ErrorMessage`; these facets share one invalidation identity.
 - CSS supports no combinators, IDs, scoping, keyframes, transforms, media
   queries, enter/exit lifetime animation, or reduced-motion policy.
 - CSS property applicability is ultimately checked by generated C#; diagnostics
@@ -62,7 +63,9 @@ Transitions use Avalonia's animation priority. Lucent generates typed
 ```powershell
 dotnet test Lucent.sln --no-restore
 dotnet build src/Lucent.Poc/Lucent.Poc.csproj --no-restore
+dotnet run --project src/Lucent.Poc/Lucent.Poc.csproj --no-build -- --smoke-test package-pulse
 ```
 
-The full suite passes, the POC builds without warnings, and a four-second launch
-smoke confirms the desktop process remains running.
+The native smoke drives initial loading, success, empty results, failure, stale
+refresh content, rapid query replacement, the latest-generation commit, and
+clean shutdown through real Avalonia controls.

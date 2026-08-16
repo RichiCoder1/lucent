@@ -9,7 +9,13 @@ public sealed class UiDispatcherContractTests
     public void Runtime_exports_only_the_planned_types()
     {
         CollectionAssert.AreEquivalent(
-            new[] { typeof(IUiDispatcher), typeof(AvaloniaUiDispatcher), typeof(ComponentOwner) },
+            new[]
+            {
+                typeof(IUiDispatcher),
+                typeof(AvaloniaUiDispatcher),
+                typeof(ComponentOwner),
+                typeof(ConditionalRegion),
+            },
             typeof(ComponentOwner).Assembly.GetExportedTypes());
     }
 

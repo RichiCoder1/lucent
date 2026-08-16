@@ -14,11 +14,8 @@ public static class LucentCompiler
     {
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
-        return EditorIntelligence.GetExpressionSymbol(
-            sourceText,
-            offset,
-            sourcePath,
-            projectContext);
+        var analysis = ComponentSemanticAnalysis.Create(sourceText, sourcePath, projectContext);
+        return EditorIntelligence.GetExpressionSymbol(sourceText, offset, analysis);
     }
 
     public static IReadOnlyList<LucentCompletionItem> GetCompletions(
@@ -29,11 +26,8 @@ public static class LucentCompiler
     {
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
-        return EditorIntelligence.GetCompletions(
-            sourceText,
-            offset,
-            sourcePath,
-            projectContext);
+        var analysis = ComponentSemanticAnalysis.Create(sourceText, sourcePath, projectContext);
+        return EditorIntelligence.GetCompletions(sourceText, offset, analysis);
     }
 
     public static CompilationResult Compile(
@@ -57,9 +51,9 @@ public static class LucentCompiler
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
 
-        var parser = new Parser(sourceText, sourcePath);
-        var syntax = parser.Parse();
-        var diagnostics = parser.Diagnostics.ToList();
+        var analysis = ComponentSemanticAnalysis.Create(sourceText, sourcePath, projectContext);
+        var syntax = analysis.Syntax;
+        var diagnostics = analysis.Diagnostics.ToList();
 
         if (HasErrors(diagnostics))
         {
@@ -76,10 +70,7 @@ public static class LucentCompiler
             diagnostics.AddRange(parsedStyles.Diagnostics);
         }
 
-        var source = new SourceDocument(sourceText, sourcePath);
-        var emissionDiagnostics = new DiagnosticBag(source);
-        var binder = new GeneralBinder(emissionDiagnostics, projectContext);
-        var model = binder.Bind(syntax);
+        var model = analysis.Model;
         string? generatedSource = null;
         if (model is not null && !HasErrors(diagnostics))
         {
@@ -104,18 +95,17 @@ public static class LucentCompiler
             }
         }
 
-        diagnostics.AddRange(emissionDiagnostics.Items);
         if (generatedSource is null || HasErrors(diagnostics))
         {
             return new CompilationResult(syntax, null, diagnostics)
             {
-                Symbols = binder.Symbols,
+                Symbols = analysis.Symbols,
             };
         }
 
         return new CompilationResult(syntax, generatedSource, diagnostics)
         {
-            Symbols = binder.Symbols,
+            Symbols = analysis.Symbols,
         };
     }
     private static bool HasErrors(IEnumerable<LucentDiagnostic> diagnostics) =>

@@ -491,6 +491,8 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(
             result.GeneratedSource,
             "private void SetItems(Func<int[], int[]> update)");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void InvalidateSource0()"), "UpdateRegion1();");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void InvalidateSource1()"), "UpdateRegion1();");
     }
 
     [TestMethod]
@@ -646,7 +648,7 @@ public sealed class GeneralCompilerTests
                 {
                     return StackPanel {
                         TextBlock { Text: "title.Value"; }
-                        TextBlock { Text: other.title.Value; }
+                        TextBlock { Text: System.Environment.Version.ToString(); }
                         TextBlock { Text: title.Value; }
                     };
                 }
@@ -656,7 +658,7 @@ public sealed class GeneralCompilerTests
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(result.GeneratedSource, ".Text = \"title.Value\";");
-        StringAssert.Contains(result.GeneratedSource, ".Text = other.title.Value;");
+        StringAssert.Contains(result.GeneratedSource, ".Text = System.Environment.Version.ToString();");
         StringAssert.Contains(result.GeneratedSource, ".Text = _title;");
     }
 
@@ -862,5 +864,251 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(result.GeneratedSource, "Contains(\")\")");
         StringAssert.Contains(result.GeneratedSource, "loopValue =>");
+    }
+
+    [TestMethod]
+    public void Reactive_sources_invalidate_only_their_bound_targets_and_computed_factories()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            using System.Linq;
+            component Main()
+            {
+                private readonly State<string> title = new("Title");
+                private readonly State<int> count = new(1);
+                private readonly Computed<int> doubled = new(ct => Task.FromResult(count.Value * 2), 0);
+                Fragment Render()
+                {
+                    return StackPanel {
+                        TextBlock { Text: $"{title.Value}: {new[] { count.Value }.Select(value => value).Single()}"; }
+                        TextBlock { Text: doubled.IsPending ? doubled.ErrorMessage : doubled.Value.ToString(); }
+                    };
+                }
+            }
+            """,
+            "dependencies.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var source = result.GeneratedSource!;
+        var titleInvalidation = Method(source, "private void InvalidateSource0()");
+        var countInvalidation = Method(source, "private void InvalidateSource1()");
+        var computedInvalidation = Method(source, "private void InvalidateSource2()");
+        StringAssert.Contains(titleInvalidation, "UpdateBinding1();");
+        Assert.IsFalse(titleInvalidation.Contains("RefreshDoubled", StringComparison.Ordinal));
+        StringAssert.Contains(countInvalidation, "UpdateBinding1();");
+        StringAssert.Contains(countInvalidation, "RefreshDoubled();");
+        StringAssert.Contains(computedInvalidation, "UpdateBinding2();");
+        Assert.IsFalse(computedInvalidation.Contains("UpdateBinding1", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Symbol_lowering_preserves_shadowing_and_treats_update_as_a_mutation()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<string> title = new("State");
+                Fragment Render()
+                {
+                    return Button {
+                        Content: new[] { "local" }.Select(title => title.ToUpperInvariant()).Single();
+                        Click: (title, e) => this.title.Update(value => value + title.Content);
+                    };
+                }
+            }
+            """,
+            "shadowing.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "Select(title => title.ToUpperInvariant())");
+        StringAssert.Contains(result.GeneratedSource!, "SetTitle(value => value + title.Content);");
+        Assert.IsFalse(result.GeneratedSource!.Contains("_title.ToUpperInvariant", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Computed_self_and_two_node_cycles_report_each_back_edge_read()
+    {
+        var self = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<int> value = new(ct => Task.FromResult(value.Value + value.Value), 0);
+                Fragment Render() { return TextBlock { Text: value.Value.ToString(); }; }
+            }
+            """,
+            "self-cycle.lui");
+        Assert.IsFalse(self.Succeeded);
+        Assert.AreEqual(2, self.Diagnostics.Count(diagnostic =>
+            diagnostic.Message.Contains("cycle", StringComparison.OrdinalIgnoreCase)));
+
+        var pair = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<int> first = new(ct => Task.FromResult(second.Value), 0);
+                private readonly Computed<int> second = new(ct => Task.FromResult(first.Value), 0);
+                Fragment Render() { return TextBlock { Text: first.Value.ToString(); }; }
+            }
+            """,
+            "pair-cycle.lui");
+        Assert.IsFalse(pair.Succeeded);
+        Assert.IsTrue(pair.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("cycle", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [TestMethod]
+    public void Conditional_regions_parse_bind_and_emit_owned_branches()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<bool> visible = new(true);
+                private readonly State<string> title = new("Latest");
+                Fragment Render()
+                {
+                    return StackPanel {
+                        if (visible.Value) {
+                            Border { TextBlock { Text: title.Value; } }
+                        } else {
+                            TextBlock { Text: "Hidden"; }
+                        }
+                    };
+                }
+            }
+            """,
+            "conditional.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.IsInstanceOfType<UiIfSyntax>(result.Syntax!.Component.RenderMethod.Root.Members.Single());
+        var source = result.GeneratedSource!;
+        StringAssert.Contains(source, "private ConditionalRegion? _conditional1;");
+        StringAssert.Contains(source, "_conditional1!.Show(0, branchOwner =>");
+        StringAssert.Contains(source, "_conditional1!.Show(1, branchOwner =>");
+        StringAssert.Contains(Method(source, "private void InvalidateSource0()"), "UpdateConditional1();");
+        StringAssert.Contains(Method(source, "private void InvalidateSource1()"), "UpdateBinding1();");
+    }
+
+    [TestMethod]
+    public void Conditional_subset_rejects_mixed_nested_keyed_and_incompatible_hosts()
+    {
+        foreach (var root in new[]
+        {
+            "StackPanel { TextBlock { Text: \"ordinary\"; } if (true) { TextBlock { Text: \"branch\"; } } }",
+            "StackPanel { if (true) { StackPanel { if (true) { TextBlock { Text: \"nested\"; } } } } }",
+            "StackPanel { foreach (var item in new[] { 1 }) keyed by item { StackPanel { if (true) { TextBlock { Text: item.ToString(); } } } } }",
+            "TextBlock { if (true) { TextBlock { Text: \"no route\"; } } }",
+        })
+        {
+            var result = LucentCompiler.Compile(
+                $$"""
+                namespace Demo;
+                component Main()
+                {
+                    Fragment Render() { return {{root}}; }
+                }
+                """,
+                "invalid-conditional.lui");
+            Assert.IsFalse(result.Succeeded, root);
+            Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Code == "LUC2001"), root);
+        }
+    }
+
+    [TestMethod]
+    public void Island_binding_preserves_target_typing_and_maps_type_failures()
+    {
+        var valid = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<int[]> items = new([1, 2]);
+                private readonly State<object> value = new(new());
+                private readonly Computed<int[]> copy = new(ct => Task.FromResult(items.Value), []);
+                Fragment Render() { return Border { Tag: new(); }; }
+            }
+            """,
+            "target-typed.lui");
+        Assert.IsTrue(valid.Succeeded, string.Join(Environment.NewLine, valid.Diagnostics));
+        StringAssert.Contains(valid.GeneratedSource!, "private int[] _items = [1, 2];");
+        StringAssert.Contains(valid.GeneratedSource!, "private object _value = new();");
+        StringAssert.Contains(valid.GeneratedSource!, ".Tag = new();");
+
+        foreach (var source in new[]
+        {
+            "private readonly State<int> value = new(\"wrong\");",
+            "private readonly Computed<int> value = new(ct => Task.FromResult(1), \"wrong\");",
+        })
+        {
+            var invalid = LucentCompiler.Compile(
+                $$"""
+                namespace Demo;
+                component Main()
+                {
+                    {{source}}
+                    Fragment Render() { return TextBlock { Text: "x"; }; }
+                }
+                """,
+                "typed-failure.lui");
+            Assert.IsFalse(invalid.Succeeded);
+            Assert.IsTrue(invalid.Diagnostics.Any(diagnostic =>
+                diagnostic.Code == "LUC3001" && diagnostic.Span.Start > 0));
+        }
+
+        var nonBoolean = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render() { return StackPanel { if (1) { TextBlock { Text: "x"; } } }; }
+            }
+            """,
+            "non-boolean.lui");
+        Assert.IsFalse(nonBoolean.Succeeded);
+        Assert.IsTrue(nonBoolean.Diagnostics.Any(diagnostic => diagnostic.Code == "LUC3001"));
+
+        var unknown = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main() { Fragment Render() { return TextBlock { Text: missingValue; }; } }
+            """,
+            "unknown-name.lui");
+        Assert.IsFalse(unknown.Succeeded);
+        Assert.IsTrue(unknown.Diagnostics.Any(diagnostic =>
+            diagnostic.Code == "LUC3001" && diagnostic.Span.Start > 0));
+    }
+
+    [TestMethod]
+    public void Reactive_class_values_are_updated_by_their_source()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<string> cssClass = new("first");
+                Fragment Render() { return Border { Class: cssClass.Value; }; }
+            }
+            """,
+            "reactive-class.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "private string? _binding1Class;");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void UpdateBinding1()"), "Classes.Remove(_binding1Class)");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void InvalidateSource0()"), "UpdateBinding1();");
+    }
+
+    private static string Method(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.IsGreaterThanOrEqualTo(0, start, signature);
+        var next = source.IndexOf("\n    private ", start + signature.Length, StringComparison.Ordinal);
+        return source[start..(next < 0 ? source.Length : next)];
     }
 }

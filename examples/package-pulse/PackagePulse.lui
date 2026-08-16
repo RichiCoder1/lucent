@@ -41,13 +41,31 @@ component PackagePulse()
                     TextChanged: (sender, e) => query.Update(sender.Text ?? "");
                 }
 
-                TextBlock {
-                    Class: "status";
-                    Text: packages.ErrorMessage ??
-                        (packages.IsPending
-                            ? "Updating package index…"
-                            : $"{packages.Value.Length} package(s)");
-                    Opacity: packages.IsPending ? 0.58 : 1;
+                Border {
+                    if (packages.IsPending && packages.Value == PackageCatalog.Placeholders) {
+                        TextBlock {
+                            Class: "status";
+                            Text: "Loading package index…";
+                        }
+                    }
+                }
+
+                Border {
+                    if (packages.ErrorMessage != null) {
+                        TextBlock {
+                            Class: "status";
+                            Text: packages.ErrorMessage;
+                        }
+                    }
+                }
+
+                Border {
+                    if (!packages.IsPending && packages.ErrorMessage == null && packages.Value.Length == 0) {
+                        TextBlock {
+                            Class: "status";
+                            Text: "No packages match this query.";
+                        }
+                    }
                 }
 
                 StackPanel {

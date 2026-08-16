@@ -13,17 +13,13 @@ internal static class EditorIntelligence
     public static IReadOnlyList<LucentCompletionItem> GetCompletions(
         string sourceText,
         int offset,
-        string sourcePath,
-        LucentProjectContext? projectContext)
+        ComponentSemanticAnalysis analysis)
     {
-        var syntax = new Parser(sourceText, sourcePath).Parse();
-        var resolver = new NativeSymbolResolver(
-            syntax.NamespaceName,
-            syntax.AllUsings.Select(directive => directive.Text).ToArray(),
-            projectContext);
+        var syntax = analysis.Syntax;
+        var resolver = analysis.Resolver;
         if (IsComponentExpressionPosition(syntax, offset))
         {
-            return GetExpressionCompletions(sourceText, offset, syntax, resolver);
+            return GetExpressionCompletions(sourceText, offset, analysis);
         }
 
         var element = EnumerateElements(syntax.Component.RenderMethod.Root)
@@ -60,8 +56,7 @@ internal static class EditorIntelligence
             var expressionItems = GetExpressionCompletions(
                 sourceText,
                 offset,
-                syntax,
-                resolver);
+                analysis);
             var nativeItems = property is null || GetExpressionPrefix(sourceText, offset).Contains('.')
                 ? []
                 : resolver.GetValueCandidates(property)
@@ -144,20 +139,19 @@ internal static class EditorIntelligence
             (offset >= loop.SourceExpressionSpan.Start &&
              offset <= loop.SourceExpressionSpan.End) ||
             (offset >= loop.KeyExpressionSpan.Start &&
-             offset <= loop.KeyExpressionSpan.End));
+             offset <= loop.KeyExpressionSpan.End)) ||
+        EnumerateConditionals(syntax.Component.RenderMethod.Root).Any(conditional =>
+            offset >= conditional.ConditionSpan.Start &&
+            offset <= conditional.ConditionSpan.End);
 
     public static LucentSemanticSymbol? GetExpressionSymbol(
         string sourceText,
         int offset,
-        string sourcePath,
-        LucentProjectContext? projectContext)
+        ComponentSemanticAnalysis analysis)
     {
-        var syntax = new Parser(sourceText, sourcePath).Parse();
-        var resolver = new NativeSymbolResolver(
-            syntax.NamespaceName,
-            syntax.AllUsings.Select(directive => directive.Text).ToArray(),
-            projectContext);
-        var scope = BuildExpressionScope(syntax, offset, resolver);
+        var syntax = analysis.Syntax;
+        var resolver = analysis.Resolver;
+        var scope = BuildExpressionScope(analysis, offset);
         var (chain, span) = GetExpressionChainAt(sourceText, offset);
         if (chain.Length == 0)
         {
@@ -165,7 +159,7 @@ internal static class EditorIntelligence
         }
 
         var parts = chain.Split('.');
-        var variable = scope.FirstOrDefault(candidate => candidate.Name == parts[0]);
+        var variable = scope.LastOrDefault(candidate => candidate.Name == parts[0]);
         var current = variable is null
             ? resolver.ResolveTypeName(parts[0]) is { } type
                 ? new ResolvedExpressionType(type, ExpressionContainer.Type)
@@ -192,7 +186,7 @@ internal static class EditorIntelligence
                     null,
                     definitionSpan is null
                         ? null
-                        : new LucentDefinition(sourcePath, definitionSpan.Value));
+                        : new LucentDefinition(analysis.SourcePath, definitionSpan.Value));
             }
 
             return resolver.ToExpressionSemanticSymbol(
@@ -227,10 +221,10 @@ internal static class EditorIntelligence
     private static IReadOnlyList<LucentCompletionItem> GetExpressionCompletions(
         string sourceText,
         int offset,
-        LucentCompilationUnitSyntax syntax,
-        NativeSymbolResolver resolver)
+        ComponentSemanticAnalysis analysis)
     {
-        var scope = BuildExpressionScope(syntax, offset, resolver);
+        var resolver = analysis.Resolver;
+        var scope = BuildExpressionScope(analysis, offset);
         var prefix = GetExpressionPrefix(sourceText, offset);
         if (!prefix.Contains('.'))
         {
@@ -254,7 +248,7 @@ internal static class EditorIntelligence
         }
 
         var parts = prefix.Split('.');
-        var variable = scope.FirstOrDefault(candidate => candidate.Name == parts[0]);
+        var variable = scope.LastOrDefault(candidate => candidate.Name == parts[0]);
         var current = variable is null
             ? resolver.ResolveTypeName(parts[0]) is { } type
                 ? new ResolvedExpressionType(type, ExpressionContainer.Type)
@@ -295,10 +289,11 @@ internal static class EditorIntelligence
     }
 
     private static IReadOnlyList<ExpressionVariable> BuildExpressionScope(
-        LucentCompilationUnitSyntax syntax,
-        int offset,
-        NativeSymbolResolver resolver)
+        ComponentSemanticAnalysis analysis,
+        int offset)
     {
+        var syntax = analysis.Syntax;
+        var resolver = analysis.Resolver;
         var variables = syntax.Component.AllStateMembers
             .Select(state => (Member: state, Type: resolver.ResolveTypeName(state.TypeName)))
             .Where(candidate => candidate.Type is not null)
@@ -334,6 +329,15 @@ internal static class EditorIntelligence
                 $"CancellationToken {lambdaParameter}"));
         }
 
+        foreach (var scope in analysis.EditorScopes.Where(scope =>
+                     offset >= scope.Span.Start && offset <= scope.Span.End))
+        {
+            variables.AddRange(scope.Locals.Select(local => new ExpressionVariable(
+                local.Name,
+                local.Type,
+                ExpressionContainer.Local,
+                $"{local.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {local.Name}")));
+        }
         AddEventVariables(syntax, offset, resolver, variables);
 
         foreach (var loop in EnumerateLoops(syntax.Component.RenderMethod.Root)
@@ -462,7 +466,7 @@ internal static class EditorIntelligence
             IdentifierNameSyntax identifier => scope
                 .Where(variable => variable.Name == identifier.Identifier.ValueText)
                 .Select(variable => new ResolvedExpressionType(variable.Type, variable.Container))
-                .FirstOrDefault() ??
+                .LastOrDefault() ??
                 (resolver.ResolveTypeName(identifier.Identifier.ValueText) is { } type
                     ? new ResolvedExpressionType(type, ExpressionContainer.Type)
                     : null),
@@ -726,6 +730,7 @@ internal static class EditorIntelligence
             {
                 UiChildSyntax nested => nested.Element,
                 UiForEachSyntax loop => loop.Body,
+                UiIfSyntax conditional => conditional.TrueRoot,
                 _ => null,
             };
             if (child is null)
@@ -736,6 +741,13 @@ internal static class EditorIntelligence
             foreach (var descendant in EnumerateElements(child))
             {
                 yield return descendant;
+            }
+            if (member is UiIfSyntax { FalseRoot: { } falseRoot })
+            {
+                foreach (var descendant in EnumerateElements(falseRoot))
+                {
+                    yield return descendant;
+                }
             }
         }
     }
@@ -755,6 +767,56 @@ internal static class EditorIntelligence
             else if (member is UiChildSyntax child)
             {
                 foreach (var nested in EnumerateLoops(child.Element))
+                {
+                    yield return nested;
+                }
+            }
+            else if (member is UiIfSyntax conditional)
+            {
+                foreach (var nested in EnumerateLoops(conditional.TrueRoot))
+                {
+                    yield return nested;
+                }
+                if (conditional.FalseRoot is not null)
+                {
+                    foreach (var nested in EnumerateLoops(conditional.FalseRoot))
+                    {
+                        yield return nested;
+                    }
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<UiIfSyntax> EnumerateConditionals(UiElementSyntax element)
+    {
+        foreach (var member in element.Members)
+        {
+            if (member is UiIfSyntax conditional)
+            {
+                yield return conditional;
+                foreach (var nested in EnumerateConditionals(conditional.TrueRoot))
+                {
+                    yield return nested;
+                }
+                if (conditional.FalseRoot is not null)
+                {
+                    foreach (var nested in EnumerateConditionals(conditional.FalseRoot))
+                    {
+                        yield return nested;
+                    }
+                }
+            }
+            else if (member is UiChildSyntax child)
+            {
+                foreach (var nested in EnumerateConditionals(child.Element))
+                {
+                    yield return nested;
+                }
+            }
+            else if (member is UiForEachSyntax loop)
+            {
+                foreach (var nested in EnumerateConditionals(loop.Body))
                 {
                     yield return nested;
                 }

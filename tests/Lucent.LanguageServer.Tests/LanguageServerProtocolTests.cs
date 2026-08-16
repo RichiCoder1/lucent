@@ -666,6 +666,63 @@ public sealed class LanguageServerProtocolTests
             "Orientation.Horizontal");
     }
 
+    [TestMethod]
+    public async Task Conditional_branches_share_editor_semantics_and_locals_shadow_state()
+    {
+        const string source =
+            "namespace Demo;\r\n" +
+            "component Main()\r\n" +
+            "{\r\n" +
+            "    private readonly State<bool> visible = new(true);\r\n" +
+            "    private readonly State<string> title = new(\"state\");\r\n" +
+            "    Fragment Render()\r\n" +
+            "    {\r\n" +
+            "        return StackPanel {\r\n" +
+            "            if (visible.Value) {\r\n" +
+            "                Button { Click: (title, e) => Console.WriteLine(title.Content); }\r\n" +
+            "            } else {\r\n" +
+            "                TextBlock { Text: title.Value; }\r\n" +
+            "            }\r\n" +
+            "        };\r\n" +
+            "    }\r\n" +
+            "}\r\n";
+        const string uri = "file:///Conditional.lui";
+        var localOffset = source.IndexOf("title.Content", StringComparison.Ordinal);
+        var stateOffset = source.LastIndexOf("title.Value", StringComparison.Ordinal);
+        var input = BuildInput(
+            Request(1, "initialize", new { capabilities = new { } }),
+            Notification("initialized", new { }),
+            Notification("textDocument/didOpen", new
+            {
+                textDocument = new { uri, languageId = "lucent", version = 1, text = source },
+            }),
+            Request(2, "textDocument/completion", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, localOffset + "title.C".Length),
+            }),
+            Request(3, "textDocument/hover", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, localOffset),
+            }),
+            Request(4, "textDocument/hover", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, stateOffset),
+            }),
+            Request(5, "shutdown", null),
+            Notification("exit", null));
+        using var output = new MemoryStream();
+
+        Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+        var messages = ReadMessages(output.ToArray());
+        Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray()
+            .Any(item => item.GetProperty("label").GetString() == "Content"));
+        StringAssert.Contains(HoverText(messages, 3), "Button title");
+        StringAssert.Contains(HoverText(messages, 4), "State<string> title");
+    }
+
     private static MemoryStream BuildInput(params byte[][] messages) =>
         new(messages.SelectMany(message => message).ToArray());
 

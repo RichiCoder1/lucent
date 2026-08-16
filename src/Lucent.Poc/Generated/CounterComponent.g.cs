@@ -54,7 +54,7 @@ internal sealed class CounterComponent : IDisposable
         _control3!.Click += OnControl3Click;
         _owner.OnDispose(() => _control3!.Click -= OnControl3Click);
 
-        UpdateBindings();
+        UpdateBinding1();
 
         return _control1!;
     }
@@ -70,12 +70,18 @@ internal sealed class CounterComponent : IDisposable
         #line default
     }
 
-    private void UpdateBindings()
+    private void UpdateBinding1()
     {
         #line 13 "examples/counter/Counter.lui"
         _control2!.Text = $"Count: {_count}";
         #line default
     }
+
+    private void InvalidateSource0()
+    {
+        UpdateBinding1();
+    }
+
 
     private void SetCount(int value)
     {
@@ -90,7 +96,7 @@ internal sealed class CounterComponent : IDisposable
         }
 
         _count = value;
-        UpdateBindings();
+        InvalidateSource0();
     }
 
     private void SetCount(Func<int, int> update)

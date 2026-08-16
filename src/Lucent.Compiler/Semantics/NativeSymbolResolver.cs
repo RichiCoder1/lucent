@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Xml.Linq;
 using Lucent.Compiler.CodeGeneration;
 using Microsoft.CodeAnalysis;
@@ -16,13 +15,6 @@ internal sealed class NativeSymbolResolver
             ["Text"] = "Avalonia.Controls.TextBlock",
         };
 
-    private static readonly string[] DefaultControlNamespaces =
-    [
-        "Avalonia.Controls",
-        "Avalonia.Controls.Primitives",
-        "Avalonia.Controls.Presenters",
-    ];
-
     private static readonly SymbolDisplayFormat FullyQualifiedFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
             SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier |
@@ -33,16 +25,23 @@ internal sealed class NativeSymbolResolver
     private readonly INamedTypeSymbol? _controlType;
     private readonly INamedTypeSymbol? _stringType;
     private readonly IReadOnlyList<string> _imports;
+    private readonly Dictionary<string, ITypeSymbol?> _resolvedTypes = new(StringComparer.Ordinal);
+
+    public NativeSymbolResolver(
+        ProjectSemanticCompilation project)
+    {
+        _compilation = project.Compilation;
+        _controlType = _compilation.GetTypeByMetadataName("Avalonia.Controls.Control");
+        _stringType = _compilation.GetSpecialType(SpecialType.System_String);
+        _imports = project.Imports;
+    }
 
     public NativeSymbolResolver(
         string componentNamespace,
         IReadOnlyList<string> usingDirectives,
         LucentProjectContext? projectContext)
+        : this(new ProjectSemanticCompilation(componentNamespace, usingDirectives, projectContext))
     {
-        _compilation = CreateCompilation(projectContext);
-        _controlType = _compilation.GetTypeByMetadataName("Avalonia.Controls.Control");
-        _stringType = _compilation.GetSpecialType(SpecialType.System_String);
-        _imports = BuildImports(componentNamespace, usingDirectives);
     }
 
     public ResolvedNativeControl? ResolveControl(string sourceName)
@@ -176,6 +175,11 @@ internal sealed class NativeSymbolResolver
 
     public ITypeSymbol? ResolveTypeName(string typeName)
     {
+        if (_resolvedTypes.TryGetValue(typeName, out var cached))
+        {
+            return cached;
+        }
+
         var source = string.Join(
             Environment.NewLine,
             _imports.Select(@namespace => $"using {@namespace};")) +
@@ -195,7 +199,9 @@ internal sealed class NativeSymbolResolver
         var type = compilation.GetSemanticModel(tree)
             .GetTypeInfo(field.Declaration.Type)
             .Type;
-        return type?.TypeKind == TypeKind.Error ? null : type;
+        var resolved = type?.TypeKind == TypeKind.Error ? null : type;
+        _resolvedTypes[typeName] = resolved;
+        return resolved;
     }
 
     public IReadOnlyList<ISymbol> GetExpressionMembers(
@@ -606,99 +612,6 @@ internal sealed class NativeSymbolResolver
         {
             yield return @interface;
         }
-    }
-
-    private static IReadOnlyList<string> BuildImports(
-        string componentNamespace,
-        IReadOnlyList<string> usingDirectives)
-    {
-        var imports = new List<string>();
-        if (!string.IsNullOrWhiteSpace(componentNamespace))
-        {
-            imports.Add(componentNamespace);
-        }
-
-        imports.AddRange(DefaultControlNamespaces);
-        foreach (var directive in usingDirectives)
-        {
-            var text = directive.Trim();
-            if (text.StartsWith("using ", StringComparison.Ordinal))
-            {
-                text = text[6..].Trim();
-            }
-
-            text = text.TrimEnd(';').Trim();
-            if (text.Length > 0 &&
-                !text.StartsWith("static ", StringComparison.Ordinal) &&
-                !text.Contains('=', StringComparison.Ordinal))
-            {
-                imports.Add(text);
-            }
-        }
-
-        return imports.Distinct(StringComparer.Ordinal).ToArray();
-    }
-
-    private static CSharpCompilation CreateCompilation(LucentProjectContext? context)
-    {
-        var referencePaths = new Dictionary<string, string>(
-            StringComparer.OrdinalIgnoreCase);
-        foreach (var path in context?.References ?? [])
-        {
-            if (File.Exists(path))
-            {
-                referencePaths[Path.GetFileName(path)] = Path.GetFullPath(path);
-            }
-        }
-
-        var trustedAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
-        if (referencePaths.Count == 0 && !string.IsNullOrWhiteSpace(trustedAssemblies))
-        {
-            foreach (var path in trustedAssemblies.Split(Path.PathSeparator))
-            {
-                referencePaths.TryAdd(Path.GetFileName(path), path);
-            }
-        }
-
-        if (!referencePaths.ContainsKey("Avalonia.Base.dll"))
-        {
-            var avaloniaDirectory = new[]
-                {
-                    AppContext.BaseDirectory,
-                    Path.GetDirectoryName(typeof(NativeSymbolResolver).Assembly.Location),
-                }
-                .Where(path => !string.IsNullOrWhiteSpace(path))
-                .FirstOrDefault(path =>
-                    File.Exists(Path.Combine(path!, "Avalonia.Controls.dll")));
-            if (avaloniaDirectory is null)
-            {
-                throw new InvalidOperationException(
-                    "The standalone Lucent context could not locate Avalonia.Controls.dll. " +
-                    "Supply consuming-project reference paths through LucentProjectContext.");
-            }
-
-            foreach (var path in Directory.EnumerateFiles(avaloniaDirectory, "Avalonia*.dll"))
-            {
-                referencePaths.TryAdd(Path.GetFileName(path), path);
-            }
-        }
-
-        var references = referencePaths.Values
-            .Select(path => MetadataReference.CreateFromFile(path))
-            .ToImmutableArray();
-        var syntaxTrees = (context?.Sources ?? [])
-            .Where(File.Exists)
-            .Select(path => CSharpSyntaxTree.ParseText(
-                File.ReadAllText(path),
-                CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
-                path))
-            .ToArray();
-
-        return CSharpCompilation.Create(
-            "Lucent.ProjectSemantics",
-            syntaxTrees,
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
     }
 
     private static LucentSemanticSymbol CreateSemanticSymbol(

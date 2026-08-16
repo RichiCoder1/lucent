@@ -1,11 +1,22 @@
 using Lucent.Compiler.Syntax;
+using Lucent.Compiler.Semantics;
 
 namespace Lucent.Compiler.CodeGeneration;
+
+internal enum BoundReactiveSourceKind { State, Computed }
+
+internal sealed record BoundReactiveSource(
+    int Id,
+    string Name,
+    BoundReactiveSourceKind Kind,
+    string ValueTypeName,
+    SourceSpan Span);
 
 internal sealed record BoundComponentModel(
     string NamespaceName,
     string ComponentName,
     IReadOnlyList<string> Usings,
+    IReadOnlyList<BoundReactiveSource> Sources,
     IReadOnlyList<BoundStateModel> States,
     IReadOnlyList<BoundComputedModel> Computed,
     BoundControlModel Root);
@@ -13,15 +24,22 @@ internal sealed record BoundComponentModel(
 internal sealed record BoundStateModel(
     string TypeName,
     string Name,
-    string InitializerText,
-    SourceSpan Span);
+    BoundCSharpIsland Initializer,
+    SourceSpan Span)
+{
+    public string InitializerText => Initializer.LoweredText;
+}
 
 internal sealed record BoundComputedModel(
     string TypeName,
     string Name,
-    string FactoryText,
-    string InitialValueText,
-    SourceSpan Span);
+    BoundCSharpIsland Factory,
+    BoundCSharpIsland InitialValue,
+    SourceSpan Span)
+{
+    public string FactoryText => Factory.LoweredText;
+    public string InitialValueText => InitialValue.LoweredText;
+}
 
 internal sealed record BoundControlModel(
     string Name,
@@ -49,13 +67,17 @@ internal abstract record BoundControlMember(SourceSpan Span);
 
 internal sealed record BoundPropertyMember(
     string Name,
-    string ExpressionText,
-    SourceSpan ExpressionSpan,
+    BoundCSharpIsland Expression,
     bool IsStringLiteral,
     bool IsInterpolated,
     SourceSpan Span,
-    BoundNativeValueKind NativeValueKind = BoundNativeValueKind.None)
-    : BoundControlMember(Span);
+    BoundNativeValueKind NativeValueKind = BoundNativeValueKind.None,
+    string? TargetTypeName = null)
+    : BoundControlMember(Span)
+{
+    public string ExpressionText => Expression.LoweredText;
+    public SourceSpan ExpressionSpan => Expression.Span;
+}
 
 internal enum BoundNativeValueKind
 {
@@ -65,28 +87,44 @@ internal enum BoundNativeValueKind
 }
 
 internal sealed record BoundContentMember(
-    string ExpressionText,
-    SourceSpan ExpressionSpan,
+    BoundCSharpIsland Expression,
     bool IsInterpolated,
-    SourceSpan Span) : BoundControlMember(Span);
+    SourceSpan Span,
+    string? TargetTypeName = null) : BoundControlMember(Span)
+{
+    public string ExpressionText => Expression.LoweredText;
+    public SourceSpan ExpressionSpan => Expression.Span;
+}
 
 internal sealed record BoundEventMember(
     string Name,
     string EventName,
-    string BodyText,
-    SourceSpan BodySpan,
+    BoundCSharpIsland Body,
     string DelegateTypeName,
     string DelegateSenderTypeName,
     string EventArgsTypeName,
     string? SenderParameterName,
     string? EventArgsParameterName,
-    SourceSpan Span) : BoundControlMember(Span);
+    SourceSpan Span) : BoundControlMember(Span)
+{
+    public string BodyText => Body.LoweredText;
+    public SourceSpan BodySpan => Body.Span;
+}
 
 internal sealed record BoundForEachMember(
     string ItemName,
-    string SourceExpression,
-    SourceSpan SourceExpressionSpan,
-    string KeyExpression,
-    SourceSpan KeyExpressionSpan,
+    BoundCSharpIsland SourceExpression,
+    BoundCSharpIsland KeyExpression,
     BoundControlModel Body,
+    SourceSpan Span) : BoundControlMember(Span)
+{
+    public SourceSpan SourceExpressionSpan => SourceExpression.Span;
+    public SourceSpan KeyExpressionSpan => KeyExpression.Span;
+}
+
+internal sealed record BoundConditionalMember(
+    int Id,
+    BoundCSharpIsland Condition,
+    BoundControlModel TrueRoot,
+    BoundControlModel? FalseRoot,
     SourceSpan Span) : BoundControlMember(Span);

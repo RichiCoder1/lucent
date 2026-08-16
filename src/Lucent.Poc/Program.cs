@@ -138,27 +138,90 @@ internal static class Program
 
     private static void WaitForPackagePulse(Window window, Action<bool> completed)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        var phase = 0;
+        var replacementQueued = false;
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         timer.Tick += (_, _) =>
         {
-            if (window.Content is Border { Child: StackPanel root } &&
-                root.Children.Count == 6 &&
-                root.Children[4] is TextBlock { Text: "1 package(s)" } &&
-                root.Children[5] is StackPanel { Children.Count: 1 })
+            if (window.Content is not Border { Child: StackPanel root } ||
+                root.Children.Count != 8 ||
+                root.Children[3] is not TextBox query ||
+                root.Children[4] is not Border loading ||
+                root.Children[5] is not Border failure ||
+                root.Children[6] is not Border empty ||
+                root.Children[7] is not StackPanel results)
             {
-                timer.Stop();
-                MarkSmokeProgress("package-pulse-updated");
-                completed(true);
+                Finish(false, "shape");
+                return;
             }
-            else if (DateTime.UtcNow >= deadline)
+
+            switch (phase)
             {
-                timer.Stop();
-                MarkSmokeProgress("package-pulse-failed-timeout");
-                completed(false);
+                case 0 when loading.Child is TextBlock { Text: "Loading package index…" } &&
+                                 results.Children.Count == 2:
+                    MarkSmokeProgress("package-pulse-initial-loading");
+                    phase = 1;
+                    break;
+                case 1 when loading.Child is null && PackageName(results) == "Lucent.UI":
+                    MarkSmokeProgress("package-pulse-success");
+                    SetQuery(query, "no-match");
+                    phase = 2;
+                    break;
+                case 2 when empty.Child is TextBlock { Text: "No packages match this query." } &&
+                                 results.Children.Count == 0:
+                    MarkSmokeProgress("package-pulse-empty");
+                    SetQuery(query, "fail");
+                    phase = 3;
+                    break;
+                case 3 when failure.Child is TextBlock:
+                    MarkSmokeProgress("package-pulse-failure");
+                    SetQuery(query, "lucent");
+                    phase = 4;
+                    break;
+                case 4 when PackageName(results) == "Lucent.UI":
+                    SetQuery(query, "avalonia");
+                    phase = 5;
+                    break;
+                case 5 when PackageName(results) == "Lucent.UI":
+                    MarkSmokeProgress("package-pulse-stale-results");
+                    if (!replacementQueued)
+                    {
+                        replacementQueued = true;
+                        SetQuery(query, "reactive");
+                    }
+                    phase = 6;
+                    break;
+                case 6 when PackageName(results) == "Reactive.Core":
+                    Finish(true, "latest-generation");
+                    break;
+            }
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                Finish(false, $"timeout-phase-{phase}");
             }
         };
         timer.Start();
+
+        void Finish(bool success, string marker)
+        {
+            timer.Stop();
+            MarkSmokeProgress($"package-pulse-{marker}");
+            completed(success);
+        }
+
+        static void SetQuery(TextBox query, string value)
+        {
+            query.Text = value;
+            query.RaiseEvent(new TextChangedEventArgs(TextBox.TextChangedEvent));
+        }
+
+        static string? PackageName(StackPanel results) =>
+            results.Children.FirstOrDefault() is Border { Child: StackPanel row } &&
+            row.Children.FirstOrDefault() is TextBlock name
+                ? name.Text
+                : null;
     }
 
     private static bool ExerciseTodo(Window window)
