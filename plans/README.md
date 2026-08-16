@@ -23,7 +23,8 @@ recent workspaces. It is not a full IDE.
 | [004a](004a-typed-native-roots.md) | Expose typed native roots for host interop | P1 | S | 003, 004 | TODO |
 | [005](005-virtualized-collections.md) | Add scalable native collections and AvaloniaEdit | P1 | M | 003, 004 | TODO |
 | [006](006-lifecycle-reliability.md) | Close lifecycle, failure, accessibility, and UI-test gaps | P1 | L | 001–005 | TODO |
-| [007](007-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–006 | TODO |
+| [007](007-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a | TODO |
+| [008](008-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–007 | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED` with a
 one-line reason.
@@ -47,7 +48,10 @@ Review records: [001–002](REVIEW-001-002.md),
   controls. They solve different problems and should have different interfaces.
 - 006 is the quality gate before distribution: cancellation, error routing,
   automation metadata, and headless UI tests must be observable contracts.
-- 007 packages only the system proven by Workbench. It must not stabilize APIs
+- 007 makes the shared compiler/LSP seam correct, bounded, and fast before its
+  artifacts are packaged. It must not depend on another language server's
+  in-memory workspace.
+- 008 packages only the system proven by Workbench. It must not stabilize APIs
   that Workbench has not exercised.
 
 ## Release gates
@@ -61,8 +65,9 @@ npm test
 Pop-Location
 ```
 
-Plans 004 onward must also add a user-flow gate to Lucent Workbench. Plan 006
-replaces manual-only smoke coverage with Avalonia headless interaction tests.
+Plans 004–006 and 008 must also add a user-flow gate to Lucent Workbench. Plan
+006 replaces manual-only smoke coverage with Avalonia headless interaction
+tests; Plan 007 instead owns protocol and performance gates for language tooling.
 
 ## Explicit non-goals
 

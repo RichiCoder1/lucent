@@ -364,5 +364,5 @@ Plan 006 expands the same headless project for accessibility/lifecycle flows.
 If pinned TreeDataGrid/AvaloniaEdit versions lack adequate native automation
 peers, Plan 006 may replace the direct control types with accessibility-only
 subclasses; those subclasses must add peers only and must not mirror control APIs.
-Plan 007 may add actual project/document I/O but must keep these native controls
+Plan 008 may add actual project/document I/O but must keep these native controls
 and stable selection contracts.
