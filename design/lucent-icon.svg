@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Lucent</title>
+  <desc id="desc">An extruded letter L with teal faces and a coral registration edge.</desc>
+  <path fill="#F05D5E" d="m12 10 6 6v38l-6-6Z"/>
+  <path fill="#56C8C7" d="M12 10h14l6 6H18Z"/>
+  <path fill="#007C7D" d="M26 34h20l6 6H32Z"/>
+  <path fill="#C23F45" d="m46 34 6 6v14l-6-6Z"/>
+  <path fill="#00A6A6" d="M18 16h14v24h20v14H18Z"/>
+</svg>

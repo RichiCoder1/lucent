@@ -1,0 +1,47 @@
+:root {
+    --lucent-canvas: #f2f0e9;
+    --lucent-surface: #fffefa;
+    --lucent-surface-raised: #ffffff;
+    --lucent-text: #101820;
+    --lucent-text-muted: #56636a;
+    --lucent-border: #c7ccc8;
+    --lucent-accent: #007a7b;
+    --lucent-accent-vivid: #00a6a6;
+    --lucent-signal: #c23f45;
+    --lucent-success: #287a4b;
+    --lucent-warning: #8a6200;
+    --lucent-danger: #a52e34;
+    --lucent-focus: #007a7b;
+    --lucent-mark-teal: #00a6a6;
+    --lucent-mark-teal-shadow: #007c7d;
+    --lucent-mark-coral: #f05d5e;
+
+    --lucent-space-1: 4px;
+    --lucent-space-2: 8px;
+    --lucent-space-3: 12px;
+    --lucent-space-4: 16px;
+    --lucent-space-6: 24px;
+    --lucent-space-8: 32px;
+
+    --lucent-radius-sm: 2px;
+    --lucent-radius-md: 4px;
+    --lucent-radius-lg: 8px;
+    --lucent-duration-fast: 120ms;
+    --lucent-duration-align: 180ms;
+}
+
+.theme-dark {
+    --lucent-canvas: #101820;
+    --lucent-surface: #17232c;
+    --lucent-surface-raised: #1e2e38;
+    --lucent-text: #f2f0e9;
+    --lucent-text-muted: #aab6b6;
+    --lucent-border: #32444d;
+    --lucent-accent: #39c6c4;
+    --lucent-accent-vivid: #39c6c4;
+    --lucent-signal: #ff8a72;
+    --lucent-success: #59c987;
+    --lucent-warning: #f2c14e;
+    --lucent-danger: #ff6670;
+    --lucent-focus: #39c6c4;
+}

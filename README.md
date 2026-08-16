@@ -72,6 +72,7 @@ dependency audit reports high-severity advisories.
 - [Language model](docs/LANGUAGE.md)
 - [Compiler and runtime architecture](docs/ARCHITECTURE.md)
 - [Styling and design tokens](docs/STYLING.md)
+- [Visual identity and interface language](DESIGN.md)
 - [Tooling and developer experience](docs/TOOLING.md)
 - [Proof-of-concept roadmap](docs/ROADMAP.md)
 - [Design decisions and open questions](docs/DECISIONS.md)
