@@ -1,11 +1,22 @@
 namespace Lucent.Examples.Workbench;
 
+using Avalonia.Controls;
+using Avalonia.Controls.Templates;
+using System.Collections.ObjectModel;
 using System.Windows.Input;
 using Avalonia.Automation;
 
-component ProblemsPane(ICommand copyCommand, int count = 2) => Border {
+component ProblemsPane(ObservableCollection<ProblemItem> items, ICommand copyCommand) => Border {
     StackPanel {
-        TextBlock { Text: $"{count} problems"; AutomationProperties.Name: "Problems"; }
+        TextBlock { Text: $"{items.Count} problems"; AutomationProperties.Name: "Problems"; }
+        ListBox {
+            Height: 180;
+            AutomationProperties.Name: "Problems list";
+            ItemsSource: items;
+            ItemTemplate: new FuncDataTemplate<ProblemItem>((item, _) => new TextBlock {
+                Text = $"{item.File}:{item.Line} {item.Message}",
+            }, true);
+        }
         Button { Content: "Copy diagnostic"; Command: copyCommand; }
     }
 };

@@ -42,7 +42,7 @@ async mechanism and prove user-visible contracts in the existing headless app.
 This plan intentionally adds **no** general effect API, hook ordering, DI
 container, `INotifyCollectionChanged` adapter, or Avalonia observable bridge:
 Workbench has no unmet use case for them. Generated native event handlers are
-already owner-unsubscribed; TreeDataGrid/ListBox consume ObservableCollection
+already owner-unsubscribed; ListBox controls consume ObservableCollection
 directly; DocumentSession owns its explicit editor events. Add a lifecycle
 primitive later only when an application cannot express its cleanup through
 those existing routes.
@@ -311,7 +311,7 @@ IDs and accessible names:
 | Target | AutomationId | Name | Peer/control type | Shown tree | Focus expectation |
 | --- | --- | --- | --- | --- | --- |
 | root Window | `Workbench.Window` | `Lucent Workbench` | native Window / `Window` | shell | contains current focus |
-| `AccessibleTreeDataGrid` | `Workspace.Tree` | `Workspace` | app peer / `DataGrid` | shell | Focus Sidebar lands here |
+| `AccessibleWorkspaceListBox` | `Workspace.Tree` | `Workspace` | app peer / `Tree` | shell | Focus Sidebar lands here |
 | `AccessibleTextEditor` | `Document.Editor` | `Editor` | app peer + `IValueProvider` / `Edit` | shell | Focus Editor lands here |
 | native ListBox | `Problems.List` | `Problems` | native ListBox peer / `List` | problems shown | problem navigation lands here |
 | native ContentControl overlay | `CommandPalette.Dialog` | `Command palette` | native peer + ControlTypeOverride / `Window` | palette open | first palette result; Tab cycles within |
@@ -319,10 +319,10 @@ IDs and accessible names:
 
 - Native text/content supplies a name where adequate; otherwise set
   `AutomationProperties.Name`. Do not assign IDs to every virtualized row.
-- Version inspection shows TreeDataGrid 12.1.1 and AvaloniaEdit 12.0.0 do not
-  expose adequate peers. Add two accessibility-only Workbench subclasses:
-  `AccessibleTreeDataGrid : TreeDataGrid` returns a
-  `ControlAutomationPeer` reporting `AutomationControlType.DataGrid`;
+- Version inspection shows the flattened workspace ListBox and AvaloniaEdit
+  12.0.0 do not expose adequate semantic peers. Add two accessibility-only
+  Workbench subclasses: `AccessibleWorkspaceListBox : ListBox` returns a
+  `ControlAutomationPeer` reporting `AutomationControlType.Tree`;
   `AccessibleTextEditor : TextEditor` returns a peer reporting
   `AutomationControlType.Edit` and implementing `IValueProvider` from the real
   Text/IsReadOnly state. It raises the Value property-change event on TextChanged.
@@ -416,7 +416,7 @@ hooks.
 - `examples/workbench/SettingsSaveCoordinator.cs`
 - `examples/workbench/IProblemLoader.cs`
 - `examples/workbench/PlaceholderProblemLoader.cs`
-- `examples/workbench/AccessibleTreeDataGrid.cs`
+- `examples/workbench/AccessibleWorkspaceListBox.cs`
 - `examples/workbench/AccessibleTextEditor.cs`
 - `tests/Lucent.Workbench.Tests/SettingsRepositoryTests.cs`
 - `tests/Lucent.Workbench.Tests/AccessibilityTests.cs`

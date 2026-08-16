@@ -1,8 +1,8 @@
 # Plan 005: Add scalable native collections and AvaloniaEdit
 
-> **Executor instructions**: Complete Plans 003–004 first. Use Avalonia's
-> collection/editor APIs directly. Do not retrofit virtualization into Lucent
-> keyed regions or invent an item-renderer abstraction without a failing
+> **Executor instructions**: Complete Plans 003–004 first. Use Avalonia's free
+> native collection/editor APIs directly. Do not retrofit virtualization into
+> Lucent keyed regions or invent an item-renderer abstraction without a failing
 > Workbench use case.
 >
 > **Drift check (run first)**:
@@ -23,10 +23,10 @@
 ## Why this matters
 
 Workbench needs thousands of project/problem/quick-open rows and a credible
-source editor. Avalonia already virtualizes TreeDataGrid/ListBox containers, and
-AvaloniaEdit already implements editing, selection, undo, IME, and scrolling.
-The smallest honest Lucent proof is to configure those native controls through
-ordinary component fields/inputs—not add a second recycler or mirror an editor
+source editor. Avalonia's free native `ListBox` virtualizes item containers, and
+AvaloniaEdit implements editing, selection, undo, IME, and scrolling. The
+smallest honest Lucent proof is to configure those native controls through
+ordinary component fields/inputs, not add a second recycler or mirror an editor
 API.
 
 ## Current state and decision
@@ -35,47 +35,45 @@ API.
   correct for small arbitrary regions and is not virtualization.
 - Plan 004 makes attached properties, native KeyBindings, resources, commands,
   focus, and project-defined native controls usable from Workbench.
-- Avalonia 12 TreeDataGrid virtualizes rows through its rows presenter and has a
-  separate selection model. Reset events cannot preserve selection without an
-  application key restore.
-- AvaloniaEdit 12 is a native Avalonia control package. It must be used directly,
-  not confused with WPF AvalonEdit.
+- The original Plan 005 TreeDataGrid spike failed with `AVLIC0001`: Avalonia
+  Controls TreeDataGrid 12 is commercial and no license key is configured.
+- Avalonia 12's free native `ListBox` provides virtualized containers, selection,
+  focus, scrolling, and recycling. A flattened visible-node projection keeps
+  hierarchy app-owned without adding a control-specific renderer.
 
-**Decision:** no Lucent compiler/runtime item-renderer interface is needed for
-the first Workbench. TreeDataGrid typed columns, native `ItemsSource`, and native
-templates cover the actual flows. If a later screen requires a stateful Lucent
-component as a recycled row, stop and design that concrete seam then.
+**Decision:** use one app-owned `ObservableCollection<WorkspaceRow>` flattened
+from the expanded workspace tree and one native `ListBox`. Indent rows with a
+minimal native `FuncDataTemplate<WorkspaceRow>` because depth plus name are
+needed. The ListBox owns containers, selection, focus, scrolling, and recycling.
+Do not use TreeView, custom presenters, Lucent row components, or generic
+item-renderer/recycler APIs. If a later screen requires a stateful Lucent
+component as a recycled row, stop and design that concrete seam.
 
 ## Exact package and resource changes
 
-In `examples/workbench/Lucent.Workbench.csproj`, add:
+In `examples/workbench/Lucent.Workbench.csproj`, add only:
 
 ```xml
-<PackageReference Include="Avalonia.Controls.TreeDataGrid" Version="12.1.1" />
 <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
 ```
 
-Keep the existing Avalonia packages at 12.1.1. AvaloniaEdit 12.0.0 declares an
-Avalonia 12 dependency; do not downgrade the project or use
-`ICSharpCode.AvalonEdit`.
+Keep the existing Avalonia packages at 12.1.1. Do **not** add the commercial
+TreeDataGrid package. AvaloniaEdit 12.0.0 declares an Avalonia 12 dependency;
+do not downgrade the project or use `ICSharpCode.AvalonEdit`.
 
 In Workbench `App.Initialize`, include the editor's shipped Fluent resource:
 
 ```csharp
-Styles.Add(new StyleInclude(new Uri("avares://Avalonia.Controls.TreeDataGrid/"))
-{
-    Source = new Uri("avares://Avalonia.Controls.TreeDataGrid/Themes/Fluent.xaml"),
-});
 Styles.Add(new StyleInclude(new Uri("avares://AvaloniaEdit/"))
 {
     Source = new Uri("avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml"),
 });
 ```
 
-`Avalonia.AvaloniaEdit` is the verified public package ID; `AvaloniaEdit` is the
-control/resource assembly and namespace. Workbench App and HeadlessTestApp both
-install FluentTheme and these exact TreeDataGrid/AvaloniaEdit StyleIncludes so
-stock presenters materialize. Do not copy themes or translate them to Lucent CSS.
+`Avalonia.AvaloniaEdit` is the package ID; `AvaloniaEdit` is the control/resource
+assembly and namespace. Workbench App and HeadlessTestApp both install
+FluentTheme and this exact AvaloniaEdit StyleInclude. Do not copy themes or
+translate them to Lucent CSS.
 
 In `tests/Lucent.Workbench.Tests`, add `Avalonia.Headless` 12.1.1. Keep MSTest
 and add `[assembly: DoNotParallelize]`. One `[AssemblyInitialize]` starts a
@@ -99,6 +97,8 @@ internal sealed record WorkspaceNode(
     string Name,
     ObservableCollection<WorkspaceNode> Children);
 
+internal sealed record WorkspaceRow(WorkspaceNode Node, int Depth);
+
 internal sealed record ProblemItem(
     string Id,
     string File,
@@ -106,74 +106,68 @@ internal sealed record ProblemItem(
     string Message,
     ProblemSeverity Severity);
 
-internal sealed record QuickOpenItem(
-    string Id,
-    string DisplayName,
-    string Path);
+internal sealed record QuickOpenItem(string Id, string DisplayName, string Path);
 ```
 
 - IDs are stable application identity, not container indexes.
 - Use `ObservableCollection<T>` because Avalonia's native controls consume its
   collection notifications. Do not wrap it in Lucent state or mirror collection
   events in `Lucent.Runtime`.
-- `WorkspaceSidebar` owns a native `TreeDataGrid`. Build one
-  `HierarchicalTreeDataGridSource<WorkspaceNode>` in an ordinary component field
-  using the package's typed hierarchical expander/text columns and child
-  selector. Bind its `Source` directly.
+- `WorkspaceSelectionController` owns the workspace roots, one visible
+  `ObservableCollection<WorkspaceRow>`, expansion/rebuild, stable-ID validation,
+  indexing, selection, and fallback. It exposes the visible projection to one
+  native workspace `ListBox`.
+- `WorkspaceSidebar` uses a minimal native `FuncDataTemplate<WorkspaceRow>` to
+  render depth indentation and the node name. It does not mount a Lucent row
+  component.
 - `ProblemsPane` and quick-open use native `ListBox.ItemsSource` with
   `ObservableCollection<T>`. Keep their item display native: `DisplayMemberBinding`
   or a small C# `FuncDataTemplate<T>` only when multiple fields are required.
-- Keep stock TreeDataGrid/ListBox templates/presenters and place each inside a
-  finite-height scrolling layout. Replacing presenters or nesting in an
-  unbounded StackPanel invalidates the virtualization proof.
+- Keep stock ListBox templates/presenters and place each inside a finite-height
+  scrolling layout. Replacing presenters or nesting in an unbounded StackPanel
+  invalidates the virtualization proof.
 
 ## Selection and focus contract
 
 Create `WorkspaceSelectionController` in the Workbench application:
 
 - Persist selected `WorkspaceNode.Id`, not row/container/index identity.
-- Validate IDs are non-empty and unique over the current tree before assigning
-  a source; duplicate IDs are an application-model error.
-- Use one `HierarchicalTreeDataGridSource<WorkspaceNode>` and assign
-  `source.Selection = new TreeDataGridRowSelectionModel<WorkspaceNode>(source)`;
-  use `source.RowSelection` and `IndexPath` for all selection operations.
+- Validate IDs are non-empty and unique over the current tree before assigning a
+  projection; duplicate IDs are an application-model error.
+- The native workspace ListBox binds `ItemsSource` to the visible projection and
+  uses the controller's selected row/selection-changed seam. The controller may
+  expose one `SelectedId` and `SelectById` operation, but must not become a
+  generic selection framework.
 - Incremental add/remove/move retains the selected model when it remains.
 - Add a narrow `ResettableObservableCollection<T>.ReplaceAll` that replaces one
   root/child collection and raises one Reset after mutation. Before replacement,
-  capture selected ID. Rebuild an ID-to-`IndexPath` map, drain source/layout
-  processing, then clear/select the new path. Clear selection if the ID vanished.
+  capture selected ID, rebuild the visible projection and ID index, then restore
+  selection by ID or clear it if the ID vanished.
 - When a selected node is removed, choose the next sibling at the removed index;
   otherwise the previous sibling; otherwise its parent; otherwise clear. Focus
-  the TreeDataGrid after applying that fallback.
+  the workspace ListBox after applying that fallback.
 - Containers, focus visuals, scrolling, and recycling remain Avalonia-owned.
 
-Problems/quick-open use the same ID principle but native flat selection APIs.
-Do not share one generic selection framework; three small controllers or direct
-methods are cheaper and clearer.
+Problems/quick-open use native flat ListBox selection APIs. Do not share one
+generic selection framework; direct methods are cheaper and clearer.
 
 ## Exact virtualization evidence
 
-Headless tests use a fixed 800×600 Window with the collection control in a
-bounded `Grid` row—never an unbounded StackPanel—and 10,000 flat rows plus a
-project tree whose expanded visible population exceeds 10,000. Construct
-`HierarchicalTreeDataGridSource`, typed columns, and
-`TreeDataGridRowSelectionModel` exactly as the Step 1 spike compiled. Call
-`source.ExpandAll()`, show the Window, and drain dispatcher/layout work. Then:
+Headless tests use a fixed 800x600 Window with each collection control in a
+bounded `Grid` row, never an unbounded StackPanel. Populate 10,000 visible
+workspace rows, 10,000 problems, and 10,000 quick-open items. Show the Window
+and drain dispatcher/layout work. Then:
 
-- visual descendants contain at least one but fewer than 200 realized
-  `TreeDataGridRow` instances;
-- the problems/quick-open `ListBox` realizes at least one but fewer than 200
-  `ListBoxItem` containers;
-- call `treeDataGrid.BringRowIntoView(lastIndexPath, null)` and
-  `listBox.ScrollIntoView(lastItem)`, drain, then bring/scroll the first items
-  back; every realized count stays below 200;
+- each ListBox visual descendants contain at least one but fewer than 200
+  realized `ListBoxItem` containers;
+- call `ScrollIntoView(lastItem)` for each ListBox, drain, then scroll the first
+  items back; every realized count stays below 200;
 - inspect public visual descendants with `GetVisualDescendants()` and public
-  `TreeDataGridRow`/`ListBoxItem` types. A realized row/container DataContext at
-  each end must reference the expected first/last model, proving layout worked;
-- insert/move/remove keeps selection by ID; reset restores it manually;
-- architecture inspection confirms the data controls receive models/native
-  templates only; do not claim private owner-count instrumentation from visual
-  traversal.
+  `ListBoxItem` types. A realized container DataContext at each end must
+  reference the expected first/last model, proving layout worked;
+- insert/move/remove keeps workspace selection by ID; reset restores it by ID;
+- architecture inspection confirms all data controls receive models/native
+  templates only. Do not test private presenter fields.
 
 The threshold is a regression ceiling for this fixed viewport, not a framework
 benchmark. Log viewport, item count, and realized counts on failure. Do not test
@@ -202,12 +196,10 @@ private presenter fields.
 - Plan 005 adds root-owned Copy, Undo, Redo, and Select All commands and passes
   them to DocumentPane as Plan 004 command inputs. Their handlers call the
   version-verified direct `TextEditor.Focus()`, `Copy()`, `Undo()`, `Redo()`, and
-  `SelectAll()` APIs; enablement reads the corresponding `Can*` properties.
-  If AvaloniaEdit 12 has no `CanSelectAll`, use
-  `editor.Document.TextLength > 0` explicitly. Notify all four commands when the
-  editor attaches/detaches, TextChanged fires, TextArea selection changes, an
-  external replacement completes, or undo/redo executes.
-  Search/find remains deferred rather than adding an editor feature here.
+  `SelectAll()` APIs; enablement reads corresponding `Can*` properties. Notify
+  all four commands when the editor attaches/detaches, TextChanged fires,
+  TextArea selection changes, an external replacement completes, or undo/redo
+  executes. Search/find remains deferred.
 - Keep one app-specific `DocumentSession` coordinator if needed for model/editor
   synchronization. It may mention AvaloniaEdit types; it must not expose a
   mirrored property/event surface.
@@ -216,7 +208,7 @@ private presenter fields.
 
 | Purpose | Command | Expected result |
 | --- | --- | --- |
-| Package restore | `dotnet restore Lucent.sln` | resolves TreeDataGrid 12.1.1, AvaloniaEdit 12.0.0, and Headless 12.1.1 |
+| Package restore | `dotnet restore Lucent.sln` | resolves AvaloniaEdit 12.0.0 and Headless 12.1.1; no commercial package |
 | Baseline | `dotnet test Lucent.sln --no-restore` | Plans 001–004 baseline passes |
 | Headless focus | `dotnet test tests/Lucent.Workbench.Tests/Lucent.Workbench.Tests.csproj --no-restore --filter "FullyQualifiedName~Virtualization|FullyQualifiedName~Editor"` | bounded realization/editor tests pass |
 | Workbench smoke | `dotnet run --project examples/workbench/Lucent.Workbench.csproj -- --smoke-test data` | project/problem/editor flow exits 0 |
@@ -253,12 +245,14 @@ private presenter fields.
 
 **Out of scope**:
 
-- Changes to `src/Lucent.Compiler` or `src/Lucent.Runtime`. Direct package types
+- Changes to `src/Lucent.Compiler` or `src/Lucent.Runtime`. Native package types
   should already work through Plans 003–004; a failure is a STOP condition.
 - A Lucent data-grid/list/item-template/recycling API, component values, or one
   mounted component owner per data item.
-- Custom editor, syntax highlighting service, language-server connection,
-  filesystem workspace loading, document persistence, diffing, or tabs.
+- TreeView, custom presenters, custom virtualization, generic selection
+  frameworks, custom editor, syntax highlighting service, language-server
+  connection, filesystem workspace loading, document persistence, diffing, or
+  tabs.
 - Replacing native control templates/presenters, general performance framework,
   or promising a universal 200-container ceiling.
 
@@ -266,13 +260,14 @@ private presenter fields.
 
 ### Step 1: Lock package/API compatibility with a C# spike
 
-Add package references and a temporary focused test that constructs the exact
-TreeDataGrid source/columns and AvaloniaEdit TextEditor under Avalonia 12.1.1.
-Add FluentTheme and both exact StyleIncludes above to app and test app. Compile
-`HierarchicalTreeDataGridSource`, expander/text columns,
-`TreeDataGridRowSelectionModel`, `ExpandAll`, `BringRowIntoView`, TreeDataGrid,
-TextEditor, direct edit commands, document replacement, and undo clearing before
-later steps; do not design against remembered Avalonia 11 signatures.
+Record the original commercial package's `AVLIC0001` failure, remove that
+package, and add the free AvaloniaEdit and headless references. Add a temporary
+focused test that constructs native `ListBox`/`ListBoxItem` templates,
+`ScrollIntoView`, and AvaloniaEdit `TextEditor` under Avalonia 12.1.1. Add
+FluentTheme and the exact AvaloniaEdit StyleInclude to app and test app. Compile
+the ListBox, data-template, scrolling, TextEditor, direct edit commands,
+document replacement, and undo clearing before later steps; do not design
+against remembered Avalonia 11 signatures.
 
 **Verify**: restore/build succeeds with one version of each package and no
 binding/type-load warnings.
@@ -280,46 +275,50 @@ binding/type-load warnings.
 ### Step 2: Add the reusable headless Workbench harness
 
 Initialize one headless App on the dedicated dispatcher thread with the exact
-assembly setup/cleanup above, create/show an 800×600 Window through `OnUiAsync`,
+assembly setup/cleanup above, create/show an 800x600 Window through `OnUiAsync`,
 and add helpers only for bounded dispatcher/layout draining and public visual
-descendants. Every helper closes the Window in `finally`. Reuse Plan 004's fake
-desktop host.
+descendants. Every helper closes the Window in `finally`. Migrate existing
+Workbench desktop-host tests onto this harness rather than leaving two
+AppBuilder loops.
 
 **Verify**: a sentinel Workbench window test shows, focuses one control, and
 closes without a desktop or leaked component owner.
 
-### Step 3: Integrate native TreeDataGrid and ListBox data surfaces
+### Step 3: Integrate native ListBox data surfaces
 
-Add typed models/source/columns, use ObservableCollection directly for normal
-changes and `ReplaceAll` only for reset, and wire the exact selection model by
-stable unique ID/IndexPath. Preserve stock presenters and bounded layout. Keep
-the small existing structural keyed example/tests unchanged.
+Add typed models and the flattened workspace projection, use
+`ObservableCollection` directly for normal changes and `ReplaceAll` only for
+reset, and wire native ListBox selection by stable unique ID. Preserve stock
+presenters and bounded layout. Keep the small existing structural keyed
+example/tests unchanged.
 
 **Verify**: collection and selection tests pass for add/remove/move/reset.
 
 ### Step 4: Prove bounded realization
 
-Populate the fixed test window with 10,000 items, show/layout, count public row
-containers, scroll end/back, and assert the evidence contract above. Fail if the
-last row cannot be reached or if counts are zero.
+Populate the fixed test window with 10,000 items in each of the three ListBoxes,
+show/layout, count public `ListBoxItem` containers, scroll end/back, and assert
+the evidence contract above. Fail if the last item cannot be reached or if
+counts are zero.
 
 **Verify**: `VirtualizationTests` passes repeatedly and reports counts on failure.
 
 ### Step 5: Replace the editor placeholder with AvaloniaEdit
 
-Render TextEditor directly, synchronize one `OpenDocument`, preserve one editor
-instance, and route focus/edit commands to its native API. Keep event ownership
-in generated component handlers and app coordination in `DocumentSession`.
+Render TextEditor directly, synchronize one `OpenDocument`, preserve one
+editor instance, and route focus/edit commands to its native API. Keep event
+ownership in generated component handlers and app coordination in
+`DocumentSession`.
 
-**Verify**: headless test types text, asserts model/dirty update, performs undo/
-redo, applies an external text replacement, and verifies control identity plus
-clamped caret/selection.
+**Verify**: headless test types text, asserts model/dirty update, performs
+undo/redo, applies an external text replacement, and verifies control identity
+plus clamped caret/selection.
 
 ### Step 6: Run the Workbench data smoke and full gates
 
-The native smoke expands the project tree, selects a file, opens its placeholder
-text, edits it, navigates to one problem, and shuts down. It does not access the
-real filesystem yet.
+The native smoke expands the flattened project tree, selects a file, opens its
+placeholder text, edits it, navigates to one problem, and shuts down. It does not
+access the real filesystem yet.
 
 **Verify**: focused headless tests, native data smoke, full solution, and VS Code
 tests pass.
@@ -335,20 +334,21 @@ tests pass.
 
 ## Done criteria
 
-- [ ] Structural keyed regions remain unchanged and explicitly non-virtualized.
-- [ ] TreeDataGrid and ListBox keep realized containers below the fixed viewport
-      ceiling for 10,000-item tests.
-- [ ] Selection survives add/move/reset by application ID where the item exists.
-- [ ] AvaloniaEdit is rendered directly with its shipped theme.
-- [ ] Editing, undo/redo, dirty state, focus, caret/selection, and editor identity
+- [x] Structural keyed regions remain unchanged and explicitly non-virtualized.
+- [x] Workspace, problems, and quick-open ListBoxes keep realized containers
+      below the fixed viewport ceiling for 10,000-item tests.
+- [x] Workspace selection survives add/move/reset by application ID where the
+      item remains and uses the documented fallback when it is removed.
+- [x] AvaloniaEdit is rendered directly with its shipped theme.
+- [x] Editing, undo/redo, dirty state, focus, caret/selection, and editor identity
       pass headless tests.
-- [ ] No Lucent item-renderer/recycler/editor abstraction is added.
-- [ ] Full build, tests, native smoke, and VS Code tests pass.
+- [x] No Lucent item-renderer/recycler/editor abstraction is added.
+- [x] Full build, tests, native smoke, and VS Code tests pass.
 
 ## STOP conditions
 
-- TreeDataGrid/AvaloniaEdit types cannot bind as native project controls after
-  Plans 003–004; report the exact semantic gap instead of adding wrappers.
+- Native ListBox/AvaloniaEdit types cannot bind as project controls after Plans
+  003–004; report the exact semantic gap instead of adding wrappers.
 - The chosen layout realizes all 10,000 items; first fix native layout/template
   configuration, not Lucent runtime code.
 - Workbench needs a stateful Lucent component as a recycled row. Capture the
@@ -361,8 +361,8 @@ tests pass.
 ## Maintenance notes
 
 Plan 006 expands the same headless project for accessibility/lifecycle flows.
-If pinned TreeDataGrid/AvaloniaEdit versions lack adequate native automation
-peers, Plan 006 may replace the direct control types with accessibility-only
-subclasses; those subclasses must add peers only and must not mirror control APIs.
-Plan 008 may add actual project/document I/O but must keep these native controls
-and stable selection contracts.
+If the pinned ListBox/AvaloniaEdit versions lack adequate native automation
+peers, Plan 006 may add accessibility-only subclasses; those subclasses must add
+peers only and must not mirror control APIs. Plan 008 may add actual
+project/document I/O but must keep these native controls and stable selection
+contracts.

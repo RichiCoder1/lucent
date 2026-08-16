@@ -8,6 +8,8 @@ using Avalonia.Media;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Avalonia.Markup.Xaml.Styling;
+using AvaloniaEdit;
 using System.Threading;
 
 namespace Lucent.Examples.Workbench;
@@ -17,6 +19,10 @@ internal sealed class App : Application
     public override void Initialize()
     {
         Styles.Add(new FluentTheme());
+        Styles.Add(new StyleInclude(new Uri("avares://AvaloniaEdit/"))
+        {
+            Source = new Uri("avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml"),
+        });
         Resources["WorkbenchAccent"] = new SolidColorBrush(Colors.CornflowerBlue);
     }
 
@@ -64,17 +70,40 @@ internal sealed class App : Application
                 binding.Gesture is KeyGesture gesture && gesture.Key == Key.K);
             var toggleBinding = window.KeyBindings.First(binding =>
                 binding.Gesture is KeyGesture gesture && gesture.Key == Key.T);
-            var editor = Descendants(window).OfType<TextBox>().First(textBox =>
-                textBox.Text == "Static editor placeholder");
+            var editor = Descendants(window).OfType<TextEditor>().First(textEditor =>
+                textEditor.Text == "// Workbench document\n");
+            var workspaceList = Descendants(window).OfType<ListBox>().First(list =>
+                list.ItemsSource is IEnumerable<WorkspaceRow>);
+            var problemsList = Descendants(window).OfType<ListBox>().First(list =>
+                list.ItemsSource is IEnumerable<ProblemItem>);
+            workspaceList.SelectedItem = workspaceList.Items.Cast<WorkspaceRow>().First(row => row.Node.Id == "readme");
+            var workspaceSelected = workspaceList.SelectedItem is WorkspaceRow { Node.Id: "readme" };
+            problemsList.SelectedIndex = 0;
+            var problemSelected = problemsList.SelectedItem is ProblemItem;
+            var dataVisible = workspaceList.Items.Count > 0 && problemsList.Items.Count == 3;
+            window.UpdateLayout();
+            var workspaceOpened = editor.Text == "// README.md\n" &&
+                Descendants(window).OfType<TextBlock>().Any(text => text.Text == "README.md");
             editor.Focus();
+            editor.AppendText("// smoke edit\n");
+            var editorChanged = editor.Text.Contains("// smoke edit", StringComparison.Ordinal);
             paletteBinding.Command!.Execute(null);
+            var quickOpenList = Descendants(window).OfType<ListBox>().First(list =>
+                list.ItemsSource is IEnumerable<QuickOpenItem>);
+            quickOpenList.SelectedIndex = 0;
+            var quickOpenSelected = quickOpenList.SelectedItem is QuickOpenItem;
             var openMenu = Descendants(window).OfType<MenuItem>().First(item =>
                 item.Header?.ToString() == "Open workspace");
             var sameCommand = ReferenceEquals(openBinding.Command, openMenu.Command);
             Descendants(window).OfType<Button>().First(button =>
                 button.Content?.ToString() == "Close palette")
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            var focusRestored = editor.IsFocused;
+            window.KeyBindings.First(binding =>
+                binding.Gesture is KeyGesture gesture && gesture.Key == Key.E).Command!.Execute(null);
+            window.UpdateLayout();
+            var focused = window.FocusManager?.GetFocusedElement();
+            var focusRestored = focused is Visual visual &&
+                (ReferenceEquals(visual, editor) || visual.GetVisualAncestors().Contains(editor));
             buttons.First(button => button.Content?.ToString() == "Increment edits")
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             buttons.First(button => button.Content?.ToString() == "Switch document")
@@ -83,7 +112,8 @@ internal sealed class App : Application
             passed = before && Descendants(window).OfType<TextBlock>().Any(text => text.Text == "Edits: 1") &&
                 Descendants(window).OfType<TextBlock>().Any(text => text.Text == "README.md") &&
                 !Descendants(window).OfType<TextBlock>().Any(text => text.Text == "3 problems") &&
-                sameCommand && focusRestored;
+                sameCommand && focusRestored && workspaceSelected && problemSelected && quickOpenSelected &&
+                editorChanged && workspaceOpened && dataVisible && quickOpenList.Items.Count > 0;
             window.Close();
             File.AppendAllText(Path.Combine(Path.GetTempPath(), "lucent-workbench-main.txt"), $"|passed:{passed}");
         }, DispatcherPriority.Loaded);

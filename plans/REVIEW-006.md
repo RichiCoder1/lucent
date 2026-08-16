@@ -26,7 +26,8 @@ read-only tools, no extensions, and no repository write authority.
   serialized save tail, timeout observer, and intercepted final close are exact.
 - **Accessibility proof was too generic:** accepted. Six exact ID/name/type/focus
   tuples are asserted. Source inspection justified two narrow accessibility-only
-  peers for TreeDataGrid and AvaloniaEdit; native peers remain elsewhere.
+  peers for the flattened workspace ListBox and AvaloniaEdit; native peers remain
+  elsewhere.
 - **Workbench lacked an async test source:** accepted. IProblemLoader supplies a
   bounded computed flow and physical Refresh/Retry route; Plan 008 swaps only its
   placeholder implementation.

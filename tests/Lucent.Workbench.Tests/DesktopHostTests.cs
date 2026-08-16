@@ -14,40 +14,6 @@ namespace Lucent.Workbench.Tests;
 [TestClass]
 public sealed class DesktopHostTests
 {
-    private static Thread? _uiThread;
-    private static TaskCompletionSource _uiReady = null!;
-
-    [ClassInitialize]
-    public static void StartAvalonia(TestContext _)
-    {
-        _uiReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _uiThread = new Thread(() =>
-        {
-            var lifetime = new ClassicDesktopStyleApplicationLifetime
-            {
-                ShutdownMode = ShutdownMode.OnExplicitShutdown,
-            };
-            AppBuilder.Configure<Application>().UsePlatformDetect().SetupWithLifetime(lifetime);
-            _uiReady.SetResult();
-            lifetime.Start(Array.Empty<string>());
-        }) { IsBackground = true };
-        if (OperatingSystem.IsWindows())
-            _uiThread.SetApartmentState(ApartmentState.STA);
-        _uiThread.Start();
-        _uiReady.Task.GetAwaiter().GetResult();
-    }
-
-    [ClassCleanup]
-    public static void StopAvalonia()
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)
-                lifetime.Shutdown();
-        });
-        _uiThread?.Join(TimeSpan.FromSeconds(5));
-    }
-
     [TestMethod]
     public async Task Fake_host_records_owner_explicit_operations()
     {
@@ -253,10 +219,10 @@ public sealed class DesktopHostTests
     }
 
     private static T RunOnUiThread<T>(Func<T> action) =>
-        Dispatcher.UIThread.InvokeAsync(action).GetAwaiter().GetResult();
+        HeadlessTestHarness.Run(action);
 
     private static void RunOnUiThread(Action action) =>
-        Dispatcher.UIThread.InvokeAsync(action).GetAwaiter().GetResult();
+        HeadlessTestHarness.Run(action);
 
     private static IEnumerable<Control> Find(Control root, Func<Control, bool> predicate)
     {

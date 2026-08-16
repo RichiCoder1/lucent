@@ -355,6 +355,8 @@ not automate the OS picker.
 
 ## Maintenance notes
 
-Plan 005 should consume TreeDataGrid/AvaloniaEdit through this native symbol and
-resource path, not add wrappers by default. Plan 006 moves shell smoke assertions
-to headless tests and audits the attached automation metadata.
+Plan 005 consumes AvaloniaEdit and native virtualized ListBox controls through
+this native symbol and resource path, not wrappers. Its originally planned
+TreeDataGrid dependency was replaced after Avalonia 12 required a commercial
+license. Plan 006 moves shell smoke assertions to headless tests and audits the
+attached automation metadata.

@@ -1,9 +1,10 @@
 namespace Lucent.Examples.Workbench;
 
+using AvaloniaEdit;
 using System.Windows.Input;
 using Avalonia.Automation;
 
-component DocumentPane(string title, ICommand focusCommand, string language = "C#")
+component DocumentPane(string title, DocumentSession session, ICommand focusCommand, ICommand copyCommand, ICommand undoCommand, ICommand redoCommand, ICommand selectAllCommand, string language = "C#")
 {
     slot toolbar;
     private readonly State<int> edits = new(0);
@@ -16,6 +17,22 @@ component DocumentPane(string title, ICommand focusCommand, string language = "C
             TextBlock { Text: $"Edits: {edits.Value}"; }
             Button { Content: "Increment edits"; Click: () => Increment(); }
             Button { Content: "Focus editor"; Command: focusCommand; }
+            StackPanel {
+                Orientation: Avalonia.Layout.Orientation.Horizontal;
+                Button { Content: "Copy"; Command: copyCommand; }
+                Button { Content: "Undo"; Command: undoCommand; }
+                Button { Content: "Redo"; Command: redoCommand; }
+                Button { Content: "Select all"; Command: selectAllCommand; }
+            }
+            TextEditor {
+                Text: "";
+                ShowLineNumbers: true;
+                Focusable: true;
+                AutomationProperties.Name: "Editor";
+                AutomationProperties.AutomationId: "editor";
+                Loaded: (sender, e) => session.Attach(sender);
+                Unloaded: (sender, e) => session.Detach(sender);
+            }
             yield children;
             StackPanel { yield toolbar; }
         }

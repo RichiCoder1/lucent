@@ -3,9 +3,12 @@ namespace Lucent.Examples.Workbench;
 using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
+using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.VisualTree;
+using AvaloniaEdit;
+using System.Collections.ObjectModel;
 using System;
 using System.Linq;
 using System.Threading;
@@ -19,8 +22,26 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     private readonly State<string> workspaceName = new("Lucent");
     private readonly State<string> documentTitle = new("Program.cs");
     private readonly State<string> lastDiagnostic = new("No diagnostics copied");
+    private readonly ObservableCollection<WorkspaceNode> workspaceRoots = new([new WorkspaceNode("root", "Lucent", new ObservableCollection<WorkspaceNode>([
+        new WorkspaceNode("src", "src", new ObservableCollection<WorkspaceNode>([
+            new WorkspaceNode("compiler", "Lucent.Compiler", []),
+            new WorkspaceNode("runtime", "Lucent.Runtime", []),
+        ])),
+        new WorkspaceNode("readme", "README.md", []),
+    ]))]);
+    private readonly WorkspaceSelectionController workspaceSelection = new WorkspaceSelectionController(workspaceRoots);
+    private readonly ObservableCollection<ProblemItem> problems = new([
+        new ProblemItem("problem-1", "WorkbenchApp.lui", 1, "Example diagnostic", ProblemSeverity.Warning),
+        new ProblemItem("problem-2", "DocumentPane.lui", 1, "Example diagnostic", ProblemSeverity.Info),
+        new ProblemItem("problem-3", "WorkspaceSidebar.lui", 1, "Example diagnostic", ProblemSeverity.Error),
+    ]);
+    private readonly ObservableCollection<QuickOpenItem> quickOpenItems = new([
+        new QuickOpenItem("quick-workbench", "WorkbenchApp.lui", "WorkbenchApp.lui"),
+        new QuickOpenItem("quick-document", "DocumentPane.lui", "DocumentPane.lui"),
+    ]);
+    private readonly OpenDocument document = new("Program.cs", "// Workbench document\n");
+    private readonly DocumentSession documentSession = new DocumentSession(document, NotifyCommandState);
     private Window? window = null;
-    private TextBox? editor = null;
     private Border? sidebar = null;
     private Border? palette = null;
     private IInputElement? previousFocus = null;
@@ -35,13 +56,22 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     private readonly DelegateCommand settings = new DelegateCommand(OpenSettings, CanOpenWorkspace);
     private readonly DelegateCommand copyDiagnostic = new DelegateCommand(CopyDiagnostic, CanCopyDiagnostic);
     private readonly DelegateCommand generatedPreview = new DelegateCommand(ShowGeneratedPreview, CanOpenWorkspace);
+    private readonly DelegateCommand copyDocument = new DelegateCommand(CopyDocument, CanCopyDocument);
+    private readonly DelegateCommand undoDocument = new DelegateCommand(UndoDocument, CanUndoDocument);
+    private readonly DelegateCommand redoDocument = new DelegateCommand(RedoDocument, CanRedoDocument);
+    private readonly DelegateCommand selectAllDocument = new DelegateCommand(SelectAllDocument, CanSelectAllDocument);
+
 
     private bool CanOpenWorkspace() => !lifetime.IsCancellationRequested;
     private bool CanCloseWorkspace() => CanOpenWorkspace() && workspaceName.Value != "No workspace";
     private bool CanOpenPalette() => CanOpenWorkspace() && !showPalette.Value;
     private bool CanFocusSidebar() => sidebar is not null;
-    private bool CanFocusEditor() => editor is not null;
+    private bool CanFocusEditor() => documentSession.Editor is not null;
     private bool CanCopyDiagnostic() => showProblems.Value;
+    private bool CanCopyDocument() => documentSession.CanCopy;
+    private bool CanUndoDocument() => documentSession.CanUndo;
+    private bool CanRedoDocument() => documentSession.CanRedo;
+    private bool CanSelectAllDocument() => documentSession.CanSelectAll;
 
     private void NotifyCommandState()
     {
@@ -51,6 +81,10 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         focusSidebar.NotifyCanExecuteChanged();
         focusEditor.NotifyCanExecuteChanged();
         copyDiagnostic.NotifyCanExecuteChanged();
+        copyDocument.NotifyCanExecuteChanged();
+        undoDocument.NotifyCanExecuteChanged();
+        redoDocument.NotifyCanExecuteChanged();
+        selectAllDocument.NotifyCanExecuteChanged();
     }
 
     private void OpenWorkspace() => _ = OpenWorkspaceAsync();
@@ -107,12 +141,29 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
             return;
         }
 
-        if (editor is not null && editor.IsAttachedToVisualTree() && editor.Focusable)
-            editor.Focus();
+        if (documentSession.Editor is not null && documentSession.Editor.IsAttachedToVisualTree() && documentSession.Editor.Focusable)
+            documentSession.Editor.Focus();
     }
 
     private void FocusSidebar() => sidebar?.Focus();
-    private void FocusEditor() => editor?.Focus();
+    private void FocusEditor() => documentSession.Editor?.Focus();
+    private void CopyDocument() => documentSession.Copy();
+    private void UndoDocument() => documentSession.Undo();
+    private void RedoDocument() => documentSession.Redo();
+    private void SelectAllDocument() => documentSession.SelectAll();
+
+    private void OpenWorkspaceNode(WorkspaceNode node)
+    {
+        if (node.Children.Count != 0) return;
+        documentTitle.Update(node.Name);
+        documentSession.ReplaceText($"// {node.Name}\n");
+    }
+
+    private void SwitchDocument()
+    {
+        documentTitle.Update("README.md");
+        documentSession.ReplaceText("# Lucent Workbench\n");
+    }
 
     private void ToggleProblems()
     {
@@ -178,7 +229,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         Width: 960;
         Height: 680;
         Loaded: (sender, e) => window = sender;
-        Unloaded: (sender, e) => { if (ReferenceEquals(window, sender)) window = null; };
+        Unloaded: (sender, e) => { if (ReferenceEquals(window, sender)) window = null; documentSession.Dispose(); };
         KeyBindings: [
             new KeyBinding { Gesture = new KeyGesture(Key.O, KeyModifiers.Control), Command = openWorkspace },
             new KeyBinding { Gesture = new KeyGesture(Key.W, KeyModifiers.Control), Command = closeWorkspace },
@@ -189,6 +240,9 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
             new KeyBinding { Gesture = new KeyGesture(Key.T, KeyModifiers.Control), Command = toggleProblems },
             new KeyBinding { Gesture = new KeyGesture(Key.S, KeyModifiers.Control), Command = settings },
             new KeyBinding { Gesture = new KeyGesture(Key.C, KeyModifiers.Control), Command = copyDiagnostic },
+            new KeyBinding { Gesture = new KeyGesture(Key.Z, KeyModifiers.Control), Command = undoDocument },
+            new KeyBinding { Gesture = new KeyGesture(Key.Y, KeyModifiers.Control), Command = redoDocument },
+            new KeyBinding { Gesture = new KeyGesture(Key.A, KeyModifiers.Control), Command = selectAllDocument },
         ];
         AutomationProperties.Name: "Lucent Workbench";
         AutomationProperties.AutomationId: "workbench-window";
@@ -205,24 +259,16 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                 Focusable: true;
                 Loaded: (sender, e) => { sidebar = sender; focusSidebar.NotifyCanExecuteChanged(); };
                 Unloaded: (sender, e) => { if (ReferenceEquals(sidebar, sender)) sidebar = null; focusSidebar.NotifyCanExecuteChanged(); };
-                WorkspaceSidebar(workspaceName.Value, focusCommand: focusSidebar, compact: false) {}
+                WorkspaceSidebar(workspaceName.Value, workspaceSelection, OpenWorkspaceNode, focusCommand: focusSidebar, compact: false) {}
             }
-            DocumentPane(documentTitle.Value, focusCommand: focusEditor) {
-                TextBox {
-                    Text: "Static editor placeholder";
-                    Focusable: true;
-                    AutomationProperties.Name: "Editor";
-                    AutomationProperties.AutomationId: "editor-textbox";
-                    Loaded: (sender, e) => { editor = sender; focusEditor.NotifyCanExecuteChanged(); };
-                    Unloaded: (sender, e) => { if (ReferenceEquals(editor, sender)) editor = null; focusEditor.NotifyCanExecuteChanged(); };
-                }
+            DocumentPane(documentTitle.Value, documentSession, focusCommand: focusEditor, copyCommand: copyDocument, undoCommand: undoDocument, redoCommand: redoDocument, selectAllCommand: selectAllDocument) {
                 slot toolbar {
-                    Button { Content: "Switch document"; Click: () => documentTitle.Update("README.md"); }
+                    Button { Content: "Switch document"; Click: () => SwitchDocument(); }
                 }
             }
             Border {
                 if (showProblems.Value) {
-                    ProblemsPane(count: 3, copyCommand: copyDiagnostic) {}
+                    ProblemsPane(problems, copyCommand: copyDiagnostic) {}
                 }
                 else {
                     TextBlock { Text: "Problems hidden"; }
@@ -246,6 +292,11 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                     KeyDown: (sender, e) => { if (e.Key == Key.Escape) { e.Handled = true; ClosePalette(); } };
                     StackPanel {
                         TextBlock { Text: "Command palette"; }
+                        ListBox {
+                            Height: 160;
+                            ItemsSource: quickOpenItems;
+                            DisplayMemberBinding: new Binding("DisplayName");
+                        }
                         Button { Content: "Open workspace"; Command: openWorkspace; }
                         Button { Content: "Close palette"; Click: () => ClosePalette(); }
                     }

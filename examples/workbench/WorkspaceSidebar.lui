@@ -1,13 +1,28 @@
 namespace Lucent.Examples.Workbench;
 
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using System.Windows.Input;
 using Avalonia.Automation;
 
-component WorkspaceSidebar(string workspace, ICommand focusCommand, bool compact = false) => Border {
+component WorkspaceSidebar(string workspace, WorkspaceSelectionController selection, Action<WorkspaceNode> openNode, ICommand focusCommand, bool compact = false) => Border {
     Padding: new Avalonia.Thickness(compact ? 4 : 12);
     AutomationProperties.Name: "Workspace sidebar";
     StackPanel {
         TextBlock { Text: $"Workspace: {workspace}"; }
         Button { Content: "Focus sidebar"; Command: focusCommand; }
+        ListBox {
+            Height: 400;
+            AutomationProperties.Name: "Workspace files";
+            ItemsSource: selection.VisibleRows;
+            ItemTemplate: new FuncDataTemplate<WorkspaceRow>((row, _) => new Border {
+                Padding = new Thickness(row.Depth * 16, 2, 2, 2),
+                Child = new TextBlock { Text = row.Node.Name },
+            }, true);
+            Loaded: (sender, e) => selection.Attach(sender);
+            Unloaded: (sender, e) => selection.Detach(sender);
+            SelectionChanged: (sender, e) => { if (sender.SelectedItem is WorkspaceRow row) openNode(row.Node); };
+        }
     }
 };
