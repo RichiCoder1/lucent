@@ -173,7 +173,8 @@ internal static class EditorIntelligence
                 CSharpIslandRole.ComputedFactory or
                 CSharpIslandRole.LoopSource or
                 CSharpIslandRole.LoopKey or
-                CSharpIslandRole.Condition) &&
+                CSharpIslandRole.Condition or
+                CSharpIslandRole.OrdinaryMember) &&
             offset >= scope.Span.Start &&
             offset <= scope.Span.End);
 

@@ -10,6 +10,7 @@
 - **Risk**: LOW
 - **Depends on**: Plans 003 and 004
 - **Category**: interop / DX
+- **Status**: DONE
 
 ## Why this matters
 
@@ -46,12 +47,14 @@ Rules:
   a conversion, and caller-selected `T` weakens the compiler-known root type.
 - Normal one-shot mount and disposed-owner errors remain unchanged.
 
-Generated component types receive standard `GeneratedCodeAttribute` metadata.
-A focused Roslyn analyzer recognizes those symbols without adding a runtime
-marker interface. It reports dropped or undisposed mounted locals, repeated
-mounts, roots escaping lexical disposal, and temporary component mounts that
-lose the only disposal handle. Fields, returns, unknown calls, and event-driven
-transfer remain conservative warnings rather than false claims of proof.
+Generated component types receive standard `GeneratedCodeAttribute` metadata
+with tool name `Lucent.Compiler`. A focused Roslyn analyzer recognizes only
+that exact marker, then performs bounded intra-procedural control-flow analysis.
+It reports dropped or undisposed mounted locals when every exit is not proven,
+repeated mounts only when one executable path can reach both calls, roots
+escaping lexical disposal (including assigned roots returned later), and
+temporary component mounts that lose the only disposal handle. Fields, unknown
+calls, and event-driven transfer remain outside the proof boundary.
 
 ## Workbench proof
 
@@ -107,15 +110,15 @@ should not change.
 
 ## Done criteria
 
-- [ ] Direct single native roots expose an exact typed `MountRoot()` method.
-- [ ] Existing `Mount(): Fragment` output and composition remain unchanged.
-- [ ] Unsupported root shapes do not receive an approximate typed method.
-- [ ] Lifecycle diagnostics catch dropped, repeatedly mounted, and lexically
+- [x] Direct single native roots expose an exact typed `MountRoot()` method.
+- [x] Existing `Mount(): Fragment` output and composition remain unchanged.
+- [x] Unsupported root shapes do not receive an approximate typed method.
+- [x] Lifecycle diagnostics catch dropped, repeatedly mounted, and lexically
       escaped generated components without claiming arbitrary event proof.
-- [ ] Workbench has no pane-only handwritten `Window` adapters.
-- [ ] Modal and non-modal paths preserve native owners/results and dispose the
+- [x] Workbench has no pane-only handwritten `Window` adapters.
+- [x] Modal and non-modal paths preserve native owners/results and dispose the
       logical component exactly once at the correct lifetime point.
-- [ ] Full build, tests, Workbench headless/smoke gates, and VS Code tests pass.
+- [x] Full build, tests, Workbench headless/smoke gates, and VS Code tests pass.
 
 ## STOP conditions
 

@@ -6,6 +6,87 @@ namespace Lucent.Compiler.Tests;
 public sealed class GeneralCompilerTests
 {
     [TestMethod]
+    public void Direct_native_roots_emit_typed_mount_root_and_generated_code_attribute()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => Window { Title: \"App\"; };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!,
+            "[global::System.CodeDom.Compiler.GeneratedCode(\"Lucent.Compiler\", \"1.0\")]");
+        StringAssert.Contains(result.GeneratedSource!,
+            "public global::Avalonia.Controls.Window MountRoot()");
+        StringAssert.Contains(result.GeneratedSource!, "var __lucent_roots = Mount();");
+
+        var control = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component ControlApp() => Border {};",
+            "ControlApp.lui");
+        Assert.IsTrue(control.Succeeded, string.Join(Environment.NewLine, control.Diagnostics));
+        StringAssert.Contains(control.GeneratedSource!,
+            "public global::Avalonia.Controls.Border MountRoot()");
+    }
+
+    [TestMethod]
+    public void Indirect_and_structural_roots_do_not_emit_approximate_mount_root()
+    {
+        var indirect = LucentCompiler.CompileProject([
+            new LucentSourceInput("Child.lui", "namespace Demo; using Avalonia.Controls; component Child() => Border {};"),
+            new LucentSourceInput("App.lui", "namespace Demo; using Avalonia.Controls; component App() => Child {};"),
+        ]);
+        var indirectSource = indirect.Sources.Single(item => item.SourcePath == "App.lui").Result.GeneratedSource!;
+        Assert.IsFalse(indirectSource.Contains("MountRoot()", StringComparison.Ordinal));
+
+        var many = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => Fragment { Border {} Border {} };",
+            "App.lui");
+        Assert.IsTrue(many.Succeeded, string.Join(Environment.NewLine, many.Diagnostics));
+        Assert.IsFalse(many.GeneratedSource!.Contains("MountRoot()", StringComparison.Ordinal));
+
+        var empty = LucentCompiler.Compile(
+            "namespace Demo; component App() => Fragment {};",
+            "App.lui");
+        Assert.IsTrue(empty.Succeeded, string.Join(Environment.NewLine, empty.Diagnostics));
+        Assert.IsFalse(empty.GeneratedSource!.Contains("MountRoot()", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Generated_semantic_stubs_keep_each_sources_imports_isolated()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-stub-imports", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var types = Path.Combine(directory, "Inputs.cs");
+            File.WriteAllText(types,
+                "namespace OneTypes { public sealed class Input { } } " +
+                "namespace TwoTypes { public sealed class Input { } }");
+            var result = LucentCompiler.CompileProject([
+                new LucentSourceInput("A.lui", """
+                    namespace One;
+                    using OneTypes;
+                    component A(Input input)
+                    {
+                        private Two.BComponent child = null!;
+                        Fragment Render() => Border {};
+                    }
+                    """),
+                new LucentSourceInput("B.lui", """
+                    namespace Two;
+                    using TwoTypes;
+                    component B(Input input) => Window {};
+                    """),
+            ], new LucentProjectContext(SourcePaths: [types]));
+
+            Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine,
+                result.Sources.SelectMany(source => source.Result.Diagnostics)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+    [TestMethod]
     public void Native_controls_properties_content_and_events_are_lowered_directly()
     {
         var result = LucentCompiler.Compile(

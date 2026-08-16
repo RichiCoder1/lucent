@@ -12,6 +12,7 @@ using Lucent.Runtime;
 
 namespace Demo;
 
+[global::System.CodeDom.Compiler.GeneratedCode("Lucent.Compiler", "1.0")]
 internal sealed class AppComponent : IDisposable
 {
     private global::Avalonia.Controls.Window? __lucent_control1;
@@ -79,6 +80,16 @@ internal sealed class AppComponent : IDisposable
         return Fragment.From(__lucent_control1!);
     }
 
+    public global::Avalonia.Controls.Window MountRoot()
+    {
+        var __lucent_roots = Mount();
+        if (__lucent_roots.Count != 1)
+        {
+            throw new InvalidOperationException("The component did not produce exactly one native root.");
+        }
+        return (global::Avalonia.Controls.Window)__lucent_roots[0];
+    }
+
     public void Dispose() => __lucent_owner.Dispose();
 
     internal void UpdateInputs()
@@ -101,6 +112,7 @@ using Lucent.Runtime;
 
 namespace Demo;
 
+[global::System.CodeDom.Compiler.GeneratedCode("Lucent.Compiler", "1.0")]
 internal sealed class HostComponent : IDisposable
 {
     private global::Avalonia.Controls.StackPanel? __lucent_control1;
@@ -156,6 +168,16 @@ internal sealed class HostComponent : IDisposable
         return Fragment.From(__lucent_control1!);
     }
 
+    public global::Avalonia.Controls.StackPanel MountRoot()
+    {
+        var __lucent_roots = Mount();
+        if (__lucent_roots.Count != 1)
+        {
+            throw new InvalidOperationException("The component did not produce exactly one native root.");
+        }
+        return (global::Avalonia.Controls.StackPanel)__lucent_roots[0];
+    }
+
     public void Dispose() => __lucent_owner.Dispose();
 
     internal void UpdateInputs(string title)
@@ -193,6 +215,7 @@ using Lucent.Runtime;
 
 namespace Demo;
 
+[global::System.CodeDom.Compiler.GeneratedCode("Lucent.Compiler", "1.0")]
 internal sealed class LeafComponent : IDisposable
 {
     private global::Avalonia.Controls.TextBlock? __lucent_control1;
@@ -233,6 +256,16 @@ internal sealed class LeafComponent : IDisposable
         __lucent_UpdateBinding1();
 
         return Fragment.From(__lucent_control1!);
+    }
+
+    public global::Avalonia.Controls.TextBlock MountRoot()
+    {
+        var __lucent_roots = Mount();
+        if (__lucent_roots.Count != 1)
+        {
+            throw new InvalidOperationException("The component did not produce exactly one native root.");
+        }
+        return (global::Avalonia.Controls.TextBlock)__lucent_roots[0];
     }
 
     public void Dispose() => __lucent_owner.Dispose();

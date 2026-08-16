@@ -2,6 +2,8 @@ using Lucent.Compiler.CodeGeneration;
 using Lucent.Compiler.Parsing;
 using Lucent.Compiler.Semantics;
 using Lucent.Compiler.Styling;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Lucent.Compiler;
 
@@ -125,6 +127,7 @@ public static class LucentCompiler
         var index = ComponentIndex.Create(parsed.Select(source =>
             (source.Input.SourcePath, source.Input.SourceText, source.Syntax, source.BatchDiagnostics)).ToArray(),
             indexProject);
+        baseCompilation = AddComponentSemanticStubs(baseCompilation, parsed, index);
         var analyses = parsed.Select(source => ComponentSemanticAnalysis.Create(
             source.Input.SourceText,
             source.Input.SourcePath,
@@ -195,6 +198,64 @@ public static class LucentCompiler
 
         return new LucentProjectCompilationResult(results);
     }
+
+    private static CSharpCompilation AddComponentSemanticStubs(
+        CSharpCompilation compilation,
+        IReadOnlyList<ParsedSource> parsed,
+        ComponentIndex index)
+    {
+        var stubs = new List<SyntaxTree>();
+        foreach (var symbol in index.Symbols)
+        {
+            var source = parsed.First(candidate =>
+                PathEquals(candidate.Input.SourcePath, symbol.SourcePath));
+            var roots = source.Syntax.Component.RenderMethod.RenderedFragment.Roots;
+            var root = roots.Count == 1 ? roots[0] : null;
+            var resolver = new NativeSymbolResolver(new ProjectSemanticCompilation(
+                symbol.NamespaceName,
+                source.Syntax.AllUsings.Select(usingDirective => usingDirective.Text).ToArray(),
+                compilation));
+            var rootType = root is not null
+                ? resolver.ResolveControl(root.Name)?.TypeName
+                : null;
+            var constructorParameters = symbol.Parameters.Select(parameter =>
+                $"{parameter.TypeName} {parameter.Name}" +
+                ((parameter.BoundDefaultValueText ?? parameter.DefaultValueText) is { } defaultValue
+                    ? $" = {defaultValue}"
+                    : string.Empty)).ToList();
+            constructorParameters.Add("global::Lucent.Runtime.IUiDispatcher? __lucent_dispatcher = null");
+            var sourceText = (string.IsNullOrWhiteSpace(symbol.NamespaceName)
+                    ? string.Empty
+                    : $"namespace {symbol.NamespaceName}\n") +
+                "{" + Environment.NewLine +
+                "[global::System.CodeDom.Compiler.GeneratedCode(\"Lucent.Compiler\", \"1.0\")]" + Environment.NewLine +
+                $"internal sealed class {symbol.GeneratedTypeName} : global::System.IDisposable" + Environment.NewLine +
+                "{" + Environment.NewLine +
+                $"    internal {symbol.GeneratedTypeName}({string.Join(", ", constructorParameters)}) {{ }}" + Environment.NewLine +
+                "    public global::Lucent.Runtime.Fragment Mount() => global::Lucent.Runtime.Fragment.Empty;" + Environment.NewLine +
+                (rootType is null
+                    ? string.Empty
+                    : $"    public {rootType} MountRoot() => default!;" + Environment.NewLine) +
+                "    public void Dispose() { }" + Environment.NewLine +
+                "}" + Environment.NewLine +
+                "}";
+            var imports = string.Join(Environment.NewLine,
+                source.Syntax.AllUsings.Select(usingDirective => usingDirective.Text));
+            stubs.Add(CSharpSyntaxTree.ParseText(
+                imports + Environment.NewLine + sourceText,
+                CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
+                symbol.GeneratedTypeName + ".SemanticStub.g.cs"));
+        }
+
+        if (stubs.Count == 0)
+            return compilation;
+
+        return compilation.AddSyntaxTrees(stubs);
+    }
+
+    private static bool PathEquals(string left, string right) =>
+        string.Equals(Path.GetFullPath(left), Path.GetFullPath(right),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private sealed record ParsedSource(
         LucentSourceInput Input,

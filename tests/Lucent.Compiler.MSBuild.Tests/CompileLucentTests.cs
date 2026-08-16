@@ -264,6 +264,37 @@ public sealed class CompileLucentTests
     }
 
     [TestMethod]
+    public async System.Threading.Tasks.Task Targets_consumer_can_use_the_exact_typed_mount_root()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        await File.WriteAllTextAsync(
+            Path.Combine(temporary.Path, "Main.lui"),
+            "namespace Demo; using Avalonia.Controls; component Main() => Window { Title: \"Main\"; };" );
+        await File.WriteAllTextAsync(
+            Path.Combine(temporary.Path, "Host.cs"),
+            "using Avalonia.Controls; namespace Demo; internal sealed class Host { " +
+            "internal void Create() { using var component = new MainComponent(); var root = component.MountRoot(); root.Title = \"Shown\"; } }");
+        var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(projectPath, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="Main.lui" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var build = await RunDotNetAsync(temporary.Path,
+            "build", projectPath, "--nologo", "--verbosity:minimal", "-nodeReuse:false");
+        Assert.AreEqual(0, build.ExitCode, build.Output);
+    }
+
+    [TestMethod]
     public async System.Threading.Tasks.Task Design_time_compile_items_include_generated_components()
     {
         using var temporary = new TemporaryDirectory();

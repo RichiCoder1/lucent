@@ -95,7 +95,7 @@ internal sealed class CSharpIslandBinder(
             text.Append("private ").Append(wrapper).Append('<').Append(source.ValueTypeName)
                 .Append("> ").Append(source.Name).Append(" = new();\n");
         }
-        var ordinaryMappings = new List<(TextSpan Synthetic, SourceSpan Source)>();
+        var ordinaryMappings = new List<(TextSpan Synthetic, SourceSpan Source, bool Editor)>();
         var constructorAssignments = new List<(string Name, string Expression, SourceSpan Source)>();
         foreach (var member in ordinaryMembers ?? [])
         {
@@ -113,7 +113,8 @@ internal sealed class CSharpIslandBinder(
                 text.Append(declarationWithoutInitializer.ToFullString()).Append('\n');
                 ordinaryMappings.Add((
                     new TextSpan(declarationStart, declarationWithoutInitializer.FullSpan.Length),
-                    member.Span));
+                    member.Span,
+                    false));
                 constructorAssignments.Add((
                     variable.Identifier.ValueText,
                     initializer.Value.ToFullString().Trim(),
@@ -123,7 +124,7 @@ internal sealed class CSharpIslandBinder(
 
             var start = text.Length;
             text.Append(member.Text).Append('\n');
-            ordinaryMappings.Add((new TextSpan(start, member.Text.Length), member.Span));
+            ordinaryMappings.Add((new TextSpan(start, member.Text.Length), member.Span, true));
         }
         if (constructorAssignments.Count > 0)
         {
@@ -132,7 +133,7 @@ internal sealed class CSharpIslandBinder(
             {
                 var start = text.Length;
                 text.Append(assignment.Name).Append(" = ").Append(assignment.Expression).Append(";\n");
-                ordinaryMappings.Add((new TextSpan(start, assignment.Expression.Length), assignment.Source));
+                ordinaryMappings.Add((new TextSpan(start, assignment.Expression.Length), assignment.Source, false));
             }
             text.Append("}\n");
         }
@@ -308,6 +309,8 @@ internal sealed class CSharpIslandBinder(
             .ToDictionary(
                 request => request.Id,
                 request => GetExpressionType(root, model, mappings[request.Id]));
+        var ordinaryDefinitions = (ordinaryMembers ?? [])
+            .ToDictionary(member => member.Name, member => member.NameSpan, StringComparer.Ordinal);
         var editorScopes = requests.Select(request =>
         {
             var resolvedLocals = request.Locals.Select(local =>
@@ -324,9 +327,6 @@ internal sealed class CSharpIslandBinder(
                 return itemType is null ? local : local with { Type = itemType };
             }).ToArray();
             var localTypes = resolvedLocals.ToDictionary(local => local.Name, local => local.Type);
-            var ordinaryDefinitions = (ordinaryMembers ?? [])
-                .ToDictionary(member => member.Name, member => member.NameSpan, StringComparer.Ordinal);
-
             return new BoundIslandScope(
                 request.EditorSpan,
                 resolvedLocals,
@@ -337,7 +337,18 @@ internal sealed class CSharpIslandBinder(
                     localTypes,
                     ordinaryDefinitions),
                 request.Role);
-        }).ToArray();
+        }).Concat(ordinaryMappings.Where(mapping => mapping.Editor).Select(mapping =>
+            new BoundIslandScope(
+                mapping.Source,
+                [],
+                new BoundIslandSemanticContext(
+                    model,
+                    mapping.Synthetic,
+                    mapping.Source,
+                    new Dictionary<string, ITypeSymbol>(),
+                    ordinaryDefinitions),
+                CSharpIslandRole.OrdinaryMember)))
+            .ToArray();
         return new CSharpIslandBindingResult(results, editorScopes, loweredMembers);
     }
 

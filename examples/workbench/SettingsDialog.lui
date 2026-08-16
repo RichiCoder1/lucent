@@ -1,0 +1,11 @@
+namespace Lucent.Examples.Workbench;
+
+using Avalonia.Controls;
+
+component SettingsDialog() => Window {
+    Title: "Settings";
+    Width: 420;
+    Height: 280;
+    Loaded: (sender, e) => sender.Title = "Settings";
+    SettingsPane {}
+};

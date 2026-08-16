@@ -117,13 +117,15 @@ public sealed class DesktopHostTests
         RunOnUiThread(() => settingsCommand.Execute(null));
         await Task.Delay(50);
         Assert.AreSame(window, host.LastOwner);
-        Assert.IsInstanceOfType<SettingsDialog>(host.LastDialog);
+        Assert.IsNotNull(host.LastDialog);
+        Assert.AreEqual("Settings", RunOnUiThread(() => host.LastDialog!.Title));
 
         var previewCommand = RunOnUiThread(() => Find((Control)window.Content!, control => control is Button button && button.Content?.ToString() == "Generated preview")
             .Cast<Button>().Single().Command!);
         RunOnUiThread(() => previewCommand.Execute(null));
         Assert.AreSame(window, host.LastOwner);
-        Assert.IsInstanceOfType<GeneratedPreviewWindow>(host.LastChild);
+        Assert.IsNotNull(host.LastChild);
+        Assert.AreEqual("Generated C# preview", RunOnUiThread(() => host.LastChild!.Title));
         RunOnUiThread(component.Dispose);
     }
 
@@ -168,6 +170,88 @@ public sealed class DesktopHostTests
         RunOnUiThread(liveComponent.Dispose);
     }
 
+    [TestMethod]
+    public async Task Generated_windows_follow_modal_modeless_and_failure_lifetimes()
+    {
+        using var lifetime = new CancellationTokenSource();
+        var modalHost = new FakeHost();
+        var modalComponent = RunOnUiThread(() => new WorkbenchAppComponent(modalHost, lifetime.Token));
+        var modalOwner = MountWorkbench(modalComponent);
+        Execute(modalOwner, control => control is MenuItem { Header: "Settings" });
+        await Task.Delay(50);
+        AssertGeneratedHandler(modalHost.LastDialog!, "Settings", attached: true);
+        modalHost.DialogGate.SetResult(true);
+        await Task.Delay(50);
+        AssertGeneratedHandler(modalHost.LastDialog!, "Settings", attached: false);
+        RunOnUiThread(modalComponent.Dispose);
+
+        var failedModalHost = new FakeHost();
+        var failedModalComponent = RunOnUiThread(() =>
+            new WorkbenchAppComponent(failedModalHost, lifetime.Token));
+        var failedModalOwner = MountWorkbench(failedModalComponent);
+        Execute(failedModalOwner, control => control is MenuItem { Header: "Settings" });
+        await Task.Delay(50);
+        failedModalHost.DialogGate.SetException(new InvalidOperationException("dialog failed"));
+        await Task.Delay(50);
+        AssertGeneratedHandler(failedModalHost.LastDialog!, "Settings", attached: false);
+        RunOnUiThread(failedModalComponent.Dispose);
+
+        var modelessHost = new FakeHost { ShowWindows = true };
+        var modelessComponent = RunOnUiThread(() =>
+            new WorkbenchAppComponent(modelessHost, lifetime.Token));
+        var modelessOwner = MountWorkbench(modelessComponent);
+        Execute(modelessOwner, control => control is Button { Content: "Generated preview" });
+        var preview = modelessHost.LastChild!;
+        EventHandler<WindowClosingEventArgs> cancel = (_, eventArgs) => eventArgs.Cancel = true;
+        RunOnUiThread(() => preview.Closing += cancel);
+        RunOnUiThread(preview.Close);
+        AssertGeneratedHandler(preview, "Generated C# preview", attached: true);
+        RunOnUiThread(() => preview.Closing -= cancel);
+        RunOnUiThread(preview.Close);
+        AssertGeneratedHandler(preview, "Generated C# preview", attached: false);
+        RunOnUiThread(preview.Close);
+        RunOnUiThread(modelessComponent.Dispose);
+
+        var failedModelessHost = new FakeHost
+        {
+            ShowWindowFault = new InvalidOperationException("show failed"),
+        };
+        var failedModelessComponent = RunOnUiThread(() =>
+            new WorkbenchAppComponent(failedModelessHost, lifetime.Token));
+        var failedModelessOwner = MountWorkbench(failedModelessComponent);
+        Execute(failedModelessOwner, control => control is Button { Content: "Generated preview" });
+        AssertGeneratedHandler(failedModelessHost.LastChild!, "Generated C# preview", attached: false);
+        RunOnUiThread(failedModelessComponent.Dispose);
+    }
+
+    private static Window MountWorkbench(WorkbenchAppComponent component) => RunOnUiThread(() =>
+    {
+        var window = component.MountRoot();
+        window.RaiseEvent(new RoutedEventArgs(Control.LoadedEvent));
+        return window;
+    });
+
+    private static void Execute(Window owner, Func<Control, bool> predicate) =>
+        RunOnUiThread(() =>
+        {
+            switch (Find(owner, predicate).Single())
+            {
+                case MenuItem menu: menu.Command!.Execute(null); break;
+                case Button button: button.Command!.Execute(null); break;
+                default: throw new InvalidOperationException();
+            }
+        });
+
+    private static void AssertGeneratedHandler(Window window, string title, bool attached)
+    {
+        RunOnUiThread(() =>
+        {
+            window.Title = "changed";
+            window.RaiseEvent(new RoutedEventArgs(Control.LoadedEvent));
+        });
+        Assert.AreEqual(attached ? title : "changed", RunOnUiThread(() => window.Title));
+    }
+
     private static T RunOnUiThread<T>(Func<T> action) =>
         Dispatcher.UIThread.InvokeAsync(action).GetAwaiter().GetResult();
 
@@ -204,6 +288,8 @@ public sealed class DesktopHostTests
         public Window? LastChild { get; private set; }
         public TaskCompletionSource<bool> DialogGate { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ShowWindows { get; init; }
+        public Exception? ShowWindowFault { get; init; }
         public Task<IReadOnlyList<IStorageFolder>> PickWorkspaceAsync(Window owner)
         {
             FolderCalls++;
@@ -233,6 +319,8 @@ public sealed class DesktopHostTests
             LastChild = child;
             Owners.Add(owner);
             Owners.Add(child);
+            if (ShowWindowFault is not null) throw ShowWindowFault;
+            if (ShowWindows) child.Show();
         }
     }
 }

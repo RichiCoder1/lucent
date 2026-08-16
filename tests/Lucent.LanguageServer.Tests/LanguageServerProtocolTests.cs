@@ -137,6 +137,78 @@ public sealed class LanguageServerProtocolTests
     }
 
     [TestMethod]
+    public async Task Same_batch_generated_components_complete_and_hover_exact_mount_root()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-mount-root-lsp",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var hostPath = Path.Combine(directory, "Host.lui");
+            var dialogPath = Path.Combine(directory, "Dialog.lui");
+            await File.WriteAllTextAsync(Path.Combine(directory, "Demo.csproj"), """
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+                  <ItemGroup>
+                    <PackageReference Include="Avalonia" Version="12.1.1" />
+                    <LucentSource Include="Host.lui" />
+                    <LucentSource Include="Dialog.lui" />
+                  </ItemGroup>
+                </Project>
+                """);
+            await File.WriteAllTextAsync(dialogPath,
+                "namespace Demo; component Dialog() => Window { Title: \"Dialog\"; };");
+            const string source = """
+                namespace Demo;
+                component Host()
+                {
+                    private void Show()
+                    {
+                        using var dialog = new DialogComponent();
+                        dialog.MountRoot();
+                    }
+                    Fragment Render() => Border {};
+                }
+                """;
+            await File.WriteAllTextAsync(hostPath, source);
+            var uri = new Uri(hostPath).AbsoluteUri;
+            var member = source.IndexOf("dialog.MountRoot", StringComparison.Ordinal) + "dialog.".Length;
+            var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new
+                {
+                    textDocument = new { uri, languageId = "lucent", version = 1, text = source },
+                }),
+                Request(2, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, member),
+                }),
+                Request(3, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, member + 1),
+                }),
+                Request(4, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "MountRoot"));
+            var hover = HoverText(messages, 3);
+            StringAssert.Contains(hover, "MountRoot");
+            StringAssert.Contains(hover, "Window DialogComponent.MountRoot()");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void Attached_property_completion_uses_native_setter_symbols()
     {
         const string source = "namespace Demo; using Avalonia.Controls; component App() => Border { Grid.; };";

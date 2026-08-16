@@ -103,6 +103,13 @@ rejected. `Mount`, `UpdateInputs`, `Dispose`, and names beginning with
 
 Controls and components share composition syntax but not an implementation model. A native control resolves to its real Avalonia type and members, while a component may produce zero, one, or many controls without becoming a heavyweight control itself. Nested content on a native control follows Avalonia's content metadata; trailing content supplied to a Lucent component remains a Lucent slot.
 
+For host interop, a component whose output is statically exactly one direct
+native control also gets a generated `MountRoot()` method returning that exact
+Avalonia type. `Mount()` remains the composition contract and returns
+`Fragment`; no `AsControl<T>()` conversion or component wrapper is introduced.
+The caller keeps the component alive and disposes it according to the native
+host's modal, modeless, or ownership-transfer lifetime.
+
 Native scalar content may be written explicitly or with trailing literal
 content when the control has an unambiguous scalar content route:
 

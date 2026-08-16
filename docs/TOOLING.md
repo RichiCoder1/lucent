@@ -104,3 +104,26 @@ example `Grid.`) and uses the same Roslyn-backed setter/property validation as
 compilation. Attached-property references are reported as
 `NativeAttachedProperty` symbols and bind their values with the setter's value
 type. Mount-only collection elements remain ordinary C# expression islands.
+
+## Native root interop and lifetime diagnostics
+
+Components with exactly one direct native root expose a generated, exact-type
+`MountRoot()` method in addition to `Mount(): Fragment`:
+
+```csharp
+using var dialog = new SettingsDialogComponent();
+await dialogHost.ShowDialogAsync(owner, dialog.MountRoot());
+```
+
+Zero-, multi-root, structural, and component-indirect roots do not receive an
+approximate method. Generated component types carry the standard
+`GeneratedCodeAttribute` with tool name `Lucent.Compiler`; the optional
+`Lucent.Analyzers` Roslyn analyzer recognizes only that exact marker. Its
+bounded intra-procedural control-flow analysis reports dropped temporary
+mounts, repeated mounts only when one execution path can reach both mounts,
+mounted locals not disposed on every exit, and roots escaping lexical disposal
+(including an assigned root returned later). Its code fix only offers safe
+lexical `using var` transformations and preserves `Mount()` versus
+`MountRoot()`. Native window close, ownership transfer, fields, unknown calls,
+and event-driven lifetimes remain application decisions rather than proven
+ownership transfers.

@@ -25,11 +25,9 @@ internal sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var lifetimeToken = new CancellationTokenSource();
+#pragma warning disable LUC004A003 // event-owned modeless component is disposed by the native Closed handler below
             var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token);
-            var roots = component.Mount();
-            var window = roots.Count == 1 && roots[0] is Window root
-                ? root
-                : throw new InvalidOperationException("WorkbenchApp must mount exactly one Window root.");
+            var window = component.MountRoot();
             window.Closed += (_, _) =>
             {
                 lifetimeToken.Cancel();
@@ -37,6 +35,7 @@ internal sealed class App : Application
                 lifetimeToken.Dispose();
             };
             desktop.MainWindow = window;
+#pragma warning restore LUC004A003
         }
         base.OnFrameworkInitializationCompleted();
     }
@@ -50,9 +49,9 @@ internal sealed class App : Application
         };
         Program.BuildAvaloniaApp().SetupWithLifetime(lifetime);
         var lifetimeToken = new CancellationTokenSource();
+#pragma warning disable LUC004A003 // event-owned smoke component is disposed by the native Closed handler below
         var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token);
-        var roots = component.Mount();
-        if (roots.Count != 1 || roots[0] is not Window window) return 1;
+        var window = component.MountRoot();
         lifetime.MainWindow = window;
         var passed = false;
         window.Opened += (_, _) => Dispatcher.UIThread.Post(() =>
@@ -95,6 +94,7 @@ internal sealed class App : Application
             lifetimeToken.Dispose();
             lifetime.Shutdown(passed ? 0 : 1);
         };
+#pragma warning restore LUC004A003
         return lifetime.Start(Array.Empty<string>());
     }
 

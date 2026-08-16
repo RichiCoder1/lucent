@@ -104,6 +104,7 @@ internal static class GeneralCSharpEmitter
         writer.Line();
         writer.Line($"namespace {model.NamespaceName};");
         writer.Line();
+        writer.Line("[global::System.CodeDom.Compiler.GeneratedCode(\"Lucent.Compiler\", \"1.0\")]");
         writer.Line($"internal sealed class {model.ComponentName}Component : IDisposable");
         writer.Line("{");
         writer.Indent();
@@ -407,6 +408,24 @@ internal static class GeneralCSharpEmitter
         writer.Unindent();
         writer.Line("}");
         writer.Line();
+
+        if (model.Roots.Count == 1 && model.Roots[0] is BoundControlModel mountRoot)
+        {
+            writer.Line($"public {mountRoot.TypeName} MountRoot()");
+            writer.Line("{");
+            writer.Indent();
+            writer.Line("var __lucent_roots = Mount();");
+            writer.Line("if (__lucent_roots.Count != 1)");
+            writer.Line("{");
+            writer.Indent();
+            writer.Line("throw new InvalidOperationException(\"The component did not produce exactly one native root.\");");
+            writer.Unindent();
+            writer.Line("}");
+            writer.Line($"return ({mountRoot.TypeName})__lucent_roots[0];");
+            writer.Unindent();
+            writer.Line("}");
+            writer.Line();
+        }
 
         writer.Line("public void Dispose() => __lucent_owner.Dispose();");
         writer.Line();

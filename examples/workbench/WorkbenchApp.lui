@@ -128,7 +128,8 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         try
         {
             previousFocus = window.FocusManager?.GetFocusedElement();
-            await desktopHost.ShowDialogAsync<bool>(window, new SettingsDialog());
+            using var dialog = new SettingsDialogComponent();
+            await desktopHost.ShowDialogAsync<bool>(window, dialog.MountRoot());
             if (!lifetime.IsCancellationRequested) RestoreFocus();
         }
         catch (Exception error)
@@ -158,9 +159,16 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     private void ShowGeneratedPreview()
     {
         if (!CanOpenWorkspace() || window is null) return;
-        try { desktopHost.ShowOwnedWindow(window, new GeneratedPreviewWindow()); }
+        var component = new GeneratedPreviewWindowComponent();
+        var preview = component.MountRoot();
+        EventHandler? closed = null;
+        closed = (_, _) => { preview.Closed -= closed; component.Dispose(); };
+        preview.Closed += closed;
+        try { desktopHost.ShowOwnedWindow(window, preview); }
         catch (Exception error)
         {
+            preview.Closed -= closed;
+            component.Dispose();
             if (!lifetime.IsCancellationRequested) lastDiagnostic.Update(error.Message);
         }
     }
