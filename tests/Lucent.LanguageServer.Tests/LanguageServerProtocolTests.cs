@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Lucent.Compiler;
 using Lucent.LanguageServer;
 
 namespace Lucent.LanguageServer.Tests;
@@ -7,6 +8,76 @@ namespace Lucent.LanguageServer.Tests;
 [TestClass]
 public sealed class LanguageServerProtocolTests
 {
+    [TestMethod]
+    public void Attached_property_completion_uses_native_setter_symbols()
+    {
+        const string source = "namespace Demo; using Avalonia.Controls; component App() => Border { Grid.; };";
+        var offset = source.IndexOf("Grid.", StringComparison.Ordinal) + "Grid.".Length;
+
+        var items = LucentCompiler.GetCompletions(source, offset, "App.lui");
+
+        Assert.IsTrue(items.Any(item => item.Label == "Row"));
+    }
+
+    [TestMethod]
+    public async Task Attached_property_protocol_completion_hover_and_definition_use_project_symbols()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-attached-lsp-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var projectPath = Path.Combine(directory, "Demo.csproj");
+            var ownerPath = Path.Combine(directory, "TestOwner.cs");
+            var sourcePath = Path.Combine(directory, "App.lui");
+            await File.WriteAllTextAsync(projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>" +
+                "<ItemGroup><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(ownerPath,
+                "namespace Demo; public static class TestOwner { " +
+                "public static readonly Avalonia.AvaloniaProperty GoodProperty = null!; " +
+                "public static void SetGood(Avalonia.Controls.Control target, int value) { } }");
+            const string source = "namespace Demo; using Avalonia.Controls; component App() => Border { TestOwner.Good: 1; };";
+            await File.WriteAllTextAsync(sourcePath, source);
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new
+                {
+                    textDocument = new { uri, languageId = "lucent", version = 1, text = source },
+                }),
+                Request(2, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, source.IndexOf("TestOwner.Good", StringComparison.Ordinal) + "TestOwner.".Length),
+                }),
+                Request(3, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "Good"),
+                }),
+                Request(4, "textDocument/definition", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "Good"),
+                }),
+                Request(5, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Good"));
+            StringAssert.Contains(HoverText(messages, 3), "TestOwner.SetGood");
+            Assert.AreEqual(new Uri(ownerPath).AbsoluteUri,
+                Response(messages, 4).GetProperty("result").GetProperty("uri").GetString());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
     [TestMethod]
     public void Windows_file_uris_do_not_duplicate_the_drive()
     {

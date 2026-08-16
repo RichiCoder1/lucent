@@ -129,7 +129,11 @@ public abstract record UiMemberSyntax(SourceSpan Span) : LucentSyntaxNode(Span);
 public sealed record UiPropertySyntax(
     string Name,
     UiValueSyntax Value,
-    SourceSpan Span) : UiMemberSyntax(Span);
+    SourceSpan Span,
+    IReadOnlyList<SourceSpan>? NameSegments = null) : UiMemberSyntax(Span)
+{
+    public IReadOnlyList<SourceSpan> Segments => NameSegments ?? [new SourceSpan(Span.Start, Name.Length)];
+}
 
 public sealed record UiChildSyntax(
     UiElementSyntax Element,

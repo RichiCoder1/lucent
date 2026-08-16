@@ -584,8 +584,7 @@ internal sealed partial class Parser
             {
                 members.Add(ParseImplicitContent());
             }
-            else if (Current.Kind == TokenKind.Identifier &&
-                Peek(1).Kind == TokenKind.Colon)
+            else if (IsPropertyHeader())
             {
                 members.Add(ParseProperty());
             }
@@ -821,6 +820,15 @@ internal sealed partial class Parser
     {
         var name = NextToken();
         var start = name.Span.Start;
+        var segments = new List<SourceSpan> { name.Span };
+        var nameText = name.Text;
+        while (Current.Kind == TokenKind.Dot && Peek(1).Kind == TokenKind.Identifier)
+        {
+            NextToken();
+            var segment = NextToken();
+            segments.Add(segment.Span);
+            nameText += "." + segment.Text;
+        }
         Expect(TokenKind.Colon, "':' after the property name");
 
         if (Current.Kind == TokenKind.OpenBrace)
@@ -831,9 +839,9 @@ internal sealed partial class Parser
                 NextToken();
             }
             return new UiPropertySyntax(
-                name.Text,
+                nameText,
                 eventBlock,
-                SpanFrom(start, Current.Span.Start));
+                SpanFrom(start, Current.Span.Start), segments);
         }
 
         var island = ReadExpressionIsland();
@@ -862,9 +870,26 @@ internal sealed partial class Parser
         }
 
         return new UiPropertySyntax(
-            name.Text,
+            nameText,
             value,
-            SpanFrom(start, Math.Max(island.Span.End, Current.Span.Start)));
+            SpanFrom(start, Math.Max(island.Span.End, Current.Span.Start)), segments);
+    }
+
+    private bool IsPropertyHeader()
+    {
+        if (Current.Kind != TokenKind.Identifier)
+        {
+            return false;
+        }
+
+        var lookahead = 1;
+        while (Peek(lookahead).Kind == TokenKind.Dot &&
+               Peek(lookahead + 1).Kind == TokenKind.Identifier)
+        {
+            lookahead += 2;
+        }
+
+        return Peek(lookahead).Kind == TokenKind.Colon;
     }
 
     private EventBlockValueSyntax ParseEventBlock()

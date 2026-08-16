@@ -2,26 +2,40 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
+using Avalonia.Input;
+using Avalonia.Automation;
+using Avalonia.Media;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using System.Threading;
 
 namespace Lucent.Examples.Workbench;
 
 internal sealed class App : Application
 {
-    public override void Initialize() => Styles.Add(new FluentTheme());
+    public override void Initialize()
+    {
+        Styles.Add(new FluentTheme());
+        Resources["WorkbenchAccent"] = new SolidColorBrush(Colors.CornflowerBlue);
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var component = new WorkbenchAppComponent();
+            var lifetimeToken = new CancellationTokenSource();
+            var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token);
             var roots = component.Mount();
             var window = roots.Count == 1 && roots[0] is Window root
                 ? root
                 : throw new InvalidOperationException("WorkbenchApp must mount exactly one Window root.");
-            window.Closed += (_, _) => component.Dispose();
+            window.Closed += (_, _) =>
+            {
+                lifetimeToken.Cancel();
+                component.Dispose();
+                lifetimeToken.Dispose();
+            };
             desktop.MainWindow = window;
         }
         base.OnFrameworkInitializationCompleted();
@@ -35,7 +49,8 @@ internal sealed class App : Application
             ShutdownMode = ShutdownMode.OnExplicitShutdown,
         };
         Program.BuildAvaloniaApp().SetupWithLifetime(lifetime);
-        var component = new WorkbenchAppComponent();
+        var lifetimeToken = new CancellationTokenSource();
+        var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token);
         var roots = component.Mount();
         if (roots.Count != 1 || roots[0] is not Window window) return 1;
         lifetime.MainWindow = window;
@@ -44,19 +59,42 @@ internal sealed class App : Application
         {
             var buttons = Descendants(window).OfType<Button>().ToArray();
             var before = Descendants(window).OfType<TextBlock>().Any(text => text.Text == "3 problems");
+            var openBinding = window.KeyBindings.First(binding =>
+                binding.Gesture is KeyGesture gesture && gesture.Key == Key.O);
+            var paletteBinding = window.KeyBindings.First(binding =>
+                binding.Gesture is KeyGesture gesture && gesture.Key == Key.K);
+            var toggleBinding = window.KeyBindings.First(binding =>
+                binding.Gesture is KeyGesture gesture && gesture.Key == Key.T);
+            var editor = Descendants(window).OfType<TextBox>().First(textBox =>
+                textBox.Text == "Static editor placeholder");
+            editor.Focus();
+            paletteBinding.Command!.Execute(null);
+            var openMenu = Descendants(window).OfType<MenuItem>().First(item =>
+                item.Header?.ToString() == "Open workspace");
+            var sameCommand = ReferenceEquals(openBinding.Command, openMenu.Command);
+            Descendants(window).OfType<Button>().First(button =>
+                button.Content?.ToString() == "Close palette")
+                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            var focusRestored = editor.IsFocused;
             buttons.First(button => button.Content?.ToString() == "Increment edits")
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             buttons.First(button => button.Content?.ToString() == "Switch document")
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            buttons.First(button => button.Content?.ToString() == "Toggle problems")
-                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            toggleBinding.Command!.Execute(null);
             passed = before && Descendants(window).OfType<TextBlock>().Any(text => text.Text == "Edits: 1") &&
                 Descendants(window).OfType<TextBlock>().Any(text => text.Text == "README.md") &&
-                !Descendants(window).OfType<TextBlock>().Any(text => text.Text == "3 problems");
+                !Descendants(window).OfType<TextBlock>().Any(text => text.Text == "3 problems") &&
+                sameCommand && focusRestored;
             window.Close();
             File.AppendAllText(Path.Combine(Path.GetTempPath(), "lucent-workbench-main.txt"), $"|passed:{passed}");
         }, DispatcherPriority.Loaded);
-        window.Closed += (_, _) => { component.Dispose(); lifetime.Shutdown(passed ? 0 : 1); };
+        window.Closed += (_, _) =>
+        {
+            lifetimeToken.Cancel();
+            component.Dispose();
+            lifetimeToken.Dispose();
+            lifetime.Shutdown(passed ? 0 : 1);
+        };
         return lifetime.Start(Array.Empty<string>());
     }
 

@@ -1,0 +1,5 @@
+namespace Lucent.Examples.Workbench;
+
+component GeneratedPreviewPane() => Border {
+    TextBlock { Text: "Generated preview"; }
+};

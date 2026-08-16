@@ -1,0 +1,5 @@
+namespace Lucent.Examples.Workbench;
+
+component SettingsPane() => Border {
+    TextBlock { Text: "Workbench settings"; }
+};

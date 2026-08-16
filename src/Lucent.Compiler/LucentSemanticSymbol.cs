@@ -5,6 +5,7 @@ public enum LucentSemanticSymbolKind
     NativeControl,
     NativeProperty,
     NativeEvent,
+    NativeAttachedProperty,
     NativeValue,
     Expression,
     Component,

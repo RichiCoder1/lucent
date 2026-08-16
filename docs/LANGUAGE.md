@@ -367,3 +367,13 @@ Before adding syntax, ask:
 6. Can it lower efficiently?
 
 If normal C# is already clear, keep normal C#.
+
+## Native attached properties and mount-only collections
+
+Native control members may use qualified attached-property names before the
+colon, such as `Grid.Row: 1;` or `AutomationProperties.Name: "Problems";`.
+Lucent resolves the owner and its public static setter/property symbols and
+emits a direct setter call. Get-only native collections are limited to C#
+collection expressions at mount time; for example, `Window.KeyBindings` may
+contain `new KeyBinding { ... }` expressions. Collection elements are not
+reactive and spread elements are rejected.

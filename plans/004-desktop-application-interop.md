@@ -333,14 +333,14 @@ not automate the OS picker.
 
 ## Done criteria
 
-- [ ] Attached properties bind through Roslyn symbols and direct setter calls.
-- [ ] Mount-only native collections cover KeyBindings without general object UI.
-- [ ] One native `ICommand` instance drives each action everywhere it appears.
-- [ ] Focus capture/restoration and modal tab cycling use Avalonia APIs.
-- [ ] Dialog/storage/clipboard/window calls are owner-explicit and fakeable.
-- [ ] Workbench primary shell flows are keyboard reachable.
-- [ ] No Lucent runtime/platform-service abstraction is added.
-- [ ] Full build, tests, Workbench smoke, and VS Code tests pass.
+- [x] Attached properties bind through Roslyn symbols and direct setter calls.
+- [x] Mount-only native collections cover KeyBindings without general object UI.
+- [x] One native `ICommand` instance drives each action everywhere it appears.
+- [x] Focus capture/restoration and modal tab cycling use Avalonia APIs.
+- [x] Dialog/storage/clipboard/window calls are owner-explicit and fakeable.
+- [x] Workbench primary shell flows are keyboard reachable.
+- [x] No Lucent runtime/platform-service abstraction is added.
+- [x] Full build, tests, Workbench smoke, and VS Code tests pass.
 
 ## STOP conditions
 

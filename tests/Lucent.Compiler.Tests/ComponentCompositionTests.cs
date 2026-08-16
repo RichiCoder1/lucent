@@ -4,6 +4,291 @@ namespace Lucent.Compiler.Tests;
 public sealed class ComponentCompositionTests
 {
     [TestMethod]
+    public void Attached_properties_lower_to_static_setters()
+    {
+        var result = LucentCompiler.Compile("""
+            namespace Demo;
+            using Avalonia.Automation;
+            using Avalonia.Controls;
+            using Avalonia.Input;
+            component App() => Border {
+                Grid.Row: 1;
+                KeyboardNavigation.TabIndex: 2;
+                AutomationProperties.Name: "Problems";
+            };
+            """, "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "Grid.SetRow");
+        StringAssert.Contains(result.GeneratedSource!, "KeyboardNavigation.SetTabIndex");
+        StringAssert.Contains(result.GeneratedSource!, "AutomationProperties.SetName");
+        Assert.IsFalse(result.GeneratedSource!.Contains("GetProperty", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Inline_attached_property_hover_uses_the_member_header_span()
+    {
+        const string source =
+            "namespace Demo; using Avalonia.Controls; component App() => Border { Grid.Row: 1; };";
+        var nameStart = source.IndexOf("Grid.Row", StringComparison.Ordinal);
+        var symbol = LucentCompiler.GetExpressionSymbol(
+            source,
+            nameStart + "Grid.Row".Length - 1,
+            "App.lui");
+
+        Assert.IsNotNull(symbol);
+        Assert.AreEqual(LucentSemanticSymbolKind.NativeAttachedProperty, symbol.Kind);
+        Assert.AreEqual(new SourceSpan(nameStart, "Grid.Row".Length), symbol.ReferenceSpan);
+    }
+
+    [TestMethod]
+    public void Get_only_key_bindings_use_mount_time_add()
+    {
+        var result = LucentCompiler.Compile("""
+            namespace Demo;
+            using Avalonia.Controls;
+            using Avalonia.Input;
+            component App() => Window {
+                KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.O, KeyModifiers.Control) }];
+            };
+            """, "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "KeyBindings.Add");
+    }
+
+    [TestMethod]
+    public void Conditional_attached_properties_are_emitted_on_the_branch_root()
+    {
+        var result = LucentCompiler.Compile("""
+            namespace Demo;
+            using Avalonia.Controls;
+            using Avalonia.Input;
+            component App() => Border {
+                if (true) { Border { KeyboardNavigation.TabNavigation: KeyboardNavigationMode.Cycle; } }
+            };
+            """, "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "KeyboardNavigation.SetTabNavigation");
+    }
+
+    [TestMethod]
+    public void Conditional_mount_collections_are_added_in_source_order()
+    {
+        var result = LucentCompiler.Compile("""
+            namespace Demo;
+            using Avalonia.Controls;
+            using Avalonia.Input;
+            component App() => Border {
+                if (true) {
+                    Window { KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.O) }]; }
+                }
+            };
+            """, "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "KeyBindings.Add");
+    }
+
+    [TestMethod]
+    public void Keyed_slot_attached_properties_are_emitted_and_refreshed()
+    {
+        var result = LucentCompiler.CompileProject([
+            new LucentSourceInput("Row.lui", "namespace Demo; component Row() { slot body; Fragment Render() => ContentControl { yield body; }; }"),
+            new LucentSourceInput("Host.lui", """
+                namespace Demo;
+                using Avalonia.Input;
+                component Host()
+                {
+                    private readonly State<string[]> values = new(["a"]);
+                    Fragment Render() => StackPanel {
+                        foreach (var value in values.Value) keyed by value {
+                            Row { slot body { Border { KeyboardNavigation.TabIndex: value.Length; } } }
+                        }
+                    };
+                }
+                """)]);
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine,
+            result.Sources.SelectMany(source => source.Result.Diagnostics)));
+        var source = result.Sources.Single(item => item.SourcePath == "Host.lui").Result.GeneratedSource!;
+        StringAssert.Contains(source, "KeyboardNavigation.SetTabIndex");
+        StringAssert.Contains(source, "__lucent_RefreshLoopSlotBody");
+    }
+
+    [TestMethod]
+    public void Invalid_attached_and_collection_shapes_are_diagnosed()
+    {
+        var invalidAttached = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => Border { Grid.NotAProperty: 1; };",
+            "App.lui");
+        Assert.IsFalse(invalidAttached.Succeeded);
+        StringAssert.Contains(string.Join(Environment.NewLine, invalidAttached.Diagnostics), "Attached property");
+        const string invalidAttachedSource =
+            "namespace Demo; using Avalonia.Controls; component App() => Border { Grid.NotAProperty: 1; };";
+        AssertDiagnosticAt(invalidAttached, "Attached property", invalidAttachedSource, "Grid.NotAProperty");
+
+        const string spreadSource = """
+            namespace Demo;
+            using Avalonia.Controls;
+            using Avalonia.Input;
+            component App() => Window { KeyBindings: [..Array.Empty<KeyBinding>()]; };
+            """;
+        var spread = LucentCompiler.Compile(spreadSource, "App.lui");
+        Assert.IsFalse(spread.Succeeded);
+        StringAssert.Contains(string.Join(Environment.NewLine, spread.Diagnostics), "Spread collection");
+        AssertDiagnosticAt(spread, "Spread collection", spreadSource, "..Array.Empty<KeyBinding>()");
+    }
+
+    [TestMethod]
+    public void Project_attached_properties_validate_owner_setter_field_target_and_value()
+    {
+        var valid = CompileWithProject("""
+            namespace Demo;
+            using Avalonia.Controls;
+            using Demo;
+            component App() => Border { TestOwner.Good: 2; };
+            """);
+        Assert.IsTrue(valid.Succeeded, string.Join(Environment.NewLine, valid.Diagnostics));
+        StringAssert.Contains(valid.GeneratedSource!, "TestOwner.SetGood");
+
+        foreach (var (source, marker) in new[]
+        {
+            ("TestOwner.Ambiguous: 1", "TestOwner.Ambiguous"),
+            ("TestOwner.Private: 1", "TestOwner.Private"),
+            ("TestOwner.NoField: 1", "TestOwner.NoField"),
+            ("TestOwner.Good: \"wrong\"", "\"wrong\""),
+        })
+        {
+            var invalidSource = $"namespace Demo; using Avalonia.Controls; component App() => Border {{ {source}; }};";
+            var invalid = CompileWithProject(invalidSource);
+            Assert.IsFalse(invalid.Succeeded, source);
+            if (marker == "\"wrong\"")
+            {
+                AssertDiagnosticSpan(invalid, invalidSource, marker);
+            }
+            else
+            {
+                AssertDiagnosticAt(invalid, "Attached property", invalidSource, marker);
+            }
+        }
+
+        const string wrongTargetSource =
+            "namespace Demo; using Avalonia.Controls; component App() => TextBlock { TestOwner.WindowOnly: 1; };";
+        var wrongTarget = CompileWithProject(wrongTargetSource);
+        Assert.IsFalse(wrongTarget.Succeeded);
+        StringAssert.Contains(string.Join(Environment.NewLine, wrongTarget.Diagnostics), "Attached property");
+        AssertDiagnosticAt(wrongTarget, "Attached property", wrongTargetSource, "TestOwner.WindowOnly");
+    }
+
+    [TestMethod]
+    public void Mount_collections_cover_inherited_add_ambiguous_add_and_read_only_property()
+    {
+        var inherited = CompileWithProject(
+            "namespace Demo; using Demo; component App() => TestControl { Items: [new Avalonia.Input.KeyBinding {}]; };");
+        Assert.IsTrue(inherited.Succeeded, string.Join(Environment.NewLine, inherited.Diagnostics));
+        StringAssert.Contains(inherited.GeneratedSource!, "Items.Add");
+
+        foreach (var property in new[] { "Ambiguous", "ReadOnly" })
+        {
+            var source = $"namespace Demo; using Demo; component App() => TestControl {{ {property}: []; }};";
+            var invalid = CompileWithProject(source);
+            Assert.IsFalse(invalid.Succeeded, property);
+            StringAssert.Contains(string.Join(Environment.NewLine, invalid.Diagnostics), "read-only");
+            AssertDiagnosticAt(invalid, "read-only", source, property);
+        }
+    }
+
+    [TestMethod]
+    public void Reactive_mount_collections_are_rejected_at_root_and_nested_structural_paths()
+    {
+        foreach (var source in new[]
+        {
+            "namespace Demo; using Avalonia.Controls; using Avalonia.Input; component App() { private readonly State<Key> key = new(Key.O); Fragment Render() => Window { KeyBindings: [new KeyBinding { Gesture = new KeyGesture(key.Value) }]; }; }",
+            "namespace Demo; using Avalonia.Controls; using Avalonia.Input; component App() { private readonly State<Key> key = new(Key.O); Fragment Render() => Border { if (true) { Window { KeyBindings: [new KeyBinding { Gesture = new KeyGesture(key.Value) }]; } } }; }",
+        })
+        {
+            var invalid = LucentCompiler.Compile(source, "App.lui");
+            Assert.IsFalse(invalid.Succeeded, source);
+            StringAssert.Contains(string.Join(Environment.NewLine, invalid.Diagnostics), "Mount-only native collection");
+            AssertDiagnosticAt(invalid, "Mount-only native collection",
+                source, "new KeyBinding { Gesture = new KeyGesture(key.Value) }");
+        }
+    }
+
+    private static CompilationResult CompileWithProject(string source)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-attached-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var csharpPath = Path.Combine(directory, "Native.cs");
+        File.WriteAllText(csharpPath, """
+            namespace Demo;
+            using Avalonia;
+            using Avalonia.Controls;
+            using Avalonia.Input;
+            public static class TestOwner
+            {
+                public static readonly AvaloniaProperty GoodProperty = null!;
+                public static readonly AvaloniaProperty WindowOnlyProperty = null!;
+                public static readonly AvaloniaProperty AmbiguousProperty = null!;
+                public static readonly AvaloniaProperty PrivateProperty = null!;
+                public static readonly int NoField = 0;
+                public static void SetGood(Control target, int value) { }
+                public static void SetWindowOnly(Window target, int value) { }
+                public static void SetAmbiguous(Control target, int value) { }
+                public static void SetAmbiguous(Border target, int value) { }
+                private static void SetPrivate(Control target, int value) { }
+                public static void SetNoField(Control target, int value) { }
+            }
+            public class TestControl : Control
+            {
+                public DerivedItems Items { get; private set; } = new();
+                public AmbiguousItems Ambiguous { get; } = new();
+                public int ReadOnly { get; } = 0;
+            }
+            public class BaseItems { public void Add(KeyBinding value) { } }
+            public class DerivedItems : BaseItems { }
+            public class AmbiguousItems : BaseItems { public new void Add(KeyBinding value) { } }
+            """);
+        try
+        {
+            return LucentCompiler.Compile(source, Path.Combine(directory, "App.lui"),
+                new LucentProjectContext(Path.Combine(directory, "Demo.csproj"), SourcePaths: [csharpPath]));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static void AssertDiagnosticAt(
+        CompilationResult result,
+        string message,
+        string source,
+        string marker)
+    {
+        var diagnostic = result.Diagnostics.Single(item =>
+            item.Message.Contains(message, StringComparison.Ordinal));
+        var start = source.IndexOf(marker, StringComparison.Ordinal);
+        Assert.IsTrue(start >= 0, marker);
+        Assert.AreEqual(new SourceSpan(start, marker.Length), diagnostic.Span,
+            $"{diagnostic.Message} at {diagnostic.Span.Start}:{diagnostic.Span.Length}");
+    }
+
+    private static void AssertDiagnosticSpan(
+        CompilationResult result,
+        string source,
+        string marker)
+    {
+        var start = source.IndexOf(marker, StringComparison.Ordinal);
+        Assert.IsTrue(start >= 0, marker);
+        Assert.IsTrue(result.Diagnostics.Any(item =>
+            item.Span == new SourceSpan(start, marker.Length)),
+            string.Join(Environment.NewLine, result.Diagnostics));
+    }
+
+    [TestMethod]
     public void Composition_generation_matches_complete_snapshot_in_either_project_order()
     {
         var root = Path.Combine(RepositoryPaths.Root, "tests", "Lucent.Compiler.Tests", "Snapshots", "Composition");
@@ -131,6 +416,34 @@ public sealed class ComponentCompositionTests
         StringAssert.Contains(generated, "new global::Avalonia.Controls.TextBlock()");
         StringAssert.Contains(generated, "__lucent_rowSlot1_1ActionsRefresh();");
         StringAssert.Contains(generated, "__lucent_slotOwner.OnDispose");
+    }
+
+    [TestMethod]
+    public void Keyed_mount_collection_elements_are_added_once_outside_refresh()
+    {
+        var result = LucentCompiler.Compile("""
+            namespace Demo;
+            using Avalonia.Controls;
+            using Avalonia.Input;
+            component Host()
+            {
+                private readonly Key[] keys = [Key.O, Key.P];
+                Fragment Render() => StackPanel {
+                    foreach (var key in keys) keyed by key {
+                        Window { KeyBindings: [new KeyBinding { Gesture = new KeyGesture(key) }]; }
+                    }
+                };
+            }
+            """, "Host.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var generated = result.GeneratedSource!;
+        var add = "control1.KeyBindings.Add(";
+        Assert.AreEqual(1, generated.Split(add, StringSplitOptions.None).Length - 1);
+        var refreshStart = generated.IndexOf("void Refresh()", StringComparison.Ordinal);
+        var refreshEnd = generated.IndexOf("Refresh();", refreshStart, StringComparison.Ordinal);
+        Assert.IsTrue(refreshStart >= 0 && refreshEnd > refreshStart);
+        Assert.IsFalse(generated[refreshStart..refreshEnd].Contains("KeyBindings.Add", StringComparison.Ordinal));
     }
 
     [TestMethod]

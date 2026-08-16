@@ -91,3 +91,11 @@ edit component
 ```
 
 Production-grade hot reload is not an initial requirement. The early component identity, state layout, generated-code boundaries, and source mapping should avoid making it impossible later.
+
+## Native member intelligence
+
+Member-header completion recognizes qualified attached-property owners (for
+example `Grid.`) and uses the same Roslyn-backed setter/property validation as
+compilation. Attached-property references are reported as
+`NativeAttachedProperty` symbols and bind their values with the setter's value
+type. Mount-only collection elements remain ordinary C# expression islands.

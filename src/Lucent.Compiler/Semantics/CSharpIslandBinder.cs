@@ -20,6 +20,7 @@ internal enum CSharpIslandRole
     LoopKey,
     Condition,
     ComponentArgument,
+    NativeCollectionElement,
     OrdinaryMember,
 }
 
@@ -95,11 +96,45 @@ internal sealed class CSharpIslandBinder(
                 .Append("> ").Append(source.Name).Append(" = new();\n");
         }
         var ordinaryMappings = new List<(TextSpan Synthetic, SourceSpan Source)>();
+        var constructorAssignments = new List<(string Name, string Expression, SourceSpan Source)>();
         foreach (var member in ordinaryMembers ?? [])
         {
+            var declaration = SyntaxFactory.ParseMemberDeclaration(member.Text);
+            if (declaration is FieldDeclarationSyntax field &&
+                field.Declaration.Variables.Count == 1 &&
+                field.Declaration.Variables[0].Initializer is { } initializer &&
+                !field.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.ConstKeyword) ||
+                                                  modifier.IsKind(SyntaxKind.StaticKeyword)))
+            {
+                var variable = field.Declaration.Variables[0];
+                var declarationWithoutInitializer = field.WithDeclaration(
+                    field.Declaration.WithVariables([variable.WithInitializer(null)]));
+                var declarationStart = text.Length;
+                text.Append(declarationWithoutInitializer.ToFullString()).Append('\n');
+                ordinaryMappings.Add((
+                    new TextSpan(declarationStart, declarationWithoutInitializer.FullSpan.Length),
+                    member.Span));
+                constructorAssignments.Add((
+                    variable.Identifier.ValueText,
+                    initializer.Value.ToFullString().Trim(),
+                    member.Span));
+                continue;
+            }
+
             var start = text.Length;
             text.Append(member.Text).Append('\n');
             ordinaryMappings.Add((new TextSpan(start, member.Text.Length), member.Span));
+        }
+        if (constructorAssignments.Count > 0)
+        {
+            text.Append("private __LucentProbe() {\n");
+            foreach (var assignment in constructorAssignments)
+            {
+                var start = text.Length;
+                text.Append(assignment.Name).Append(" = ").Append(assignment.Expression).Append(";\n");
+                ordinaryMappings.Add((new TextSpan(start, assignment.Expression.Length), assignment.Source));
+            }
+            text.Append("}\n");
         }
 
         var mappings = new Dictionary<int, TextSpan>();
@@ -190,8 +225,14 @@ internal sealed class CSharpIslandBinder(
                     _ => false,
                 });
             if (node is not null)
-                loweredMembers[member.Name] = new OrdinaryLoweringRewriter(model, sourceFields)
-                    .Visit(node)!.ToFullString().Trim();
+            {
+                var original = SyntaxFactory.ParseMemberDeclaration(member.Text);
+                loweredMembers[member.Name] = original is FieldDeclarationSyntax originalField &&
+                    originalField.Declaration.Variables.Count == 1 &&
+                    originalField.Declaration.Variables[0].Initializer is not null
+                    ? member.Text
+                    : new OrdinaryLoweringRewriter(model, sourceFields).Visit(node)!.ToFullString().Trim();
+            }
         }
 
         foreach (var diagnostic in compilation.GetDiagnostics()

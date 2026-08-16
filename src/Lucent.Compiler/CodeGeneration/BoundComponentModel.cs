@@ -126,6 +126,19 @@ internal sealed record BoundPropertyMember(
     public SourceSpan ExpressionSpan => Expression.Span;
 }
 
+internal sealed record BoundAttachedPropertyMember(
+    string Name,
+    string SetterTypeName,
+    string SetterName,
+    BoundCSharpIsland Expression,
+    SourceSpan Span) : BoundControlMember(Span);
+
+internal sealed record BoundNativeCollectionMember(
+    string PropertyName,
+    string AddTypeName,
+    IReadOnlyList<BoundCSharpIsland> Elements,
+    SourceSpan Span) : BoundControlMember(Span);
+
 internal enum BoundNativeValueKind
 {
     None,

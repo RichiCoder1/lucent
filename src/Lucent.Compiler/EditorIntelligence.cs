@@ -20,7 +20,7 @@ internal static class EditorIntelligence
             return GetExpressionCompletions(sourceText, offset, analysis);
         }
 
-        var element = EnumerateElements(syntax.Component.RenderMethod.Root)
+        var element = EnumerateElements(syntax.Component.RenderMethod.RenderedFragment.Roots)
             .Where(candidate =>
                 offset >= candidate.Span.Start &&
                 offset <= candidate.Span.End)
@@ -65,6 +65,17 @@ internal static class EditorIntelligence
         if (control is null)
         {
             return [];
+        }
+
+        if (FindAttachedOwner(sourceText, offset) is { } attachedOwner &&
+            resolver.GetAttachedPropertyCandidates(attachedOwner, control) is { Count: > 0 } attachedCandidates)
+        {
+            return attachedCandidates.Select(candidate => new LucentCompletionItem(
+                    candidate.Name,
+                    LucentCompletionItemKind.Property,
+                    candidate.Display,
+                    candidate.Name + ": "))
+                .ToArray();
         }
 
         var valueMember = element.Properties
@@ -173,6 +184,21 @@ internal static class EditorIntelligence
     {
         var syntax = analysis.Syntax;
         var resolver = analysis.Resolver;
+        if (FindAttachedHeaderAt(sourceText, offset, syntax) is { } attachedHeader)
+        {
+            var element = EnumerateElements(syntax.Component.RenderMethod.RenderedFragment.Roots)
+                .Where(candidate => offset >= candidate.Span.Start && offset <= candidate.Span.End)
+                .OrderBy(candidate => candidate.Span.Length)
+                .FirstOrDefault();
+            var control = element is null ? null : resolver.ResolveControl(element.Name);
+            var attached = control is null
+                ? null
+                : resolver.ResolveAttachedProperty(control, attachedHeader.Name);
+            if (attached is not null)
+            {
+                return resolver.ToSemanticSymbol(attached, attachedHeader.Span);
+            }
+        }
         var scope = BuildExpressionScope(analysis, offset);
         var (chain, span) = GetExpressionChainAt(sourceText, offset);
         if (chain.Length == 0)
@@ -567,33 +593,113 @@ internal static class EditorIntelligence
         return name.Length == 0 ? null : name;
     }
 
-    private static IEnumerable<UiElementSyntax> EnumerateElements(UiElementSyntax element)
+    private static string? FindAttachedOwner(string text, int offset)
     {
-        yield return element;
-        foreach (var member in element.Members)
+        var position = Math.Clamp(offset, 0, text.Length);
+        var lineStart = position == 0 ? 0 : text.LastIndexOf('\n', position - 1) + 1;
+        var prefix = text[lineStart..position];
+        if (prefix.Contains(':', StringComparison.Ordinal))
         {
-            var child = member switch
+            return null;
+        }
+
+        var dot = prefix.LastIndexOf('.');
+        if (dot <= 0)
+        {
+            return null;
+        }
+
+        var end = dot;
+        var start = end - 1;
+        while (start >= 0 && (char.IsLetterOrDigit(prefix[start]) || prefix[start] == '_'))
+        {
+            start--;
+        }
+
+        var owner = prefix[(start + 1)..end].Trim();
+        return owner.Length == 0 ? null : owner;
+    }
+
+    private static (string Name, SourceSpan Span)? FindAttachedHeaderAt(
+        string text,
+        int offset,
+        LucentCompilationUnitSyntax syntax)
+    {
+        var position = Math.Clamp(offset, 0, text.Length);
+        var parsedProperty = EnumerateElements(syntax.Component.RenderMethod.RenderedFragment.Roots)
+            .SelectMany(element => element.Properties)
+            .Where(property => property.Name.Contains('.', StringComparison.Ordinal) &&
+                position >= property.Span.Start &&
+                position <= property.Span.Start + property.Name.Length)
+            .OrderBy(property => property.Span.Length)
+            .FirstOrDefault();
+        if (parsedProperty is not null)
+        {
+            return (parsedProperty.Name,
+                new SourceSpan(parsedProperty.Span.Start, parsedProperty.Name.Length));
+        }
+
+        // Incomplete editor buffers may not produce a UiPropertySyntax. Keep the
+        // fallback bounded to a member header, never the whole line, so dots in a
+        // C# value do not become attached-property references.
+        var lineStart = position == 0 ? 0 : text.LastIndexOf('\n', position - 1) + 1;
+        var lineEnd = text.IndexOf('\n', position);
+        if (lineEnd < 0) lineEnd = text.Length;
+        var line = text[lineStart..lineEnd];
+        var relativePosition = position - lineStart;
+        var colon = line.IndexOf(':');
+        while (colon >= 0)
+        {
+            var candidateEnd = colon;
+            while (candidateEnd > 0 && char.IsWhiteSpace(line[candidateEnd - 1]))
             {
-                UiChildSyntax nested => nested.Element,
-                UiForEachSyntax loop => loop.Body,
-                UiIfSyntax conditional => conditional.TrueRoot,
-                _ => null,
-            };
-            if (child is null)
-            {
-                continue;
+                candidateEnd--;
             }
 
-            foreach (var descendant in EnumerateElements(child))
+            var candidateStart = candidateEnd;
+            while (candidateStart > 0 &&
+                   (char.IsLetterOrDigit(line[candidateStart - 1]) ||
+                    line[candidateStart - 1] is '_' or '.'))
             {
-                yield return descendant;
+                candidateStart--;
             }
-            if (member is UiIfSyntax { FalseRoot: { } falseRoot })
+
+            var candidate = line[candidateStart..candidateEnd];
+            if (relativePosition >= candidateStart && relativePosition <= colon &&
+                candidate.Contains('.', StringComparison.Ordinal) &&
+                candidate.Split('.').All(segment => segment.Length > 0 &&
+                    (char.IsLetter(segment[0]) || segment[0] == '_') &&
+                    segment.Skip(1).All(character => char.IsLetterOrDigit(character) ||
+                        character == '_')))
             {
-                foreach (var descendant in EnumerateElements(falseRoot))
+                return (candidate,
+                    new SourceSpan(lineStart + candidateStart, candidate.Length));
+            }
+
+            colon = line.IndexOf(':', colon + 1);
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<UiElementSyntax> EnumerateElements(IEnumerable<UiElementSyntax> roots)
+    {
+        foreach (var element in roots)
+        {
+            yield return element;
+            foreach (var member in element.Members)
+            {
+                var children = member switch
                 {
+                    UiChildSyntax nested => [nested.Element],
+                    UiForEachSyntax loop => [loop.Body],
+                    UiIfSyntax conditional => conditional.FalseRoot is null
+                        ? [conditional.TrueRoot]
+                        : new[] { conditional.TrueRoot, conditional.FalseRoot },
+                    _ => Array.Empty<UiElementSyntax>(),
+                };
+                foreach (var descendant in EnumerateElements(children))
                     yield return descendant;
-                }
             }
         }
     }

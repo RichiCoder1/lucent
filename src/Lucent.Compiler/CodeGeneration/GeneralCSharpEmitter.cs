@@ -1,5 +1,6 @@
 using System.Globalization;
 using Lucent.Compiler.Parsing;
+using Lucent.Compiler.Semantics;
 using Lucent.Compiler.Styling;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -60,6 +61,7 @@ internal static class GeneralCSharpEmitter
                 .Where(member => member switch
                 {
                     BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
+                    BoundAttachedPropertyMember attached => attached.Expression.Dependencies.Count > 0,
                     BoundContentMember content => content.Expression.Dependencies.Count > 0,
                     _ => false,
                 })
@@ -817,6 +819,7 @@ internal static class GeneralCSharpEmitter
             writer.Line($"{name}.{control.ContentRoute!.PropertyName} = {content.ExpressionText};");
             writer.Line("#line default");
         }
+        EmitAttachedAndCollectionMembers(writer, control, name, source);
         foreach (var child in control.Members.OfType<BoundChildMember>())
             EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, child.Child, owner, source, ref counter));
         foreach (var child in control.Members.OfType<BoundComponentChildMember>())
@@ -1095,6 +1098,10 @@ internal static class GeneralCSharpEmitter
             writer.Line("#line default");
         }
 
+        EmitAttachedAndCollectionMembers(
+            writer, control, $"__lucent_control{index}!", source,
+            expression => expression.Dependencies.Count == 0);
+
         foreach (var content in control.Members.OfType<BoundContentMember>())
         {
             if (content.Expression.Dependencies.Count > 0)
@@ -1212,6 +1219,12 @@ internal static class GeneralCSharpEmitter
                 }
                 writer.Line("#line default");
             }
+            else if (binding.Member is BoundAttachedPropertyMember attached)
+            {
+                EmitLineMapping(writer, source, attached.Expression.Span);
+                writer.Line($"{attached.SetterTypeName}.{attached.SetterName}({binding.Target}!, {attached.Expression.LoweredText});");
+                writer.Line("#line default");
+            }
             else if (binding.Member is BoundContentMember content)
             {
                 EmitLineMapping(writer, source, content.ExpressionSpan);
@@ -1276,6 +1289,11 @@ internal static class GeneralCSharpEmitter
                         writer.Line($"if ({prefix}Control{controlIndex} is not null) {prefix}Control{controlIndex}!.{property.Name} = " +
                             $"{LowerPropertyValue(property.Expression.LoweredText, property.NativeValueKind)};");
                     }
+                    foreach (var attached in control.Members.OfType<BoundAttachedPropertyMember>()
+                                 .Where(attached => attached.Expression.Dependencies.Contains(sourceItem.Id)))
+                    {
+                        writer.Line($"if ({prefix}Control{controlIndex} is not null) {attached.SetterTypeName}.{attached.SetterName}({prefix}Control{controlIndex}!, {attached.Expression.LoweredText});");
+                    }
                     foreach (var content in control.Members.OfType<BoundContentMember>()
                                  .Where(content => content.Expression.Dependencies.Contains(sourceItem.Id)))
                     {
@@ -1323,6 +1341,7 @@ internal static class GeneralCSharpEmitter
                 .Where(member => member switch
                 {
                     BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
+                    BoundAttachedPropertyMember attached => attached.Expression.Dependencies.Count > 0,
                     BoundContentMember content => content.Expression.Dependencies.Count > 0,
                     _ => false,
                 })
@@ -1451,6 +1470,9 @@ internal static class GeneralCSharpEmitter
                         : $"{name}!.{route.PropertyName} = {content.ExpressionText};");
                     output.Line("#line default");
                 }
+                EmitAttachedAndCollectionMembers(
+                    output, control, $"{name}!", sourceDocument,
+                    expression => expression.Dependencies.Count == 0);
             }
             foreach (var (control, name) in controls)
             {
@@ -1505,9 +1527,11 @@ internal static class GeneralCSharpEmitter
                         output.Line($"{name}!.{route.PropertyName} = {roots}.Count == 0 ? null : {roots}[0];");
                     }
                 }
+                var controlIndex = controls.Select((candidate, index) => (candidate, index))
+                    .First(candidate => ReferenceEquals(candidate.candidate.Control, control)).index;
                 foreach (var (eventMember, eventIndex) in control.Members.OfType<BoundEventMember>().Select((value, index) => (value, index)))
                 {
-                    var handler = $"conditionalHandler{conditional.Index}_{side}_{eventIndex + 1}";
+                    var handler = $"conditionalHandler{conditional.Index}_{side}_{controlIndex + 1}_{eventIndex + 1}";
                     output.Line($"{eventMember.DelegateTypeName} {handler} = (__sender, __eventArgs) =>");
                     output.Line("{");
                     output.Indent();
@@ -2027,6 +2051,10 @@ internal static class GeneralCSharpEmitter
 
             EmitTemplateContent(writer, control, index, content, source);
         }
+        EmitAttachedAndCollectionMembers(
+            writer, control, $"control{index}", source,
+            expression => expression.Dependencies.Count == 0 &&
+                          !ReferencesItem(expression.LoweredText, itemName));
     }
 
     private static void EmitTemplateBindings(
@@ -2065,6 +2093,11 @@ internal static class GeneralCSharpEmitter
 
             EmitTemplateContent(writer, control, index, content, source);
         }
+        EmitAttachedAndCollectionMembers(
+            writer, control, $"control{index}", source,
+            expression => expression.Dependencies.Count > 0 ||
+                          ReferencesItem(expression.LoweredText, itemName),
+            includeCollections: false);
     }
 
     private static void EmitTemplateChildren(
@@ -2098,6 +2131,41 @@ internal static class GeneralCSharpEmitter
             if (!route.IsCollection)
             {
                 writer.Line($"control{index}.{route.PropertyName} = {roots}.Count == 0 ? null : {roots}[0];");
+            }
+        }
+    }
+
+    private static void EmitAttachedAndCollectionMembers(
+        CodeWriter writer,
+        BoundControlModel control,
+        string target,
+        SourceDocument source,
+        Func<BoundCSharpIsland, bool>? include = null,
+        bool includeCollections = true)
+    {
+        include ??= static _ => true;
+        foreach (var member in control.Members)
+        {
+            switch (member)
+            {
+                case BoundAttachedPropertyMember attached when include(attached.Expression):
+                    EmitLineMapping(writer, source, attached.Expression.Span);
+                    writer.Line($"{attached.SetterTypeName}.{attached.SetterName}({target}, {attached.Expression.LoweredText});");
+                    writer.Line("#line default");
+                    break;
+                case BoundNativeCollectionMember collection:
+                    if (!includeCollections)
+                    {
+                        break;
+                    }
+
+                    foreach (var element in collection.Elements)
+                    {
+                        EmitLineMapping(writer, source, element.Span);
+                        writer.Line($"{target}.{collection.PropertyName}.Add({element.LoweredText});");
+                        writer.Line("#line default");
+                    }
+                    break;
             }
         }
     }
@@ -2385,6 +2453,15 @@ internal static class GeneralCSharpEmitter
             refreshStatements.Add(control.ContentRoute!.IsCollection
                 ? $"{name}.{control.ContentRoute.PropertyName}.Clear(); {name}.{control.ContentRoute.PropertyName}.Add({content.ExpressionText});"
                 : $"{name}.{control.ContentRoute.PropertyName} = {content.ExpressionText};");
+        }
+        EmitAttachedAndCollectionMembers(writer, control, name, source);
+        foreach (var attached in control.Members.OfType<BoundAttachedPropertyMember>())
+        {
+            if (attached.Expression.Dependencies.Count == 0 &&
+                !ReferencesItem(attached.Expression.LoweredText, itemName))
+                continue;
+            refreshStatements.Add(
+                $"{attached.SetterTypeName}.{attached.SetterName}({name}, {attached.Expression.LoweredText});");
         }
         foreach (var child in control.Members.OfType<BoundChildMember>())
         {
@@ -2728,6 +2805,8 @@ internal static class GeneralCSharpEmitter
     private static IReadOnlyList<int> Dependencies(BoundControlMember member) => member switch
     {
         BoundPropertyMember property => property.Expression.Dependencies,
+        BoundAttachedPropertyMember attached => attached.Expression.Dependencies,
+        BoundNativeCollectionMember collection => collection.Elements.SelectMany(element => element.Dependencies).ToArray(),
         BoundContentMember content => content.Expression.Dependencies,
         BoundEventMember eventMember => eventMember.Body.Dependencies,
         _ => [],

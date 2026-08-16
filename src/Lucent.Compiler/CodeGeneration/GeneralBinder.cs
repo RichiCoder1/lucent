@@ -163,8 +163,50 @@ internal sealed class GeneralBinder
                 component.AllOrdinaryMembers.Select(member => new BoundOrdinaryMemberModel(
                     islandBinding.OrdinaryMembers?.GetValueOrDefault(member.Name) ?? member.Text,
                     member.Name, member.Span)).ToArray());
+        foreach (var collection in EnumerateControls(model.Roots)
+                     .SelectMany(control => control.Members.OfType<BoundNativeCollectionMember>()))
+        {
+            foreach (var element in collection.Elements.Where(element => element.Dependencies.Count > 0))
+            {
+                AddUnsupported(element.Span,
+                    "Mount-only native collection elements cannot read reactive state or parameters.");
+            }
+        }
         DetectComputedCycles(model);
         return HasErrors ? null : model;
+
+        static IEnumerable<BoundControlModel> EnumerateControls(IEnumerable<BoundRenderableModel> renderables)
+        {
+            foreach (var renderable in renderables)
+            {
+                if (renderable is BoundControlModel control)
+                {
+                    yield return control;
+                    foreach (var member in control.Members)
+                    {
+                        foreach (var nested in EnumerateControlsFromMember(member))
+                            yield return nested;
+                    }
+                }
+                else if (renderable is BoundComponentInvocationModel invocation)
+                {
+                    foreach (var supply in invocation.Slots)
+                        foreach (var nested in EnumerateControls(supply.Roots))
+                            yield return nested;
+                }
+            }
+
+            static IEnumerable<BoundControlModel> EnumerateControlsFromMember(BoundControlMember member) =>
+                member switch
+                {
+                    BoundChildMember child => EnumerateControls([child.Child]),
+                    BoundComponentChildMember child => EnumerateControls([child.Invocation]),
+                    BoundConditionalMember conditional =>
+                        EnumerateControls(conditional.TrueRoots.Concat(conditional.FalseRoots ?? [])),
+                    BoundForEachMember loop => EnumerateControls([loop.Body]),
+                    _ => [],
+                };
+        }
     }
 
     private BoundStateModel BindState(StateMemberSyntax state)
@@ -820,6 +862,34 @@ internal sealed class GeneralBinder
         IReadOnlyList<BoundLocal> locals)
     {
         var resolver = _resolver!;
+        if (property.Name.Contains('.', StringComparison.Ordinal))
+        {
+            var attached = resolver.ResolveAttachedProperty(control, property.Name);
+            if (attached is null)
+            {
+                AddUnsupported(PropertyNameSpan(property),
+                    $"Attached property '{property.Name}' could not be resolved for {control.TypeName}.");
+                return;
+            }
+
+            if (!seenMembers.Add(property.Name))
+            {
+                AddUnsupported(property.Span, $"{element.Name} may contain only one '{property.Name}' member.");
+                return;
+            }
+
+            var bound = new BoundAttachedPropertyMember(
+                property.Name,
+                attached.OwnerTypeName,
+                attached.SetterName,
+                Request(property.Value.Text, property.Value.Span,
+                    CSharpIslandKind.Expression, CSharpIslandRole.Property,
+                    attached.ValueType, locals),
+                property.Span);
+            members.Add(bound);
+            _symbols.Add(resolver.ToSemanticSymbol(attached, PropertyNameSpan(property)));
+            return;
+        }
         var resolvedEvent = resolver.ResolveEvent(control, property.Name);
         if (resolvedEvent is not null)
         {
@@ -883,6 +953,44 @@ internal sealed class GeneralBinder
 
         if (resolvedProperty.Symbol.SetMethod is not { DeclaredAccessibility: Microsoft.CodeAnalysis.Accessibility.Public })
         {
+            var collection = resolver.ResolveMountCollection(control, property.Name);
+            if (collection is not null)
+            {
+                if (property.Value is not CSharpExpressionValueSyntax expression ||
+                    SyntaxFactory.ParseExpression(expression.Text) is not CollectionExpressionSyntax collectionSyntax)
+                {
+                    AddUnsupported(property.Value.Span,
+                        $"Mount-only collection '{property.Name}' requires a C# collection expression.");
+                    return;
+                }
+
+                var elements = new List<BoundCSharpIsland>();
+                foreach (var collectionElement in collectionSyntax.Elements)
+                {
+                    if (collectionElement is not ExpressionElementSyntax expressionElement)
+                    {
+                        AddUnsupported(new SourceSpan(
+                                property.Value.Span.Start + collectionElement.SpanStart,
+                                Math.Max(1, collectionElement.Span.Length)),
+                            "Spread collection elements are not supported for mount-only native collections.");
+                        continue;
+                    }
+
+                    var span = new SourceSpan(
+                        property.Value.Span.Start + expressionElement.Expression.SpanStart,
+                        expressionElement.Expression.Span.Length);
+                    elements.Add(Request(expressionElement.Expression.ToFullString().Trim(), span,
+                        CSharpIslandKind.Expression, CSharpIslandRole.NativeCollectionElement,
+                        collection.ElementType, locals));
+                }
+
+                if (seenMembers.Add(property.Name))
+                {
+                    members.Add(new BoundNativeCollectionMember(
+                        resolvedProperty.Name, collection.ElementTypeName, elements, property.Span));
+                }
+                return;
+            }
             AddUnsupported(
                 PropertyNameSpan(property),
                 $"Property '{resolvedProperty.Name}' on {control.TypeName} is read-only.");
@@ -1079,6 +1187,11 @@ internal sealed class GeneralBinder
             Members = control.Members.Select(member => member switch
             {
                 BoundPropertyMember property => property with { Expression = Resolve(property.Expression, islands) },
+                BoundAttachedPropertyMember attached => attached with { Expression = Resolve(attached.Expression, islands) },
+                BoundNativeCollectionMember collection => collection with
+                {
+                    Elements = collection.Elements.Select(element => Resolve(element, islands)).ToArray(),
+                },
                 BoundContentMember content => content with { Expression = Resolve(content.Expression, islands) },
                 BoundEventMember eventMember => eventMember with { Body = Resolve(eventMember.Body, islands) },
                 BoundForEachMember loop => loop with

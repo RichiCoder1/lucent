@@ -31,6 +31,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Runtime.Tests", "tes
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Workbench", "examples\workbench\Lucent.Workbench.csproj", "{2288D4F8-0D4F-4272-84D9-204FCD4DC55C}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Workbench.Tests", "tests\Lucent.Workbench.Tests\Lucent.Workbench.Tests.csproj", "{2542211E-BD0A-4FEE-8DA1-7E0AF95E6E6B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -93,5 +97,15 @@ Global
 		{2288D4F8-0D4F-4272-84D9-204FCD4DC55C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2288D4F8-0D4F-4272-84D9-204FCD4DC55C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2288D4F8-0D4F-4272-84D9-204FCD4DC55C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2542211E-BD0A-4FEE-8DA1-7E0AF95E6E6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2542211E-BD0A-4FEE-8DA1-7E0AF95E6E6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2542211E-BD0A-4FEE-8DA1-7E0AF95E6E6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2542211E-BD0A-4FEE-8DA1-7E0AF95E6E6B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{2542211E-BD0A-4FEE-8DA1-7E0AF95E6E6B} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

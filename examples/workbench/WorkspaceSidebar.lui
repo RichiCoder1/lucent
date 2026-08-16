@@ -1,6 +1,13 @@
 namespace Lucent.Examples.Workbench;
 
-component WorkspaceSidebar(string workspace, bool compact = false) => Border {
+using System.Windows.Input;
+using Avalonia.Automation;
+
+component WorkspaceSidebar(string workspace, ICommand focusCommand, bool compact = false) => Border {
     Padding: new Avalonia.Thickness(compact ? 4 : 12);
-    TextBlock { Text: $"Workspace: {workspace}"; }
+    AutomationProperties.Name: "Workspace sidebar";
+    StackPanel {
+        TextBlock { Text: $"Workspace: {workspace}"; }
+        Button { Content: "Focus sidebar"; Command: focusCommand; }
+    }
 };

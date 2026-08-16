@@ -1,5 +1,11 @@
 namespace Lucent.Examples.Workbench;
 
-component ProblemsPane(int count = 2) => Border {
-    TextBlock { Text: $"{count} problems"; }
+using System.Windows.Input;
+using Avalonia.Automation;
+
+component ProblemsPane(ICommand copyCommand, int count = 2) => Border {
+    StackPanel {
+        TextBlock { Text: $"{count} problems"; AutomationProperties.Name: "Problems"; }
+        Button { Content: "Copy diagnostic"; Command: copyCommand; }
+    }
 };

@@ -204,6 +204,113 @@ internal sealed class NativeSymbolResolver
         return resolved;
     }
 
+    public ResolvedNativeAttachedProperty? ResolveAttachedProperty(
+        ResolvedNativeControl control,
+        string sourceName)
+    {
+        var separator = sourceName.LastIndexOf('.');
+        if (separator <= 0 || separator == sourceName.Length - 1)
+        {
+            return null;
+        }
+
+        var ownerName = sourceName[..separator];
+        var memberName = sourceName[(separator + 1)..];
+        var owner = ResolveTypeName(ownerName) as INamedTypeSymbol;
+        if (owner is null)
+        {
+            return null;
+        }
+
+        var setters = owner.GetMembers("Set" + memberName)
+            .OfType<IMethodSymbol>()
+            .Where(method => method is { IsStatic: true, IsGenericMethod: false,
+                DeclaredAccessibility: Accessibility.Public, ReturnsVoid: true } &&
+                method.Parameters.Length == 2 &&
+                _compilation.ClassifyConversion(control.Symbol, method.Parameters[0].Type).IsImplicit)
+            .ToArray();
+        var fields = owner.GetMembers(memberName + "Property")
+            .Where(symbol => symbol is IFieldSymbol
+                { IsStatic: true, DeclaredAccessibility: Accessibility.Public } field &&
+                IsAvaloniaProperty(field.Type))
+            .ToArray();
+        if (setters.Length != 1 || fields.Length != 1)
+        {
+            return null;
+        }
+
+        var setter = setters[0];
+        return new ResolvedNativeAttachedProperty(
+            sourceName,
+            owner.ToDisplayString(FullyQualifiedFormat),
+            setter.Name,
+            setter,
+            fields[0],
+            setter.Parameters[1].Type,
+            setter.Parameters[1].Type.ToDisplayString(FullyQualifiedFormat));
+    }
+
+    public ResolvedNativeCollection? ResolveMountCollection(
+        ResolvedNativeControl control,
+        string sourceName)
+    {
+        var property = ResolveProperty(control, sourceName);
+        if (property?.Symbol is not { GetMethod.DeclaredAccessibility: Accessibility.Public } propertySymbol ||
+            propertySymbol.SetMethod?.DeclaredAccessibility == Accessibility.Public)
+        {
+            return null;
+        }
+
+        if (propertySymbol.Type is not INamedTypeSymbol collectionType)
+        {
+            return null;
+        }
+
+        var addMethods = EnumerateTypeHierarchy(collectionType)
+            .SelectMany(type => type.GetMembers("Add"))
+            .OfType<IMethodSymbol>()
+            .Where(method => method is { IsStatic: false, IsGenericMethod: false,
+                DeclaredAccessibility: Accessibility.Public } && method.Parameters.Length == 1)
+            .ToArray();
+        return addMethods.Length == 1
+            ? new ResolvedNativeCollection(
+                property,
+                addMethods[0],
+                addMethods[0].Parameters[0].Type,
+                addMethods[0].Parameters[0].Type.ToDisplayString(FullyQualifiedFormat))
+            : null;
+    }
+
+    public IReadOnlyList<NativeAttachedCandidate> GetAttachedPropertyCandidates(
+        string ownerName,
+        ResolvedNativeControl control)
+    {
+        var owner = ResolveTypeName(ownerName) as INamedTypeSymbol;
+        if (owner is null)
+        {
+            return [];
+        }
+
+        return owner.GetMembers()
+            .OfType<IMethodSymbol>()
+            .Where(method => method is { IsStatic: true, IsGenericMethod: false,
+                DeclaredAccessibility: Accessibility.Public, ReturnsVoid: true } &&
+                method.Name.StartsWith("Set", StringComparison.Ordinal) &&
+                method.Parameters.Length == 2 &&
+                _compilation.ClassifyConversion(control.Symbol, method.Parameters[0].Type).IsImplicit)
+            .Select(method => method.Name[3..])
+            .Where(name => owner.GetMembers(name + "Property").OfType<IFieldSymbol>().Any(field =>
+                field is { IsStatic: true, DeclaredAccessibility: Accessibility.Public } &&
+                IsAvaloniaProperty(field.Type)))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .Select(name => new NativeAttachedCandidate(
+                name,
+                $"{owner.ToDisplayString(FullyQualifiedFormat)}.Set{name}",
+                owner.GetMembers("Set" + name).OfType<IMethodSymbol>().First()))
+            .ToArray();
+    }
+
     public IReadOnlyList<ISymbol> GetExpressionMembers(
         ITypeSymbol type,
         bool staticMembers = false) =>
@@ -486,6 +593,17 @@ internal sealed class NativeSymbolResolver
         return null;
     }
 
+    public LucentSemanticSymbol ToSemanticSymbol(
+        ResolvedNativeAttachedProperty property,
+        SourceSpan referenceSpan) =>
+        CreateSemanticSymbol(
+            property.SourceName,
+            LucentSemanticSymbolKind.NativeAttachedProperty,
+            referenceSpan,
+            $"{property.ValueTypeName} {property.OwnerTypeName}.{property.SetterName} " +
+            $"({property.OwnerTypeName}.{property.SetterName.Replace("Set", "", StringComparison.Ordinal)}Property)",
+            property.Setter);
+
     private static ITypeSymbol? GetCollectionValueType(ITypeSymbol type) =>
         GetMembers<IMethodSymbol>(type, "Add")
             .Where(method =>
@@ -516,6 +634,14 @@ internal sealed class NativeSymbolResolver
          SymbolEqualityComparer.Default.Equals(
              symbol.ContainingAssembly,
              _compilation.Assembly));
+
+    private bool IsAvaloniaProperty(ITypeSymbol type)
+    {
+        var propertyType = _compilation.GetTypeByMetadataName("Avalonia.AvaloniaProperty");
+        return propertyType is not null &&
+            (SymbolEqualityComparer.Default.Equals(type, propertyType) ||
+             type.BaseType is not null && IsAvaloniaProperty(type.BaseType));
+    }
 
     private static string CanonicalPropertyName(string controlName, string propertyName) =>
         (controlName, propertyName) switch
@@ -676,6 +802,26 @@ internal sealed record ResolvedNativeProperty(
     IPropertySymbol Symbol,
     string TypeName,
     BoundNativeValueKind NativeValueKind);
+
+internal sealed record ResolvedNativeAttachedProperty(
+    string SourceName,
+    string OwnerTypeName,
+    string SetterName,
+    IMethodSymbol Setter,
+    ISymbol PropertyField,
+    ITypeSymbol ValueType,
+    string ValueTypeName);
+
+internal sealed record ResolvedNativeCollection(
+    ResolvedNativeProperty Property,
+    IMethodSymbol AddMethod,
+    ITypeSymbol ElementType,
+    string ElementTypeName);
+
+internal sealed record NativeAttachedCandidate(
+    string Name,
+    string Display,
+    IMethodSymbol Setter);
 
 internal sealed record ResolvedNativeEvent(
     string SourceName,
