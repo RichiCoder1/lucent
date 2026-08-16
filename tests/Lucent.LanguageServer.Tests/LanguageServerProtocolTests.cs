@@ -723,6 +723,130 @@ public sealed class LanguageServerProtocolTests
         StringAssert.Contains(HoverText(messages, 4), "State<string> title");
     }
 
+    [TestMethod]
+    public async Task Cross_file_component_semantics_follow_unsaved_sibling_generations()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-lsp-composition-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var projectPath = Path.Combine(directory, "Demo.csproj");
+            var callerPath = Path.Combine(directory, "Main.lui");
+            var calleePath = Path.Combine(directory, "Child.lui");
+            var caller = "namespace Demo; component Main() => Window { Child(title: \"caller\") {} };";
+            var callee = "namespace Demo; component Child(string title = \"disk\") => TextBlock { Text: title; };";
+            await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"Main.lui\" /><LucentSource Include=\"Child.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(callerPath, caller);
+            await File.WriteAllTextAsync(calleePath, callee);
+
+            var callerUri = new Uri(callerPath).AbsoluteUri;
+            var calleeUri = new Uri(calleePath).AbsoluteUri;
+            var callPosition = PositionAtOffset(caller, caller.IndexOf("Child", StringComparison.Ordinal) + 5);
+            var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = callerUri, languageId = "lucent", version = 1, text = caller } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = calleeUri, languageId = "lucent", version = 1, text = callee } }),
+                Request(10, "textDocument/completion", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Request(11, "textDocument/hover", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Request(12, "textDocument/definition", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Notification("textDocument/didChange", new { textDocument = new { uri = calleeUri, version = 2 }, contentChanges = new[] { new { text = "namespace Demo; component Child(int count = 1) => TextBlock { Text: count.ToString(); };" } } }),
+                Request(20, "textDocument/completion", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Request(21, "textDocument/hover", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Request(22, "textDocument/definition", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Notification("textDocument/didChange", new { textDocument = new { uri = calleeUri, version = 3 }, contentChanges = new[] { new { text = callee } } }),
+                Request(30, "textDocument/definition", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Notification("textDocument/didChange", new { textDocument = new { uri = calleeUri, version = 4 }, contentChanges = new[] { new { text = "namespace Demo; component Child(int count = 1) => TextBlock { Text: count.ToString(); };" } } }),
+                Notification("textDocument/didClose", new { textDocument = new { uri = calleeUri } }),
+                Request(40, "textDocument/hover", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Request(41, "textDocument/definition", new { textDocument = new { uri = callerUri }, position = callPosition }),
+                Request(99, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+
+            StringAssert.Contains(HoverText(messages, 11), "component Demo.Child");
+            Assert.AreEqual(calleeUri, Response(messages, 12).GetProperty("result").GetProperty("uri").GetString());
+            Assert.IsTrue(Response(messages, 20).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "count"));
+            StringAssert.Contains(HoverText(messages, 21), "component Demo.Child");
+            Assert.AreEqual(calleeUri, Response(messages, 22).GetProperty("result").GetProperty("uri").GetString());
+            Assert.IsTrue(PublishedDiagnostics(messages, callerUri).Any(diagnostics => diagnostics.GetArrayLength() > 0));
+            var callerDiagnosticBatches = PublishedDiagnostics(messages, callerUri).ToArray();
+            Assert.IsTrue(callerDiagnosticBatches.Any(diagnostics => diagnostics.GetArrayLength() == 0),
+                string.Join("; ", callerDiagnosticBatches.Select(diagnostics => diagnostics.GetRawText())));
+            Assert.AreEqual(calleeUri, Response(messages, 30).GetProperty("result").GetProperty("uri").GetString());
+            StringAssert.Contains(HoverText(messages, 40), "component Demo.Child");
+            Assert.AreEqual(calleeUri, Response(messages, 41).GetProperty("result").GetProperty("uri").GetString());
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task Project_analysis_does_not_resolve_components_from_another_project()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-lsp-isolation-tests",
+            Guid.NewGuid().ToString("N"));
+        var first = Path.Combine(directory, "First");
+        var second = Path.Combine(directory, "Second");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(second);
+        try
+        {
+            var firstProject = Path.Combine(first, "First.csproj");
+            var secondProject = Path.Combine(second, "Second.csproj");
+            var firstMain = Path.Combine(first, "Main.lui");
+            var firstChild = Path.Combine(first, "Child.lui");
+            var secondMain = Path.Combine(second, "Main.lui");
+            var secondChild = Path.Combine(second, "Child.lui");
+            const string projectTemplate = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"Main.lui\" /><LucentSource Include=\"Child.lui\" /></ItemGroup></Project>";
+            const string main = "namespace Demo; component Main() => Window { Child {} };";
+            const string child = "namespace Demo; component Child() => TextBlock { Text: \"child\"; };";
+            await File.WriteAllTextAsync(firstProject, projectTemplate);
+            await File.WriteAllTextAsync(secondProject, projectTemplate);
+            await File.WriteAllTextAsync(firstMain, main);
+            await File.WriteAllTextAsync(firstChild, "namespace Demo; component Other() => TextBlock {};" );
+            await File.WriteAllTextAsync(secondMain, main);
+            await File.WriteAllTextAsync(secondChild, child);
+
+            var firstMainUri = new Uri(firstMain).AbsoluteUri;
+            var firstChildUri = new Uri(firstChild).AbsoluteUri;
+            var secondMainUri = new Uri(secondMain).AbsoluteUri;
+            var secondChildUri = new Uri(secondChild).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = firstMainUri, languageId = "lucent", version = 1, text = main } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = firstChildUri, languageId = "lucent", version = 1, text = "namespace Demo; component Other() => TextBlock {};" } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = secondMainUri, languageId = "lucent", version = 1, text = main } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = secondChildUri, languageId = "lucent", version = 1, text = child } }),
+                Request(2, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var diagnostics = PublishedDiagnostics(ReadMessages(output.ToArray()), firstMainUri).ToArray();
+            Assert.IsTrue(diagnostics.Any(batch => batch.EnumerateArray().Any(item =>
+                item.GetProperty("code").GetString() == "LUC2001")));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static IEnumerable<JsonElement> PublishedDiagnostics(
+        IReadOnlyList<JsonDocument> messages,
+        string uri) => messages
+        .Where(message => message.RootElement.TryGetProperty("method", out var method) &&
+            method.GetString() == "textDocument/publishDiagnostics" &&
+            message.RootElement.GetProperty("params").GetProperty("uri").GetString() == uri)
+        .Select(message => message.RootElement.GetProperty("params").GetProperty("diagnostics"));
+
     private static MemoryStream BuildInput(params byte[][] messages) =>
         new(messages.SelectMany(message => message).ToArray());
 

@@ -3,7 +3,7 @@ using Lucent.Compiler.Semantics;
 
 namespace Lucent.Compiler.CodeGeneration;
 
-internal enum BoundReactiveSourceKind { State, Computed }
+internal enum BoundReactiveSourceKind { State, Computed, Parameter }
 
 internal sealed record BoundReactiveSource(
     int Id,
@@ -19,7 +19,29 @@ internal sealed record BoundComponentModel(
     IReadOnlyList<BoundReactiveSource> Sources,
     IReadOnlyList<BoundStateModel> States,
     IReadOnlyList<BoundComputedModel> Computed,
-    BoundControlModel Root);
+    BoundControlModel Root,
+    IReadOnlyList<BoundParameterModel>? Parameters = null,
+    IReadOnlyList<BoundSlotModel>? Slots = null,
+    IReadOnlyList<BoundRenderableModel>? FragmentRoots = null,
+    IReadOnlyList<BoundOrdinaryMemberModel>? OrdinaryMembers = null)
+{
+    public IReadOnlyList<BoundParameterModel> AllParameters => Parameters ?? [];
+    public IReadOnlyList<BoundSlotModel> AllSlots => Slots ?? [];
+    public IReadOnlyList<BoundRenderableModel> Roots => FragmentRoots ?? [Root];
+    public IReadOnlyList<BoundOrdinaryMemberModel> Members => OrdinaryMembers ?? [];
+}
+
+internal sealed record BoundParameterModel(
+    string TypeName,
+    string Name,
+    string? DefaultValueText,
+    SourceSpan Span);
+
+internal sealed record BoundSlotModel(string Name, SourceSpan Span);
+
+internal sealed record BoundOrdinaryMemberModel(string Text, string Name, SourceSpan Span);
+
+internal abstract record BoundRenderableModel(SourceSpan Span);
 
 internal sealed record BoundStateModel(
     string TypeName,
@@ -47,7 +69,24 @@ internal sealed record BoundControlModel(
     IReadOnlyList<BoundControlMember> Members,
     SourceSpan Span,
     BoundControlKind Kind = BoundControlKind.Unknown,
-    BoundContentRoute? ContentRoute = null);
+    BoundContentRoute? ContentRoute = null) : BoundRenderableModel(Span);
+
+internal sealed record BoundComponentInvocationModel(
+    ComponentSymbol Component,
+    IReadOnlyList<BoundComponentArgument> Arguments,
+    IReadOnlyList<BoundSlotSupply> Slots,
+    int SiteId,
+    SourceSpan Span) : BoundRenderableModel(Span);
+
+internal sealed record BoundComponentArgument(
+    ComponentParameterSymbol Parameter,
+    BoundCSharpIsland Expression,
+    bool IsDefault);
+
+internal sealed record BoundSlotSupply(
+    ComponentSlotSymbol Slot,
+    IReadOnlyList<BoundRenderableModel> Roots,
+    SourceSpan Span);
 
 internal sealed record BoundContentRoute(
     string PropertyName,
@@ -64,6 +103,14 @@ internal enum BoundControlKind
 }
 
 internal abstract record BoundControlMember(SourceSpan Span);
+
+internal sealed record BoundComponentChildMember(
+    BoundComponentInvocationModel Invocation,
+    SourceSpan Span) : BoundControlMember(Span);
+
+internal sealed record BoundYieldMember(
+    ComponentSlotSymbol Slot,
+    SourceSpan Span) : BoundControlMember(Span);
 
 internal sealed record BoundPropertyMember(
     string Name,
@@ -115,7 +162,7 @@ internal sealed record BoundForEachMember(
     string ItemName,
     BoundCSharpIsland SourceExpression,
     BoundCSharpIsland KeyExpression,
-    BoundControlModel Body,
+    BoundRenderableModel Body,
     SourceSpan Span) : BoundControlMember(Span)
 {
     public SourceSpan SourceExpressionSpan => SourceExpression.Span;
@@ -125,6 +172,6 @@ internal sealed record BoundForEachMember(
 internal sealed record BoundConditionalMember(
     int Id,
     BoundCSharpIsland Condition,
-    BoundControlModel TrueRoot,
-    BoundControlModel? FalseRoot,
+    IReadOnlyList<BoundRenderableModel> TrueRoots,
+    IReadOnlyList<BoundRenderableModel>? FalseRoots,
     SourceSpan Span) : BoundControlMember(Span);

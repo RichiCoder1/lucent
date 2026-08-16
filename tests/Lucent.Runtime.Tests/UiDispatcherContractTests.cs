@@ -15,6 +15,7 @@ public sealed class UiDispatcherContractTests
                 typeof(AvaloniaUiDispatcher),
                 typeof(ComponentOwner),
                 typeof(ConditionalRegion),
+                typeof(Fragment),
             },
             typeof(ComponentOwner).Assembly.GetExportedTypes());
     }

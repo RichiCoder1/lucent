@@ -1,0 +1,4 @@
+namespace Demo;
+component App() => Window {
+    Host("Demo") { slot actions { Leaf("Run") {} } }
+};

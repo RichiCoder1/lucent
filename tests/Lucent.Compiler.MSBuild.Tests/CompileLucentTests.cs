@@ -30,7 +30,7 @@ public sealed class CompileLucentTests
         StringAssert.Contains(generated, "internal sealed class CounterComponent");
         StringAssert.Contains(generated, "Styles.Add(new global::Avalonia.Styling.Style");
         StringAssert.Contains(generated, "global::Avalonia.Animation.DoubleTransition");
-        StringAssert.Contains(generated, "SetCount(_count + 1);");
+        StringAssert.Contains(generated, "__lucent_SetCount(__lucent_stateCount + 1);");
         Assert.HasCount(0, buildEngine.Errors);
     }
 
@@ -98,15 +98,105 @@ public sealed class CompileLucentTests
     }
 
     [TestMethod]
+    public void Caller_before_callee_is_compiled_as_one_batch()
+    {
+        using var temporary = new TemporaryDirectory();
+        var caller = Path.Combine(temporary.Path, "Main.lui");
+        var callee = Path.Combine(temporary.Path, "Child.lui");
+        File.WriteAllText(caller, "namespace Demo; component Main() => Window { Child {} };");
+        File.WriteAllText(callee, "namespace Demo; component Child() => TextBlock { Text: \"child\"; };");
+        var engine = new CapturingBuildEngine();
+        var task = new CompileLucent
+        {
+            BuildEngine = engine,
+            Sources = [new TaskItem(caller), new TaskItem(callee)],
+            OutputDirectory = temporary.OutputDirectory,
+        };
+
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        Assert.HasCount(2, task.GeneratedFiles);
+    }
+
+    [TestMethod]
+    public void Duplicate_sources_and_flat_outputs_fail_before_writing()
+    {
+        using var temporary = new TemporaryDirectory();
+        var source = Path.Combine(temporary.Path, "Main.lui");
+        File.WriteAllText(source, "namespace Demo; component Main() => Border {}; ");
+        var engine = new CapturingBuildEngine();
+        var duplicateTask = new CompileLucent
+        {
+            BuildEngine = engine,
+            Sources = [new TaskItem(source), new TaskItem(source)],
+            OutputDirectory = temporary.OutputDirectory,
+        };
+
+        Assert.IsFalse(duplicateTask.Execute());
+        Assert.IsTrue(engine.Errors.Any(error => error.Code == "LUC9004"));
+        Assert.IsEmpty(duplicateTask.GeneratedFiles);
+    }
+
+    [TestMethod]
+    public void Distinct_same_named_sources_fail_output_preflight()
+    {
+        using var temporary = new TemporaryDirectory();
+        var firstDirectory = Directory.CreateDirectory(Path.Combine(temporary.Path, "one")).FullName;
+        var secondDirectory = Directory.CreateDirectory(Path.Combine(temporary.Path, "two")).FullName;
+        var first = Path.Combine(firstDirectory, "Foo.lui");
+        var second = Path.Combine(secondDirectory, "Foo.lui");
+        File.WriteAllText(first, "namespace Demo; component One() => Border {}; ");
+        File.WriteAllText(second, "namespace Demo; component Two() => Border {}; ");
+        var engine = new CapturingBuildEngine();
+        var task = new CompileLucent
+        {
+            BuildEngine = engine,
+            Sources = [new TaskItem(first), new TaskItem(second)],
+            OutputDirectory = temporary.OutputDirectory,
+        };
+
+        Assert.IsFalse(task.Execute());
+        Assert.IsTrue(engine.Errors.Any(error => error.Code == "LUC9003"));
+        Assert.IsEmpty(task.GeneratedFiles);
+    }
+
+    [TestMethod]
+    public void Malformed_sibling_preserves_all_existing_outputs()
+    {
+        using var temporary = new TemporaryDirectory();
+        var good = Path.Combine(temporary.Path, "Good.lui");
+        var bad = Path.Combine(temporary.Path, "Bad.lui");
+        Directory.CreateDirectory(temporary.OutputDirectory);
+        File.WriteAllText(good, "namespace Demo; component Good() => Border {}; ");
+        File.WriteAllText(bad, "component");
+        var output = Path.Combine(temporary.OutputDirectory, "GoodComponent.g.cs");
+        File.WriteAllText(output, "sentinel");
+        var engine = new CapturingBuildEngine();
+        var task = new CompileLucent
+        {
+            BuildEngine = engine,
+            Sources = [new TaskItem(good), new TaskItem(bad)],
+            OutputDirectory = temporary.OutputDirectory,
+        };
+
+        Assert.IsFalse(task.Execute());
+        Assert.AreEqual("sentinel", File.ReadAllText(output));
+        Assert.IsEmpty(task.GeneratedFiles);
+    }
+
+    [TestMethod]
     public async System.Threading.Tasks.Task Targets_consumer_builds_and_copies_the_runtime()
     {
         using var temporary = new TemporaryDirectory();
         var repository = FindRepositoryRoot();
         var sourcePath = Path.Combine(temporary.Path, "Main.lui");
+        var childPath = Path.Combine(temporary.Path, "Child.lui");
         var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
         await File.WriteAllTextAsync(
             sourcePath,
-            "namespace Demo; component Main() { Fragment Render() { return Border { }; } }");
+            "namespace Demo; component Main() => Window { Child {} };");
+        await File.WriteAllTextAsync(
+            childPath,
+            "namespace Demo; component Child() => Border { }; ");
         await File.WriteAllTextAsync(
             projectPath,
             $$"""
@@ -121,6 +211,7 @@ public sealed class CompileLucentTests
                 <PackageReference Include="Avalonia" Version="12.1.1" />
                 <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
                 <LucentSource Include="Main.lui" />
+                <LucentSource Include="Child.lui" />
               </ItemGroup>
               <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
             </Project>
@@ -159,10 +250,63 @@ public sealed class CompileLucentTests
         Assert.IsTrue(
             Directory.EnumerateFiles(
                     Path.Combine(temporary.Path, "artifacts", "obj"),
+                    "ChildComponent.g.cs",
+                    SearchOption.AllDirectories)
+                .Any(),
+            output);
+        Assert.IsTrue(
+            Directory.EnumerateFiles(
+                    Path.Combine(temporary.Path, "artifacts", "obj"),
                     "MainComponent.g.cs",
                     SearchOption.AllDirectories)
                 .Any(),
             output);
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Targets_consumer_rejects_bad_sibling_without_replacing_output()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        var good = Path.Combine(temporary.Path, "Main.lui");
+        var bad = Path.Combine(temporary.Path, "Broken.lui");
+        var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(good, "namespace Demo; component Main() => Window {}; ");
+        await File.WriteAllTextAsync(bad, "component");
+        await File.WriteAllTextAsync(projectPath, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework><Nullable>enable</Nullable></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="Main.lui" /><LucentSource Include="Broken.lui" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var sentinel = Path.Combine(temporary.Path, "obj", "Debug", "net9.0", "Lucent", "MainComponent.g.cs");
+        Directory.CreateDirectory(Path.GetDirectoryName(sentinel)!);
+        await File.WriteAllTextAsync(sentinel, "sentinel");
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            WorkingDirectory = temporary.Path,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in new[] { "build", projectPath, "--nologo", "--verbosity:minimal", "-nodeReuse:false" })
+            startInfo.ArgumentList.Add(argument);
+        using var process = Process.Start(startInfo)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await stdout + await stderr;
+
+        Assert.AreNotEqual(0, process.ExitCode, output);
+        Assert.AreEqual("sentinel", await File.ReadAllTextAsync(sentinel));
+        Assert.IsFalse(output.Contains("MainComponent.g.cs", StringComparison.Ordinal) &&
+                       output.Contains("Compile", StringComparison.OrdinalIgnoreCase));
     }
 
     private static (CompileLucent Task, CapturingBuildEngine BuildEngine) CreateTask(

@@ -17,7 +17,7 @@ internal static class GeneralCSharpEmitter
     {
         var source = new SourceDocument(sourceText, sourcePath);
         var writer = new CodeWriter();
-        var controls = Flatten(model.Root).ToArray();
+        var controls = model.Roots.OfType<BoundControlModel>().SelectMany(Flatten).ToArray();
         var fields = controls
             .Select((control, index) => (control, index: index + 1))
             .ToArray();
@@ -37,6 +37,24 @@ internal static class GeneralCSharpEmitter
                 .Select(member => new BoundConditionalRegion(
                     field.control, field.index, member, member.Id + 1)))
             .ToArray();
+        var staticComponentSites = fields.SelectMany(field => field.control.Members
+                .OfType<BoundComponentChildMember>()
+                .Select(member => new ComponentSite(field.control, field.index,
+                    member.Invocation, member.Invocation.SiteId + 1)))
+            .Concat(model.Roots.OfType<BoundComponentInvocationModel>()
+                .Select(invocation => new ComponentSite(null, 0, invocation, invocation.SiteId + 1)))
+            .ToArray();
+        var componentSites = staticComponentSites
+            .Concat(ConditionalComponentSites(fields, staticComponentSites))
+            .GroupBy(site => site.Index)
+            .Select(group => group.First())
+            .ToArray();
+        var slotSupplySites = componentSites.SelectMany(site => site.Invocation.Slots.Select(supply =>
+            new SlotSupplySite(site.Index, supply,
+                supply.Roots,
+                supply.Roots.OfType<BoundControlModel>().SelectMany(FlattenAll).ToArray(),
+                EnumerateInvocations(supply.Roots).ToArray())))
+            .ToArray();
         var bindings = fields
             .SelectMany(field => field.control.Members
                 .Where(member => member switch
@@ -47,7 +65,7 @@ internal static class GeneralCSharpEmitter
                 })
                 .Select(member => (field.control, field.index, member)))
             .Select(binding => new BoundBinding(
-                binding.control, $"_control{binding.index}", binding.member, null, 0))
+                binding.control, $"__lucent_control{binding.index}", binding.member, null, 0))
             .Concat(conditionals.SelectMany(ConditionalBindings))
             .Select((binding, index) => binding with { Index = index + 1 })
             .ToArray();
@@ -90,18 +108,36 @@ internal static class GeneralCSharpEmitter
 
         foreach (var (control, index) in fields)
         {
-            writer.Line($"private {control.TypeName}? _control{index};");
+            writer.Line($"private {control.TypeName}? __lucent_control{index};");
+        }
+
+        foreach (var site in componentSites)
+        {
+            writer.Line($"private {site.Invocation.Component.GeneratedTypeName}? __lucent_component{site.Index};");
+            writer.Line($"private Fragment __lucent_component{site.Index}Roots;");
+        }
+        foreach (var supply in slotSupplySites)
+        {
+            writer.Line($"private bool __lucent_slot{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}Mounted;");
+            foreach (var (control, index) in supply.Controls.Select((control, index) => (control, index + 1)))
+            {
+                writer.Line($"private {control.TypeName}? __lucent_slot{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}Control{index};");
+            }
+            foreach (var (invocation, index) in supply.Invocations.Select((invocation, index) => (invocation, index + 1)))
+            {
+                writer.Line($"private {invocation.Component.GeneratedTypeName}? __lucent_slot{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}Component{index};");
+            }
         }
 
         foreach (var region in regions)
         {
             writer.Line(
-                $"private readonly Dictionary<object, ILoopEntry> _region{region.Index} = new();");
+                $"private readonly Dictionary<object, __lucent_ILoopEntry> __lucent_region{region.Index} = new();");
         }
 
         foreach (var conditional in conditionals)
         {
-            writer.Line($"private ConditionalRegion? _conditional{conditional.Index};");
+            writer.Line($"private ConditionalRegion? __lucent_conditional{conditional.Index};");
             foreach (var (control, name) in ConditionalControls(conditional))
             {
                 writer.Line($"private {control.TypeName}? {name};");
@@ -111,7 +147,7 @@ internal static class GeneralCSharpEmitter
         foreach (var binding in bindings.Where(candidate =>
                      candidate.Member is BoundPropertyMember { Name: "Class" }))
         {
-            writer.Line($"private string? _binding{binding.Index}Class;");
+            writer.Line($"private string? __lucent_binding{binding.Index}Class;");
         }
 
         if (regions.Length > 0)
@@ -121,52 +157,140 @@ internal static class GeneralCSharpEmitter
 
         foreach (var state in model.States)
         {
-            writer.Line($"private {state.TypeName} _{state.Name} = {state.InitializerText};");
+            writer.Line($"private {state.TypeName} {StateField(state.Name)};");
         }
 
         foreach (var computed in model.Computed)
         {
-            writer.Line($"private {computed.TypeName} _{computed.Name} = {computed.InitialValueText};");
-            writer.Line($"private bool _{computed.Name}Pending;");
-            writer.Line($"private string? _{computed.Name}ErrorMessage;");
-            writer.Line($"private global::System.Threading.CancellationTokenSource? _{computed.Name}Cancellation;");
-            writer.Line($"private int _{computed.Name}Generation;");
+            writer.Line($"private {computed.TypeName} {ComputedField(computed.Name)};");
+            writer.Line($"private bool {ComputedField(computed.Name)}Pending;");
+            writer.Line($"private string? {ComputedField(computed.Name)}ErrorMessage;");
+            writer.Line($"private global::System.Threading.CancellationTokenSource? {ComputedField(computed.Name)}Cancellation;");
+            writer.Line($"private int {ComputedField(computed.Name)}Generation;");
         }
 
-        writer.Line("private readonly ComponentOwner _owner;");
-        writer.Line("private bool _mounted;");
+        writer.Line("private readonly ComponentOwner __lucent_owner;");
+        writer.Line("private bool __lucent_mounted;");
         if (model.Computed.Count > 0)
         {
-            writer.Line("private bool _startingComputedWork;");
+            writer.Line("private bool __lucent_startingComputedWork;");
         }
+
+        foreach (var parameter in model.AllParameters)
+        {
+            writer.Line($"private {parameter.TypeName} __lucent_input{Pascal(parameter.Name)};");
+            writer.Line($"private {parameter.TypeName} {parameter.Name} => __lucent_input{Pascal(parameter.Name)};");
+        }
+        foreach (var slot in model.AllSlots)
+        {
+            writer.Line($"private readonly Func<ComponentOwner, Fragment> __lucent_{slot.Name};");
+        }
+        var ordinaryInitializers = new List<(string Name, string Expression)>();
+        foreach (var member in model.Members)
+        {
+            var declaration = SyntaxFactory.ParseMemberDeclaration(member.Text);
+            if (declaration is FieldDeclarationSyntax field &&
+                field.Declaration.Variables.Count == 1 &&
+                field.Declaration.Variables[0].Initializer is { } initializer &&
+                !field.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.ConstKeyword) ||
+                                                  modifier.IsKind(SyntaxKind.StaticKeyword)))
+            {
+                var variable = field.Declaration.Variables[0].WithInitializer(null);
+                writer.Line(field.WithDeclaration(field.Declaration.WithVariables([variable]))
+                    .ToFullString().Trim());
+                ordinaryInitializers.Add((variable.Identifier.ValueText,
+                    new OrdinaryMemberRewriter(model).Visit(initializer.Value)!.ToFullString().Trim()));
+            }
+            else
+            {
+                writer.Line(LowerOrdinaryMember(member.Text, model));
+            }
+        }
+        var initializers = ordinaryInitializers
+            .Select(item => (Span: model.Members.First(member => member.Name == item.Name).Span.Start,
+                Statement: $"{item.Name} = {item.Expression};"))
+            .Concat(model.States.Select(state => (Span: state.Span.Start,
+                Statement: $"{StateField(state.Name)} = {state.InitializerText};")))
+            .Concat(model.Computed.Select(computed => (Span: computed.Span.Start,
+                Statement: $"{ComputedField(computed.Name)} = {computed.InitialValueText};")))
+            .OrderBy(item => item.Span)
+            .ToArray();
         writer.Line();
-        writer.Line($"internal {model.ComponentName}Component(IUiDispatcher? dispatcher = null)");
+        var topParameters = model.AllParameters.Select(parameter =>
+                $"{parameter.TypeName} {parameter.Name}" +
+                (parameter.DefaultValueText is null ? string.Empty : $" = {parameter.DefaultValueText}"))
+            .Concat(["IUiDispatcher? __lucent_dispatcher = null"]);
+        writer.Line($"internal {model.ComponentName}Component({string.Join(", ", topParameters)})");
         writer.Line("{");
         writer.Indent();
-        writer.Line("_owner = new ComponentOwner(dispatcher ?? AvaloniaUiDispatcher.Instance);");
+        writer.Line("__lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance);");
+        foreach (var parameter in model.AllParameters)
+        {
+            writer.Line($"__lucent_input{Pascal(parameter.Name)} = {parameter.Name};");
+        }
+        foreach (var slot in model.AllSlots)
+        {
+            writer.Line($"__lucent_{slot.Name} = static _ => Fragment.Empty;");
+        }
+        foreach (var initializer in initializers)
+        {
+            writer.Line(initializer.Statement);
+        }
         foreach (var region in regions)
         {
-            writer.Line($"_owner.OnDispose(_region{region.Index}.Clear);");
+            writer.Line($"__lucent_owner.OnDispose(__lucent_region{region.Index}.Clear);");
         }
         foreach (var computed in model.Computed)
         {
-            writer.Line("_owner.OnDispose(() =>");
+            writer.Line("__lucent_owner.OnDispose(() =>");
             writer.Line("{");
             writer.Indent();
-            writer.Line($"_{computed.Name}Cancellation?.Cancel();");
-            writer.Line($"_{computed.Name}Cancellation?.Dispose();");
+            writer.Line($"{ComputedField(computed.Name)}Cancellation?.Cancel();");
+            writer.Line($"{ComputedField(computed.Name)}Cancellation?.Dispose();");
             writer.Unindent();
             writer.Line("});");
         }
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line("public Control Mount()");
+        foreach (var supply in slotSupplySites)
+        {
+            EmitSlotFactory(writer, supply, source);
+            writer.Line();
+        }
+        var nestedParameters = new[] { "ComponentOwner __lucent_ownerArgument" }
+            .Concat(model.AllParameters.Select(parameter => $"{parameter.TypeName} {parameter.Name}"))
+            .Concat(model.AllSlots.Select(slot =>
+                $"Func<ComponentOwner, Fragment> __lucent_{slot.Name}Factory"));
+        writer.Line($"internal {model.ComponentName}Component({string.Join(", ", nestedParameters)})");
         writer.Line("{");
         writer.Indent();
-        writer.Line("ObjectDisposedException.ThrowIf(_owner.IsDisposed, this);");
+        writer.Line("__lucent_owner = __lucent_ownerArgument;");
+        foreach (var parameter in model.AllParameters)
+        {
+            writer.Line($"__lucent_input{Pascal(parameter.Name)} = {parameter.Name};");
+        }
+        foreach (var slot in model.AllSlots)
+        {
+            writer.Line($"__lucent_{slot.Name} = __lucent_{slot.Name}Factory;");
+        }
+        foreach (var initializer in initializers)
+        {
+            writer.Line(initializer.Statement);
+        }
+        foreach (var region in regions)
+        {
+            writer.Line($"__lucent_owner.OnDispose(__lucent_region{region.Index}.Clear);");
+        }
+        writer.Unindent();
+        writer.Line("}");
         writer.Line();
-        writer.Line("if (_mounted)");
+        writer.Line("public Fragment Mount()");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("ObjectDisposedException.ThrowIf(__lucent_owner.IsDisposed, this);");
+        writer.Line();
+        writer.Line("if (__lucent_mounted)");
         writer.Line("{");
         writer.Indent();
         writer.Line(
@@ -174,15 +298,15 @@ internal static class GeneralCSharpEmitter
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line("_mounted = true;");
+        writer.Line("__lucent_mounted = true;");
         writer.Line();
 
         foreach (var (control, index) in fields)
         {
-            writer.Line($"_control{index} = new {control.TypeName}();");
+            writer.Line($"__lucent_control{index} = new {control.TypeName}();");
         }
 
-        EmitStyles(writer, model, styles ?? BoundStyleSheet.Empty);
+        EmitStyles(writer, model, styles ?? BoundStyleSheet.Empty, fields);
 
         writer.Line();
         foreach (var (control, index) in fields)
@@ -190,9 +314,28 @@ internal static class GeneralCSharpEmitter
             EmitStaticProperties(writer, control, index, model.States, model.Computed, source);
         }
 
+        foreach (var site in staticComponentSites)
+        {
+            var arguments = InvocationArguments(site);
+            writer.Line($"var __lucent_childOwner{site.Index} = __lucent_owner.CreateChild();");
+            writer.Line($"__lucent_component{site.Index} = new {site.Invocation.Component.GeneratedTypeName}(" +
+                $"__lucent_childOwner{site.Index}" +
+                (arguments.Any() ? ", " + string.Join(", ", arguments) : string.Empty) + ");");
+            writer.Line($"__lucent_component{site.Index}Roots = __lucent_component{site.Index}.Mount();");
+            EmitProjectedStyles(writer, $"__lucent_component{site.Index}Roots",
+                styles ?? BoundStyleSheet.Empty, $"__lucent_styleRoot{site.Index}");
+            writer.Line($"__lucent_childOwner{site.Index}.OnDispose(() =>");
+            writer.Line("{");
+            writer.Indent();
+            writer.Line($"__lucent_component{site.Index} = null;");
+            writer.Line($"__lucent_component{site.Index}Roots = Fragment.Empty;");
+            writer.Unindent();
+            writer.Line("});");
+        }
+
         foreach (var (control, index) in fields)
         {
-            EmitChildren(writer, control, index, fields);
+            EmitChildren(writer, control, index, fields, componentSites);
         }
 
         foreach (var (control, index) in fields)
@@ -200,11 +343,11 @@ internal static class GeneralCSharpEmitter
             foreach (var eventMember in control.Members.OfType<BoundEventMember>())
             {
                 writer.Line(
-                    $"_control{index}!.{eventMember.EventName} += " +
-                    $"OnControl{index}{eventMember.EventName};");
+                    $"__lucent_control{index}!.{eventMember.EventName} += " +
+                    $"__lucent_OnControl{index}{eventMember.EventName};");
                 writer.Line(
-                    $"_owner.OnDispose(() => _control{index}!.{eventMember.EventName} -= " +
-                    $"OnControl{index}{eventMember.EventName});");
+                    $"__lucent_owner.OnDispose(() => __lucent_control{index}!.{eventMember.EventName} -= " +
+                    $"__lucent_OnControl{index}{eventMember.EventName});");
             }
         }
 
@@ -215,42 +358,76 @@ internal static class GeneralCSharpEmitter
         }
         foreach (var binding in bindings.Where(binding => binding.ConditionalIndex is null))
         {
-            writer.Line($"UpdateBinding{binding.Index}();");
+            writer.Line($"__lucent_UpdateBinding{binding.Index}();");
         }
         foreach (var region in regions)
         {
-            writer.Line($"UpdateRegion{region.Index}();");
+            writer.Line($"__lucent_UpdateRegion{region.Index}();");
         }
         foreach (var conditional in conditionals)
         {
-            writer.Line($"UpdateConditional{conditional.Index}();");
+            writer.Line($"__lucent_UpdateConditional{conditional.Index}();");
         }
         if (model.Computed.Count > 0)
         {
-            writer.Line("_startingComputedWork = true;");
+            writer.Line("__lucent_startingComputedWork = true;");
             writer.Line("try");
             writer.Line("{");
             writer.Indent();
             foreach (var computed in model.Computed)
             {
-                writer.Line($"Refresh{Pascal(computed.Name)}();");
+                writer.Line($"__lucent_Refresh{Pascal(computed.Name)}();");
             }
             writer.Unindent();
             writer.Line("}");
             writer.Line("finally");
             writer.Line("{");
             writer.Indent();
-            writer.Line("_startingComputedWork = false;");
+            writer.Line("__lucent_startingComputedWork = false;");
             writer.Unindent();
             writer.Line("}");
         }
         writer.Line();
-        writer.Line("return _control1!;");
+        var mountedRoots = model.Roots.Select(root => root switch
+        {
+            BoundControlModel control =>
+                $"Fragment.From(__lucent_control{fields.First(field => ReferenceEquals(field.control, control)).index}!)",
+            BoundComponentInvocationModel invocation =>
+                $"__lucent_component{componentSites.First(site => ReferenceEquals(site.Invocation, invocation)).Index}Roots",
+            _ => "Fragment.Empty",
+        }).ToArray();
+        writer.Line(mountedRoots.Length switch
+        {
+            0 => "return Fragment.Empty;",
+            1 => $"return {mountedRoots[0]};",
+            _ => $"return Fragment.Concat({string.Join(", ", mountedRoots)});",
+        });
         writer.Unindent();
         writer.Line("}");
         writer.Line();
 
-        writer.Line("public void Dispose() => _owner.Dispose();");
+        writer.Line("public void Dispose() => __lucent_owner.Dispose();");
+        writer.Line();
+        writer.Line($"internal void UpdateInputs({string.Join(", ", model.AllParameters.Select(parameter => $"{parameter.TypeName} {parameter.Name}"))})");
+        writer.Line("{");
+        writer.Indent();
+        foreach (var parameter in model.AllParameters)
+        {
+            writer.Line($"var __lucent_changed{Pascal(parameter.Name)} = !EqualityComparer<{parameter.TypeName}>.Default.Equals(" +
+                $"__lucent_input{Pascal(parameter.Name)}, {parameter.Name});");
+        }
+        foreach (var parameter in model.AllParameters)
+        {
+            writer.Line($"if (__lucent_changed{Pascal(parameter.Name)}) __lucent_input{Pascal(parameter.Name)} = {parameter.Name};");
+        }
+        foreach (var parameter in model.AllParameters)
+        {
+            var sourceId = model.Sources.First(source => source.Name == parameter.Name &&
+                source.Kind == BoundReactiveSourceKind.Parameter).Id;
+            writer.Line($"if (__lucent_changed{Pascal(parameter.Name)}) __lucent_InvalidateSource{sourceId}();");
+        }
+        writer.Unindent();
+        writer.Line("}");
         writer.Line();
 
         foreach (var (control, index) in fields)
@@ -262,11 +439,12 @@ internal static class GeneralCSharpEmitter
             }
         }
 
-        EmitUpdateBindings(writer, model, bindings, regions, conditionals, source);
+        EmitUpdateBindings(writer, model, bindings, regions, conditionals, componentSites,
+            slotSupplySites, styles ?? BoundStyleSheet.Empty, source);
         foreach (var region in regions)
         {
             writer.Line();
-            EmitRegionUpdater(writer, model, region, source);
+            EmitRegionUpdater(writer, model, region, styles ?? BoundStyleSheet.Empty, source);
         }
 
         foreach (var computed in model.Computed)
@@ -282,7 +460,7 @@ internal static class GeneralCSharpEmitter
             writer.Line($"private void {methodName}({state.TypeName} value)");
             writer.Line("{");
             writer.Indent();
-            writer.Line($"_owner.Dispatch(() => {methodName}Core(value));");
+            writer.Line($"__lucent_owner.Dispatch(() => {methodName}Core(value));");
             writer.Unindent();
             writer.Line("}");
             writer.Line();
@@ -290,16 +468,16 @@ internal static class GeneralCSharpEmitter
             writer.Line("{");
             writer.Indent();
             writer.Line(
-                $"if (EqualityComparer<{state.TypeName}>.Default.Equals(_{state.Name}, value))");
+                $"if (EqualityComparer<{state.TypeName}>.Default.Equals({StateField(state.Name)}, value))");
             writer.Line("{");
             writer.Indent();
             writer.Line("return;");
             writer.Unindent();
             writer.Line("}");
             writer.Line();
-            writer.Line($"_{state.Name} = value;");
+            writer.Line($"{StateField(state.Name)} = value;");
             var sourceId = model.Sources.First(source => source.Name == state.Name).Id;
-            writer.Line($"InvalidateSource{sourceId}();");
+            writer.Line($"__lucent_InvalidateSource{sourceId}();");
             writer.Unindent();
             writer.Line("}");
             writer.Line();
@@ -308,7 +486,9 @@ internal static class GeneralCSharpEmitter
             writer.Line("{");
             writer.Indent();
             writer.Line("ArgumentNullException.ThrowIfNull(update);");
-            writer.Line($"_owner.Dispatch(() => {methodName}Core(update(_{state.Name})));");
+            writer.Line($"var __lucent_previous{Pascal(state.Name)} = {StateField(state.Name)};");
+            writer.Line("var __lucent_stateOwner = __lucent_owner;");
+            writer.Line($"__lucent_stateOwner.Dispatch(() => {methodName}Core(update(__lucent_previous{Pascal(state.Name)})));");
             writer.Unindent();
             writer.Line("}");
         }
@@ -327,31 +507,31 @@ internal static class GeneralCSharpEmitter
         var factory = computed.Factory.LoweredText;
         var sourceId = model.Sources.First(source => source.Name == computed.Name).Id;
 
-        writer.Line($"private void Refresh{pascalName}()");
+        writer.Line($"private void __lucent_Refresh{pascalName}()");
         writer.Line("{");
         writer.Indent();
-        writer.Line("if (_owner.IsDisposed)");
+        writer.Line("if (__lucent_owner.IsDisposed)");
         writer.Line("{");
         writer.Indent();
         writer.Line("return;");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line($"var generation = ++_{computed.Name}Generation;");
-        writer.Line($"_{computed.Name}Cancellation?.Cancel();");
-        writer.Line($"_{computed.Name}Cancellation?.Dispose();");
+        writer.Line($"var generation = ++{ComputedField(computed.Name)}Generation;");
+        writer.Line($"{ComputedField(computed.Name)}Cancellation?.Cancel();");
+        writer.Line($"{ComputedField(computed.Name)}Cancellation?.Dispose();");
         writer.Line(
-            $"_{computed.Name}Cancellation = global::System.Threading.CancellationTokenSource." +
-            "CreateLinkedTokenSource(_owner.CancellationToken);");
-        writer.Line($"_{computed.Name}Pending = true;");
-        writer.Line($"_{computed.Name}ErrorMessage = null;");
-        writer.Line($"InvalidateSource{sourceId}();");
-        writer.Line($"_ = Run{pascalName}Async(generation, _{computed.Name}Cancellation.Token);");
+            $"{ComputedField(computed.Name)}Cancellation = global::System.Threading.CancellationTokenSource." +
+            "CreateLinkedTokenSource(__lucent_owner.CancellationToken);");
+        writer.Line($"{ComputedField(computed.Name)}Pending = true;");
+        writer.Line($"{ComputedField(computed.Name)}ErrorMessage = null;");
+        writer.Line($"__lucent_InvalidateSource{sourceId}();");
+        writer.Line($"_ = __lucent_Run{pascalName}Async(generation, {ComputedField(computed.Name)}Cancellation.Token);");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
 
-        writer.Line($"private async global::System.Threading.Tasks.Task Run{pascalName}Async(");
+        writer.Line($"private async global::System.Threading.Tasks.Task __lucent_Run{pascalName}Async(");
         writer.Indent();
         writer.Line("int generation,");
         writer.Line("global::System.Threading.CancellationToken cancellationToken)");
@@ -365,19 +545,19 @@ internal static class GeneralCSharpEmitter
             $"var value = await ((global::System.Func<global::System.Threading.CancellationToken, " +
             $"global::System.Threading.Tasks.Task<{computed.TypeName}>>)({factory}))" +
             "(cancellationToken).ConfigureAwait(false);");
-        writer.Line("_owner.Dispatch(() =>");
+        writer.Line("__lucent_owner.Dispatch(() =>");
         writer.Line("{");
         writer.Indent();
-        writer.Line($"if (generation != _{computed.Name}Generation)");
+        writer.Line($"if (generation != {ComputedField(computed.Name)}Generation)");
         writer.Line("{");
         writer.Indent();
         writer.Line("return;");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line($"_{computed.Name} = value;");
-        writer.Line($"_{computed.Name}Pending = false;");
-        writer.Line($"InvalidateSource{sourceId}();");
+        writer.Line($"{ComputedField(computed.Name)} = value;");
+        writer.Line($"{ComputedField(computed.Name)}Pending = false;");
+        writer.Line($"__lucent_InvalidateSource{sourceId}();");
         writer.Unindent();
         writer.Line("});");
         writer.Unindent();
@@ -388,19 +568,19 @@ internal static class GeneralCSharpEmitter
         writer.Line("catch (global::System.Exception exception)");
         writer.Line("{");
         writer.Indent();
-        writer.Line("_owner.Dispatch(() =>");
+        writer.Line("__lucent_owner.Dispatch(() =>");
         writer.Line("{");
         writer.Indent();
-        writer.Line($"if (generation != _{computed.Name}Generation)");
+        writer.Line($"if (generation != {ComputedField(computed.Name)}Generation)");
         writer.Line("{");
         writer.Indent();
         writer.Line("return;");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line($"_{computed.Name}Pending = false;");
-        writer.Line($"_{computed.Name}ErrorMessage = exception.Message;");
-        writer.Line($"InvalidateSource{sourceId}();");
+        writer.Line($"{ComputedField(computed.Name)}Pending = false;");
+        writer.Line($"{ComputedField(computed.Name)}ErrorMessage = exception.Message;");
+        writer.Line($"__lucent_InvalidateSource{sourceId}();");
         writer.Unindent();
         writer.Line("});");
         writer.Unindent();
@@ -412,14 +592,20 @@ internal static class GeneralCSharpEmitter
     private static void EmitStyles(
         CodeWriter writer,
         BoundComponentModel model,
-        BoundStyleSheet styles)
+        BoundStyleSheet styles,
+        IReadOnlyList<(BoundControlModel control, int index)> fields)
     {
         if (styles.Rules.Count == 0)
         {
             return;
         }
 
-        var controls = FlattenStyleTargets(model.Root).ToArray();
+        var nativeRoots = model.Roots.OfType<BoundControlModel>().ToArray();
+        if (nativeRoots.Length == 0)
+        {
+            return;
+        }
+        var controls = nativeRoots.SelectMany(FlattenStyleTargets).ToArray();
         foreach (var rule in styles.Rules)
         {
             var targetTypes = controls
@@ -439,8 +625,11 @@ internal static class GeneralCSharpEmitter
                     selector += $".Class({Quote(rule.PseudoClass)})";
                 }
 
+                foreach (var nativeRoot in nativeRoots)
+                {
+                var rootIndex = fields.First(field => ReferenceEquals(field.control, nativeRoot)).index;
                 writer.Line();
-                writer.Line($"_control1!.Styles.Add(new global::Avalonia.Styling.Style(x => {selector})");
+                writer.Line($"__lucent_control{rootIndex}!.Styles.Add(new global::Avalonia.Styling.Style(x => {selector})");
                 writer.Line("{");
                 writer.Indent();
                 writer.Line("Setters =");
@@ -464,6 +653,7 @@ internal static class GeneralCSharpEmitter
                 writer.Line("},");
                 writer.Unindent();
                 writer.Line("});");
+                }
             }
         }
     }
@@ -510,10 +700,12 @@ internal static class GeneralCSharpEmitter
             var children = member switch
             {
                 BoundChildMember boundChild => new[] { boundChild.Child },
-                BoundForEachMember loop => new[] { loop.Body },
-                BoundConditionalMember conditional => conditional.FalseRoot is null
-                    ? new[] { conditional.TrueRoot }
-                    : new[] { conditional.TrueRoot, conditional.FalseRoot },
+                BoundForEachMember loop => loop.Body is BoundControlModel loopControl
+                    ? new[] { loopControl }
+                    : [],
+                BoundConditionalMember conditional => conditional.TrueRoots
+                    .Concat(conditional.FalseRoots ?? [])
+                    .OfType<BoundControlModel>(),
                 _ => [],
             };
             foreach (var child in children)
@@ -523,6 +715,183 @@ internal static class GeneralCSharpEmitter
                     yield return nested;
                 }
             }
+        }
+    }
+
+    private static void EmitSlotFactory(
+        CodeWriter writer,
+        SlotSupplySite supply,
+        SourceDocument source)
+    {
+        var name = Pascal(supply.Supply.Slot.Name);
+        var prefix = $"__lucent_slot{supply.ComponentIndex}{name}";
+        writer.Line($"private Fragment __lucent_MountSlot{supply.ComponentIndex}{name}(ComponentOwner __lucent_slotOwner)");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line($"if ({prefix}Mounted) throw new InvalidOperationException(\"A slot cannot be mounted twice concurrently.\");");
+        writer.Line($"{prefix}Mounted = true;");
+        var roots = new List<string>();
+        var counter = 0;
+        foreach (var root in supply.Roots)
+        {
+            roots.Add(EmitSlotRenderable(writer, supply, root, "__lucent_slotOwner", source, ref counter));
+        }
+        writer.Line("__lucent_slotOwner.OnDispose(() =>");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line($"{prefix}Mounted = false;");
+        foreach (var index in Enumerable.Range(1, supply.Controls.Count))
+        {
+            writer.Line($"{prefix}Control{index} = null;");
+        }
+        foreach (var index in Enumerable.Range(1, supply.Invocations.Count))
+        {
+            writer.Line($"{prefix}Component{index} = null;");
+        }
+        writer.Unindent();
+        writer.Line("});");
+        writer.Line(roots.Count == 0 ? "return Fragment.Empty;" :
+            $"return Fragment.Concat({string.Join(", ", roots)});");
+        writer.Unindent();
+        writer.Line("}");
+    }
+
+    private static string EmitSlotRenderable(
+        CodeWriter writer,
+        SlotSupplySite supply,
+        BoundRenderableModel renderable,
+        string owner,
+        SourceDocument source,
+        ref int counter)
+    {
+        if (renderable is BoundComponentInvocationModel invocation)
+        {
+            var id = ++counter;
+            var childOwner = $"__lucent_slotChildOwner{id}";
+            var invocationIndex = supply.Invocations
+                .Select((candidate, index) => (candidate, index))
+                .First(candidate => ReferenceEquals(candidate.candidate, invocation)).index + 1;
+            var child = $"__lucent_slot{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}Component{invocationIndex}";
+            writer.Line($"var {childOwner} = {owner}.CreateChild();");
+            var arguments = invocation.Arguments.Select(argument => argument.Expression.LoweredText).ToList();
+            foreach (var slot in invocation.Component.Slots)
+            {
+                var nested = invocation.Slots.FirstOrDefault(candidate => candidate.Slot.Name == slot.Name);
+                arguments.Add(nested is null
+                    ? "static _ => Fragment.Empty"
+                    : EmitSlotFactoryLambda(writer, supply, nested, source, ref counter));
+            }
+            writer.Line($"{child} = new {invocation.Component.GeneratedTypeName}({childOwner}, {string.Join(", ", arguments)});");
+            writer.Line($"var {child}Roots = {child}.Mount();");
+            writer.Line($"{childOwner}.OnDispose(() => {child} = null);");
+            return $"{child}Roots";
+        }
+
+        var control = (BoundControlModel)renderable;
+        var existing = -1;
+        for (var index = 0; index < supply.Controls.Count; index++)
+        {
+            if (ReferenceEquals(supply.Controls[index], control))
+            {
+                existing = index;
+                break;
+            }
+        }
+        var name = existing >= 0
+            ? $"__lucent_slot{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}Control{existing + 1}"
+            : $"__lucent_slotControl{++counter}";
+        writer.Line(existing >= 0
+            ? $"{name} = new {control.TypeName}();"
+            : $"var {name} = new {control.TypeName}();");
+        foreach (var property in control.Members.OfType<BoundPropertyMember>())
+        {
+            EmitLineMapping(writer, source, property.ExpressionSpan);
+            writer.Line(property.Name == "Class"
+                ? $"{name}.Classes.Add({property.ExpressionText});"
+                : $"{name}.{property.Name} = {LowerPropertyValue(property.ExpressionText, property.NativeValueKind)};");
+            writer.Line("#line default");
+        }
+        foreach (var content in control.Members.OfType<BoundContentMember>())
+        {
+            EmitLineMapping(writer, source, content.ExpressionSpan);
+            writer.Line($"{name}.{control.ContentRoute!.PropertyName} = {content.ExpressionText};");
+            writer.Line("#line default");
+        }
+        foreach (var child in control.Members.OfType<BoundChildMember>())
+            EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, child.Child, owner, source, ref counter));
+        foreach (var child in control.Members.OfType<BoundComponentChildMember>())
+            EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, child.Invocation, owner, source, ref counter));
+        foreach (var yield in control.Members.OfType<BoundYieldMember>())
+        {
+            var id = ++counter;
+            writer.Line($"var __lucent_slotYieldOwner{id} = {owner}.CreateChild();");
+            writer.Line($"var __lucent_slotYieldRoots{id} = __lucent_{yield.Slot.Name}(__lucent_slotYieldOwner{id});");
+            EmitSlotAttach(writer, name, control.ContentRoute!, $"__lucent_slotYieldRoots{id}");
+        }
+        foreach (var conditional in control.Members.OfType<BoundConditionalMember>())
+        {
+            writer.Line($"if ({conditional.Condition.LoweredText})");
+            writer.Line("{"); writer.Indent();
+            foreach (var root in conditional.TrueRoots)
+                EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, root, owner, source, ref counter));
+            writer.Unindent(); writer.Line("}");
+            if (conditional.FalseRoots is not null)
+            {
+                writer.Line("else"); writer.Line("{"); writer.Indent();
+                foreach (var root in conditional.FalseRoots)
+                    EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, root, owner, source, ref counter));
+                writer.Unindent(); writer.Line("}");
+            }
+        }
+        foreach (var loop in control.Members.OfType<BoundForEachMember>())
+        {
+            writer.Line($"foreach (var {loop.ItemName} in ({loop.SourceExpression.LoweredText}))");
+            writer.Line("{"); writer.Indent();
+            var loopRoot = EmitSlotRenderable(writer, supply, loop.Body, owner, source, ref counter);
+            EmitSlotAttach(writer, name, control.ContentRoute!, loopRoot);
+            writer.Unindent(); writer.Line("}");
+        }
+        foreach (var (eventMember, eventIndex) in control.Members.OfType<BoundEventMember>()
+                     .Select((member, index) => (member, index + 1)))
+        {
+            var handler = $"__lucent_slotHandler{counter}_{eventIndex}";
+            writer.Line($"{eventMember.DelegateTypeName} {handler} = (__sender, __eventArgs) =>");
+            writer.Line("{"); writer.Indent();
+            EmitEventParameterAliases(writer, control, eventMember);
+            EmitBody(writer, eventMember.Body.LoweredText);
+            writer.Unindent(); writer.Line("};");
+            writer.Line($"{name}.{eventMember.EventName} += {handler};");
+            writer.Line($"{owner}.OnDispose(() =>");
+            writer.Line("{"); writer.Indent();
+            writer.Line($"if ({name} is not null) {name}.{eventMember.EventName} -= {handler};");
+            writer.Unindent(); writer.Line("});");
+        }
+        return $"Fragment.From({name})";
+    }
+
+    private static string EmitSlotFactoryLambda(CodeWriter writer, SlotSupplySite supply, BoundSlotSupply nested, SourceDocument source, ref int counter)
+    {
+        var method = $"__lucent_slotFactory{++counter}";
+        writer.Line($"Func<ComponentOwner, Fragment> {method} = __lucent_nestedOwner =>");
+        writer.Line("{"); writer.Indent();
+        var roots = new List<string>();
+        foreach (var root in nested.Roots)
+        {
+            roots.Add(EmitSlotRenderable(writer, supply, root, "__lucent_nestedOwner", source, ref counter));
+        }
+        writer.Line(roots.Count == 0 ? "return Fragment.Empty;" : $"return Fragment.Concat({string.Join(", ", roots)});");
+        writer.Unindent(); writer.Line("};");
+        return method;
+    }
+
+    private static void EmitSlotAttach(CodeWriter writer, string target, BoundContentRoute route, string fragment)
+    {
+        if (route.IsCollection)
+            writer.Line($"foreach (var root in {fragment}.Roots) {target}.{route.PropertyName}.Add(root);");
+        else
+        {
+            writer.Line($"if ({fragment}.Count > 1) throw new InvalidOperationException(\"A scalar content route received multiple slot roots.\");");
+            writer.Line($"{target}.{route.PropertyName} = {fragment}.Count == 0 ? null : {fragment}[0];");
         }
     }
 
@@ -700,7 +1069,7 @@ internal static class GeneralCSharpEmitter
     {
         foreach (var property in control.Members.OfType<BoundPropertyMember>())
         {
-            var target = $"_control{index}!";
+            var target = $"__lucent_control{index}!";
             if (property.Name == "Class")
             {
                 if (property.Expression.Dependencies.Count > 0)
@@ -741,9 +1110,10 @@ internal static class GeneralCSharpEmitter
         CodeWriter writer,
         BoundControlModel control,
         int index,
-        IReadOnlyList<(BoundControlModel control, int index)> fields)
+        IReadOnlyList<(BoundControlModel control, int index)> fields,
+        IReadOnlyList<ComponentSite> componentSites)
     {
-        if (!control.Members.OfType<BoundChildMember>().Any())
+        if (!control.Members.Any(member => member is BoundChildMember or BoundComponentChildMember or BoundYieldMember))
         {
             return;
         }
@@ -757,8 +1127,50 @@ internal static class GeneralCSharpEmitter
                 ?? throw new InvalidOperationException(
                     $"Bound control '{control.Name}' has children without a content route.");
             writer.Line(route.IsCollection
-                ? $"_control{index}!.{route.PropertyName}.Add(_control{childIndex}!);"
-                : $"_control{index}!.{route.PropertyName} = _control{childIndex}!;");
+                ? $"__lucent_control{index}!.{route.PropertyName}.Add(__lucent_control{childIndex}!);"
+                : $"__lucent_control{index}!.{route.PropertyName} = __lucent_control{childIndex}!;");
+        }
+
+        foreach (var child in control.Members.OfType<BoundComponentChildMember>())
+        {
+            var site = componentSites.First(candidate =>
+                ReferenceEquals(candidate.Invocation, child.Invocation));
+            var route = control.ContentRoute ?? throw new InvalidOperationException(
+                $"Bound control '{control.Name}' has component children without a content route.");
+            if (route.IsCollection)
+            {
+                writer.Line($"foreach (var root in __lucent_component{site.Index}Roots.Roots) " +
+                    $"__lucent_control{index}!.{route.PropertyName}.Add(root);");
+            }
+            else
+            {
+                writer.Line($"if (__lucent_component{site.Index}Roots.Count > 1) throw new InvalidOperationException(" +
+                    "\"A scalar content route received multiple component roots.\");");
+                writer.Line($"__lucent_control{index}!.{route.PropertyName} = __lucent_component{site.Index}Roots.Count == 0 " +
+                    $"? null : __lucent_component{site.Index}Roots[0];");
+            }
+        }
+
+        foreach (var yield in control.Members.OfType<BoundYieldMember>())
+        {
+            var route = control.ContentRoute ?? throw new InvalidOperationException(
+                $"Bound control '{control.Name}' has a slot yield without a content route.");
+            writer.Line($"var __lucent_yield{index}{Pascal(yield.Slot.Name)}Owner = __lucent_owner.CreateChild();");
+            writer.Line($"var __lucent_yield{index}{Pascal(yield.Slot.Name)}Roots = " +
+                $"__lucent_{yield.Slot.Name}(__lucent_yield{index}{Pascal(yield.Slot.Name)}Owner);");
+            if (route.IsCollection)
+            {
+                writer.Line($"foreach (var root in __lucent_yield{index}{Pascal(yield.Slot.Name)}Roots.Roots) " +
+                    $"__lucent_control{index}!.{route.PropertyName}.Add(root);");
+            }
+            else
+            {
+                writer.Line($"if (__lucent_yield{index}{Pascal(yield.Slot.Name)}Roots.Count > 1) " +
+                    "throw new InvalidOperationException(\"A scalar content route received multiple slot roots.\");");
+                writer.Line($"__lucent_control{index}!.{route.PropertyName} = " +
+                    $"__lucent_yield{index}{Pascal(yield.Slot.Name)}Roots.Count == 0 ? null : " +
+                    $"__lucent_yield{index}{Pascal(yield.Slot.Name)}Roots[0];");
+            }
         }
     }
 
@@ -768,11 +1180,14 @@ internal static class GeneralCSharpEmitter
         IReadOnlyList<BoundBinding> bindings,
         IReadOnlyList<BoundRegion> regions,
         IReadOnlyList<BoundConditionalRegion> conditionals,
+        IReadOnlyList<ComponentSite> componentSites,
+        IReadOnlyList<SlotSupplySite> slotSupplySites,
+        BoundStyleSheet styles,
         SourceDocument source)
     {
         foreach (var binding in bindings)
         {
-            writer.Line($"private void UpdateBinding{binding.Index}()");
+            writer.Line($"private void __lucent_UpdateBinding{binding.Index}()");
             writer.Line("{");
             writer.Indent();
             if (binding.ConditionalIndex is not null)
@@ -784,9 +1199,9 @@ internal static class GeneralCSharpEmitter
                 EmitLineMapping(writer, source, property.ExpressionSpan);
                 if (property.Name == "Class")
                 {
-                    writer.Line($"if (_binding{binding.Index}Class is not null) {binding.Target}!.Classes.Remove(_binding{binding.Index}Class);");
-                    writer.Line($"_binding{binding.Index}Class = {property.Expression.LoweredText};");
-                    writer.Line($"{binding.Target}!.Classes.Add(_binding{binding.Index}Class);");
+                    writer.Line($"if (__lucent_binding{binding.Index}Class is not null) {binding.Target}!.Classes.Remove(__lucent_binding{binding.Index}Class);");
+                    writer.Line($"__lucent_binding{binding.Index}Class = {property.Expression.LoweredText};");
+                    writer.Line($"{binding.Target}!.Classes.Add(__lucent_binding{binding.Index}Class);");
                 }
                 else
                 {
@@ -813,33 +1228,71 @@ internal static class GeneralCSharpEmitter
         foreach (var conditional in conditionals)
         {
             writer.Line();
-            EmitConditionalUpdater(writer, conditional, bindings, source);
+            EmitConditionalUpdater(writer, conditional, bindings, componentSites, styles, source);
         }
 
         foreach (var sourceItem in model.Sources)
         {
-            writer.Line($"private void InvalidateSource{sourceItem.Id}()");
+            writer.Line($"private void __lucent_InvalidateSource{sourceItem.Id}()");
             writer.Line("{");
             writer.Indent();
             foreach (var binding in bindings.Where(candidate =>
                          Dependencies(candidate.Member).Contains(sourceItem.Id)))
             {
-                writer.Line($"UpdateBinding{binding.Index}();");
+                writer.Line($"__lucent_UpdateBinding{binding.Index}();");
             }
             foreach (var region in regions.Where(candidate =>
                          RegionDependencies(candidate).Contains(sourceItem.Id)))
             {
-                writer.Line($"UpdateRegion{region.Index}();");
+                writer.Line($"__lucent_UpdateRegion{region.Index}();");
             }
             foreach (var conditional in conditionals.Where(candidate =>
                          candidate.Member.Condition.Dependencies.Contains(sourceItem.Id)))
             {
-                writer.Line($"UpdateConditional{conditional.Index}();");
+                writer.Line($"__lucent_UpdateConditional{conditional.Index}();");
             }
             foreach (var computed in model.Computed.Where(candidate =>
                          candidate.Factory.Dependencies.Contains(sourceItem.Id)))
             {
-                writer.Line($"if (!_startingComputedWork) Refresh{Pascal(computed.Name)}();");
+                writer.Line($"if (!__lucent_startingComputedWork) __lucent_Refresh{Pascal(computed.Name)}();");
+            }
+            foreach (var site in componentSites.Where(candidate =>
+                         candidate.Invocation.Arguments.Any(argument =>
+                             argument.Expression.Dependencies.Contains(sourceItem.Id))))
+            {
+                writer.Line($"if (__lucent_component{site.Index} is not null) " +
+                    $"__lucent_component{site.Index}.UpdateInputs(" +
+                    string.Join(", ", site.Invocation.Arguments.Select(argument =>
+                        argument.Expression.LoweredText)) + ");");
+            }
+            foreach (var supply in slotSupplySites)
+            {
+                var prefix = $"__lucent_slot{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}";
+                foreach (var (control, controlIndex) in supply.Controls.Select((control, index) => (control, index + 1)))
+                {
+                    foreach (var property in control.Members.OfType<BoundPropertyMember>()
+                                 .Where(property => property.Expression.Dependencies.Contains(sourceItem.Id)))
+                    {
+                        writer.Line($"if ({prefix}Control{controlIndex} is not null) {prefix}Control{controlIndex}!.{property.Name} = " +
+                            $"{LowerPropertyValue(property.Expression.LoweredText, property.NativeValueKind)};");
+                    }
+                    foreach (var content in control.Members.OfType<BoundContentMember>()
+                                 .Where(content => content.Expression.Dependencies.Contains(sourceItem.Id)))
+                    {
+                        writer.Line($"if ({prefix}Control{controlIndex} is not null) {prefix}Control{controlIndex}!.{control.ContentRoute!.PropertyName} = {content.Expression.LoweredText};");
+                    }
+                }
+            }
+            foreach (var supply in slotSupplySites)
+            {
+                var prefix = $"__lucent_slot{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}";
+                foreach (var (invocation, invocationIndex) in supply.Invocations.Select((invocation, index) => (invocation, index + 1)))
+                {
+                    if (invocation.Arguments.Any(argument => argument.Expression.Dependencies.Contains(sourceItem.Id)))
+                    {
+                        writer.Line($"if ({prefix}Component{invocationIndex} is not null) {prefix}Component{invocationIndex}!.UpdateInputs({string.Join(", ", invocation.Arguments.Select(argument => argument.Expression.LoweredText))});");
+                    }
+                }
             }
             writer.Unindent();
             writer.Line("}");
@@ -850,13 +1303,13 @@ internal static class GeneralCSharpEmitter
     private static IEnumerable<(BoundControlModel Control, string Name)> ConditionalControls(
         BoundConditionalRegion region)
     {
-        foreach (var item in ConditionalBranchControls(region, region.Member.TrueRoot, "True"))
+        foreach (var item in ConditionalBranchControls(region, region.Member.TrueRoots, "True"))
         {
             yield return (item.Control, item.Name);
         }
-        if (region.Member.FalseRoot is not null)
+        if (region.Member.FalseRoots is not null)
         {
-            foreach (var item in ConditionalBranchControls(region, region.Member.FalseRoot, "False"))
+            foreach (var item in ConditionalBranchControls(region, region.Member.FalseRoots, "False"))
             {
                 yield return (item.Control, item.Name);
             }
@@ -865,8 +1318,8 @@ internal static class GeneralCSharpEmitter
 
     private static IEnumerable<BoundBinding> ConditionalBindings(BoundConditionalRegion region)
     {
-        IEnumerable<BoundBinding> Branch(BoundControlModel root, string side) =>
-            ConditionalBranchControls(region, root, side).SelectMany(item => item.Control.Members
+        IEnumerable<BoundBinding> Branch(IReadOnlyList<BoundRenderableModel> roots, string side) =>
+            ConditionalBranchControls(region, roots, side).SelectMany(item => item.Control.Members
                 .Where(member => member switch
                 {
                     BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
@@ -877,26 +1330,28 @@ internal static class GeneralCSharpEmitter
                     item.Name,
                     member, region.Index, 0)));
 
-        return Branch(region.Member.TrueRoot, "True")
-            .Concat(region.Member.FalseRoot is null
+        return Branch(region.Member.TrueRoots, "True")
+            .Concat(region.Member.FalseRoots is null
                 ? []
-                : Branch(region.Member.FalseRoot, "False"));
+                : Branch(region.Member.FalseRoots, "False"));
     }
 
     private static void EmitConditionalSetup(CodeWriter writer, BoundConditionalRegion region)
     {
         var route = region.Parent.ContentRoute!;
-        writer.Line($"_conditional{region.Index} = new ConditionalRegion(_owner, root =>");
+        writer.Line($"__lucent_conditional{region.Index} = new ConditionalRegion(__lucent_owner, roots =>");
         writer.Line("{");
         writer.Indent();
         if (route.IsCollection)
         {
-            writer.Line($"_control{region.ParentIndex}!.{route.PropertyName}.Clear();");
-            writer.Line($"if (root is not null) _control{region.ParentIndex}!.{route.PropertyName}.Add(root);");
+            writer.Line($"__lucent_control{region.ParentIndex}!.{route.PropertyName}.Clear();");
+            writer.Line("// ponytail: clear/re-add is sufficient until indexed fragment moves are measurable.");
+            writer.Line($"foreach (var root in roots.Roots) __lucent_control{region.ParentIndex}!.{route.PropertyName}.Add(root);");
         }
         else
         {
-            writer.Line($"_control{region.ParentIndex}!.{route.PropertyName} = root;");
+            writer.Line("if (roots.Count > 1) throw new InvalidOperationException(\"A scalar content route received multiple roots.\");");
+            writer.Line($"__lucent_control{region.ParentIndex}!.{route.PropertyName} = roots.Count == 0 ? null : roots[0];");
         }
         writer.Unindent();
         writer.Line("});");
@@ -906,9 +1361,11 @@ internal static class GeneralCSharpEmitter
         CodeWriter writer,
         BoundConditionalRegion region,
         IReadOnlyList<BoundBinding> bindings,
+        IReadOnlyList<ComponentSite> componentSites,
+        BoundStyleSheet styles,
         SourceDocument source)
     {
-        writer.Line($"private void UpdateConditional{region.Index}()");
+        writer.Line($"private void __lucent_UpdateConditional{region.Index}()");
         writer.Line("{");
         writer.Indent();
         EmitLineMapping(writer, source, region.Member.Condition.Span);
@@ -916,15 +1373,15 @@ internal static class GeneralCSharpEmitter
         writer.Line("#line default");
         writer.Line("{");
         writer.Indent();
-        EmitConditionalBranch(writer, region, region.Member.TrueRoot, "True", 0, source);
+        EmitConditionalBranch(writer, region, region.Member.TrueRoots, "True", 0, source);
         writer.Unindent();
         writer.Line("}");
-        if (region.Member.FalseRoot is { } falseRoot)
+        if (region.Member.FalseRoots is { } falseRoots)
         {
             writer.Line("else");
             writer.Line("{");
             writer.Indent();
-            EmitConditionalBranch(writer, region, falseRoot, "False", 1, source);
+            EmitConditionalBranch(writer, region, falseRoots, "False", 1, source);
             writer.Unindent();
             writer.Line("}");
         }
@@ -933,7 +1390,7 @@ internal static class GeneralCSharpEmitter
             writer.Line("else");
             writer.Line("{");
             writer.Indent();
-            writer.Line($"_conditional{region.Index}!.Clear();");
+            writer.Line($"__lucent_conditional{region.Index}!.Clear();");
             writer.Unindent();
             writer.Line("}");
         }
@@ -943,16 +1400,16 @@ internal static class GeneralCSharpEmitter
         void EmitConditionalBranch(
             CodeWriter output,
             BoundConditionalRegion conditional,
-            BoundControlModel root,
+            IReadOnlyList<BoundRenderableModel> branchRoots,
             string side,
             int branch,
             SourceDocument sourceDocument)
         {
-            var controls = ConditionalBranchControls(conditional, root, side);
-            output.Line($"if (_conditional{conditional.Index}!.ActiveBranch != {branch})");
+            var controls = ConditionalBranchControls(conditional, branchRoots, side);
+            output.Line($"if (__lucent_conditional{conditional.Index}!.ActiveBranch != {branch})");
             output.Line("{");
             output.Indent();
-            output.Line($"_conditional{conditional.Index}!.Show({branch}, branchOwner =>");
+            output.Line($"__lucent_conditional{conditional.Index}!.Show({branch}, branchOwner =>");
             output.Line("{");
             output.Indent();
             foreach (var (control, name) in controls)
@@ -1005,6 +1462,49 @@ internal static class GeneralCSharpEmitter
                         ? $"{name}!.{route.PropertyName}.Add({childName}!);"
                         : $"{name}!.{route.PropertyName} = {childName}!;");
                 }
+                foreach (var (child, componentIndex) in control.Members.OfType<BoundComponentChildMember>()
+                             .Select((child, componentIndex) => (child, componentIndex + 1)))
+                {
+                    var childOwner = $"__lucent_branchChildOwner{conditional.Index}{side}{componentIndex}";
+                    var site = componentSites.First(candidate =>
+                        ReferenceEquals(candidate.Invocation, child.Invocation));
+                    var instance = $"__lucent_component{site.Index}";
+                    var roots = instance + "Roots";
+                    var arguments = InvocationArguments(componentSites.First(site =>
+                        ReferenceEquals(site.Invocation, child.Invocation)));
+                    output.Line($"var {childOwner} = branchOwner.CreateChild();");
+                    output.Line($"{instance} = new {child.Invocation.Component.GeneratedTypeName}({childOwner}" +
+                        (arguments.Any() ? ", " + string.Join(", ", arguments) : string.Empty) + ");");
+                    output.Line($"{roots} = {instance}!.Mount();");
+                    EmitProjectedStyles(output, roots, styles,
+                        $"__lucent_conditionalStyle{conditional.Index}{side}{componentIndex}");
+                    output.Line($"branchOwner.OnDispose(() => {{ {instance} = null; {roots} = Fragment.Empty; }});");
+                    var route = control.ContentRoute!;
+                    if (route.IsCollection)
+                    {
+                        output.Line($"foreach (var root in {roots}.Roots) {name}!.{route.PropertyName}.Add(root);");
+                    }
+                    else
+                    {
+                        output.Line($"if ({roots}.Count > 1) throw new InvalidOperationException(\"A scalar content route received multiple component roots.\");");
+                        output.Line($"{name}!.{route.PropertyName} = {roots}.Count == 0 ? null : {roots}[0];");
+                    }
+                }
+                foreach (var yield in control.Members.OfType<BoundYieldMember>())
+                {
+                    var owner = $"__lucent_branchYieldOwner{conditional.Index}{side}{Pascal(yield.Slot.Name)}";
+                    var roots = owner + "Roots";
+                    output.Line($"var {owner} = branchOwner.CreateChild();");
+                    output.Line($"var {roots} = __lucent_{yield.Slot.Name}({owner});");
+                    var route = control.ContentRoute!;
+                    if (route.IsCollection)
+                        output.Line($"foreach (var root in {roots}.Roots) {name}!.{route.PropertyName}.Add(root);");
+                    else
+                    {
+                        output.Line($"if ({roots}.Count > 1) throw new InvalidOperationException(\"A scalar content route received multiple slot roots.\");");
+                        output.Line($"{name}!.{route.PropertyName} = {roots}.Count == 0 ? null : {roots}[0];");
+                    }
+                }
                 foreach (var (eventMember, eventIndex) in control.Members.OfType<BoundEventMember>().Select((value, index) => (value, index)))
                 {
                     var handler = $"conditionalHandler{conditional.Index}_{side}_{eventIndex + 1}";
@@ -1021,14 +1521,46 @@ internal static class GeneralCSharpEmitter
                     output.Line($"branchOwner.OnDispose(() => {name}!.{eventMember.EventName} -= {handler});");
                 }
             }
-            output.Line($"return {controls[0].Name}!;");
+            var fragmentRoots = new List<string>();
+            foreach (var root in branchRoots)
+            {
+                if (root is BoundControlModel control)
+                {
+                    var name = controls.First(candidate => ReferenceEquals(candidate.Control, control)).Name;
+                    fragmentRoots.Add($"Fragment.From({name}!)");
+                    continue;
+                }
+
+                if (root is BoundComponentInvocationModel invocation)
+                {
+                    var rootIndex = fragmentRoots.Count + 1;
+                    var owner = $"__lucent_branchRootOwner{conditional.Index}{side}{rootIndex}";
+                    var site = componentSites.First(candidate =>
+                        ReferenceEquals(candidate.Invocation, invocation));
+                    var instance = $"__lucent_component{site.Index}";
+                    var componentRoots = instance + "Roots";
+                    var arguments = InvocationArguments(componentSites.First(site =>
+                        ReferenceEquals(site.Invocation, invocation)));
+                    output.Line($"var {owner} = branchOwner.CreateChild();");
+                    output.Line($"{instance} = new {invocation.Component.GeneratedTypeName}({owner}" +
+                        (arguments.Any() ? ", " + string.Join(", ", arguments) : string.Empty) + ");");
+                    output.Line($"{componentRoots} = {instance}!.Mount();");
+                    EmitProjectedStyles(output, componentRoots, styles,
+                        $"__lucent_conditionalStyle{conditional.Index}{side}{rootIndex}");
+                    output.Line($"branchOwner.OnDispose(() => {{ {instance} = null; {componentRoots} = Fragment.Empty; }});");
+                    fragmentRoots.Add(componentRoots);
+                }
+            }
+            output.Line(fragmentRoots.Count == 0
+                ? "return Fragment.Empty;"
+                : $"return Fragment.Concat({string.Join(", ", fragmentRoots)});");
             output.Unindent();
             output.Line("});");
             foreach (var binding in bindings.Where(binding =>
                          binding.ConditionalIndex == conditional.Index &&
                          binding.Target.Contains(side, StringComparison.Ordinal)))
             {
-                output.Line($"UpdateBinding{binding.Index}();");
+                output.Line($"__lucent_UpdateBinding{binding.Index}();");
             }
             output.Unindent();
             output.Line("}");
@@ -1037,12 +1569,12 @@ internal static class GeneralCSharpEmitter
 
     private static ConditionalControl[] ConditionalBranchControls(
         BoundConditionalRegion region,
-        BoundControlModel root,
+        IReadOnlyList<BoundRenderableModel> roots,
         string side) =>
-        Flatten(root)
+        roots.OfType<BoundControlModel>().SelectMany(Flatten)
             .Select((control, index) => new ConditionalControl(
                 control,
-                $"_conditional{region.Index}{side}Control{index + 1}"))
+                $"__lucent_conditional{region.Index}{side}Control{index + 1}"))
             .ToArray();
 
     private static void EmitEventHandler(
@@ -1054,7 +1586,7 @@ internal static class GeneralCSharpEmitter
         SourceDocument source)
     {
         writer.Line(
-            $"private void OnControl{index}{eventMember.EventName}" +
+            $"private void __lucent_OnControl{index}{eventMember.EventName}" +
             $"({eventMember.DelegateSenderTypeName} __sender, " +
             $"{eventMember.EventArgsTypeName} __eventArgs)");
         writer.Line("{");
@@ -1106,8 +1638,8 @@ internal static class GeneralCSharpEmitter
             ?? throw new InvalidOperationException(
                 $"Bound control '{control.Name}' has content without a content route.");
         writer.Line(route.IsCollection
-            ? $"_control{index}!.{route.PropertyName}.Add({content.ExpressionText});"
-            : $"_control{index}!.{route.PropertyName} = {content.ExpressionText};");
+            ? $"__lucent_control{index}!.{route.PropertyName}.Add({content.ExpressionText});"
+            : $"__lucent_control{index}!.{route.PropertyName} = {content.ExpressionText};");
 
         writer.Line("#line default");
     }
@@ -1115,57 +1647,66 @@ internal static class GeneralCSharpEmitter
     private static void EmitLoopRuntime(CodeWriter writer)
     {
         writer.Line();
-        writer.Line("private interface ILoopEntry : IDisposable");
+        writer.Line("private interface __lucent_ILoopEntry : IDisposable");
         writer.Line("{");
         writer.Indent();
-        writer.Line("Control Root { get; }");
+        writer.Line("Fragment Roots { get; }");
         writer.Line("void Update(object value);");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line("private sealed class LoopValue<T>(T value)");
+        writer.Line("private sealed class __lucent_LoopValue<T>(T value)");
         writer.Line("{");
         writer.Indent();
         writer.Line("public T Value { get; set; } = value;");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line("private sealed class LoopEntry<T>(");
+        writer.Line("private sealed class __lucent_LoopEntry<T>(");
         writer.Indent();
-        writer.Line("LoopValue<T> value,");
-        writer.Line("Control root,");
+        writer.Line("__lucent_LoopValue<T> value,");
+        writer.Line("Fragment roots,");
         writer.Line("Action refresh,");
-        writer.Line("Action dispose) : ILoopEntry");
+        writer.Line("Action dispose) : __lucent_ILoopEntry");
         writer.Unindent();
         writer.Line("{");
         writer.Indent();
-        writer.Line("public Control Root { get; } = root;");
+        writer.Line("public Fragment Roots { get; } = roots;");
         writer.Line();
         writer.Line("public void Update(object next)");
         writer.Line("{");
         writer.Indent();
+        writer.Line("if (__lucent_disposed) return;");
         writer.Line("value.Value = (T)next;");
         writer.Line("refresh();");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line("public void Dispose() => dispose();");
+        writer.Line("private bool __lucent_disposed;");
+        writer.Line("public void Dispose()");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("if (__lucent_disposed) return;");
+        writer.Line("__lucent_disposed = true;");
+        writer.Line("dispose();");
+        writer.Unindent();
+        writer.Line("}");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
-        writer.Line("private static ILoopEntry CreateLoopEntry<T>(");
+        writer.Line("private static __lucent_ILoopEntry __lucent_CreateLoopEntry<T>(");
         writer.Indent();
         writer.Line("T item,");
-        writer.Line("Func<LoopValue<T>, (Control Root, Action Refresh, Action Dispose)> factory)");
+        writer.Line("Func<__lucent_LoopValue<T>, (Fragment Roots, Action Refresh, Action Dispose)> factory)");
         writer.Unindent();
         writer.Line("{");
         writer.Indent();
-        writer.Line("var value = new LoopValue<T>(item);");
+        writer.Line("var value = new __lucent_LoopValue<T>(item);");
         writer.Line("var created = factory(value);");
-        writer.Line("return new LoopEntry<T>(");
+        writer.Line("return new __lucent_LoopEntry<T>(");
         writer.Indent();
         writer.Line("value,");
-        writer.Line("created.Root,");
+        writer.Line("created.Roots,");
         writer.Line("created.Refresh,");
         writer.Line("created.Dispose);");
         writer.Unindent();
@@ -1177,18 +1718,34 @@ internal static class GeneralCSharpEmitter
         CodeWriter writer,
         BoundComponentModel model,
         BoundRegion region,
+        BoundStyleSheet styles,
         SourceDocument source)
     {
         var loop = region.Loop;
-        var templateControls = Flatten(loop.Body)
+        if (loop.Body is BoundComponentInvocationModel component)
+        {
+            EmitComponentRegionUpdater(writer, model, region, component, styles, source);
+            return;
+        }
+        var templateControls = Flatten((BoundControlModel)loop.Body)
             .Select((control, index) => (control, index: index + 1))
             .ToArray();
-        var dictionary = $"_region{region.Index}";
+        var rowComponents = templateControls
+            .SelectMany(candidate => candidate.control.Members.OfType<BoundComponentChildMember>())
+            .Select((child, index) => (child.Invocation,
+                Ordinal: index + 1,
+                Instance: $"__lucent_rowComponent{region.Index}_{index + 1}",
+                Roots: $"__lucent_rowComponent{region.Index}_{index + 1}Roots"))
+            .ToArray();
+        var rowComponentMap = rowComponents.ToDictionary(
+            candidate => candidate.Invocation,
+            candidate => (candidate.Instance, candidate.Roots));
+        var dictionary = $"__lucent_region{region.Index}";
 
-        writer.Line($"private void UpdateRegion{region.Index}()");
+        writer.Line($"private void __lucent_UpdateRegion{region.Index}()");
         writer.Line("{");
         writer.Indent();
-        writer.Line("var nextEntries = new List<ILoopEntry>();");
+        writer.Line("var nextEntries = new List<__lucent_ILoopEntry>();");
         writer.Line("var seenKeys = new HashSet<object>();");
         writer.Line("var orderedKeys = new List<object>();");
         EmitLineMapping(writer, source, loop.SourceExpressionSpan);
@@ -1228,7 +1785,7 @@ internal static class GeneralCSharpEmitter
         writer.Line($"if (!{dictionary}.TryGetValue(key, out var entry))");
         writer.Line("{");
         writer.Indent();
-        writer.Line($"entry = CreateLoopEntry({loop.ItemName}, loopValue =>");
+        writer.Line($"entry = __lucent_CreateLoopEntry({loop.ItemName}, loopValue =>");
         writer.Line("{");
         writer.Indent();
 
@@ -1236,7 +1793,36 @@ internal static class GeneralCSharpEmitter
         {
             writer.Line($"var control{index} = new {control.TypeName}();");
         }
-        writer.Line("var rowOwner = _owner.CreateChild();");
+        writer.Line("var rowOwner = __lucent_owner.CreateChild();");
+        var rowSlotRefreshes = new Dictionary<BoundComponentInvocationModel, IReadOnlyList<string>>();
+        foreach (var rowComponent in rowComponents)
+        {
+            var childOwner = rowComponent.Instance + "Owner";
+            var slotArguments = new List<string>();
+            var slotRefreshes = new List<string>();
+            foreach (var slot in rowComponent.Invocation.Component.Slots)
+            {
+                var supply = rowComponent.Invocation.Slots
+                    .FirstOrDefault(candidate => candidate.Slot.Name == slot.Name);
+                if (supply is null)
+                {
+                    slotArguments.Add("static _ => Fragment.Empty");
+                    continue;
+                }
+
+                var prefix = $"__lucent_rowSlot{region.Index}_{rowComponent.Ordinal}{Pascal(slot.Name)}";
+                slotArguments.Add(EmitLoopSlotFactory(writer, supply, loop.ItemName, source, prefix));
+                slotRefreshes.Add(prefix + "Refresh();");
+            }
+            rowSlotRefreshes[rowComponent.Invocation] = slotRefreshes;
+            var arguments = rowComponent.Invocation.Arguments.Select(argument => argument.Expression.LoweredText)
+                .Concat(slotArguments);
+            writer.Line($"var {childOwner} = rowOwner.CreateChild();");
+            writer.Line($"var {rowComponent.Instance} = new {rowComponent.Invocation.Component.GeneratedTypeName}({childOwner}, {string.Join(", ", arguments)});");
+            writer.Line($"var {rowComponent.Roots} = {rowComponent.Instance}.Mount();");
+            EmitProjectedStyles(writer, rowComponent.Roots, styles,
+                $"__lucent_rowComponentStyle{region.Index}_{rowComponents.ToList().IndexOf(rowComponent)}");
+        }
 
         writer.Line();
         foreach (var (control, index) in templateControls)
@@ -1257,19 +1843,26 @@ internal static class GeneralCSharpEmitter
                 writer,
                 control,
                 index,
-                templateControls);
+                templateControls,
+                rowComponentMap);
         }
 
         writer.Line();
         writer.Line("void Refresh()");
         writer.Line("{");
         writer.Indent();
-        var hasItemBindings = templateControls.Any(candidate =>
-            candidate.control.Members.Any(member =>
-                MemberReferencesItem(member, loop.ItemName)));
-        if (hasItemBindings)
+        writer.Line($"var {loop.ItemName} = loopValue.Value;");
+        foreach (var rowComponent in rowComponents)
         {
-            writer.Line($"var {loop.ItemName} = loopValue.Value;");
+            writer.Line($"{rowComponent.Instance}.UpdateInputs({string.Join(", ", rowComponent.Invocation.Arguments.Select(argument => argument.Expression.LoweredText))});");
+        }
+
+        foreach (var rowComponent in rowComponents)
+        {
+            foreach (var refresh in rowSlotRefreshes[rowComponent.Invocation])
+            {
+                writer.Line(refresh);
+            }
         }
 
         foreach (var (control, index) in templateControls)
@@ -1288,7 +1881,6 @@ internal static class GeneralCSharpEmitter
         writer.Line("}");
         writer.Line();
         writer.Line("Refresh();");
-
         foreach (var (control, index) in templateControls)
         {
             foreach (var (eventMember, eventIndex) in control.Members
@@ -1322,7 +1914,7 @@ internal static class GeneralCSharpEmitter
         }
 
         writer.Line();
-        writer.Line("return (control1, (Action)Refresh, rowOwner.Dispose);");
+        writer.Line("return (Fragment.From(control1), (Action)Refresh, rowOwner.Dispose);");
         writer.Unindent();
         writer.Line("});");
         writer.Line($"{dictionary}.Add(key, entry);");
@@ -1365,13 +1957,13 @@ internal static class GeneralCSharpEmitter
             ?? throw new InvalidOperationException(
                 $"Keyed region parent '{region.Parent.Name}' has no collection content route.");
         writer.Line(
-            $"var nativeItems = _control{region.ParentIndex}!.{collectionProperty};");
+            $"var nativeItems = __lucent_control{region.ParentIndex}!.{collectionProperty};");
         writer.Line("var orderChanged = nativeItems.Count != nextEntries.Count;");
         writer.Line("for (var index = 0; !orderChanged && index < nextEntries.Count; index++)");
         writer.Line("{");
         writer.Indent();
         writer.Line(
-            "orderChanged = !ReferenceEquals(nativeItems[index], nextEntries[index].Root);");
+            "orderChanged = nextEntries[index].Roots.Count != 1 || !ReferenceEquals(nativeItems[index], nextEntries[index].Roots[0]);");
         writer.Unindent();
         writer.Line("}");
         writer.Line();
@@ -1382,7 +1974,7 @@ internal static class GeneralCSharpEmitter
         writer.Line("foreach (var entry in nextEntries)");
         writer.Line("{");
         writer.Indent();
-        writer.Line("nativeItems.Add(entry.Root);");
+        writer.Line("foreach (var root in entry.Roots.Roots) nativeItems.Add(root);");
         writer.Unindent();
         writer.Line("}");
         writer.Unindent();
@@ -1479,7 +2071,8 @@ internal static class GeneralCSharpEmitter
         CodeWriter writer,
         BoundControlModel control,
         int index,
-        IReadOnlyList<(BoundControlModel control, int index)> controls)
+        IReadOnlyList<(BoundControlModel control, int index)> controls,
+        IReadOnlyDictionary<BoundComponentInvocationModel, (string Instance, string Roots)> components)
     {
         foreach (var child in control.Members.OfType<BoundChildMember>())
         {
@@ -1492,6 +2085,20 @@ internal static class GeneralCSharpEmitter
             writer.Line(route.IsCollection
                 ? $"control{index}.{route.PropertyName}.Add(control{childIndex});"
                 : $"control{index}.{route.PropertyName} = control{childIndex};");
+        }
+        foreach (var child in control.Members.OfType<BoundComponentChildMember>())
+        {
+            var route = control.ContentRoute
+                ?? throw new InvalidOperationException(
+                    $"Bound control '{control.Name}' has component children without a content route.");
+            var roots = components[child.Invocation].Roots;
+            writer.Line(route.IsCollection
+                ? $"foreach (var root in {roots}.Roots) control{index}.{route.PropertyName}.Add(root);"
+                : $"if ({roots}.Count > 1) throw new InvalidOperationException(\"A scalar keyed row received multiple component roots.\");");
+            if (!route.IsCollection)
+            {
+                writer.Line($"control{index}.{route.PropertyName} = {roots}.Count == 0 ? null : {roots}[0];");
+            }
         }
     }
 
@@ -1587,6 +2194,365 @@ internal static class GeneralCSharpEmitter
             _ => false,
         };
 
+    private static string LowerOrdinaryMember(string text, BoundComponentModel model)
+    {
+        var member = SyntaxFactory.ParseMemberDeclaration(text);
+        if (member is null) return text;
+        return new OrdinaryMemberRewriter(model).Visit(member)!.ToFullString().Trim();
+    }
+
+    private static void EmitComponentRegionUpdater(
+        CodeWriter writer,
+        BoundComponentModel model,
+        BoundRegion region,
+        BoundComponentInvocationModel invocation,
+        BoundStyleSheet styles,
+        SourceDocument source)
+    {
+        var loop = region.Loop;
+        var dictionary = $"__lucent_region{region.Index}";
+        var route = region.Parent.ContentRoute?.PropertyName
+            ?? throw new InvalidOperationException($"Keyed region parent '{region.Parent.Name}' has no collection content route.");
+
+        writer.Line($"private void __lucent_UpdateRegion{region.Index}()");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("var nextEntries = new List<__lucent_ILoopEntry>();");
+        writer.Line("var seenKeys = new HashSet<object>();");
+        writer.Line("var orderedKeys = new List<object>();");
+        EmitLineMapping(writer, source, loop.SourceExpressionSpan);
+        writer.Line($"var sourceItems = ({loop.SourceExpression.LoweredText}).ToArray();");
+        writer.Line("#line default");
+        writer.Line($"foreach (var {loop.ItemName} in sourceItems)");
+        writer.Line("{"); writer.Indent();
+        EmitLineMapping(writer, source, loop.KeyExpressionSpan);
+        writer.Line($"object? key = {loop.KeyExpression.LoweredText};");
+        writer.Line("#line default");
+        writer.Line("if (key is null) throw new InvalidOperationException(\"A keyed foreach produced a null key.\");");
+        writer.Line("if (!seenKeys.Add(key)) throw new InvalidOperationException($\"A keyed foreach produced duplicate key '{key}'.\");");
+        writer.Line("orderedKeys.Add(key);");
+        writer.Unindent(); writer.Line("}");
+        writer.Line("var itemIndex = 0;");
+        writer.Line($"foreach (var {loop.ItemName} in sourceItems)");
+        writer.Line("{"); writer.Indent();
+        writer.Line("var key = orderedKeys[itemIndex++];");
+        writer.Line($"if (!{dictionary}.TryGetValue(key, out var entry))");
+        writer.Line("{"); writer.Indent();
+        writer.Line($"entry = __lucent_CreateLoopEntry({loop.ItemName}, loopValue =>");
+        writer.Line("{"); writer.Indent();
+        writer.Line("var rowOwner = __lucent_owner.CreateChild();");
+        var arguments = invocation.Arguments.Select(argument => argument.Expression.LoweredText).ToArray();
+        foreach (var supply in invocation.Slots)
+        {
+            EmitLoopSlotFactory(writer, supply, loop.ItemName, source);
+        }
+        var slotArguments = invocation.Component.Slots.Select(slot =>
+            invocation.Slots.Any(supply => supply.Slot.Name == slot.Name)
+                ? $"__lucent_loopSlot{Pascal(slot.Name)}"
+                : "static _ => Fragment.Empty");
+        writer.Line($"var child = new {invocation.Component.GeneratedTypeName}(rowOwner" +
+            ((arguments.Length == 0 && !slotArguments.Any()) ? string.Empty : ", " +
+                string.Join(", ", arguments.Concat(slotArguments))) + ");");
+        writer.Line("var roots = child.Mount();");
+        EmitProjectedStyles(writer, "roots", styles, $"__lucent_regionStyle{region.Index}");
+        writer.Line("void Refresh()");
+        writer.Line("{"); writer.Indent();
+        writer.Line($"var {loop.ItemName} = loopValue.Value;");
+        var inputArguments = invocation.Arguments.Select(argument => argument.Expression.LoweredText);
+        writer.Line("child.UpdateInputs(" + string.Join(", ", inputArguments) + ");");
+        foreach (var supply in invocation.Slots)
+        {
+            writer.Line($"__lucent_RefreshLoopSlot{Pascal(supply.Slot.Name)}();");
+        }
+        writer.Unindent(); writer.Line("}");
+        writer.Line("Refresh();");
+        writer.Line("return (roots, (Action)Refresh, rowOwner.Dispose);");
+        writer.Unindent(); writer.Line("});");
+        writer.Line($"{dictionary}.Add(key, entry);");
+        writer.Unindent(); writer.Line("}");
+        writer.Line("else"); writer.Line("{"); writer.Indent();
+        writer.Line($"entry.Update({loop.ItemName});");
+        writer.Unindent(); writer.Line("}");
+        writer.Line("nextEntries.Add(entry);");
+        writer.Unindent(); writer.Line("}");
+        writer.Line($"var staleKeys = {dictionary}.Keys.Except(seenKeys).ToArray();");
+        writer.Line("foreach (var staleKey in staleKeys) { " + dictionary + "[staleKey].Dispose(); " + dictionary + ".Remove(staleKey); }");
+        writer.Line($"var nativeItems = __lucent_control{region.ParentIndex}!.{route};");
+        writer.Line("nativeItems.Clear();");
+        writer.Line("foreach (var entry in nextEntries) foreach (var root in entry.Roots.Roots) nativeItems.Add(root);");
+        writer.Unindent(); writer.Line("}");
+    }
+
+    private static string EmitLoopSlotFactory(
+        CodeWriter writer,
+        BoundSlotSupply supply,
+        string itemName,
+        SourceDocument source,
+        string? namePrefix = null)
+    {
+        var prefix = namePrefix ?? $"__lucent_loopSlot{Pascal(supply.Slot.Name)}";
+        var refreshName = namePrefix is null
+            ? $"__lucent_RefreshLoopSlot{Pascal(supply.Slot.Name)}"
+            : prefix + "Refresh";
+        writer.Line($"Action {refreshName} = static () => {{ }};");
+        writer.Line($"Fragment {prefix}(ComponentOwner __lucent_slotOwner)");
+        writer.Line("{"); writer.Indent();
+        writer.Line($"var {itemName} = loopValue.Value;");
+        var counter = 0;
+        var refreshStatements = new List<string>();
+        var roots = supply.Roots.Select(root =>
+            EmitLoopSlotRenderable(writer, root, "__lucent_slotOwner", itemName, source,
+                ref counter, refreshStatements, namePrefix))
+            .ToArray();
+        writer.Line($"{refreshName} = () =>");
+        writer.Line("{"); writer.Indent();
+        writer.Line($"var {itemName} = loopValue.Value;");
+        foreach (var statement in refreshStatements)
+        {
+            writer.Line(statement);
+        }
+        writer.Unindent(); writer.Line("};");
+        writer.Line("__lucent_slotOwner.OnDispose(() =>");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line($"{refreshName} = static () => {{ }};");
+        writer.Unindent();
+        writer.Line("});");
+        writer.Line(roots.Length == 0 ? "return Fragment.Empty;" :
+            $"return Fragment.Concat({string.Join(", ", roots)});");
+        writer.Unindent(); writer.Line("}");
+        return prefix;
+    }
+
+    private static string EmitLoopSlotRenderable(
+        CodeWriter writer,
+        BoundRenderableModel renderable,
+        string owner,
+        string itemName,
+        SourceDocument source,
+        ref int counter,
+        List<string> refreshStatements,
+        string? namePrefix = null)
+    {
+        if (renderable is BoundComponentInvocationModel invocation)
+        {
+            var id = ++counter;
+            var childOwner = namePrefix is null
+                ? $"__lucent_loopSlotChildOwner{id}"
+                : $"{namePrefix}ChildOwner{id}";
+            var child = namePrefix is null
+                ? $"__lucent_loopSlotComponent{id}"
+                : $"{namePrefix}Component{id}";
+            var arguments = invocation.Arguments.Select(argument => argument.Expression.LoweredText).ToList();
+            foreach (var slot in invocation.Component.Slots)
+            {
+            var nested = invocation.Slots.FirstOrDefault(candidate => candidate.Slot.Name == slot.Name);
+                arguments.Add(nested is null
+                    ? "static _ => Fragment.Empty"
+                    : EmitLoopSlotFactoryLambda(writer, nested, itemName, source, ref counter, namePrefix));
+            }
+            writer.Line($"var {childOwner} = {owner}.CreateChild();");
+            writer.Line($"var {child} = new {invocation.Component.GeneratedTypeName}({childOwner}, {string.Join(", ", arguments)});");
+            var roots = $"{child}Roots";
+            writer.Line($"var {roots} = {child}.Mount();");
+            if (invocation.Arguments.Count > 0)
+            {
+                refreshStatements.Add(
+                    $"{child}.UpdateInputs({string.Join(", ", invocation.Arguments.Select(argument => argument.Expression.LoweredText))});");
+            }
+            return roots;
+        }
+
+        var control = (BoundControlModel)renderable;
+        var name = namePrefix is null
+            ? $"__lucent_loopSlotControl{++counter}"
+            : $"{namePrefix}Control{++counter}";
+        writer.Line($"var {name} = new {control.TypeName}();");
+        foreach (var property in control.Members.OfType<BoundPropertyMember>())
+        {
+            EmitLineMapping(writer, source, property.ExpressionSpan);
+            writer.Line($"{name}.{property.Name} = {LowerPropertyValue(property.Expression.LoweredText, property.NativeValueKind)};");
+            writer.Line("#line default");
+            refreshStatements.Add(property.Name == "Class"
+                ? $"{name}.Classes.Clear(); {name}.Classes.Add({property.Expression.LoweredText});"
+                : $"{name}.{property.Name} = {LowerPropertyValue(property.Expression.LoweredText, property.NativeValueKind)};");
+        }
+        foreach (var content in control.Members.OfType<BoundContentMember>())
+        {
+            EmitLineMapping(writer, source, content.ExpressionSpan);
+            writer.Line($"{name}.{control.ContentRoute!.PropertyName} = {content.ExpressionText};");
+            writer.Line("#line default");
+            refreshStatements.Add(control.ContentRoute!.IsCollection
+                ? $"{name}.{control.ContentRoute.PropertyName}.Clear(); {name}.{control.ContentRoute.PropertyName}.Add({content.ExpressionText});"
+                : $"{name}.{control.ContentRoute.PropertyName} = {content.ExpressionText};");
+        }
+        foreach (var child in control.Members.OfType<BoundChildMember>())
+        {
+            var childRoots = EmitLoopSlotRenderable(writer, child.Child, owner, itemName, source,
+                ref counter, refreshStatements, namePrefix);
+            EmitSlotAttach(writer, name, control.ContentRoute!, childRoots);
+        }
+        foreach (var child in control.Members.OfType<BoundComponentChildMember>())
+        {
+            var childRoots = EmitLoopSlotRenderable(writer, child.Invocation, owner, itemName, source,
+                ref counter, refreshStatements, namePrefix);
+            EmitSlotAttach(writer, name, control.ContentRoute!, childRoots);
+        }
+        foreach (var conditional in control.Members.OfType<BoundConditionalMember>())
+        {
+            writer.Line($"if ({conditional.Condition.LoweredText})");
+            writer.Line("{"); writer.Indent();
+            foreach (var root in conditional.TrueRoots)
+                EmitSlotAttach(writer, name, control.ContentRoute!,
+                    EmitLoopSlotRenderable(writer, root, owner, itemName, source,
+                        ref counter, refreshStatements, namePrefix));
+            writer.Unindent(); writer.Line("}");
+            if (conditional.FalseRoots is not null)
+            {
+                writer.Line("else"); writer.Line("{"); writer.Indent();
+                foreach (var root in conditional.FalseRoots)
+                        EmitSlotAttach(writer, name, control.ContentRoute!,
+                            EmitLoopSlotRenderable(writer, root, owner, itemName, source,
+                            ref counter, refreshStatements, namePrefix));
+                writer.Unindent(); writer.Line("}");
+            }
+        }
+        foreach (var loop in control.Members.OfType<BoundForEachMember>())
+        {
+            writer.Line($"foreach (var {loop.ItemName} in ({loop.SourceExpression.LoweredText}))");
+            writer.Line("{"); writer.Indent();
+            var loopRoot = EmitLoopSlotRenderable(writer, loop.Body, owner, itemName, source,
+                ref counter, refreshStatements, namePrefix);
+            EmitSlotAttach(writer, name, control.ContentRoute!, loopRoot);
+            writer.Unindent(); writer.Line("}");
+        }
+        return $"Fragment.From({name}!)";
+    }
+
+    private static void EmitProjectedStyles(
+        CodeWriter writer,
+        string fragment,
+        BoundStyleSheet styles,
+        string variablePrefix)
+    {
+        foreach (var rule in styles.Rules)
+        {
+            var targetType = rule.TypeName is null
+                ? "global::Avalonia.Controls.Control"
+                : rule.TypeName.Contains('.', StringComparison.Ordinal)
+                    ? "global::" + rule.TypeName
+                    : "global::Avalonia.Controls." + rule.TypeName;
+            writer.Line($"foreach (var {variablePrefix} in {fragment}.Roots)");
+            writer.Line("{");
+            writer.Indent();
+            var selector = rule.TypeName is null
+                ? "x => x"
+                : $"x => x.OfType<{targetType}>()";
+            if (rule.ClassName is not null)
+            {
+                selector += $".Class({Quote(rule.ClassName)})";
+            }
+            if (rule.PseudoClass is not null)
+            {
+                selector += $".Class({Quote(rule.PseudoClass)})";
+            }
+            writer.Line($"{variablePrefix}.Styles.Add(new global::Avalonia.Styling.Style({selector})");
+            writer.Line("{");
+            writer.Indent();
+            writer.Line("Setters =");
+            writer.Line("{");
+            writer.Indent();
+            foreach (var declaration in rule.Declarations)
+            {
+                var setter = declaration.PropertyName == "transition"
+                    ? "new global::Avalonia.Styling.Setter(global::Avalonia.Animation.Animatable.TransitionsProperty, " +
+                      $"{LowerTransitions(declaration.Value, targetType)}),"
+                    : $"new global::Avalonia.Styling.Setter({PropertyField(targetType, declaration.PropertyName)}, " +
+                      $"{LowerStyleValue(declaration.PropertyName, declaration.Value)}),";
+                writer.Line(setter);
+            }
+            writer.Unindent();
+            writer.Line("},");
+            writer.Unindent();
+            writer.Line("});");
+            writer.Unindent();
+            writer.Line("}");
+        }
+    }
+
+    private static string EmitLoopSlotFactoryLambda(
+        CodeWriter writer,
+        BoundSlotSupply supply,
+        string itemName,
+        SourceDocument source,
+        ref int counter,
+        string? namePrefix = null)
+    {
+        var name = namePrefix is null
+            ? $"__lucent_loopSlotFactory{++counter}"
+            : $"{namePrefix}Factory{++counter}";
+        writer.Line($"Func<ComponentOwner, Fragment> {name} = __lucent_nestedOwner =>");
+        writer.Line("{"); writer.Indent();
+        writer.Line($"var {itemName} = loopValue.Value;");
+        var roots = new List<string>();
+        foreach (var root in supply.Roots)
+        {
+            if (root is not BoundComponentInvocationModel invocation)
+                continue;
+            var child = namePrefix is null
+                ? $"__lucent_nestedLoopComponent{counter}_{roots.Count + 1}"
+                : $"{namePrefix}NestedComponent{counter}_{roots.Count + 1}";
+            var owner = namePrefix is null
+                ? $"__lucent_nestedLoopOwner{counter}_{roots.Count + 1}"
+                : $"{namePrefix}NestedOwner{counter}_{roots.Count + 1}";
+            var arguments = invocation.Arguments.Select(argument => argument.Expression.LoweredText).ToList();
+            foreach (var slot in invocation.Component.Slots)
+            {
+                var nested = invocation.Slots.FirstOrDefault(candidate => candidate.Slot.Name == slot.Name);
+                arguments.Add(nested is null
+                    ? "static _ => Fragment.Empty"
+                    : EmitLoopSlotFactoryLambda(writer, nested, itemName, source, ref counter, namePrefix));
+            }
+            writer.Line($"var {owner} = __lucent_nestedOwner.CreateChild();");
+            writer.Line($"var {child} = new {invocation.Component.GeneratedTypeName}({owner}, {string.Join(", ", arguments)});");
+            writer.Line($"var {child}Roots = {child}.Mount();");
+            roots.Add($"{child}Roots");
+        }
+        writer.Line(roots.Count == 0 ? "return Fragment.Empty;" : $"return Fragment.Concat({string.Join(", ", roots)});");
+        writer.Unindent(); writer.Line("};");
+        return name;
+    }
+
+    private sealed class OrdinaryMemberRewriter(BoundComponentModel model) : CSharpSyntaxRewriter
+    {
+        public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
+        {
+            if (node.Expression is not IdentifierNameSyntax identifier) return base.VisitMemberAccessExpression(node);
+            var state = model.States.FirstOrDefault(candidate => candidate.Name == identifier.Identifier.ValueText);
+            var computed = model.Computed.FirstOrDefault(candidate => candidate.Name == identifier.Identifier.ValueText);
+            if (state is not null)
+            {
+                return node.Name.Identifier.ValueText switch
+                {
+                    "Value" => SyntaxFactory.IdentifierName(StateField(state.Name)).WithTriviaFrom(node),
+                    "Update" => SyntaxFactory.IdentifierName(SetterName(state.Name)).WithTriviaFrom(node),
+                    _ => base.VisitMemberAccessExpression(node),
+                };
+            }
+            if (computed is not null)
+            {
+                return node.Name.Identifier.ValueText switch
+                {
+                    "Value" => SyntaxFactory.IdentifierName(ComputedField(computed.Name)).WithTriviaFrom(node),
+                    "IsPending" => SyntaxFactory.IdentifierName(ComputedField(computed.Name) + "Pending").WithTriviaFrom(node),
+                    "ErrorMessage" => SyntaxFactory.IdentifierName(ComputedField(computed.Name) + "ErrorMessage").WithTriviaFrom(node),
+                    _ => base.VisitMemberAccessExpression(node),
+                };
+            }
+            return base.VisitMemberAccessExpression(node);
+        }
+    }
+
     private static void EmitBody(CodeWriter writer, string body)
     {
         body = body.Trim();
@@ -1615,6 +2581,150 @@ internal static class GeneralCSharpEmitter
         }
     }
 
+    private static IEnumerable<BoundControlModel> FlattenAll(BoundControlModel root)
+    {
+        yield return root;
+        foreach (var child in root.Members.OfType<BoundChildMember>())
+        {
+            foreach (var nested in FlattenAll(child.Child))
+            {
+                yield return nested;
+            }
+        }
+        foreach (var conditional in root.Members.OfType<BoundConditionalMember>())
+        {
+            foreach (var nestedRoot in conditional.TrueRoots.Concat(conditional.FalseRoots ?? []))
+            {
+                if (nestedRoot is BoundControlModel control)
+                {
+                    foreach (var nested in FlattenAll(control))
+                    {
+                        yield return nested;
+                    }
+                }
+            }
+        }
+        foreach (var loop in root.Members.OfType<BoundForEachMember>())
+        {
+            if (loop.Body is BoundControlModel control)
+            {
+                foreach (var nested in FlattenAll(control))
+                    yield return nested;
+            }
+        }
+    }
+
+    private static IEnumerable<BoundComponentInvocationModel> EnumerateInvocations(
+        IEnumerable<BoundRenderableModel> roots)
+    {
+        foreach (var root in roots)
+        {
+            if (root is BoundComponentInvocationModel invocation)
+            {
+                yield return invocation;
+                foreach (var nested in invocation.Slots.SelectMany(slot => EnumerateInvocations(slot.Roots)))
+                {
+                    yield return nested;
+                }
+            }
+            else if (root is BoundControlModel control)
+            {
+                foreach (var child in control.Members.OfType<BoundComponentChildMember>())
+                {
+                    yield return child.Invocation;
+                    foreach (var nested in child.Invocation.Slots.SelectMany(slot => EnumerateInvocations(slot.Roots)))
+                    {
+                        yield return nested;
+                    }
+                }
+                foreach (var child in control.Members.OfType<BoundChildMember>())
+                {
+                    foreach (var nested in EnumerateInvocations([child.Child]))
+                    {
+                        yield return nested;
+                    }
+                }
+                foreach (var conditional in control.Members.OfType<BoundConditionalMember>())
+                {
+                    foreach (var nested in EnumerateInvocations(conditional.TrueRoots.Concat(conditional.FalseRoots ?? [])))
+                    {
+                        yield return nested;
+                    }
+                }
+                foreach (var loop in control.Members.OfType<BoundForEachMember>())
+                {
+                    foreach (var nested in EnumerateInvocations([loop.Body]))
+                        yield return nested;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<ComponentSite> ConditionalComponentSites(
+        IReadOnlyList<(BoundControlModel control, int index)> fields,
+        IReadOnlyList<ComponentSite> staticSites)
+    {
+        var staticInvocations = staticSites
+            .Select(site => site.Invocation)
+            .ToHashSet();
+        foreach (var field in fields)
+        {
+            foreach (var conditional in field.control.Members.OfType<BoundConditionalMember>())
+            {
+                foreach (var invocation in EnumerateInvocations(
+                             conditional.TrueRoots.Concat(conditional.FalseRoots ?? [])))
+                {
+                    if (!staticInvocations.Contains(invocation))
+                    {
+                        yield return new ComponentSite(null, 0, invocation, invocation.SiteId + 1);
+                    }
+                }
+            }
+        }
+
+        static IEnumerable<BoundComponentInvocationModel> EnumerateInvocations(
+            IEnumerable<BoundRenderableModel> roots)
+        {
+            foreach (var root in roots)
+            {
+                if (root is BoundComponentInvocationModel invocation)
+                {
+                    yield return invocation;
+                    continue;
+                }
+
+                if (root is not BoundControlModel control)
+                {
+                    continue;
+                }
+
+                foreach (var child in control.Members.OfType<BoundComponentChildMember>())
+                {
+                    yield return child.Invocation;
+                }
+                foreach (var child in control.Members.OfType<BoundChildMember>())
+                {
+                    foreach (var nested in EnumerateInvocations([child.Child]))
+                    {
+                        yield return nested;
+                    }
+                }
+                foreach (var loop in control.Members.OfType<BoundForEachMember>())
+                {
+                    foreach (var nested in EnumerateInvocations([loop.Body]))
+                        yield return nested;
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> InvocationArguments(ComponentSite site) =>
+        site.Invocation.Arguments.Select(argument => argument.Expression.LoweredText)
+            .Concat(site.Invocation.Component.Slots.Select(slot =>
+                site.Invocation.Slots.FirstOrDefault(supply => supply.Slot.Name == slot.Name) is null
+                    ? "static _ => Fragment.Empty"
+                    : $"__lucent_MountSlot{site.Index}{Pascal(slot.Name)}"));
+
     private static IReadOnlyList<int> Dependencies(BoundControlMember member) => member switch
     {
         BoundPropertyMember property => property.Expression.Dependencies,
@@ -1626,11 +2736,67 @@ internal static class GeneralCSharpEmitter
     private static IReadOnlySet<int> RegionDependencies(BoundRegion region) =>
         region.Loop.SourceExpression.Dependencies
             .Concat(region.Loop.KeyExpression.Dependencies)
-            .Concat(Flatten(region.Loop.Body)
-                .SelectMany(control => control.Members
-                    .Where(member => member is BoundPropertyMember or BoundContentMember)
-                    .SelectMany(Dependencies)))
+            .Concat(RenderableDependencies(region.Loop.Body))
             .ToHashSet();
+
+    private static IEnumerable<int> RenderableDependencies(BoundRenderableModel renderable)
+    {
+        switch (renderable)
+        {
+            case BoundComponentInvocationModel invocation:
+                foreach (var argument in invocation.Arguments)
+                {
+                    foreach (var dependency in argument.Expression.Dependencies)
+                        yield return dependency;
+                }
+                foreach (var supply in invocation.Slots)
+                {
+                    foreach (var root in supply.Roots)
+                    {
+                        foreach (var dependency in RenderableDependencies(root))
+                            yield return dependency;
+                    }
+                }
+                yield break;
+            case BoundControlModel control:
+                foreach (var member in control.Members)
+                {
+                    foreach (var dependency in MemberDependencies(member))
+                        yield return dependency;
+                }
+                yield break;
+        }
+    }
+
+    private static IEnumerable<int> MemberDependencies(BoundControlMember member)
+    {
+        foreach (var dependency in Dependencies(member))
+            yield return dependency;
+        switch (member)
+        {
+            case BoundChildMember child:
+                foreach (var dependency in RenderableDependencies(child.Child))
+                    yield return dependency;
+                break;
+            case BoundComponentChildMember child:
+                foreach (var dependency in RenderableDependencies(child.Invocation))
+                    yield return dependency;
+                break;
+            case BoundConditionalMember conditional:
+                foreach (var dependency in conditional.Condition.Dependencies)
+                    yield return dependency;
+                foreach (var root in conditional.TrueRoots.Concat(conditional.FalseRoots ?? []))
+                foreach (var dependency in RenderableDependencies(root))
+                    yield return dependency;
+                break;
+            case BoundForEachMember loop:
+                foreach (var dependency in loop.SourceExpression.Dependencies.Concat(loop.KeyExpression.Dependencies))
+                    yield return dependency;
+                foreach (var dependency in RenderableDependencies(loop.Body))
+                    yield return dependency;
+                break;
+        }
+    }
 
     private static void EmitLineMapping(
         CodeWriter writer,
@@ -1642,9 +2808,12 @@ internal static class GeneralCSharpEmitter
     }
 
     private static string SetterName(string stateName) =>
-        "Set" + (stateName.Length == 0
+        "__lucent_Set" + (stateName.Length == 0
             ? stateName
             : char.ToUpperInvariant(stateName[0]) + stateName[1..]);
+
+    private static string StateField(string name) => "__lucent_state" + Pascal(name);
+    private static string ComputedField(string name) => "__lucent_computed" + Pascal(name);
 
     private sealed record BoundRegion(
         BoundControlModel Parent,
@@ -1664,6 +2833,19 @@ internal static class GeneralCSharpEmitter
         BoundControlMember Member,
         int? ConditionalIndex,
         int Index);
+
+    private sealed record ComponentSite(
+        BoundControlModel? Parent,
+        int ParentIndex,
+        BoundComponentInvocationModel Invocation,
+        int Index);
+
+    private sealed record SlotSupplySite(
+        int ComponentIndex,
+        BoundSlotSupply Supply,
+        IReadOnlyList<BoundRenderableModel> Roots,
+        IReadOnlyList<BoundControlModel> Controls,
+        IReadOnlyList<BoundComponentInvocationModel> Invocations);
 
     private sealed record ConditionalControl(BoundControlModel Control, string Name);
 

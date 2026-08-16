@@ -36,17 +36,17 @@ public sealed class GeneralCompilerTests
         Assert.IsNotNull(result.GeneratedSource);
         StringAssert.Contains(
             result.GeneratedSource,
-            "private global::Avalonia.Controls.Border? _control1;");
+            "private global::Avalonia.Controls.Border? __lucent_control1;");
         StringAssert.Contains(
             result.GeneratedSource,
-            "private global::Avalonia.Controls.StackPanel? _control2;");
+            "private global::Avalonia.Controls.StackPanel? __lucent_control2;");
         StringAssert.Contains(result.GeneratedSource, ".Padding = new Avalonia.Thickness(8);");
         StringAssert.Contains(
             result.GeneratedSource,
             ".Spacing = 6;");
         StringAssert.Contains(result.GeneratedSource, ".Content = \"Add\";");
-        StringAssert.Contains(result.GeneratedSource, "_control1!.Child = _control2!;");
-        StringAssert.Contains(result.GeneratedSource, ".Click += OnControl4Click;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_control1!.Child = __lucent_control2!;");
+        StringAssert.Contains(result.GeneratedSource, ".Click += __lucent_OnControl4Click;");
     }
 
     [TestMethod]
@@ -136,10 +136,10 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.IsNotNull(result.GeneratedSource);
         Assert.HasCount(2, result.Syntax!.Component.RenderMethod.Root.Children);
-        StringAssert.Contains(result.GeneratedSource, "_control5");
-        StringAssert.Contains(result.GeneratedSource, "OnControl5Click");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_control5");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_OnControl5Click");
         StringAssert.Contains(result.GeneratedSource, "#line");
-        StringAssert.Contains(result.GeneratedSource, "SetCount(_count + 1);");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_SetCount(__lucent_stateCount + 1);");
     }
 
     [TestMethod]
@@ -274,12 +274,12 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(
             result.GeneratedSource,
-            "private global::Avalonia.Controls.StackPanel? _control1;");
-        StringAssert.Contains(result.GeneratedSource, "_control1!.Orientation = Orientation.Horizontal;");
+            "private global::Avalonia.Controls.StackPanel? __lucent_control1;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_control1!.Orientation = Orientation.Horizontal;");
         StringAssert.Contains(
             result.GeneratedSource,
-            "_control1!.Spacing = 8;");
-        StringAssert.Contains(result.GeneratedSource, "_control1!.Children.Add(_control2!);");
+            "__lucent_control1!.Spacing = 8;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_control1!.Children.Add(__lucent_control2!);");
     }
 
     [TestMethod]
@@ -304,8 +304,8 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(
             result.GeneratedSource,
-            "private global::Avalonia.Controls.Border? _control1;");
-        StringAssert.Contains(result.GeneratedSource, "_control1!.Child = _control2!;");
+            "private global::Avalonia.Controls.Border? __lucent_control1;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_control1!.Child = __lucent_control2!;");
         Assert.IsFalse(result.GeneratedSource.Contains("AttachChild", StringComparison.Ordinal));
     }
 
@@ -326,7 +326,7 @@ public sealed class GeneralCompilerTests
             "native-button-content.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource, "_control1!.Content = \"Add task\";");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_control1!.Content = \"Add task\";");
     }
 
     [TestMethod]
@@ -359,8 +359,8 @@ public sealed class GeneralCompilerTests
 
         Assert.IsTrue(implicitResult.Succeeded);
         Assert.IsTrue(explicitResult.Succeeded);
-        StringAssert.Contains(implicitResult.GeneratedSource, "_control1!.Content = \"Add task\";");
-        StringAssert.Contains(explicitResult.GeneratedSource, "_control1!.Content = \"Add task\";");
+        StringAssert.Contains(implicitResult.GeneratedSource, "__lucent_control1!.Content = \"Add task\";");
+        StringAssert.Contains(explicitResult.GeneratedSource, "__lucent_control1!.Content = \"Add task\";");
     }
 
     [TestMethod]
@@ -415,13 +415,13 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(
             result.GeneratedSource,
-            "_control1!.Padding = new global::Avalonia.Thickness(12, 8)");
+            "__lucent_control1!.Padding = new global::Avalonia.Thickness(12, 8)");
         StringAssert.Contains(
             result.GeneratedSource,
-            "_control1!.CornerRadius = new global::Avalonia.CornerRadius(6)");
+            "__lucent_control1!.CornerRadius = new global::Avalonia.CornerRadius(6)");
         StringAssert.Contains(
             result.GeneratedSource,
-            "_control2!.FontSize = 24;");
+            "__lucent_control2!.FontSize = 24;");
     }
 
     [TestMethod]
@@ -459,25 +459,27 @@ public sealed class GeneralCompilerTests
         Assert.HasCount(1, result.Syntax!.AllUsings);
         Assert.IsInstanceOfType<UiForEachSyntax>(
             result.Syntax.Component.RenderMethod.Root.Members.Single());
-        StringAssert.Contains(result.GeneratedSource, "private string _title = \"Todos\";");
-        StringAssert.Contains(result.GeneratedSource, "private int[] _items = [1, 2, 3];");
+        StringAssert.Contains(result.GeneratedSource, "private string __lucent_stateTitle;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_stateTitle = \"Todos\";");
+        StringAssert.Contains(result.GeneratedSource, "private int[] __lucent_stateItems;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_stateItems = [1, 2, 3];");
         StringAssert.Contains(
             result.GeneratedSource,
-            "private readonly Dictionary<object, ILoopEntry> _region1 = new();");
+            "private readonly Dictionary<object, __lucent_ILoopEntry> __lucent_region1 = new();");
         StringAssert.Contains(
             result.GeneratedSource,
-            "var sourceItems = (_items.Where(value => value > 1)).ToArray();");
+            "var sourceItems = (__lucent_stateItems.Where(value => value > 1)).ToArray();");
         StringAssert.Contains(result.GeneratedSource, "foreach (var item in sourceItems)");
         StringAssert.Contains(result.GeneratedSource, "entry.Update(item);");
-        StringAssert.Contains(result.GeneratedSource, "nativeItems.Add(entry.Root);");
+        StringAssert.Contains(result.GeneratedSource, "foreach (var root in entry.Roots.Roots) nativeItems.Add(root);");
         StringAssert.Contains(
             result.GeneratedSource,
-            "ReferenceEquals(nativeItems[index], nextEntries[index].Root)");
+            "ReferenceEquals(nativeItems[index], nextEntries[index].Roots[0])");
         StringAssert.Contains(result.GeneratedSource, "if (orderChanged)");
-        StringAssert.Contains(result.GeneratedSource, "var rowOwner = _owner.CreateChild();");
+        StringAssert.Contains(result.GeneratedSource, "var rowOwner = __lucent_owner.CreateChild();");
         StringAssert.Contains(result.GeneratedSource, "rowOwner.OnDispose(() =>");
-        StringAssert.Contains(result.GeneratedSource, "return (control1, (Action)Refresh, rowOwner.Dispose);");
-        StringAssert.Contains(result.GeneratedSource, "_owner.OnDispose(_region1.Clear);");
+        StringAssert.Contains(result.GeneratedSource, "return (Fragment.From(control1), (Action)Refresh, rowOwner.Dispose);");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_owner.OnDispose(__lucent_region1.Clear);");
         Assert.IsFalse(result.GeneratedSource.Contains("Dispatcher.UIThread", StringComparison.Ordinal));
         Assert.IsFalse(result.GeneratedSource.Contains("disposeActions", StringComparison.Ordinal));
         Assert.IsTrue(
@@ -485,14 +487,14 @@ public sealed class GeneralCompilerTests
                 "duplicate key",
                 StringComparison.Ordinal) <
             result.GeneratedSource.IndexOf(
-                "_region1.TryGetValue",
+                "__lucent_region1.TryGetValue",
                 StringComparison.Ordinal),
             "All keys should be validated before the existing region is mutated.");
         StringAssert.Contains(
             result.GeneratedSource,
-            "private void SetItems(Func<int[], int[]> update)");
-        StringAssert.Contains(Method(result.GeneratedSource!, "private void InvalidateSource0()"), "UpdateRegion1();");
-        StringAssert.Contains(Method(result.GeneratedSource!, "private void InvalidateSource1()"), "UpdateRegion1();");
+            "private void __lucent_SetItems(Func<int[], int[]> update)");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void __lucent_InvalidateSource0()"), "__lucent_UpdateRegion1();");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void __lucent_InvalidateSource1()"), "__lucent_UpdateRegion1();");
     }
 
     [TestMethod]
@@ -516,8 +518,8 @@ public sealed class GeneralCompilerTests
             "native-click.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource, "_control1!.Click += OnControl1Click;");
-        StringAssert.Contains(result.GeneratedSource, "SetCount(_count + 1);");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_control1!.Click += __lucent_OnControl1Click;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_SetCount(__lucent_stateCount + 1);");
         StringAssert.Contains(result.GeneratedSource, "#line");
     }
 
@@ -566,11 +568,11 @@ public sealed class GeneralCompilerTests
             "unsupported-event.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource, ".Loaded += OnControl1Loaded;");
+        StringAssert.Contains(result.GeneratedSource, ".Loaded += __lucent_OnControl1Loaded;");
         StringAssert.Contains(
             result.GeneratedSource,
-            "_owner.OnDispose(() => _control1!.Loaded -= OnControl1Loaded);");
-        StringAssert.Contains(result.GeneratedSource, "public void Dispose() => _owner.Dispose();");
+            "__lucent_owner.OnDispose(() => __lucent_control1!.Loaded -= __lucent_OnControl1Loaded);");
+        StringAssert.Contains(result.GeneratedSource, "public void Dispose() => __lucent_owner.Dispose();");
     }
 
     [TestMethod]
@@ -596,14 +598,34 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(
             result.GeneratedSource,
-            "ObjectDisposedException.ThrowIf(_owner.IsDisposed, this);");
+            "ObjectDisposedException.ThrowIf(__lucent_owner.IsDisposed, this);");
         StringAssert.Contains(
             result.GeneratedSource,
             "A Main component can only be mounted once.");
-        StringAssert.Contains(result.GeneratedSource, "public void Dispose() => _owner.Dispose();");
+        StringAssert.Contains(result.GeneratedSource, "public void Dispose() => __lucent_owner.Dispose();");
         StringAssert.Contains(
             result.GeneratedSource,
-            "_owner.Dispatch(() => SetCountCore(value));");
+            "__lucent_owner.Dispatch(() => __lucent_SetCountCore(value));");
+    }
+
+    [TestMethod]
+    public void State_named_owner_does_not_collide_with_generated_locals()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<int> owner = new(1);
+                Fragment Render() => Button { Click: () => owner.Update(value => value + 1); };
+            }
+            """,
+            "owner-state.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.IsFalse(result.GeneratedSource!.Contains("var _owner", StringComparison.Ordinal));
+        StringAssert.Contains(result.GeneratedSource!, "var __lucent_stateOwner = __lucent_owner;");
+        StringAssert.Contains(result.GeneratedSource!, "__lucent_previousOwner");
     }
 
     [TestMethod]
@@ -659,7 +681,7 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(result.GeneratedSource, ".Text = \"title.Value\";");
         StringAssert.Contains(result.GeneratedSource, ".Text = System.Environment.Version.ToString();");
-        StringAssert.Contains(result.GeneratedSource, ".Text = _title;");
+        StringAssert.Contains(result.GeneratedSource, ".Text = __lucent_stateTitle;");
     }
 
     [TestMethod]
@@ -764,17 +786,18 @@ public sealed class GeneralCompilerTests
             "Search.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource, "private string[] _results = [];");
-        StringAssert.Contains(result.GeneratedSource, "++_resultsGeneration");
-        StringAssert.Contains(result.GeneratedSource, "_resultsCancellation?.Cancel();");
-        StringAssert.Contains(result.GeneratedSource, "generation != _resultsGeneration");
+        StringAssert.Contains(result.GeneratedSource, "private string[] __lucent_computedResults;");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_computedResults = [];");
+        StringAssert.Contains(result.GeneratedSource, "++__lucent_computedResultsGeneration");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_computedResultsCancellation?.Cancel();");
+        StringAssert.Contains(result.GeneratedSource, "generation != __lucent_computedResultsGeneration");
         StringAssert.Contains(
             result.GeneratedSource,
-            "CreateLinkedTokenSource(_owner.CancellationToken)");
-        StringAssert.Contains(result.GeneratedSource, "_owner.Dispatch(() =>");
+            "CreateLinkedTokenSource(__lucent_owner.CancellationToken)");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_owner.Dispatch(() =>");
         Assert.IsFalse(result.GeneratedSource.Contains("Dispatcher.UIThread", StringComparison.Ordinal));
-        StringAssert.Contains(result.GeneratedSource, "Task.FromResult(new[] { _query })");
-        StringAssert.Contains(result.GeneratedSource, "var sourceItems = (_results).ToArray();");
+        StringAssert.Contains(result.GeneratedSource, "Task.FromResult(new[] { __lucent_stateQuery })");
+        StringAssert.Contains(result.GeneratedSource, "var sourceItems = (__lucent_computedResults).ToArray();");
     }
 
     [TestMethod]
@@ -891,15 +914,15 @@ public sealed class GeneralCompilerTests
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         var source = result.GeneratedSource!;
-        var titleInvalidation = Method(source, "private void InvalidateSource0()");
-        var countInvalidation = Method(source, "private void InvalidateSource1()");
-        var computedInvalidation = Method(source, "private void InvalidateSource2()");
-        StringAssert.Contains(titleInvalidation, "UpdateBinding1();");
-        Assert.IsFalse(titleInvalidation.Contains("RefreshDoubled", StringComparison.Ordinal));
-        StringAssert.Contains(countInvalidation, "UpdateBinding1();");
-        StringAssert.Contains(countInvalidation, "RefreshDoubled();");
-        StringAssert.Contains(computedInvalidation, "UpdateBinding2();");
-        Assert.IsFalse(computedInvalidation.Contains("UpdateBinding1", StringComparison.Ordinal));
+        var titleInvalidation = Method(source, "private void __lucent_InvalidateSource0()");
+        var countInvalidation = Method(source, "private void __lucent_InvalidateSource1()");
+        var computedInvalidation = Method(source, "private void __lucent_InvalidateSource2()");
+        StringAssert.Contains(titleInvalidation, "__lucent_UpdateBinding1();");
+        Assert.IsFalse(titleInvalidation.Contains("__lucent_RefreshDoubled", StringComparison.Ordinal));
+        StringAssert.Contains(countInvalidation, "__lucent_UpdateBinding1();");
+        StringAssert.Contains(countInvalidation, "__lucent_RefreshDoubled();");
+        StringAssert.Contains(computedInvalidation, "__lucent_UpdateBinding2();");
+        Assert.IsFalse(computedInvalidation.Contains("__lucent_UpdateBinding1", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -988,13 +1011,13 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         Assert.IsInstanceOfType<UiIfSyntax>(result.Syntax!.Component.RenderMethod.Root.Members.Single());
         var source = result.GeneratedSource!;
-        StringAssert.Contains(source, "private ConditionalRegion? _conditional1;");
-        StringAssert.Contains(source, "_conditional1!.Show(0, branchOwner =>");
-        StringAssert.Contains(source, "_conditional1!.Show(1, branchOwner =>");
-        StringAssert.Contains(source, "if (_conditional1!.ActiveBranch != 0)");
-        StringAssert.Contains(source, "if (_conditional1!.ActiveBranch != 1)");
-        StringAssert.Contains(Method(source, "private void InvalidateSource0()"), "UpdateConditional1();");
-        StringAssert.Contains(Method(source, "private void InvalidateSource1()"), "UpdateBinding1();");
+        StringAssert.Contains(source, "private ConditionalRegion? __lucent_conditional1;");
+        StringAssert.Contains(source, "__lucent_conditional1!.Show(0, branchOwner =>");
+        StringAssert.Contains(source, "__lucent_conditional1!.Show(1, branchOwner =>");
+        StringAssert.Contains(source, "if (__lucent_conditional1!.ActiveBranch != 0)");
+        StringAssert.Contains(source, "if (__lucent_conditional1!.ActiveBranch != 1)");
+        StringAssert.Contains(Method(source, "private void __lucent_InvalidateSource0()"), "__lucent_UpdateConditional1();");
+        StringAssert.Contains(Method(source, "private void __lucent_InvalidateSource1()"), "__lucent_UpdateBinding1();");
     }
 
     [TestMethod]
@@ -1008,8 +1031,6 @@ public sealed class GeneralCompilerTests
             "TextBlock { if (true) { TextBlock { Text: \"no route\"; } } }",
             "ContentControl { if (true) { TextBlock { Text: \"branch\"; } } Content: \"later\"; }",
             "Border { if (true) { TextBlock { Text: \"branch\"; } } Child: new TextBlock(); }",
-            "StackPanel { if (true) { TextBlock { } Border { } } }",
-            "StackPanel { if (true) { TextBlock { } } else { TextBlock { } Border { } } }",
         })
         {
             var result = LucentCompiler.Compile(
@@ -1024,6 +1045,49 @@ public sealed class GeneralCompilerTests
             Assert.IsFalse(result.Succeeded, root);
             Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Code == "LUC2001"), root);
         }
+    }
+
+    [TestMethod]
+    public void Conditional_branches_project_fixed_fragments_to_collection_routes()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<bool> visible = new(true);
+                Fragment Render() { return StackPanel {
+                    if (visible.Value) { TextBlock { Text: "one"; } Border { } }
+                    else { }
+                }; }
+            }
+            """, "conditional-fragments.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var source = result.GeneratedSource!;
+        StringAssert.Contains(source, "return Fragment.Concat(Fragment.From(__lucent_conditional1TrueControl1!), Fragment.From(__lucent_conditional1TrueControl2!));");
+        StringAssert.Contains(source, "return Fragment.Empty;");
+        StringAssert.Contains(source, ".Children.Clear();");
+    }
+
+    [TestMethod]
+    public void Conditional_fragments_reject_multiple_scalar_roots_before_emission()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render() { return ContentControl {
+                    if (true) { TextBlock { } Border { } }
+                }; }
+            }
+            """, "conditional-scalar-overflow.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("scalar content route", StringComparison.Ordinal)));
+        Assert.IsNull(result.GeneratedSource);
     }
 
     [TestMethod]
@@ -1043,13 +1107,13 @@ public sealed class GeneralCompilerTests
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         var source = result.GeneratedSource!;
-        StringAssert.Contains(source, "_startingComputedWork = true;");
-        StringAssert.Contains(Method(source, "private void InvalidateSource0()"),
-            "if (!_startingComputedWork) RefreshSecond();");
-        Assert.AreEqual(1, Method(source, "public Control Mount()")
-            .Split("RefreshFirst();", StringSplitOptions.None).Length - 1);
-        Assert.AreEqual(1, Method(source, "public Control Mount()")
-            .Split("RefreshSecond();", StringSplitOptions.None).Length - 1);
+        StringAssert.Contains(source, "__lucent_startingComputedWork = true;");
+        StringAssert.Contains(Method(source, "private void __lucent_InvalidateSource0()"),
+            "if (!__lucent_startingComputedWork) __lucent_RefreshSecond();");
+        Assert.AreEqual(1, Method(source, "public Fragment Mount()")
+            .Split("__lucent_RefreshFirst();", StringSplitOptions.None).Length - 1);
+        Assert.AreEqual(1, Method(source, "public Fragment Mount()")
+            .Split("__lucent_RefreshSecond();", StringSplitOptions.None).Length - 1);
     }
 
     [TestMethod]
@@ -1068,8 +1132,10 @@ public sealed class GeneralCompilerTests
             """,
             "target-typed.lui");
         Assert.IsTrue(valid.Succeeded, string.Join(Environment.NewLine, valid.Diagnostics));
-        StringAssert.Contains(valid.GeneratedSource!, "private int[] _items = [1, 2];");
-        StringAssert.Contains(valid.GeneratedSource!, "private object _value = new();");
+        StringAssert.Contains(valid.GeneratedSource!, "private int[] __lucent_stateItems;");
+        StringAssert.Contains(valid.GeneratedSource!, "__lucent_stateItems = [1, 2];");
+        StringAssert.Contains(valid.GeneratedSource!, "private object __lucent_stateValue;");
+        StringAssert.Contains(valid.GeneratedSource!, "__lucent_stateValue = new();");
         StringAssert.Contains(valid.GeneratedSource!, ".Tag = new();");
 
         foreach (var source in new[]
@@ -1164,9 +1230,9 @@ public sealed class GeneralCompilerTests
             "reactive-class.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource!, "private string? _binding1Class;");
-        StringAssert.Contains(Method(result.GeneratedSource!, "private void UpdateBinding1()"), "Classes.Remove(_binding1Class)");
-        StringAssert.Contains(Method(result.GeneratedSource!, "private void InvalidateSource0()"), "UpdateBinding1();");
+        StringAssert.Contains(result.GeneratedSource!, "private string? __lucent_binding1Class;");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void __lucent_UpdateBinding1()"), "Classes.Remove(__lucent_binding1Class)");
+        StringAssert.Contains(Method(result.GeneratedSource!, "private void __lucent_InvalidateSource0()"), "__lucent_UpdateBinding1();");
     }
 
     private static string Method(string source, string signature)

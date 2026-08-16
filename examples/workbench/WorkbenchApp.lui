@@ -1,0 +1,31 @@
+namespace Lucent.Examples.Workbench;
+
+component WorkbenchApp()
+{
+    private readonly State<bool> showProblems = new(true);
+    private readonly State<string> documentTitle = new("Program.cs");
+
+    Fragment Render() => Window {
+        Title: "Lucent Workbench";
+        Width: 960;
+        Height: 680;
+        StackPanel {
+            WorkspaceSidebar("Lucent", compact: false) {}
+            DocumentPane(documentTitle.Value) {
+                TextBlock { Text: "Static editor placeholder"; }
+                slot toolbar {
+                    Button { Content: "Switch document"; Click: () => documentTitle.Update("README.md"); }
+                }
+            }
+            Border {
+                if (showProblems.Value) {
+                    StackPanel { ProblemsPane(count: 3) {} }
+                }
+                else {
+                    TextBlock { Text: "Problems hidden"; }
+                }
+            }
+            Button { Content: "Toggle problems"; Click: () => showProblems.Update(value => !value); }
+        }
+    };
+}

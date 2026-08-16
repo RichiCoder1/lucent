@@ -18,7 +18,7 @@ recent workspaces. It is not a full IDE.
 | --- | --- | --- | --- | --- | --- |
 | [001](001-runtime-owner-scheduler.md) | Centralize ownership and UI scheduling | P0 | M | — | DONE |
 | [002](002-reactivity-conditional-regions.md) | Bind dependencies and add conditional regions | P0 | L | 001 | DONE |
-| [003](003-component-composition.md) | Make Lucent components genuinely composable | P0 | L | 001, 002 | TODO |
+| [003](003-component-composition.md) | Make Lucent components genuinely composable | P0 | L | 001, 002 | DONE |
 | [004](004-desktop-application-interop.md) | Prove the native desktop application shell | P1 | L | 003 | TODO |
 | [005](005-virtualized-collections.md) | Add scalable native collections and AvaloniaEdit | P1 | M | 003, 004 | TODO |
 | [006](006-lifecycle-reliability.md) | Close lifecycle, failure, accessibility, and UI-test gaps | P1 | L | 001–005 | TODO |

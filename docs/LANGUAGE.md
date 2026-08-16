@@ -12,11 +12,9 @@ Lucent should keep its custom vocabulary small:
 component
 slot
 yield
-context
-using context
 ```
 
-Normal C# remains responsible for namespaces, `using`, parameters, fields, methods, named arguments, lambdas, records, `with`, generics, expressions, and control flow. Lucent adds UI declarations, keyed UI iteration, slots, and contextually typed construction where they materially improve UI code.
+Normal C# remains responsible for namespaces, `using`, supported component parameters, initialized fields, private methods, named arguments, lambdas, generics, expressions, and control flow. Lucent adds UI declarations, keyed UI iteration, and slots. Context remains deferred.
 
 ## Components
 
@@ -40,10 +38,10 @@ The declaration does not require a framework base class, an `override`, or an Av
 
 Component parameters are current read-only inputs, not mutable state. When a parent updates an invocation with the same logical identity, new input values are visible to dependent render computations while the component instance and its state members survive.
 
-`Render()` is the declarative boundary. It describes a fragment from current inputs, state, slots, and context:
+`Render()` is the declarative boundary. It describes a fragment from current inputs, state, and slots:
 
 ```text
-inputs + state + slots + context
+inputs + state + slots
     -> Render()
     -> Fragment
 ```
@@ -61,7 +59,11 @@ Fragment Render()
 }
 ```
 
-`label` is recomputed render data, not a hidden reactive cell. The compiler may propagate the visible `count.Value` dependency into a direct property update; when it cannot safely specialize an expression, correctness comes from reevaluating the owning computation or structural region.
+`label` is recomputed render data, not a hidden reactive cell. Reactive reads in
+component-local helper methods are summarized transitively, so a pure helper
+used by a render computation remains current. A render computation may not hide
+a state mutation behind such a helper; external method bodies remain opaque
+snapshots.
 
 A stateless component may use an expression body:
 
@@ -73,7 +75,31 @@ component Badge(string text) =>
     };
 ```
 
-This is shorthand for the same `Fragment Render()` contract, not a second component model. The exact literal syntax for an explicit zero- or multiple-root fragment remains a working choice.
+This is shorthand for the same `Fragment Render()` contract, not a second component model. Fixed zero- or multiple-root output uses an explicit fragment literal:
+
+```csharp
+Fragment Render() => Fragment {
+    TextBlock { Text: "one"; }
+    TextBlock { Text: "two"; }
+};
+```
+
+Top-level fragment roots are fixed native controls or component sites. Structural
+`if`, `foreach`, and `yield` remain inside a native content host. Native scalar
+content accepts at most one possible root; collection content flattens fragments
+in source order without inserting a layout wrapper.
+
+Each `.lui` file declares exactly one component. All project `.lui` files are
+indexed before any body binds, so source order does not affect current-namespace,
+imported-namespace, or qualified lookup. Calls use normal positional and named
+arguments: `Counter {}`, `Counter(initial: 10) {}`, or
+`UserCard(user, compact: true) {}`.
+
+Block-bodied components currently accept initialized one-variable fields and
+private instance/static methods with block or expression bodies. Properties,
+events, constructors, operators, nested types, and public instance members are
+rejected. `Mount`, `UpdateInputs`, `Dispose`, and names beginning with
+`__lucent_` are reserved for generated implementation details.
 
 Controls and components share composition syntax but not an implementation model. A native control resolves to its real Avalonia type and members, while a component may produce zero, one, or many controls without becoming a heavyweight control itself. Nested content on a native control follows Avalonia's content metadata; trailing content supplied to a Lucent component remains a Lucent slot.
 
@@ -159,7 +185,9 @@ new keys create rows, removed keys dispose their subscriptions, and source
 order determines native child order. Nested structural control flow remains
 deferred.
 
-Complete C# expressions remain valid in property values, arguments, event callbacks, conditions, and other defined C# positions. The frontend must preserve their C# meaning rather than silently reinterpret them as Lucent declarations.
+Complete C# expressions remain valid in the supported property, argument, event,
+condition, and initializer islands. Unsupported member and render positions are
+diagnosed rather than silently reinterpreted as Lucent declarations.
 
 ## Children and named slots
 
@@ -222,32 +250,21 @@ Slots contain declarative renderable content, not already-created controls. A na
 
 Initially, each slot has at most one syntactic yield site. That site may be conditional, so the supplied subtree does not exist while it is not yielded, but it may not appear twice or inside a repeated region. Supplied content captures the caller's lexical values and observes tree context at its yield site. Required, typed, and repeatable slots are deferred.
 
-## Context
+## Context (deferred)
 
-Context carries data through the rendered component tree without turning it into a global service locator:
-
-```csharp
-context Theme = darkTheme;
-PreviewPane();
-```
-
-```csharp
-using context Theme;
-```
-
-Nested providers shadow outer values. Content observes the context where a component yields it, so a component can establish context for its supplied children.
-
-The exact naming and type-inference rules are deferred. Lucent may integrate context with `Microsoft.Extensions.DependencyInjection`, but it should not create a competing application-service container.
+Context declarations and access are not implemented in the current executable
+subset. Their typing and ownership rules remain deferred.
 
 ## Parameters, options, and contextual construction
 
-Component APIs should distinguish four roles:
+Component APIs are currently limited to parameters and slots. The intended API
+roles are:
 
 ```text
 parameters -> essential data and behavior
-options    -> secondary configuration
+    options    -> deferred secondary configuration
 slots      -> caller-provided UI
-context    -> ambient tree-scoped values
+context    -> deferred
 ```
 
 Lucent does not implicitly promote members of an options record into component arguments. The API boundary stays visible:

@@ -7,19 +7,12 @@
     <ProjectReference Include="$(LucentRuntimeProject)" />
   </ItemGroup>
 
-  <ItemGroup>
-    <LucentGenerated Include="@(LucentSource->'$(LucentCompilerOutputDirectory)%(Filename)Component.g.cs')" />
-    <FileWrites Include="@(LucentGenerated)" />
-    <Compile Include="@(LucentGenerated)" AutoGen="true" />
-  </ItemGroup>
-
+  <!-- ponytail: generation always runs; add an output manifest when generation time is measurable. -->
   <Target
     Name="GenerateLucent"
     BeforeTargets="CoreCompile"
     DependsOnTargets="ResolveReferences;GenerateGlobalUsings"
-    Condition="'$(LucentCompilerEnabled)' == 'true' and '@(LucentSource)' != '' and '$(DesignTimeBuild)' != 'true'"
-    Inputs="@(LucentSource);@(LucentSource->'%(RootDir)%(Directory)%(Filename).css');@(Compile);@(ReferencePathWithRefAssemblies);$(LucentCompilerTaskAssembly);$(LucentCompilerCoreAssembly)"
-    Outputs="@(LucentGenerated)">
+    Condition="'$(LucentCompilerEnabled)' == 'true' and '@(LucentSource)' != '' and '$(DesignTimeBuild)' != 'true'">
     <MakeDir Directories="$(LucentCompilerOutputDirectory)" />
 
     <CompileLucent
@@ -30,5 +23,10 @@
       ProjectPath="$(MSBuildProjectFullPath)">
       <Output TaskParameter="GeneratedFiles" ItemName="_LucentGeneratedFiles" />
     </CompileLucent>
+
+    <ItemGroup>
+      <Compile Include="@(_LucentGeneratedFiles)" AutoGen="true" />
+      <FileWrites Include="@(_LucentGeneratedFiles)" />
+    </ItemGroup>
   </Target>
 </Project>

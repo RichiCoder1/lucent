@@ -1,0 +1,6 @@
+namespace Lucent.Examples.Workbench;
+
+component WorkspaceSidebar(string workspace, bool compact = false) => Border {
+    Padding: new Avalonia.Thickness(compact ? 4 : 12);
+    TextBlock { Text: $"Workspace: {workspace}"; }
+};

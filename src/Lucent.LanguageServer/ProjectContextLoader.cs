@@ -280,6 +280,7 @@ internal sealed class ProjectContextLoader
         startInfo.ArgumentList.Add(projectPath);
         startInfo.ArgumentList.Add("-getTargetResult:ResolveReferences");
         startInfo.ArgumentList.Add("-getItem:Compile");
+        startInfo.ArgumentList.Add("-getItem:LucentSource");
         startInfo.ArgumentList.Add("-p:DesignTimeBuild=true");
         startInfo.ArgumentList.Add("-p:BuildingProject=false");
         startInfo.ArgumentList.Add("-nologo");
@@ -331,8 +332,14 @@ internal sealed class ProjectContextLoader
                     .Where(path => !IsBuildOutput(path))
                     .ToArray()
                 : [];
+        var lucentSources = root.TryGetProperty("Items", out items) &&
+            items.TryGetProperty("LucentSource", out var lucentItems)
+                ? ReadItems(lucentItems)
+                    .Where(path => path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
+                    .ToArray()
+                : [];
 
-        return new LucentProjectContext(projectPath, references, sources);
+        return new LucentProjectContext(projectPath, references, sources, lucentSources);
     }
 
     private static LucentProjectContext CreateFallbackContext(string projectPath)
@@ -372,7 +379,9 @@ internal sealed class ProjectContextLoader
 
         var context = new LucentProjectContext(
             projectPath,
-            SourcePaths: sources.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+            SourcePaths: sources.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+            LucentSourcePaths: Directory.EnumerateFiles(projectDirectory, "*.lui", SearchOption.AllDirectories)
+                .Where(path => !IsBuildOutput(path)).ToArray());
         LanguageServerLog.ProjectFallback(
             LanguageServerLog.Logger,
             projectPath,

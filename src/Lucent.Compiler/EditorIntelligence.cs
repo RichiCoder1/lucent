@@ -26,9 +26,39 @@ internal static class EditorIntelligence
                 offset <= candidate.Span.End)
             .OrderBy(candidate => candidate.Span.Length)
             .FirstOrDefault();
+        var componentItems = analysis.ComponentIndex?.Symbols
+            .Where(component => string.Equals(component.NamespaceName,
+                syntax.NamespaceName, StringComparison.Ordinal) ||
+                syntax.AllUsings.Any(usingDirective =>
+                    string.Equals(usingDirective.Text["using ".Length..].TrimEnd(';').Trim(),
+                        component.NamespaceName, StringComparison.Ordinal)))
+            .Select(component => new LucentCompletionItem(
+                component.Name, LucentCompletionItemKind.Component,
+                $"component {component.NamespaceName}.{component.Name}",
+                component.Name + " {}"))
+            .ToArray() ?? [];
         if (element is null || element.Name == "Missing")
         {
-            return [];
+            return componentItems;
+        }
+
+        var component = analysis.ComponentIndex?.Resolve(
+            element.Name, syntax.NamespaceName,
+            syntax.AllUsings.Select(usingDirective => usingDirective.Text["using ".Length..].TrimEnd(';').Trim()).ToArray())
+            .SingleOrDefault();
+        if (component is not null)
+        {
+            if (element.AllArguments.Any(argument => offset >= argument.Span.Start && offset <= argument.Span.End) ||
+                offset <= element.Span.Start + element.Name.Length + 1)
+            {
+                return component.Parameters.Select(parameter => new LucentCompletionItem(
+                    parameter.Name, LucentCompletionItemKind.Parameter,
+                    $"{parameter.TypeName} {parameter.Name}", parameter.Name + ": ")).ToArray();
+            }
+            return componentItems.Concat(component.Slots.Select(slot => new LucentCompletionItem(
+                    slot.Name, LucentCompletionItemKind.Slot, $"slot {slot.Name}",
+                    "slot " + slot.Name + " { }")))
+                .GroupBy(item => item.Label, StringComparer.Ordinal).Select(group => group.First()).ToArray();
         }
 
         var control = resolver.ResolveControl(element.Name);

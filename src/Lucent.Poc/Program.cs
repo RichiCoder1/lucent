@@ -122,12 +122,18 @@ internal static class Program
             case "todo":
                 var todo = new TodoComponent();
                 component = todo;
-                content = todo.Mount();
+                var todoRoots = todo.Mount();
+                content = todoRoots.Count == 1 && todoRoots[0] is Control todoControl
+                    ? todoControl
+                    : throw new InvalidOperationException("Todo must mount exactly one Control root.");
                 break;
             case "package-pulse":
                 var packagePulse = new PackagePulseComponent();
                 component = packagePulse;
-                content = packagePulse.Mount();
+                var packageRoots = packagePulse.Mount();
+                content = packageRoots.Count == 1 && packageRoots[0] is Control packageControl
+                    ? packageControl
+                    : throw new InvalidOperationException("Package Pulse must mount exactly one Control root.");
                 break;
             default:
                 throw new ArgumentException($"Unknown smoke test '{name}'.", nameof(name));

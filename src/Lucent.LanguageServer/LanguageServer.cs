@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using Lucent.Compiler;
 
 namespace Lucent.LanguageServer;
@@ -25,6 +27,8 @@ public static class LanguageServer
         private readonly Dictionary<string, DocumentState> _documents =
             new(StringComparer.Ordinal);
         private readonly ProjectContextLoader _projectContexts = new();
+        private readonly Dictionary<string, ProjectAnalysis> _projectAnalyses =
+            new(StringComparer.OrdinalIgnoreCase);
 
         private bool _shutdownRequested;
 
@@ -119,6 +123,7 @@ public static class LanguageServer
                                         },
                                         hoverProvider = true,
                                         definitionProvider = true,
+                                        documentSymbolProvider = true,
                                         completionProvider = new
                                         {
                                             resolveProvider = false,
@@ -200,6 +205,13 @@ public static class LanguageServer
 
                         break;
 
+                    case "textDocument/documentSymbol":
+                        if (hasId)
+                        {
+                            await DocumentSymbolsAsync(id!.Value, parameters, cancellationToken);
+                        }
+                        break;
+
                     default:
                         if (hasId)
                         {
@@ -262,7 +274,7 @@ public static class LanguageServer
 
             var analysis = await AnalyzeAsync(uri, text, cancellationToken);
             _documents[uri] = new DocumentState(text, version, analysis);
-            await PublishDiagnosticsAsync(uri, text, analysis, cancellationToken);
+            await PublishAllDiagnosticsAsync(cancellationToken);
         }
 
         private async Task DidChangeAsync(
@@ -305,11 +317,7 @@ public static class LanguageServer
                 : document?.Version;
             var analysis = await AnalyzeAsync(uri, current, cancellationToken);
             _documents[uri] = new DocumentState(current, version, analysis);
-            await PublishDiagnosticsAsync(
-                uri,
-                current,
-                analysis,
-                cancellationToken);
+            await PublishAllDiagnosticsAsync(cancellationToken);
         }
 
         private async Task DidCloseAsync(
@@ -331,6 +339,21 @@ public static class LanguageServer
                     diagnostics = Array.Empty<object>(),
                 },
                 cancellationToken);
+            foreach (var (remainingUri, remaining) in _documents.ToArray())
+            {
+                var analysis = await AnalyzeAsync(remainingUri, remaining.Text, cancellationToken);
+                _documents[remainingUri] = remaining with { Analysis = analysis };
+            }
+            await PublishAllDiagnosticsAsync(cancellationToken);
+        }
+
+        private async Task PublishAllDiagnosticsAsync(CancellationToken cancellationToken)
+        {
+            foreach (var document in _documents)
+            {
+                await PublishDiagnosticsAsync(document.Key, document.Value.Text,
+                    document.Value.Analysis, cancellationToken);
+            }
         }
 
         private async Task PublishDiagnosticsAsync(
@@ -367,7 +390,48 @@ public static class LanguageServer
             var projectContext = await _projectContexts.LoadAsync(
                 sourcePath,
                 cancellationToken);
-            var result = LucentCompiler.Compile(text, sourcePath, projectContext);
+            var inputs = new Dictionary<string, LucentSourceInput>(
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            foreach (var path in projectContext?.LucentSources ?? [])
+            {
+                if (File.Exists(path))
+                {
+                    inputs[path] = new LucentSourceInput(path,
+                        await File.ReadAllTextAsync(path, cancellationToken));
+                }
+            }
+            foreach (var open in _documents)
+            {
+                var path = GetSourcePath(open.Key);
+                if (!IsSourceInProject(path, sourcePath, projectContext))
+                {
+                    continue;
+                }
+                inputs[path] = new LucentSourceInput(path, open.Value.Text);
+            }
+            inputs[sourcePath] = new LucentSourceInput(sourcePath, text);
+            var projectKey = projectContext?.ProjectPath ?? sourcePath;
+            var generation = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                string.Join("\n", inputs.OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(item => item.Key + "\0" +
+                        (_documents.Where(document => PathsEqual(GetSourcePath(document.Key), item.Key))
+                            .Select(document => document.Value.Version).FirstOrDefault()?.ToString() ?? "0") +
+                        "\0" + item.Value.SourceText)))));
+            if (!_projectAnalyses.TryGetValue(projectKey, out var cached) ||
+                !string.Equals(cached.Generation, generation, StringComparison.Ordinal))
+            {
+                var projectResult = LucentCompiler.CompileProject(inputs.Values.ToArray(), projectContext);
+                cached = new ProjectAnalysis(generation, projectResult.Sources.ToArray());
+                _projectAnalyses[projectKey] = cached;
+            }
+            foreach (var source in cached.Results)
+            {
+                var open = _documents.FirstOrDefault(document => PathsEqual(
+                    GetSourcePath(document.Key), source.SourcePath));
+                if (open.Key is not null)
+                    _documents[open.Key] = open.Value with { Analysis = source.Result };
+            }
+            var result = cached.Results.First(source => PathsEqual(source.SourcePath, sourcePath)).Result;
             LanguageServerLog.DocumentAnalyzed(
                 LanguageServerLog.Logger,
                 sourcePath,
@@ -378,6 +442,27 @@ public static class LanguageServer
             return result;
         }
 
+        private static bool IsSourceInProject(
+            string path,
+            string currentSourcePath,
+            LucentProjectContext? projectContext)
+        {
+            if (PathsEqual(path, currentSourcePath))
+            {
+                return true;
+            }
+
+            return projectContext?.LucentSources.Any(source => PathsEqual(source, path)) == true;
+        }
+
+        private static bool PathsEqual(string left, string right) =>
+            string.Equals(
+                Path.GetFullPath(left),
+                Path.GetFullPath(right),
+                OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal);
+
         private async Task HoverAsync(
             JsonElement id,
             JsonElement parameters,
@@ -387,6 +472,10 @@ public static class LanguageServer
                 .GetProperty("textDocument")
                 .GetProperty("uri")
                 .GetString();
+            if (uri is not null)
+            {
+                await RefreshDocumentAnalysisAsync(uri, cancellationToken);
+            }
             if (uri is null || !_documents.TryGetValue(uri, out var document))
             {
                 await _connection.WriteResponseAsync(id, null, cancellationToken);
@@ -402,15 +491,8 @@ public static class LanguageServer
                 .FirstOrDefault();
             if (symbol is null)
             {
-                var sourcePath = GetSourcePath(uri);
-                var projectContext = await _projectContexts.LoadAsync(
-                    sourcePath,
-                    cancellationToken);
-                symbol = LucentCompiler.GetExpressionSymbol(
-                    document.Text,
-                    offset,
-                    sourcePath,
-                    projectContext);
+                symbol = LucentCompiler.GetExpressionSymbol(document.Text, offset,
+                    document.Analysis);
             }
 
             if (symbol is null)
@@ -446,22 +528,19 @@ public static class LanguageServer
                 .GetProperty("uri")
                 .GetString()
                 ?? throw new InvalidOperationException("A document URI is required.");
+            await RefreshDocumentAnalysisAsync(uri, cancellationToken);
             if (!_documents.TryGetValue(uri, out var document))
             {
                 await _connection.WriteResponseAsync(id, Array.Empty<object>(), cancellationToken);
                 return;
             }
 
-            var sourcePath = GetSourcePath(uri);
-            var projectContext = await _projectContexts.LoadAsync(
-                sourcePath,
-                cancellationToken);
             var offset = GetOffset(document.Text, parameters.GetProperty("position"));
-            var completions = LucentCompiler.GetCompletions(
-                document.Text,
-                offset,
-                sourcePath,
-                projectContext);
+            var completions = LucentCompiler.GetCompletions(document.Text, offset,
+                    document.Analysis)
+                .GroupBy(item => item.Label, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToArray();
             await _connection.WriteResponseAsync(
                 id,
                 completions.Select(item => new
@@ -489,11 +568,52 @@ public static class LanguageServer
                 cancellationToken);
         }
 
+        private async Task DocumentSymbolsAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var uri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
+            if (uri is not null)
+            {
+                await RefreshDocumentAnalysisAsync(uri, cancellationToken);
+            }
+            if (uri is null || !_documents.TryGetValue(uri, out var document))
+            {
+                await _connection.WriteResponseAsync(id, Array.Empty<object>(), cancellationToken);
+                return;
+            }
+
+            var symbols = document.Analysis.Symbols.Where(symbol => symbol.Kind is
+                    LucentSemanticSymbolKind.Component or
+                    LucentSemanticSymbolKind.ComponentParameter or
+                    LucentSemanticSymbolKind.ComponentSlot)
+                .Select(symbol => new
+                {
+                    name = symbol.Name,
+                    detail = symbol.Display,
+                    kind = symbol.Kind switch
+                    {
+                        LucentSemanticSymbolKind.Component => 5,
+                        LucentSemanticSymbolKind.ComponentParameter => 13,
+                        _ => 8,
+                    },
+                    range = ToRange(document.Text, symbol.ReferenceSpan),
+                    selectionRange = ToRange(document.Text, symbol.ReferenceSpan),
+                }).ToArray();
+            await _connection.WriteResponseAsync(id, symbols, cancellationToken);
+        }
+
         private async Task DefinitionAsync(
             JsonElement id,
             JsonElement parameters,
             CancellationToken cancellationToken)
         {
+            var requestUri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
+            if (requestUri is not null)
+            {
+                await RefreshDocumentAnalysisAsync(requestUri, cancellationToken);
+            }
             var (document, symbol) = FindSymbol(parameters);
             if (document is not null && symbol is null)
             {
@@ -501,15 +621,10 @@ public static class LanguageServer
                     .GetProperty("textDocument")
                     .GetProperty("uri")
                     .GetString()!;
-                var sourcePath = GetSourcePath(uri);
-                var projectContext = await _projectContexts.LoadAsync(
-                    sourcePath,
-                    cancellationToken);
                 symbol = LucentCompiler.GetExpressionSymbol(
                     document.Text,
                     GetOffset(document.Text, parameters.GetProperty("position")),
-                    sourcePath,
-                    projectContext);
+                    document.Analysis);
             }
 
             if (symbol?.Definition is not { } definition ||
@@ -533,6 +648,17 @@ public static class LanguageServer
                     range = ToRange(definitionText, definition.Span),
                 },
                 cancellationToken);
+        }
+
+        private async Task RefreshDocumentAnalysisAsync(
+            string uri,
+            CancellationToken cancellationToken)
+        {
+            if (_documents.TryGetValue(uri, out var document))
+            {
+                var analysis = await AnalyzeAsync(uri, document.Text, cancellationToken);
+                _documents[uri] = document with { Analysis = analysis };
+            }
         }
 
         private (DocumentState? Document, LucentSemanticSymbol? Symbol) FindSymbol(
@@ -629,6 +755,10 @@ public static class LanguageServer
             string Text,
             int? Version,
             CompilationResult Analysis);
+
+        private sealed record ProjectAnalysis(
+            string Generation,
+            IReadOnlyList<LucentSourceCompilation> Results);
 
         private sealed record LspPosition(int Line, int Character);
 

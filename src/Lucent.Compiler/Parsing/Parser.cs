@@ -2,6 +2,19 @@ using System.Text.RegularExpressions;
 using Lucent.Compiler.Syntax;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using CSharpExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.ExpressionSyntax;
+using CSharpLiteralExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.LiteralExpressionSyntax;
+using CSharpDefaultExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.DefaultExpressionSyntax;
+using CSharpTypeOfExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.TypeOfExpressionSyntax;
+using CSharpPrefixUnaryExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.PrefixUnaryExpressionSyntax;
+using CSharpParenthesizedExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.ParenthesizedExpressionSyntax;
+using CSharpInvocationExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax;
+using CSharpIdentifierNameSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax;
+using CSharpObjectCreationExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.ObjectCreationExpressionSyntax;
+using CSharpAnonymousFunctionExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.AnonymousFunctionExpressionSyntax;
+using CSharpAssignmentExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.AssignmentExpressionSyntax;
+using CSharpAwaitExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.AwaitExpressionSyntax;
+using CSharpElementAccessExpressionSyntax = Microsoft.CodeAnalysis.CSharp.Syntax.ElementAccessExpressionSyntax;
 
 namespace Lucent.Compiler.Parsing;
 
@@ -120,7 +133,23 @@ internal sealed partial class Parser
         var start = Current.Span.Start;
         ExpectIdentifier("component");
         var name = Expect(TokenKind.Identifier, "a component name");
-        var parameters = ReadDelimited(TokenKind.OpenParen, TokenKind.CloseParen);
+        var parameters = ReadDelimited(TokenKind.OpenParen, TokenKind.CloseParen, validate: false);
+        var parsedParameters = ParseParameters(parameters);
+
+        if (Current.Kind == TokenKind.Equals && Peek(1).Kind == TokenKind.GreaterThan)
+        {
+            NextToken();
+            NextToken();
+            var fragment = ParseRenderedFragment();
+            var semicolon = Expect(TokenKind.Semicolon, "';' after the component expression body");
+            var root = fragment.Roots.FirstOrDefault() ?? new UiElementSyntax(
+                "Missing", [], new SourceSpan(fragment.Span.Start, 0));
+            return new ComponentDeclarationSyntax(
+                name.Text, null,
+                new RenderMethodSyntax(root, fragment.Span,
+                    [new ReturnRenderStatementSyntax(root, root.Span)], fragment),
+                SpanFrom(start, semicolon.Span.End), Parameters: parsedParameters);
+        }
 
         Expect(TokenKind.OpenBrace, "'{' to open the component body");
 
@@ -128,6 +157,8 @@ internal sealed partial class Parser
         var computed = new List<ComputedMemberSyntax>();
         RenderMethodSyntax? render = null;
         var members = new List<LucentSyntaxNode>();
+        var slots = new List<SlotDeclarationSyntax>();
+        var ordinaryMembers = new List<OrdinaryMemberSyntax>();
 
         while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
         {
@@ -150,7 +181,13 @@ internal sealed partial class Parser
 
                 members.Add(candidate);
             }
-            else if (IsIdentifier("private"))
+            else if (IsIdentifier("slot"))
+            {
+                var slot = ParseSlotDeclaration();
+                slots.Add(slot);
+                members.Add(slot);
+            }
+            else if (IsIdentifier("private") && LooksLikeReactiveField())
             {
                 var persistentMember = ParsePersistentMember();
                 if (persistentMember is StateMemberSyntax state)
@@ -162,6 +199,15 @@ internal sealed partial class Parser
                 {
                     computed.Add(computedMember);
                     members.Add(computedMember);
+                }
+            }
+            else if (IsIdentifier("private") || IsIdentifier("static") || IsIdentifier("const"))
+            {
+                var ordinary = ParseOrdinaryMember();
+                if (ordinary is not null)
+                {
+                    ordinaryMembers.Add(ordinary);
+                    members.Add(ordinary);
                 }
             }
             else
@@ -189,7 +235,169 @@ internal sealed partial class Parser
             SpanFrom(start, closeBrace.Span.End),
             states,
             members,
-            computed);
+            computed,
+            parsedParameters,
+            slots,
+            ordinaryMembers);
+    }
+
+    private IReadOnlyList<ComponentParameterSyntax> ParseParameters(CSharpIslandSyntax clause)
+    {
+        var list = SyntaxFactory.ParseParameterList("(" + clause.Text + ")");
+        var result = new List<ComponentParameterSyntax>();
+        foreach (var diagnostic in list.GetDiagnostics())
+        {
+            var offset = clause.Span.Start - 1 + diagnostic.Location.SourceSpan.Start;
+            AddSyntax(new SourceSpan(offset, Math.Max(1, diagnostic.Location.SourceSpan.Length)),
+                diagnostic.GetMessage());
+        }
+        foreach (var parameter in list.Parameters)
+        {
+            var offset = clause.Span.Start - 1;
+            if (parameter.Modifiers.Count > 0 || parameter.AttributeLists.Count > 0)
+            {
+                AddUnsupported(new SourceSpan(offset + parameter.SpanStart,
+                    Math.Max(1, parameter.Span.Length)),
+                    "Component parameters do not support attributes, ref, out, in, or params.");
+            }
+
+            if (parameter.Type is null)
+            {
+                AddSyntax(new SourceSpan(offset + parameter.SpanStart,
+                    Math.Max(1, parameter.Span.Length)),
+                    "Component parameters require an explicit type.");
+            }
+            var type = parameter.Type?.ToFullString().Trim() ?? "object";
+            var name = parameter.Identifier.ValueText;
+            var nameSpan = new SourceSpan(offset + parameter.Identifier.SpanStart,
+                parameter.Identifier.Span.Length);
+            var defaultValue = parameter.Default?.Value.ToFullString().Trim();
+            SourceSpan? defaultSpan = parameter.Default is null ? null : new SourceSpan(
+                offset + parameter.Default.Value.SpanStart,
+                parameter.Default.Value.Span.Length);
+            if (parameter.Default is { Value: { } defaultValueSyntax } &&
+                !IsCompileTimeDefault(defaultValueSyntax))
+            {
+                AddUnsupported(defaultSpan!.Value,
+                    "Component parameter defaults must be compile-time constant expressions.");
+            }
+            result.Add(new ComponentParameterSyntax(type, name, defaultValue,
+                new SourceSpan(offset + parameter.SpanStart, parameter.Span.Length),
+                nameSpan, defaultSpan));
+        }
+
+        var sawDefault = false;
+        foreach (var parameter in result)
+        {
+            if (parameter.DefaultValueText is not null)
+            {
+                sawDefault = true;
+            }
+            else if (sawDefault)
+            {
+                AddUnsupported(parameter.NameSpan,
+                    "A required component parameter cannot follow an optional parameter.");
+            }
+        }
+
+        foreach (var duplicate in result.GroupBy(parameter => parameter.Name, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1).SelectMany(group => group))
+        {
+            AddUnsupported(duplicate.NameSpan,
+                $"Component parameter '{duplicate.Name}' is declared more than once.");
+        }
+
+        return result;
+
+        static bool IsCompileTimeDefault(CSharpExpressionSyntax expression) =>
+            !expression.DescendantNodesAndSelf().Any(node => node switch
+            {
+                CSharpInvocationExpressionSyntax invocation =>
+                    invocation.Expression is not CSharpIdentifierNameSyntax
+                    { Identifier.ValueText: "nameof" },
+                CSharpObjectCreationExpressionSyntax or
+                CSharpAnonymousFunctionExpressionSyntax or
+                CSharpAssignmentExpressionSyntax or
+                CSharpAwaitExpressionSyntax or
+                CSharpElementAccessExpressionSyntax => true,
+                _ => false,
+            });
+    }
+
+    private SlotDeclarationSyntax ParseSlotDeclaration()
+    {
+        var start = ExpectIdentifier("slot").Span.Start;
+        var name = Expect(TokenKind.Identifier, "a slot name");
+        var end = Expect(TokenKind.Semicolon, "';' after the slot declaration").Span.End;
+        return new SlotDeclarationSyntax(name.Text, SpanFrom(start, end), name.Span);
+    }
+
+    private bool LooksLikeReactiveField()
+    {
+        var type = Peek(1);
+        if (type.Text == "readonly")
+        {
+            type = Peek(2);
+        }
+
+        return type.Kind == TokenKind.Identifier &&
+               (type.Text == "State" || type.Text == "Computed");
+    }
+
+    private OrdinaryMemberSyntax? ParseOrdinaryMember()
+    {
+        var start = Current.Span.Start;
+        var end = FindOrdinaryMemberEnd(start);
+        if (end <= start)
+        {
+            NextToken();
+            return null;
+        }
+
+        var text = Slice(start, end).Trim();
+        AdvanceTo(end);
+        if (Current.Kind == TokenKind.Semicolon)
+        {
+            end = NextToken().Span.End;
+            text = Slice(start, end).Trim();
+        }
+
+        var member = SyntaxFactory.ParseMemberDeclaration(text);
+        var nameToken = member switch
+        {
+            Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax method => method.Identifier,
+            Microsoft.CodeAnalysis.CSharp.Syntax.FieldDeclarationSyntax field when field.Declaration.Variables.Count == 1 =>
+                field.Declaration.Variables[0].Identifier,
+            _ => default,
+        };
+        if (member is null || nameToken == default)
+        {
+            AddUnsupported(SpanFrom(start, end),
+                "Only one-variable fields and private methods are supported component members.");
+            return null;
+        }
+
+        return new OrdinaryMemberSyntax(text, nameToken.ValueText,
+            SpanFrom(start, end), new SourceSpan(start + nameToken.SpanStart, nameToken.Span.Length));
+    }
+
+    private int FindOrdinaryMemberEnd(int start)
+    {
+        var source = _source.Text;
+        var brace = 0;
+        var sawBrace = false;
+        for (var index = start; index < source.Length; index++)
+        {
+            if (source[index] == '{') { brace++; sawBrace = true; }
+            else if (source[index] == '}')
+            {
+                if (brace == 0) return index;
+                brace--;
+                if (sawBrace && brace == 0) return index + 1;
+            }
+            else if (source[index] == ';' && brace == 0) return index;
+        }
+        return source.Length;
     }
 
     private LucentSyntaxNode? ParsePersistentMember()
@@ -263,6 +471,17 @@ internal sealed partial class Parser
         ExpectIdentifier("Fragment");
         ExpectIdentifier("Render");
         ReadDelimited(TokenKind.OpenParen, TokenKind.CloseParen);
+        if (Current.Kind == TokenKind.Equals && Peek(1).Kind == TokenKind.GreaterThan)
+        {
+            NextToken();
+            NextToken();
+            var expressionFragment = ParseRenderedFragment();
+            var semicolon = Expect(TokenKind.Semicolon, "';' after Render expression body");
+            var expressionRoot = expressionFragment.Roots.FirstOrDefault() ?? new UiElementSyntax(
+                "Missing", [], new SourceSpan(expressionFragment.Span.Start, 0));
+            return new RenderMethodSyntax(expressionRoot, SpanFrom(start, semicolon.Span.End),
+                [new ReturnRenderStatementSyntax(expressionRoot, expressionRoot.Span)], expressionFragment);
+        }
         Expect(TokenKind.OpenBrace, "'{' to open Render");
 
         while (!IsIdentifier("return") &&
@@ -278,8 +497,16 @@ internal sealed partial class Parser
         if (IsIdentifier("return"))
         {
             NextToken();
-            root = ParseElement();
+            var fragment = ParseRenderedFragment();
+            root = fragment.Roots.FirstOrDefault() ?? new UiElementSyntax(
+                "Missing", [], new SourceSpan(fragment.Span.Start, 0));
             Expect(TokenKind.Semicolon, "';' after the rendered root");
+            var close = Expect(TokenKind.CloseBrace, "'}' to close Render");
+            return new RenderMethodSyntax(
+                root,
+                SpanFrom(start, close.Span.End),
+                [new ReturnRenderStatementSyntax(root, root.Span)],
+                fragment);
         }
         else
         {
@@ -296,10 +523,40 @@ internal sealed partial class Parser
             [new ReturnRenderStatementSyntax(root, root.Span)]);
     }
 
+    private UiFragmentSyntax ParseRenderedFragment()
+    {
+        if (IsIdentifier("Fragment") && Peek(1).Kind == TokenKind.OpenBrace)
+        {
+            var start = NextToken().Span.Start;
+            Expect(TokenKind.OpenBrace, "'{' to open Fragment");
+            var roots = new List<UiElementSyntax>();
+            while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
+            {
+                roots.Add(ParseElement());
+            }
+            var end = Expect(TokenKind.CloseBrace, "'}' to close Fragment").Span.End;
+            return new UiFragmentSyntax(roots, SpanFrom(start, end));
+        }
+
+        var root = ParseElement();
+        return new UiFragmentSyntax([root], root.Span);
+    }
+
     private UiElementSyntax ParseElement()
     {
         var name = Expect(TokenKind.Identifier, "a UI element name");
         var start = name.Span.Start;
+        var nameText = name.Text;
+        while (Current.Kind == TokenKind.Dot && Peek(1).Kind == TokenKind.Identifier)
+        {
+            NextToken();
+            nameText += "." + NextToken().Text;
+        }
+        IReadOnlyList<UiArgumentSyntax> arguments = [];
+        if (Current.Kind == TokenKind.OpenParen)
+        {
+            arguments = ParseArguments(ReadDelimited(TokenKind.OpenParen, TokenKind.CloseParen, validate: false));
+        }
         Expect(TokenKind.OpenBrace, "'{' to open the UI element");
         var members = new List<UiMemberSyntax>();
 
@@ -315,6 +572,14 @@ internal sealed partial class Parser
             {
                 members.Add(ParseForEach());
             }
+            else if (IsIdentifier("yield"))
+            {
+                members.Add(ParseYield());
+            }
+            else if (IsIdentifier("slot"))
+            {
+                members.Add(ParseSlotSupply());
+            }
             else if (Current.Kind is TokenKind.String or TokenKind.InterpolatedString)
             {
                 members.Add(ParseImplicitContent());
@@ -325,7 +590,7 @@ internal sealed partial class Parser
                 members.Add(ParseProperty());
             }
             else if (Current.Kind == TokenKind.Identifier &&
-                     Peek(1).Kind == TokenKind.OpenBrace)
+                     Peek(1).Kind is TokenKind.OpenBrace or TokenKind.OpenParen)
             {
                 var child = ParseElement();
                 members.Add(new UiChildSyntax(child, child.Span));
@@ -346,9 +611,52 @@ internal sealed partial class Parser
 
         var closeBrace = Expect(TokenKind.CloseBrace, "'}' to close the UI element");
         return new UiElementSyntax(
-            name.Text,
+            nameText,
             members,
-            SpanFrom(start, closeBrace.Span.End));
+            SpanFrom(start, closeBrace.Span.End),
+            arguments);
+    }
+
+    private IReadOnlyList<UiArgumentSyntax> ParseArguments(CSharpIslandSyntax clause)
+    {
+        var list = SyntaxFactory.ParseArgumentList("(" + clause.Text + ")");
+        var offset = clause.Span.Start - 1;
+        foreach (var diagnostic in list.GetDiagnostics())
+        {
+            AddSyntax(new SourceSpan(offset + diagnostic.Location.SourceSpan.Start,
+                Math.Max(1, diagnostic.Location.SourceSpan.Length)),
+                diagnostic.GetMessage());
+        }
+        return list.Arguments.Select(argument => new UiArgumentSyntax(
+            argument.NameColon?.Name.Identifier.ValueText,
+            argument.Expression.ToFullString().Trim(),
+            new SourceSpan(offset + argument.SpanStart, argument.Span.Length),
+            new SourceSpan(offset + argument.Expression.SpanStart, argument.Expression.Span.Length)))
+            .ToArray();
+    }
+
+    private UiYieldSyntax ParseYield()
+    {
+        var start = ExpectIdentifier("yield").Span.Start;
+        var name = Expect(TokenKind.Identifier, "a slot name after yield");
+        var end = Expect(TokenKind.Semicolon, "';' after yield").Span.End;
+        return new UiYieldSyntax(name.Text, SpanFrom(start, end), name.Span);
+    }
+
+    private UiSlotSupplySyntax ParseSlotSupply()
+    {
+        var start = ExpectIdentifier("slot").Span.Start;
+        var name = Expect(TokenKind.Identifier, "a supplied slot name");
+        var open = Expect(TokenKind.OpenBrace, "'{' to open slot supply");
+        var roots = new List<UiElementSyntax>();
+        while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
+        {
+            roots.Add(ParseElement());
+        }
+        var close = Expect(TokenKind.CloseBrace, "'}' to close slot supply");
+        return new UiSlotSupplySyntax(name.Text,
+            new UiFragmentSyntax(roots, SpanFrom(open.Span.Start, close.Span.End)),
+            SpanFrom(start, close.Span.End), name.Span);
     }
 
     private UiForEachSyntax ParseForEach()
@@ -406,7 +714,7 @@ internal sealed partial class Parser
         Expect(TokenKind.OpenBrace, "'{' to open the foreach body");
         UiElementSyntax body;
         if (Current.Kind == TokenKind.Identifier &&
-            Peek(1).Kind == TokenKind.OpenBrace)
+            Peek(1).Kind is TokenKind.OpenBrace or TokenKind.OpenParen)
         {
             body = ParseElement();
         }
@@ -473,7 +781,8 @@ internal sealed partial class Parser
 
         while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
         {
-            if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.OpenBrace)
+            if (Current.Kind == TokenKind.Identifier &&
+                Peek(1).Kind is TokenKind.OpenBrace or TokenKind.OpenParen)
             {
                 roots.Add(ParseElement());
                 continue;
@@ -620,7 +929,7 @@ internal sealed partial class Parser
         return null;
     }
 
-    private CSharpIslandSyntax ReadDelimited(TokenKind open, TokenKind close)
+    private CSharpIslandSyntax ReadDelimited(TokenKind open, TokenKind close, bool validate = true)
     {
         var openToken = Expect(open, $"'{TokenText(open)}'");
         var start = openToken.Span.End;
@@ -628,7 +937,10 @@ internal sealed partial class Parser
         AdvanceTo(end);
         var closeToken = Expect(close, $"'{TokenText(close)}'");
         var text = Slice(start, closeToken.Span.Start);
-        ValidateCSharpIsland(text, start, CSharpIslandKind.Expression);
+        if (validate)
+        {
+            ValidateCSharpIsland(text, start, CSharpIslandKind.Expression);
+        }
         return new CSharpIslandSyntax(
             CSharpIslandKind.Expression,
             text.Trim(),

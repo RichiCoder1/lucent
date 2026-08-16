@@ -1,0 +1,19 @@
+namespace Lucent.Examples.Workbench;
+
+component DocumentPane(string title, string language = "C#")
+{
+    slot toolbar;
+    private readonly State<int> edits = new(0);
+    private void Increment() => edits.Update(value => value + 1);
+
+    Fragment Render() => Border {
+        StackPanel {
+            TextBlock { Text: title; }
+            TextBlock { Text: language; }
+            TextBlock { Text: $"Edits: {edits.Value}"; }
+            Button { Content: "Increment edits"; Click: () => Increment(); }
+            yield children;
+            StackPanel { yield toolbar; }
+        }
+    };
+}

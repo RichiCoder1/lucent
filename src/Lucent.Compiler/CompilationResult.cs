@@ -16,6 +16,8 @@ public sealed record CompilationResult(
 {
     public IReadOnlyList<LucentSemanticSymbol> Symbols { get; init; } = [];
 
+    internal ComponentSemanticAnalysis? Analysis { get; init; }
+
     public bool Succeeded =>
         GeneratedSource is not null &&
         Diagnostics.All(diagnostic =>
@@ -33,7 +35,8 @@ internal sealed class ComponentSemanticAnalysis
         BoundComponentModel? model,
         IReadOnlyList<LucentSemanticSymbol> symbols,
         IReadOnlyList<BoundIslandScope> editorScopes,
-        IReadOnlyList<BoundEditorVariable> editorVariables)
+        IReadOnlyList<BoundEditorVariable> editorVariables,
+        ComponentIndex? componentIndex)
     {
         Syntax = syntax;
         Diagnostics = diagnostics;
@@ -44,6 +47,7 @@ internal sealed class ComponentSemanticAnalysis
         Symbols = symbols;
         EditorScopes = editorScopes;
         EditorVariables = editorVariables;
+        ComponentIndex = componentIndex;
     }
 
     public CompilationUnitSyntax Syntax { get; }
@@ -55,6 +59,7 @@ internal sealed class ComponentSemanticAnalysis
     public IReadOnlyList<LucentSemanticSymbol> Symbols { get; }
     public IReadOnlyList<BoundIslandScope> EditorScopes { get; }
     public IReadOnlyList<BoundEditorVariable> EditorVariables { get; }
+    public ComponentIndex? ComponentIndex { get; }
 
     public static ComponentSemanticAnalysis Create(
         string sourceText,
@@ -83,7 +88,31 @@ internal sealed class ComponentSemanticAnalysis
 
         return new ComponentSemanticAnalysis(
             syntax, diagnostics, sourcePath, project, resolver, model, symbols, editorScopes,
-            editorVariables);
+            editorVariables, null);
+    }
+
+    internal static ComponentSemanticAnalysis Create(
+        string sourceText,
+        string sourcePath,
+        CompilationUnitSyntax syntax,
+        IReadOnlyList<LucentDiagnostic> parserDiagnostics,
+        LucentProjectContext? projectContext,
+        Microsoft.CodeAnalysis.CSharp.CSharpCompilation baseCompilation,
+        ComponentIndex index)
+    {
+        var diagnostics = parserDiagnostics.ToList();
+        var project = new ProjectSemanticCompilation(
+            syntax.NamespaceName,
+            syntax.AllUsings.Select(directive => directive.Text).ToArray(),
+            baseCompilation);
+        var resolver = new NativeSymbolResolver(project);
+        var bag = new DiagnosticBag(new SourceDocument(sourceText, sourcePath));
+        var binder = new GeneralBinder(bag, projectContext, project, index, sourcePath);
+        var model = binder.Bind(syntax);
+        diagnostics.AddRange(bag.Items);
+        return new ComponentSemanticAnalysis(
+            syntax, diagnostics, sourcePath, project, resolver, model,
+            binder.Symbols, binder.EditorScopes, binder.EditorVariables, index);
     }
 }
 
@@ -93,7 +122,7 @@ internal sealed record BoundIslandScope(
     BoundIslandSemanticContext Context,
     CSharpIslandRole Role);
 
-internal enum BoundEditorVariableKind { Local, State, Computed }
+internal enum BoundEditorVariableKind { Local, State, Computed, Parameter }
 
 internal sealed record BoundEditorVariable(
     string Name,

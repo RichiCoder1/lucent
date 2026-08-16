@@ -843,36 +843,36 @@ changes status in `plans/README.md`.
 
 ## Done criteria
 
-- [ ] `Counter {}` resolves to the `.lui` component with `Counter.cs` deleted.
-- [ ] All project `.lui` declarations are indexed before body binding; reversing
+- [x] `Counter {}` resolves to the `.lui` component with `Counter.cs` deleted.
+- [x] All project `.lui` declarations are indexed before body binding; reversing
       input order produces identical successful output.
-- [ ] One malformed source prevents partial MSBuild output replacement.
-- [ ] Duplicate physical sources/output paths and generated C# type collisions
+- [x] One malformed source prevents partial MSBuild output replacement.
+- [x] Duplicate physical sources/output paths and generated C# type collisions
       are diagnosed before emission.
-- [ ] Authored declarations cannot collide with generated contract names or the
+- [x] Authored declarations cannot collide with generated contract names or the
       reserved implementation prefix.
-- [ ] Parameters bind with C# types/defaults/named arguments and update retained
+- [x] Parameters bind with C# types/defaults/named arguments and update retained
       children without rerunning state initializers.
-- [ ] Authored input identifiers are read-only; component-local helper method
+- [x] Authored input identifiers are read-only; component-local helper method
       dependencies keep render targets current.
-- [ ] Supported ordinary methods work; every unsupported member gets a mapped
+- [x] Supported ordinary methods work; every unsupported member gets a mapped
       diagnostic rather than being dropped.
-- [ ] Component and native-control symbols are distinct; ambiguities and cycles
+- [x] Component and native-control symbols are distinct; ambiguities and cycles
       are diagnosed at exact source spans.
-- [ ] `Fragment` supports fixed zero/one/many roots without wrappers or a VDOM.
-- [ ] Every pre-existing generated-component host validates and consumes the
+- [x] `Fragment` supports fixed zero/one/many roots without wrappers or a VDOM.
+- [x] Every pre-existing generated-component host validates and consumes the
       new fragment return contract; Todo, Package Pulse, and POC builds pass.
-- [ ] Static, conditional, and keyed component sites use child owners and dispose
+- [x] Static, conditional, and keyed component sites use child owners and dispose
       child-before-parent exactly once.
-- [ ] Slots are delayed, caller-capturing, optional, single-site, and owned at the
+- [x] Slots are delayed, caller-capturing, optional, single-site, and owned at the
       yield location.
-- [ ] Compiler and LSP consume the same component index/semantic results.
-- [ ] Cross-file completion, hover, definition, and unsaved-buffer overlay work.
-- [ ] A sibling `.lui` change republishes/clears diagnostics for every affected
+- [x] Compiler and LSP consume the same component index/semantic results.
+- [x] Cross-file completion, hover, definition, and unsaved-buffer overlay work.
+- [x] A sibling `.lui` change republishes/clears diagnostics for every affected
       open document from one current project generation.
-- [ ] Counter builds and Workbench's native smoke passes.
-- [ ] Full solution, runtime/compiler/MSBuild/LSP, and VS Code tests pass.
-- [ ] No files outside scope are modified except generated/ignored build output.
+- [x] Counter builds and Workbench's native smoke passes.
+- [x] Full solution, runtime/compiler/MSBuild/LSP, and VS Code tests pass.
+- [x] No files outside scope are modified except generated/ignored build output and the approved diagnostic/snapshot test exception.
 
 ## STOP conditions
 

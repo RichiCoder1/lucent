@@ -22,7 +22,10 @@ internal sealed class MainWindow : Window
         MinWidth = 560;
         MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Content = _todo.Mount();
+        var roots = _todo.Mount();
+        Content = roots.Count == 1 && roots[0] is Control control
+            ? control
+            : throw new InvalidOperationException("Todo must mount exactly one Control root.");
     }
 
     protected override void OnClosed(EventArgs e)

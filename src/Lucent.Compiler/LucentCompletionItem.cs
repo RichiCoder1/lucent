@@ -10,6 +10,9 @@ public enum LucentCompletionItemKind
     Field,
     Method,
     Type,
+    Component,
+    Parameter,
+    Slot,
 }
 
 public sealed record LucentCompletionItem(

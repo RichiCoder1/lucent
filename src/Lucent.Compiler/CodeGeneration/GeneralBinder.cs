@@ -15,19 +15,27 @@ internal sealed class GeneralBinder
     private IReadOnlyList<BoundIslandScope> _editorScopes = [];
     private readonly LucentProjectContext? _projectContext;
     private readonly ProjectSemanticCompilation? _semanticCompilation;
+    private readonly ComponentIndex? _componentIndex;
+    private readonly string? _sourcePath;
     private NativeSymbolResolver? _resolver;
     private ITypeSymbol? _dynamicType;
     private int _nextConditionalId;
+    private int _nextComponentSiteId;
     private IReadOnlyList<BoundReactiveSource> _sources = [];
+    private ComponentSymbol? _currentComponent;
 
     public GeneralBinder(
         DiagnosticBag diagnostics,
         LucentProjectContext? projectContext = null,
-        ProjectSemanticCompilation? semanticCompilation = null)
+        ProjectSemanticCompilation? semanticCompilation = null,
+        ComponentIndex? componentIndex = null,
+        string? sourcePath = null)
     {
         _diagnostics = diagnostics;
         _projectContext = projectContext;
         _semanticCompilation = semanticCompilation;
+        _componentIndex = componentIndex;
+        _sourcePath = sourcePath;
     }
 
     public IReadOnlyList<LucentSemanticSymbol> Symbols => _symbols;
@@ -51,9 +59,41 @@ internal sealed class GeneralBinder
         }
 
         var component = syntax.Component;
-        _sources = component.AllStateMembers
+        _currentComponent = _componentIndex?.Symbols.FirstOrDefault(symbol =>
+            string.Equals(symbol.SourcePath, _sourcePath, OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+        if (_currentComponent is not null)
+        {
+            _symbols.Add(new LucentSemanticSymbol(_currentComponent.Name,
+                LucentSemanticSymbolKind.Component, _currentComponent.DeclarationSpan,
+                $"component {_currentComponent.NamespaceName}.{_currentComponent.Name}",
+                Definition: new LucentDefinition(_currentComponent.SourcePath,
+                    _currentComponent.DeclarationSpan)));
+            _symbols.AddRange(component.AllParameters.Select(parameter =>
+                new LucentSemanticSymbol(parameter.Name,
+                    LucentSemanticSymbolKind.ComponentParameter, parameter.NameSpan,
+                    $"{parameter.TypeName} {parameter.Name}")));
+            _symbols.AddRange(component.AllSlots.Select(slot =>
+                new LucentSemanticSymbol(slot.Name,
+                    LucentSemanticSymbolKind.ComponentSlot, slot.NameSpan,
+                    $"slot {slot.Name}")));
+        }
+        ValidateDeclarationNames(component);
+        ValidateOrdinaryMembers(component.AllOrdinaryMembers);
+        foreach (var parameter in component.AllParameters)
+        {
+            if (_resolver.ResolveTypeName(parameter.TypeName) is null)
+            {
+                AddUnsupported(parameter.Span,
+                    $"Component parameter type '{parameter.TypeName}' could not be resolved.");
+            }
+        }
+        _sources = component.AllParameters
+            .Select(parameter => (Name: parameter.Name, Kind: BoundReactiveSourceKind.Parameter,
+                Type: parameter.TypeName, parameter.Span))
+            .Concat(component.AllStateMembers
             .Select(state => (Name: state.Name, Kind: BoundReactiveSourceKind.State,
-                Type: state.TypeName, state.Span))
+                Type: state.TypeName, state.Span)))
             .Concat(component.AllComputedMembers.Select(computed =>
                 (Name: computed.Name, Kind: BoundReactiveSourceKind.Computed,
                     Type: computed.TypeName, Span: computed.Span)))
@@ -67,9 +107,12 @@ internal sealed class GeneralBinder
             .Select(candidate => new BoundEditorVariable(
                 candidate.Source.Name,
                 candidate.Type!,
-                candidate.Source.Kind == BoundReactiveSourceKind.State
-                    ? BoundEditorVariableKind.State
-                    : BoundEditorVariableKind.Computed,
+                candidate.Source.Kind switch
+                {
+                    BoundReactiveSourceKind.State => BoundEditorVariableKind.State,
+                    BoundReactiveSourceKind.Computed => BoundEditorVariableKind.Computed,
+                    _ => BoundEditorVariableKind.Parameter,
+                },
                 $"private readonly {candidate.Source.Kind}<{candidate.Source.ValueTypeName}> {candidate.Source.Name}"))
             .ToArray();
         var states = component.AllStateMembers
@@ -83,18 +126,22 @@ internal sealed class GeneralBinder
             .Cast<BoundComputedModel>()
             .ToArray();
 
-        if (component.RenderMethod.Root.Name == "Missing")
+        if (component.RenderMethod.Root.Name == "Missing" && component.RenderMethod.Fragment is null)
         {
             return null;
         }
 
-        var root = BindControl(component.RenderMethod.Root);
-        if (root is null)
-        {
-            return null;
-        }
+        var roots = component.RenderMethod.RenderedFragment.Roots
+            .Select(element => BindRenderable(element))
+            .Where(root => root is not null)
+            .Cast<BoundRenderableModel>()
+            .ToArray();
+        var root = roots.OfType<BoundControlModel>().FirstOrDefault() ??
+            new BoundControlModel("Missing", "global::Avalonia.Controls.Control", [],
+                component.RenderMethod.RenderedFragment.Span);
 
-        var islandBinding = new CSharpIslandBinder(project, _sources, _diagnostics).BindAll(_requests);
+        var islandBinding = new CSharpIslandBinder(
+            project, _sources, _diagnostics, component.AllOrdinaryMembers).BindAll(_requests);
         _editorScopes = islandBinding.EditorScopes;
         var islands = islandBinding.Islands;
         var model = new BoundComponentModel(
@@ -108,7 +155,14 @@ internal sealed class GeneralBinder
                     Factory = Resolve(value.Factory, islands),
                     InitialValue = Resolve(value.InitialValue, islands),
                 }).ToArray(),
-                FinalizeControl(root, islands));
+                FinalizeControl(root, islands),
+                component.AllParameters.Select(parameter => new BoundParameterModel(
+                    parameter.TypeName, parameter.Name, parameter.DefaultValueText, parameter.Span)).ToArray(),
+                (_currentComponent?.Slots ?? []).Select(slot => new BoundSlotModel(slot.Name, slot.Span)).ToArray(),
+                roots.Select(candidate => FinalizeRenderable(candidate, islands)).ToArray(),
+                component.AllOrdinaryMembers.Select(member => new BoundOrdinaryMemberModel(
+                    islandBinding.OrdinaryMembers?.GetValueOrDefault(member.Name) ?? member.Text,
+                    member.Name, member.Span)).ToArray());
         DetectComputedCycles(model);
         return HasErrors ? null : model;
     }
@@ -166,6 +220,285 @@ internal sealed class GeneralBinder
             computed.Span);
     }
 
+    private void ValidateDeclarationNames(ComponentDeclarationSyntax component)
+    {
+        var declarations = component.AllParameters.Select(parameter => (parameter.Name, parameter.NameSpan))
+            .Concat(component.AllSlots.Select(slot => (slot.Name, slot.NameSpan)))
+            .Concat(component.AllStateMembers.Select(state => (state.Name, state.Span)))
+            .Concat(component.AllComputedMembers.Select(computed => (computed.Name, computed.Span)))
+            .Concat(component.AllOrdinaryMembers.Select(member => (member.Name, member.NameSpan)))
+            .ToArray();
+        foreach (var declaration in declarations)
+        {
+            if (declaration.Name is "Mount" or "UpdateInputs" or "Dispose" ||
+                declaration.Name.StartsWith("__lucent_", StringComparison.Ordinal))
+            {
+                AddUnsupported(declaration.Item2,
+                    $"'{declaration.Name}' is reserved by the generated component contract.");
+            }
+        }
+
+        foreach (var duplicate in declarations.GroupBy(item => item.Name, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1).SelectMany(group => group))
+        {
+            AddUnsupported(duplicate.Item2,
+                $"Component member '{duplicate.Name}' collides with another declaration.");
+        }
+
+        foreach (var slot in component.AllSlots.Where(slot => slot.Name == "children"))
+        {
+            AddUnsupported(slot.NameSpan, "The implicit 'children' slot cannot be redeclared.");
+        }
+
+        foreach (var duplicate in component.RenderMethod.RenderedFragment.Roots
+                     .SelectMany(AllYields).GroupBy(item => item.Name, StringComparer.Ordinal)
+                     .Where(group => group.Count() > 1).SelectMany(group => group))
+        {
+            AddUnsupported(duplicate.NameSpan,
+                $"Slot '{duplicate.Name}' may have only one syntactic yield site.");
+        }
+    }
+
+    private void ValidateOrdinaryMembers(IReadOnlyList<OrdinaryMemberSyntax> members)
+    {
+        foreach (var member in members)
+        {
+            var declaration = SyntaxFactory.ParseMemberDeclaration(member.Text);
+            switch (declaration)
+            {
+                case FieldDeclarationSyntax field:
+                    var isStatic = field.Modifiers.Any(modifier =>
+                        modifier.IsKind(SyntaxKind.StaticKeyword) ||
+                        modifier.IsKind(SyntaxKind.ConstKeyword));
+                    if (!isStatic && !field.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.PrivateKeyword)))
+                    {
+                        AddUnsupported(member.NameSpan,
+                            $"Instance field '{member.Name}' must be private.");
+                    }
+                    if (!isStatic && field.Declaration.Variables.Any(variable => variable.Initializer is null))
+                    {
+                        AddUnsupported(member.NameSpan,
+                            $"Instance field '{member.Name}' must have an initializer.");
+                    }
+                    break;
+                case MethodDeclarationSyntax method when
+                    !method.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.PrivateKeyword)):
+                    AddUnsupported(member.NameSpan,
+                        $"Instance method '{member.Name}' must be private.");
+                    break;
+            }
+        }
+    }
+
+    private static IEnumerable<UiYieldSyntax> AllYields(UiElementSyntax element)
+    {
+        foreach (var yield in element.Members.OfType<UiYieldSyntax>()) yield return yield;
+        foreach (var child in element.Members.OfType<UiChildSyntax>())
+            foreach (var yield in AllYields(child.Element)) yield return yield;
+        foreach (var loop in element.Members.OfType<UiForEachSyntax>())
+            foreach (var yield in AllYields(loop.Body)) yield return yield;
+        foreach (var conditional in element.Members.OfType<UiIfSyntax>())
+        {
+            foreach (var root in conditional.TrueBranch.Roots)
+                foreach (var yield in AllYields(root)) yield return yield;
+            foreach (var root in conditional.FalseBranch?.Roots ?? [])
+                foreach (var yield in AllYields(root)) yield return yield;
+        }
+    }
+
+    private static int RenderableCardinality(IReadOnlyList<BoundRenderableModel> roots) =>
+        roots.Sum(root => root is BoundComponentInvocationModel invocation
+            ? invocation.Component.OutputCardinality
+            : 1);
+
+    private BoundRenderableModel? BindRenderable(
+        UiElementSyntax element,
+        bool insideLoop = false,
+        IReadOnlyList<BoundLocal>? locals = null,
+        bool insideConditional = false)
+    {
+        var components = _componentIndex?.Resolve(
+            element.Name,
+            _currentComponent?.NamespaceName ?? string.Empty,
+            _semanticCompilation?.Imports ?? []) ?? [];
+        var native = _resolver!.ResolveControl(element.Name);
+        if (components.Count > 0 && native is not null)
+        {
+            AddUnsupported(ControlNameSpan(element),
+                $"Renderable '{element.Name}' is ambiguous between a Lucent component and a native control.");
+            return null;
+        }
+        if (components.Count > 1)
+        {
+            AddUnsupported(ControlNameSpan(element),
+                $"Component name '{element.Name}' is ambiguous between imported namespaces.");
+            return null;
+        }
+        if (components.Count == 1)
+        {
+            return BindComponentInvocation(element, components[0], locals ?? [], insideLoop);
+        }
+
+        return BindControl(element, insideLoop, locals, insideConditional);
+    }
+
+    private BoundComponentInvocationModel? BindComponentInvocation(
+        UiElementSyntax element,
+        ComponentSymbol component,
+        IReadOnlyList<BoundLocal> locals,
+        bool insideLoop = false)
+    {
+        _symbols.Add(new LucentSemanticSymbol(component.Name,
+            LucentSemanticSymbolKind.Component, ControlNameSpan(element),
+            $"component {component.NamespaceName}.{component.Name}",
+            Definition: new LucentDefinition(component.SourcePath, component.DeclarationSpan)));
+        var effective = new Dictionary<string, BoundComponentArgument>(StringComparer.Ordinal);
+        var positional = 0;
+        var sawNamed = false;
+        foreach (var argument in element.AllArguments)
+        {
+            ComponentParameterSymbol? parameter;
+            if (argument.Name is null)
+            {
+                if (sawNamed)
+                {
+                    AddUnsupported(argument.Span, "Positional component arguments must precede named arguments.");
+                    continue;
+                }
+                parameter = positional < component.Parameters.Count ? component.Parameters[positional++] : null;
+            }
+            else
+            {
+                sawNamed = true;
+                parameter = component.Parameters.FirstOrDefault(candidate => candidate.Name == argument.Name);
+            }
+
+            if (parameter is null)
+            {
+                AddUnsupported(argument.Span,
+                    argument.Name is null ? "Too many component arguments." :
+                    $"Component '{component.Name}' has no parameter named '{argument.Name}'.");
+                continue;
+            }
+            if (effective.ContainsKey(parameter.Name))
+            {
+                AddUnsupported(argument.Span, $"Parameter '{parameter.Name}' is supplied more than once.");
+                continue;
+            }
+            if (argument.Name is not null)
+            {
+                _symbols.Add(new LucentSemanticSymbol(parameter.Name,
+                    LucentSemanticSymbolKind.ComponentParameter,
+                    new SourceSpan(argument.Span.Start, argument.Name.Length),
+                    $"{parameter.TypeName} {parameter.Name}"));
+            }
+            effective[parameter.Name] = new BoundComponentArgument(parameter,
+                Request(argument.Text, argument.ExpressionSpan, CSharpIslandKind.Expression,
+                    CSharpIslandRole.ComponentArgument,
+                    _resolver!.ResolveTypeName(parameter.TypeName), locals), false);
+        }
+
+        foreach (var parameter in component.Parameters.Where(parameter => !effective.ContainsKey(parameter.Name)))
+        {
+            if (parameter.DefaultValueText is null)
+            {
+                AddUnsupported(ControlNameSpan(element),
+                    $"Required component parameter '{parameter.Name}' is missing.");
+                continue;
+            }
+            effective[parameter.Name] = new BoundComponentArgument(parameter,
+                Request(parameter.BoundDefaultValueText ?? parameter.DefaultValueText, parameter.Span, CSharpIslandKind.Expression,
+                    CSharpIslandRole.ComponentArgument,
+                    _resolver!.ResolveTypeName(parameter.TypeName), locals), true);
+        }
+
+        var supplies = new List<BoundSlotSupply>();
+        var children = element.Members.OfType<UiChildSyntax>().ToArray();
+        if (children.Length > 0)
+        {
+            var slot = component.Slots.First(candidate => candidate.Name == "children");
+            foreach (var child in children)
+            {
+                ValidateSlotStructure(child.Element, child.Span);
+            }
+            var boundRoots = children.Select(child => BindRenderable(
+                    child.Element, locals: locals, insideLoop: insideLoop))
+                .Where(item => item is not null).Cast<BoundRenderableModel>().ToArray();
+            if (insideLoop && boundRoots.Any(HasNestedNativeSlotRoot))
+            {
+                AddUnsupported(element.Span,
+                    "Nested keyed slot supplies must contain component roots only in this compiler subset.");
+            }
+            supplies.Add(new BoundSlotSupply(slot, boundRoots, element.Span));
+        }
+        foreach (var supply in element.Members.OfType<UiSlotSupplySyntax>())
+        {
+            var slot = component.Slots.FirstOrDefault(candidate => candidate.Name == supply.Name);
+            if (slot is null)
+            {
+                AddUnsupported(supply.NameSpan,
+                    $"Component '{component.Name}' has no slot named '{supply.Name}'.");
+                continue;
+            }
+            if (supplies.Any(candidate => candidate.Slot.Name == slot.Name))
+            {
+                AddUnsupported(supply.NameSpan, $"Slot '{slot.Name}' is supplied more than once.");
+                continue;
+            }
+            _symbols.Add(new LucentSemanticSymbol(slot.Name,
+                LucentSemanticSymbolKind.ComponentSlot, supply.NameSpan,
+                $"slot {slot.Name}",
+                Definition: new LucentDefinition(component.SourcePath, slot.Span)));
+            foreach (var root in supply.Fragment.Roots)
+            {
+                ValidateSlotStructure(root, supply.Span);
+            }
+            var boundRoots = supply.Fragment.Roots.Select(root => BindRenderable(
+                    root, locals: locals, insideLoop: insideLoop))
+                .Where(item => item is not null).Cast<BoundRenderableModel>().ToArray();
+            if (insideLoop && boundRoots.Any(HasNestedNativeSlotRoot))
+            {
+                AddUnsupported(supply.Span,
+                    "Nested keyed slot supplies must contain component roots only in this compiler subset.");
+            }
+            supplies.Add(new BoundSlotSupply(slot, boundRoots, supply.Span));
+        }
+        foreach (var invalid in element.Members.Where(member =>
+                     member is not UiChildSyntax and not UiSlotSupplySyntax))
+        {
+            AddUnsupported(invalid.Span,
+                "A component invocation body may contain only children and named slot supplies.");
+        }
+
+        return new BoundComponentInvocationModel(component,
+            component.Parameters.Where(parameter => effective.ContainsKey(parameter.Name))
+                .Select(parameter => effective[parameter.Name]).ToArray(),
+            supplies, _nextComponentSiteId++, element.Span);
+
+        void ValidateSlotStructure(UiElementSyntax root, SourceSpan span)
+        {
+            if (root.Members.Any(member => member is UiIfSyntax or UiForEachSyntax) ||
+                root.Members.OfType<UiChildSyntax>().Any(child =>
+                    HasStructuralMember(child.Element)))
+            {
+                AddUnsupported(span,
+                    "Conditional and keyed structural regions are not supported inside delayed slot supplies; place them inside the yielded component host.");
+            }
+        }
+
+        static bool HasStructuralMember(UiElementSyntax root) =>
+            root.Members.Any(member => member is UiIfSyntax or UiForEachSyntax) ||
+            root.Members.OfType<UiChildSyntax>().Any(child => HasStructuralMember(child.Element));
+
+        static bool HasNestedNativeSlotRoot(BoundRenderableModel root) => root switch
+        {
+            BoundComponentInvocationModel invocation => invocation.Slots.Any(slot =>
+                slot.Roots.Any(slotRoot => slotRoot is BoundControlModel ||
+                    HasNestedNativeSlotRoot(slotRoot))),
+            _ => false,
+        };
+    }
+
     private BoundControlModel? BindControl(
         UiElementSyntax element,
         bool insideLoop = false,
@@ -180,6 +513,12 @@ internal sealed class GeneralBinder
                 ControlNameSpan(element),
                 $"Control '{element.Name}' could not be resolved to one accessible, concrete Avalonia Control in the project context.");
             return null;
+        }
+
+        if (element.AllArguments.Count > 0)
+        {
+            AddUnsupported(element.AllArguments[0].Span,
+                "Native controls do not accept invocation arguments.");
         }
 
         _symbols.Add(resolver.ToSemanticSymbol(resolvedControl, ControlNameSpan(element)));
@@ -261,10 +600,22 @@ internal sealed class GeneralBinder
                         continue;
                     }
 
-                    var boundChild = BindControl(child.Element, insideLoop, locals, insideConditional);
-                    if (boundChild is not null)
+                    var boundChild = BindRenderable(child.Element, insideLoop, locals, insideConditional);
+                    if (boundChild is BoundControlModel boundControl)
                     {
-                        members.Add(new BoundChildMember(boundChild, child.Span));
+                        members.Add(new BoundChildMember(boundControl, child.Span));
+                        childCount++;
+                    }
+                    else if (boundChild is BoundComponentInvocationModel invocation)
+                    {
+                        if (!route.IsCollection && invocation.Component.OutputCardinality > 1)
+                        {
+                            AddUnsupported(child.Span,
+                                $"Component '{invocation.Component.Name}' can produce {invocation.Component.OutputCardinality} roots, " +
+                                $"but '{element.Name}' accepts only one child.");
+                            continue;
+                        }
+                        members.Add(new BoundComponentChildMember(invocation, child.Span));
                         childCount++;
                     }
 
@@ -301,7 +652,7 @@ internal sealed class GeneralBinder
                     {
                         new BoundLocal(loop.ItemName, _dynamicType!, loop.SourceExpression),
                     };
-                    var boundBody = BindControl(loop.Body, insideLoop: true, loopLocals);
+                    var boundBody = BindRenderable(loop.Body, insideLoop: true, loopLocals);
                     if (boundBody is not null)
                     {
                         members.Add(
@@ -317,6 +668,23 @@ internal sealed class GeneralBinder
                         hasStructuralRegion = true;
                     }
 
+                    break;
+
+                case UiYieldSyntax yield:
+                    var slot = _currentComponent?.Slots.FirstOrDefault(candidate => candidate.Name == yield.Name);
+                    if (slot is null)
+                    {
+                        AddUnsupported(yield.NameSpan, $"Slot '{yield.Name}' is not declared by this component.");
+                    }
+                    else if (insideLoop)
+                    {
+                        AddUnsupported(yield.Span, "Slots cannot be yielded inside keyed loops.");
+                    }
+                    else
+                    {
+                        members.Add(new BoundYieldMember(slot, yield.Span));
+                        childCount++;
+                    }
                     break;
 
                 case UiIfSyntax conditional:
@@ -345,39 +713,41 @@ internal sealed class GeneralBinder
                         continue;
                     }
 
-                    if (conditional.TrueBranch.Roots.Count != 1 ||
-                        conditional.FalseBranch is { Roots.Count: not 1 })
+                    var trueRoots = conditional.TrueBranch.Roots
+                        .Select(root => BindRenderable(root, locals: locals, insideConditional: true))
+                        .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
+                    var falseRoots = conditional.FalseBranch?.Roots
+                        .Select(root => BindRenderable(root, locals: locals, insideConditional: true))
+                        .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
+                    if (!conditionalRoute.IsCollection &&
+                        (RenderableCardinality(trueRoots) > 1 ||
+                         (falseRoots is not null && RenderableCardinality(falseRoots) > 1)))
                     {
-                        if (conditional.TrueBranch.Roots.Count != 1)
+                        if (RenderableCardinality(trueRoots) > 1)
                         {
                             AddUnsupported(conditional.TrueBranch.Span,
-                                "A conditional branch must contain exactly one native control root.");
+                                "A scalar content route cannot receive more than one conditional root.");
                         }
-                        if (conditional.FalseBranch is { Roots.Count: not 1 } falseBranch)
+                        if (falseRoots is not null && RenderableCardinality(falseRoots) > 1 &&
+                            conditional.FalseBranch is { } falseBranch)
                         {
                             AddUnsupported(falseBranch.Span,
-                                "A conditional branch must contain exactly one native control root.");
+                                "A scalar content route cannot receive more than one conditional root.");
                         }
                         continue;
                     }
 
                     var conditionalId = _nextConditionalId++;
-                    var trueRoot = BindControl(conditional.TrueBranch.Roots[0], locals: locals,
-                        insideConditional: true);
-                    var falseRoot = conditional.FalseBranch is null
-                        ? null
-                        : BindControl(conditional.FalseBranch.Roots[0], locals: locals,
-                            insideConditional: true);
-                    if (trueRoot is not null &&
-                        (conditional.FalseBranch is null || falseRoot is not null))
+                    if (trueRoots.Length == conditional.TrueBranch.Roots.Count &&
+                        (conditional.FalseBranch is null || falseRoots?.Length == conditional.FalseBranch.Roots.Count))
                     {
                         members.Add(new BoundConditionalMember(
                             conditionalId,
                             Request(conditional.Condition, conditional.ConditionSpan,
                                 CSharpIslandKind.Expression, CSharpIslandRole.Condition,
                                 resolver.ResolveTypeName("bool"), locals),
-                            trueRoot,
-                            falseRoot,
+                            trueRoots,
+                            falseRoots,
                             conditional.Span));
                         seenMembers.Add(conditionalRoute.Property.Name);
                         hasStructuralRegion = true;
@@ -715,19 +1085,40 @@ internal sealed class GeneralBinder
                 {
                     SourceExpression = Resolve(loop.SourceExpression, islands),
                     KeyExpression = Resolve(loop.KeyExpression, islands),
-                    Body = FinalizeControl(loop.Body, islands),
+                    Body = FinalizeRenderable(loop.Body, islands),
                 },
                 BoundConditionalMember conditional => conditional with
                 {
                     Condition = Resolve(conditional.Condition, islands),
-                    TrueRoot = FinalizeControl(conditional.TrueRoot, islands),
-                    FalseRoot = conditional.FalseRoot is null
-                        ? null
-                        : FinalizeControl(conditional.FalseRoot, islands),
+                    TrueRoots = conditional.TrueRoots.Select(root => FinalizeRenderable(root, islands)).ToArray(),
+                    FalseRoots = conditional.FalseRoots?.Select(root => FinalizeRenderable(root, islands)).ToArray(),
                 },
                 BoundChildMember child => child with { Child = FinalizeControl(child.Child, islands) },
+                BoundComponentChildMember child => child with
+                {
+                    Invocation = (BoundComponentInvocationModel)FinalizeRenderable(child.Invocation, islands),
+                },
                 _ => member,
             }).ToArray(),
+        };
+
+    private static BoundRenderableModel FinalizeRenderable(
+        BoundRenderableModel renderable,
+        IReadOnlyDictionary<int, BoundCSharpIsland> islands) => renderable switch
+        {
+            BoundControlModel control => FinalizeControl(control, islands),
+            BoundComponentInvocationModel component => component with
+            {
+                Arguments = component.Arguments.Select(argument => argument with
+                {
+                    Expression = Resolve(argument.Expression, islands),
+                }).ToArray(),
+                Slots = component.Slots.Select(slot => slot with
+                {
+                    Roots = slot.Roots.Select(root => FinalizeRenderable(root, islands)).ToArray(),
+                }).ToArray(),
+            },
+            _ => renderable,
         };
 
     private void DetectComputedCycles(BoundComponentModel model)

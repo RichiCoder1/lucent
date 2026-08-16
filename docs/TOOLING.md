@@ -28,7 +28,7 @@ Required capabilities:
 - hover information;
 - document symbols.
 
-The current server implements document synchronization, shared compiler
+The current server implements project-wide document synchronization, shared compiler
 diagnostics, native member and context-valid value completion, native
 control/property/event/value hover, and source navigation for project-defined
 controls and members. Completion includes writable Avalonia properties,
@@ -44,11 +44,15 @@ current namespace and imports are completion candidates, while `(` and `,`
 automatically reopen expression completion for arguments. It discovers the
 owning `.csproj` from workspace projects or the nearest repository/solution,
 including linked `LucentSource` files opened without a workspace root, and uses design-time
-MSBuild to obtain C# sources and resolved references, and feeds that context to
-the same Roslyn-backed binder used by the build.
+MSBuild to obtain C# sources, Lucent sources, and resolved references. Open
+`.lui` buffers overlay the disk snapshot. A sibling open, change, or close
+rebuilds the project batch and republishes diagnostics for every open project
+document, so hover, completion, definition, and diagnostics use one current
+component index. Visible components, named arguments, and slots have distinct
+semantic symbols, and definitions navigate directly between `.lui` files.
 
-Useful follow-ups include Lucent-to-C# navigation, component-parameter and CSS
-class/token completion, signature help, metadata-as-source, document symbols,
+Useful follow-ups include Lucent-to-C# navigation, CSS class/token completion,
+signature help, metadata-as-source, document symbols,
 references, rename, reactive dependency inspection, and Lucent component
 navigation.
 

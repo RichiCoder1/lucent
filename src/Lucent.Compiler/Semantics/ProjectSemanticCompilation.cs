@@ -23,9 +23,17 @@ internal sealed class ProjectSemanticCompilation
         string componentNamespace,
         IReadOnlyList<string> usingDirectives,
         LucentProjectContext? context)
+        : this(componentNamespace, usingDirectives, CreateBaseCompilation(context))
+    {
+    }
+
+    public ProjectSemanticCompilation(
+        string componentNamespace,
+        IReadOnlyList<string> usingDirectives,
+        CSharpCompilation compilation)
     {
         Imports = BuildImports(componentNamespace, usingDirectives);
-        Compilation = CreateCompilation(context);
+        Compilation = compilation;
     }
 
     public CSharpCompilation Compilation { get; }
@@ -63,7 +71,7 @@ internal sealed class ProjectSemanticCompilation
         return imports.Distinct(StringComparer.Ordinal).ToArray();
     }
 
-    private static CSharpCompilation CreateCompilation(LucentProjectContext? context)
+    public static CSharpCompilation CreateBaseCompilation(LucentProjectContext? context)
     {
         var referencePaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in context?.References ?? [])

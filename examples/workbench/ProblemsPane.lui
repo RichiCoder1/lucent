@@ -1,0 +1,5 @@
+namespace Lucent.Examples.Workbench;
+
+component ProblemsPane(int count = 2) => Border {
+    TextBlock { Text: $"{count} problems"; }
+};

@@ -19,6 +19,8 @@ internal enum CSharpIslandRole
     LoopSource,
     LoopKey,
     Condition,
+    ComponentArgument,
+    OrdinaryMember,
 }
 
 internal sealed record BoundLocal(string Name, ITypeSymbol Type, string? SourceExpression = null);
@@ -45,12 +47,14 @@ internal sealed record BoundReactiveRead(int SourceId, SourceSpan Span);
 
 internal sealed record CSharpIslandBindingResult(
     IReadOnlyDictionary<int, BoundCSharpIsland> Islands,
-    IReadOnlyList<BoundIslandScope> EditorScopes);
+    IReadOnlyList<BoundIslandScope> EditorScopes,
+    IReadOnlyDictionary<string, string>? OrdinaryMembers = null);
 
 internal sealed class CSharpIslandBinder(
     ProjectSemanticCompilation project,
     IReadOnlyList<BoundReactiveSource> sources,
-    DiagnosticBag diagnostics)
+    DiagnosticBag diagnostics,
+    IReadOnlyList<OrdinaryMemberSyntax>? ordinaryMembers = null)
 {
     private static readonly SymbolDisplayFormat TypeFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
@@ -61,10 +65,10 @@ internal sealed class CSharpIslandBinder(
     public CSharpIslandBindingResult BindAll(
         IReadOnlyList<CSharpIslandRequest> requests)
     {
-        if (requests.Count == 0)
+        if (requests.Count == 0 && (ordinaryMembers?.Count ?? 0) == 0)
         {
             return new CSharpIslandBindingResult(
-                new Dictionary<int, BoundCSharpIsland>(), []);
+                new Dictionary<int, BoundCSharpIsland>(), [], new Dictionary<string, string>());
         }
 
         var text = new System.Text.StringBuilder("#nullable enable\n");
@@ -78,11 +82,24 @@ internal sealed class CSharpIslandBinder(
             .Append("internal sealed class __LucentProbe {\n");
         foreach (var source in sources)
         {
+            if (source.Kind == BoundReactiveSourceKind.Parameter)
+            {
+                text.Append("private ").Append(source.ValueTypeName).Append(' ')
+                    .Append(source.Name).Append(" => default!;\n");
+                continue;
+            }
             var wrapper = source.Kind == BoundReactiveSourceKind.State
                 ? "__LucentState"
                 : "__LucentComputed";
             text.Append("private ").Append(wrapper).Append('<').Append(source.ValueTypeName)
                 .Append("> ").Append(source.Name).Append(" = new();\n");
+        }
+        var ordinaryMappings = new List<(TextSpan Synthetic, SourceSpan Source)>();
+        foreach (var member in ordinaryMembers ?? [])
+        {
+            var start = text.Length;
+            text.Append(member.Text).Append('\n');
+            ordinaryMappings.Add((new TextSpan(start, member.Text.Length), member.Span));
         }
 
         var mappings = new Dictionary<int, TextSpan>();
@@ -150,6 +167,32 @@ internal sealed class CSharpIslandBinder(
         {
             sourceFields[candidate.Symbol] = candidate.Source;
         }
+        foreach (var candidate in root.DescendantNodes().OfType<PropertyDeclarationSyntax>()
+                     .Select(node => (Node: node, Symbol: model.GetDeclaredSymbol(node)))
+                     .Where(candidate => candidate.Symbol is not null)
+                     .Join(sources.Where(source => source.Kind == BoundReactiveSourceKind.Parameter),
+                         candidate => candidate.Node.Identifier.ValueText, source => source.Name,
+                         (candidate, source) => (Symbol: candidate.Symbol!, Source: source)))
+        {
+            sourceFields[candidate.Symbol] = candidate.Source;
+        }
+
+        var methodSummaries = BuildMethodSummaries(root, model, sourceFields);
+        var loweredMembers = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var member in ordinaryMembers ?? [])
+        {
+            var node = root.DescendantNodes().OfType<MemberDeclarationSyntax>().FirstOrDefault(candidate =>
+                candidate switch
+                {
+                    MethodDeclarationSyntax method => method.Identifier.ValueText == member.Name,
+                    FieldDeclarationSyntax field => field.Declaration.Variables.Any(variable =>
+                        variable.Identifier.ValueText == member.Name),
+                    _ => false,
+                });
+            if (node is not null)
+                loweredMembers[member.Name] = new OrdinaryLoweringRewriter(model, sourceFields)
+                    .Visit(node)!.ToFullString().Trim();
+        }
 
         foreach (var diagnostic in compilation.GetDiagnostics()
                      .Where(item => item.Severity == DiagnosticSeverity.Error &&
@@ -159,6 +202,20 @@ internal sealed class CSharpIslandBinder(
                 candidate.Value.IntersectsWith(diagnostic.Location.SourceSpan));
             if (mapping.Value == default)
             {
+                var ordinary = ordinaryMappings.FirstOrDefault(candidate =>
+                    candidate.Synthetic.IntersectsWith(diagnostic.Location.SourceSpan));
+                if (ordinary != default)
+                {
+                    var ordinaryRelative = Math.Clamp(
+                        diagnostic.Location.SourceSpan.Start - ordinary.Synthetic.Start,
+                        0,
+                        ordinary.Synthetic.Length);
+                    diagnostics.Add(
+                        "LUC3001",
+                        $"Embedded C# is invalid: {diagnostic.GetMessage()}",
+                        new SourceSpan(ordinary.Source.Start + ordinaryRelative,
+                            Math.Max(1, diagnostic.Location.SourceSpan.Length)));
+                }
                 continue;
             }
 
@@ -186,7 +243,8 @@ internal sealed class CSharpIslandBinder(
                 continue;
             }
             var reads = new List<BoundReactiveRead>();
-            var rewriter = new ReactiveRewriter(model, sourceFields, request, mapping, reads);
+            var rewriter = new ReactiveRewriter(model, sourceFields, methodSummaries,
+                diagnostics, request, mapping, reads);
             var rewritten = rewriter.Visit(node)!;
             var lowered = request.Kind == CSharpIslandKind.StatementBlock
                 ? string.Join(Environment.NewLine,
@@ -236,7 +294,7 @@ internal sealed class CSharpIslandBinder(
                     localTypes),
                 request.Role);
         }).ToArray();
-        return new CSharpIslandBindingResult(results, editorScopes);
+        return new CSharpIslandBindingResult(results, editorScopes, loweredMembers);
     }
 
     private static ITypeSymbol? GetExpressionType(
@@ -263,13 +321,149 @@ internal sealed class CSharpIslandBinder(
     private static string FormatType(ITypeSymbol type) =>
         type.TypeKind == TypeKind.Dynamic ? "dynamic" : type.ToDisplayString(TypeFormat);
 
+    private static IReadOnlyDictionary<IMethodSymbol, MethodSummary> BuildMethodSummaries(
+        SyntaxNode root,
+        SemanticModel model,
+        IReadOnlyDictionary<ISymbol, BoundReactiveSource> sourceFields)
+    {
+        var methods = new Dictionary<IMethodSymbol, MethodDeclarationSyntax>(SymbolEqualityComparer.Default);
+        foreach (var method in root.DescendantNodes().OfType<MethodDeclarationSyntax>()
+                     .Where(method => !method.Identifier.ValueText.StartsWith("__Island", StringComparison.Ordinal)))
+        {
+            if (model.GetDeclaredSymbol(method) is { } symbol) methods[symbol] = method;
+        }
+        var summaries = new Dictionary<IMethodSymbol, MethodSummary>(SymbolEqualityComparer.Default);
+        foreach (var pair in methods)
+        {
+            var dependencies = new HashSet<int>();
+            var mutates = false;
+            var calls = new HashSet<IMethodSymbol>(SymbolEqualityComparer.Default);
+            foreach (var node in pair.Value.DescendantNodes())
+            {
+                if (node is IdentifierNameSyntax identifier &&
+                    model.GetSymbolInfo(identifier).Symbol is { } symbol &&
+                    sourceFields.TryGetValue(symbol, out var parameter) &&
+                    parameter.Kind == BoundReactiveSourceKind.Parameter)
+                {
+                    dependencies.Add(parameter.Id);
+                }
+                if (node is MemberAccessExpressionSyntax access &&
+                    model.GetSymbolInfo(access.Expression).Symbol is { } receiver &&
+                    sourceFields.TryGetValue(receiver, out var source))
+                {
+                    if (access.Name.Identifier.ValueText is "Value" or "IsPending" or "ErrorMessage")
+                        dependencies.Add(source.Id);
+                    if (source.Kind == BoundReactiveSourceKind.State &&
+                        access.Name.Identifier.ValueText == "Update") mutates = true;
+                }
+                if (node is InvocationExpressionSyntax invocation &&
+                    model.GetSymbolInfo(invocation).Symbol is IMethodSymbol called &&
+                    methods.ContainsKey(called)) calls.Add(called);
+            }
+            summaries[pair.Key] = new MethodSummary(dependencies, mutates, calls);
+        }
+
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var summary in summaries.Values)
+            {
+                foreach (var called in summary.Calls)
+                {
+                    var target = summaries[called];
+                    foreach (var dependency in target.Dependencies)
+                        changed |= summary.Dependencies.Add(dependency);
+                    if (target.Mutates && !summary.Mutates) { summary.Mutates = true; changed = true; }
+                }
+            }
+        }
+        return summaries;
+    }
+
+    private sealed class MethodSummary(
+        HashSet<int> dependencies,
+        bool mutates,
+        HashSet<IMethodSymbol> calls)
+    {
+        public HashSet<int> Dependencies { get; } = dependencies;
+        public bool Mutates { get; set; } = mutates;
+        public HashSet<IMethodSymbol> Calls { get; } = calls;
+    }
+
+    private sealed class OrdinaryLoweringRewriter(
+        SemanticModel model,
+        IReadOnlyDictionary<ISymbol, BoundReactiveSource> sources) : CSharpSyntaxRewriter
+    {
+        public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
+        {
+            if (model.GetSymbolInfo(node.Expression).Symbol is not { } symbol ||
+                !sources.TryGetValue(symbol, out var source)) return base.VisitMemberAccessExpression(node);
+            var pascal = char.ToUpperInvariant(source.Name[0]) + source.Name[1..];
+            var lowered = node.Name.Identifier.ValueText switch
+            {
+                "Value" when source.Kind == BoundReactiveSourceKind.State => "__lucent_state" + pascal,
+                "Value" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal,
+                "Update" when source.Kind == BoundReactiveSourceKind.State => "__lucent_Set" + pascal,
+                "IsPending" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + "Pending",
+                "ErrorMessage" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + "ErrorMessage",
+                _ => null,
+            };
+            return lowered is null ? base.VisitMemberAccessExpression(node) :
+                SyntaxFactory.IdentifierName(lowered).WithTriviaFrom(node);
+        }
+    }
+
     private sealed class ReactiveRewriter(
         SemanticModel model,
         IReadOnlyDictionary<ISymbol, BoundReactiveSource> sourceFields,
+        IReadOnlyDictionary<IMethodSymbol, MethodSummary> methodSummaries,
+        DiagnosticBag diagnostics,
         CSharpIslandRequest request,
         TextSpan mapping,
         List<BoundReactiveRead> reads) : CSharpSyntaxRewriter
     {
+        public override SyntaxNode? VisitInvocationExpression(InvocationExpressionSyntax node)
+        {
+            if (model.GetSymbolInfo(node).Symbol is IMethodSymbol method &&
+                methodSummaries.TryGetValue(method, out var summary))
+            {
+                foreach (var dependency in summary.Dependencies)
+                {
+                    reads.Add(new BoundReactiveRead(dependency,
+                        new SourceSpan(request.Span.Start + node.Span.Start - mapping.Start,
+                            node.Span.Length)));
+                }
+                if (summary.Mutates && request.Role is CSharpIslandRole.Property or
+                    CSharpIslandRole.Content or CSharpIslandRole.Condition or
+                    CSharpIslandRole.LoopSource or CSharpIslandRole.LoopKey or
+                    CSharpIslandRole.ComponentArgument)
+                {
+                    diagnostics.Add("LUC3001",
+                        "A render computation cannot call a component method that mutates state.",
+                        new SourceSpan(request.Span.Start + node.Span.Start - mapping.Start,
+                            node.Span.Length));
+                }
+            }
+            return base.VisitInvocationExpression(node);
+        }
+
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            var symbol = model.GetSymbolInfo(node).Symbol;
+            if (symbol is null || !sourceFields.TryGetValue(symbol, out var source) ||
+                source.Kind != BoundReactiveSourceKind.Parameter)
+            {
+                return base.VisitIdentifierName(node);
+            }
+
+            reads.Add(new BoundReactiveRead(source.Id,
+                new SourceSpan(request.Span.Start + node.Span.Start - mapping.Start,
+                    node.Span.Length)));
+            return SyntaxFactory.IdentifierName("__lucent_input" +
+                char.ToUpperInvariant(source.Name[0]) + source.Name[1..]).WithTriviaFrom(node);
+        }
+
         public override SyntaxNode? VisitMemberAccessExpression(MemberAccessExpressionSyntax node)
         {
             var receiver = model.GetSymbolInfo(node.Expression).Symbol;
@@ -290,13 +484,15 @@ internal sealed class CSharpIslandBinder(
 
             var lowered = name switch
             {
-                "Value" => "_" + source.Name,
+                "Value" => source.Kind == BoundReactiveSourceKind.State
+                    ? "__lucent_state" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..]
+                    : "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..],
                 "IsPending" when source.Kind == BoundReactiveSourceKind.Computed =>
-                    "_" + source.Name + "Pending",
+                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + "Pending",
                 "ErrorMessage" when source.Kind == BoundReactiveSourceKind.Computed =>
-                    "_" + source.Name + "ErrorMessage",
+                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + "ErrorMessage",
                 "Update" when source.Kind == BoundReactiveSourceKind.State =>
-                    "Set" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..],
+                    "__lucent_Set" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..],
                 _ => null,
             };
             return lowered is null

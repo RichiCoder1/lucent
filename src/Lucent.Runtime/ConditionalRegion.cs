@@ -1,26 +1,24 @@
-using Avalonia.Controls;
-
 namespace Lucent.Runtime;
 
 public sealed class ConditionalRegion : IDisposable
 {
     private readonly ComponentOwner _owner;
-    private readonly Action<Control?> _setRoot;
+    private readonly Action<Fragment> _setRoots;
     private ComponentOwner? _branchOwner;
-    private Control? _root;
+    private Fragment _roots;
 
-    public ConditionalRegion(ComponentOwner owner, Action<Control?> setRoot)
+    public ConditionalRegion(ComponentOwner owner, Action<Fragment> setRoots)
     {
         ArgumentNullException.ThrowIfNull(owner);
-        ArgumentNullException.ThrowIfNull(setRoot);
+        ArgumentNullException.ThrowIfNull(setRoots);
         _owner = owner;
-        _setRoot = setRoot;
+        _setRoots = setRoots;
         owner.OnDispose(Dispose);
     }
 
     public int? ActiveBranch { get; private set; }
 
-    public void Show(int branch, Func<ComponentOwner, Control> mount)
+    public void Show(int branch, Func<ComponentOwner, Fragment> mount)
     {
         ArgumentNullException.ThrowIfNull(mount);
         ObjectDisposedException.ThrowIf(_owner.IsDisposed, this);
@@ -30,17 +28,17 @@ public sealed class ConditionalRegion : IDisposable
         }
 
         var nextOwner = _owner.CreateChild();
-        Control nextRoot;
+        Fragment nextRoots;
         try
         {
-            nextRoot = mount(nextOwner) ?? throw new InvalidOperationException("A conditional branch returned no root control.");
+            nextRoots = mount(nextOwner);
         }
         catch (Exception mountFailure)
         {
             throw DisposeAfterFailure(nextOwner, mountFailure);
         }
 
-        Publish(nextRoot, nextOwner, branch);
+        Publish(nextRoots, nextOwner, branch);
     }
 
     public void Clear()
@@ -50,7 +48,7 @@ public sealed class ConditionalRegion : IDisposable
             return;
         }
 
-        Publish(null, null, null);
+        Publish(Fragment.Empty, null, null);
     }
 
     public void Dispose()
@@ -59,19 +57,19 @@ public sealed class ConditionalRegion : IDisposable
         oldOwner?.Dispose();
     }
 
-    private void Publish(Control? nextRoot, ComponentOwner? nextOwner, int? nextBranch)
+    private void Publish(Fragment nextRoots, ComponentOwner? nextOwner, int? nextBranch)
     {
         var oldOwner = _branchOwner;
-        var oldRoot = _root;
+        var oldRoots = _roots;
         try
         {
-            _setRoot(nextRoot);
+            _setRoots(nextRoots);
         }
         catch (Exception publicationFailure)
         {
             try
             {
-                _setRoot(oldRoot);
+                _setRoots(oldRoots);
             }
             catch (Exception restorationFailure)
             {
@@ -88,7 +86,7 @@ public sealed class ConditionalRegion : IDisposable
         }
 
         _branchOwner = nextOwner;
-        _root = nextRoot;
+        _roots = nextRoots;
         ActiveBranch = nextBranch;
         oldOwner?.Dispose();
     }
@@ -97,7 +95,7 @@ public sealed class ConditionalRegion : IDisposable
     {
         var oldOwner = _branchOwner;
         _branchOwner = null;
-        _root = null;
+        _roots = Fragment.Empty;
         ActiveBranch = null;
         return oldOwner;
     }

@@ -73,6 +73,8 @@ public sealed class CompileLucent : Task
 
         var pendingOutputs = new List<PendingOutput>(Sources.Length);
         var outputPaths = new HashSet<string>(GetPathComparer());
+        var sourcePaths = new HashSet<string>(GetPathComparer());
+        var inputs = new List<LucentSourceInput>(Sources.Length);
         var succeeded = true;
         var projectContext = new LucentProjectContext(
             ProjectPath,
@@ -88,6 +90,22 @@ public sealed class CompileLucent : Task
                 continue;
             }
 
+            var outputPath = GetOutputPath(sourcePath);
+            if (!sourcePaths.Add(sourcePath))
+            {
+                LogError("LUC9004", sourcePath, 1, 1,
+                    $"Lucent source '{sourcePath}' was supplied more than once.");
+                succeeded = false;
+            }
+            if (!outputPaths.Add(outputPath))
+            {
+                LogError("LUC9003", sourcePath, 1, 1,
+                    $"Multiple Lucent sources map to the generated output '{outputPath}'.");
+                succeeded = false;
+            }
+
+            if (!succeeded) continue;
+
             try
             {
                 var sourceText = File.ReadAllText(sourcePath);
@@ -95,34 +113,7 @@ public sealed class CompileLucent : Task
                 var styleText = File.Exists(stylePath)
                     ? File.ReadAllText(stylePath)
                     : null;
-                var result = LucentCompiler.Compile(
-                    sourceText,
-                    sourcePath,
-                    projectContext,
-                    styleText,
-                    stylePath);
-                LogDiagnostics(sourcePath, result.Diagnostics);
-
-                if (!result.Succeeded || result.GeneratedSource is null)
-                {
-                    succeeded = false;
-                    continue;
-                }
-
-                var outputPath = GetOutputPath(sourcePath);
-                if (!outputPaths.Add(outputPath))
-                {
-                    LogError(
-                        code: "LUC9003",
-                        file: sourcePath,
-                        line: 1,
-                        column: 1,
-                        message: $"Multiple Lucent sources map to the generated output '{outputPath}'.");
-                    succeeded = false;
-                    continue;
-                }
-
-                pendingOutputs.Add(new PendingOutput(outputPath, result.GeneratedSource));
+                inputs.Add(new LucentSourceInput(sourcePath, sourceText, stylePath, styleText));
             }
             catch (IOException exception)
             {
@@ -150,6 +141,24 @@ public sealed class CompileLucent : Task
         {
             // Do not partially update generated output when any source has
             // diagnostics. This preserves the last successful build result.
+            GeneratedFiles = [];
+            return false;
+        }
+
+        var projectResult = LucentCompiler.CompileProject(inputs, projectContext);
+        foreach (var source in projectResult.Sources)
+        {
+            LogDiagnostics(source.SourcePath, source.Result.Diagnostics);
+            if (!source.Result.Succeeded || source.Result.GeneratedSource is null)
+            {
+                succeeded = false;
+                continue;
+            }
+            pendingOutputs.Add(new PendingOutput(
+                GetOutputPath(source.SourcePath), source.Result.GeneratedSource));
+        }
+        if (!succeeded)
+        {
             GeneratedFiles = [];
             return false;
         }

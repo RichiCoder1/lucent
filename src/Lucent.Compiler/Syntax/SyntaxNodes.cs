@@ -29,7 +29,10 @@ public sealed record ComponentDeclarationSyntax(
     SourceSpan Span,
     IReadOnlyList<StateMemberSyntax>? StateMembers = null,
     IReadOnlyList<LucentSyntaxNode>? Members = null,
-    IReadOnlyList<ComputedMemberSyntax>? ComputedMembers = null)
+    IReadOnlyList<ComputedMemberSyntax>? ComputedMembers = null,
+    IReadOnlyList<ComponentParameterSyntax>? Parameters = null,
+    IReadOnlyList<SlotDeclarationSyntax>? Slots = null,
+    IReadOnlyList<OrdinaryMemberSyntax>? OrdinaryMembers = null)
     : LucentSyntaxNode(Span)
 {
     public IReadOnlyList<StateMemberSyntax> AllStateMembers =>
@@ -37,7 +40,30 @@ public sealed record ComponentDeclarationSyntax(
 
     public IReadOnlyList<ComputedMemberSyntax> AllComputedMembers =>
         ComputedMembers ?? [];
+
+    public IReadOnlyList<ComponentParameterSyntax> AllParameters => Parameters ?? [];
+    public IReadOnlyList<SlotDeclarationSyntax> AllSlots => Slots ?? [];
+    public IReadOnlyList<OrdinaryMemberSyntax> AllOrdinaryMembers => OrdinaryMembers ?? [];
 }
+
+public sealed record ComponentParameterSyntax(
+    string TypeName,
+    string Name,
+    string? DefaultValueText,
+    SourceSpan Span,
+    SourceSpan NameSpan,
+    SourceSpan? DefaultValueSpan) : LucentSyntaxNode(Span);
+
+public sealed record SlotDeclarationSyntax(
+    string Name,
+    SourceSpan Span,
+    SourceSpan NameSpan) : LucentSyntaxNode(Span);
+
+public sealed record OrdinaryMemberSyntax(
+    string Text,
+    string Name,
+    SourceSpan Span,
+    SourceSpan NameSpan) : LucentSyntaxNode(Span);
 
 public sealed record StateMemberSyntax(
     string TypeName,
@@ -57,11 +83,19 @@ public sealed record ComputedMemberSyntax(
 public sealed record RenderMethodSyntax(
     UiElementSyntax Root,
     SourceSpan Span,
-    IReadOnlyList<RenderStatementSyntax>? Statements = null) : LucentSyntaxNode(Span)
+    IReadOnlyList<RenderStatementSyntax>? Statements = null,
+    UiFragmentSyntax? Fragment = null) : LucentSyntaxNode(Span)
 {
     public IReadOnlyList<RenderStatementSyntax> BodyStatements =>
         Statements ?? [new ReturnRenderStatementSyntax(Root, Root.Span)];
+
+    public UiFragmentSyntax RenderedFragment =>
+        Fragment ?? new UiFragmentSyntax([Root], Root.Span);
 }
+
+public sealed record UiFragmentSyntax(
+    IReadOnlyList<UiElementSyntax> Roots,
+    SourceSpan Span) : LucentSyntaxNode(Span);
 
 public abstract record RenderStatementSyntax(SourceSpan Span) : LucentSyntaxNode(Span);
 
@@ -72,14 +106,23 @@ public sealed record ReturnRenderStatementSyntax(
 public sealed record UiElementSyntax(
     string Name,
     IReadOnlyList<UiMemberSyntax> Members,
-    SourceSpan Span) : LucentSyntaxNode(Span)
+    SourceSpan Span,
+    IReadOnlyList<UiArgumentSyntax>? Arguments = null) : LucentSyntaxNode(Span)
 {
     public IEnumerable<UiPropertySyntax> Properties =>
         Members.OfType<UiPropertySyntax>();
 
     public IEnumerable<UiElementSyntax> Children =>
         Members.OfType<UiChildSyntax>().Select(child => child.Element);
+
+    public IReadOnlyList<UiArgumentSyntax> AllArguments => Arguments ?? [];
 }
+
+public sealed record UiArgumentSyntax(
+    string? Name,
+    string Text,
+    SourceSpan Span,
+    SourceSpan ExpressionSpan) : LucentSyntaxNode(Span);
 
 public abstract record UiMemberSyntax(SourceSpan Span) : LucentSyntaxNode(Span);
 
@@ -104,6 +147,17 @@ public sealed record UiForEachSyntax(
     SourceSpan KeyExpressionSpan,
     UiElementSyntax Body,
     SourceSpan Span) : UiMemberSyntax(Span);
+
+public sealed record UiSlotSupplySyntax(
+    string Name,
+    UiFragmentSyntax Fragment,
+    SourceSpan Span,
+    SourceSpan NameSpan) : UiMemberSyntax(Span);
+
+public sealed record UiYieldSyntax(
+    string Name,
+    SourceSpan Span,
+    SourceSpan NameSpan) : UiMemberSyntax(Span);
 
 public sealed record UiIfSyntax(
     string Condition,
