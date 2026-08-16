@@ -18,6 +18,8 @@ coverage/
 
 # Node and VS Code extension output
 node_modules/
+.blume/
+dist/
 editors/vscode/out/
 editors/vscode/server/
 *.vsix

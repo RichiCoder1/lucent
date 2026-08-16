@@ -62,6 +62,11 @@ The goal is not C# punctuation wrapped around XAML semantics. Lucent owns a smal
 
 ## Documentation
 
+Build the static Blume documentation site with `npm run docs:build`. Blume also
+emits `/llms.txt`, `/llms-full.txt`, and raw Markdown routes for AI tools. The
+development server is intentionally not exposed while Blume's transitive
+dependency audit reports high-severity advisories.
+
 - [Project vision](docs/VISION.md)
 - [Language and Avalonia design review](docs/DESIGN_REVIEW.md)
 - [Language model](docs/LANGUAGE.md)

@@ -41,6 +41,8 @@ checkout using the language tooling proven by Plan 007.
 - Add Windows, Linux, and macOS CI where supported, plus package-consumer tests.
 - Finish Workbench's real project loading, compiler diagnostics, source editing,
   generated-C# preview, settings, themes, and release documentation.
+- Publish the existing Markdown through Blume, including its generated
+  `llms.txt`, `llms-full.txt`, and raw Markdown routes.
 
 **Out of scope**:
 
@@ -102,6 +104,10 @@ Document install, template use, supported syntax, interop boundaries, debugging,
 known limits, package versioning, Plan 007's tooling-performance evidence, and
 the Workbench evidence. Mark the release experimental and list unsupported
 behavior explicitly.
+
+Use the repository's Blume site as the publication surface so the same source
+serves people and AI clients. Keep MCP deferred until server deployment is
+needed; the static AI endpoints cover the preview release.
 
 **Verify**: every README command runs from a clean temporary directory.
 On the recorded Plan 007 reference machine, rerun its benchmark against the
