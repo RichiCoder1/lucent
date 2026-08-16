@@ -324,6 +324,8 @@ internal sealed class CSharpIslandBinder(
                 return itemType is null ? local : local with { Type = itemType };
             }).ToArray();
             var localTypes = resolvedLocals.ToDictionary(local => local.Name, local => local.Type);
+            var ordinaryDefinitions = (ordinaryMembers ?? [])
+                .ToDictionary(member => member.Name, member => member.NameSpan, StringComparer.Ordinal);
 
             return new BoundIslandScope(
                 request.EditorSpan,
@@ -332,7 +334,8 @@ internal sealed class CSharpIslandBinder(
                     model,
                     mappings[request.Id],
                     request.Span,
-                    localTypes),
+                    localTypes,
+                    ordinaryDefinitions),
                 request.Role);
         }).ToArray();
         return new CSharpIslandBindingResult(results, editorScopes, loweredMembers);

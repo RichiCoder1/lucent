@@ -134,7 +134,8 @@ internal sealed class BoundIslandSemanticContext(
     SemanticModel model,
     TextSpan mapping,
     SourceSpan sourceSpan,
-    IReadOnlyDictionary<string, ITypeSymbol> localTypes)
+    IReadOnlyDictionary<string, ITypeSymbol> localTypes,
+    IReadOnlyDictionary<string, SourceSpan> ordinaryMemberDefinitions)
 {
     public IReadOnlyList<BoundLocal> LookupLocals(int sourceOffset)
     {
@@ -177,5 +178,22 @@ internal sealed class BoundIslandSemanticContext(
                 local.Type.TypeKind == TypeKind.Dynamic).First())
             .ToArray();
         return symbols;
+    }
+
+    public IReadOnlyList<(ISymbol Symbol, SourceSpan Definition)> LookupOrdinaryMembers(
+        int sourceOffset)
+    {
+        var position = mapping.Start + Math.Clamp(
+            sourceOffset - sourceSpan.Start,
+            0,
+            mapping.Length);
+        return model.LookupSymbols(position)
+            .Where(symbol => ordinaryMemberDefinitions.ContainsKey(symbol.Name))
+            .Where(symbol => symbol is IFieldSymbol or IPropertySymbol or IEventSymbol or
+                IMethodSymbol { MethodKind: MethodKind.Ordinary })
+            .GroupBy(symbol => symbol.Name, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .Select(symbol => (symbol, ordinaryMemberDefinitions[symbol.Name]))
+            .ToArray();
     }
 }

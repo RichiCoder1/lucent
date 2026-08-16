@@ -264,6 +264,42 @@ public sealed class CompileLucentTests
     }
 
     [TestMethod]
+    public async System.Threading.Tasks.Task Design_time_compile_items_include_generated_components()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(
+            Path.Combine(temporary.Path, "SettingsPane.lui"),
+            "namespace Demo; component SettingsPane() => Border {}; ");
+        await File.WriteAllTextAsync(
+            Path.Combine(temporary.Path, "SettingsDialog.cs"),
+            "namespace Demo; internal sealed class SettingsDialog { private readonly SettingsPaneComponent pane = new(); }");
+        await File.WriteAllTextAsync(projectPath, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="SettingsPane.lui" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var build = await RunDotNetAsync(temporary.Path,
+            "build", projectPath, "--nologo", "--verbosity:minimal", "-nodeReuse:false");
+        Assert.AreEqual(0, build.ExitCode, build.Output);
+
+        var designTime = await RunDotNetAsync(temporary.Path,
+            "msbuild", projectPath, "-getItem:Compile", "-p:DesignTimeBuild=true",
+            "-p:Configuration=Debug", "-nologo");
+        Assert.AreEqual(0, designTime.ExitCode, designTime.Output);
+        StringAssert.Contains(designTime.Output, "SettingsPaneComponent.g.cs");
+    }
+
+    [TestMethod]
     public async System.Threading.Tasks.Task Targets_consumer_rejects_bad_sibling_without_replacing_output()
     {
         using var temporary = new TemporaryDirectory();
@@ -322,6 +358,25 @@ public sealed class CompileLucentTests
         };
 
         return (task, buildEngine);
+    }
+
+    private static async Task<(int ExitCode, string Output)> RunDotNetAsync(
+        string workingDirectory,
+        params string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+        using var process = Process.Start(startInfo)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        return (process.ExitCode, await stdout + await stderr);
     }
 
     private static string CounterSourcePath() =>

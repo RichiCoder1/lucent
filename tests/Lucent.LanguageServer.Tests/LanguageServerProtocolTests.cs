@@ -9,6 +9,69 @@ namespace Lucent.LanguageServer.Tests;
 public sealed class LanguageServerProtocolTests
 {
     [TestMethod]
+    public async Task Event_islands_complete_hover_and_define_ordinary_component_members()
+    {
+        var sourcePath = Path.Combine(Path.GetTempPath(), $"lucent-members-{Guid.NewGuid():N}.lui");
+        const string source = """
+            namespace Demo;
+            using System.Threading;
+            component App()
+            {
+                private readonly CancellationTokenSource focusSidebar = new();
+                Fragment Render() => Border {
+                    Loaded: (sender, e) => { focusSidebar.Cancel(); };
+                };
+            }
+            """;
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            var use = source.LastIndexOf("focusSidebar", StringComparison.Ordinal);
+            var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new
+                {
+                    textDocument = new { uri, languageId = "lucent", version = 1, text = source },
+                }),
+                Request(2, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, use + "focusS".Length),
+                }),
+                Request(3, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, use),
+                }),
+                Request(4, "textDocument/definition", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, use),
+                }),
+                Request(5, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "focusSidebar"));
+            StringAssert.Contains(HoverText(messages, 3), "focusSidebar");
+            var definition = Response(messages, 4).GetProperty("result");
+            Assert.AreEqual(uri, definition.GetProperty("uri").GetString());
+            Assert.AreEqual(source[..source.IndexOf("focusSidebar", StringComparison.Ordinal)]
+                    .Count(character => character == '\n'),
+                definition.GetProperty("range").GetProperty("start").GetProperty("line").GetInt32());
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+        }
+    }
+
+    [TestMethod]
     public void Attached_property_completion_uses_native_setter_symbols()
     {
         const string source = "namespace Demo; using Avalonia.Controls; component App() => Border { Grid.; };";

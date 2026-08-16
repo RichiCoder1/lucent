@@ -7,6 +7,14 @@
     <ProjectReference Include="$(LucentRuntimeProject)" />
   </ItemGroup>
 
+  <!-- ponytail: design-time uses the last successful output directory; Plan 007 adds a generated manifest when project invalidation lands. -->
+  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' and '@(LucentSource)' != ''">
+    <Compile Include="$(LucentCompilerOutputDirectory)*Component.g.cs"
+             AutoGen="true"
+             DesignTime="true"
+             Visible="false" />
+  </ItemGroup>
+
   <!-- ponytail: generation always runs; add an output manifest when generation time is measurable. -->
   <Target
     Name="GenerateLucent"

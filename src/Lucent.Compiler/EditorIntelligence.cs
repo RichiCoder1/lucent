@@ -222,7 +222,7 @@ internal static class EditorIntelligence
         {
             if (variable is not null)
             {
-                var definitionSpan = FindPersistentMemberNameSpan(
+                var definitionSpan = variable.DefinitionSpan ?? FindPersistentMemberNameSpan(
                     sourceText,
                     syntax,
                     variable.Name);
@@ -278,7 +278,14 @@ internal static class EditorIntelligence
         {
             return scope.Select(variable => new LucentCompletionItem(
                     variable.Name,
-                    LucentCompletionItemKind.Variable,
+                    variable.Symbol switch
+                    {
+                        IFieldSymbol => LucentCompletionItemKind.Field,
+                        IMethodSymbol => LucentCompletionItemKind.Method,
+                        IPropertySymbol => LucentCompletionItemKind.Property,
+                        IEventSymbol => LucentCompletionItemKind.Event,
+                        _ => LucentCompletionItemKind.Variable,
+                    },
                     variable.Display,
                     variable.Name,
                     null))
@@ -364,9 +371,27 @@ internal static class EditorIntelligence
                 local.Type,
                 ExpressionContainer.Local,
                 $"{local.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {local.Name}")));
+            variables.AddRange(scope.Context.LookupOrdinaryMembers(offset)
+                .Select(member => new ExpressionVariable(
+                    member.Symbol.Name,
+                    member.Symbol switch
+                    {
+                        IFieldSymbol field => field.Type,
+                        IPropertySymbol property => property.Type,
+                        IEventSymbol @event => @event.Type,
+                        IMethodSymbol method => method.ReturnType,
+                        _ => throw new InvalidOperationException(),
+                    },
+                    ExpressionContainer.Local,
+                    member.Symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+                    member.Symbol,
+                    member.Definition)));
         }
 
-        return variables;
+        return variables
+            .GroupBy(variable => variable.Name, StringComparer.Ordinal)
+            .Select(group => group.Last())
+            .ToArray();
     }
 
     private static ExpressionMember? ResolveMember(
@@ -716,7 +741,9 @@ internal static class EditorIntelligence
         string Name,
         ITypeSymbol Type,
         ExpressionContainer Container,
-        string Display);
+        string Display,
+        ISymbol? Symbol = null,
+        SourceSpan? DefinitionSpan = null);
 
     private sealed record ResolvedExpressionType(
         ITypeSymbol Type,

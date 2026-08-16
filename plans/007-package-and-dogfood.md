@@ -25,7 +25,9 @@ application that can be built from a fresh checkout.
 ## Current state
 
 - `build/Lucent.Compiler.props` points at local `src/.../bin` assemblies.
-- `build/Lucent.Compiler.targets:16` skips generation during design-time builds.
+- `build/Lucent.Compiler.targets` exposes the last successful generated files
+  to design-time C# compilation but does not regenerate changed `.lui` files
+  during design-time builds.
 - `ProjectContextLoader.cs:63-86` caches project context without invalidation and
   silently falls back to no context on common failures.
 - `LanguageServer.cs:102-117` advertises only sync, hover, definition, and

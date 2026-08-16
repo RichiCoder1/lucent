@@ -758,6 +758,50 @@ public sealed class GeneralCompilerTests
     }
 
     [TestMethod]
+    public void Editor_completion_and_hover_include_ordinary_component_members()
+    {
+        const string source = """
+            namespace Demo;
+            using System.Threading;
+            component Main()
+            {
+                private readonly CancellationTokenSource focusSidebar = new();
+                private void FocusEditor() { }
+                Fragment Render() => Border {
+                    Loaded: (sender, e) => { focusSidebar.Cancel(); FocusEditor(); };
+                };
+            }
+            """;
+
+        var rootOffset = source.IndexOf("focusSidebar.Cancel", StringComparison.Ordinal) +
+            "focusS".Length;
+        Assert.IsTrue(LucentCompiler.GetCompletions(source, rootOffset, "Events.lui")
+            .Any(item => item.Label == "focusSidebar" && item.Kind == LucentCompletionItemKind.Field));
+
+        var memberOffset = source.IndexOf("focusSidebar.Cancel", StringComparison.Ordinal) +
+            "focusSidebar.C".Length;
+        var memberCompletions = LucentCompiler.GetCompletions(source, memberOffset, "Events.lui");
+        if (!memberCompletions.Any(item => item.Label == "Cancel"))
+            Assert.Fail(string.Join(", ", memberCompletions.Select(item => item.Label)));
+
+        var useOffset = source.LastIndexOf("focusSidebar", StringComparison.Ordinal);
+        var symbol = LucentCompiler.GetExpressionSymbol(source, useOffset, "Events.lui");
+        Assert.IsNotNull(symbol);
+        StringAssert.Contains(symbol.Display, "focusSidebar");
+        Assert.AreEqual(source.IndexOf("focusSidebar", StringComparison.Ordinal),
+            symbol.Definition?.Span.Start);
+
+        var methodUse = source.LastIndexOf("FocusEditor", StringComparison.Ordinal);
+        Assert.IsTrue(LucentCompiler.GetCompletions(source, methodUse + "FocusE".Length, "Events.lui")
+            .Any(item => item.Label == "FocusEditor" && item.Kind == LucentCompletionItemKind.Method));
+        var methodSymbol = LucentCompiler.GetExpressionSymbol(source, methodUse, "Events.lui");
+        Assert.IsNotNull(methodSymbol);
+        StringAssert.Contains(methodSymbol.Display, "FocusEditor");
+        Assert.AreEqual(source.IndexOf("FocusEditor", StringComparison.Ordinal),
+            methodSymbol.Definition?.Span.Start);
+    }
+
+    [TestMethod]
     public void Computed_values_keep_stale_data_cancel_prior_work_and_ignore_late_results()
     {
         var result = LucentCompiler.Compile(

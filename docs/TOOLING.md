@@ -34,8 +34,9 @@ control/property/event/value hover, and source navigation for project-defined
 controls and members. Completion includes writable Avalonia properties,
 compatible events, `Class`, enums, booleans, same-type static values, and
 compatible `Brushes` values. Property expressions also complete and hover
-component state, computed values, keyed-loop locals, event parameters and
-locals, project types, static members, methods, and typed member chains. Type,
+component state, computed values, ordinary component fields and methods,
+keyed-loop locals, event parameters and locals, project types, static members,
+methods, and typed member chains. Type,
 constructor, field, and expression hover plus project-source definition
 navigation work in persistent-member initializers and render expressions, so
 `Text: package.Description` resolves through the project's C# model. CSS class
@@ -50,6 +51,10 @@ rebuilds the project batch and republishes diagnostics for every open project
 document, so hover, completion, definition, and diagnostics use one current
 component index. Visible components, named arguments, and slots have distinct
 semantic symbols, and definitions navigate directly between `.lui` files.
+The MSBuild targets also expose the last successful generated component files
+as design-time C# compile items, so C# tooling can resolve generated component
+types after a build without compiling `.lui` files during every design-time
+evaluation.
 
 Useful follow-ups include Lucent-to-C# navigation, CSS class/token completion,
 signature help, metadata-as-source, document symbols,
