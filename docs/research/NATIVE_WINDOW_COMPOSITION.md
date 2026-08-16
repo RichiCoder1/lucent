@@ -1,0 +1,105 @@
+# Native window composition
+
+## Question
+
+Can a Lucent-authored dialog or secondary window be presented through native
+Avalonia APIs without a handwritten `Window` adapter such as
+`SettingsDialog.cs`?
+
+## Repository constraints
+
+- A generated component is a logical instance that owns state and cleanup; it
+  is not an Avalonia control and must not inherit `Window`.
+- `Mount()` returns `Fragment` because ordinary composition supports zero, one,
+  or many roots.
+- Lucent already permits a native `Window` as a component root. No new dialog
+  syntax or wrapper control is needed.
+- Avalonia remains responsible for owners, modality, results, close
+  cancellation, native window relationships, and platform behavior.
+
+These constraints come from [the architecture](../ARCHITECTURE.md),
+[the accepted decisions](../DECISIONS.md), and the executable component
+contract in `GeneralCSharpEmitter` and `Fragment`.
+
+## Primary-source findings
+
+Avalonia's existing APIs are the presentation seam:
+
+- `Show()` presents a non-modal window.
+- `Show(owner)` associates an owned non-modal window.
+- `ShowDialog<TResult>(owner)` presents a modal window and completes when it
+  closes; `Close(result)` supplies its result.
+- `Closing` can be cancelled, while `Closed` represents completed native
+  lifetime.
+
+Avalonia validates owner visibility, prevents a window from owning itself, and
+does not permit a closed window to be shown again. Lucent should propagate
+those rules rather than mirror them.
+
+Sources:
+
+- [Avalonia dialogs](https://docs.avaloniaui.net/docs/how-to/dialogs-how-to)
+- [Avalonia window management](https://docs.avaloniaui.net/docs/app-development/window-management)
+- [Avalonia `Window` source](https://github.com/AvaloniaUI/Avalonia/blob/main/src/Avalonia.Controls/Window.cs)
+
+Other declarative systems support the same broad separation. QML components
+have a declared root object while creation and ownership remain explicit;
+SwiftUI owns window scenes itself and is therefore a weaker fit for Lucent's
+direct-native approach.
+
+- [Qt QML `Component`](https://doc.qt.io/qt-6/qml-qtqml-component.html)
+- [Qt Quick `Window`](https://doc.qt.io/qt-6/qml-qtquick-window.html)
+- [SwiftUI `App`](https://developer.apple.com/documentation/SwiftUI/App)
+- [SwiftUI `WindowGroup`](https://developer.apple.com/documentation/swiftui/windowgroup)
+
+## Recommendation
+
+Generate a strongly typed `MountRoot()` method when a component has exactly one
+statically known, direct native root:
+
+```csharp
+component SettingsDialog() => Window {
+    Title: "Settings";
+    SettingsPane {}
+};
+```
+
+```csharp
+using var component = new SettingsDialogComponent();
+await desktopHost.ShowDialogAsync<bool>(owner, component.MountRoot());
+```
+
+`Mount()` remains the uniform composition interface and still returns
+`Fragment`. `MountRoot()` is an additional generated interop interface whose
+return type is the actual native root type (`Window` above). It is generated
+only when cardinality and type are statically certain; there is no reflection,
+registry, cast-by-name, wrapper, or runtime window service.
+
+For a modal dialog, `using` naturally disposes the component after close or a
+failed `ShowDialog`. For a non-modal owned window, application code retains the
+component until the native `Closed` event and disposes it there. A cancelled
+`Closing` event must not dispose the component.
+
+## Rejected options
+
+- **Generated components inherit `Window`:** conflates logical and native
+  identity, breaks ordinary composition, and still does not define owner
+  disposal.
+- **Lucent `ShowDialog`/window manager:** duplicates Avalonia ownership,
+  modality, results, and failure behavior.
+- **New dialog syntax:** unnecessary because native `Window` is already a valid
+  Lucent root.
+- **Reflection or a component registry:** weakens compile-time guarantees and
+  violates the direct-generated contract.
+- **`RequireRoot<T>()` alone:** improves validation but leaves callers with the
+  same repeated untyped boundary.
+- **Automatic disposal in `MountRoot()`:** presentation has not started yet;
+  modal and non-modal callers have different deterministic lifetime points.
+
+## Falsifying evidence
+
+Reconsider this recommendation if direct native root types cannot be stable at
+compile time, if the extra generated method creates ambiguity in composition,
+or if Workbench still needs adapter classes for behavior other than obtaining a
+typed root. Repeated modeless ownership ceremony would justify an
+application-level helper before any Lucent runtime feature.
