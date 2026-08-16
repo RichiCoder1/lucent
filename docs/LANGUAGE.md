@@ -29,7 +29,7 @@ component UserCard(User user, bool compact = false)
 {
     Fragment Render() =>
         Card {
-            class: compact ? "user-card compact" : "user-card";
+            Class: compact ? "user-card compact" : "user-card";
             Text(user.Name);
             Text(user.Email);
         };
@@ -68,7 +68,7 @@ A stateless component may use an expression body:
 ```csharp
 component Badge(string text) =>
     Text {
-        class: "badge";
+        Class: "badge";
         text: text;
     };
 ```
@@ -301,6 +301,36 @@ state int count = initial;
 ```
 
 If adopted, it must mean exactly an instance-owned `State<int>` member with one-time initialization. It must not introduce hook ordering, hidden local persistence, or different lifetime rules.
+
+## Derived computations
+
+The first executable async slice uses a compiler-owned `Computed<T>` member:
+
+```csharp
+private readonly Computed<PackageInfo[]> packages = new(
+    cancellationToken => PackageCatalog.SearchAsync(query.Value, cancellationToken),
+    PackageCatalog.Placeholders);
+```
+
+The factory may return `Task<T>`. The required initial value avoids a nullable
+loading hole and remains visible while replacement work is pending. A changed
+state cancels prior work, starts a new generation, and commits only the latest
+generation on Avalonia's UI dispatcher. Component disposal cancels owned work.
+
+Render expressions may currently read:
+
+```text
+computed.Value
+computed.IsPending
+computed.ErrorMessage
+```
+
+This is a deliberately narrow checkpoint, not the final error/loading
+interface. Structural `Loading` and error boundaries, symbol-derived
+per-computation dependencies, synchronous derived values, composition between
+computed nodes, async streams, refresh, and optimistic mutation remain to be
+designed. The current compiler conservatively refreshes every computed member
+when component state changes.
 
 ## Reusable state and effects
 

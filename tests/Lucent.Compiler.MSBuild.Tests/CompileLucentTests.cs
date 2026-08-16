@@ -27,6 +27,8 @@ public sealed class CompileLucentTests
             .Replace("\"", "\\\"", StringComparison.Ordinal);
         StringAssert.Contains(generated, $"#line 10 \"{mappedSourcePath}\"");
         StringAssert.Contains(generated, "internal sealed class CounterComponent");
+        StringAssert.Contains(generated, "Styles.Add(new global::Avalonia.Styling.Style");
+        StringAssert.Contains(generated, "global::Avalonia.Animation.DoubleTransition");
         StringAssert.Contains(generated, "SetCount(_count + 1);");
         Assert.HasCount(0, buildEngine.Errors);
     }

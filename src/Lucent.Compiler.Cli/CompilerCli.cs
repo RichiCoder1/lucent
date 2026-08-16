@@ -27,11 +27,20 @@ public static class CompilerCli
         try
         {
             var sourceText = File.ReadAllText(options.InputPath);
-            var result = LucentCompiler.Compile(sourceText, options.InputPath);
+            var stylePath = Path.ChangeExtension(options.InputPath, ".css");
+            var styleText = File.Exists(stylePath) ? File.ReadAllText(stylePath) : null;
+            var result = LucentCompiler.Compile(
+                sourceText,
+                options.InputPath,
+                projectContext: null,
+                styleText,
+                stylePath);
 
             foreach (var diagnostic in result.Diagnostics)
             {
-                standardError.WriteLine(FormatDiagnostic(options.InputPath, diagnostic));
+                standardError.WriteLine(FormatDiagnostic(
+                    diagnostic.SourcePath ?? options.InputPath,
+                    diagnostic));
             }
 
             if (!result.Succeeded || result.GeneratedSource is null)

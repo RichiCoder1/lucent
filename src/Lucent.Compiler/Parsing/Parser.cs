@@ -125,6 +125,7 @@ internal sealed partial class Parser
         Expect(TokenKind.OpenBrace, "'{' to open the component body");
 
         var states = new List<StateMemberSyntax>();
+        var computed = new List<ComputedMemberSyntax>();
         RenderMethodSyntax? render = null;
         var members = new List<LucentSyntaxNode>();
 
@@ -151,11 +152,16 @@ internal sealed partial class Parser
             }
             else if (IsIdentifier("private"))
             {
-                var state = ParseStateMember();
-                if (state is not null)
+                var persistentMember = ParsePersistentMember();
+                if (persistentMember is StateMemberSyntax state)
                 {
                     states.Add(state);
                     members.Add(state);
+                }
+                else if (persistentMember is ComputedMemberSyntax computedMember)
+                {
+                    computed.Add(computedMember);
+                    members.Add(computedMember);
                 }
             }
             else
@@ -182,10 +188,11 @@ internal sealed partial class Parser
             render,
             SpanFrom(start, closeBrace.Span.End),
             states,
-            members);
+            members,
+            computed);
     }
 
-    private StateMemberSyntax? ParseStateMember()
+    private LucentSyntaxNode? ParsePersistentMember()
     {
         var start = Current.Span.Start;
         var end = ScanToTerminator(start, stopAtCloseBrace: true);
@@ -205,32 +212,49 @@ internal sealed partial class Parser
         }
 
         var match = StatePattern().Match(raw);
-        if (!match.Success)
+        if (match.Success)
         {
-            AddUnsupported(
+            var typeName = match.Groups["type"].Value.Trim();
+            var memberName = match.Groups["name"].Value;
+            var initializerText = match.Groups["initializer"].Value.Trim();
+            var initializerOffset = raw.IndexOf(
+                match.Groups["initializer"].Value,
+                StringComparison.Ordinal);
+            var initializerSpan = new SourceSpan(
+                start + Math.Max(0, initializerOffset),
+                initializerText.Length);
+            _ = int.TryParse(initializerText, out var initialValue);
+
+            return new StateMemberSyntax(
+                typeName,
+                memberName,
+                initialValue,
                 new SourceSpan(start, Math.Max(1, end - start)),
-                "State members must use the form State<T> name = new(...).");
-            return null;
+                initializerText,
+                initializerSpan);
         }
 
-        var typeName = match.Groups["type"].Value.Trim();
-        var memberName = match.Groups["name"].Value;
-        var initializerText = match.Groups["initializer"].Value.Trim();
-        var initializerOffset = raw.IndexOf(
-            match.Groups["initializer"].Value,
-            StringComparison.Ordinal);
-        var initializerSpan = new SourceSpan(
-            start + Math.Max(0, initializerOffset),
-            initializerText.Length);
-        _ = int.TryParse(initializerText, out var initialValue);
+        match = ComputedPattern().Match(raw);
+        if (match.Success)
+        {
+            var initializerText = match.Groups["initializer"].Value.Trim();
+            var initializerOffset = raw.IndexOf(
+                match.Groups["initializer"].Value,
+                StringComparison.Ordinal);
+            return new ComputedMemberSyntax(
+                match.Groups["type"].Value.Trim(),
+                match.Groups["name"].Value,
+                initializerText,
+                new SourceSpan(start, Math.Max(1, end - start)),
+                new SourceSpan(
+                    start + Math.Max(0, initializerOffset),
+                    initializerText.Length));
+        }
 
-        return new StateMemberSyntax(
-            typeName,
-            memberName,
-            initialValue,
+        AddUnsupported(
             new SourceSpan(start, Math.Max(1, end - start)),
-            initializerText,
-            initializerSpan);
+            "Persistent members must use State<T> name = new(...) or Computed<T> name = new(factory, initialValue).");
+        return null;
     }
 
     private RenderMethodSyntax ParseRenderMethod()
@@ -532,7 +556,7 @@ internal sealed partial class Parser
 
         AddUnsupported(
             new SourceSpan(start, end - start),
-            "Only State<T> members and Fragment Render() are supported in the initial compiler.");
+            "Only State<T>, Computed<T>, and Fragment Render() are supported in the initial compiler.");
         AdvanceTo(end);
         if (Current.Kind == TokenKind.Semicolon)
         {
@@ -1158,6 +1182,11 @@ internal sealed partial class Parser
         @"\bState\s*<\s*(?<type>.+)\s*>\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*new\s*\(\s*(?<initializer>.*)\s*\)\s*$",
         RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex StatePattern();
+
+    [GeneratedRegex(
+        @"\bComputed\s*<\s*(?<type>.+)\s*>\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*new\s*\(\s*(?<initializer>.*)\s*\)\s*$",
+        RegexOptions.CultureInvariant | RegexOptions.Singleline)]
+    private static partial Regex ComputedPattern();
 
     [GeneratedRegex(
         @"^\s*var\s+(?<item>[A-Za-z_][A-Za-z0-9_]*)\s+in\s+(?<source>.+)\s*$",

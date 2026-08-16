@@ -15,14 +15,14 @@ component Counter()
     Fragment Render()
     {
         return StackPanel {
-            class: "counter";
+            Class: "counter";
 
             TextBlock {
                 Text: $"Count: {count.Value}";
             }
 
             Button {
-                class: "primary";
+                Class: "primary";
                 Content: "Increment";
 
                 Click: (sender, e) => {
@@ -71,10 +71,19 @@ The goal is not C# punctuation wrapped around XAML semantics. Lucent owns a smal
 - [Proof-of-concept roadmap](docs/ROADMAP.md)
 - [Design decisions and open questions](docs/DECISIONS.md)
 - [Documentation index](docs/README.md)
+- [Credits and research sources](CREDITS.md)
 
 ## Repository status
 
-This repository contains a shared [Lucent compiler](src/Lucent.Compiler), [CLI](src/Lucent.Compiler.Cli) and project-aware [MSBuild](src/Lucent.Compiler.MSBuild) adapters, a basic [language server](src/Lucent.LanguageServer) and [VS Code extension](editors/vscode), Counter and native-control TodoMVC examples, and a runnable Avalonia host in [`src/Lucent.Poc`](src/Lucent.Poc). The POC generates compiled C# from `.lui` under `obj` during the normal build. The editor currently provides diagnostics and native-control/member hover; go-to-definition works for project-source controls and members.
+This repository contains a shared [Lucent compiler](src/Lucent.Compiler), [CLI](src/Lucent.Compiler.Cli) and project-aware [MSBuild](src/Lucent.Compiler.MSBuild) adapters, a basic [language server](src/Lucent.LanguageServer) and [VS Code extension](editors/vscode), standalone Counter, native-control TodoMVC, and async Package Pulse Avalonia projects, and the existing host in [`src/Lucent.Poc`](src/Lucent.Poc). Normal builds generate compiled C# from `.lui` and adjacent `.css` under `obj`.
+
+Run an example directly:
+
+```powershell
+dotnet run --project examples/counter/Counter.csproj
+dotnet run --project examples/todo/Todo.csproj
+dotnet run --project examples/package-pulse/PackagePulse.csproj
+```
 
 Run the desktop POC with:
 
@@ -104,5 +113,7 @@ Pop-Location
 See [POC 0002](docs/poc/0002-counter-compiler.md) for the original compiler checkpoint and [POC 0003](docs/poc/0003-shared-compiler-tooling.md) for the generalized binder, bounded C# islands, source mapping, MSBuild adapter, and editor foundation.
 
 See [POC 0004](docs/poc/0004-native-controls-todo.md) for the direct native-control TodoMVC, explicit and implicit Avalonia content, target-type primitive conveniences, keyed row identity, project-aware metadata binding, and current limits.
+
+See [POC 0005](docs/poc/0005-async-css-package-pulse.md) for the Package Pulse artificial-delay demo, adjacent compiled CSS, native Avalonia transitions, and owned `Computed<T>` cancellation and stale-result semantics.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing syntax or architecture changes. Lucent has deliberately deferred several design choices, and examples should not quietly turn those possibilities into promises.

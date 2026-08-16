@@ -3,6 +3,7 @@ using System.Xml.Linq;
 using Lucent.Compiler.CodeGeneration;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Lucent.Compiler.Semantics;
 
@@ -139,6 +140,273 @@ internal sealed class NativeSymbolResolver
             invoke.Parameters[1].Type.ToDisplayString(FullyQualifiedFormat));
     }
 
+    public IReadOnlyList<ResolvedNativeProperty> GetProperties(
+        ResolvedNativeControl control) =>
+        EnumerateTypeHierarchy(control.Symbol)
+            .SelectMany(type => type.GetMembers().OfType<IPropertySymbol>())
+            .Where(property =>
+                !property.IsStatic &&
+                property.DeclaredAccessibility == Accessibility.Public &&
+                property.SetMethod is { DeclaredAccessibility: Accessibility.Public })
+            .GroupBy(property => property.Name, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .Select(property => new ResolvedNativeProperty(
+                property.Name,
+                property.Name,
+                property,
+                property.Type.ToDisplayString(FullyQualifiedFormat),
+                GetNativeValueKind(property.Type)))
+            .OrderBy(property => property.Name, StringComparer.Ordinal)
+            .ToArray();
+
+    public IReadOnlyList<ResolvedNativeEvent> GetEvents(
+        ResolvedNativeControl control) =>
+        EnumerateTypeHierarchy(control.Symbol)
+            .SelectMany(type => type.GetMembers().OfType<IEventSymbol>())
+            .Where(@event =>
+                !@event.IsStatic &&
+                @event.DeclaredAccessibility == Accessibility.Public)
+            .Select(@event => ResolveEvent(control, @event.Name))
+            .Where(@event => @event is not null)
+            .Cast<ResolvedNativeEvent>()
+            .GroupBy(@event => @event.Name, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(@event => @event.Name, StringComparer.Ordinal)
+            .ToArray();
+
+    public ITypeSymbol? ResolveTypeName(string typeName)
+    {
+        var source = string.Join(
+            Environment.NewLine,
+            _imports.Select(@namespace => $"using {@namespace};")) +
+            $"{Environment.NewLine}internal sealed class __LucentTypeProbe {{ public {typeName} Value = default!; }}";
+        var tree = CSharpSyntaxTree.ParseText(
+            source,
+            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview));
+        var compilation = _compilation.AddSyntaxTrees(tree);
+        var field = tree.GetRoot()
+            .DescendantNodes()
+            .OfType<FieldDeclarationSyntax>()
+            .FirstOrDefault();
+        if (field is null)
+        {
+            return null;
+        }
+        var type = compilation.GetSemanticModel(tree)
+            .GetTypeInfo(field.Declaration.Type)
+            .Type;
+        return type?.TypeKind == TypeKind.Error ? null : type;
+    }
+
+    public IReadOnlyList<ISymbol> GetExpressionMembers(
+        ITypeSymbol type,
+        bool staticMembers = false) =>
+        EnumerateExpressionTypes(type)
+            .SelectMany(candidate => candidate.GetMembers())
+            .Where(member =>
+                member.IsStatic == staticMembers &&
+                IsAccessible(member) &&
+                (member is IPropertySymbol or IFieldSymbol or IEventSymbol ||
+                 member is IMethodSymbol { MethodKind: MethodKind.Ordinary }))
+            .GroupBy(member => member.Name, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(member => member.Name, StringComparer.Ordinal)
+            .ToArray();
+
+    public ISymbol? ResolveExpressionMember(
+        ITypeSymbol type,
+        string name,
+        bool staticMember = false) =>
+        GetExpressionMembers(type, staticMember)
+            .FirstOrDefault(member => member.Name == name);
+
+    public static ITypeSymbol? GetExpressionMemberType(ISymbol member) =>
+        member switch
+        {
+            IPropertySymbol property => property.Type,
+            IFieldSymbol field => field.Type,
+            IEventSymbol @event => @event.Type,
+            IMethodSymbol method => method.ReturnType,
+            _ => null,
+        };
+
+    public static string? GetExpressionDocumentation(ISymbol symbol) =>
+        GetDocumentation(symbol);
+
+    public IReadOnlyList<INamedTypeSymbol> GetExpressionTypes() =>
+        _imports
+            .Select(ResolveNamespace)
+            .Where(@namespace => @namespace is not null)
+            .Cast<INamespaceSymbol>()
+            .SelectMany(@namespace => @namespace.GetTypeMembers())
+            .Where(type => !type.IsImplicitlyDeclared && IsAccessible(type))
+            .GroupBy(
+                type => type.ToDisplayString(FullyQualifiedFormat),
+                StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(type => type.Name, StringComparer.Ordinal)
+            .ToArray();
+
+    private INamespaceSymbol? ResolveNamespace(string name)
+    {
+        INamespaceSymbol current = _compilation.GlobalNamespace;
+        foreach (var segment in name.Split('.'))
+        {
+            var next = current.GetNamespaceMembers()
+                .FirstOrDefault(candidate => candidate.Name == segment);
+            if (next is null)
+            {
+                return null;
+            }
+
+            current = next;
+        }
+
+        return current;
+    }
+
+    public static ITypeSymbol? GetEnumerableElementType(ITypeSymbol type)
+    {
+        if (type is IArrayTypeSymbol array)
+        {
+            return array.ElementType;
+        }
+
+        return type is INamedTypeSymbol named
+            ? new[] { named }.Concat(named.AllInterfaces)
+                .FirstOrDefault(candidate =>
+                    candidate.OriginalDefinition.SpecialType ==
+                    SpecialType.System_Collections_Generic_IEnumerable_T)
+                ?.TypeArguments[0]
+            : null;
+    }
+
+    public LucentSemanticSymbol ToExpressionSemanticSymbol(
+        string name,
+        SourceSpan referenceSpan,
+        string display,
+        ISymbol? symbol = null) =>
+        symbol is null
+            ? new LucentSemanticSymbol(
+                name,
+                LucentSemanticSymbolKind.Expression,
+                referenceSpan,
+                display,
+                null,
+                null)
+            : CreateSemanticSymbol(
+                name,
+                LucentSemanticSymbolKind.Expression,
+                referenceSpan,
+                display,
+                symbol);
+
+    public IReadOnlyList<NativeValueCandidate> GetValueCandidates(
+        ResolvedNativeProperty property)
+    {
+        var type = UnwrapNullable(property.Symbol.Type);
+        if (type.TypeKind == TypeKind.Enum)
+        {
+            return type.GetMembers()
+                .OfType<IFieldSymbol>()
+                .Where(field => field is { IsStatic: true, HasConstantValue: true })
+                .Select(field => new NativeValueCandidate(
+                    $"{type.Name}.{field.Name}",
+                    $"{type.ToDisplayString(FullyQualifiedFormat)}.{field.Name}",
+                    $"{type.ToDisplayString(FullyQualifiedFormat)}.{field.Name}",
+                    GetDocumentation(field),
+                    field))
+                .ToArray();
+        }
+
+        if (type.SpecialType == SpecialType.System_Boolean)
+        {
+            return
+            [
+                new NativeValueCandidate("true", "true", "bool", null, null),
+                new NativeValueCandidate("false", "false", "bool", null, null),
+            ];
+        }
+
+        var ownValues = type.GetMembers()
+            .Where(candidate =>
+                candidate.IsStatic &&
+                candidate.DeclaredAccessibility == Accessibility.Public)
+            .Select(candidate => candidate switch
+            {
+                IFieldSymbol field => (Symbol: (ISymbol)field, Type: field.Type),
+                IPropertySymbol property => (Symbol: (ISymbol)property, Type: property.Type),
+                _ => default,
+            })
+            .Where(candidate =>
+                candidate.Symbol is not null &&
+                _compilation.ClassifyConversion(candidate.Type!, type).IsImplicit)
+            .Select(candidate => new NativeValueCandidate(
+                $"{type.Name}.{candidate.Symbol!.Name}",
+                $"{type.ToDisplayString(FullyQualifiedFormat)}.{candidate.Symbol.Name}",
+                $"{type.ToDisplayString(FullyQualifiedFormat)}.{candidate.Symbol.Name}",
+                GetDocumentation(candidate.Symbol),
+                candidate.Symbol));
+
+        var brushes = _compilation.GetTypeByMetadataName("Avalonia.Media.Brushes");
+        var brushValues = brushes?.GetMembers()
+            .OfType<IPropertySymbol>()
+            .Where(candidate =>
+                candidate.IsStatic &&
+                candidate.DeclaredAccessibility == Accessibility.Public &&
+                _compilation.ClassifyConversion(candidate.Type, type).IsImplicit)
+            .Select(candidate => new NativeValueCandidate(
+                $"Brushes.{candidate.Name}",
+                $"global::Avalonia.Media.Brushes.{candidate.Name}",
+                candidate.Type.ToDisplayString(FullyQualifiedFormat),
+                GetDocumentation(candidate),
+                candidate)) ?? [];
+
+        return ownValues
+            .Concat(brushValues)
+            .GroupBy(candidate => candidate.Label, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    public IReadOnlyList<LucentSemanticSymbol> GetValueSymbols(
+        ResolvedNativeProperty property,
+        string expression,
+        int absoluteStart)
+    {
+        var candidates = GetValueCandidates(property)
+            .Where(candidate => candidate.Symbol is not null)
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            return [];
+        }
+
+        var root = SyntaxFactory.ParseExpression(expression);
+        var result = new List<LucentSemanticSymbol>();
+        foreach (var access in root.DescendantNodesAndSelf().OfType<MemberAccessExpressionSyntax>())
+        {
+            var candidate = candidates.FirstOrDefault(item =>
+                item.Label.EndsWith("." + access.Name.Identifier.ValueText, StringComparison.Ordinal) &&
+                item.Label.StartsWith(access.Expression.ToString().Split('.').Last() + ".", StringComparison.Ordinal));
+            if (candidate?.Symbol is null)
+            {
+                continue;
+            }
+
+            result.Add(CreateSemanticSymbol(
+                access.Name.Identifier.ValueText,
+                LucentSemanticSymbolKind.NativeValue,
+                new SourceSpan(
+                    absoluteStart + access.Name.SpanStart,
+                    access.Name.Span.Length),
+                candidate.Display,
+                candidate.Symbol));
+        }
+
+        return result;
+    }
+
     public LucentSemanticSymbol ToSemanticSymbol(
         ResolvedNativeControl control,
         SourceSpan referenceSpan) =>
@@ -147,8 +415,7 @@ internal sealed class NativeSymbolResolver
             LucentSemanticSymbolKind.NativeControl,
             referenceSpan,
             $"class {control.Symbol.ToDisplayString(FullyQualifiedFormat)}",
-            control.Symbol,
-            "Native Avalonia control.");
+            control.Symbol);
 
     public LucentSemanticSymbol ToSemanticSymbol(
         ResolvedNativeControl control,
@@ -161,8 +428,7 @@ internal sealed class NativeSymbolResolver
             $"{property.TypeName} {control.TypeName}.{property.Name} {{ " +
             $"{(property.Symbol.GetMethod is null ? string.Empty : "get; ")}" +
             $"{(property.Symbol.SetMethod is null ? string.Empty : "set; ")}}}",
-            property.Symbol,
-            "Native Avalonia property.");
+            property.Symbol);
 
     public LucentSemanticSymbol ToSemanticSymbol(
         ResolvedNativeControl control,
@@ -174,8 +440,7 @@ internal sealed class NativeSymbolResolver
             referenceSpan,
             $"event {@event.Symbol.Type.ToDisplayString(FullyQualifiedFormat)} " +
             $"{control.TypeName}.{@event.Name}",
-            @event.Symbol,
-            $"Native Avalonia event. Handler: ({control.TypeName} sender, {@event.EventArgsTypeName} e) => ...");
+            @event.Symbol);
 
     public bool ContentAcceptsControl(NativeContentRoute route) =>
         _controlType is not null &&
@@ -251,9 +516,19 @@ internal sealed class NativeSymbolResolver
         {
             ("Text", "text") => "Text",
             ("Button", "text") => "Content",
-            (_, "class") => "Classes",
+            (_, "Class") => "Classes",
             _ => propertyName,
         };
+
+    private static ITypeSymbol UnwrapNullable(ITypeSymbol type) =>
+        type is INamedTypeSymbol
+        {
+            IsGenericType: true,
+            OriginalDefinition.SpecialType: SpecialType.System_Nullable_T,
+            TypeArguments: [var underlying],
+        }
+            ? underlying
+            : type;
 
     private static BoundNativeValueKind GetNativeValueKind(ITypeSymbol type) =>
         type.ToDisplayString() switch
@@ -312,6 +587,24 @@ internal sealed class NativeSymbolResolver
         for (var current = type; current is not null; current = current.BaseType)
         {
             yield return current;
+        }
+    }
+
+    private static IEnumerable<INamedTypeSymbol> EnumerateExpressionTypes(ITypeSymbol type)
+    {
+        if (type is not INamedTypeSymbol named)
+        {
+            yield break;
+        }
+
+        foreach (var candidate in EnumerateTypeHierarchy(named))
+        {
+            yield return candidate;
+        }
+
+        foreach (var @interface in named.AllInterfaces)
+        {
+            yield return @interface;
         }
     }
 
@@ -414,7 +707,7 @@ internal sealed class NativeSymbolResolver
         SourceSpan referenceSpan,
         string display,
         ISymbol symbol,
-        string fallbackDocumentation)
+        string? fallbackDocumentation = null)
     {
         var documentation = GetDocumentation(symbol) ?? fallbackDocumentation;
         var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
@@ -483,3 +776,10 @@ internal sealed record NativeContentRoute(
     ResolvedNativeProperty Property,
     bool IsCollection,
     ITypeSymbol ValueType);
+
+internal sealed record NativeValueCandidate(
+    string Label,
+    string InsertText,
+    string Display,
+    string? Documentation,
+    ISymbol? Symbol);

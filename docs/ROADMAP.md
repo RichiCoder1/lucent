@@ -98,6 +98,11 @@ Exit condition: a small multi-component screen exercises state, slots, context, 
 
 Add the CSS frontend, typed style IR, classes, a narrow selector set, pseudo-classes, CSS variables, and common Avalonia property mappings.
 
+The first executable subset now compiles adjacent CSS into native Avalonia
+styles, typed values, pseudo-class selectors, and property transitions. Counter
+and Package Pulse consume it without runtime CSS parsing. Combinators, scoping,
+keyframes, enter/exit motion, and broader property validation remain.
+
 Exit condition: the Counter example builds with statically validated CSS and applies its class and token values without runtime CSS parsing.
 
 ### 7. Interop and developer experience

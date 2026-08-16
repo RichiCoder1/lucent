@@ -33,6 +33,7 @@ This page separates project direction from illustrative syntax. Update it when a
 | Source extension | `.lui` | Validate through editor integration and public file-association research. |
 | Compiler strategy | Dedicated frontend, generated C#, then Roslyn | Replace only if expression integration or source mapping proves unworkable. |
 | State surface | Explicit `State<T>` members with `.Value` and `.Update`; concise `state T name = value` member sugar remains a candidate | Validate that sugar removes ceremony without hiding ownership, initialization, or invalidation. |
+| Derived computation surface | `Computed<T>` accepts a cancellation-token `Task<T>` factory plus a required initial value; `.Value` stays stale while `.IsPending` is true and `.ErrorMessage` reports the latest failure | Replace status members with structural loading/error boundaries after conditional region lifetime is executable. |
 | Component identity | Lexical call site for static structure, call site plus key for repeated structure | Validate with stateful conditional and reordered-list tests. |
 | Initial keyed loops | Require `keyed by`, one native row root, and a dedicated native collection host; retain controls by key without a virtual DOM. | Expand only after nested regions and component-row lifetime have executable coverage. |
 | Context syntax | `context Theme = value` and `using context Theme` | Finalize after symbol, shadowing, and type-inference experiments. |

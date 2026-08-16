@@ -114,7 +114,7 @@ public sealed class GeneralCompilerTests
                 Fragment Render()
                 {
                     return Column {
-                        class: "root";
+                        Class: "root";
                         Text {
                             text: $"Count: {count.Value}";
                         }
@@ -617,6 +617,177 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(result.GeneratedSource, ".Text = \"title.Value\";");
         StringAssert.Contains(result.GeneratedSource, ".Text = other.title.Value;");
         StringAssert.Contains(result.GeneratedSource, ".Text = _title;");
+    }
+
+    [TestMethod]
+    public void Editor_completion_uses_native_member_and_value_types()
+    {
+        const string source = """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return StackPanel {
+                        Orientation: Orientation.Horizontal;
+                        Button {
+                        }
+                    };
+                }
+            }
+            """;
+
+        var memberOffset = source.IndexOf("Button {", StringComparison.Ordinal) + "Button {".Length;
+        var members = LucentCompiler.GetCompletions(source, memberOffset, "Completion.lui");
+        Assert.IsTrue(members.Any(item =>
+            item.Label == "Content" &&
+            item.Kind == LucentCompletionItemKind.Property));
+        Assert.IsTrue(members.Any(item =>
+            item.Label == "Click" &&
+            item.Kind == LucentCompletionItemKind.Event));
+        Assert.IsTrue(members.Any(item => item.Label == "Class"));
+
+        var valueOffset = source.IndexOf("Orientation.Horizontal", StringComparison.Ordinal);
+        var values = LucentCompiler.GetCompletions(source, valueOffset, "Completion.lui");
+        Assert.IsTrue(values.Any(item =>
+            item.Label == "Orientation.Horizontal" &&
+            item.InsertText.Contains("Avalonia.Layout.Orientation.Horizontal", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Editor_completion_tracks_event_parameters_and_local_variables()
+    {
+        const string source = """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return TextBox {
+                        TextChanged: (sender, e) => {
+                            var current = sender.Text;
+                            current.Contains("x");
+                        };
+                    };
+                }
+            }
+            """;
+
+        var senderOffset = source.IndexOf("sender.Text", StringComparison.Ordinal) +
+            "sender.T".Length;
+        var senderMembers = LucentCompiler.GetCompletions(source, senderOffset, "Events.lui");
+        Assert.IsTrue(senderMembers.Any(item => item.Label == "Text"));
+
+        var localOffset = source.IndexOf("current.Contains", StringComparison.Ordinal) +
+            "current.C".Length;
+        var localMembers = LucentCompiler.GetCompletions(source, localOffset, "Events.lui");
+        Assert.IsTrue(localMembers.Any(item => item.Label == "Contains"));
+
+        var eventArgsOffset = source.IndexOf("e) =>", StringComparison.Ordinal);
+        var eventArgsHover = LucentCompiler.GetExpressionSymbol(
+            source,
+            eventArgsOffset,
+            "Events.lui");
+        Assert.IsNotNull(eventArgsHover);
+        StringAssert.Contains(eventArgsHover.Display, "TextChangedEventArgs e");
+    }
+
+    [TestMethod]
+    public void Computed_values_keep_stale_data_cancel_prior_work_and_ignore_late_results()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Search()
+            {
+                private readonly State<string> query = new("lucent");
+                private readonly Computed<string[]> results = new(
+                    cancellationToken => Catalog.SearchAsync(query.Value, cancellationToken),
+                    []);
+
+                Fragment Render()
+                {
+                    return StackPanel {
+                        TextBlock { Text: results.IsPending ? "Updating" : results.ErrorMessage; }
+                        StackPanel {
+                            foreach (var result in results.Value) keyed by result {
+                                TextBlock { Text: result; }
+                            }
+                        }
+                    };
+                }
+            }
+            """,
+            "Search.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, "private string[] _results = [];");
+        StringAssert.Contains(result.GeneratedSource, "++_resultsGeneration");
+        StringAssert.Contains(result.GeneratedSource, "_resultsCancellation?.Cancel();");
+        StringAssert.Contains(result.GeneratedSource, "generation != _resultsGeneration");
+        StringAssert.Contains(result.GeneratedSource, "Catalog.SearchAsync(_query, cancellationToken)");
+        StringAssert.Contains(result.GeneratedSource, "var sourceItems = (_results).ToArray();");
+    }
+
+    [TestMethod]
+    public void Invalid_css_reports_a_css_diagnostic_instead_of_crashing()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render() { return Border { Class: "card"; }; }
+            }
+            """,
+            "Main.lui",
+            projectContext: null,
+            ".card { background: definitely-not-a-color; }",
+            "Main.css");
+
+        Assert.IsFalse(result.Succeeded);
+        var diagnostic = result.Diagnostics.Single(candidate => candidate.Code == "LUC4001");
+        Assert.AreEqual("Main.css", diagnostic.SourcePath);
+        StringAssert.Contains(diagnostic.Message, "color");
+    }
+
+    [TestMethod]
+    public void Css_subset_lowers_variables_pseudo_classes_and_native_transitions()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render()
+                {
+                    return StackPanel {
+                        Class: "shell";
+                        Button { Class: "primary"; Content: "Search"; }
+                    };
+                }
+            }
+            """,
+            "Main.lui",
+            projectContext: null,
+            """
+            :root { --accent: #7357e6; }
+            .shell { gap: 8px; padding: 16px; }
+            .primary {
+                background: var(--accent);
+                opacity: 0.8;
+                transition: opacity 150ms ease-out, background 150ms ease-out;
+            }
+            .primary:pointerover { opacity: 1; }
+            """,
+            "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource, ".OfType<global::Avalonia.Controls.Button>().Class(\"primary\").Class(\":pointerover\")");
+        StringAssert.Contains(result.GeneratedSource, "global::Avalonia.Controls.StackPanel.SpacingProperty");
+        StringAssert.Contains(result.GeneratedSource, "global::Avalonia.Media.Color.FromRgb(0x73, 0x57, 0xe6)");
+        StringAssert.Contains(result.GeneratedSource, "global::Avalonia.Animation.BrushTransition");
+        StringAssert.Contains(result.GeneratedSource, "global::Avalonia.Animation.DoubleTransition");
     }
 
     [TestMethod]

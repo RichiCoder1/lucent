@@ -35,6 +35,11 @@ internal sealed class GeneralBinder(
             .Where(state => state is not null)
             .Cast<BoundStateModel>()
             .ToArray();
+        var computed = component.AllComputedMembers
+            .Select(BindComputed)
+            .Where(candidate => candidate is not null)
+            .Cast<BoundComputedModel>()
+            .ToArray();
 
         if (component.RenderMethod.Root.Name == "Missing")
         {
@@ -54,6 +59,7 @@ internal sealed class GeneralBinder(
                 component.Name,
                 syntax.AllUsings.Select(directive => directive.Text).ToArray(),
                 states,
+                computed,
                 root);
     }
 
@@ -63,6 +69,27 @@ internal sealed class GeneralBinder(
             state.Name,
             state.InitializerText ?? state.InitialValue.ToString(),
             state.Span);
+
+    private BoundComputedModel? BindComputed(ComputedMemberSyntax computed)
+    {
+        var arguments = SyntaxFactory.ParseArgumentList(
+            "(" + computed.InitializerText + ")");
+        if (arguments.Arguments.Count != 2 ||
+            arguments.Arguments[0].Expression is not LambdaExpressionSyntax)
+        {
+            AddUnsupported(
+                computed.InitializerSpan,
+                "Computed<T> requires a cancellation-token lambda and an initial value: new(ct => LoadAsync(ct), initialValue).");
+            return null;
+        }
+
+        return new BoundComputedModel(
+            computed.TypeName,
+            computed.Name,
+            arguments.Arguments[0].Expression.ToFullString().Trim(),
+            arguments.Arguments[1].Expression.ToFullString().Trim(),
+            computed.Span);
+    }
 
     private BoundControlModel? BindControl(
         UiElementSyntax element,
@@ -296,17 +323,17 @@ internal sealed class GeneralBinder(
             return;
         }
 
-        if (property.Name == "class")
+        if (property.Name == "Class")
         {
-            if (!seenMembers.Add("class"))
+            if (!seenMembers.Add("Class"))
             {
-                AddUnsupported(property.Span, $"{element.Name} may contain only one 'class' member.");
+                AddUnsupported(property.Span, $"{element.Name} may contain only one 'Class' member.");
                 return;
             }
 
             members.Add(
                 new BoundPropertyMember(
-                    "class",
+                    "Class",
                     property.Value.Text,
                     property.Value.Span,
                     property.Value is StringValueSyntax,
@@ -366,6 +393,10 @@ internal sealed class GeneralBinder(
                 control,
                 resolvedProperty,
                 PropertyNameSpan(property)));
+        _symbols.AddRange(resolver.GetValueSymbols(
+            resolvedProperty,
+            property.Value.Text,
+            property.Value.Span.Start));
     }
 
     private BoundEventMember? BindEvent(

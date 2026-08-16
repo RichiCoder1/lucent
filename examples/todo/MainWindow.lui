@@ -1,0 +1,20 @@
+namespace Lucent.Examples.Todo;
+
+using Lucent.Examples.Todo;
+
+component MainWindow()
+{
+    Fragment Render()
+    {
+        return Window {
+            Title: "Lucent TodoMVC";
+            Width: 900;
+            Height: 760;
+            MinWidth: 700;
+            MinHeight: 560;
+            WindowStartupLocation: Avalonia.Controls.WindowStartupLocation.CenterScreen;
+
+            Todo {}
+        };
+    }
+}

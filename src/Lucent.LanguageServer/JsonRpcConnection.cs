@@ -6,6 +6,8 @@ namespace Lucent.LanguageServer;
 
 internal sealed class JsonRpcConnection(Stream input, Stream output)
 {
+    internal const int MaxPayloadLength = 16 * 1024 * 1024;
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -46,6 +48,12 @@ internal sealed class JsonRpcConnection(Stream input, Stream output)
         }
 
         var contentLength = ParseContentLength(header.WrittenSpan[..^4]);
+        if (contentLength > MaxPayloadLength)
+        {
+            throw new InvalidDataException(
+                $"The JSON-RPC payload exceeds the {MaxPayloadLength}-byte limit.");
+        }
+
         var payload = new byte[contentLength];
         await _input.ReadExactlyAsync(payload, cancellationToken);
         return JsonDocument.Parse(payload);

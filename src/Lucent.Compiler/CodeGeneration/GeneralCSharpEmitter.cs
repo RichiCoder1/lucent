@@ -1,4 +1,6 @@
+using System.Globalization;
 using Lucent.Compiler.Parsing;
+using Lucent.Compiler.Styling;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -10,7 +12,8 @@ internal static class GeneralCSharpEmitter
     public static string Emit(
         BoundComponentModel model,
         string sourcePath,
-        string sourceText)
+        string sourceText,
+        BoundStyleSheet? styles = null)
     {
         var source = new SourceDocument(sourceText, sourcePath);
         var writer = new CodeWriter();
@@ -41,6 +44,10 @@ internal static class GeneralCSharpEmitter
         }
         writer.Line("using Avalonia.Controls;");
         writer.Line("using Avalonia.Interactivity;");
+        if (styles?.Rules.Count > 0)
+        {
+            writer.Line("using Avalonia.Styling;");
+        }
         writer.Line("using Avalonia.Threading;");
         foreach (var usingDirective in model.Usings
                      .Where(directive =>
@@ -82,6 +89,15 @@ internal static class GeneralCSharpEmitter
             writer.Line($"private {state.TypeName} _{state.Name} = {state.InitializerText};");
         }
 
+        foreach (var computed in model.Computed)
+        {
+            writer.Line($"private {computed.TypeName} _{computed.Name} = {computed.InitialValueText};");
+            writer.Line($"private bool _{computed.Name}Pending;");
+            writer.Line($"private string? _{computed.Name}ErrorMessage;");
+            writer.Line($"private global::System.Threading.CancellationTokenSource? _{computed.Name}Cancellation;");
+            writer.Line($"private int _{computed.Name}Generation;");
+        }
+
         writer.Line("private bool _disposed;");
         writer.Line("private bool _mounted;");
         writer.Line();
@@ -106,10 +122,12 @@ internal static class GeneralCSharpEmitter
             writer.Line($"_control{index} = new {control.TypeName}();");
         }
 
+        EmitStyles(writer, model, styles ?? BoundStyleSheet.Empty);
+
         writer.Line();
         foreach (var (control, index) in fields)
         {
-            EmitStaticProperties(writer, control, index, model.States, source);
+            EmitStaticProperties(writer, control, index, model.States, model.Computed, source);
         }
 
         foreach (var (control, index) in fields)
@@ -129,6 +147,10 @@ internal static class GeneralCSharpEmitter
 
         writer.Line();
         writer.Line("UpdateBindings();");
+        foreach (var computed in model.Computed)
+        {
+            writer.Line($"Refresh{Pascal(computed.Name)}();");
+        }
         writer.Line();
         writer.Line("return _control1!;");
         writer.Unindent();
@@ -172,6 +194,12 @@ internal static class GeneralCSharpEmitter
             writer.Line($"_region{region.Index}.Clear();");
         }
 
+        foreach (var computed in model.Computed)
+        {
+            writer.Line($"_{computed.Name}Cancellation?.Cancel();");
+            writer.Line($"_{computed.Name}Cancellation?.Dispose();");
+        }
+
         writer.Line();
         writer.Line("_disposed = true;");
         writer.Unindent();
@@ -192,6 +220,12 @@ internal static class GeneralCSharpEmitter
         {
             writer.Line();
             EmitRegionUpdater(writer, model, region, source);
+        }
+
+        foreach (var computed in model.Computed)
+        {
+            writer.Line();
+            EmitComputed(writer, computed, model.States);
         }
 
         foreach (var state in model.States)
@@ -226,6 +260,14 @@ internal static class GeneralCSharpEmitter
             writer.Line();
             writer.Line($"_{state.Name} = value;");
             writer.Line("UpdateBindings();");
+            if (model.Computed.Count > 0)
+            {
+                writer.Line("// ponytail: refresh all computed values; use symbol dependencies when components have several.");
+            }
+            foreach (var computed in model.Computed)
+            {
+                writer.Line($"Refresh{Pascal(computed.Name)}();");
+            }
             writer.Unindent();
             writer.Line("}");
             writer.Line();
@@ -259,17 +301,385 @@ internal static class GeneralCSharpEmitter
         return writer.ToString();
     }
 
+    private static void EmitComputed(
+        CodeWriter writer,
+        BoundComputedModel computed,
+        IReadOnlyList<BoundStateModel> states)
+    {
+        var pascalName = Pascal(computed.Name);
+        var factory = RewriteStateReferences(computed.FactoryText, states);
+
+        writer.Line($"private void Refresh{pascalName}()");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("if (_disposed)");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("return;");
+        writer.Unindent();
+        writer.Line("}");
+        writer.Line();
+        writer.Line($"var generation = ++_{computed.Name}Generation;");
+        writer.Line($"_{computed.Name}Cancellation?.Cancel();");
+        writer.Line($"_{computed.Name}Cancellation?.Dispose();");
+        writer.Line($"_{computed.Name}Cancellation = new global::System.Threading.CancellationTokenSource();");
+        writer.Line($"_{computed.Name}Pending = true;");
+        writer.Line($"_{computed.Name}ErrorMessage = null;");
+        writer.Line("UpdateBindings();");
+        writer.Line($"_ = Run{pascalName}Async(generation, _{computed.Name}Cancellation.Token);");
+        writer.Unindent();
+        writer.Line("}");
+        writer.Line();
+
+        writer.Line($"private async global::System.Threading.Tasks.Task Run{pascalName}Async(");
+        writer.Indent();
+        writer.Line("int generation,");
+        writer.Line("global::System.Threading.CancellationToken cancellationToken)");
+        writer.Unindent();
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("try");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line(
+            $"var value = await ((global::System.Func<global::System.Threading.CancellationToken, " +
+            $"global::System.Threading.Tasks.Task<{computed.TypeName}>>)({factory}))(cancellationToken);");
+        writer.Line("Dispatcher.UIThread.Post(() =>");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line($"if (_disposed || generation != _{computed.Name}Generation)");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("return;");
+        writer.Unindent();
+        writer.Line("}");
+        writer.Line();
+        writer.Line($"_{computed.Name} = value;");
+        writer.Line($"_{computed.Name}Pending = false;");
+        writer.Line("UpdateBindings();");
+        writer.Unindent();
+        writer.Line("});");
+        writer.Unindent();
+        writer.Line("}");
+        writer.Line("catch (global::System.OperationCanceledException) when (cancellationToken.IsCancellationRequested)");
+        writer.Line("{");
+        writer.Line("}");
+        writer.Line("catch (global::System.Exception exception)");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("Dispatcher.UIThread.Post(() =>");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line($"if (_disposed || generation != _{computed.Name}Generation)");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("return;");
+        writer.Unindent();
+        writer.Line("}");
+        writer.Line();
+        writer.Line($"_{computed.Name}Pending = false;");
+        writer.Line($"_{computed.Name}ErrorMessage = exception.Message;");
+        writer.Line("UpdateBindings();");
+        writer.Unindent();
+        writer.Line("});");
+        writer.Unindent();
+        writer.Line("}");
+        writer.Unindent();
+        writer.Line("}");
+    }
+
+    private static void EmitStyles(
+        CodeWriter writer,
+        BoundComponentModel model,
+        BoundStyleSheet styles)
+    {
+        if (styles.Rules.Count == 0)
+        {
+            return;
+        }
+
+        var controls = FlattenStyleTargets(model.Root).ToArray();
+        foreach (var rule in styles.Rules)
+        {
+            var targetTypes = controls
+                .Where(control => Matches(rule, control))
+                .Select(control => control.TypeName)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            foreach (var targetType in targetTypes)
+            {
+                var selector = $"x.OfType<{targetType}>()";
+                if (rule.ClassName is not null)
+                {
+                    selector += $".Class({Quote(rule.ClassName)})";
+                }
+                if (rule.PseudoClass is not null)
+                {
+                    selector += $".Class({Quote(rule.PseudoClass)})";
+                }
+
+                writer.Line();
+                writer.Line($"_control1!.Styles.Add(new global::Avalonia.Styling.Style(x => {selector})");
+                writer.Line("{");
+                writer.Indent();
+                writer.Line("Setters =");
+                writer.Line("{");
+                writer.Indent();
+                foreach (var declaration in rule.Declarations)
+                {
+                    if (declaration.PropertyName == "transition")
+                    {
+                        writer.Line(
+                            "new global::Avalonia.Styling.Setter(global::Avalonia.Animation.Animatable.TransitionsProperty, " +
+                            $"{LowerTransitions(declaration.Value, targetType)}),");
+                        continue;
+                    }
+
+                    writer.Line(
+                        $"new global::Avalonia.Styling.Setter({PropertyField(targetType, declaration.PropertyName)}, " +
+                        $"{LowerStyleValue(declaration.PropertyName, declaration.Value)}),");
+                }
+                writer.Unindent();
+                writer.Line("},");
+                writer.Unindent();
+                writer.Line("});");
+            }
+        }
+    }
+
+    private static bool Matches(BoundStyleRule rule, BoundControlModel control)
+    {
+        if (rule.TypeName is not null &&
+            !string.Equals(rule.TypeName, control.Name, StringComparison.Ordinal) &&
+            !control.TypeName.EndsWith("." + rule.TypeName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return rule.ClassName is null || StaticClasses(control).Contains(rule.ClassName);
+    }
+
+    private static HashSet<string> StaticClasses(BoundControlModel control)
+    {
+        var classes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in control.Members
+                     .OfType<BoundPropertyMember>()
+                     .Where(property => property.Name == "Class"))
+        {
+            if (SyntaxFactory.ParseExpression(property.ExpressionText) is LiteralExpressionSyntax literal &&
+                literal.IsKind(SyntaxKind.StringLiteralExpression))
+            {
+                foreach (var name in literal.Token.ValueText.Split(
+                             ' ',
+                             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    classes.Add(name);
+                }
+            }
+        }
+
+        return classes;
+    }
+
+    private static IEnumerable<BoundControlModel> FlattenStyleTargets(BoundControlModel root)
+    {
+        yield return root;
+        foreach (var member in root.Members)
+        {
+            var child = member switch
+            {
+                BoundChildMember boundChild => boundChild.Child,
+                BoundForEachMember loop => loop.Body,
+                _ => null,
+            };
+            if (child is null)
+            {
+                continue;
+            }
+
+            foreach (var nested in FlattenStyleTargets(child))
+            {
+                yield return nested;
+            }
+        }
+    }
+
+    private static string PropertyField(string targetType, string cssName)
+    {
+        var propertyName = cssName switch
+        {
+            "gap" => "Spacing",
+            "border-radius" => "CornerRadius",
+            _ => string.Concat(cssName.Split('-')
+                .Select(part => char.ToUpperInvariant(part[0]) + part[1..])),
+        };
+        return $"{targetType}.{propertyName}Property";
+    }
+
+    private static string LowerStyleValue(string propertyName, string value) =>
+        propertyName switch
+        {
+            "background" or "foreground" => LowerBrush(value),
+            "padding" or "margin" => LowerThickness(value),
+            "border-radius" => LowerCornerRadius(value),
+            "font-weight" => value switch
+            {
+                "normal" => "global::Avalonia.Media.FontWeight.Normal",
+                "semibold" or "600" => "global::Avalonia.Media.FontWeight.SemiBold",
+                "bold" or "700" => "global::Avalonia.Media.FontWeight.Bold",
+                _ => throw new InvalidOperationException($"Unsupported CSS font weight '{value}'."),
+            },
+            "horizontal-alignment" =>
+                $"global::Avalonia.Layout.HorizontalAlignment.{Pascal(value)}",
+            "vertical-alignment" =>
+                $"global::Avalonia.Layout.VerticalAlignment.{Pascal(value)}",
+            _ => LowerNumber(value),
+        };
+
+    private static string LowerBrush(string value)
+    {
+        if (!value.StartsWith('#'))
+        {
+            return value switch
+            {
+                "transparent" => "global::Avalonia.Media.Brushes.Transparent",
+                "black" => "global::Avalonia.Media.Brushes.Black",
+                "white" => "global::Avalonia.Media.Brushes.White",
+                _ => throw new InvalidOperationException($"Unsupported CSS color '{value}'."),
+            };
+        }
+
+        var hex = value[1..];
+        if (hex.Length == 3)
+        {
+            hex = string.Concat(hex.Select(character => new string(character, 2)));
+        }
+
+        if (hex.Length != 6 || !uint.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb))
+        {
+            throw new InvalidOperationException($"Unsupported CSS color '{value}'.");
+        }
+
+        return "new global::Avalonia.Media.SolidColorBrush(" +
+               $"global::Avalonia.Media.Color.FromRgb(0x{hex[..2]}, 0x{hex[2..4]}, 0x{hex[4..6]}))";
+    }
+
+    private static string LowerThickness(string value)
+    {
+        var values = value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(LowerNumber)
+            .ToArray();
+        return values.Length switch
+        {
+            1 => $"new global::Avalonia.Thickness({values[0]})",
+            2 => $"new global::Avalonia.Thickness({values[1]}, {values[0]})",
+            4 => $"new global::Avalonia.Thickness({values[3]}, {values[0]}, {values[1]}, {values[2]})",
+            _ => throw new InvalidOperationException($"Unsupported CSS thickness '{value}'."),
+        };
+    }
+
+    private static string LowerCornerRadius(string value)
+    {
+        var values = value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(LowerNumber)
+            .ToArray();
+        return values.Length switch
+        {
+            1 => $"new global::Avalonia.CornerRadius({values[0]})",
+            4 => $"new global::Avalonia.CornerRadius({string.Join(", ", values)})",
+            _ => throw new InvalidOperationException($"Unsupported CSS corner radius '{value}'."),
+        };
+    }
+
+    private static string LowerNumber(string value)
+    {
+        var number = value.EndsWith("px", StringComparison.Ordinal)
+            ? value[..^2]
+            : value;
+        if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            throw new InvalidOperationException($"Unsupported CSS number '{value}'.");
+        }
+
+        return parsed.ToString("R", CultureInfo.InvariantCulture) + "d";
+    }
+
+    private static string LowerTransitions(string value, string targetType)
+    {
+        var transitions = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(candidate => LowerTransition(candidate, targetType));
+        return "new global::Avalonia.Animation.Transitions { " +
+               string.Join(", ", transitions) + " }";
+    }
+
+    private static string LowerTransition(string value, string targetType)
+    {
+        var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length is < 2 or > 3)
+        {
+            throw new InvalidOperationException($"Unsupported CSS transition '{value}'.");
+        }
+
+        var propertyName = parts[0];
+        var transitionType = propertyName switch
+        {
+            "background" or "foreground" => "BrushTransition",
+            "padding" or "margin" => "ThicknessTransition",
+            "border-radius" => "CornerRadiusTransition",
+            _ => "DoubleTransition",
+        };
+        var duration = LowerDuration(parts[1]);
+        var easing = parts.Length == 3 ? LowerEasing(parts[2]) : "LinearEasing";
+        return $"new global::Avalonia.Animation.{transitionType} " +
+               "{ " +
+               $"Property = {PropertyField(targetType, propertyName)}, " +
+               $"Duration = global::System.TimeSpan.FromMilliseconds({duration}), " +
+               $"Easing = new global::Avalonia.Animation.Easings.{easing}() " +
+               "}";
+    }
+
+    private static string LowerDuration(string value)
+    {
+        var multiplier = value.EndsWith("ms", StringComparison.Ordinal) ? 1d :
+            value.EndsWith('s') ? 1000d :
+            throw new InvalidOperationException($"Unsupported CSS duration '{value}'.");
+        var number = value.EndsWith("ms", StringComparison.Ordinal) ? value[..^2] : value[..^1];
+        if (!double.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+        {
+            throw new InvalidOperationException($"Unsupported CSS duration '{value}'.");
+        }
+
+        return (parsed * multiplier).ToString("R", CultureInfo.InvariantCulture) + "d";
+    }
+
+    private static string LowerEasing(string value) => value switch
+    {
+        "linear" => "LinearEasing",
+        "ease-in" => "QuadraticEaseIn",
+        "ease-out" => "QuadraticEaseOut",
+        "ease-in-out" => "QuadraticEaseInOut",
+        _ => throw new InvalidOperationException($"Unsupported CSS easing '{value}'."),
+    };
+
+    private static string Pascal(string value) =>
+        char.ToUpperInvariant(value[0]) + value[1..];
+
+    private static string Quote(string value) =>
+        "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+
     private static void EmitStaticProperties(
         CodeWriter writer,
         BoundControlModel control,
         int index,
         IReadOnlyList<BoundStateModel> states,
+        IReadOnlyList<BoundComputedModel> computed,
         SourceDocument source)
     {
         foreach (var property in control.Members.OfType<BoundPropertyMember>())
         {
             var target = $"_control{index}!";
-            if (property.Name == "class")
+            if (property.Name == "Class")
             {
                 EmitLineMapping(writer, source, property.ExpressionSpan);
                 writer.Line($"{target}.Classes.Add({property.ExpressionText});");
@@ -277,7 +687,7 @@ internal static class GeneralCSharpEmitter
                 continue;
             }
 
-            if (IsReactive(property.ExpressionText, states))
+            if (IsReactive(property.ExpressionText, states, computed))
             {
                 continue;
             }
@@ -292,7 +702,7 @@ internal static class GeneralCSharpEmitter
 
         foreach (var content in control.Members.OfType<BoundContentMember>())
         {
-            if (IsReactive(content.ExpressionText, states))
+            if (IsReactive(content.ExpressionText, states, computed))
             {
                 continue;
             }
@@ -340,8 +750,8 @@ internal static class GeneralCSharpEmitter
         {
             foreach (var property in control.Members.OfType<BoundPropertyMember>())
             {
-                if (property.Name == "class" ||
-                    !IsReactive(property.ExpressionText, model.States))
+                if (property.Name == "Class" ||
+                    !IsReactive(property.ExpressionText, model.States, model.Computed))
                 {
                     continue;
                 }
@@ -349,7 +759,8 @@ internal static class GeneralCSharpEmitter
                 EmitLineMapping(writer, source, property.ExpressionSpan);
                 var rewritten = RewriteStateReferences(
                     property.ExpressionText,
-                    model.States);
+                    model.States,
+                    model.Computed);
                 var expression = LowerPropertyValue(
                     rewritten,
                     property.NativeValueKind);
@@ -361,7 +772,7 @@ internal static class GeneralCSharpEmitter
 
             foreach (var content in control.Members.OfType<BoundContentMember>())
             {
-                if (!IsReactive(content.ExpressionText, model.States))
+                if (!IsReactive(content.ExpressionText, model.States, model.Computed))
                 {
                     continue;
                 }
@@ -372,7 +783,10 @@ internal static class GeneralCSharpEmitter
                     index,
                     content with
                     {
-                        ExpressionText = RewriteStateReferences(content.ExpressionText, model.States),
+                        ExpressionText = RewriteStateReferences(
+                            content.ExpressionText,
+                            model.States,
+                            model.Computed),
                     },
                     source);
             }
@@ -404,7 +818,7 @@ internal static class GeneralCSharpEmitter
         EmitEventParameterAliases(writer, control, eventMember);
         EmitLineMapping(writer, source, eventMember.BodySpan);
 
-        var body = RewriteStateReferences(eventMember.BodyText, model.States).Trim();
+        var body = RewriteStateReferences(eventMember.BodyText, model.States, model.Computed).Trim();
         if (body.Length > 0)
         {
             foreach (var line in body.Split(
@@ -536,7 +950,7 @@ internal static class GeneralCSharpEmitter
         EmitLineMapping(writer, source, loop.SourceExpressionSpan);
         writer.Line(
             $"var sourceItems = " +
-            $"({RewriteStateReferences(loop.SourceExpression, model.States)}).ToArray();");
+            $"({RewriteStateReferences(loop.SourceExpression, model.States, model.Computed)}).ToArray();");
         writer.Line("#line default");
         writer.Line($"foreach (var {loop.ItemName} in sourceItems)");
         writer.Line("{");
@@ -589,6 +1003,7 @@ internal static class GeneralCSharpEmitter
                 index,
                 loop.ItemName,
                 model.States,
+                model.Computed,
                 source);
         }
 
@@ -621,6 +1036,7 @@ internal static class GeneralCSharpEmitter
                 index,
                 loop.ItemName,
                 model.States,
+                model.Computed,
                 source);
         }
 
@@ -652,7 +1068,7 @@ internal static class GeneralCSharpEmitter
                 EmitLineMapping(writer, source, eventMember.BodySpan);
                 EmitBody(
                     writer,
-                    RewriteStateReferences(body, model.States));
+                    RewriteStateReferences(body, model.States, model.Computed));
                 writer.Line("#line default");
                 writer.Unindent();
                 writer.Line("};");
@@ -750,11 +1166,12 @@ internal static class GeneralCSharpEmitter
         int index,
         string itemName,
         IReadOnlyList<BoundStateModel> states,
+        IReadOnlyList<BoundComputedModel> computed,
         SourceDocument source)
     {
         foreach (var property in control.Members.OfType<BoundPropertyMember>())
         {
-            if (property.Name == "class")
+            if (property.Name == "Class")
             {
                 EmitLineMapping(writer, source, property.ExpressionSpan);
                 writer.Line($"control{index}.Classes.Add({property.ExpressionText});");
@@ -762,7 +1179,7 @@ internal static class GeneralCSharpEmitter
                 continue;
             }
 
-            if (IsReactive(property.ExpressionText, states) ||
+            if (IsReactive(property.ExpressionText, states, computed) ||
                 ReferencesItem(property.ExpressionText, itemName))
             {
                 continue;
@@ -778,7 +1195,7 @@ internal static class GeneralCSharpEmitter
 
         foreach (var content in control.Members.OfType<BoundContentMember>())
         {
-            if (IsReactive(content.ExpressionText, states) ||
+            if (IsReactive(content.ExpressionText, states, computed) ||
                 ReferencesItem(content.ExpressionText, itemName))
             {
                 continue;
@@ -794,12 +1211,13 @@ internal static class GeneralCSharpEmitter
         int index,
         string itemName,
         IReadOnlyList<BoundStateModel> states,
+        IReadOnlyList<BoundComputedModel> computed,
         SourceDocument source)
     {
         foreach (var property in control.Members.OfType<BoundPropertyMember>())
         {
-            if (property.Name == "class" ||
-                (!IsReactive(property.ExpressionText, states) &&
+            if (property.Name == "Class" ||
+                (!IsReactive(property.ExpressionText, states, computed) &&
                  !ReferencesItem(property.ExpressionText, itemName)))
             {
                 continue;
@@ -807,7 +1225,7 @@ internal static class GeneralCSharpEmitter
 
             EmitLineMapping(writer, source, property.ExpressionSpan);
             var target = $"control{index}.{property.Name}";
-            var rewritten = RewriteStateReferences(property.ExpressionText, states);
+            var rewritten = RewriteStateReferences(property.ExpressionText, states, computed);
             writer.Line(
                 $"{target} = " +
                 $"{LowerPropertyValue(rewritten, property.NativeValueKind)};");
@@ -816,7 +1234,7 @@ internal static class GeneralCSharpEmitter
 
         foreach (var content in control.Members.OfType<BoundContentMember>())
         {
-            if (!IsReactive(content.ExpressionText, states) &&
+            if (!IsReactive(content.ExpressionText, states, computed) &&
                 !ReferencesItem(content.ExpressionText, itemName))
             {
                 continue;
@@ -828,7 +1246,7 @@ internal static class GeneralCSharpEmitter
                 index,
                 content with
                 {
-                    ExpressionText = RewriteStateReferences(content.ExpressionText, states),
+                    ExpressionText = RewriteStateReferences(content.ExpressionText, states, computed),
                 },
                 source);
         }
@@ -976,45 +1394,70 @@ internal static class GeneralCSharpEmitter
 
     private static bool IsReactive(
         string expression,
-        IReadOnlyList<BoundStateModel> states)
+        IReadOnlyList<BoundStateModel> states,
+        IReadOnlyList<BoundComputedModel>? computed = null)
     {
         var stateNames = states
             .Select(state => state.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        var computedNames = (computed ?? [])
+            .Select(candidate => candidate.Name)
             .ToHashSet(StringComparer.Ordinal);
         var root = CSharpSyntaxTree.ParseText(expression).GetRoot();
         return root.DescendantNodes()
             .OfType<MemberAccessExpressionSyntax>()
             .Any(access =>
                 access.Expression is IdentifierNameSyntax identifier &&
-                stateNames.Contains(identifier.Identifier.ValueText) &&
-                access.Name.Identifier.ValueText == "Value");
+                (stateNames.Contains(identifier.Identifier.ValueText) &&
+                 access.Name.Identifier.ValueText == "Value" ||
+                 computedNames.Contains(identifier.Identifier.ValueText) &&
+                 access.Name.Identifier.ValueText is "Value" or "IsPending" or "ErrorMessage"));
     }
 
     private static string RewriteStateReferences(
         string expression,
-        IReadOnlyList<BoundStateModel> states)
+        IReadOnlyList<BoundStateModel> states,
+        IReadOnlyList<BoundComputedModel>? computed = null)
     {
         var replacements = new List<(int Start, int Length, string Text)>();
         var stateNames = states.ToDictionary(
             state => state.Name,
             state => state,
             StringComparer.Ordinal);
+        var computedNames = (computed ?? []).ToDictionary(
+            candidate => candidate.Name,
+            candidate => candidate,
+            StringComparer.Ordinal);
         var root = CSharpSyntaxTree.ParseText(expression).GetRoot();
         foreach (var access in root.DescendantNodes()
                      .OfType<MemberAccessExpressionSyntax>())
         {
-            if (access.Expression is not IdentifierNameSyntax identifier ||
-                !stateNames.TryGetValue(identifier.Identifier.ValueText, out var state))
+            if (access.Expression is not IdentifierNameSyntax identifier)
             {
                 continue;
             }
 
-            var replacement = access.Name.Identifier.ValueText switch
+            string? replacement = null;
+            if (stateNames.TryGetValue(identifier.Identifier.ValueText, out var state))
             {
-                "Value" => "_" + state.Name,
-                "Update" => SetterName(state.Name),
-                _ => null,
-            };
+                replacement = access.Name.Identifier.ValueText switch
+                {
+                    "Value" => "_" + state.Name,
+                    "Update" => SetterName(state.Name),
+                    _ => null,
+                };
+            }
+            else if (computedNames.TryGetValue(identifier.Identifier.ValueText, out var candidate))
+            {
+                replacement = access.Name.Identifier.ValueText switch
+                {
+                    "Value" => "_" + candidate.Name,
+                    "IsPending" => "_" + candidate.Name + "Pending",
+                    "ErrorMessage" => "_" + candidate.Name + "ErrorMessage",
+                    _ => null,
+                };
+            }
+
             if (replacement is not null)
             {
                 replacements.Add(

@@ -91,10 +91,16 @@ public sealed class CompileLucent : Task
             try
             {
                 var sourceText = File.ReadAllText(sourcePath);
+                var stylePath = Path.ChangeExtension(sourcePath, ".css");
+                var styleText = File.Exists(stylePath)
+                    ? File.ReadAllText(stylePath)
+                    : null;
                 var result = LucentCompiler.Compile(
                     sourceText,
                     sourcePath,
-                    projectContext);
+                    projectContext,
+                    styleText,
+                    stylePath);
                 LogDiagnostics(sourcePath, result.Diagnostics);
 
                 if (!result.Succeeded || result.GeneratedSource is null)
@@ -244,6 +250,7 @@ public sealed class CompileLucent : Task
     {
         foreach (var diagnostic in diagnostics)
         {
+            var diagnosticPath = diagnostic.SourcePath ?? sourcePath;
             var line = Math.Max(1, diagnostic.Line);
             var column = Math.Max(1, diagnostic.Column);
             var endColumn = Math.Max(column, column + Math.Max(0, diagnostic.Span.Length));
@@ -253,7 +260,7 @@ public sealed class CompileLucent : Task
                 Log.LogErrorEvent(new BuildErrorEventArgs(
                     subcategory: "Lucent",
                     code: diagnostic.Code,
-                    file: sourcePath,
+                    file: diagnosticPath,
                     lineNumber: line,
                     columnNumber: column,
                     endLineNumber: line,
@@ -267,7 +274,7 @@ public sealed class CompileLucent : Task
                 Log.LogWarningEvent(new BuildWarningEventArgs(
                     subcategory: "Lucent",
                     code: diagnostic.Code,
-                    file: sourcePath,
+                    file: diagnosticPath,
                     lineNumber: line,
                     columnNumber: column,
                     endLineNumber: line,

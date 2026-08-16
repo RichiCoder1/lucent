@@ -27,6 +27,11 @@ test('manifest packages the language client runtime', () => {
 
     assert.ok(manifest.files.includes('node_modules'));
     assert.equal(manifest.dependencies['vscode-languageclient'], '10.1.0');
+    assert.ok(manifest.contributes.commands.some(
+        command => command.command === 'lucent.showLanguageServerOutput'));
+    assert.deepEqual(
+        manifest.contributes.configuration.properties['lucent.languageServer.trace'].enum,
+        ['off', 'messages', 'verbose']);
 });
 
 test('grammar and language configuration are valid JSON with Lucent constructs', () => {
@@ -35,10 +40,10 @@ test('grammar and language configuration are valid JSON with Lucent constructs',
 
     assert.equal(grammar.scopeName, 'source.lucent');
     assert.match(
-        grammar.repository.keywords.patterns[0].match,
+        grammar.repository.declarations.patterns[2].match,
         /component/);
     assert.match(
-        grammar.repository.keywords.patterns[1].match,
+        grammar.repository.keywords.patterns[0].match,
         /keyed/);
     assert.match(
         grammar.repository.properties.patterns[0].match,

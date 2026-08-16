@@ -1,5 +1,14 @@
 # Counter example
 
-This is the north-star proof-of-concept slice, not an executable application yet. It captures the smallest example that exercises a class-shaped component, its explicit `Render()` method, control creation, an event, component-owned state, a fine-grained property update, CSS classes, and a design token.
+A standalone Avalonia application containing the smallest state-and-event
+Lucent example.
 
-The first end-to-end compiler milestone should make these files produce a real Avalonia window. The later styling milestone should consume `Counter.css` without runtime parsing of its static declarations.
+```powershell
+dotnet run --project examples/counter/Counter.csproj
+```
+
+[`MainWindow.lui`](MainWindow.lui) defines the native `Window` and hosts
+`Counter {}` as its content. [`Counter.lui`](Counter.lui) owns the reactive
+counter, while adjacent [`Counter.css`](Counter.css) supplies its compiled
+styles. `Counter.cs` is the minimal native adapter until direct Lucent component
+invocation is executable.

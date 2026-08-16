@@ -37,7 +37,16 @@
       {
         "language": "lucent",
         "scopeName": "source.lucent",
-        "path": "./syntaxes/lucent.tmLanguage.json"
+        "path": "./syntaxes/lucent.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.cs": "csharp"
+        }
+      }
+    ],
+    "commands": [
+      {
+        "command": "lucent.showLanguageServerOutput",
+        "title": "Lucent: Show Language Server Output"
       }
     ],
     "configuration": {
@@ -52,6 +61,16 @@
           "type": "string",
           "default": "server/Lucent.LanguageServer.dll",
           "description": "Path to the net9 Lucent language-server assembly, relative to this extension when not absolute."
+        },
+        "lucent.languageServer.trace": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "messages",
+          "description": "Structured language-server tracing written to the Lucent output channel."
         }
       }
     }

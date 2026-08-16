@@ -104,8 +104,8 @@ public sealed class CompilerTests
     {
         var source = File.ReadAllText(RepositoryPaths.CounterSource)
             .Replace(
-                "class: \"primary\";",
-                "class: \"primary\";\n                MinWidth: 120;",
+                "Class: \"primary\";",
+                "Class: \"primary\";\n                MinWidth: 120;",
                 StringComparison.Ordinal);
 
         var result = LucentCompiler.Compile(source, "NativeProperty.lui");
@@ -119,8 +119,8 @@ public sealed class CompilerTests
     {
         var source = File.ReadAllText(RepositoryPaths.CounterSource)
             .Replace(
-                "class: \"primary\";",
-                "class: \"primary\";\n                class: \"secondary\";",
+                "Class: \"primary\";",
+                "Class: \"primary\";\n                Class: \"secondary\";",
                 StringComparison.Ordinal);
 
         var result = LucentCompiler.Compile(source, "DuplicateClass.lui");
@@ -129,7 +129,7 @@ public sealed class CompilerTests
         Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
             diagnostic.Code == "LUC2001" &&
             diagnostic.Message.Contains(
-                "only one 'class'",
+                "only one 'Class'",
                 StringComparison.Ordinal)));
     }
 }

@@ -8,6 +8,110 @@ namespace Lucent.LanguageServer.Tests;
 public sealed class LanguageServerProtocolTests
 {
     [TestMethod]
+    public void Windows_file_uris_do_not_duplicate_the_drive()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Assert.IsTrue(FileUri.TryGetPath(
+            "file:///d%3A/src/richicoder1/lucent",
+            out var path));
+        Assert.AreEqual(
+            @"D:\src\richicoder1\lucent",
+            path,
+            ignoreCase: true);
+    }
+
+    [TestMethod]
+    public async Task Project_context_keeps_local_sources_when_design_time_build_fails()
+    {
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-context-fallback-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+
+        try
+        {
+            var projectPath = Path.Combine(temporaryDirectory, "Example.csproj");
+            var lucentPath = Path.Combine(temporaryDirectory, "MainWindow.lui");
+            var counterPath = Path.Combine(temporaryDirectory, "Counter.cs");
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+                "<TargetFramework>net9.0</TargetFramework></PropertyGroup>" +
+                "<ItemGroup><LucentSource Include=\"MainWindow.lui\" /></ItemGroup>" +
+                "<Target Name=\"FailDesignTime\" BeforeTargets=\"ResolveReferences\">" +
+                "<Error Text=\"forced design-time failure\" /></Target></Project>");
+            await File.WriteAllTextAsync(lucentPath, "namespace Demo;");
+            await File.WriteAllTextAsync(
+                counterPath,
+                "namespace Demo; internal sealed class Counter { }");
+            var loader = new ProjectContextLoader();
+            using var initialize = JsonDocument.Parse("{}");
+            loader.Configure(initialize.RootElement);
+
+            var context = await loader.LoadAsync(lucentPath, CancellationToken.None);
+
+            Assert.IsNotNull(context);
+            Assert.IsTrue(context.Sources.Contains(counterPath));
+            Assert.AreEqual(0, context.References.Count);
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task Project_context_reloads_when_a_source_file_is_added()
+    {
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-context-cache-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+
+        try
+        {
+            var projectPath = Path.Combine(temporaryDirectory, "Example.csproj");
+            var lucentPath = Path.Combine(temporaryDirectory, "MainWindow.lui");
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+                "<TargetFramework>net9.0</TargetFramework></PropertyGroup>" +
+                "<ItemGroup><LucentSource Include=\"MainWindow.lui\" /></ItemGroup>" +
+                "</Project>");
+            await File.WriteAllTextAsync(lucentPath, "namespace Demo;");
+            var loader = new ProjectContextLoader();
+            using var initialize = JsonDocument.Parse("{}");
+            loader.Configure(initialize.RootElement);
+
+            var first = await loader.LoadAsync(lucentPath, CancellationToken.None);
+            Assert.IsNotNull(first);
+            Assert.IsFalse(first.Sources.Any(path => path.EndsWith("Counter.cs")));
+
+            var counterPath = Path.Combine(temporaryDirectory, "Counter.cs");
+            await File.WriteAllTextAsync(
+                counterPath,
+                "namespace Demo; internal sealed class Counter { }");
+            Directory.SetLastWriteTimeUtc(
+                temporaryDirectory,
+                DateTime.UtcNow.AddSeconds(1));
+
+            var second = await loader.LoadAsync(lucentPath, CancellationToken.None);
+            Assert.IsNotNull(second);
+            Assert.IsTrue(second.Sources.Contains(counterPath));
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task Initialize_open_shutdown_and_exit_use_stdio_json_rpc()
     {
         var input = BuildInput(
@@ -65,6 +169,38 @@ public sealed class LanguageServerProtocolTests
                 .GetProperty("capabilities")
                 .GetProperty("definitionProvider")
                 .GetBoolean());
+        Assert.AreEqual(
+            ":",
+            initialize.RootElement
+                .GetProperty("result")
+                .GetProperty("capabilities")
+                .GetProperty("completionProvider")
+                .GetProperty("triggerCharacters")[0]
+                .GetString());
+        Assert.AreEqual(
+            ".",
+            initialize.RootElement
+                .GetProperty("result")
+                .GetProperty("capabilities")
+                .GetProperty("completionProvider")
+                .GetProperty("triggerCharacters")[1]
+                .GetString());
+        Assert.AreEqual(
+            "(",
+            initialize.RootElement
+                .GetProperty("result")
+                .GetProperty("capabilities")
+                .GetProperty("completionProvider")
+                .GetProperty("triggerCharacters")[2]
+                .GetString());
+        Assert.AreEqual(
+            ",",
+            initialize.RootElement
+                .GetProperty("result")
+                .GetProperty("capabilities")
+                .GetProperty("completionProvider")
+                .GetProperty("triggerCharacters")[3]
+                .GetString());
 
         var published = messages.Single(message =>
             message.RootElement.TryGetProperty("method", out var method) &&
@@ -146,6 +282,64 @@ public sealed class LanguageServerProtocolTests
     }
 
     [TestMethod]
+    public async Task Malformed_payload_does_not_prevent_later_requests()
+    {
+        var malformed = Encoding.UTF8.GetBytes("{");
+        using var input = BuildInput(
+            Frame(malformed),
+            Request(1, "shutdown", null),
+            Notification("exit", null));
+        using var output = new MemoryStream();
+
+        var exitCode = await LanguageServer.RunAsync(input, output);
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(
+            JsonValueKind.Null,
+            Response(ReadMessages(output.ToArray()), 1)
+                .GetProperty("result")
+                .ValueKind);
+    }
+
+    [TestMethod]
+    public async Task Oversized_payload_is_rejected_before_allocation()
+    {
+        var header = Encoding.ASCII.GetBytes(
+            $"Content-Length: {JsonRpcConnection.MaxPayloadLength + 1}\r\n\r\n");
+        using var input = new MemoryStream(header);
+        using var output = new MemoryStream();
+
+        var exitCode = await LanguageServer.RunAsync(input, output);
+
+        Assert.AreEqual(1, exitCode);
+        Assert.AreEqual(0, output.Length);
+    }
+
+    [TestMethod]
+    public async Task Unexpected_request_failure_returns_internal_error()
+    {
+        using var input = BuildInput(
+            Request(1, "initialize", new
+            {
+                workspaceFolders = new[]
+                {
+                    new { uri = "file:///C:/%00", name = "invalid" },
+                },
+                capabilities = new { },
+            }),
+            Request(2, "shutdown", null),
+            Notification("exit", null));
+        using var output = new MemoryStream();
+
+        var exitCode = await LanguageServer.RunAsync(input, output);
+        var error = Response(ReadMessages(output.ToArray()), 1)
+            .GetProperty("error");
+
+        Assert.AreEqual(0, exitCode);
+        Assert.AreEqual(-32603, error.GetProperty("code").GetInt32());
+    }
+
+    [TestMethod]
     public async Task Hover_and_definition_use_project_semantic_symbols()
     {
         var temporaryDirectory = Path.Combine(
@@ -156,36 +350,53 @@ public sealed class LanguageServerProtocolTests
 
         try
         {
-            var projectPath = Path.Combine(temporaryDirectory, "Demo.csproj");
-            var controlPath = Path.Combine(temporaryDirectory, "FancyControl.cs");
-            var sourcePath = Path.Combine(temporaryDirectory, "Custom.lui");
+            var projectDirectory = Path.Combine(temporaryDirectory, "src", "App");
+            var exampleDirectory = Path.Combine(temporaryDirectory, "examples");
+            Directory.CreateDirectory(projectDirectory);
+            Directory.CreateDirectory(exampleDirectory);
+            await File.WriteAllTextAsync(
+                Path.Combine(temporaryDirectory, "Demo.sln"),
+                string.Empty);
+            var projectPath = Path.Combine(projectDirectory, "Demo.csproj");
+            var controlPath = Path.Combine(projectDirectory, "FancyControl.cs");
+            var sourcePath = Path.Combine(exampleDirectory, "Custom.lui");
             await File.WriteAllTextAsync(
                 projectPath,
                 "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
                 "<TargetFramework>net9.0</TargetFramework></PropertyGroup>" +
-                "<ItemGroup><LucentSource Include=\"Custom.lui\" /></ItemGroup></Project>");
+                "<ItemGroup><LucentSource Include=\"..\\..\\examples\\Custom.lui\" />" +
+                "</ItemGroup></Project>");
             await File.WriteAllTextAsync(
                 controlPath,
                 "namespace Demo.Controls; public sealed class FancyControl : " +
-                "Avalonia.Controls.ContentControl { public string? Accent { get; set; } }");
+                "Avalonia.Controls.ContentControl { public string? Accent { get; set; } } " +
+                "public sealed record PackageInfo(string Name, string Id, string Description); " +
+                "public static class PackageCatalog { public static System.Threading.Tasks.Task<PackageInfo[]> " +
+                "Load(System.Threading.CancellationToken cancellationToken) => throw null!; }");
             const string source =
                 "namespace Demo;\r\n" +
                 "using Demo.Controls;\r\n" +
                 "component Custom()\r\n" +
                 "{\r\n" +
+                "    private readonly State<string> query = new(\"lucent\");\r\n" +
+                "    private readonly Computed<PackageInfo[]> packages = new(ct => PackageCatalog.Load(ct), []);\r\n" +
                 "    Fragment Render()\r\n" +
                 "    {\r\n" +
-                "        return FancyControl { Accent: \"blue\"; };\r\n" +
+                "        return StackPanel {\r\n" +
+                "            foreach (var package in packages.Value)\r\n" +
+                "            keyed by package.Id {\r\n" +
+                "                FancyControl { Accent: package.Description; }\r\n" +
+                "            }\r\n" +
+                "        };\r\n" +
                 "    }\r\n" +
                 "}\r\n";
             await File.WriteAllTextAsync(sourcePath, source);
             var uri = new Uri(sourcePath).AbsoluteUri;
-            var rootUri = new Uri(temporaryDirectory + Path.DirectorySeparatorChar).AbsoluteUri;
             var accentPosition = PositionOf(source, "Accent");
+            var expressionOffset = source.IndexOf("package.Description", StringComparison.Ordinal);
             var input = BuildInput(
                 Request(1, "initialize", new
                 {
-                    rootUri,
                     capabilities = new { },
                 }),
                 Notification("initialized", new { }),
@@ -209,7 +420,90 @@ public sealed class LanguageServerProtocolTests
                     textDocument = new { uri },
                     position = accentPosition,
                 }),
-                Request(4, "shutdown", null),
+                Request(4, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, expressionOffset + "package.D".Length),
+                }),
+                Request(5, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source, expressionOffset + "package.".Length),
+                }),
+                Request(6, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(
+                        source,
+                        source.IndexOf("packages.Value", StringComparison.Ordinal) +
+                        "packages.V".Length),
+                }),
+                Request(7, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "packages ="),
+                }),
+                Request(8, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "State<string>"),
+                }),
+                Request(9, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "new(\"lucent\")"),
+                }),
+                Request(10, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "PackageCatalog.Load"),
+                }),
+                Request(11, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "Load(ct)"),
+                }),
+                Request(12, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "ct =>"),
+                }),
+                Request(13, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(
+                        source,
+                        source.IndexOf("PackageCatalog.Load", StringComparison.Ordinal) +
+                        "PackageCatalog.L".Length),
+                }),
+                Request(14, "textDocument/definition", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "PackageCatalog.Load"),
+                }),
+                Request(15, "textDocument/definition", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(
+                        source,
+                        source.LastIndexOf("packages.Value", StringComparison.Ordinal)),
+                }),
+                Request(16, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(
+                        source,
+                        source.IndexOf("PackageCatalog.Load", StringComparison.Ordinal) + 1),
+                }),
+                Request(17, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(
+                        source,
+                        source.IndexOf("Load(ct)", StringComparison.Ordinal) +
+                        "Load(".Length),
+                }),
+                Request(18, "shutdown", null),
                 Notification("exit", null));
             using var output = new MemoryStream();
 
@@ -221,6 +515,9 @@ public sealed class LanguageServerProtocolTests
             StringAssert.Contains(
                 hover.GetProperty("contents").GetProperty("value").GetString()!,
                 "FancyControl.Accent");
+            Assert.IsFalse(
+                hover.GetProperty("contents").GetProperty("value").GetString()!
+                    .Contains("Native Avalonia", StringComparison.Ordinal));
             var definition = Response(messages, 3).GetProperty("result");
             Assert.AreEqual(
                 new Uri(controlPath).AbsoluteUri,
@@ -231,11 +528,142 @@ public sealed class LanguageServerProtocolTests
                     .GetProperty("start")
                     .GetProperty("line")
                     .GetInt32());
+            Assert.IsTrue(Response(messages, 4)
+                .GetProperty("result")
+                .EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Description"));
+            StringAssert.Contains(
+                Response(messages, 5)
+                    .GetProperty("result")
+                    .GetProperty("contents")
+                    .GetProperty("value")
+                    .GetString()!,
+                "PackageInfo.Description");
+            var computedMembers = Response(messages, 6)
+                .GetProperty("result")
+                .EnumerateArray()
+                .Select(item => item.GetProperty("label").GetString())
+                .ToArray();
+            CollectionAssert.Contains(computedMembers, "Value");
+            CollectionAssert.Contains(computedMembers, "IsPending");
+            StringAssert.Contains(
+                Response(messages, 7)
+                    .GetProperty("result")
+                    .GetProperty("contents")
+                    .GetProperty("value")
+                    .GetString()!,
+                "private readonly Computed<PackageInfo[]> packages");
+            StringAssert.Contains(HoverText(messages, 8), "class State<T>");
+            StringAssert.Contains(HoverText(messages, 9), "State<string>.State");
+            StringAssert.Contains(HoverText(messages, 10), "class Demo.Controls.PackageCatalog");
+            StringAssert.Contains(HoverText(messages, 11), "PackageCatalog.Load");
+            StringAssert.Contains(HoverText(messages, 12), "CancellationToken ct");
+            Assert.IsTrue(Response(messages, 13)
+                .GetProperty("result")
+                .EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Load"));
+            Assert.AreEqual(
+                new Uri(controlPath).AbsoluteUri,
+                Response(messages, 14)
+                    .GetProperty("result")
+                    .GetProperty("uri")
+                    .GetString());
+            Assert.AreEqual(
+                uri,
+                Response(messages, 15)
+                    .GetProperty("result")
+                    .GetProperty("uri")
+                    .GetString());
+            Assert.IsTrue(Response(messages, 16)
+                .GetProperty("result")
+                .EnumerateArray()
+                .Any(item =>
+                    item.GetProperty("label").GetString() == "PackageCatalog" &&
+                    item.GetProperty("kind").GetInt32() == 7));
+            var argumentCompletions = Response(messages, 17)
+                .GetProperty("result")
+                .EnumerateArray()
+                .Select(item => item.GetProperty("label").GetString())
+                .ToArray();
+            CollectionAssert.Contains(argumentCompletions, "ct");
+            CollectionAssert.Contains(argumentCompletions, "query");
+            CollectionAssert.Contains(argumentCompletions, "PackageCatalog");
         }
         finally
         {
             Directory.Delete(temporaryDirectory, recursive: true);
         }
+    }
+
+    [TestMethod]
+    public async Task Completion_and_value_hover_use_the_native_property_type()
+    {
+        const string source =
+            "namespace Demo;\r\n" +
+            "using Avalonia.Layout;\r\n" +
+            "component Main()\r\n" +
+            "{\r\n" +
+            "    Fragment Render()\r\n" +
+            "    {\r\n" +
+            "        return StackPanel {\r\n" +
+            "            Orientation: Orientation.Horizontal;\r\n" +
+            "            Button { Content: \"Go\"; }\r\n" +
+            "        };\r\n" +
+            "    }\r\n" +
+            "}\r\n";
+        const string uri = "file:///Completion.lui";
+        var memberPosition = PositionAtOffset(
+            source,
+            source.IndexOf("Button {", StringComparison.Ordinal) + "Button {".Length);
+        var valuePosition = PositionOf(source, "Orientation.Horizontal");
+        var hoverPosition = PositionOf(source, "Horizontal");
+        var input = BuildInput(
+            Request(1, "initialize", new { capabilities = new { } }),
+            Notification("initialized", new { }),
+            Notification("textDocument/didOpen", new
+            {
+                textDocument = new
+                {
+                    uri,
+                    languageId = "lucent",
+                    version = 1,
+                    text = source,
+                },
+            }),
+            Request(2, "textDocument/completion", new
+            {
+                textDocument = new { uri },
+                position = memberPosition,
+            }),
+            Request(3, "textDocument/completion", new
+            {
+                textDocument = new { uri },
+                position = valuePosition,
+            }),
+            Request(4, "textDocument/hover", new
+            {
+                textDocument = new { uri },
+                position = hoverPosition,
+            }),
+            Request(5, "shutdown", null),
+            Notification("exit", null));
+        using var output = new MemoryStream();
+
+        Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+        var messages = ReadMessages(output.ToArray());
+        var members = Response(messages, 2).GetProperty("result").EnumerateArray().ToArray();
+        Assert.IsTrue(members.Any(item => item.GetProperty("label").GetString() == "Click"));
+        Assert.IsTrue(members.Any(item => item.GetProperty("label").GetString() == "Class"));
+        var values = Response(messages, 3).GetProperty("result").EnumerateArray().ToArray();
+        Assert.IsTrue(values.Any(item =>
+            item.GetProperty("label").GetString() == "Orientation.Horizontal"));
+        StringAssert.Contains(
+            Response(messages, 4)
+                .GetProperty("result")
+                .GetProperty("contents")
+                .GetProperty("value")
+                .GetString()!,
+            "Orientation.Horizontal");
     }
 
     private static MemoryStream BuildInput(params byte[][] messages) =>
@@ -261,6 +689,11 @@ public sealed class LanguageServerProtocolTests
     private static byte[] Message(object message)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(message);
+        return Frame(payload);
+    }
+
+    private static byte[] Frame(byte[] payload)
+    {
         var header = Encoding.ASCII.GetBytes(
             $"Content-Length: {payload.Length}\r\n\r\n");
         return header.Concat(payload).ToArray();
@@ -311,10 +744,24 @@ public sealed class LanguageServerProtocolTests
                 responseId.GetInt32() == id)
             .RootElement;
 
+    private static string HoverText(
+        IReadOnlyList<JsonDocument> messages,
+        int id) =>
+        Response(messages, id)
+            .GetProperty("result")
+            .GetProperty("contents")
+            .GetProperty("value")
+            .GetString()!;
+
     private static object PositionOf(string text, string value)
     {
         var offset = text.IndexOf(value, StringComparison.Ordinal);
         Assert.IsGreaterThanOrEqualTo(0, offset);
+        return PositionAtOffset(text, offset);
+    }
+
+    private static object PositionAtOffset(string text, int offset)
+    {
         var prefix = text[..offset];
         var line = prefix.Count(character => character == '\n');
         var lineStart = prefix.LastIndexOf('\n') + 1;
@@ -331,7 +778,7 @@ public sealed class LanguageServerProtocolTests
         "        return Column {\r\n" +
         "            Text { text: \"😀\"; tooltip: \"Not supported\"; }\r\n" +
         "            Button {\r\n" +
-        "                class: \"primary\";\r\n" +
+        "                Class: \"primary\";\r\n" +
         "                text: \"Increment\";\r\n" +
         "                onClick: () => count.Update(count.Value + 1);\r\n" +
         "            }\r\n" +
@@ -349,7 +796,7 @@ public sealed class LanguageServerProtocolTests
         "        return Column {\r\n" +
         "            Text { text: $\"Count: {count.Value}\"; }\r\n" +
         "            Button {\r\n" +
-        "                class: \"primary\";\r\n" +
+        "                Class: \"primary\";\r\n" +
         "                text: \"Increment\";\r\n" +
         "                onClick: () => count.Update(count.Value + 1);\r\n" +
         "            }\r\n" +

@@ -3,10 +3,16 @@
 }
 
 .counter {
-    padding: 16px;
+    margin: 16px;
     gap: 8px;
 }
 
 .primary {
     background: var(--accent);
+    opacity: 0.84;
+    transition: opacity 150ms ease-out;
+}
+
+.primary:pointerover {
+    opacity: 1;
 }

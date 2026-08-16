@@ -28,15 +28,29 @@ Required capabilities:
 - hover information;
 - document symbols.
 
-Useful follow-ups include Lucent-to-C# navigation, parameter and property completion, signature help, CSS class and token completion, references, rename, and reactive dependency inspection.
-
 The current server implements document synchronization, shared compiler
-diagnostics, native control/property/event hover, and source navigation for
-project-defined controls and members. It discovers the owning `.csproj`, uses
-design-time MSBuild to obtain C# sources and resolved references, and feeds that
-context to the same Roslyn-backed binder used by the build. Metadata-as-source,
-completion, document symbols, and Lucent component navigation remain follow-up
-work.
+diagnostics, native member and context-valid value completion, native
+control/property/event/value hover, and source navigation for project-defined
+controls and members. Completion includes writable Avalonia properties,
+compatible events, `Class`, enums, booleans, same-type static values, and
+compatible `Brushes` values. Property expressions also complete and hover
+component state, computed values, keyed-loop locals, event parameters and
+locals, project types, static members, methods, and typed member chains. Type,
+constructor, field, and expression hover plus project-source definition
+navigation work in persistent-member initializers and render expressions, so
+`Text: package.Description` resolves through the project's C# model. CSS class
+name completion inside `Class:` is intentionally excluded. C# types from the
+current namespace and imports are completion candidates, while `(` and `,`
+automatically reopen expression completion for arguments. It discovers the
+owning `.csproj` from workspace projects or the nearest repository/solution,
+including linked `LucentSource` files opened without a workspace root, and uses design-time
+MSBuild to obtain C# sources and resolved references, and feeds that context to
+the same Roslyn-backed binder used by the build.
+
+Useful follow-ups include Lucent-to-C# navigation, component-parameter and CSS
+class/token completion, signature help, metadata-as-source, document symbols,
+references, rename, reactive dependency inspection, and Lucent component
+navigation.
 
 ## Diagnostics
 

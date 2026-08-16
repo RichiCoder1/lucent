@@ -1,0 +1,21 @@
+namespace Lucent.Examples.PackagePulse;
+
+using Lucent.Examples.PackagePulse;
+
+component MainWindow()
+{
+    Fragment Render()
+    {
+        return Window {
+            Title: "Package Pulse — Lucent Async + CSS";
+            Width: 820;
+            Height: 760;
+            MinWidth: 600;
+            MinHeight: 560;
+            Background: Avalonia.Media.Brushes.Black;
+            WindowStartupLocation: Avalonia.Controls.WindowStartupLocation.CenterScreen;
+
+            PackagePulse {}
+        };
+    }
+}

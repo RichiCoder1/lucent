@@ -1,0 +1,88 @@
+:root {
+    --canvas: #10131a;
+    --surface: #191e29;
+    --surface-hover: #232b3a;
+    --text: #f5f7fb;
+    --muted: #9ca8ba;
+    --accent: #8ca7ff;
+}
+
+.app-shell {
+    background: var(--canvas);
+    padding: 32px;
+}
+
+.content {
+    gap: 12px;
+}
+
+TextBlock {
+    foreground: var(--text);
+}
+
+.eyebrow {
+    foreground: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.title {
+    font-size: 34px;
+    font-weight: 700;
+}
+
+.subtitle {
+    foreground: var(--muted);
+    opacity: 0.9;
+}
+
+.search {
+    background: var(--surface);
+    foreground: var(--text);
+    padding: 14px 12px;
+    font-size: 16px;
+    transition: background 140ms ease-out;
+}
+
+.search:focus {
+    background: var(--surface-hover);
+}
+
+.status {
+    foreground: var(--muted);
+    transition: opacity 160ms ease-out;
+}
+
+.results {
+    gap: 8px;
+    transition: opacity 180ms ease-out;
+}
+
+.package-row {
+    background: var(--surface);
+    padding: 16px;
+    border-radius: 10px;
+    transition: background 140ms ease-out, opacity 140ms ease-out;
+}
+
+.package-row:pointerover {
+    background: var(--surface-hover);
+}
+
+.package-copy {
+    gap: 4px;
+}
+
+.package-name {
+    font-size: 17px;
+    font-weight: 600;
+}
+
+.package-version {
+    foreground: var(--accent);
+    font-size: 12px;
+}
+
+.package-description {
+    foreground: var(--muted);
+}

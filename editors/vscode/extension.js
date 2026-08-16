@@ -14,6 +14,7 @@ async function activate(context) {
     const configuredPath = configuration.get(
         'languageServer.path',
         'server/Lucent.LanguageServer.dll');
+    const trace = configuration.get('languageServer.trace', 'messages');
     const serverPath = path.isAbsolute(configuredPath)
         ? configuredPath
         : path.join(context.extensionPath, configuredPath);
@@ -23,11 +24,23 @@ async function activate(context) {
             command,
             args: command === 'dotnet' ? [serverPath] : [],
             transport: TransportKind.stdio,
+            options: {
+                env: {
+                    ...process.env,
+                    LUCENT_LANGUAGE_SERVER_TRACE: trace,
+                },
+            },
         },
         debug: {
             command,
             args: command === 'dotnet' ? [serverPath] : [],
             transport: TransportKind.stdio,
+            options: {
+                env: {
+                    ...process.env,
+                    LUCENT_LANGUAGE_SERVER_TRACE: 'verbose',
+                },
+            },
         },
     };
 
@@ -36,6 +49,7 @@ async function activate(context) {
             { scheme: 'file', language: 'lucent' },
         ],
         diagnosticCollectionName: 'lucent',
+        outputChannelName: 'Lucent Language Server',
         synchronize: {
             configurationSection: 'lucent',
         },
@@ -46,6 +60,9 @@ async function activate(context) {
         'Lucent Language Server',
         serverOptions,
         clientOptions);
+    context.subscriptions.push(vscode.commands.registerCommand(
+        'lucent.showLanguageServerOutput',
+        () => client?.outputChannel.show()));
     await client.start();
     context.subscriptions.push({
         dispose: () => {

@@ -5,6 +5,8 @@ public enum LucentSemanticSymbolKind
     NativeControl,
     NativeProperty,
     NativeEvent,
+    NativeValue,
+    Expression,
 }
 
 public sealed record LucentDefinition(

@@ -12,4 +12,5 @@ public sealed record LucentDiagnostic(
     string Message,
     SourceSpan Span,
     int Line,
-    int Column);
+    int Column,
+    string? SourcePath = null);

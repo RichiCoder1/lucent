@@ -5,6 +5,12 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Poc", "src\Lucent.Poc\Lucent.Poc.csproj", "{6D3B8145-D79E-47D7-AD68-3549AF99102A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Counter", "examples\counter\Counter.csproj", "{1A118A10-91D1-49EC-A7D9-1625DFE0B101}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Todo", "examples\todo\Todo.csproj", "{2B229B21-A2E2-4AFD-B8EA-2736E0F1C202}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PackagePulse", "examples\package-pulse\PackagePulse.csproj", "{3C33AC32-B3F3-4B0E-C9FB-3847F102D303}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Compiler", "src\Lucent.Compiler\Lucent.Compiler.csproj", "{A5C2DDA1-6F04-4A0C-B3B9-01805E55C001}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Compiler.Cli", "src\Lucent.Compiler.Cli\Lucent.Compiler.Cli.csproj", "{B6D3EEB2-7A15-4B1D-C4CA-12916F66D002}"
@@ -29,6 +35,18 @@ Global
 		{6D3B8145-D79E-47D7-AD68-3549AF99102A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6D3B8145-D79E-47D7-AD68-3549AF99102A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6D3B8145-D79E-47D7-AD68-3549AF99102A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A118A10-91D1-49EC-A7D9-1625DFE0B101}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A118A10-91D1-49EC-A7D9-1625DFE0B101}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A118A10-91D1-49EC-A7D9-1625DFE0B101}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A118A10-91D1-49EC-A7D9-1625DFE0B101}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2B229B21-A2E2-4AFD-B8EA-2736E0F1C202}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2B229B21-A2E2-4AFD-B8EA-2736E0F1C202}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2B229B21-A2E2-4AFD-B8EA-2736E0F1C202}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2B229B21-A2E2-4AFD-B8EA-2736E0F1C202}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C33AC32-B3F3-4B0E-C9FB-3847F102D303}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C33AC32-B3F3-4B0E-C9FB-3847F102D303}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C33AC32-B3F3-4B0E-C9FB-3847F102D303}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C33AC32-B3F3-4B0E-C9FB-3847F102D303}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A5C2DDA1-6F04-4A0C-B3B9-01805E55C001}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A5C2DDA1-6F04-4A0C-B3B9-01805E55C001}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A5C2DDA1-6F04-4A0C-B3B9-01805E55C001}.Release|Any CPU.ActiveCfg = Release|Any CPU

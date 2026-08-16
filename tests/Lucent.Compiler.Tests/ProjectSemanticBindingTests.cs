@@ -4,6 +4,227 @@ namespace Lucent.Compiler.Tests;
 public sealed class ProjectSemanticBindingTests
 {
     [TestMethod]
+    public void Expression_completion_and_hover_resolve_keyed_loop_items()
+    {
+        var temporaryDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-expression-tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(temporaryDirectory);
+
+        try
+        {
+            var modelPath = Path.Combine(temporaryDirectory, "PackageInfo.cs");
+            File.WriteAllText(
+                modelPath,
+                "namespace Demo; " +
+                "public sealed record PackageInfo(string Name, string Id, string Description); " +
+                "public static class Catalog { " +
+                "public static System.Threading.Tasks.Task<PackageInfo[]> Load(" +
+                "System.Threading.CancellationToken cancellationToken) => throw null!; }");
+            const string source = """
+                namespace Demo;
+
+                component Packages()
+                {
+                    private readonly State<string> query = new("lucent");
+                    private readonly Computed<PackageInfo[]> packages = new(ct => Catalog.Load(ct), []);
+
+                    Fragment Render()
+                    {
+                        return StackPanel {
+                            TextBlock { Text: query.Value; }
+                            foreach (var package in packages.Value)
+                            keyed by package.Id {
+                                TextBlock { Text: package.Name; }
+                            }
+                        };
+                    }
+                }
+                """;
+            var sourcePath = Path.Combine(temporaryDirectory, "Packages.lui");
+            var context = new LucentProjectContext(
+                Path.Combine(temporaryDirectory, "Demo.csproj"),
+                SourcePaths: [modelPath]);
+            var expressionOffset = source.IndexOf("package.Name", StringComparison.Ordinal);
+
+            var roots = LucentCompiler.GetCompletions(
+                source,
+                expressionOffset,
+                sourcePath,
+                context);
+            Assert.IsTrue(roots.Any(item => item.Label == "package"));
+            Assert.IsTrue(roots.Any(item =>
+                item.Label == "query" &&
+                item.Detail == "private readonly State<string> query"));
+            Assert.IsTrue(roots.Any(item =>
+                item.Label == "packages" &&
+                item.Detail == "private readonly Computed<PackageInfo[]> packages"));
+
+            var queryOffset = source.IndexOf("query.Value", StringComparison.Ordinal);
+            var queryMembers = LucentCompiler.GetCompletions(
+                source,
+                queryOffset + "query.V".Length,
+                sourcePath,
+                context);
+            Assert.IsTrue(queryMembers.Any(item => item.Label == "Value"));
+            Assert.IsTrue(queryMembers.Any(item => item.Label == "Update"));
+
+            var packagesOffset = source.IndexOf("packages.Value", StringComparison.Ordinal);
+            var computedMembers = LucentCompiler.GetCompletions(
+                source,
+                packagesOffset + "packages.V".Length,
+                sourcePath,
+                context);
+            Assert.IsTrue(computedMembers.Any(item => item.Label == "Value"));
+            Assert.IsTrue(computedMembers.Any(item => item.Label == "IsPending"));
+            Assert.IsTrue(computedMembers.Any(item => item.Label == "ErrorMessage"));
+
+            var arraySource = source.Replace(
+                "Text: query.Value;",
+                "Text: packages.Value.Length;",
+                StringComparison.Ordinal);
+            var arrayOffset = arraySource.IndexOf("packages.Value.Length", StringComparison.Ordinal);
+            var arrayMembers = LucentCompiler.GetCompletions(
+                arraySource,
+                arrayOffset + "packages.Value.L".Length,
+                sourcePath,
+                context);
+            Assert.IsTrue(arrayMembers.Any(item => item.Label == "Length"));
+            var lengthHover = LucentCompiler.GetExpressionSymbol(
+                arraySource,
+                arrayOffset + "packages.Value.".Length,
+                sourcePath,
+                context);
+            Assert.IsNotNull(lengthHover);
+            StringAssert.Contains(lengthHover.Display, "Array.Length");
+
+            var staticOffset = source.IndexOf("Catalog.Load", StringComparison.Ordinal);
+            var staticMembers = LucentCompiler.GetCompletions(
+                source,
+                staticOffset + "Catalog.L".Length,
+                sourcePath,
+                context);
+            Assert.IsTrue(staticMembers.Any(item => item.Label == "Load"));
+
+            var cancellationOffset = source.IndexOf("Load(ct)", StringComparison.Ordinal) +
+                "Load(".Length;
+            var initializerSymbols = LucentCompiler.GetCompletions(
+                source,
+                cancellationOffset + 1,
+                sourcePath,
+                context);
+            Assert.IsTrue(initializerSymbols.Any(item => item.Label == "ct"));
+
+            var classSource = source.Replace(
+                "Text: package.Name;",
+                "Class: \"package-row\";",
+                StringComparison.Ordinal);
+            var classOffset = classSource.IndexOf("package-row", StringComparison.Ordinal);
+            Assert.AreEqual(
+                0,
+                LucentCompiler.GetCompletions(
+                    classSource,
+                    classOffset,
+                    sourcePath,
+                    context).Count);
+
+            var members = LucentCompiler.GetCompletions(
+                source,
+                expressionOffset + "package.N".Length,
+                sourcePath,
+                context);
+            Assert.IsTrue(members.Any(item => item.Label == "Name"));
+
+            var incompleteSource = source.Replace(
+                "Text: package.Name;",
+                "Text: package.D",
+                StringComparison.Ordinal);
+            var incompleteOffset = incompleteSource.IndexOf("package.D", StringComparison.Ordinal) +
+                "package.D".Length;
+            var incompleteMembers = LucentCompiler.GetCompletions(
+                incompleteSource,
+                incompleteOffset,
+                sourcePath,
+                context);
+            Assert.IsTrue(incompleteMembers.Any(item => item.Label == "Description"));
+
+            var hover = LucentCompiler.GetExpressionSymbol(
+                source,
+                expressionOffset + "package.".Length,
+                sourcePath,
+                context);
+            Assert.IsNotNull(hover);
+            StringAssert.Contains(hover.Display, "PackageInfo.Name");
+            Assert.IsNull(hover.Documentation);
+
+            var queryHover = LucentCompiler.GetExpressionSymbol(
+                source,
+                source.IndexOf("query =", StringComparison.Ordinal),
+                sourcePath,
+                context);
+            Assert.IsNotNull(queryHover);
+            Assert.AreEqual("private readonly State<string> query", queryHover.Display);
+            Assert.IsNull(queryHover.Documentation);
+
+            var packagesHover = LucentCompiler.GetExpressionSymbol(
+                source,
+                source.IndexOf("packages =", StringComparison.Ordinal),
+                sourcePath,
+                context);
+            Assert.IsNotNull(packagesHover);
+            Assert.AreEqual(
+                "private readonly Computed<PackageInfo[]> packages",
+                packagesHover.Display);
+            Assert.IsNull(packagesHover.Documentation);
+
+            var stateTypeHover = LucentCompiler.GetExpressionSymbol(
+                source,
+                source.IndexOf("State<string>", StringComparison.Ordinal),
+                sourcePath,
+                context);
+            Assert.IsNotNull(stateTypeHover);
+            Assert.AreEqual("class State<T>", stateTypeHover.Display);
+
+            var newHover = LucentCompiler.GetExpressionSymbol(
+                source,
+                source.IndexOf("new(\"lucent\")", StringComparison.Ordinal),
+                sourcePath,
+                context);
+            Assert.IsNotNull(newHover);
+            StringAssert.Contains(newHover.Display, "State<string>.State");
+
+            var catalogHover = LucentCompiler.GetExpressionSymbol(
+                source,
+                source.IndexOf("Catalog.Load", StringComparison.Ordinal),
+                sourcePath,
+                context);
+            Assert.IsNotNull(catalogHover);
+            Assert.AreEqual("class Demo.Catalog", catalogHover.Display);
+
+            var loadHover = LucentCompiler.GetExpressionSymbol(
+                source,
+                source.IndexOf("Load(ct)", StringComparison.Ordinal),
+                sourcePath,
+                context);
+            Assert.IsNotNull(loadHover);
+            StringAssert.Contains(loadHover.Display, "Catalog.Load");
+
+            var cancellationHover = LucentCompiler.GetExpressionSymbol(
+                source,
+                source.IndexOf("ct =>", StringComparison.Ordinal),
+                sourcePath,
+                context);
+            Assert.IsNotNull(cancellationHover);
+            Assert.AreEqual("CancellationToken ct", cancellationHover.Display);
+        }
+        finally
+        {
+            Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void Project_sources_resolve_custom_controls_properties_and_definitions()
     {
         var temporaryDirectory = Path.Combine(
@@ -73,7 +294,7 @@ public sealed class ProjectSemanticBindingTests
             Assert.AreEqual(controlPath, control.Definition?.SourcePath);
             Assert.AreEqual(controlPath, property.Definition?.SourcePath);
             StringAssert.Contains(property.Display, "FancyControl.Accent");
-            StringAssert.Contains(loaded.Documentation!, "FancyControl sender");
+            Assert.IsNull(loaded.Documentation);
         }
         finally
         {

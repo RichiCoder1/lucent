@@ -37,12 +37,23 @@ public static class LanguageServer
                 {
                     message = await _connection.ReadAsync(cancellationToken);
                 }
-                catch (JsonException)
+                catch (JsonException exception)
                 {
+                    LanguageServerLog.MalformedPayload(
+                        LanguageServerLog.Logger,
+                        exception);
                     // A malformed message cannot be associated with a request ID.
                     // Keep the stream alive so a client can recover with a later
                     // well-formed message.
                     continue;
+                }
+                catch (Exception exception) when (
+                    exception is InvalidDataException or EndOfStreamException)
+                {
+                    LanguageServerLog.TransportFailed(
+                        LanguageServerLog.Logger,
+                        exception);
+                    return 1;
                 }
 
                 if (message is null)
@@ -108,6 +119,11 @@ public static class LanguageServer
                                         },
                                         hoverProvider = true,
                                         definitionProvider = true,
+                                        completionProvider = new
+                                        {
+                                            resolveProvider = false,
+                                            triggerCharacters = new[] { ":", ".", "(", "," },
+                                        },
                                         positionEncoding = "utf-16",
                                     },
                                     serverInfo = new
@@ -173,6 +189,17 @@ public static class LanguageServer
 
                         break;
 
+                    case "textDocument/completion":
+                        if (hasId)
+                        {
+                            await CompletionAsync(
+                                id!.Value,
+                                parameters,
+                                cancellationToken);
+                        }
+
+                        break;
+
                     default:
                         if (hasId)
                         {
@@ -195,6 +222,25 @@ public static class LanguageServer
                         id!.Value,
                         -32602,
                         "The request parameters were invalid.",
+                        cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                LanguageServerLog.RequestFailed(
+                    LanguageServerLog.Logger,
+                    method,
+                    exception);
+                if (hasId)
+                {
+                    await _connection.WriteErrorAsync(
+                        id!.Value,
+                        -32603,
+                        "An internal error occurred while processing the request.",
                         cancellationToken);
                 }
             }
@@ -321,7 +367,15 @@ public static class LanguageServer
             var projectContext = await _projectContexts.LoadAsync(
                 sourcePath,
                 cancellationToken);
-            return LucentCompiler.Compile(text, sourcePath, projectContext);
+            var result = LucentCompiler.Compile(text, sourcePath, projectContext);
+            LanguageServerLog.DocumentAnalyzed(
+                LanguageServerLog.Logger,
+                sourcePath,
+                projectContext?.ProjectPath,
+                projectContext?.Sources.Count ?? 0,
+                projectContext?.References.Count ?? 0,
+                string.Join(',', result.Diagnostics.Select(item => item.Code)));
+            return result;
         }
 
         private async Task HoverAsync(
@@ -329,8 +383,37 @@ public static class LanguageServer
             JsonElement parameters,
             CancellationToken cancellationToken)
         {
-            var (document, symbol) = FindSymbol(parameters);
-            if (document is null || symbol is null)
+            var uri = parameters
+                .GetProperty("textDocument")
+                .GetProperty("uri")
+                .GetString();
+            if (uri is null || !_documents.TryGetValue(uri, out var document))
+            {
+                await _connection.WriteResponseAsync(id, null, cancellationToken);
+                return;
+            }
+
+            var offset = GetOffset(document.Text, parameters.GetProperty("position"));
+            var symbol = document.Analysis.Symbols
+                .Where(candidate =>
+                    offset >= candidate.ReferenceSpan.Start &&
+                    offset <= candidate.ReferenceSpan.End)
+                .OrderBy(candidate => candidate.ReferenceSpan.Length)
+                .FirstOrDefault();
+            if (symbol is null)
+            {
+                var sourcePath = GetSourcePath(uri);
+                var projectContext = await _projectContexts.LoadAsync(
+                    sourcePath,
+                    cancellationToken);
+                symbol = LucentCompiler.GetExpressionSymbol(
+                    document.Text,
+                    offset,
+                    sourcePath,
+                    projectContext);
+            }
+
+            if (symbol is null)
             {
                 await _connection.WriteResponseAsync(id, null, cancellationToken);
                 return;
@@ -353,12 +436,82 @@ public static class LanguageServer
                 cancellationToken);
         }
 
+        private async Task CompletionAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var uri = parameters
+                .GetProperty("textDocument")
+                .GetProperty("uri")
+                .GetString()
+                ?? throw new InvalidOperationException("A document URI is required.");
+            if (!_documents.TryGetValue(uri, out var document))
+            {
+                await _connection.WriteResponseAsync(id, Array.Empty<object>(), cancellationToken);
+                return;
+            }
+
+            var sourcePath = GetSourcePath(uri);
+            var projectContext = await _projectContexts.LoadAsync(
+                sourcePath,
+                cancellationToken);
+            var offset = GetOffset(document.Text, parameters.GetProperty("position"));
+            var completions = LucentCompiler.GetCompletions(
+                document.Text,
+                offset,
+                sourcePath,
+                projectContext);
+            await _connection.WriteResponseAsync(
+                id,
+                completions.Select(item => new
+                {
+                    label = item.Label,
+                    kind = item.Kind switch
+                    {
+                        LucentCompletionItemKind.Property => 10,
+                        LucentCompletionItemKind.Event => 23,
+                        LucentCompletionItemKind.Value => 12,
+                        LucentCompletionItemKind.Keyword => 14,
+                        LucentCompletionItemKind.Variable => 6,
+                        LucentCompletionItemKind.Field => 5,
+                        LucentCompletionItemKind.Method => 2,
+                        LucentCompletionItemKind.Type => 7,
+                        _ => 1,
+                    },
+                    detail = item.Detail,
+                    documentation = string.IsNullOrWhiteSpace(item.Documentation)
+                        ? null
+                        : new { kind = "markdown", value = item.Documentation },
+                    insertText = item.InsertText,
+                    insertTextFormat = item.IsSnippet ? 2 : 1,
+                }).ToArray(),
+                cancellationToken);
+        }
+
         private async Task DefinitionAsync(
             JsonElement id,
             JsonElement parameters,
             CancellationToken cancellationToken)
         {
-            var (_, symbol) = FindSymbol(parameters);
+            var (document, symbol) = FindSymbol(parameters);
+            if (document is not null && symbol is null)
+            {
+                var uri = parameters
+                    .GetProperty("textDocument")
+                    .GetProperty("uri")
+                    .GetString()!;
+                var sourcePath = GetSourcePath(uri);
+                var projectContext = await _projectContexts.LoadAsync(
+                    sourcePath,
+                    cancellationToken);
+                symbol = LucentCompiler.GetExpressionSymbol(
+                    document.Text,
+                    GetOffset(document.Text, parameters.GetProperty("position")),
+                    sourcePath,
+                    projectContext);
+            }
+
             if (symbol?.Definition is not { } definition ||
                 !File.Exists(definition.SourcePath))
             {
@@ -407,10 +560,9 @@ public static class LanguageServer
 
         private static string GetSourcePath(string uri)
         {
-            if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed) &&
-                parsed.IsFile)
+            if (FileUri.TryGetPath(uri, out var path))
             {
-                return parsed.LocalPath;
+                return path;
             }
 
             return uri;

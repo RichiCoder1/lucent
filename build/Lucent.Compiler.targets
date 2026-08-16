@@ -14,7 +14,7 @@
     BeforeTargets="CoreCompile"
     DependsOnTargets="ResolveReferences;GenerateGlobalUsings"
     Condition="'$(LucentCompilerEnabled)' == 'true' and '@(LucentSource)' != '' and '$(DesignTimeBuild)' != 'true'"
-    Inputs="@(LucentSource);@(Compile);@(ReferencePathWithRefAssemblies);$(LucentCompilerTaskAssembly);$(LucentCompilerCoreAssembly)"
+    Inputs="@(LucentSource);@(LucentSource->'%(RootDir)%(Directory)%(Filename).css');@(Compile);@(ReferencePathWithRefAssemblies);$(LucentCompilerTaskAssembly);$(LucentCompilerCoreAssembly)"
     Outputs="@(LucentGenerated)">
     <MakeDir Directories="$(LucentCompilerOutputDirectory)" />
 

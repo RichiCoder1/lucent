@@ -10,12 +10,12 @@ internal sealed class ProjectContextLoader
     private readonly StringComparer _pathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
-    private readonly Dictionary<string, LucentProjectContext?> _contexts;
+    private readonly Dictionary<string, CachedProjectContext> _contexts;
     private IReadOnlyList<string> _workspaceRoots = [];
 
     public ProjectContextLoader()
     {
-        _contexts = new Dictionary<string, LucentProjectContext?>(_pathComparer);
+        _contexts = new Dictionary<string, CachedProjectContext>(_pathComparer);
     }
 
     public void Configure(JsonElement initializeParameters)
@@ -43,6 +43,9 @@ internal sealed class ProjectContextLoader
 
         _workspaceRoots = roots.Distinct(_pathComparer).ToArray();
         _contexts.Clear();
+        LanguageServerLog.WorkspaceConfigured(
+            LanguageServerLog.Logger,
+            string.Join(Path.PathSeparator, _workspaceRoots));
     }
 
     public async Task<LucentProjectContext?> LoadAsync(
@@ -57,12 +60,21 @@ internal sealed class ProjectContextLoader
         var projectPath = FindProject(sourcePath);
         if (projectPath is null)
         {
+            LanguageServerLog.ProjectNotFound(LanguageServerLog.Logger, sourcePath);
             return null;
         }
 
-        if (_contexts.TryGetValue(projectPath, out var cached))
+        LanguageServerLog.ProjectSelected(
+            LanguageServerLog.Logger,
+            projectPath,
+            sourcePath);
+
+        var stamp = GetProjectStamp(projectPath);
+        if (_contexts.TryGetValue(projectPath, out var cached) &&
+            cached.Stamp == stamp)
         {
-            return cached;
+            LanguageServerLog.ProjectCacheHit(LanguageServerLog.Logger, projectPath);
+            return cached.Context;
         }
 
         LucentProjectContext? context;
@@ -75,23 +87,72 @@ internal sealed class ProjectContextLoader
             InvalidOperationException or JsonException or
             System.ComponentModel.Win32Exception)
         {
-            context = null;
+            LanguageServerLog.ProjectLoadFailed(
+                LanguageServerLog.Logger,
+                projectPath,
+                exception);
+            context = CreateFallbackContext(projectPath);
         }
 
         if (context is not null)
         {
-            _contexts[projectPath] = context;
+            _contexts[projectPath] = new CachedProjectContext(
+                context,
+                GetProjectStamp(projectPath));
+            LanguageServerLog.ProjectLoaded(
+                LanguageServerLog.Logger,
+                projectPath,
+                context.Sources.Count,
+                context.References.Count);
         }
 
         return context;
     }
 
+    private static ProjectStamp GetProjectStamp(string projectPath)
+    {
+        var hash = new HashCode();
+        hash.Add(File.GetLastWriteTimeUtc(projectPath));
+        var pending = new Stack<string>();
+        pending.Push(Path.GetDirectoryName(projectPath)!);
+        while (pending.TryPop(out var directory))
+        {
+            try
+            {
+                hash.Add(directory, StringComparer.OrdinalIgnoreCase);
+                hash.Add(Directory.GetLastWriteTimeUtc(directory));
+                foreach (var child in Directory.EnumerateDirectories(directory))
+                {
+                    if (!IgnoredDirectoryNames.Contains(Path.GetFileName(child)))
+                    {
+                        pending.Push(child);
+                    }
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                hash.Add(directory);
+            }
+        }
+
+        return new ProjectStamp(hash.ToHashCode());
+    }
+
     private string? FindProject(string sourcePath)
     {
         var fullSourcePath = Path.GetFullPath(sourcePath);
-        var projects = _workspaceRoots
+        var roots = _workspaceRoots;
+        if (FindFallbackRoot(fullSourcePath) is { } fallbackRoot &&
+            !roots.Contains(fallbackRoot, _pathComparer))
+        {
+            roots = roots.Append(fallbackRoot).ToArray();
+        }
+
+        var projects = roots
             .Where(Directory.Exists)
             .SelectMany(EnumerateProjects)
+            .Distinct(_pathComparer)
             .ToArray();
 
         foreach (var project in projects)
@@ -109,6 +170,31 @@ internal sealed class ProjectContextLoader
                 Path.GetDirectoryName(project)))
             .OrderByDescending(project => Path.GetDirectoryName(project)!.Length)
             .FirstOrDefault();
+    }
+
+    private static string? FindFallbackRoot(string sourcePath)
+    {
+        for (var directory = new DirectoryInfo(Path.GetDirectoryName(sourcePath)!);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            try
+            {
+                if (directory.EnumerateFiles("*.csproj").Any() ||
+                    directory.EnumerateFiles("*.sln").Any() ||
+                    Directory.Exists(Path.Combine(directory.FullName, ".git")))
+                {
+                    return directory.FullName;
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     private static IEnumerable<string> EnumerateProjects(string root)
@@ -181,6 +267,7 @@ internal sealed class ProjectContextLoader
         string projectPath,
         CancellationToken cancellationToken)
     {
+        LanguageServerLog.MsBuildStarted(LanguageServerLog.Logger, projectPath);
         var startInfo = new ProcessStartInfo("dotnet")
         {
             RedirectStandardOutput = true,
@@ -200,24 +287,32 @@ internal sealed class ProjectContextLoader
         using var process = Process.Start(startInfo);
         if (process is null)
         {
-            return null;
+            return CreateFallbackContext(projectPath);
         }
 
         var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         var output = await standardOutput;
-        _ = await standardError;
+        var error = await standardError;
         if (process.ExitCode != 0)
         {
-            return null;
+            LanguageServerLog.MsBuildFailed(
+                LanguageServerLog.Logger,
+                projectPath,
+                process.ExitCode,
+                error.Trim());
+            return CreateFallbackContext(projectPath);
         }
 
         var jsonStart = output.IndexOf('{');
         var jsonEnd = output.LastIndexOf('}');
         if (jsonStart < 0 || jsonEnd < jsonStart)
         {
-            return null;
+            LanguageServerLog.MsBuildInvalidOutput(
+                LanguageServerLog.Logger,
+                projectPath);
+            return CreateFallbackContext(projectPath);
         }
 
         using var document = JsonDocument.Parse(
@@ -238,6 +333,51 @@ internal sealed class ProjectContextLoader
                 : [];
 
         return new LucentProjectContext(projectPath, references, sources);
+    }
+
+    private static LucentProjectContext CreateFallbackContext(string projectPath)
+    {
+        var projectDirectory = Path.GetDirectoryName(projectPath)!;
+        var sources = Directory.EnumerateFiles(
+                projectDirectory,
+                "*.cs",
+                SearchOption.AllDirectories)
+            .Where(path => !IsBuildOutput(path))
+            .ToList();
+
+        try
+        {
+            var document = XDocument.Load(projectPath);
+            foreach (var include in document.Descendants()
+                         .Where(element => element.Name.LocalName == "Compile")
+                         .Select(element => element.Attribute("Include")?.Value)
+                         .Where(include =>
+                             !string.IsNullOrWhiteSpace(include) &&
+                             !include!.Contains('*') &&
+                             !include.Contains('$')))
+            {
+                var path = Path.GetFullPath(include!, projectDirectory);
+                if (File.Exists(path))
+                {
+                    sources.Add(path);
+                }
+            }
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+            System.Xml.XmlException or ArgumentException)
+        {
+            // Project-local sources still provide a useful degraded context.
+        }
+
+        var context = new LucentProjectContext(
+            projectPath,
+            SourcePaths: sources.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        LanguageServerLog.ProjectFallback(
+            LanguageServerLog.Logger,
+            projectPath,
+            context.Sources.Count);
+        return context;
     }
 
     private static IEnumerable<string> ReadItems(JsonElement items)
@@ -278,11 +418,17 @@ internal sealed class ProjectContextLoader
             !Path.IsPathFullyQualified(relative);
     }
 
+    private sealed record CachedProjectContext(
+        LucentProjectContext Context,
+        ProjectStamp Stamp);
+
+    private readonly record struct ProjectStamp(int Value);
+
     private static void AddFileUri(ICollection<string> roots, string? uri)
     {
-        if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.IsFile)
+        if (FileUri.TryGetPath(uri, out var path))
         {
-            roots.Add(Path.GetFullPath(parsed.LocalPath));
+            roots.Add(path);
         }
     }
 }

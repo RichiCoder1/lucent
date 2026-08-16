@@ -1,0 +1,18 @@
+namespace Lucent.Examples.Counter;
+
+using Lucent.Examples.Counter;
+
+component MainWindow()
+{
+    Fragment Render()
+    {
+        return Window {
+            Title: "Lucent Counter";
+            Width: 420;
+            Height: 260;
+            WindowStartupLocation: Avalonia.Controls.WindowStartupLocation.CenterScreen;
+
+            Counter {}
+        };
+    }
+}

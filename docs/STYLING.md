@@ -17,14 +17,19 @@ Static styles should be parsed and validated during the build. The runtime may s
 
 ## Initial CSS surface
 
-The proof of concept should start with:
+The executable subset supports:
 
-- type selectors;
-- classes;
-- useful pseudo-classes;
-- basic descendant and child combinators;
-- CSS custom properties;
-- a narrow set of common Avalonia visual properties.
+- one type selector and/or one class per rule;
+- one trailing Avalonia pseudo-class such as `:pointerover` or `:focus`;
+- compile-time `:root` custom properties;
+- colors, opacity, spacing, thickness, corner radius, size, font size and
+  weight, and alignment;
+- comma-separated `transition` declarations for brush, double, thickness, and
+  corner-radius properties.
+
+Adjacent `.lui` and `.css` files are compiled together. The compiler emits
+native Avalonia `Style`, `Setter`, and typed `Transition` objects; it does not
+ship CSS strings or a runtime CSS parser.
 
 ```css
 :root {
@@ -46,7 +51,19 @@ The proof of concept should start with:
 }
 ```
 
-CSS scoping, IDs, media or platform conditions, transitions, animations, and the exact selector mapping to Avalonia are not settled. Add them only after the initial style IR and control projection prove the basic model.
+This is deliberately Avalonia-targeted rather than browser-compatible:
+
+- `gap` maps to `StackPanel.Spacing`;
+- `padding` is valid only on controls that expose an Avalonia padding property;
+- selectors match projected Avalonia controls and their real pseudo-classes;
+- property names must map to an animatable or styled Avalonia property;
+- CSS pixels are device-independent Avalonia units;
+- transitions use Avalonia animation priority and reveal the latest underlying
+  value when interrupted or completed.
+
+Descendant/child combinators, IDs, scoping, media/platform conditions,
+keyframes, transforms, enter/exit lifetime animation, and reduced-motion policy
+remain deferred. Add them only when a concrete application needs them.
 
 ## Design tokens
 

@@ -7,14 +7,14 @@ component Counter()
     Fragment Render()
     {
         return StackPanel {
-            class: "counter";
+            Class: "counter";
 
             TextBlock {
                 Text: $"Count: {count.Value}";
             }
 
             Button {
-                class: "primary";
+                Class: "primary";
                 "Increment";
 
                 Click: (sender, e) => {

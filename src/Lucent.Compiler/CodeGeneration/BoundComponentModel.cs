@@ -7,12 +7,20 @@ internal sealed record BoundComponentModel(
     string ComponentName,
     IReadOnlyList<string> Usings,
     IReadOnlyList<BoundStateModel> States,
+    IReadOnlyList<BoundComputedModel> Computed,
     BoundControlModel Root);
 
 internal sealed record BoundStateModel(
     string TypeName,
     string Name,
     string InitializerText,
+    SourceSpan Span);
+
+internal sealed record BoundComputedModel(
+    string TypeName,
+    string Name,
+    string FactoryText,
+    string InitialValueText,
     SourceSpan Span);
 
 internal sealed record BoundControlModel(

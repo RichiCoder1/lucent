@@ -28,11 +28,15 @@ public sealed record ComponentDeclarationSyntax(
     RenderMethodSyntax RenderMethod,
     SourceSpan Span,
     IReadOnlyList<StateMemberSyntax>? StateMembers = null,
-    IReadOnlyList<LucentSyntaxNode>? Members = null)
+    IReadOnlyList<LucentSyntaxNode>? Members = null,
+    IReadOnlyList<ComputedMemberSyntax>? ComputedMembers = null)
     : LucentSyntaxNode(Span)
 {
     public IReadOnlyList<StateMemberSyntax> AllStateMembers =>
         StateMembers ?? (State is null ? [] : [State]);
+
+    public IReadOnlyList<ComputedMemberSyntax> AllComputedMembers =>
+        ComputedMembers ?? [];
 }
 
 public sealed record StateMemberSyntax(
@@ -42,6 +46,13 @@ public sealed record StateMemberSyntax(
     SourceSpan Span,
     string? InitializerText = null,
     SourceSpan? InitializerSpan = null) : LucentSyntaxNode(Span);
+
+public sealed record ComputedMemberSyntax(
+    string TypeName,
+    string Name,
+    string InitializerText,
+    SourceSpan Span,
+    SourceSpan InitializerSpan) : LucentSyntaxNode(Span);
 
 public sealed record RenderMethodSyntax(
     UiElementSyntax Root,
