@@ -6,10 +6,16 @@ namespace Lucent.Poc;
 
 internal sealed class MainWindow : Window
 {
-    private readonly TodoComponent _todo = new();
+    private readonly TodoComponent? _todo;
 
     public MainWindow()
     {
+        if (Program.SmokeTestName is not null)
+        {
+            return;
+        }
+
+        _todo = new TodoComponent();
         Title = "Lucent Native Controls Todo";
         Width = 760;
         Height = 720;
@@ -21,7 +27,7 @@ internal sealed class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        _todo.Dispose();
+        _todo?.Dispose();
         base.OnClosed(e);
     }
 }

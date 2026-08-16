@@ -44,11 +44,11 @@ internal static class GeneralCSharpEmitter
         }
         writer.Line("using Avalonia.Controls;");
         writer.Line("using Avalonia.Interactivity;");
+        writer.Line("using Lucent.Runtime;");
         if (styles?.Rules.Count > 0)
         {
             writer.Line("using Avalonia.Styling;");
         }
-        writer.Line("using Avalonia.Threading;");
         foreach (var usingDirective in model.Usings
                      .Where(directive =>
                          directive is not "using System;" and
@@ -56,7 +56,7 @@ internal static class GeneralCSharpEmitter
                          not "using System.Linq;" and
                          not "using Avalonia.Controls;" and
                          not "using Avalonia.Interactivity;" and
-                         not "using Avalonia.Threading;")
+                         not "using Lucent.Runtime;")
                      .Distinct(StringComparer.Ordinal))
         {
             writer.Line(usingDirective);
@@ -98,13 +98,30 @@ internal static class GeneralCSharpEmitter
             writer.Line($"private int _{computed.Name}Generation;");
         }
 
-        writer.Line("private bool _disposed;");
+        writer.Line("private readonly ComponentOwner _owner;");
         writer.Line("private bool _mounted;");
+        writer.Line();
+        writer.Line($"internal {model.ComponentName}Component(IUiDispatcher? dispatcher = null)");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("_owner = new ComponentOwner(dispatcher ?? AvaloniaUiDispatcher.Instance);");
+        foreach (var computed in model.Computed)
+        {
+            writer.Line("_owner.OnDispose(() =>");
+            writer.Line("{");
+            writer.Indent();
+            writer.Line($"_{computed.Name}Cancellation?.Cancel();");
+            writer.Line($"_{computed.Name}Cancellation?.Dispose();");
+            writer.Unindent();
+            writer.Line("});");
+        }
+        writer.Unindent();
+        writer.Line("}");
         writer.Line();
         writer.Line("public Control Mount()");
         writer.Line("{");
         writer.Indent();
-        writer.Line("ObjectDisposedException.ThrowIf(_disposed, this);");
+        writer.Line("ObjectDisposedException.ThrowIf(_owner.IsDisposed, this);");
         writer.Line();
         writer.Line("if (_mounted)");
         writer.Line("{");
@@ -142,6 +159,9 @@ internal static class GeneralCSharpEmitter
                 writer.Line(
                     $"_control{index}!.{eventMember.EventName} += " +
                     $"OnControl{index}{eventMember.EventName};");
+                writer.Line(
+                    $"_owner.OnDispose(() => _control{index}!.{eventMember.EventName} -= " +
+                    $"OnControl{index}{eventMember.EventName});");
             }
         }
 
@@ -157,53 +177,7 @@ internal static class GeneralCSharpEmitter
         writer.Line("}");
         writer.Line();
 
-        writer.Line("public void Dispose()");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("if (_disposed)");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("return;");
-        writer.Unindent();
-        writer.Line("}");
-        writer.Line();
-
-        foreach (var (control, index) in fields)
-        {
-            foreach (var eventMember in control.Members.OfType<BoundEventMember>())
-            {
-                writer.Line($"if (_control{index} is not null)");
-                writer.Line("{");
-                writer.Indent();
-                writer.Line(
-                    $"_control{index}.{eventMember.EventName} -= " +
-                    $"OnControl{index}{eventMember.EventName};");
-                writer.Unindent();
-                writer.Line("}");
-            }
-        }
-
-        foreach (var region in regions)
-        {
-            writer.Line($"foreach (var entry in _region{region.Index}.Values)");
-            writer.Line("{");
-            writer.Indent();
-            writer.Line("entry.Dispose();");
-            writer.Unindent();
-            writer.Line("}");
-            writer.Line($"_region{region.Index}.Clear();");
-        }
-
-        foreach (var computed in model.Computed)
-        {
-            writer.Line($"_{computed.Name}Cancellation?.Cancel();");
-            writer.Line($"_{computed.Name}Cancellation?.Dispose();");
-        }
-
-        writer.Line();
-        writer.Line("_disposed = true;");
-        writer.Unindent();
-        writer.Line("}");
+        writer.Line("public void Dispose() => _owner.Dispose();");
         writer.Line();
 
         foreach (var (control, index) in fields)
@@ -235,21 +209,13 @@ internal static class GeneralCSharpEmitter
             writer.Line($"private void {methodName}({state.TypeName} value)");
             writer.Line("{");
             writer.Indent();
-            writer.Line("if (_disposed)");
-            writer.Line("{");
-            writer.Indent();
-            writer.Line("return;");
+            writer.Line($"_owner.Dispatch(() => {methodName}Core(value));");
             writer.Unindent();
             writer.Line("}");
             writer.Line();
-            writer.Line("if (!Dispatcher.UIThread.CheckAccess())");
+            writer.Line($"private void {methodName}Core({state.TypeName} value)");
             writer.Line("{");
             writer.Indent();
-            writer.Line($"Dispatcher.UIThread.Post(() => {methodName}(value));");
-            writer.Line("return;");
-            writer.Unindent();
-            writer.Line("}");
-            writer.Line();
             writer.Line(
                 $"if (EqualityComparer<{state.TypeName}>.Default.Equals(_{state.Name}, value))");
             writer.Line("{");
@@ -276,22 +242,7 @@ internal static class GeneralCSharpEmitter
             writer.Line("{");
             writer.Indent();
             writer.Line("ArgumentNullException.ThrowIfNull(update);");
-            writer.Line("if (_disposed)");
-            writer.Line("{");
-            writer.Indent();
-            writer.Line("return;");
-            writer.Unindent();
-            writer.Line("}");
-            writer.Line();
-            writer.Line("if (!Dispatcher.UIThread.CheckAccess())");
-            writer.Line("{");
-            writer.Indent();
-            writer.Line($"Dispatcher.UIThread.Post(() => {methodName}(update));");
-            writer.Line("return;");
-            writer.Unindent();
-            writer.Line("}");
-            writer.Line();
-            writer.Line($"{methodName}(update(_{state.Name}));");
+            writer.Line($"_owner.Dispatch(() => {methodName}Core(update(_{state.Name})));");
             writer.Unindent();
             writer.Line("}");
         }
@@ -312,7 +263,7 @@ internal static class GeneralCSharpEmitter
         writer.Line($"private void Refresh{pascalName}()");
         writer.Line("{");
         writer.Indent();
-        writer.Line("if (_disposed)");
+        writer.Line("if (_owner.IsDisposed)");
         writer.Line("{");
         writer.Indent();
         writer.Line("return;");
@@ -322,7 +273,9 @@ internal static class GeneralCSharpEmitter
         writer.Line($"var generation = ++_{computed.Name}Generation;");
         writer.Line($"_{computed.Name}Cancellation?.Cancel();");
         writer.Line($"_{computed.Name}Cancellation?.Dispose();");
-        writer.Line($"_{computed.Name}Cancellation = new global::System.Threading.CancellationTokenSource();");
+        writer.Line(
+            $"_{computed.Name}Cancellation = global::System.Threading.CancellationTokenSource." +
+            "CreateLinkedTokenSource(_owner.CancellationToken);");
         writer.Line($"_{computed.Name}Pending = true;");
         writer.Line($"_{computed.Name}ErrorMessage = null;");
         writer.Line("UpdateBindings();");
@@ -343,11 +296,12 @@ internal static class GeneralCSharpEmitter
         writer.Indent();
         writer.Line(
             $"var value = await ((global::System.Func<global::System.Threading.CancellationToken, " +
-            $"global::System.Threading.Tasks.Task<{computed.TypeName}>>)({factory}))(cancellationToken);");
-        writer.Line("Dispatcher.UIThread.Post(() =>");
+            $"global::System.Threading.Tasks.Task<{computed.TypeName}>>)({factory}))" +
+            "(cancellationToken).ConfigureAwait(false);");
+        writer.Line("_owner.Dispatch(() =>");
         writer.Line("{");
         writer.Indent();
-        writer.Line($"if (_disposed || generation != _{computed.Name}Generation)");
+        writer.Line($"if (generation != _{computed.Name}Generation)");
         writer.Line("{");
         writer.Indent();
         writer.Line("return;");
@@ -367,10 +321,10 @@ internal static class GeneralCSharpEmitter
         writer.Line("catch (global::System.Exception exception)");
         writer.Line("{");
         writer.Indent();
-        writer.Line("Dispatcher.UIThread.Post(() =>");
+        writer.Line("_owner.Dispatch(() =>");
         writer.Line("{");
         writer.Indent();
-        writer.Line($"if (_disposed || generation != _{computed.Name}Generation)");
+        writer.Line($"if (generation != _{computed.Name}Generation)");
         writer.Line("{");
         writer.Indent();
         writer.Line("return;");
@@ -992,7 +946,7 @@ internal static class GeneralCSharpEmitter
         {
             writer.Line($"var control{index} = new {control.TypeName}();");
         }
-        writer.Line("var disposeActions = new List<Action>();");
+        writer.Line("var rowOwner = _owner.CreateChild();");
 
         writer.Line();
         foreach (var (control, index) in templateControls)
@@ -1074,23 +1028,13 @@ internal static class GeneralCSharpEmitter
                 writer.Line("};");
                 writer.Line($"control{index}.{eventMember.EventName} += {handlerName};");
                 writer.Line(
-                    $"disposeActions.Add(() => " +
+                    $"rowOwner.OnDispose(() => " +
                     $"control{index}.{eventMember.EventName} -= {handlerName});");
             }
         }
 
         writer.Line();
-        writer.Line("return (control1, (Action)Refresh, () =>");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("foreach (var disposeAction in disposeActions)");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("disposeAction();");
-        writer.Unindent();
-        writer.Line("}");
-        writer.Unindent();
-        writer.Line("});");
+        writer.Line("return (control1, (Action)Refresh, rowOwner.Dispose);");
         writer.Unindent();
         writer.Line("});");
         writer.Line($"{dictionary}.Add(key, entry);");

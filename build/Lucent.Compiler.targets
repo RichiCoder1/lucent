@@ -3,6 +3,10 @@
     TaskName="Lucent.Compiler.MSBuild.CompileLucent"
     AssemblyFile="$(LucentCompilerTaskAssembly)" />
 
+  <ItemGroup Condition="'@(LucentSource)' != '' and Exists('$(LucentRuntimeProject)')">
+    <ProjectReference Include="$(LucentRuntimeProject)" />
+  </ItemGroup>
+
   <ItemGroup>
     <LucentGenerated Include="@(LucentSource->'$(LucentCompilerOutputDirectory)%(Filename)Component.g.cs')" />
     <FileWrites Include="@(LucentGenerated)" />

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics;
 using Lucent.Compiler.MSBuild;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
@@ -94,6 +95,74 @@ public sealed class CompileLucentTests
         StringAssert.Contains(
             File.ReadAllText(task.GeneratedFiles.Single().ItemSpec),
             "new global::Demo.Controls.FancyControl()");
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Targets_consumer_builds_and_copies_the_runtime()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        var sourcePath = Path.Combine(temporary.Path, "Main.lui");
+        var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(
+            sourcePath,
+            "namespace Demo; component Main() { Fragment Render() { return Border { }; } }");
+        await File.WriteAllTextAsync(
+            projectPath,
+            $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFramework>net9.0</TargetFramework>
+                <ImplicitUsings>enable</ImplicitUsings>
+                <Nullable>enable</Nullable>
+              </PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="Main.lui" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            WorkingDirectory = temporary.Path,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        startInfo.ArgumentList.Add("build");
+        startInfo.ArgumentList.Add(projectPath);
+        startInfo.ArgumentList.Add("--nologo");
+        startInfo.ArgumentList.Add("--verbosity:minimal");
+        startInfo.ArgumentList.Add("-nodeReuse:false");
+        startInfo.ArgumentList.Add("-p:UseArtifactsOutput=true");
+        startInfo.ArgumentList.Add(
+            $"-p:ArtifactsPath={Path.Combine(temporary.Path, "artifacts")}");
+
+        using var process = Process.Start(startInfo)
+            ?? throw new AssertFailedException("Could not start dotnet build.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await standardOutput + await standardError;
+
+        Assert.AreEqual(0, process.ExitCode, output);
+        Assert.IsTrue(
+            Directory.EnumerateFiles(
+                    Path.Combine(temporary.Path, "artifacts", "bin"),
+                    "Lucent.Runtime.dll",
+                    SearchOption.AllDirectories)
+                .Any(),
+            output);
+        Assert.IsTrue(
+            Directory.EnumerateFiles(
+                    Path.Combine(temporary.Path, "artifacts", "obj"),
+                    "MainComponent.g.cs",
+                    SearchOption.AllDirectories)
+                .Any(),
+            output);
     }
 
     private static (CompileLucent Task, CapturingBuildEngine BuildEngine) CreateTask(

@@ -3,11 +3,15 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
+using Lucent.Examples.PackagePulse;
+using Lucent.Examples.Todo;
 
 namespace Lucent.Poc;
 
 internal static class Program
 {
+    internal static string? SmokeTestName { get; private set; }
+
     [STAThread]
     public static int Main(string[] args)
     {
@@ -23,6 +27,9 @@ internal static class Program
 
     private static int RunSmokeTest(string[] args)
     {
+        SmokeTestName = args.SkipWhile(argument => argument != "--smoke-test")
+            .Skip(1)
+            .FirstOrDefault() ?? "todo";
         var lifetime = new ClassicDesktopStyleApplicationLifetime
         {
             Args = args,
@@ -31,13 +38,12 @@ internal static class Program
 
         BuildAvaloniaApp().SetupWithLifetime(lifetime);
 
-        var window = lifetime.MainWindow
-            ?? throw new InvalidOperationException(
-                "Smoke test expected App to create the main window during setup.");
+        var (window, component) = CreateSmokeTarget(SmokeTestName);
+        lifetime.MainWindow = window;
 
         var opened = false;
         var loadedTurn = false;
-        var todoUpdated = false;
+        var sampleUpdated = false;
         var closed = false;
         var exited = false;
 
@@ -58,13 +64,24 @@ internal static class Program
                     loadedTurn = true;
                     MarkSmokeProgress("loaded-turn");
 
-                    todoUpdated = ExerciseTodo(window);
-                    if (todoUpdated)
+                    if (SmokeTestName == "todo")
                     {
-                        MarkSmokeProgress("todo-updated");
-                    }
+                        sampleUpdated = ExerciseTodo(window);
+                        if (sampleUpdated)
+                        {
+                            MarkSmokeProgress("todo-updated");
+                        }
 
-                    window.Close();
+                        window.Close();
+                    }
+                    else
+                    {
+                        WaitForPackagePulse(window, success =>
+                        {
+                            sampleUpdated = success;
+                            window.Close();
+                        });
+                    }
                 },
                 DispatcherPriority.Loaded);
         };
@@ -73,6 +90,7 @@ internal static class Program
         {
             closed = true;
             MarkSmokeProgress("window-closed");
+            component.Dispose();
             lifetime.Shutdown(0);
         };
 
@@ -80,18 +98,67 @@ internal static class Program
         if (exitCode != 0 ||
             !opened ||
             !loadedTurn ||
-            !todoUpdated ||
+            !sampleUpdated ||
             !closed ||
             !exited)
         {
             Console.Error.WriteLine(
                 "SMOKE: failed " +
                 $"exitCode={exitCode} opened={opened} loadedTurn={loadedTurn} " +
-                $"todoUpdated={todoUpdated} closed={closed} exited={exited}");
+                $"sample={SmokeTestName} sampleUpdated={sampleUpdated} " +
+                $"closed={closed} exited={exited}");
             return 1;
         }
 
         return 0;
+    }
+
+    private static (Window Window, IDisposable Component) CreateSmokeTarget(string name)
+    {
+        IDisposable component;
+        Control content;
+        switch (name)
+        {
+            case "todo":
+                var todo = new TodoComponent();
+                component = todo;
+                content = todo.Mount();
+                break;
+            case "package-pulse":
+                var packagePulse = new PackagePulseComponent();
+                component = packagePulse;
+                content = packagePulse.Mount();
+                break;
+            default:
+                throw new ArgumentException($"Unknown smoke test '{name}'.", nameof(name));
+        }
+
+        return (new Window { Content = content }, component);
+    }
+
+    private static void WaitForPackagePulse(Window window, Action<bool> completed)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        timer.Tick += (_, _) =>
+        {
+            if (window.Content is Border { Child: StackPanel root } &&
+                root.Children.Count == 6 &&
+                root.Children[4] is TextBlock { Text: "1 package(s)" } &&
+                root.Children[5] is StackPanel { Children.Count: 1 })
+            {
+                timer.Stop();
+                MarkSmokeProgress("package-pulse-updated");
+                completed(true);
+            }
+            else if (DateTime.UtcNow >= deadline)
+            {
+                timer.Stop();
+                MarkSmokeProgress("package-pulse-failed-timeout");
+                completed(false);
+            }
+        };
+        timer.Start();
     }
 
     private static bool ExerciseTodo(Window window)

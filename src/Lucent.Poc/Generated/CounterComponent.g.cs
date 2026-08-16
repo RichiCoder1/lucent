@@ -7,7 +7,7 @@ using System;
 using System.Collections.Generic;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Avalonia.Threading;
+using Lucent.Runtime;
 
 namespace Lucent.Examples.Counter;
 
@@ -17,12 +17,17 @@ internal sealed class CounterComponent : IDisposable
     private global::Avalonia.Controls.TextBlock? _control2;
     private global::Avalonia.Controls.Button? _control3;
     private int _count = 0;
-    private bool _disposed;
+    private readonly ComponentOwner _owner;
     private bool _mounted;
+
+    internal CounterComponent(IUiDispatcher? dispatcher = null)
+    {
+        _owner = new ComponentOwner(dispatcher ?? AvaloniaUiDispatcher.Instance);
+    }
 
     public Control Mount()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(_owner.IsDisposed, this);
 
         if (_mounted)
         {
@@ -47,26 +52,14 @@ internal sealed class CounterComponent : IDisposable
         _control1!.Children.Add(_control2!);
         _control1!.Children.Add(_control3!);
         _control3!.Click += OnControl3Click;
+        _owner.OnDispose(() => _control3!.Click -= OnControl3Click);
 
         UpdateBindings();
 
         return _control1!;
     }
 
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        if (_control3 is not null)
-        {
-            _control3.Click -= OnControl3Click;
-        }
-
-        _disposed = true;
-    }
+    public void Dispose() => _owner.Dispose();
 
     private void OnControl3Click(object? __sender, global::Avalonia.Interactivity.RoutedEventArgs __eventArgs)
     {
@@ -86,17 +79,11 @@ internal sealed class CounterComponent : IDisposable
 
     private void SetCount(int value)
     {
-        if (_disposed)
-        {
-            return;
-        }
+        _owner.Dispatch(() => SetCountCore(value));
+    }
 
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => SetCount(value));
-            return;
-        }
-
+    private void SetCountCore(int value)
+    {
         if (EqualityComparer<int>.Default.Equals(_count, value))
         {
             return;
@@ -109,17 +96,6 @@ internal sealed class CounterComponent : IDisposable
     private void SetCount(Func<int, int> update)
     {
         ArgumentNullException.ThrowIfNull(update);
-        if (_disposed)
-        {
-            return;
-        }
-
-        if (!Dispatcher.UIThread.CheckAccess())
-        {
-            Dispatcher.UIThread.Post(() => SetCount(update));
-            return;
-        }
-
-        SetCount(update(_count));
+        _owner.Dispatch(() => SetCountCore(update(_count)));
     }
 }

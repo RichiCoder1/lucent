@@ -474,7 +474,11 @@ public sealed class GeneralCompilerTests
             result.GeneratedSource,
             "ReferenceEquals(nativeItems[index], nextEntries[index].Root)");
         StringAssert.Contains(result.GeneratedSource, "if (orderChanged)");
-        StringAssert.Contains(result.GeneratedSource, "Dispatcher.UIThread.CheckAccess()");
+        StringAssert.Contains(result.GeneratedSource, "var rowOwner = _owner.CreateChild();");
+        StringAssert.Contains(result.GeneratedSource, "rowOwner.OnDispose(() =>");
+        StringAssert.Contains(result.GeneratedSource, "return (control1, (Action)Refresh, rowOwner.Dispose);");
+        Assert.IsFalse(result.GeneratedSource.Contains("Dispatcher.UIThread", StringComparison.Ordinal));
+        Assert.IsFalse(result.GeneratedSource.Contains("disposeActions", StringComparison.Ordinal));
         Assert.IsTrue(
             result.GeneratedSource.IndexOf(
                 "duplicate key",
@@ -560,7 +564,10 @@ public sealed class GeneralCompilerTests
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(result.GeneratedSource, ".Loaded += OnControl1Loaded;");
-        StringAssert.Contains(result.GeneratedSource, ".Loaded -= OnControl1Loaded;");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "_owner.OnDispose(() => _control1!.Loaded -= OnControl1Loaded);");
+        StringAssert.Contains(result.GeneratedSource, "public void Dispose() => _owner.Dispose();");
     }
 
     [TestMethod]
@@ -725,6 +732,11 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(result.GeneratedSource, "++_resultsGeneration");
         StringAssert.Contains(result.GeneratedSource, "_resultsCancellation?.Cancel();");
         StringAssert.Contains(result.GeneratedSource, "generation != _resultsGeneration");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "CreateLinkedTokenSource(_owner.CancellationToken)");
+        StringAssert.Contains(result.GeneratedSource, "_owner.Dispatch(() =>");
+        Assert.IsFalse(result.GeneratedSource.Contains("Dispatcher.UIThread", StringComparison.Ordinal));
         StringAssert.Contains(result.GeneratedSource, "Catalog.SearchAsync(_query, cancellationToken)");
         StringAssert.Contains(result.GeneratedSource, "var sourceItems = (_results).ToArray();");
     }

@@ -16,7 +16,7 @@ recent workspaces. It is not a full IDE.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 | --- | --- | --- | --- | --- | --- |
-| [001](001-runtime-owner-scheduler.md) | Centralize ownership and UI scheduling | P0 | M | — | TODO |
+| [001](001-runtime-owner-scheduler.md) | Centralize ownership and UI scheduling | P0 | M | — | DONE |
 | [002](002-reactivity-conditional-regions.md) | Bind dependencies and add conditional regions | P0 | L | 001 | TODO |
 | [003](003-component-composition.md) | Make Lucent components genuinely composable | P0 | L | 001, 002 | TODO |
 | [004](004-desktop-application-interop.md) | Prove the native desktop application shell | P1 | L | 003 | TODO |

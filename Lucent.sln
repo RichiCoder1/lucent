@@ -25,6 +25,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.LanguageServer", "sr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.LanguageServer.Tests", "tests\Lucent.LanguageServer.Tests\Lucent.LanguageServer.Tests.csproj", "{0B283347-CF6A-4062-B91F-67E6BEBBC407}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Runtime", "src\Lucent.Runtime\Lucent.Runtime.csproj", "{1C394458-D06B-4173-8A31-67F7CFC51808}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Runtime.Tests", "tests\Lucent.Runtime.Tests\Lucent.Runtime.Tests.csproj", "{2D4A5569-E17C-4284-9B42-7808D0D62919}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,5 +79,13 @@ Global
 		{0B283347-CF6A-4062-B91F-67E6BEBBC407}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0B283347-CF6A-4062-B91F-67E6BEBBC407}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0B283347-CF6A-4062-B91F-67E6BEBBC407}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1C394458-D06B-4173-8A31-67F7CFC51808}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C394458-D06B-4173-8A31-67F7CFC51808}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C394458-D06B-4173-8A31-67F7CFC51808}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C394458-D06B-4173-8A31-67F7CFC51808}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2D4A5569-E17C-4284-9B42-7808D0D62919}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2D4A5569-E17C-4284-9B42-7808D0D62919}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2D4A5569-E17C-4284-9B42-7808D0D62919}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2D4A5569-E17C-4284-9B42-7808D0D62919}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
