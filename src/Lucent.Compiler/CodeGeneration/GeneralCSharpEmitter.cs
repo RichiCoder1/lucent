@@ -105,6 +105,10 @@ internal static class GeneralCSharpEmitter
         writer.Line("{");
         writer.Indent();
         writer.Line("_owner = new ComponentOwner(dispatcher ?? AvaloniaUiDispatcher.Instance);");
+        foreach (var region in regions)
+        {
+            writer.Line($"_owner.OnDispose(_region{region.Index}.Clear);");
+        }
         foreach (var computed in model.Computed)
         {
             writer.Line("_owner.OnDispose(() =>");

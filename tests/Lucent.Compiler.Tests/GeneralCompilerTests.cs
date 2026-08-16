@@ -477,6 +477,7 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(result.GeneratedSource, "var rowOwner = _owner.CreateChild();");
         StringAssert.Contains(result.GeneratedSource, "rowOwner.OnDispose(() =>");
         StringAssert.Contains(result.GeneratedSource, "return (control1, (Action)Refresh, rowOwner.Dispose);");
+        StringAssert.Contains(result.GeneratedSource, "_owner.OnDispose(_region1.Clear);");
         Assert.IsFalse(result.GeneratedSource.Contains("Dispatcher.UIThread", StringComparison.Ordinal));
         Assert.IsFalse(result.GeneratedSource.Contains("disposeActions", StringComparison.Ordinal));
         Assert.IsTrue(
@@ -568,6 +569,39 @@ public sealed class GeneralCompilerTests
             result.GeneratedSource,
             "_owner.OnDispose(() => _control1!.Loaded -= OnControl1Loaded);");
         StringAssert.Contains(result.GeneratedSource, "public void Dispose() => _owner.Dispose();");
+    }
+
+    [TestMethod]
+    public void Generated_owner_guards_mount_and_state_commits()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly State<int> count = new(0);
+
+                Fragment Render()
+                {
+                    return Button {
+                        Click: (sender, e) => count.Update(count.Value + 1);
+                    };
+                }
+            }
+            """,
+            "owner-contract.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "ObjectDisposedException.ThrowIf(_owner.IsDisposed, this);");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "A Main component can only be mounted once.");
+        StringAssert.Contains(result.GeneratedSource, "public void Dispose() => _owner.Dispose();");
+        StringAssert.Contains(
+            result.GeneratedSource,
+            "_owner.Dispatch(() => SetCountCore(value));");
     }
 
     [TestMethod]
