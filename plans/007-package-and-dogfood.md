@@ -111,6 +111,13 @@ keyboard-first walkthrough: open workspace, navigate tree, edit `.lui`, inspect
 problems, jump to source, preview generated C#, change theme/settings, close and
 reopen the recent workspace.
 
+Replace Plan 006's `PlaceholderProblemLoader` with the real implementation of
+the existing `IProblemLoader`; preserve its OwnedComputed loading/stale/error/
+retry and owner-cancellation contract. Reuse Plan 006's settings repository,
+save coordinator, intercepted shutdown, accessibility peers, and Plan 005's
+single headless harness—do not introduce parallel loader/resource/settings/
+lifecycle/test models.
+
 **Verify**: the walkthrough is automated headlessly where possible and manually
 recorded only for native dialogs/platform behavior.
 

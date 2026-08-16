@@ -170,6 +170,7 @@ dependency for every current targets consumer, not only the POC:
 
 | Purpose | Command | Expected result |
 | --- | --- | --- |
+| Restore new projects | `dotnet restore Lucent.sln` | Runtime/test assets exist before no-restore gates |
 | Baseline | `dotnet test Lucent.sln --no-restore` | 45 tests pass |
 | Runtime tests | `dotnet test tests/Lucent.Runtime.Tests/Lucent.Runtime.Tests.csproj --no-restore` | all runtime tests pass |
 | Compiler tests | `dotnet test tests/Lucent.Compiler.Tests/Lucent.Compiler.Tests.csproj --no-restore` | all compiler tests pass |

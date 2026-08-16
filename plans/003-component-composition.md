@@ -542,6 +542,7 @@ Rules:
 
 - `Lucent.sln`
 - `src/Lucent.Compiler/LucentProjectContext.cs`
+- `src/Lucent.Compiler/CompilationResult.cs`
 - `src/Lucent.Compiler/LucentCompiler.cs`
 - `src/Lucent.Compiler/LucentSemanticSymbol.cs`
 - `src/Lucent.Compiler/LucentCompletionItem.cs` only for a component/parameter/slot kind
@@ -565,6 +566,8 @@ Rules:
 - `tests/Lucent.Compiler.Tests/GeneralCompilerTests.cs`
 - `tests/Lucent.Compiler.Tests/ProjectSemanticBindingTests.cs`
 - `tests/Lucent.Runtime.Tests/ConditionalRegionTests.cs`
+- `tests/Lucent.Runtime.Tests/UiDispatcherContractTests.cs` — add Fragment to
+  the exact exported runtime-type contract
 - `tests/Lucent.Compiler.MSBuild.Tests/CompileLucentTests.cs`
 - `tests/Lucent.LanguageServer.Tests/LanguageServerProtocolTests.cs`
 - `examples/counter/MainWindow.lui`
@@ -572,9 +575,7 @@ Rules:
 - `examples/counter/Counter.csproj` only if an explicit compile item requires removal
 - `examples/counter/README.md`
 - `examples/todo/App.cs`
-- `examples/todo/Todo.cs`
 - `examples/package-pulse/App.cs`
-- `examples/package-pulse/PackagePulse.cs`
 - `docs/LANGUAGE.md`
 - `docs/TOOLING.md`
 - `plans/README.md` status only
@@ -583,6 +584,10 @@ Rules:
 
 - `examples/counter/Counter.cs` — the native adapter is replaced by direct
   `Counter {}` component invocation.
+- `examples/todo/Todo.cs` — direct `Todo {}` component invocation replaces the
+  ambiguous same-named native adapter.
+- `examples/package-pulse/PackagePulse.cs` — direct `PackagePulse {}` component
+  invocation replaces the ambiguous same-named native adapter.
 
 **Out of scope**:
 
@@ -705,9 +710,10 @@ concrete instance plus mounted roots.
 
 This return-type change affects every authored host, not only Counter. Update
 all current hosts to require the expected one-root cardinality and native type:
-`src/Lucent.Poc/MainWindow.cs`, `examples/todo/App.cs`,
-`examples/todo/Todo.cs`, `examples/package-pulse/App.cs`, and
-`examples/package-pulse/PackagePulse.cs`. Update `src/Lucent.Poc/Program.cs`
+`src/Lucent.Poc/MainWindow.cs`, `examples/todo/App.cs`, and
+`examples/package-pulse/App.cs`. Delete the Todo and PackagePulse native adapter
+classes and keep their existing `.lui` call sites as direct component
+invocations. Update `src/Lucent.Poc/Program.cs`
 only where its smoke assertions consume `Mount()` directly. Do not use
 `fragment.Roots.First()`; throw a clear host-boundary error unless `Count == 1`
 and root `[0]` has the expected `Window`/`Control` type.

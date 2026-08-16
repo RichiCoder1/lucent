@@ -288,7 +288,13 @@ Required semantics:
   If restoration also fails, dispose both owners, clear active state, and throw
   one aggregate containing publication, restoration, and cleanup failures.
   Test adapters that mutate before throwing.
-- `Clear()` publishes `null`, then disposes the old branch owner.
+- `Clear()` is transactional. Publish `null`; only on success clear active state
+  and dispose the old branch owner. If publication throws after mutating, attempt
+  `setRoot(oldRoot)`. Successful restoration leaves the old branch active and
+  rethrows publication failure. If restoration also fails, clear active state,
+  dispose the old owner exactly once, and throw one aggregate containing
+  publication, restoration, and cleanup failures. Include mutate-then-throw
+  Clear tests; a later Show of the prior branch must never become a false no-op.
 - `Dispose()` disposes the active branch without calling `setRoot`; parent tree
   teardown owns native detachment. The constructor registers this disposal with
   `owner.OnDispose`; parent disposal leaves `ActiveBranch == null` and never
@@ -332,6 +338,8 @@ The runtime does not reflect over controls or content metadata.
 - `tests/Lucent.Compiler.Tests/ProjectSemanticBindingTests.cs` if symbol-backed
   shadowing requires project context
 - `tests/Lucent.Runtime.Tests/ConditionalRegionTests.cs` (create)
+- `tests/Lucent.Runtime.Tests/UiDispatcherContractTests.cs` — add
+  ConditionalRegion to the exact exported runtime-type contract
 - `tests/Lucent.LanguageServer.Tests/LanguageServerProtocolTests.cs`
 - `examples/package-pulse/PackagePulse.lui`
 - `src/Lucent.Poc/Program.cs`
