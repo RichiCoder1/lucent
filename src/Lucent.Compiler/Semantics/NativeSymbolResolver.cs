@@ -211,6 +211,12 @@ internal sealed class NativeSymbolResolver
         return resolved;
     }
 
+    public bool IsAssignableTo(ITypeSymbol source, string targetMetadataName)
+    {
+        var target = _compilation.GetTypeByMetadataName(targetMetadataName);
+        return target is not null && _compilation.ClassifyConversion(source, target).IsImplicit;
+    }
+
     public ResolvedNativeAttachedProperty? ResolveAttachedProperty(
         ResolvedNativeControl control,
         string sourceName)

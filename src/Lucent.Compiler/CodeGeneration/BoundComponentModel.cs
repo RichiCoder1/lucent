@@ -126,6 +126,13 @@ internal sealed record BoundPropertyMember(
     public SourceSpan ExpressionSpan => Expression.Span;
 }
 
+internal sealed record BoundItemTemplateMember(
+    string Name,
+    string ItemTypeName,
+    string ItemName,
+    BoundControlModel Root,
+    SourceSpan Span) : BoundControlMember(Span);
+
 internal sealed record BoundAttachedPropertyMember(
     string Name,
     string SetterTypeName,

@@ -568,6 +568,10 @@ internal sealed partial class Parser
             {
                 members.Add(ParseIf());
             }
+            else if (IsIdentifier("template"))
+            {
+                members.Add(ParseTemplate());
+            }
             else if (IsIdentifier("try"))
             {
                 members.Add(ParseAsyncBoundary());
@@ -618,6 +622,64 @@ internal sealed partial class Parser
             members,
             SpanFrom(start, closeBrace.Span.End),
             arguments);
+    }
+
+    private UiTemplateSyntax ParseTemplate()
+    {
+        var start = ExpectIdentifier("template").Span.Start;
+        var name = Expect(TokenKind.Identifier, "a template property name");
+        var parameters = ReadDelimited(TokenKind.OpenParen, TokenKind.CloseParen, validate: false);
+        var list = SyntaxFactory.ParseParameterList("(" + parameters.Text + ")");
+        foreach (var diagnostic in list.GetDiagnostics())
+        {
+            AddSyntax(new SourceSpan(
+                    parameters.Span.Start - 1 + diagnostic.Location.SourceSpan.Start,
+                    Math.Max(1, diagnostic.Location.SourceSpan.Length)),
+                diagnostic.GetMessage());
+        }
+
+        if (list.Parameters.Count != 1)
+        {
+            AddSyntax(parameters.Span,
+                "A template declaration requires exactly one typed item parameter.");
+        }
+
+        var parameter = list.Parameters.FirstOrDefault();
+        if (parameter is not null && parameter.Type is null)
+        {
+            AddSyntax(new SourceSpan(
+                    parameters.Span.Start - 1 + parameter.SpanStart,
+                    Math.Max(1, parameter.Span.Length)),
+                "The ItemTemplate parameter requires an explicit item type.");
+        }
+        if (parameter is not null &&
+            (parameter.Modifiers.Count > 0 || parameter.AttributeLists.Count > 0 || parameter.Default is not null))
+        {
+            AddUnsupported(new SourceSpan(
+                    parameters.Span.Start - 1 + parameter.SpanStart,
+                    Math.Max(1, parameter.Span.Length)),
+                "ItemTemplate parameters do not support attributes, modifiers, or default values.");
+        }
+        var itemType = parameter?.Type?.ToFullString().Trim() ?? "object";
+        var itemName = parameter?.Identifier.ValueText ?? "item";
+        var parameterOffset = parameters.Span.Start - 1;
+        var itemTypeSpan = parameter?.Type is { } type
+            ? new SourceSpan(parameterOffset + type.SpanStart, type.Span.Length)
+            : parameters.Span;
+        var itemNameSpan = parameter is not null
+            ? new SourceSpan(parameterOffset + parameter.Identifier.SpanStart,
+                parameter.Identifier.Span.Length)
+            : parameters.Span;
+        var body = ParseConditionalBranch();
+        return new UiTemplateSyntax(
+            name.Text,
+            itemType,
+            itemName,
+            body,
+            SpanFrom(start, body.Span.End),
+            name.Span,
+            itemTypeSpan,
+            itemNameSpan);
     }
 
     private IReadOnlyList<UiArgumentSyntax> ParseArguments(CSharpIslandSyntax clause)
@@ -820,6 +882,7 @@ internal sealed partial class Parser
 
         while (Current.Kind is not TokenKind.CloseBrace and not TokenKind.EndOfFile)
         {
+            var before = _position;
             if (Current.Kind == TokenKind.Identifier &&
                 Peek(1).Kind is TokenKind.OpenBrace or TokenKind.OpenParen)
             {
@@ -829,6 +892,10 @@ internal sealed partial class Parser
 
             AddSyntax(Current.Span, "Expected a native control root in the conditional branch.");
             SynchronizeUiMember();
+            if (_position == before)
+            {
+                NextToken();
+            }
         }
         var closeBrace = Expect(TokenKind.CloseBrace, "'}' to close the conditional branch");
         return new UiConditionalBranchSyntax(

@@ -175,6 +175,15 @@ internal sealed class GeneralBinder
                     "Mount-only native collection elements cannot read reactive state or parameters.");
             }
         }
+        foreach (var template in EnumerateControls(model.Roots)
+                     .SelectMany(control => control.Members.OfType<BoundItemTemplateMember>()))
+        {
+            if (ContainsReactiveTemplateDependency(template.Root))
+            {
+                AddUnsupported(template.Span,
+                    "ItemTemplate property values must depend on the typed item; component state, inputs, and computed values are not refreshed by Avalonia template realization.");
+            }
+        }
         DetectComputedCycles(model);
         return HasErrors ? null : model;
 
@@ -207,9 +216,21 @@ internal sealed class GeneralBinder
                     BoundConditionalMember conditional =>
                         EnumerateControls(conditional.TrueRoots.Concat(conditional.FalseRoots ?? [])),
                     BoundForEachMember loop => EnumerateControls([loop.Body]),
+                    BoundItemTemplateMember template => EnumerateControls([template.Root]),
                     _ => [],
                 };
         }
+
+    static bool ContainsReactiveTemplateDependency(BoundControlModel control) =>
+        control.Members.Any(member => member switch
+        {
+            BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
+            BoundAttachedPropertyMember attached => attached.Expression.Dependencies.Count > 0,
+            BoundContentMember content => content.Expression.Dependencies.Count > 0,
+            BoundNativeCollectionMember collection => collection.Elements.Any(element => element.Dependencies.Count > 0),
+            BoundChildMember child => ContainsReactiveTemplateDependency(child.Child),
+            _ => false,
+        });
     }
 
     private BoundStateModel BindState(StateMemberSyntax state)
@@ -611,6 +632,15 @@ internal sealed class GeneralBinder
                         locals ?? []);
                     break;
 
+                case UiTemplateSyntax template:
+                    BindItemTemplate(
+                        element,
+                        template,
+                        resolvedControl,
+                        seenMembers,
+                        members);
+                    break;
+
                 case UiChildSyntax child:
                     if (hasStructuralRegion)
                     {
@@ -873,6 +903,168 @@ internal sealed class GeneralBinder
             element.Span,
             kind,
             contentRoute);
+    }
+
+    private void BindItemTemplate(
+        UiElementSyntax element,
+        UiTemplateSyntax template,
+        ResolvedNativeControl control,
+        HashSet<string> seenMembers,
+        List<BoundControlMember> members)
+    {
+        if (!string.Equals(template.Name, "ItemTemplate", StringComparison.Ordinal))
+        {
+            AddUnsupported(template.NameSpan,
+                $"Only the Avalonia ItemTemplate property has first-class template syntax; use a C# expression for '{template.Name}'.");
+            return;
+        }
+
+        var resolvedProperty = _resolver!.ResolveProperty(control, template.Name);
+        if (resolvedProperty is null ||
+            !_resolver.IsAssignableTo(
+                resolvedProperty.Symbol.Type,
+                "Avalonia.Controls.Templates.IDataTemplate"))
+        {
+            AddUnsupported(template.NameSpan,
+                $"Property '{template.Name}' is not an Avalonia data-template property on {control.TypeName}.");
+            return;
+        }
+
+        if (!seenMembers.Add(template.Name))
+        {
+            AddUnsupported(template.NameSpan,
+                $"{element.Name} may contain only one '{template.Name}' member.");
+            return;
+        }
+
+        var itemType = _resolver.ResolveTypeName(template.ItemTypeName);
+        if (itemType is null)
+        {
+            AddUnsupported(template.ItemTypeSpan,
+                $"Template item type '{template.ItemTypeName}' could not be resolved.");
+            return;
+        }
+
+        if (HasTemplateStructure(template.Body.Roots))
+        {
+            AddUnsupported(template.Span,
+                "ItemTemplate fragments currently support one native control tree only; nested templates, keyed, conditional, and slot regions are not supported in a recycled data template.");
+            return;
+        }
+
+        var locals = new[] { new BoundLocal(template.ItemName, itemType) };
+        var roots = template.Body.Roots
+            .Select(root => BindRenderable(root, locals: locals))
+            .Where(root => root is not null)
+            .Cast<BoundRenderableModel>()
+            .ToArray();
+        if (roots.Length != 1)
+        {
+            AddUnsupported(template.Body.Span,
+                "An ItemTemplate fragment must produce exactly one native control root.");
+            return;
+        }
+
+        if (roots[0] is not BoundControlModel nativeRoot)
+        {
+            AddUnsupported(template.Body.Span,
+                "ItemTemplate fragments cannot invoke Lucent components because Avalonia owns template realization and disposal.");
+            return;
+        }
+
+        if (ContainsComponent(nativeRoot))
+        {
+            AddUnsupported(template.Body.Span,
+                "ItemTemplate fragments cannot invoke Lucent components because Avalonia owns template realization and disposal.");
+            return;
+        }
+
+        if (ContainsTemplateEvent(nativeRoot))
+        {
+            AddUnsupported(template.Body.Span,
+                "ItemTemplate fragments cannot declare events because Avalonia owns template realization and no per-realization ComponentOwner is available.");
+            return;
+        }
+
+        if (ContainsReactiveTemplateBinding(nativeRoot))
+        {
+            AddUnsupported(template.Body.Span,
+                "ItemTemplate property values must depend on the typed item; component state, inputs, and computed values are not refreshed by Avalonia template realization.");
+            return;
+        }
+
+        if (ContainsItemDependentCollection(nativeRoot, template.ItemName))
+        {
+            AddUnsupported(template.Body.Span,
+                "Mount-only native collection members cannot depend on the ItemTemplate item.");
+            return;
+        }
+
+        members.Add(new BoundItemTemplateMember(
+            template.Name,
+            itemType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            template.ItemName,
+            nativeRoot,
+            template.Span));
+        _symbols.Add(_resolver!.ToSemanticSymbol(control, resolvedProperty, template.NameSpan));
+
+        static bool HasTemplateStructure(IEnumerable<UiElementSyntax> roots) =>
+            roots.Any(HasTemplateStructureInElement);
+
+        static bool HasTemplateStructureInElement(UiElementSyntax root) =>
+            root.Members.Any(member => member is UiIfSyntax or UiForEachSyntax or
+                UiAsyncBoundarySyntax or UiYieldSyntax or UiSlotSupplySyntax or UiTemplateSyntax) ||
+            root.Members.OfType<UiChildSyntax>().Any(child => HasTemplateStructureInElement(child.Element));
+
+        static bool ContainsComponent(BoundControlModel root) =>
+            root.Members.Any(member => member switch
+            {
+                BoundComponentChildMember => true,
+                BoundChildMember child => ContainsComponent(child.Child),
+                _ => false,
+            });
+
+        static bool ContainsTemplateEvent(BoundControlModel root) =>
+            root.Members.Any(member => member switch
+            {
+                BoundEventMember => true,
+                BoundChildMember child => ContainsTemplateEvent(child.Child),
+                _ => false,
+            });
+
+        bool ContainsReactiveTemplateBinding(BoundControlModel root) =>
+            root.Members.Any(member => member switch
+            {
+                BoundPropertyMember property => IsReactiveTemplateExpression(property.Expression),
+                BoundAttachedPropertyMember attached => IsReactiveTemplateExpression(attached.Expression),
+                BoundContentMember content => IsReactiveTemplateExpression(content.Expression),
+                BoundNativeCollectionMember collection => collection.Elements.Any(IsReactiveTemplateExpression),
+                BoundChildMember child => ContainsReactiveTemplateBinding(child.Child),
+                _ => false,
+            });
+
+        static bool ContainsItemDependentCollection(BoundControlModel root, string itemName) =>
+            root.Members.Any(member => member switch
+            {
+                BoundNativeCollectionMember collection => collection.Elements.Any(element =>
+                    ReferencesIdentifier(element.SourceText, itemName)),
+                BoundChildMember child => ContainsItemDependentCollection(child.Child, itemName),
+                _ => false,
+            });
+
+        static bool ReferencesIdentifier(string expression, string name) =>
+            CSharpSyntaxTree.ParseText(expression).GetRoot().DescendantNodes()
+                .OfType<IdentifierNameSyntax>()
+                .Any(identifier => identifier.Identifier.ValueText == name);
+
+        bool IsReactiveTemplateExpression(BoundCSharpIsland expression) =>
+            expression.Dependencies.Count > 0 ||
+            CSharpSyntaxTree.ParseText(expression.SourceText).GetRoot().DescendantNodes()
+                .OfType<IdentifierNameSyntax>()
+                .Any(identifier => _sources.Any(source => source.Name == identifier.Identifier.ValueText)) ||
+            expression.LoweredText.Contains("__lucent_state", StringComparison.Ordinal) ||
+            expression.LoweredText.Contains("__lucent_input", StringComparison.Ordinal) ||
+            expression.LoweredText.Contains("__lucent_computed", StringComparison.Ordinal);
     }
 
     private void BindImplicitContent(
@@ -1321,6 +1513,10 @@ internal sealed class GeneralBinder
                 BoundComponentChildMember child => child with
                 {
                     Invocation = (BoundComponentInvocationModel)FinalizeRenderable(child.Invocation, islands),
+                },
+                BoundItemTemplateMember template => template with
+                {
+                    Root = FinalizeControl(template.Root, islands),
                 },
                 _ => member,
             }).ToArray(),

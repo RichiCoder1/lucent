@@ -298,6 +298,35 @@ public sealed class CompileLucentTests
     }
 
     [TestMethod]
+    public async System.Threading.Tasks.Task Targets_consumer_compiles_first_class_item_template_with_declared_local()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        await File.WriteAllTextAsync(
+            Path.Combine(temporary.Path, "Main.lui"),
+            "namespace Demo; using Avalonia.Controls; component Main() => ListBox { " +
+            "ItemsSource: new[] { \"one\" }; " +
+            "template ItemTemplate(string @class) { TextBlock { Text: @class.ToUpperInvariant(); } } };" );
+        var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(projectPath, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="Main.lui" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var build = await RunDotNetAsync(temporary.Path,
+            "build", projectPath, "--nologo", "--verbosity:minimal", "-nodeReuse:false");
+        Assert.AreEqual(0, build.ExitCode, build.Output);
+    }
+
+    [TestMethod]
     public async System.Threading.Tasks.Task Design_time_compile_items_include_generated_components()
     {
         using var temporary = new TemporaryDirectory();

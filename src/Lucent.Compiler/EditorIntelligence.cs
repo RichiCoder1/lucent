@@ -756,6 +756,7 @@ internal static class EditorIntelligence
                     UiAsyncBoundarySyntax boundary => boundary.Fallback.Roots.Count == 0
                         ? boundary.Content.Roots
                         : boundary.Content.Roots.Concat(boundary.Fallback.Roots),
+                    UiTemplateSyntax template => template.Body.Roots,
                     _ => Array.Empty<UiElementSyntax>(),
                 };
                 foreach (var descendant in EnumerateElements(children))

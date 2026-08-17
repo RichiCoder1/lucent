@@ -135,6 +135,16 @@ public sealed record UiPropertySyntax(
     public IReadOnlyList<SourceSpan> Segments => NameSegments ?? [new SourceSpan(Span.Start, Name.Length)];
 }
 
+public sealed record UiTemplateSyntax(
+    string Name,
+    string ItemTypeName,
+    string ItemName,
+    UiConditionalBranchSyntax Body,
+    SourceSpan Span,
+    SourceSpan NameSpan,
+    SourceSpan ItemTypeSpan,
+    SourceSpan ItemNameSpan) : UiMemberSyntax(Span);
+
 public sealed record UiChildSyntax(
     UiElementSyntax Element,
     SourceSpan Span) : UiMemberSyntax(Span);

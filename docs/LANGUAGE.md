@@ -122,6 +122,31 @@ Both forms target Avalonia's `ContentControl.Content`; the explicit spelling is
 available when floating text would be less clear. Explicit content and nested
 implicit content cannot be combined.
 
+### Item templates
+
+Avalonia item controls can use a typed fragment for `ItemTemplate` without
+embedding a raw `FuncDataTemplate` expression:
+
+```csharp
+ListBox {
+    ItemsSource: items;
+    template ItemTemplate(TodoItem item) {
+        TextBlock { Text: $"{item.Title} ({item.Priority})"; }
+    }
+}
+```
+
+The item parameter is a normal typed C# island local, so member access,
+completion, hover, and diagnostics use its declared type. The fragment must
+produce exactly one native Avalonia control. Empty or multiple roots are
+diagnosed, and Lucent component invocations, nested templates, slots,
+conditionals, keyed regions, and events are currently rejected inside item
+templates because Avalonia owns realization and no per-realization
+`ComponentOwner` is available. The compiler therefore emits a native
+`FuncDataTemplate<T>` with no Lucent component owner or hidden wrapper. Use
+native controls and ordinary item expressions for virtualized rows. Existing
+raw `ItemTemplate: new FuncDataTemplate<T>(...)` expressions remain supported.
+
 The language rule is that literal conveniences are selected from the resolved
 target property type, not from a control or property-name table. Numeric and
 tuple literals support `Thickness` and `CornerRadius`:

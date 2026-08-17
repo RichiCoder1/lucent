@@ -1137,6 +1137,11 @@ internal static class GeneralCSharpEmitter
             writer, control, $"__lucent_control{index}!", source,
             expression => expression.Dependencies.Count == 0);
 
+        foreach (var template in control.Members.OfType<BoundItemTemplateMember>())
+        {
+            EmitItemTemplate(writer, template, source, $"__lucent_control{index}!");
+        }
+
         foreach (var content in control.Members.OfType<BoundContentMember>())
         {
             if (content.Expression.Dependencies.Count > 0)
@@ -2191,6 +2196,41 @@ internal static class GeneralCSharpEmitter
         }
     }
 
+    private static void EmitItemTemplate(
+        CodeWriter writer,
+        BoundItemTemplateMember template,
+        SourceDocument source,
+        string target)
+    {
+        var controls = Flatten(template.Root)
+            .Select((control, index) => (control, index: index + 1))
+            .ToArray();
+        writer.Line(
+            $"{target}.ItemTemplate = new global::Avalonia.Controls.Templates.FuncDataTemplate<{template.ItemTypeName}>(({EscapeIdentifier(template.ItemName)}, _) =>");
+        writer.Line("{");
+        writer.Indent();
+        foreach (var (control, index) in controls)
+        {
+            writer.Line($"var control{index} = new {control.TypeName}();");
+        }
+        writer.Line();
+        foreach (var (control, index) in controls)
+        {
+            EmitTemplateStaticProperties(writer, control, index, template.ItemName, [], [], source);
+        }
+        foreach (var (control, index) in controls)
+        {
+            EmitTemplateChildren(writer, control, index, controls, new Dictionary<BoundComponentInvocationModel, (string Instance, string Roots)>());
+        }
+        foreach (var (control, index) in controls)
+        {
+            EmitTemplateBindings(writer, control, index, template.ItemName, [], [], source);
+        }
+        writer.Line("return control1;");
+        writer.Unindent();
+        writer.Line("}, false);");
+    }
+
     private static void EmitReportedBody(CodeWriter writer, string body, string owner)
     {
         writer.Line("try");
@@ -3044,4 +3084,7 @@ internal static class GeneralCSharpEmitter
     private static string EscapeLinePath(string path) =>
         path.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private static string EscapeIdentifier(string name) =>
+        SyntaxFacts.GetKeywordKind(name) == SyntaxKind.None ? name : "@" + name;
 }

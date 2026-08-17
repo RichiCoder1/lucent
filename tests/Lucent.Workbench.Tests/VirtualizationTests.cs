@@ -201,6 +201,88 @@ public sealed class VirtualizationTests
         });
     }
 
+    [TestMethod]
+    public async Task Recycling_interface_spike_records_realization_without_owner_contract()
+    {
+        var items = new ObservableCollection<int>(Enumerable.Range(0, 5_000));
+        var template = new TrackingTemplate();
+
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            var list = new ListBox
+            {
+                Width = 400,
+                Height = 240,
+                ItemsSource = items,
+                ItemTemplate = template,
+            };
+            window.Content = list;
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            list.ScrollIntoView(items[^1]);
+            Dispatcher.UIThread.RunJobs();
+            items.RemoveAt(items.Count - 1);
+            items.Insert(0, -1);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.IsTrue(template.BuildCount > 0);
+            Assert.AreEqual(0, template.RecycleCount,
+                "The headless ListBox does not recycle item-template roots through Build(existing).");
+            Assert.IsTrue(template.AttachedCount > 0);
+            Assert.IsTrue(template.DetachedCount > 0,
+                "Virtualized template roots detach when their containers leave the visual tree.");
+            Assert.IsTrue(template.BuildCount < items.Count,
+                "ListBox remained virtualized instead of realizing every item.");
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    public async Task Non_recycling_func_data_template_realizes_bounded_rows_and_detaches_roots()
+    {
+        var items = new ObservableCollection<int>(Enumerable.Range(0, 5_000));
+        var buildCount = 0;
+        var attachedCount = 0;
+        var detachedCount = 0;
+        var template = new FuncDataTemplate<int>((item, _) =>
+        {
+            buildCount++;
+            var root = new TextBlock { Text = item.ToString() };
+            root.AttachedToVisualTree += (_, _) => attachedCount++;
+            root.DetachedFromVisualTree += (_, _) => detachedCount++;
+            return root;
+        }, false);
+
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            var list = new ListBox
+            {
+                Width = 400,
+                Height = 240,
+                ItemsSource = items,
+                ItemTemplate = template,
+            };
+            window.Content = list;
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+
+            list.ScrollIntoView(items[^1]);
+            Dispatcher.UIThread.RunJobs();
+            items.RemoveAt(items.Count - 1);
+            items.Insert(0, -1);
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.IsTrue(buildCount > 0);
+            Assert.IsTrue(attachedCount > 0);
+            Assert.IsTrue(detachedCount > 0,
+                "Non-recycling template roots detach when virtualized containers leave the visual tree.");
+            Assert.IsTrue(buildCount < items.Count,
+                "ListBox remained virtualized instead of realizing every item.");
+            return Task.CompletedTask;
+        });
+    }
+
     private static ListBox CreateList<T>(ObservableCollection<T> items, Func<T, INameScope, Control> build) =>
         new()
         {
@@ -217,5 +299,33 @@ public sealed class VirtualizationTests
         Assert.IsTrue(containers.Any(item => ReferenceEquals(item.DataContext, expected)) ||
             containers.Any(item => item.DataContext?.Equals(expected) == true),
             $"Expected endpoint was not realized for {typeof(T).Name}.");
+    }
+
+    private sealed class TrackingTemplate : IRecyclingDataTemplate
+    {
+        public int BuildCount { get; private set; }
+        public int RecycleCount { get; private set; }
+        public int AttachedCount { get; private set; }
+        public int DetachedCount { get; private set; }
+
+        public bool Match(object? data) => data is int;
+
+        public Control? Build(object? data) => Build(data, null);
+
+        public Control Build(object? data, Control? existing)
+        {
+            if (existing is TextBlock text)
+            {
+                RecycleCount++;
+                text.Text = data?.ToString();
+                return text;
+            }
+
+            BuildCount++;
+            var root = new TextBlock { Text = data?.ToString() };
+            root.AttachedToVisualTree += (_, _) => AttachedCount++;
+            root.DetachedFromVisualTree += (_, _) => DetachedCount++;
+            return root;
+        }
     }
 }

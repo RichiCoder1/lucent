@@ -28,6 +28,172 @@ public sealed class GeneralCompilerTests
     }
 
     [TestMethod]
+    public void Typed_item_template_lowers_native_fragment_and_item_scope()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => ListBox { ItemsSource: new[] { \"one\" }; template ItemTemplate(string item) { TextBlock { Text: item.ToUpperInvariant(); } } };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!,
+            "FuncDataTemplate<string>");
+        StringAssert.Contains(result.GeneratedSource!, "item.ToUpperInvariant()");
+        StringAssert.Contains(result.GeneratedSource!, "return control1;");
+    }
+
+    [TestMethod]
+    public void Item_template_emits_the_declared_parameter_name()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string todo) { TextBlock { Text: todo.ToUpperInvariant(); } } };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "FuncDataTemplate<string>((todo, _) =>");
+        Assert.IsFalse(result.GeneratedSource!.Contains("(item, _) =>", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Item_template_preserves_escaped_parameter_names()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string @class) { TextBlock { Text: @class.ToUpperInvariant(); } } };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "FuncDataTemplate<string>((@class, _) =>");
+        StringAssert.Contains(result.GeneratedSource!, "@class.ToUpperInvariant()");
+    }
+
+    [TestMethod]
+    public void Item_template_requires_exactly_one_native_root()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string item) { TextBlock { Text: item; } TextBlock { Text: item; } } };",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("exactly one native control root", StringComparison.Ordinal)));
+
+        var empty = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string item) { } };",
+            "App.lui");
+        Assert.IsFalse(empty.Succeeded);
+        Assert.IsTrue(empty.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("exactly one native control root", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Malformed_item_template_body_recovers()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string item) Title: \"x\"; };",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("Expected a native control root", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Item_template_rejects_component_lifetimes_owned_by_Avalonia()
+    {
+        var result = LucentCompiler.CompileProject([
+            new LucentSourceInput("Child.lui",
+                "namespace Demo; using Avalonia.Controls; component Child() => Border {};"),
+            new LucentSourceInput("App.lui",
+                "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string item) { Child {}; } };")]);
+
+        var app = result.Sources.Single(source => source.SourcePath == "App.lui").Result;
+        Assert.IsFalse(app.Succeeded);
+        Assert.IsTrue(app.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("cannot invoke Lucent components", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Item_template_rejects_nested_events_without_a_component_owner()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string todo) { Border { Button { Click: (sender, e) => { } } } } };",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("cannot declare events", StringComparison.Ordinal)),
+            string.Join(Environment.NewLine, result.Diagnostics));
+    }
+
+    [TestMethod]
+    public void Item_template_item_scope_supports_completion_and_hover()
+    {
+        const string source = "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string item) { TextBlock { Text: item.ToUpperInvariant(); } } };";
+        var memberOffset = source.IndexOf("item.ToUpperInvariant", StringComparison.Ordinal) + "item.ToU".Length;
+        Assert.IsTrue(LucentCompiler.GetCompletions(source, memberOffset, "App.lui")
+            .Any(item => item.Label == "ToUpperInvariant"));
+
+        var symbolOffset = source.IndexOf("item.ToUpperInvariant", StringComparison.Ordinal);
+        var symbol = LucentCompiler.GetExpressionSymbol(source, symbolOffset, "App.lui");
+        Assert.IsNotNull(symbol);
+        StringAssert.Contains(symbol.Display, "string item");
+    }
+
+    [TestMethod]
+    public void Item_template_rejects_component_reactive_bindings()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() { private readonly State<string> prefix = new(\"!\"); Fragment Render() => ListBox { template ItemTemplate(string item) { TextBlock { Text: prefix.Value + item; } } }; }",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded, result.GeneratedSource ?? string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("must depend on the typed item", StringComparison.Ordinal)),
+            string.Join(Environment.NewLine, result.Diagnostics));
+    }
+
+    [TestMethod]
+    public void Item_template_rejects_indirect_state_reads_through_method_summaries()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() { private readonly State<string> prefix = new(\"!\"); private string Prefix() => prefix.Value; Fragment Render() => ListBox { template ItemTemplate(string todo) { TextBlock { Text: Prefix() + todo; } } }; }",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded, result.GeneratedSource ?? string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("must depend on the typed item", StringComparison.Ordinal)),
+            string.Join(Environment.NewLine, result.Diagnostics));
+    }
+
+    [TestMethod]
+    public void Item_template_requires_the_native_IDataTemplate_contract()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-item-template-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "FakeControl.cs");
+            File.WriteAllText(sourcePath,
+                "namespace Demo.Controls; public sealed class FakeControl : Avalonia.Controls.Control " +
+                "{ public NotADataTemplate? ItemTemplate { get; set; } } " +
+                "public sealed class NotADataTemplate { }");
+
+            var result = LucentCompiler.Compile(
+                "namespace Demo; using Demo.Controls; component App() => FakeControl { template ItemTemplate(string todo) { TextBlock { Text: todo; } } };",
+                "App.lui",
+                new LucentProjectContext(SourcePaths: [sourcePath]));
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+                diagnostic.Message.Contains("not an Avalonia data-template property", StringComparison.Ordinal)),
+                string.Join(Environment.NewLine, result.Diagnostics));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void Indirect_and_structural_roots_do_not_emit_approximate_mount_root()
     {
         var indirect = LucentCompiler.CompileProject([

@@ -149,7 +149,7 @@ internal sealed class CSharpIslandBinder(
             text.Append("private ").Append(returnType).Append(" __Island")
                 .Append(request.Id).Append('(')
                 .Append(string.Join(", ", request.Locals.Where(local => local != inferredLocal).Select(local =>
-                    $"{FormatType(local.Type)} {local.Name}")))
+                    $"{FormatType(local.Type)} {EscapeIdentifier(local.Name)}")))
                 .Append(')');
             if (inferredLocal is not null)
             {
@@ -572,4 +572,7 @@ internal sealed class CSharpIslandBinder(
                 : SyntaxFactory.ParseExpression(lowered).WithTriviaFrom(node);
         }
     }
+
+    private static string EscapeIdentifier(string name) =>
+        SyntaxFacts.GetKeywordKind(name) == SyntaxKind.None ? name : "@" + name;
 }
