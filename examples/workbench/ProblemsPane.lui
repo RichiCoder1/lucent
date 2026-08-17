@@ -1,7 +1,6 @@
 namespace Lucent.Examples.Workbench;
 
 using Avalonia.Controls;
-using Avalonia.Controls.Templates;
 using Avalonia;
 using System.Windows.Input;
 using Avalonia.Automation;
@@ -29,9 +28,9 @@ component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand 
             AutomationProperties.Name: "Problems";
             AutomationProperties.AutomationId: "Problems.List";
             ItemsSource: items;
-            ItemTemplate: new FuncDataTemplate<ProblemItem>((item, _) => new TextBlock {
-                Text = $"{item.File}:{item.Line} {item.Message}",
-            }, true);
+            template ItemTemplate(ProblemItem item) {
+                TextBlock { Text: $"{item.File}:{item.Line} {item.Message}"; }
+            }
             KeyDown: (sender, e) => {
                 if (e.Key == Avalonia.Input.Key.Down) {
                     sender.SelectedIndex = Math.Min(sender.Items.Count - 1, sender.SelectedIndex + 1);

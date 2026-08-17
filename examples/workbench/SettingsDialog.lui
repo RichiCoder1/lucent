@@ -27,6 +27,7 @@ component SettingsDialog(WorkbenchSettings settings, Action<WorkbenchSettings> o
         KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = toggleProblems }];
         Loaded: (sender, e) => {
             window = sender;
+            sender.Title = "Settings";
             sender.Activate();
         };
 

@@ -2209,6 +2209,7 @@ internal static class GeneralCSharpEmitter
             $"{target}.ItemTemplate = new global::Avalonia.Controls.Templates.FuncDataTemplate<{template.ItemTypeName}>(({EscapeIdentifier(template.ItemName)}, _) =>");
         writer.Line("{");
         writer.Indent();
+        writer.Line($"if ((object?){EscapeIdentifier(template.ItemName)} is null) return null!;");
         foreach (var (control, index) in controls)
         {
             writer.Line($"var control{index} = new {control.TypeName}();");

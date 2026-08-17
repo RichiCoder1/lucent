@@ -37,6 +37,7 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(result.GeneratedSource!,
             "FuncDataTemplate<string>");
+        StringAssert.Contains(result.GeneratedSource!, "if ((object?)item is null) return null!;");
         StringAssert.Contains(result.GeneratedSource!, "item.ToUpperInvariant()");
         StringAssert.Contains(result.GeneratedSource!, "return control1;");
     }
