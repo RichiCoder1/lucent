@@ -19,11 +19,17 @@ component SettingsDialog(WorkbenchSettings settings, Action<WorkbenchSettings> o
     private void ChangeSettings(WorkbenchSettings value) { draft.Update(value); onChanged(value); }
 
     Fragment Render() => Window {
-    Title: "Settings";
-    Width: 420;
-    Height: 280;
-    Loaded: (sender, e) => { window = sender; sender.Title = "Settings"; sender.Activate(); AutomationProperties.SetName(sender, "Settings"); AutomationProperties.SetAutomationId(sender, "Settings.Dialog"); };
-    KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = toggleProblems }];
-    SettingsPane(draft.Value, ChangeSettings) {}
+        Title: "Settings";
+        Width: 420;
+        Height: 280;
+        AutomationProperties.Name: "Settings";
+        AutomationProperties.AutomationId: "Settings.Dialog";
+        KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = toggleProblems }];
+        Loaded: (sender, e) => {
+            window = sender;
+            sender.Activate();
+        };
+
+        SettingsPane(draft.Value, ChangeSettings) {}
     };
 }
