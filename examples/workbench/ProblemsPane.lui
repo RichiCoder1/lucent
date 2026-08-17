@@ -2,19 +2,29 @@ namespace Lucent.Examples.Workbench;
 
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
+using Avalonia;
 using System.Windows.Input;
 using Avalonia.Automation;
 
 component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand copyCommand) => Border {
-    StackPanel {
-        TextBlock { Text: $"{items.Count} problems"; AutomationProperties.Name: "Problems"; }
+    Class: "problems-pane";
+    Grid {
+        RowDefinitions: [
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(new GridLength(1, GridUnitType.Star)),
+            new RowDefinition(GridLength.Auto)
+        ];
+        TextBlock { Class: "pane-title"; Grid.Row: 0; Text: $"{items.Count} problems"; AutomationProperties.Name: "Problems"; }
         ContentControl {
+            Grid.Row: 1;
             if (loading) {
-                TextBlock { Text: "Loading problems"; AutomationProperties.Name: "Loading problems"; }
+                TextBlock { Class: "loading-state"; Text: "Loading problems"; AutomationProperties.Name: "Loading problems"; }
             }
         }
         ListBox {
-            Height: 180;
+            Class: "problems-list";
+            Grid.Row: 2;
             Focusable: true;
             AutomationProperties.Name: "Problems";
             AutomationProperties.AutomationId: "Problems.List";
@@ -33,6 +43,6 @@ component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand 
                 }
             };
         }
-        Button { Content: "Copy diagnostic"; Command: copyCommand; }
+        Button { Class: "pane-action"; Grid.Row: 3; Content: "Copy diagnostic"; Command: copyCommand; }
     }
 };

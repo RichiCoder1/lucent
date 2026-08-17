@@ -1,0 +1,41 @@
+Border.editor-pane {
+    background: resource(Lucent.Surface);
+    padding: 12px;
+}
+
+Grid.document-header {
+    margin: 0 0 8px 0;
+}
+
+TextBlock.document-title {
+    foreground: resource(Lucent.Text);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+TextBlock.document-language {
+    foreground: resource(Lucent.TextMuted);
+    font-size: 12px;
+}
+
+TextBlock.document-edits {
+    foreground: resource(Lucent.TextMuted);
+    font-size: 12px;
+}
+
+StackPanel.editor-actions {
+    gap: 4px;
+    margin: 0 0 8px 0;
+}
+
+StackPanel.document-toolbar {
+    gap: 8px;
+    margin: 8px 0 0 0;
+}
+
+TextEditor.source-editor {
+    background: resource(Lucent.SurfaceRaised);
+    foreground: resource(Lucent.Text);
+    border-color: resource(Lucent.Border);
+    border-width: 1px;
+}

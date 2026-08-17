@@ -29,6 +29,8 @@ public static class LucentCompiler
     {
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+        if (sourcePath.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+            return EditorIntelligence.GetCssCompletions(sourceText, offset);
         var analysis = ComponentSemanticAnalysis.Create(sourceText, sourcePath, projectContext);
         return EditorIntelligence.GetCompletions(sourceText, offset, analysis);
     }
@@ -149,6 +151,17 @@ public static class LucentCompiler
                 input.StylePath ?? Path.ChangeExtension(input.SourcePath, ".css"));
             styleSheets[indexValue] = styles.Sheet;
             diagnostics[indexValue].AddRange(styles.Diagnostics);
+            if (analyses[indexValue].Model is { } styledModel)
+            {
+                var styleValidation = StyleSheetValidator.Validate(
+                    styles.Sheet,
+                    styledModel,
+                    analyses[indexValue].Resolver,
+                    input.StylePath ?? Path.ChangeExtension(input.SourcePath, ".css"),
+                    input.StyleText);
+                styleSheets[indexValue] = styleValidation.Sheet;
+                diagnostics[indexValue].AddRange(styleValidation.Diagnostics);
+            }
             if (styles.Sheet.Rules.Count > 0 && analyses[indexValue].Model is { } model &&
                 EffectiveOutputCardinality(model.Roots) == 0)
             {

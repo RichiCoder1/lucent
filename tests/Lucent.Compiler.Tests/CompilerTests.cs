@@ -57,7 +57,7 @@ public sealed class CompilerTests
         Assert.AreEqual(first.GeneratedSource, second.GeneratedSource);
         StringAssert.Contains(first.GeneratedSource, "public Fragment Mount()");
         StringAssert.Contains(first.GeneratedSource, "return Fragment.From(__lucent_control1!);");
-        Assert.IsFalse(first.GeneratedSource!.Contains("FontSize", StringComparison.Ordinal));
+        StringAssert.Contains(first.GeneratedSource!, "FontSize");
         Assert.IsFalse(first.GeneratedSource.Contains("Padding", StringComparison.Ordinal));
         Assert.IsFalse(first.GeneratedSource.Contains(
             "Text = \"Lucent\"",

@@ -967,6 +967,22 @@ public sealed class GeneralCompilerTests
     }
 
     [TestMethod]
+    public void Invalid_css_values_and_transitions_report_declaration_spans()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() => Border { Class: \"card\"; };",
+            "Main.lui",
+            projectContext: null,
+            "\n.card { opacity: NaN; transition: font-family 120ms; }",
+            "Main.css");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Count(diagnostic => diagnostic.Code == "LUC4001") >= 2);
+        Assert.IsTrue(result.Diagnostics.All(diagnostic => diagnostic.SourcePath == "Main.css"));
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Line == 2 && diagnostic.Column > 0));
+    }
+
+    [TestMethod]
     public void Css_subset_lowers_variables_pseudo_classes_and_native_transitions()
     {
         var result = LucentCompiler.Compile(
@@ -987,7 +1003,7 @@ public sealed class GeneralCompilerTests
             projectContext: null,
             """
             :root { --accent: #7357e6; }
-            .shell { gap: 8px; padding: 16px; }
+            .shell { gap: 8px; }
             .primary {
                 background: var(--accent);
                 opacity: 0.8;
@@ -1003,6 +1019,124 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(result.GeneratedSource, "global::Avalonia.Media.Color.FromRgb(0x73, 0x57, 0xe6)");
         StringAssert.Contains(result.GeneratedSource, "global::Avalonia.Animation.BrushTransition");
         StringAssert.Contains(result.GeneratedSource, "global::Avalonia.Animation.DoubleTransition");
+    }
+
+    [TestMethod]
+    public void Css_catalog_lowers_names_combinators_resources_and_extended_values()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component Main() => Border { Name: \"Shell\"; Class: \"toolbar primary\"; Border { Name: \"SearchBox\"; Class: \"toolbar primary\"; } };",
+            "Main.lui",
+            projectContext: null,
+            """
+            :root { --canvas: resource(Lucent.Canvas); }
+            #Shell > #SearchBox.toolbar.primary:focus-visible {
+                background: var(--canvas);
+                border-color: #007a7b;
+                border-width: 2px;
+                border-radius: 4px;
+                visibility: true;
+                transition: background 120ms ease-out, border-radius 180ms ease-in-out;
+            }
+            #Shell .toolbar { opacity: 0.9; }
+            """,
+            "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, ".Child().OfType<global::Avalonia.Controls.Border>()");
+        StringAssert.Contains(result.GeneratedSource!, ".Descendant().OfType<global::Avalonia.Controls.Border>()");
+        StringAssert.Contains(result.GeneratedSource!, ".Name(\"SearchBox\")");
+        StringAssert.Contains(result.GeneratedSource!, "DynamicResourceExtension(\"Lucent.Canvas\")");
+        StringAssert.Contains(result.GeneratedSource!, "CornerRadiusTransition");
+    }
+
+    [TestMethod]
+    public void Css_untyped_ancestor_keeps_its_own_control_type()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() => Border { Class: \"todo-row completed\"; TextBox { Class: \"editor\"; } };",
+            "Main.lui",
+            projectContext: null,
+            ".todo-row.completed TextBox { opacity: 0.5; }",
+            "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!,
+            "x.Class(\"todo-row\").Class(\"completed\").Descendant().OfType<global::Avalonia.Controls.TextBox>()");
+        Assert.IsFalse(result.GeneratedSource!.Contains(
+            "x.OfType<global::Avalonia.Controls.TextBox>().Class(\"todo-row\")",
+            StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Css_runtime_class_and_name_selectors_are_not_dropped_when_statically_unmatched()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() => Border {};",
+            "Main.lui",
+            projectContext: null,
+            ".future #Later { background: #112233; }",
+            "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, ".Class(\"future\").Descendant()");
+        StringAssert.Contains(result.GeneratedSource!, ".Name(\"Later\")");
+        StringAssert.Contains(result.GeneratedSource!, "global::Avalonia.Controls.Border.BackgroundProperty");
+        Assert.IsFalse(result.GeneratedSource!.Contains(
+            "global::Avalonia.Controls.Control.BackgroundProperty", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Css_selector_without_a_common_native_property_owner_is_diagnosed()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() => Border {};",
+            "Main.lui",
+            projectContext: null,
+            ".future { gap: 8px; box-shadow: 0 2px 4px #112233; }",
+            "Main.css");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Code == "LUC4001" &&
+            diagnostic.Message.Contains("no common native property owner", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Css_font_weight_medium_lowers_to_native_medium()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() => TextBlock { Class: \"copy\"; };",
+            "Main.lui",
+            projectContext: null,
+            ".copy { font-weight: medium; }",
+            "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "global::Avalonia.Media.FontWeight.Medium");
+    }
+
+    [TestMethod]
+    public void Css_eight_digit_color_lowers_rgba_to_native_argb_order()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() => Border { Class: \"surface\"; };",
+            "Main.lui",
+            projectContext: null,
+            ".surface { background: #11223344; }",
+            "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!,
+            "global::Avalonia.Media.Color.FromArgb(0x44, 0x11, 0x22, 0x33)");
+    }
+
+    [TestMethod]
+    public void Css_completions_are_backed_by_the_typed_catalog()
+    {
+        var items = LucentCompiler.GetCompletions(".card { border-", 15, "Main.css");
+        Assert.IsTrue(items.Any(item => item.Label == "border-color"));
+        Assert.IsTrue(items.Any(item => item.Label == "border-radius"));
+        Assert.IsTrue(items.All(item => item.Kind == LucentCompletionItemKind.Property));
     }
 
     [TestMethod]

@@ -1,0 +1,73 @@
+Border {
+    background: resource(Lucent.Canvas);
+}
+
+Border.todo-row {
+    padding: 12px 8px;
+}
+
+TextBlock {
+    foreground: resource(Lucent.Text);
+}
+
+TextBlock.todo-subtitle {
+    foreground: resource(Lucent.TextMuted);
+}
+
+TextBlock.todo-status {
+    foreground: resource(Lucent.TextMuted);
+}
+
+StackPanel.todo-entry {
+    gap: 8px;
+}
+
+StackPanel.filter-bar {
+    gap: 8px;
+}
+
+.todo-row {
+    border-width: 1px;
+    border-color: resource(Lucent.Border);
+    transition: background 120ms ease-out;
+}
+
+.todo-row.active {
+    background: resource(Lucent.Surface);
+}
+
+.todo-row.completed {
+    background: resource(Lucent.Surface);
+    border-color: resource(Lucent.Success);
+}
+
+TextBlock.completion-state {
+    foreground: resource(Lucent.Success);
+    font-weight: 600;
+}
+
+.todo-row.completed TextBox {
+    text-wrap: nowrap;
+}
+
+.todo-row:pointerover {
+    border-color: resource(Lucent.Accent);
+}
+
+TextBox:focus-visible {
+    border-color: resource(Lucent.Focus);
+    border-width: 2px;
+}
+
+CheckBox:checked {
+    foreground: resource(Lucent.Success);
+}
+
+Button:disabled {
+    opacity: 0.62;
+}
+
+Button:focus-visible {
+    border-color: resource(Lucent.Focus);
+    border-width: 2px;
+}

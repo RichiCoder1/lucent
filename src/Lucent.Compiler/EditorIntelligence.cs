@@ -1,5 +1,6 @@
 using Lucent.Compiler.Parsing;
 using Lucent.Compiler.Semantics;
+using Lucent.Compiler.Styling;
 using Lucent.Compiler.Syntax;
 using Microsoft.CodeAnalysis;
 using LucentCompilationUnitSyntax = Lucent.Compiler.Syntax.CompilationUnitSyntax;
@@ -8,6 +9,24 @@ namespace Lucent.Compiler;
 
 internal static class EditorIntelligence
 {
+    public static IReadOnlyList<LucentCompletionItem> GetCssCompletions(string sourceText, int offset)
+    {
+        var prefixStart = Math.Max(0, Math.Min(offset, sourceText.Length));
+        while (prefixStart > 0 && (char.IsLetterOrDigit(sourceText[prefixStart - 1]) || sourceText[prefixStart - 1] == '-'))
+            prefixStart--;
+        var prefix = sourceText[prefixStart..Math.Min(offset, sourceText.Length)];
+        return CssPropertyCatalog.All
+            .Where(definition => definition.CssName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            .Select(definition => new LucentCompletionItem(
+                definition.CssName,
+                LucentCompletionItemKind.Property,
+                $"Avalonia {definition.AvaloniaName}",
+                definition.CssName + ": ",
+                $"Typed {definition.ValueKind} value"))
+            .OrderBy(item => item.Label, StringComparer.Ordinal)
+            .ToArray();
+    }
+
     public static IReadOnlyList<LucentCompletionItem> GetCompletions(
         string sourceText,
         int offset,

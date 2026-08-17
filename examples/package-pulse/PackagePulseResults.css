@@ -1,15 +1,11 @@
-:root {
-    --canvas: #10131a;
-    --surface: #191e29;
-    --surface-hover: #232b3a;
-    --text: #f5f7fb;
-    --muted: #9ca8ba;
-    --accent: #8ca7ff;
+Border.app-shell {
+    background: resource(Lucent.Canvas);
+    padding: 24px;
 }
 
-Border.app-shell {
-    background: var(--canvas);
-    padding: 32px;
+Border.app-shell TextBox.search:focus-visible {
+    border-color: resource(Lucent.Focus);
+    border-width: 2px;
 }
 
 StackPanel.content {
@@ -17,11 +13,11 @@ StackPanel.content {
 }
 
 TextBlock {
-    foreground: var(--text);
+    foreground: resource(Lucent.Text);
 }
 
 TextBlock.eyebrow {
-    foreground: var(--accent);
+    foreground: resource(Lucent.Accent);
     font-size: 12px;
     font-weight: 600;
 }
@@ -32,25 +28,25 @@ TextBlock.title {
 }
 
 TextBlock.subtitle {
-    foreground: var(--muted);
+    foreground: resource(Lucent.TextMuted);
     opacity: 0.9;
 }
 
 TextBox.search {
-    background: var(--surface);
-    foreground: var(--text);
-    padding: 14px 12px;
+    background: resource(Lucent.Surface);
+    foreground: resource(Lucent.Text);
+    padding: 12px 8px;
     font-size: 16px;
-    transition: background 140ms ease-out;
+    transition: background 120ms ease-out;
 }
 
 TextBox.search:focus {
-    background: var(--surface-hover);
+    background: resource(Lucent.Surface);
 }
 
 TextBlock.status {
-    foreground: var(--muted);
-    transition: opacity 160ms ease-out;
+    foreground: resource(Lucent.TextMuted);
+    transition: opacity 120ms ease-out;
 }
 
 StackPanel.results {
@@ -59,14 +55,14 @@ StackPanel.results {
 }
 
 Border.package-row {
-    background: var(--surface);
+    background: resource(Lucent.Surface);
     padding: 16px;
-    border-radius: 10px;
-    transition: background 140ms ease-out, opacity 140ms ease-out;
+    border-radius: 8px;
+    transition: background 120ms ease-out, opacity 120ms ease-out;
 }
 
 Border.package-row:pointerover {
-    background: var(--surface-hover);
+    background: resource(Lucent.SurfaceRaised);
 }
 
 StackPanel.package-copy {
@@ -79,10 +75,17 @@ TextBlock.package-name {
 }
 
 TextBlock.package-version {
-    foreground: var(--accent);
+    foreground: resource(Lucent.Accent);
     font-size: 12px;
 }
 
 TextBlock.package-description {
-    foreground: var(--muted);
+    foreground: resource(Lucent.TextMuted);
+}
+
+Border.error-state {
+    background: resource(Lucent.SurfaceRaised);
+    border-color: resource(Lucent.Danger);
+    border-width: 1px;
+    padding: 16px;
 }

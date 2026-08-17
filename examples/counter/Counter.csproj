@@ -18,6 +18,7 @@
       PrivateAssets="all" />
     <LucentSource Include="Counter.lui" />
     <LucentSource Include="MainWindow.lui" />
+    <AvaloniaResource Include="..\..\design\rendered\lucent-icon-32.png" Link="Assets\lucent-icon-32.png" />
   </ItemGroup>
 
   <Import Project="..\..\build\Lucent.Compiler.targets" />

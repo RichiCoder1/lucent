@@ -14,6 +14,19 @@ namespace Lucent.Workbench.Tests;
 public sealed class UserFlowTests
 {
     [TestMethod]
+    public async Task Workbench_uses_persisted_sidebar_width_in_shell_grid()
+    {
+        await WithWorkbenchAsync(new TestHost(), async (root, _) =>
+        {
+            var shellGrid = root.GetVisualDescendants().OfType<Grid>()
+                .Single(grid => grid.ColumnDefinitions.Count == 3 &&
+                    grid.ColumnDefinitions[0].Width.Value == 360d);
+            Assert.AreEqual(360d, shellGrid.ColumnDefinitions[0].Width.Value);
+            await Task.CompletedTask;
+        }, settings: new WorkbenchSettings("Lucent", 360, true));
+    }
+
+    [TestMethod]
     public async Task Flow_1_ctrl_o_cancelled_picker_preserves_workspace()
     {
         var host = new TestHost { Folders = [] };
@@ -220,12 +233,13 @@ public sealed class UserFlowTests
         Func<Window, CancellationTokenSource, Task> action,
         ControllableProblemLoader? loader = null,
         SettingsSaveCoordinator? coordinator = null,
-        DocumentSession? session = null)
+        DocumentSession? session = null,
+        WorkbenchSettings? settings = null)
     {
         await HeadlessTestHarness.RunUiAsync(async () =>
         {
             using var lifetime = new CancellationTokenSource();
-            using var component = WorkbenchTestFactory.Create(host, lifetime.Token, loader: loader, session: session,
+            using var component = WorkbenchTestFactory.Create(host, lifetime.Token, settings: settings, loader: loader, session: session,
                 saveCoordinator: coordinator);
             var root = component.MountRoot();
             try

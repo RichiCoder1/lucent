@@ -5,28 +5,6 @@ namespace Lucent.Compiler.Styling;
 
 internal sealed partial class StyleSheetParser(string text, string path)
 {
-    private static readonly HashSet<string> SupportedProperties = new(StringComparer.Ordinal)
-    {
-        "background",
-        "foreground",
-        "opacity",
-        "padding",
-        "margin",
-        "border-radius",
-        "gap",
-        "font-size",
-        "font-weight",
-        "width",
-        "height",
-        "min-width",
-        "min-height",
-        "max-width",
-        "max-height",
-        "horizontal-alignment",
-        "vertical-alignment",
-        "transition",
-    };
-
     private readonly SourceDocument _source = new(text, path);
     private readonly List<LucentDiagnostic> _diagnostics = [];
     private readonly Dictionary<string, string> _variables = new(StringComparer.Ordinal);
@@ -92,12 +70,12 @@ internal sealed partial class StyleSheetParser(string text, string path)
         var boundRules = new List<BoundStyleRule>();
         foreach (var rule in rules)
         {
-            var match = SelectorPattern().Match(rule.Selector);
-            if (!match.Success)
+            var selector = ParseSelector(rule.Selector);
+            if (selector is null)
             {
                 Add(
                     "LUC4001",
-                    "The initial CSS subset supports one type selector, one class, and one Avalonia pseudo-class.",
+                    "CSS selectors support type, class, name, child (>) and descendant selectors with one terminal Avalonia pseudo-class.",
                     rule.Offset);
                 continue;
             }
@@ -105,16 +83,21 @@ internal sealed partial class StyleSheetParser(string text, string path)
             var declarations = new List<BoundStyleDeclaration>();
             foreach (var declaration in rule.Declarations)
             {
-                if (!SupportedProperties.Contains(declaration.PropertyName))
+                if (!CssPropertyCatalog.TryGet(declaration.PropertyName, out var definition))
                 {
                     Add(
                         "LUC4001",
-                        $"CSS property '{declaration.PropertyName}' is not supported by the initial Avalonia subset.",
+                        $"CSS property '{declaration.PropertyName}' is not supported by the Avalonia CSS catalog.",
                         rule.Offset);
                     continue;
                 }
 
                 var value = ResolveVariables(declaration.Value, rule.Offset);
+                if (value is not null && !CssPropertyCatalog.TryValidateValue(definition, value, out var error))
+                {
+                    Add("LUC4001", error!, declaration.Offset);
+                    continue;
+                }
                 if (value is not null)
                 {
                     declarations.Add(declaration with { Value = value });
@@ -122,9 +105,11 @@ internal sealed partial class StyleSheetParser(string text, string path)
             }
 
             boundRules.Add(new BoundStyleRule(
-                EmptyToNull(match.Groups["type"].Value),
-                EmptyToNull(match.Groups["class"].Value.TrimStart('.')),
-                EmptyToNull(match.Groups["pseudo"].Value),
+                new BoundStyleSelector(
+                    rule.Selector,
+                    selector.Parts,
+                    selector.Combinators,
+                    selector.PseudoClass),
                 declarations));
         }
 
@@ -149,9 +134,11 @@ internal sealed partial class StyleSheetParser(string text, string path)
                 continue;
             }
 
+            var segmentStart = text.IndexOf(declaration, start, end - start, StringComparison.Ordinal);
             declarations.Add(new BoundStyleDeclaration(
                 declaration[..colon].Trim(),
-                declaration[(colon + 1)..].Trim()));
+                declaration[(colon + 1)..].Trim(),
+                Math.Max(start, segmentStart)));
         }
 
         return declarations;
@@ -243,9 +230,79 @@ internal sealed partial class StyleSheetParser(string text, string path)
     private static string? EmptyToNull(string value) =>
         value.Length == 0 ? null : value;
 
-    [GeneratedRegex("^(?<type>[A-Za-z_][A-Za-z0-9_]*)?(?<class>\\.[A-Za-z_][A-Za-z0-9_-]*)?(?<pseudo>:[A-Za-z_][A-Za-z0-9_-]*)?$")]
-    private static partial Regex SelectorPattern();
-
     [GeneratedRegex(@"var\(\s*(?<name>--[A-Za-z_][A-Za-z0-9_-]*)\s*\)")]
     private static partial Regex VariablePattern();
+
+    private static ParsedSelector? ParseSelector(string selector)
+    {
+        var text = selector.Trim();
+        string? pseudo = null;
+        var pseudoIndex = text.LastIndexOf(':');
+        if (pseudoIndex >= 0)
+        {
+            pseudo = text[pseudoIndex..];
+            text = text[..pseudoIndex].TrimEnd();
+            if (!Regex.IsMatch(pseudo, "^:[A-Za-z_][A-Za-z0-9_-]*$")) return null;
+        }
+
+        var parts = new List<string>();
+        var combinators = new List<BoundStyleCombinator>();
+        var index = 0;
+        var pendingWhitespace = false;
+        while (index < text.Length)
+        {
+            var whitespace = false;
+            while (index < text.Length && char.IsWhiteSpace(text[index])) { whitespace = true; index++; }
+            if (index >= text.Length) break;
+            if (text[index] == '>')
+            {
+                if (parts.Count == 0 || (combinators.Count == parts.Count)) return null;
+                combinators.Add(BoundStyleCombinator.Child);
+                index++;
+                pendingWhitespace = false;
+                continue;
+            }
+            if (parts.Count > 0 && combinators.Count < parts.Count)
+                combinators.Add(pendingWhitespace || whitespace ? BoundStyleCombinator.Descendant : BoundStyleCombinator.Descendant);
+            var start = index;
+            while (index < text.Length && !char.IsWhiteSpace(text[index]) && text[index] != '>') index++;
+            if (index == start) return null;
+            parts.Add(text[start..index]);
+            pendingWhitespace = whitespace;
+        }
+        if (parts.Count == 0 || combinators.Count != parts.Count - 1) return null;
+        var selectors = new List<BoundStyleSelectorPart>();
+        foreach (var part in parts)
+        {
+            var match = Regex.Match(part,
+                @"^(?<type>[A-Za-z_][A-Za-z0-9_]*)?(?<name>#[A-Za-z_][A-Za-z0-9_-]*)?(?<classes>(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)$");
+            if (!match.Success || match.Value != part) return null;
+            var type = match.Groups["type"].Value;
+            var nameMatch = Regex.Match(part, @"#[A-Za-z_][A-Za-z0-9_-]*");
+            var classes = Regex.Matches(part, @"\.[A-Za-z_][A-Za-z0-9_-]*")
+                .Select(item => item.Value[1..]).ToArray();
+            if (type.Length == 0 && nameMatch.Length == 0 && classes.Length == 0) return null;
+            selectors.Add(new BoundStyleSelectorPart(
+                type.Length == 0 ? null : type,
+                nameMatch.Success ? nameMatch.Value[1..] : null,
+                classes));
+        }
+
+        var terminal = selectors[^1];
+        return new ParsedSelector(
+            terminal.TypeName,
+            terminal.Name,
+            terminal.Classes,
+            pseudo,
+            selectors,
+            combinators);
+    }
+
+    private sealed record ParsedSelector(
+        string? TypeName,
+        string? Name,
+        IReadOnlyList<string> ClassNames,
+        string? PseudoClass,
+        IReadOnlyList<BoundStyleSelectorPart> Parts,
+        IReadOnlyList<BoundStyleCombinator> Combinators);
 }

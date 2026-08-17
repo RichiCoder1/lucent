@@ -1,0 +1,24 @@
+Border.error-state {
+    background: resource(Lucent.SurfaceRaised);
+    border-color: resource(Lucent.Danger);
+    border-width: 1px;
+    padding: 16px;
+}
+
+StackPanel.pulse-error-state {
+    gap: 12px;
+}
+
+TextBlock.error-title {
+    foreground: resource(Lucent.Danger);
+    font-weight: 700;
+}
+
+Button.retry-action {
+    background: resource(Lucent.Danger);
+    foreground: resource(Lucent.SurfaceRaised);
+}
+
+TextBlock.status {
+    foreground: resource(Lucent.TextMuted);
+}

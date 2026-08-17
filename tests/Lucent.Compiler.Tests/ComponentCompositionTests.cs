@@ -661,6 +661,29 @@ public sealed class ComponentCompositionTests
     }
 
     [TestMethod]
+    public void Component_styles_bind_class_only_projected_background_to_valid_native_owners()
+    {
+        LucentSourceInput[] inputs = [
+            new LucentSourceInput("Child.lui", "namespace Demo; component Child() => Border { Class: \"surface\"; };"),
+            new LucentSourceInput("Host.lui", "namespace Demo; component Host() => Child {};", "Host.css",
+                ".surface { background: #112233; }")];
+        var result = LucentCompiler.CompileProject(inputs);
+        var reversed = LucentCompiler.CompileProject(inputs.Reverse().ToArray());
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine,
+            result.Sources.SelectMany(source => source.Result.Diagnostics)));
+        Assert.IsTrue(reversed.Succeeded, string.Join(Environment.NewLine,
+            reversed.Sources.SelectMany(source => source.Result.Diagnostics)));
+        var generated = result.Sources.Single(source => source.SourcePath == "Host.lui")
+            .Result.GeneratedSource!;
+        Assert.AreEqual(generated, reversed.Sources.Single(source => source.SourcePath == "Host.lui")
+            .Result.GeneratedSource!);
+        StringAssert.Contains(generated, "global::Avalonia.Controls.Border.BackgroundProperty");
+        Assert.IsFalse(generated.Contains("global::Avalonia.Controls.Control.BackgroundProperty",
+            StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public void Component_styles_project_conditional_and_keyed_component_roots()
     {
         var conditional = LucentCompiler.CompileProject([
@@ -673,7 +696,7 @@ public sealed class ComponentCompositionTests
 
         var keyed = LucentCompiler.CompileProject([
             new LucentSourceInput("Child.lui", "namespace Demo; component Child() => TextBlock { Class: \"surface\"; };"),
-            new LucentSourceInput("Host.lui", "namespace Demo; component Host() { private readonly State<string[]> values = new([\"a\"]); Fragment Render() => StackPanel { foreach (var value in values.Value) keyed by value { Child {} } }; }", "Host.css", ".surface:hover { opacity: 0.5; }")]);
+            new LucentSourceInput("Host.lui", "namespace Demo; component Host() { private readonly State<string[]> values = new([\"a\"]); Fragment Render() => StackPanel { foreach (var value in values.Value) keyed by value { Child {} } }; }", "Host.css", ".surface:pointerover { opacity: 0.5; }")]);
         Assert.IsTrue(keyed.Succeeded, string.Join(Environment.NewLine,
             keyed.Sources.SelectMany(source => source.Result.Diagnostics)));
         StringAssert.Contains(keyed.Sources.Single(source => source.SourcePath == "Host.lui")

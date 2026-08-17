@@ -23,8 +23,9 @@ recent workspaces. It is not a full IDE.
 | [004a](004a-typed-native-roots.md) | Expose typed native roots and lifecycle diagnostics | P1 | S | 003, 004 | DONE |
 | [005](005-virtualized-collections.md) | Add scalable native collections and AvaloniaEdit | P1 | M | 003, 004 | DONE |
 | [006](006-lifecycle-reliability.md) | Close lifecycle, failure, accessibility, and UI-test gaps | P1 | L | 001–005 | DONE |
-| [007](007-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a | TODO |
-| [008](008-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–007 | TODO |
+| [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
+| [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 007 | TODO |
+| [009](009-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–008 | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED` with a
 one-line reason.

@@ -3,6 +3,8 @@ namespace Lucent.Examples.Workbench;
 using AvaloniaEdit;
 using System.Windows.Input;
 using Avalonia.Automation;
+using Avalonia.Controls;
+using Avalonia.Layout;
 
 component DocumentPane(string title, DocumentSession session, ICommand focusCommand, ICommand copyCommand, ICommand undoCommand, ICommand redoCommand, ICommand selectAllCommand, string language = "C#")
 {
@@ -11,13 +13,39 @@ component DocumentPane(string title, DocumentSession session, ICommand focusComm
     private void Increment() => edits.Update(value => value + 1);
 
     Fragment Render() => Border {
-        StackPanel {
-            TextBlock { Text: title; AutomationProperties.Name: "Document title"; }
-            TextBlock { Text: language; }
-            TextBlock { Text: $"Edits: {edits.Value}"; }
-            Button { Content: "Increment edits"; Click: () => Increment(); }
-            Button { Content: "Focus editor"; Command: focusCommand; }
+        Class: "editor-pane";
+        Grid {
+            Class: "editor-content";
+            RowDefinitions: [
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(new GridLength(1, GridUnitType.Star)),
+                new RowDefinition(GridLength.Auto)
+            ];
+            Grid {
+                Class: "document-header";
+                Grid.Row: 0;
+                ColumnDefinitions: [
+                    new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                    new ColumnDefinition(GridLength.Auto)
+                ];
+                StackPanel {
+                    TextBlock { Class: "document-title"; Text: title; AutomationProperties.Name: "Document title"; }
+                    TextBlock { Class: "document-language"; Text: language; }
+                }
+                TextBlock { Class: "document-edits"; Grid.Column: 1; Text: $"Edits: {edits.Value}"; }
+            }
             StackPanel {
+                Class: "editor-actions";
+                Grid.Row: 1;
+                Orientation: Avalonia.Layout.Orientation.Horizontal;
+                Button { Class: "editor-action"; Content: "Increment edits"; Click: () => Increment(); }
+                Button { Class: "editor-action"; Content: "Focus editor"; Command: focusCommand; }
+            }
+            StackPanel {
+                Class: "editor-actions secondary";
+                Grid.Row: 2;
                 Orientation: Avalonia.Layout.Orientation.Horizontal;
                 Button { Content: "Copy"; Command: copyCommand; }
                 Button { Content: "Undo"; Command: undoCommand; }
@@ -25,6 +53,10 @@ component DocumentPane(string title, DocumentSession session, ICommand focusComm
                 Button { Content: "Select all"; Command: selectAllCommand; }
             }
             AccessibleTextEditor {
+                Class: "source-editor";
+                Grid.Row: 3;
+                HorizontalAlignment: HorizontalAlignment.Stretch;
+                VerticalAlignment: VerticalAlignment.Stretch;
                 Text: "";
                 ShowLineNumbers: true;
                 Focusable: true;
@@ -33,8 +65,7 @@ component DocumentPane(string title, DocumentSession session, ICommand focusComm
                 Loaded: (sender, e) => session.Attach(sender);
                 Unloaded: (sender, e) => session.Detach(sender);
             }
-            yield children;
-            StackPanel { yield toolbar; }
+            StackPanel { Class: "document-toolbar"; Grid.Row: 4; Orientation: Orientation.Horizontal; yield children; yield toolbar; }
         }
     };
 }

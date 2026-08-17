@@ -22,6 +22,7 @@
     <LucentSource Include="SettingsDialog.lui" />
     <LucentSource Include="GeneratedPreviewWindow.lui" />
     <LucentSource Include="ThrowingEvent.lui" />
+    <AvaloniaResource Include="..\..\design\rendered\lucent-icon-32.png" Link="Assets\lucent-icon-32.png" />
   </ItemGroup>
   <Import Project="..\..\build\Lucent.Compiler.targets" />
 </Project>

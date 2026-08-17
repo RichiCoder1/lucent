@@ -1,5 +1,6 @@
 namespace Lucent.Examples.Workbench;
 
 component GeneratedPreviewPane() => Border {
-    TextBlock { Text: "Generated preview"; }
+    Class: "preview-pane";
+    TextBlock { Class: "pane-title"; Text: "Generated preview"; }
 };

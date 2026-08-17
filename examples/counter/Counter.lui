@@ -2,24 +2,21 @@ namespace Lucent.Examples.Counter;
 
 component Counter()
 {
-    private readonly State<int> count = new(0);
+    private readonly State<int> count = new(
+        System.Environment.GetEnvironmentVariable("LUCENT_QUALITY_CAPTURE") == "counter-light" ? 3 : 0);
 
     Fragment Render()
     {
         return StackPanel {
             Class: "counter";
-
             TextBlock {
+                Class: "count";
                 Text: $"Count: {count.Value}";
             }
-
             Button {
                 Class: "primary";
-                "Increment";
-
-                Click: (sender, e) => {
-                    count.Update(count.Value + 1);
-                };
+                Content: "Increment";
+                Click: (sender, e) => count.Update(count.Value + 1);
             }
         };
     }

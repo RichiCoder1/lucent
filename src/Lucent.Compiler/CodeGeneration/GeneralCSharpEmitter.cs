@@ -247,7 +247,7 @@ internal static class GeneralCSharpEmitter
         writer.Line();
         foreach (var supply in slotSupplySites)
         {
-            EmitSlotFactory(writer, supply, source);
+            EmitSlotFactory(writer, supply, source, styles ?? BoundStyleSheet.Empty);
             writer.Line();
         }
         var nestedParameters = new[] { "ComponentOwner __lucent_ownerArgument" }
@@ -547,21 +547,15 @@ internal static class GeneralCSharpEmitter
         foreach (var rule in styles.Rules)
         {
             var targetTypes = controls
-                .Where(control => Matches(rule, control))
+                .Where(control => Matches(rule, control) &&
+                    rule.Declarations.Any(declaration => SupportsStyledProperty(control.TypeName, declaration)))
                 .Select(control => control.TypeName)
                 .Distinct(StringComparer.Ordinal)
                 .ToArray();
+            if (targetTypes.Length == 0) targetTypes = rule.TargetTypeNames.ToArray();
             foreach (var targetType in targetTypes)
             {
-                var selector = $"x.OfType<{targetType}>()";
-                if (rule.ClassName is not null)
-                {
-                    selector += $".Class({Quote(rule.ClassName)})";
-                }
-                if (rule.PseudoClass is not null)
-                {
-                    selector += $".Class({Quote(rule.PseudoClass)})";
-                }
+                var selector = BuildSelector(rule, targetType);
 
                 foreach (var nativeRoot in nativeRoots)
                 {
@@ -573,7 +567,8 @@ internal static class GeneralCSharpEmitter
                 writer.Line("Setters =");
                 writer.Line("{");
                 writer.Indent();
-                foreach (var declaration in rule.Declarations)
+                foreach (var declaration in rule.Declarations.Where(declaration =>
+                             SupportsStyledProperty(targetType, declaration)))
                 {
                     if (declaration.PropertyName == "transition")
                     {
@@ -598,14 +593,32 @@ internal static class GeneralCSharpEmitter
 
     private static bool Matches(BoundStyleRule rule, BoundControlModel control)
     {
-        if (rule.TypeName is not null &&
-            !string.Equals(rule.TypeName, control.Name, StringComparison.Ordinal) &&
-            !control.TypeName.EndsWith("." + rule.TypeName, StringComparison.Ordinal))
+        var terminal = rule.Selector.Terminal;
+        if (terminal.TypeName is not null &&
+            !string.Equals(terminal.TypeName, control.Name, StringComparison.Ordinal) &&
+            !control.TypeName.EndsWith("." + terminal.TypeName, StringComparison.Ordinal))
         {
             return false;
         }
 
-        return rule.ClassName is null || StaticClasses(control).Contains(rule.ClassName);
+        var classes = StaticClasses(control);
+        var hasDynamicClass = control.Members.OfType<BoundPropertyMember>().Any(property =>
+            property.Name == "Class" && !property.IsStringLiteral);
+        return (terminal.Classes.All(classes.Contains) || hasDynamicClass) &&
+            (terminal.Name is null || StaticName(control) == terminal.Name);
+    }
+
+    private static bool SupportsStyledProperty(string typeName, BoundStyleDeclaration declaration)
+    {
+        if (declaration.PropertyName == "transition")
+        {
+            return declaration.Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(item => item.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault())
+                .Where(property => property is not null)
+                .All(property => SupportsStyledProperty(typeName,
+                    new BoundStyleDeclaration(property!, string.Empty)));
+        }
+        return CssPropertyCatalog.TryGet(declaration.PropertyName, out _);
     }
 
     private static HashSet<string> StaticClasses(BoundControlModel control)
@@ -629,6 +642,38 @@ internal static class GeneralCSharpEmitter
 
         return classes;
     }
+
+    private static string? StaticName(BoundControlModel control) =>
+        control.Members.OfType<BoundPropertyMember>()
+            .FirstOrDefault(property => property.Name == "Name" && property.IsStringLiteral)
+            ?.ExpressionText.Trim('"');
+
+    private static string BuildSelector(BoundStyleRule rule, string targetType)
+    {
+        var result = "x";
+        for (var index = 0; index < rule.Selector.Parts.Count; index++)
+        {
+            if (index > 0)
+                result += rule.Selector.Combinators[index - 1] == BoundStyleCombinator.Child
+                    ? ".Child()" : ".Descendant()";
+            var part = rule.Selector.Parts[index];
+            var type = part.TypeName is null
+                ? (index == rule.Selector.Parts.Count - 1 ? targetType : null)
+                : part.ResolvedTypeName ?? QualifySelectorType(part.TypeName);
+            if (type is not null) result += $".OfType<{type}>()";
+            foreach (var className in part.Classes)
+                result += $".Class({Quote(className)})";
+            if (part.Name is not null)
+                result += $".Name({Quote(part.Name)})";
+        }
+        if (rule.PseudoClass is not null) result += $".Class({Quote(rule.PseudoClass)})";
+        return result;
+    }
+
+    private static string QualifySelectorType(string sourceName) =>
+        sourceName.Contains('.', StringComparison.Ordinal)
+            ? (sourceName.StartsWith("global::", StringComparison.Ordinal) ? sourceName : "global::" + sourceName)
+            : "global::Avalonia.Controls." + sourceName;
 
     private static IEnumerable<BoundControlModel> FlattenStyleTargets(BoundControlModel root)
     {
@@ -659,7 +704,8 @@ internal static class GeneralCSharpEmitter
     private static void EmitSlotFactory(
         CodeWriter writer,
         SlotSupplySite supply,
-        SourceDocument source)
+        SourceDocument source,
+        BoundStyleSheet styles)
     {
         var name = Pascal(supply.Supply.Slot.Name);
         var prefix = $"__lucent_slot{supply.ComponentIndex}{name}";
@@ -670,9 +716,12 @@ internal static class GeneralCSharpEmitter
         writer.Line($"{prefix}Mounted = true;");
         var roots = new List<string>();
         var counter = 0;
-        foreach (var root in supply.Roots)
+        foreach (var (root, rootIndex) in supply.Roots.Select((root, index) => (root, index + 1)))
         {
-            roots.Add(EmitSlotRenderable(writer, supply, root, "__lucent_slotOwner", source, ref counter));
+            var fragment = EmitSlotRenderable(writer, supply, root, "__lucent_slotOwner", source, ref counter);
+            EmitProjectedStyles(writer, fragment, styles,
+                $"__lucent_slotStyle{supply.ComponentIndex}{Pascal(supply.Supply.Slot.Name)}{rootIndex}");
+            roots.Add(fragment);
         }
         writer.Line("__lucent_slotOwner.OnDispose(() =>");
         writer.Line("{");
@@ -836,38 +885,93 @@ internal static class GeneralCSharpEmitter
 
     private static string PropertyField(string targetType, string cssName)
     {
-        var propertyName = cssName switch
-        {
-            "gap" => "Spacing",
-            "border-radius" => "CornerRadius",
-            _ => string.Concat(cssName.Split('-')
-                .Select(part => char.ToUpperInvariant(part[0]) + part[1..])),
-        };
+        var propertyName = CssPropertyCatalog.TryGet(cssName, out var definition)
+            ? definition.AvaloniaName
+            : string.Concat(cssName.Split('-').Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
         return $"{targetType}.{propertyName}Property";
     }
 
-    private static string LowerStyleValue(string propertyName, string value) =>
-        propertyName switch
+    private static string LowerStyleValue(string propertyName, string value)
+    {
+        if (value.StartsWith("resource(", StringComparison.Ordinal) && value.EndsWith(')'))
+            return $"new global::Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension({Quote(value[9..^1].Trim())})";
+
+        return propertyName switch
         {
-            "background" or "foreground" => LowerBrush(value),
-            "padding" or "margin" => LowerThickness(value),
+            "background" or "foreground" or "border-color" => LowerBrush(value),
+            "padding" or "margin" or "border-width" => LowerThickness(value),
             "border-radius" => LowerCornerRadius(value),
+            "box-shadow" => LowerBoxShadows(value),
+            "font-family" => $"new global::Avalonia.Media.FontFamily({Quote(value.Trim('"'))})",
+            "font-style" => value switch
+            {
+                "normal" => "global::Avalonia.Media.FontStyle.Normal",
+                "italic" => "global::Avalonia.Media.FontStyle.Italic",
+                _ => throw new InvalidOperationException($"Unsupported CSS font style '{value}'."),
+            },
             "font-weight" => value switch
             {
-                "normal" => "global::Avalonia.Media.FontWeight.Normal",
+                "normal" or "400" => "global::Avalonia.Media.FontWeight.Normal",
+                "medium" or "500" => "global::Avalonia.Media.FontWeight.Medium",
                 "semibold" or "600" => "global::Avalonia.Media.FontWeight.SemiBold",
                 "bold" or "700" => "global::Avalonia.Media.FontWeight.Bold",
+                "800" => "global::Avalonia.Media.FontWeight.ExtraBold",
                 _ => throw new InvalidOperationException($"Unsupported CSS font weight '{value}'."),
             },
             "horizontal-alignment" =>
                 $"global::Avalonia.Layout.HorizontalAlignment.{Pascal(value)}",
             "vertical-alignment" =>
                 $"global::Avalonia.Layout.VerticalAlignment.{Pascal(value)}",
+            "horizontal-content-alignment" =>
+                $"global::Avalonia.Layout.HorizontalAlignment.{Pascal(value)}",
+            "vertical-content-alignment" =>
+                $"global::Avalonia.Layout.VerticalAlignment.{Pascal(value)}",
+            "text-align" => value switch
+            {
+                "start" or "left" => "global::Avalonia.Media.TextAlignment.Left",
+                "end" or "right" => "global::Avalonia.Media.TextAlignment.Right",
+                "center" => "global::Avalonia.Media.TextAlignment.Center",
+                "justify" => "global::Avalonia.Media.TextAlignment.Justify",
+                _ => throw new InvalidOperationException($"Unsupported CSS text alignment '{value}'."),
+            },
+            "text-wrap" => value switch
+            {
+                "wrap" => "global::Avalonia.Media.TextWrapping.Wrap",
+                "nowrap" => "global::Avalonia.Media.TextWrapping.NoWrap",
+                _ => throw new InvalidOperationException($"Unsupported CSS text wrapping '{value}'."),
+            },
+            "visibility" or "clip-to-bounds" => value switch
+            {
+                "true" => "true",
+                "false" => "false",
+                _ => throw new InvalidOperationException($"Unsupported CSS boolean '{value}'."),
+            },
+            "cursor" => $"global::Avalonia.Input.Cursor.Parse({Quote(value)})",
+            "width" or "height" => value == "auto" ? "double.NaN" : LowerNumber(value),
+            "max-width" or "max-height" => value == "none" ? "double.PositiveInfinity" : LowerNumber(value),
             _ => LowerNumber(value),
         };
+    }
+
+    private static string LowerBoxShadows(string value)
+    {
+        var parts = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3 || parts.Length > 4)
+            throw new InvalidOperationException($"Unsupported CSS box shadow '{value}'.");
+        var offsetX = LowerNumber(parts[0]);
+        var offsetY = LowerNumber(parts[1]);
+        var blur = LowerNumber(parts[2]);
+        var color = parts.Length == 4 ? LowerBrush(parts[3]) : "global::Avalonia.Media.Brushes.Black";
+        return $"new global::Avalonia.Media.BoxShadows(new global::Avalonia.Media.BoxShadow(OffsetX: {offsetX}, OffsetY: {offsetY}, Blur: {blur}, Spread: 0d, Color: ((global::Avalonia.Media.SolidColorBrush){color}).Color))";
+    }
 
     private static string LowerBrush(string value)
     {
+        if (value.StartsWith("resource(", StringComparison.Ordinal) && value.EndsWith(')'))
+        {
+            var key = value[9..^1].Trim();
+            return $"new global::Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension({Quote(key)})";
+        }
         if (!value.StartsWith('#'))
         {
             return value switch
@@ -885,13 +989,15 @@ internal static class GeneralCSharpEmitter
             hex = string.Concat(hex.Select(character => new string(character, 2)));
         }
 
-        if (hex.Length != 6 || !uint.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb))
+        if (hex.Length is not (6 or 8) || !uint.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out _))
         {
             throw new InvalidOperationException($"Unsupported CSS color '{value}'.");
         }
 
         return "new global::Avalonia.Media.SolidColorBrush(" +
-               $"global::Avalonia.Media.Color.FromRgb(0x{hex[..2]}, 0x{hex[2..4]}, 0x{hex[4..6]}))";
+               (hex.Length == 8
+                   ? $"global::Avalonia.Media.Color.FromArgb(0x{hex[6..8]}, 0x{hex[..2]}, 0x{hex[2..4]}, 0x{hex[4..6]}))"
+                   : $"global::Avalonia.Media.Color.FromRgb(0x{hex[..2]}, 0x{hex[2..4]}, 0x{hex[4..6]}))");
     }
 
     private static string LowerThickness(string value)
@@ -951,13 +1057,9 @@ internal static class GeneralCSharpEmitter
         }
 
         var propertyName = parts[0];
-        var transitionType = propertyName switch
-        {
-            "background" or "foreground" => "BrushTransition",
-            "padding" or "margin" => "ThicknessTransition",
-            "border-radius" => "CornerRadiusTransition",
-            _ => "DoubleTransition",
-        };
+        if (!CssPropertyCatalog.TryGet(propertyName, out var definition) || definition.TransitionType is null)
+            throw new InvalidOperationException($"CSS transition property '{propertyName}' is not animatable by the catalog.");
+        var transitionType = definition.TransitionType;
         var duration = LowerDuration(parts[1]);
         var easing = parts.Length == 3 ? LowerEasing(parts[2]) : "LinearEasing";
         return $"new global::Avalonia.Animation.{transitionType} " +
@@ -1410,6 +1512,13 @@ internal static class GeneralCSharpEmitter
                     output, control, $"{name}!", sourceDocument,
                     expression => expression.Dependencies.Count == 0);
             }
+            foreach (var root in branchRoots.OfType<BoundControlModel>())
+            {
+                var rootName = controls.First(candidate => ReferenceEquals(candidate.Control, root)).Name;
+                EmitProjectedStyles(output, $"Fragment.From({rootName}!)", styles,
+                    $"__lucent_conditionalNativeStyle{conditional.Index}{side}{rootName}",
+                    root.TypeName);
+            }
             foreach (var (control, name) in controls)
             {
                 foreach (var child in control.Members.OfType<BoundChildMember>())
@@ -1773,7 +1882,7 @@ internal static class GeneralCSharpEmitter
                 }
 
                 var prefix = $"__lucent_rowSlot{region.Index}_{rowComponent.Ordinal}{Pascal(slot.Name)}";
-                slotArguments.Add(EmitLoopSlotFactory(writer, supply, loop.ItemName, source, prefix));
+                slotArguments.Add(EmitLoopSlotFactory(writer, supply, loop.ItemName, source, styles, prefix));
                 slotRefreshes.Add(prefix + "Refresh();");
             }
             rowSlotRefreshes[rowComponent.Invocation] = slotRefreshes;
@@ -1808,6 +1917,11 @@ internal static class GeneralCSharpEmitter
                 templateControls,
                 rowComponentMap);
         }
+
+        var rowRoot = templateControls.First(candidate =>
+            ReferenceEquals(candidate.control, loop.Body));
+        EmitProjectedStyles(writer, $"Fragment.From(control{rowRoot.index}!)", styles,
+            $"__lucent_rowNativeStyle{region.Index}", rowRoot.control.TypeName);
 
         writer.Line();
         writer.Line("void Refresh()");
@@ -2273,7 +2387,7 @@ internal static class GeneralCSharpEmitter
         var arguments = invocation.Arguments.Select(argument => argument.Expression.LoweredText).ToArray();
         foreach (var supply in invocation.Slots)
         {
-            EmitLoopSlotFactory(writer, supply, loop.ItemName, source);
+            EmitLoopSlotFactory(writer, supply, loop.ItemName, source, styles);
         }
         var slotArguments = invocation.Component.Slots.Select(slot =>
             invocation.Slots.Any(supply => supply.Slot.Name == slot.Name)
@@ -2317,6 +2431,7 @@ internal static class GeneralCSharpEmitter
         BoundSlotSupply supply,
         string itemName,
         SourceDocument source,
+        BoundStyleSheet styles,
         string? namePrefix = null)
     {
         var prefix = namePrefix ?? $"__lucent_loopSlot{Pascal(supply.Slot.Name)}";
@@ -2329,9 +2444,14 @@ internal static class GeneralCSharpEmitter
         writer.Line($"var {itemName} = loopValue.Value;");
         var counter = 0;
         var refreshStatements = new List<string>();
-        var roots = supply.Roots.Select(root =>
-            EmitLoopSlotRenderable(writer, root, "__lucent_slotOwner", itemName, source,
-                ref counter, refreshStatements, namePrefix))
+        var roots = supply.Roots.Select((root, index) =>
+        {
+            var fragment = EmitLoopSlotRenderable(writer, root, "__lucent_slotOwner", itemName, source,
+                ref counter, refreshStatements, namePrefix);
+            EmitProjectedStyles(writer, fragment, styles,
+                $"__lucent_loopSlotStyle{Pascal(supply.Slot.Name)}{index + 1}");
+            return fragment;
+        })
             .ToArray();
         writer.Line($"{refreshName} = () =>");
         writer.Line("{"); writer.Indent();
@@ -2471,36 +2591,36 @@ internal static class GeneralCSharpEmitter
         CodeWriter writer,
         string fragment,
         BoundStyleSheet styles,
-        string variablePrefix)
+        string variablePrefix,
+        string? fallbackType = null)
     {
         foreach (var rule in styles.Rules)
         {
-            var targetType = rule.TypeName is null
-                ? "global::Avalonia.Controls.Control"
-                : rule.TypeName.Contains('.', StringComparison.Ordinal)
-                    ? "global::" + rule.TypeName
-                    : "global::Avalonia.Controls." + rule.TypeName;
+            var usesCatalogTargets = rule.TargetTypeNames.Count == 0 &&
+                rule.TypeName is null && fallbackType is null;
+            var targetTypes = rule.TargetTypeNames.Count > 0
+                ? rule.TargetTypeNames
+                : rule.TypeName is not null
+                    ? [QualifySelectorType(rule.TypeName)]
+                    : fallbackType is not null
+                        ? [fallbackType]
+                        : CssPropertyCatalog.InferProjectedTargetTypes(rule.Declarations);
+            foreach (var targetType in targetTypes)
+            {
             writer.Line($"foreach (var {variablePrefix} in {fragment}.Roots)");
             writer.Line("{");
             writer.Indent();
-            var selector = rule.TypeName is null
-                ? "x => x"
-                : $"x => x.OfType<{targetType}>()";
-            if (rule.ClassName is not null)
-            {
-                selector += $".Class({Quote(rule.ClassName)})";
-            }
-            if (rule.PseudoClass is not null)
-            {
-                selector += $".Class({Quote(rule.PseudoClass)})";
-            }
-            writer.Line($"{variablePrefix}.Styles.Add(new global::Avalonia.Styling.Style({selector})");
+            writer.Line($"{variablePrefix}.Styles.Add(new global::Avalonia.Styling.Style(x => {BuildSelector(rule, targetType)})");
             writer.Line("{");
             writer.Indent();
             writer.Line("Setters =");
             writer.Line("{");
             writer.Indent();
-            foreach (var declaration in rule.Declarations)
+            foreach (var declaration in rule.Declarations.Where(declaration =>
+                         usesCatalogTargets
+                             ? CssPropertyCatalog.SupportsProjectedTarget(targetType, declaration)
+                             : declaration.PropertyName == "transition" ||
+                               SupportsStyledProperty(targetType, declaration)))
             {
                 var setter = declaration.PropertyName == "transition"
                     ? "new global::Avalonia.Styling.Setter(global::Avalonia.Animation.Animatable.TransitionsProperty, " +
@@ -2515,6 +2635,7 @@ internal static class GeneralCSharpEmitter
             writer.Line("});");
             writer.Unindent();
             writer.Line("}");
+            }
         }
     }
 

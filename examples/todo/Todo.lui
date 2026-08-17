@@ -5,7 +5,9 @@ using Avalonia.Layout;
 component Todo()
 {
     private readonly State<string> draft = new("");
-    private readonly State<TodoItem[]> todos = new([
+    private readonly State<TodoItem[]> todos = new(System.Environment.GetEnvironmentVariable("LUCENT_QUALITY_CAPTURE") == "todo-dark-empty" ? [
+        new TodoItem(4, "Review the completed Lucent proof", true)
+    ] : [
         new TodoItem(1, "Surface native Avalonia controls", true),
         new TodoItem(2, "Add keyed Lucent regions", false),
         new TodoItem(3, "Ship the TodoMVC proof of concept", false)
@@ -21,6 +23,7 @@ component Todo()
             VerticalAlignment: VerticalAlignment.Center;
 
             StackPanel {
+                Class: "todo-content";
                 Spacing: 14;
 
                 TextBlock {
@@ -30,16 +33,17 @@ component Todo()
                 }
 
                 TextBlock {
+                    Class: "todo-subtitle";
                     Text: "A TodoMVC-style app composed directly from Avalonia controls.";
-                    Opacity: 0.7;
                 }
 
                 StackPanel {
+                    Class: "todo-entry";
                     Orientation: Orientation.Horizontal;
                     Spacing: 8;
 
                     TextBox {
-                        Width: 500;
+                        MinWidth: 180;
                         Text: draft.Value;
                         PlaceholderText: "What needs doing?";
                         TextChanged: (sender, e) => {
@@ -68,6 +72,7 @@ component Todo()
                 }
 
                 CheckBox {
+                    Class: "select-all";
                     Content: "Mark all complete";
                     IsEnabled: todos.Value.Length > 0;
                     IsChecked: todos.Value.Length > 0 &&
@@ -89,17 +94,16 @@ component Todo()
                         (filter.Value == TodoFilter.Completed && item.Completed)))
                     keyed by todo.Id {
                         Border {
+                            Class: todo.Completed ? "todo-row completed" : "todo-row active";
                             Padding: (12, 8);
                             CornerRadius: 8;
-                            Background: todo.Completed
-                                ? Avalonia.Media.Brushes.LightGreen
-                                : Avalonia.Media.Brushes.LightBlue;
 
                             StackPanel {
                                 Orientation: Orientation.Horizontal;
                                 Spacing: 10;
 
                                 CheckBox {
+                                    Class: "todo-check";
                                     IsChecked: todo.Completed;
                                     VerticalAlignment: VerticalAlignment.Center;
                                     Click: (sender, e) => {
@@ -111,8 +115,14 @@ component Todo()
                                     };
                                 }
 
+                                TextBlock {
+                                    Class: "completion-state";
+                                    Text: todo.Completed ? "Completed" : "Active";
+                                }
+
                                 TextBox {
-                                    Width: 500;
+                                    Class: "todo-editor";
+                                    HorizontalAlignment: HorizontalAlignment.Stretch;
                                     Text: todo.Title;
                                     TextChanged: (sender, e) => {
                                         var title = sender.Text ?? "";
@@ -125,6 +135,7 @@ component Todo()
                                 }
 
                                 Button {
+                                    Class: "delete-task";
                                     Content: "Delete";
                                     Click: (sender, e) => {
                                         todos.Update(todos.Value
@@ -138,12 +149,14 @@ component Todo()
                 }
 
                 TextBlock {
+                    Class: "todo-status";
                     Text: todos.Value.Length == 0
                         ? "No tasks yet."
                         : $"{todos.Value.Count(item => !item.Completed)} item(s) left";
                 }
 
                 StackPanel {
+                    Class: "filter-bar";
                     Orientation: Orientation.Horizontal;
                     Spacing: 8;
 
@@ -177,6 +190,7 @@ component Todo()
                 }
 
                 ProgressBar {
+                    Class: "todo-progress";
                     Minimum: 0;
                     Maximum: todos.Value.Length == 0 ? 1 : todos.Value.Length;
                     Value: todos.Value.Count(item => item.Completed);

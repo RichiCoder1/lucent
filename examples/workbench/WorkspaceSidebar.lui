@@ -7,14 +7,21 @@ using System.Windows.Input;
 using Avalonia.Automation;
 
 component WorkspaceSidebar(string workspace, WorkspaceSelectionController selection, Action<WorkspaceNode> openNode, ICommand focusCommand, bool compact = false) => Border {
+    Class: "workspace-sidebar";
     Padding: new Avalonia.Thickness(compact ? 4 : 12);
     AutomationProperties.Name: "Workspace sidebar";
     AutomationProperties.AutomationId: "Workspace.Sidebar";
-    StackPanel {
-        TextBlock { Text: $"Workspace: {workspace}"; }
-        Button { Content: "Focus sidebar"; Command: focusCommand; }
+    Grid {
+        RowDefinitions: [
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(GridLength.Auto),
+            new RowDefinition(new GridLength(1, GridUnitType.Star))
+        ];
+        TextBlock { Class: "pane-title"; Grid.Row: 0; Text: $"Workspace: {workspace}"; }
+        Button { Class: "pane-action"; Grid.Row: 1; Content: "Focus sidebar"; Command: focusCommand; }
         AccessibleWorkspaceListBox {
-            Height: 400;
+            Class: "workspace-tree";
+            Grid.Row: 2;
             Focusable: true;
             AutomationProperties.Name: "Workspace";
             AutomationProperties.AutomationId: "Workspace.Tree";

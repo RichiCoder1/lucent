@@ -9,10 +9,16 @@ dotnet run --project examples/package-pulse/PackagePulse.csproj
 
 [`MainWindow.lui`](MainWindow.lui) defines the native `Window` and hosts
 `PackagePulse {}`. [`PackagePulse.lui`](PackagePulse.lui) owns the search state
-and async computation; adjacent [`PackagePulse.css`](PackagePulse.css) compiles
-to native Avalonia styles and transitions.
+and async computation; adjacent [`PackagePulseResults.css`](PackagePulseResults.css)
+compiles to native Avalonia styles, dynamic resources, and transitions.
 
 Type `avalonia`, `reactive`, or `toolkit` to filter the simulated catalog. Type
 `fail` to exercise error handling. Every query waits 850 ms while stale results
-remain visible. `PackagePulse.cs` is the minimal native adapter until direct
-Lucent component invocation is executable.
+remain visible. The light error quality profile first renders the real `lucent`
+results, then changes the query to `fail` so the stale result context and Retry
+action are visible together with the actual failure.
+
+```powershell
+dotnet run --project examples/package-pulse/PackagePulse.csproj -- --quality-capture pulse-dark-results
+dotnet run --project examples/package-pulse/PackagePulse.csproj -- --quality-capture pulse-light-error
+```

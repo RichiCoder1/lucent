@@ -15,17 +15,25 @@ CSS authoring does not imply a browser layout engine or runtime string-based CSS
 
 Static styles should be parsed and validated during the build. The runtime may still resolve values that are inherently dynamic, but it should not repeatedly parse known strings or rediscover known property mappings.
 
-## Initial CSS surface
+## Avalonia CSS surface (Plan 007)
 
-The executable subset supports:
+The executable subset is one compile-time catalog shared by parsing, semantic
+validation, native lowering, and editor metadata. It supports type, class,
+multiple-class, `#Name`, descendant, direct-child, and one terminal Avalonia
+pseudo-class selectors (`:pointerover`, `:pressed`, `:focus`, `:focus-visible`,
+`:disabled`, `:checked`, `:unchecked`, and `:selected`). `#Name` matches the
+native Avalonia `Name`, not an automation ID.
 
-- one type selector and/or one class per rule;
-- one trailing Avalonia pseudo-class such as `:pointerover` or `:focus`;
-- compile-time `:root` custom properties;
-- colors, opacity, spacing, thickness, corner radius, size, font size and
-  weight, and alignment;
-- comma-separated `transition` declarations for brush, double, thickness, and
-  corner-radius properties.
+The catalog covers brushes, opacity, padding/margin, borders, corner radius,
+box shadows, spacing, font family/style/size/weight, text alignment/wrapping,
+line height, letter spacing, dimensions, alignment, visibility, clipping,
+cursor, and native transitions. Values are emitted as typed Avalonia setters;
+unsupported units, values, and transitions produce a Lucent diagnostic.
+
+`resource(Key)` lowers to Avalonia's public
+`DynamicResourceExtension`, so a coded setter follows changes in the owning
+application resource dictionary without polling or reparsing. `var(--token)`
+is still only a compile-time alias. Example:
 
 Adjacent `.lui` and `.css` files are compiled together. The compiler emits
 native Avalonia `Style`, `Setter`, and typed `Transition` objects; it does not
@@ -61,9 +69,12 @@ This is deliberately Avalonia-targeted rather than browser-compatible:
 - transitions use Avalonia animation priority and reveal the latest underlying
   value when interrupted or completed.
 
-Descendant/child combinators, IDs, scoping, media/platform conditions,
-keyframes, transforms, enter/exit lifetime animation, and reduced-motion policy
-remain deferred. Add them only when a concrete application needs them.
+Styles are attached to each native root produced by the owning component;
+selectors traverse only that root's native Avalonia style tree. Browser layout,
+selector lists, `:not`, structural/template selectors, media/platform
+conditions, imports, keyframes, transforms, and CSS runtime parsing remain
+unsupported. Reduced motion is an application/theme concern; zero-duration
+native resources preserve final state.
 
 ## Design tokens
 
@@ -80,7 +91,11 @@ CSS custom properties are the preferred authoring model for design tokens:
 }
 ```
 
-The compiler should explore typed declarations for colors, lengths, typography, borders, motion, and elevation. A token that represents a length should not remain an arbitrary string once it reaches generated code. Static validation should catch category errors and diagnostics should name both the expected and supplied token types.
+The compiler validates typed declarations for colors, lengths, typography,
+borders, motion, and elevation. A token that represents a length does not
+remain an arbitrary string once it reaches generated code. Static validation
+catches category errors and diagnostics name both the expected and supplied
+token types.
 
 Generating a typed C# surface such as `Theme.RadiusMd` may be useful, but it is not yet a committed API.
 

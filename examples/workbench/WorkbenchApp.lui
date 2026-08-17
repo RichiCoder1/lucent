@@ -19,7 +19,7 @@ using System.Windows.Input;
 component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken lifetime, Action<Exception> errorReporter, WorkbenchSettings initialSettings, SettingsSaveCoordinator saveCoordinator, IProblemLoader problemLoader, DocumentSession session)
 {
     private readonly State<bool> showProblems = new(initialSettings.ProblemsVisible);
-    private readonly State<bool> showPalette = new(false);
+    private readonly State<bool> showPalette = new(System.Environment.GetEnvironmentVariable("LUCENT_QUALITY_CAPTURE") == "workbench-dark-palette");
     private readonly State<string> workspaceName = new(initialSettings.RecentWorkspace ?? "Lucent");
     private readonly State<string> documentTitle = new("Program.cs");
     private readonly State<string> lastDiagnostic = new("No diagnostics copied");
@@ -290,6 +290,9 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         Title: "Lucent Workbench";
         Width: 960;
         Height: 680;
+        MinWidth: 920;
+        MinHeight: 600;
+        Class: "workbench-window";
         Loaded: (sender, e) => window = sender;
         Unloaded: (sender, e) => { if (ReferenceEquals(window, sender)) window = null; GetSession().Dispose(); };
         KeyBindings: [
@@ -309,8 +312,18 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         ];
         AutomationProperties.Name: "Lucent Workbench";
         AutomationProperties.AutomationId: "Workbench.Window";
-        StackPanel {
+        Grid {
+            Class: "shell";
+            RowDefinitions: [
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(new GridLength(1, GridUnitType.Star)),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto),
+                new RowDefinition(GridLength.Auto)
+            ];
             Menu {
+                Class: "topbar";
+                Grid.Row: 0;
                 MenuItem { Header: "Open workspace"; Command: openWorkspace; }
                 MenuItem { Header: "Close workspace"; Command: closeWorkspace; }
                 MenuItem { Header: "Quick open"; Command: quickOpen; }
@@ -318,44 +331,69 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                 MenuItem { Header: "Settings"; Command: settings; }
                 MenuItem { Header: "Copy diagnostic"; Command: copyDiagnostic; }
             }
-            Border {
-                Focusable: true;
-                Loaded: (sender, e) => { sidebar = sender; focusSidebar.NotifyCanExecuteChanged(); };
-                Unloaded: (sender, e) => { if (ReferenceEquals(sidebar, sender)) sidebar = null; focusSidebar.NotifyCanExecuteChanged(); };
-                WorkspaceSidebar(workspaceName.Value, workspaceSelection, OpenWorkspaceNode, focusCommand: focusSidebar, compact: false) {}
-            }
-            DocumentPane(documentTitle.Value, GetSession(), focusCommand: focusEditor, copyCommand: copyDocument, undoCommand: undoDocument, redoCommand: redoDocument, selectAllCommand: selectAllDocument) {
-                slot toolbar {
-                    Button { Content: "Switch document"; Click: () => SwitchDocument(); }
+            Grid {
+                Class: "work-area";
+                Grid.Row: 1;
+                ColumnDefinitions: [
+                    new ColumnDefinition(new GridLength(currentSettings.SidebarWidth)),
+                    new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
+                    new ColumnDefinition(new GridLength(320))
+                ];
+                Border {
+                    Class: "sidebar-host";
+                    Grid.Column: 0;
+                    Focusable: true;
+                    Loaded: (sender, e) => { sidebar = sender; focusSidebar.NotifyCanExecuteChanged(); };
+                    Unloaded: (sender, e) => { if (ReferenceEquals(sidebar, sender)) sidebar = null; focusSidebar.NotifyCanExecuteChanged(); };
+                    WorkspaceSidebar(workspaceName.Value, workspaceSelection, OpenWorkspaceNode, focusCommand: focusSidebar, compact: false) {}
                 }
-            }
-            ContentControl {
-                IsVisible: showProblems.Value;
-                try (loadedProblems) {
-                    ProblemsPane(loadedProblems.Value, loadedProblems.IsPending, copyCommand: copyDiagnostic) {}
+                Border {
+                    Class: "editor-host";
+                    Grid.Column: 1;
+                    DocumentPane(documentTitle.Value, GetSession(), focusCommand: focusEditor, copyCommand: copyDocument, undoCommand: undoDocument, redoCommand: redoDocument, selectAllCommand: selectAllDocument) {
+                        slot toolbar {
+                            Button { Content: "Switch document"; Click: () => SwitchDocument(); }
+                        }
+                    }
                 }
-                catch (Exception error) {
-                    StackPanel {
-                        TextBlock { Text: error.Message; AutomationProperties.Name: "Problem loading error"; }
-                        Button {
-                            Content: "Retry problems";
-                            Focusable: true;
-                            Command: retryProblems;
-                            KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = retryProblems }];
+                ContentControl {
+                    Class: "problems-host";
+                    Grid.Column: 2;
+                    IsVisible: showProblems.Value;
+                    try (loadedProblems) {
+                        ProblemsPane(loadedProblems.Value, loadedProblems.IsPending, copyCommand: copyDiagnostic) {}
+                    }
+                    catch (Exception error) {
+                        StackPanel { Class: "problem-error";
+                            TextBlock { Class: "error-title"; Text: "Problems unavailable"; AutomationProperties.Name: "Problem loading error"; }
+                            TextBlock { Class: "error-message"; Text: error.Message; }
+                            Button {
+                                Content: "Retry problems";
+                                Focusable: true;
+                                Command: retryProblems;
+                                KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = retryProblems }];
+                            }
                         }
                     }
                 }
             }
-            TextBlock { IsVisible: !showProblems.Value; Text: "Problems hidden"; }
-            TextBlock { Text: lastDiagnostic.Value; AutomationProperties.Name: "Diagnostic status"; }
+            TextBlock { Class: "problems-hidden"; Grid.Row: 2; IsVisible: !showProblems.Value; Text: "Problems hidden"; }
+            TextBlock { Class: "status-line"; Grid.Row: 3; Text: lastDiagnostic.Value; AutomationProperties.Name: "Diagnostic status"; }
             StackPanel {
+                Class: "action-bar";
+                Grid.Row: 4;
                 Orientation: Avalonia.Layout.Orientation.Horizontal;
                 Button { Content: "Toggle problems"; Command: toggleProblems; }
                 Button { Content: "Generated preview"; Command: generatedPreview; }
             }
             Border {
+                Grid.Row: 1;
+                Grid.ColumnSpan: 3;
+                HorizontalAlignment: HorizontalAlignment.Center;
+                VerticalAlignment: VerticalAlignment.Top;
                 if (showPalette.Value) {
-                    Border {
+                    Border { Class: "command-palette";
+                    Width: 420;
                     Focusable: true;
                     KeyboardNavigation.TabNavigation: KeyboardNavigationMode.Cycle;
                     AutomationProperties.Name: "Command palette";

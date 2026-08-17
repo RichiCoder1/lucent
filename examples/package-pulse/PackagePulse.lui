@@ -1,5 +1,6 @@
 namespace Lucent.Examples.PackagePulse;
 
+
 component PackagePulse()
 {
     private readonly State<string> query = new("lucent");
@@ -13,16 +14,22 @@ component PackagePulse()
         UpdateQuery("lucent");
         packages.Refresh();
     }
-
-    Fragment Render() => Border {
+    Fragment Render() => StackPanel {
         ContentControl {
             try (packages) {
                 PackagePulseResults(query.Value, UpdateQuery, packages.Value, packages.IsPending) {}
             }
             catch (Exception error) {
-                StackPanel {
-                    TextBlock { Class: "status"; Text: error.Message; }
-                    Button { Content: "Retry"; Click: () => RetryPackages(); }
+                StackPanel { Class: "pulse-error-state";
+                    PackagePulseResults(query.Value, UpdateQuery, packages.Value, false) {}
+                    Border {
+                        Class: "error-state";
+                        StackPanel {
+                            TextBlock { Class: "error-title"; Text: "Search failed"; }
+                            TextBlock { Class: "status"; Text: error.Message; }
+                            Button { Class: "retry-action"; Content: "Retry"; Click: () => RetryPackages(); }
+                        }
+                    }
                 }
             }
         }
