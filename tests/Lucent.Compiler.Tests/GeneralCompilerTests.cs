@@ -687,6 +687,47 @@ public sealed class GeneralCompilerTests
     }
 
     [TestMethod]
+    public void Interpolated_target_string_constructors_remain_reactive()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() { private readonly State<double> width = new(280); Fragment Render() => Grid { ColumnDefinitions: $\"{width.Value} * 320\"; }; }",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!,
+            ".ColumnDefinitions = new global::Avalonia.Controls.ColumnDefinitions($\"{__lucent_stateWidth} * 320\")");
+        StringAssert.Contains(result.GeneratedSource!, "__lucent_UpdateBinding1();");
+    }
+
+    [TestMethod]
+    public void String_values_use_the_target_property_types_static_parse_method()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-string-parse-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var types = Path.Combine(directory, "ParsedControl.cs");
+            File.WriteAllText(types,
+                "namespace Demo.Controls; " +
+                "public sealed class ParsedValue { public static ParsedValue Parse(string value) => new(); } " +
+                "public sealed class ParsedControl : Avalonia.Controls.Control { public ParsedValue Value { get; set; } = null!; }");
+            var result = LucentCompiler.Compile(
+                "namespace Demo; using Demo.Controls; component App() { private readonly State<int> width = new(280); Fragment Render() => ParsedControl { Value: $\"{width.Value}px\"; }; }",
+                "App.lui",
+                new LucentProjectContext(SourcePaths: [types]));
+
+            Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+            StringAssert.Contains(result.GeneratedSource!,
+                ".Value = global::Demo.Controls.ParsedValue.Parse($\"{__lucent_stateWidth}px\")");
+            StringAssert.Contains(result.GeneratedSource!, "__lucent_UpdateBinding1();");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void General_state_and_keyed_foreach_emit_a_retained_native_region()
     {
         var result = LucentCompiler.Compile(

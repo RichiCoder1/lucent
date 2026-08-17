@@ -1283,6 +1283,11 @@ internal sealed class GeneralBinder
         {
             expressionText = $"new {resolvedProperty.TypeName}({expressionText})";
         }
+        else if (property.Value is StringValueSyntax &&
+            resolver.RequiresStringParse(resolvedProperty.Symbol.Type))
+        {
+            expressionText = $"{resolvedProperty.TypeName}.Parse({expressionText})";
+        }
 
         members.Add(
             new BoundPropertyMember(

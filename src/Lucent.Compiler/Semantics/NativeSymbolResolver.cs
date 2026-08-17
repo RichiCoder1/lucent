@@ -118,6 +118,16 @@ internal sealed class NativeSymbolResolver
             IsAccessible(constructor) &&
             constructor.Parameters is [{ Type.SpecialType: SpecialType.System_String }]) == 1;
 
+    public bool RequiresStringParse(ITypeSymbol targetType) =>
+        !_compilation.ClassifyConversion(_stringType!, targetType).IsImplicit &&
+        !RequiresStringConstructor(targetType) &&
+        targetType is INamedTypeSymbol named &&
+        named.GetMembers("Parse").OfType<IMethodSymbol>().Count(method =>
+            method is { IsStatic: true, Arity: 0 } &&
+            IsAccessible(method) &&
+            SymbolEqualityComparer.Default.Equals(method.ReturnType, targetType) &&
+            method.Parameters is [{ RefKind: RefKind.None, Type.SpecialType: SpecialType.System_String }]) == 1;
+
     public ResolvedNativeEvent? ResolveEvent(
         ResolvedNativeControl control,
         string sourceName)

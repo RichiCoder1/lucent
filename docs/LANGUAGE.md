@@ -170,10 +170,11 @@ Those recognized values lower to typed `Thickness` and `CornerRadius`
 construction, while the same numeric literal remains numeric for a property
 such as `Width`. A string literal or interpolation lowers through exactly one
 accessible `TargetType(string)` constructor when normal C# string conversion is
-not available; `RowDefinitions` above therefore uses Avalonia's native parser.
-Explicit C# construction always remains available. Other target-type conversion,
-including implicit string parsing for enums, brushes, colors, and `GridLength`,
-remains deferred.
+not available; if no such constructor exists, Lucent uses exactly one accessible
+static `TargetType Parse(string)` method returning the target type.
+`RowDefinitions` above therefore uses Avalonia's native parser. Explicit C#
+construction always remains available. Broader XAML type-converter discovery
+and parsing conventions remain deferred.
 
 Native events are always visibly C# lambdas. A zero-argument lambda ignores the
 delegate arguments; a two-argument lambda receives them:

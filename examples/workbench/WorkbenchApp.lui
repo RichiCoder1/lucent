@@ -11,6 +11,7 @@ using Avalonia.VisualTree;
 using AvaloniaEdit;
 using System.Collections.ObjectModel;
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -328,11 +329,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
             Grid {
                 Class: "work-area";
                 Grid.Row: 1;
-                ColumnDefinitions: [
-                    new ColumnDefinition(new GridLength(currentSettings.SidebarWidth)),
-                    new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
-                    new ColumnDefinition(new GridLength(320))
-                ];
+                ColumnDefinitions: $"{currentSettings.SidebarWidth:0} * 320";
                 Border {
                     Class: "sidebar-host";
                     Grid.Column: 0;
