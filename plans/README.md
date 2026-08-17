@@ -25,7 +25,8 @@ recent workspaces. It is not a full IDE.
 | [006](006-lifecycle-reliability.md) | Close lifecycle, failure, accessibility, and UI-test gaps | P1 | L | 001–005 | DONE |
 | [006a](006a-loading-boundaries.md) | Add explicit loading clauses to async boundaries | P1 | S | 006 | TODO |
 | [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
-| [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007 | TODO |
+| [007a](007a-native-compiled-bindings.md) | Use Avalonia compiled bindings at native seams | P1 | M | 005–007 | TODO |
+| [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007a | TODO |
 | [009](009-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–008 | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED` with a
@@ -55,6 +56,8 @@ Review records: [001–002](REVIEW-001-002.md),
   stale-refresh, error-routing, or runtime contracts.
 - 007 turns the examples into one credible visual family and closes the common
   Avalonia styling gaps they expose without adding a component/theme framework.
+- 007a uses native compiled bindings only for explicit binding paths and safe
+  recycled templates; Lucent expressions keep their existing runtime.
 - 008 makes the shared compiler/LSP seam correct, bounded, and fast before its
   artifacts are packaged. It must not depend on another language server's
   in-memory workspace.
@@ -72,7 +75,7 @@ npm test
 Pop-Location
 ```
 
-Plans 004–007, including 006a, and 009 must also add a user-flow gate to Lucent
+Plans 004–007a, including 006a, and 009 must also add a user-flow gate to Lucent
 Workbench. Plan 006 replaces manual-only smoke coverage with Avalonia headless
 interaction tests; Plan 006a extends that flow with first-load/stale-refresh
 boundary evidence; Plan 007 adds bounded visual evidence without pixel-golden
