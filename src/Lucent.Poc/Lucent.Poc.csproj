@@ -22,6 +22,8 @@
     <LucentSource Include="..\..\examples\counter\Counter.lui" />
     <LucentSource Include="..\..\examples\todo\Todo.lui" />
     <LucentSource Include="..\..\examples\package-pulse\PackagePulse.lui" />
+    <LucentSource Include="..\..\examples\package-pulse\PackagePulseResults.lui" />
+    <LucentSource Include="..\..\examples\package-pulse\PackagePulseRows.lui" />
     <Compile Include="..\..\examples\todo\TodoModel.cs" Link="TodoModel.cs" />
     <Compile Include="..\..\examples\package-pulse\PackageModel.cs" Link="PackageModel.cs" />
     <Compile Remove="Generated\CounterComponent.g.cs" />

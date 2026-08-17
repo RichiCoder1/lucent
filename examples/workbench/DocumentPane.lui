@@ -24,12 +24,12 @@ component DocumentPane(string title, DocumentSession session, ICommand focusComm
                 Button { Content: "Redo"; Command: redoCommand; }
                 Button { Content: "Select all"; Command: selectAllCommand; }
             }
-            TextEditor {
+            AccessibleTextEditor {
                 Text: "";
                 ShowLineNumbers: true;
                 Focusable: true;
                 AutomationProperties.Name: "Editor";
-                AutomationProperties.AutomationId: "editor";
+                AutomationProperties.AutomationId: "Document.Editor";
                 Loaded: (sender, e) => session.Attach(sender);
                 Unloaded: (sender, e) => session.Detach(sender);
             }

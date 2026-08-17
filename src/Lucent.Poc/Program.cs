@@ -2,7 +2,9 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Lucent.Examples.PackagePulse;
 using Lucent.Examples.Todo;
 
@@ -150,13 +152,16 @@ internal static class Program
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         timer.Tick += (_, _) =>
         {
-            if (window.Content is not Border { Child: StackPanel root } ||
-                root.Children.Count != 8 ||
-                root.Children[3] is not TextBox query ||
-                root.Children[4] is not Border loading ||
-                root.Children[5] is not Border failure ||
-                root.Children[6] is not Border empty ||
-                root.Children[7] is not StackPanel results)
+            var query = Descendants(window).OfType<TextBox>().FirstOrDefault();
+            var results = Descendants(window).OfType<StackPanel>()
+                .FirstOrDefault(panel => panel.Classes.Contains("results"));
+            var loading = Descendants(window).OfType<TextBlock>()
+                .FirstOrDefault(text => text.Text == "Loading package index…");
+            var empty = Descendants(window).OfType<TextBlock>()
+                .FirstOrDefault(text => text.Text == "No packages match this query.");
+            var failure = Descendants(window).OfType<TextBlock>()
+                .FirstOrDefault(text => text.Text?.Contains("feed is unavailable", StringComparison.Ordinal) == true);
+            if (query is null && phase < 3)
             {
                 Finish(false, "shape");
                 return;
@@ -164,32 +169,42 @@ internal static class Program
 
             switch (phase)
             {
-                case 0 when loading.Child is TextBlock { Text: "Loading package index…" } &&
-                                 results.Children.Count == 2:
+                case 0 when loading is not null:
                     MarkSmokeProgress("package-pulse-initial-loading");
                     phase = 1;
                     break;
-                case 1 when loading.Child is null && PackageName(results) == "Lucent.UI":
+                case 1 when query is not null && results is not null && loading is null && PackageName(results) == "Lucent.UI":
                     MarkSmokeProgress("package-pulse-success");
                     SetQuery(query, "no-match");
                     phase = 2;
                     break;
-                case 2 when empty.Child is TextBlock { Text: "No packages match this query." } &&
-                                 results.Children.Count == 0:
+                case 2 when query is not null && empty is not null:
                     MarkSmokeProgress("package-pulse-empty");
                     SetQuery(query, "fail");
                     phase = 3;
                     break;
-                case 3 when failure.Child is TextBlock:
+                case 3 when failure is not null:
                     MarkSmokeProgress("package-pulse-failure");
-                    SetQuery(query, "lucent");
+                    var retry = Descendants(window).OfType<Button>().FirstOrDefault(button =>
+                        string.Equals(button.Content?.ToString(), "Retry", StringComparison.Ordinal)) ??
+                        failure?.GetVisualAncestors().OfType<Panel>()
+                            .SelectMany(panel => panel.Children.OfType<Button>())
+                            .FirstOrDefault(button => string.Equals(button.Content?.ToString(), "Retry", StringComparison.Ordinal)) ??
+                        (failure?.Parent as Panel)?.Children.OfType<Button>()
+                            .FirstOrDefault(button => string.Equals(button.Content?.ToString(), "Retry", StringComparison.Ordinal));
+                    if (retry is null)
+                    {
+                        Finish(false, "missing-retry");
+                        return;
+                    }
+                    retry.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                     phase = 4;
                     break;
-                case 4 when PackageName(results) == "Lucent.UI":
+                case 4 when query is not null && results is not null && PackageName(results) == "Lucent.UI":
                     SetQuery(query, "avalonia");
                     phase = 5;
                     break;
-                case 5 when PackageName(results) == "Lucent.UI":
+                case 5 when query is not null && results is not null && PackageName(results) == "Lucent.UI":
                     MarkSmokeProgress("package-pulse-stale-results");
                     if (!replacementQueued)
                     {
@@ -198,7 +213,7 @@ internal static class Program
                     }
                     phase = 6;
                     break;
-                case 6 when PackageName(results) == "Reactive.Core":
+                case 6 when results is not null && PackageName(results) == "Reactive.Core":
                     Finish(true, "latest-generation");
                     break;
             }
@@ -224,10 +239,29 @@ internal static class Program
         }
 
         static string? PackageName(StackPanel results) =>
-            results.Children.FirstOrDefault() is Border { Child: StackPanel row } &&
-            row.Children.FirstOrDefault() is TextBlock name
-                ? name.Text
-                : null;
+            results.GetVisualDescendants().OfType<TextBlock>()
+                .FirstOrDefault(text => text.Classes.Contains("package-name"))?.Text;
+    }
+
+    private static IEnumerable<Control> Descendants(Control root)
+    {
+        var pending = new Stack<Control>([root]);
+        var seen = new HashSet<Control>(ReferenceEqualityComparer.Instance);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (!seen.Add(current)) continue;
+            yield return current;
+            foreach (var child in current.GetVisualChildren().OfType<Control>()) pending.Push(child);
+            if (current is ILogical logical)
+                foreach (var child in logical.LogicalChildren.OfType<Control>()) pending.Push(child);
+            if (current is Panel panel)
+                foreach (var child in panel.Children) pending.Push(child);
+            if (current is ContentControl content && content.Content is Control contentControl)
+                pending.Push(contentControl);
+            if (current is Decorator decorator && decorator.Child is Control decoratorChild)
+                pending.Push(decoratorChild);
+        }
     }
 
     private static bool ExerciseTodo(Window window)

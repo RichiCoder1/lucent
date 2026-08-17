@@ -188,3 +188,11 @@ internal sealed record BoundConditionalMember(
     IReadOnlyList<BoundRenderableModel> TrueRoots,
     IReadOnlyList<BoundRenderableModel>? FalseRoots,
     SourceSpan Span) : BoundControlMember(Span);
+
+internal sealed record BoundAsyncBoundary(
+    string SourceIdentifier,
+    BoundCSharpIsland Condition,
+    IReadOnlyList<BoundRenderableModel> ContentRoots,
+    IReadOnlyList<BoundRenderableModel> FallbackRoots,
+    string CatchName,
+    SourceSpan Span) : BoundControlMember(Span);

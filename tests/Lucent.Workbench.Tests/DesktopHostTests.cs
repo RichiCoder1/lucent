@@ -57,7 +57,7 @@ public sealed class DesktopHostTests
         host.FolderGate.SetResult([]);
         host.DialogGate.SetResult(true);
         using var lifetime = new CancellationTokenSource();
-        var component = RunOnUiThread(() => new WorkbenchAppComponent(host, lifetime.Token));
+        var component = RunOnUiThread(() => WorkbenchTestFactory.Create(host, lifetime.Token));
         var window = RunOnUiThread(() =>
         {
             var mounted = (Window)component.Mount().Roots.Single();
@@ -100,7 +100,7 @@ public sealed class DesktopHostTests
     {
         var host = new FakeHost();
         using var lifetime = new CancellationTokenSource();
-        var component = RunOnUiThread(() => new WorkbenchAppComponent(host, lifetime.Token));
+        var component = RunOnUiThread(() => WorkbenchTestFactory.Create(host, lifetime.Token));
         var window = RunOnUiThread(() =>
         {
             var mounted = (Window)component.Mount().Roots.Single();
@@ -120,7 +120,7 @@ public sealed class DesktopHostTests
 
         using var liveLifetime = new CancellationTokenSource();
         host = new FakeHost { Fault = new InvalidOperationException("picker failed") };
-        var liveComponent = RunOnUiThread(() => new WorkbenchAppComponent(host, liveLifetime.Token));
+        var liveComponent = RunOnUiThread(() => WorkbenchTestFactory.Create(host, liveLifetime.Token));
         var liveWindow = RunOnUiThread(() =>
         {
             var mounted = (Window)liveComponent.Mount().Roots.Single();
@@ -141,7 +141,7 @@ public sealed class DesktopHostTests
     {
         using var lifetime = new CancellationTokenSource();
         var modalHost = new FakeHost();
-        var modalComponent = RunOnUiThread(() => new WorkbenchAppComponent(modalHost, lifetime.Token));
+        var modalComponent = RunOnUiThread(() => WorkbenchTestFactory.Create(modalHost, lifetime.Token));
         var modalOwner = MountWorkbench(modalComponent);
         Execute(modalOwner, control => control is MenuItem { Header: "Settings" });
         await Task.Delay(50);
@@ -153,7 +153,7 @@ public sealed class DesktopHostTests
 
         var failedModalHost = new FakeHost();
         var failedModalComponent = RunOnUiThread(() =>
-            new WorkbenchAppComponent(failedModalHost, lifetime.Token));
+            WorkbenchTestFactory.Create(failedModalHost, lifetime.Token));
         var failedModalOwner = MountWorkbench(failedModalComponent);
         Execute(failedModalOwner, control => control is MenuItem { Header: "Settings" });
         await Task.Delay(50);
@@ -164,7 +164,7 @@ public sealed class DesktopHostTests
 
         var modelessHost = new FakeHost { ShowWindows = true };
         var modelessComponent = RunOnUiThread(() =>
-            new WorkbenchAppComponent(modelessHost, lifetime.Token));
+            WorkbenchTestFactory.Create(modelessHost, lifetime.Token));
         var modelessOwner = MountWorkbench(modelessComponent);
         Execute(modelessOwner, control => control is Button { Content: "Generated preview" });
         var preview = modelessHost.LastChild!;
@@ -183,7 +183,7 @@ public sealed class DesktopHostTests
             ShowWindowFault = new InvalidOperationException("show failed"),
         };
         var failedModelessComponent = RunOnUiThread(() =>
-            new WorkbenchAppComponent(failedModelessHost, lifetime.Token));
+            WorkbenchTestFactory.Create(failedModelessHost, lifetime.Token));
         var failedModelessOwner = MountWorkbench(failedModelessComponent);
         Execute(failedModelessOwner, control => control is Button { Content: "Generated preview" });
         AssertGeneratedHandler(failedModelessHost.LastChild!, "Generated C# preview", attached: false);

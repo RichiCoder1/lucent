@@ -2,6 +2,7 @@ namespace Lucent.Examples.Workbench;
 
 using Avalonia;
 using Avalonia.Automation;
+using Avalonia.Automation.Peers;
 using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
@@ -15,11 +16,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 
-component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken lifetime)
+component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken lifetime, Action<Exception> errorReporter, WorkbenchSettings initialSettings, SettingsSaveCoordinator saveCoordinator, IProblemLoader problemLoader, DocumentSession session)
 {
-    private readonly State<bool> showProblems = new(true);
+    private readonly State<bool> showProblems = new(initialSettings.ProblemsVisible);
     private readonly State<bool> showPalette = new(false);
-    private readonly State<string> workspaceName = new("Lucent");
+    private readonly State<string> workspaceName = new(initialSettings.RecentWorkspace ?? "Lucent");
     private readonly State<string> documentTitle = new("Program.cs");
     private readonly State<string> lastDiagnostic = new("No diagnostics copied");
     private readonly ObservableCollection<WorkspaceNode> workspaceRoots = new([new WorkspaceNode("root", "Lucent", new ObservableCollection<WorkspaceNode>([
@@ -30,48 +31,83 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         new WorkspaceNode("readme", "README.md", []),
     ]))]);
     private readonly WorkspaceSelectionController workspaceSelection = new WorkspaceSelectionController(workspaceRoots);
-    private readonly ObservableCollection<ProblemItem> problems = new([
-        new ProblemItem("problem-1", "WorkbenchApp.lui", 1, "Example diagnostic", ProblemSeverity.Warning),
-        new ProblemItem("problem-2", "DocumentPane.lui", 1, "Example diagnostic", ProblemSeverity.Info),
-        new ProblemItem("problem-3", "WorkspaceSidebar.lui", 1, "Example diagnostic", ProblemSeverity.Error),
-    ]);
     private readonly ObservableCollection<QuickOpenItem> quickOpenItems = new([
         new QuickOpenItem("quick-workbench", "WorkbenchApp.lui", "WorkbenchApp.lui"),
         new QuickOpenItem("quick-document", "DocumentPane.lui", "DocumentPane.lui"),
     ]);
-    private readonly OpenDocument document = new("Program.cs", "// Workbench document\n");
-    private readonly DocumentSession documentSession = new DocumentSession(document, NotifyCommandState);
+    private readonly State<bool> workspaceOpened = new(false);
+    private readonly IReadOnlyList<ProblemItem> placeholderProblems = [
+        new ProblemItem("problem-1", "WorkbenchApp.lui", 1, "Example diagnostic", ProblemSeverity.Warning),
+        new ProblemItem("problem-2", "DocumentPane.lui", 1, "Example diagnostic", ProblemSeverity.Info),
+        new ProblemItem("problem-3", "WorkspaceSidebar.lui", 1, "Example diagnostic", ProblemSeverity.Error),
+    ];
+    private DocumentSession GetSession() => session;
+    private readonly Computed<IReadOnlyList<ProblemItem>> loadedProblems = new(
+        ct => workspaceOpened.Value
+            ? problemLoader.LoadAsync(workspaceName.Value, ct)
+            : Task.FromResult<IReadOnlyList<ProblemItem>>(placeholderProblems),
+        placeholderProblems);
     private Window? window = null;
     private Border? sidebar = null;
     private Border? palette = null;
+    private ListBox? quickOpenList = null;
     private IInputElement? previousFocus = null;
 
-    private readonly DelegateCommand openWorkspace = new DelegateCommand(OpenWorkspace, CanOpenWorkspace);
-    private readonly DelegateCommand closeWorkspace = new DelegateCommand(CloseWorkspace, CanCloseWorkspace);
-    private readonly DelegateCommand quickOpen = new DelegateCommand(QuickOpen, CanOpenPalette);
-    private readonly DelegateCommand commandPalette = new DelegateCommand(ShowCommandPalette, CanOpenPalette);
-    private readonly DelegateCommand focusSidebar = new DelegateCommand(FocusSidebar, CanFocusSidebar);
-    private readonly DelegateCommand focusEditor = new DelegateCommand(FocusEditor, CanFocusEditor);
-    private readonly DelegateCommand toggleProblems = new DelegateCommand(ToggleProblems);
-    private readonly DelegateCommand settings = new DelegateCommand(OpenSettings, CanOpenWorkspace);
-    private readonly DelegateCommand copyDiagnostic = new DelegateCommand(CopyDiagnostic, CanCopyDiagnostic);
-    private readonly DelegateCommand generatedPreview = new DelegateCommand(ShowGeneratedPreview, CanOpenWorkspace);
-    private readonly DelegateCommand copyDocument = new DelegateCommand(CopyDocument, CanCopyDocument);
-    private readonly DelegateCommand undoDocument = new DelegateCommand(UndoDocument, CanUndoDocument);
-    private readonly DelegateCommand redoDocument = new DelegateCommand(RedoDocument, CanRedoDocument);
-    private readonly DelegateCommand selectAllDocument = new DelegateCommand(SelectAllDocument, CanSelectAllDocument);
+    private WorkbenchSettings currentSettings = initialSettings;
+    private WorkbenchSettings Settings() => currentSettings;
+    private void ApplySettings(WorkbenchSettings value)
+    {
+        currentSettings = value;
+        if (value.RecentWorkspace is not null) workspaceName.Update(value.RecentWorkspace);
+        showProblems.Update(value.ProblemsVisible);
+        SaveSettings();
+        NotifyCommandState();
+    }
+    private void SaveSettings()
+    {
+        saveCoordinator.Save(currentSettings with { RecentWorkspace = workspaceName.Value, ProblemsVisible = showProblems.Value });
+    }
+
+    private readonly DelegateCommand openWorkspace = new DelegateCommand(OpenWorkspace, CanOpenWorkspace, errorReporter);
+    private readonly DelegateCommand closeWorkspace = new DelegateCommand(CloseWorkspace, CanCloseWorkspace, errorReporter);
+    private readonly DelegateCommand quickOpen = new DelegateCommand(QuickOpen, CanOpenPalette, errorReporter);
+    private readonly DelegateCommand commandPalette = new DelegateCommand(ShowCommandPalette, CanOpenPalette, errorReporter);
+    private readonly DelegateCommand focusSidebar = new DelegateCommand(FocusSidebar, CanFocusSidebar, errorReporter);
+    private readonly DelegateCommand focusEditor = new DelegateCommand(FocusEditor, CanFocusEditor, errorReporter);
+    private readonly DelegateCommand toggleProblems = new DelegateCommand(ToggleProblems, null, errorReporter);
+    private readonly DelegateCommand settings = new DelegateCommand(OpenSettings, CanOpenWorkspace, errorReporter);
+    private readonly DelegateCommand copyDiagnostic = new DelegateCommand(CopyDiagnostic, CanCopyDiagnostic, errorReporter);
+    private readonly DelegateCommand generatedPreview = new DelegateCommand(ShowGeneratedPreview, CanOpenWorkspace, errorReporter);
+    private readonly DelegateCommand copyDocument = new DelegateCommand(CopyDocument, CanCopyDocument, errorReporter);
+    private readonly DelegateCommand undoDocument = new DelegateCommand(UndoDocument, CanUndoDocument, errorReporter);
+    private readonly DelegateCommand redoDocument = new DelegateCommand(RedoDocument, CanRedoDocument, errorReporter);
+    private readonly DelegateCommand selectAllDocument = new DelegateCommand(SelectAllDocument, CanSelectAllDocument, errorReporter);
+    private readonly DelegateCommand refreshProblems = new DelegateCommand(RefreshProblems, CanOpenWorkspace, errorReporter);
+    private readonly DelegateCommand retryProblems = new DelegateCommand(RefreshProblems, CanOpenWorkspace, errorReporter);
+    private readonly DelegateCommand acceptQuickOpen = new DelegateCommand(OpenSelectedQuickOpen, () => showPalette.Value, errorReporter);
+    private readonly DelegateCommand togglePaletteProblems = new DelegateCommand(ToggleProblemsAndClosePalette, () => showPalette.Value, errorReporter);
 
 
     private bool CanOpenWorkspace() => !lifetime.IsCancellationRequested;
     private bool CanCloseWorkspace() => CanOpenWorkspace() && workspaceName.Value != "No workspace";
     private bool CanOpenPalette() => CanOpenWorkspace() && !showPalette.Value;
     private bool CanFocusSidebar() => sidebar is not null;
-    private bool CanFocusEditor() => documentSession.Editor is not null;
+    private bool CanFocusEditor() => GetSession().Editor is not null;
     private bool CanCopyDiagnostic() => showProblems.Value;
-    private bool CanCopyDocument() => documentSession.CanCopy;
-    private bool CanUndoDocument() => documentSession.CanUndo;
-    private bool CanRedoDocument() => documentSession.CanRedo;
-    private bool CanSelectAllDocument() => documentSession.CanSelectAll;
+    private bool CanCopyDocument() => GetSession().CanCopy;
+    private bool CanUndoDocument() => GetSession().CanUndo;
+    private bool CanRedoDocument() => GetSession().CanRedo;
+    private bool CanSelectAllDocument() => GetSession().CanSelectAll;
+    private void RefreshProblems() => loadedProblems.Refresh();
+
+    private void OpenSelectedQuickOpen()
+    {
+        var item = quickOpenList?.SelectedItem as QuickOpenItem ?? quickOpenItems.FirstOrDefault();
+        if (item is null) return;
+        documentTitle.Update(item.DisplayName);
+        GetSession().ReplaceText($"// {item.Path}\n");
+        ClosePalette();
+    }
 
     private void NotifyCommandState()
     {
@@ -85,6 +121,10 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         undoDocument.NotifyCanExecuteChanged();
         redoDocument.NotifyCanExecuteChanged();
         selectAllDocument.NotifyCanExecuteChanged();
+        refreshProblems.NotifyCanExecuteChanged();
+        retryProblems.NotifyCanExecuteChanged();
+        acceptQuickOpen.NotifyCanExecuteChanged();
+        togglePaletteProblems.NotifyCanExecuteChanged();
     }
 
     private void OpenWorkspace() => _ = OpenWorkspaceAsync();
@@ -96,7 +136,11 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         {
             var folders = await desktopHost.PickWorkspaceAsync(window);
             if (lifetime.IsCancellationRequested) return;
-            workspaceName.Update(folders.FirstOrDefault()?.Name ?? "No workspace");
+            var folder = folders.FirstOrDefault();
+            if (folder is null) return;
+            workspaceName.Update(folder.Name);
+            workspaceOpened.Update(true);
+            SaveSettings();
             closeWorkspace.NotifyCanExecuteChanged();
         }
         catch (Exception error)
@@ -110,6 +154,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     {
         if (!CanCloseWorkspace()) return;
         workspaceName.Update("No workspace");
+        SaveSettings();
         closeWorkspace.NotifyCanExecuteChanged();
     }
 
@@ -121,6 +166,8 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         showPalette.Update(true);
         quickOpen.NotifyCanExecuteChanged();
         commandPalette.NotifyCanExecuteChanged();
+        acceptQuickOpen.NotifyCanExecuteChanged();
+        togglePaletteProblems.NotifyCanExecuteChanged();
     }
 
     private void ClosePalette()
@@ -129,6 +176,8 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         showPalette.Update(false);
         quickOpen.NotifyCanExecuteChanged();
         commandPalette.NotifyCanExecuteChanged();
+        acceptQuickOpen.NotifyCanExecuteChanged();
+        togglePaletteProblems.NotifyCanExecuteChanged();
         RestoreFocus();
     }
 
@@ -141,34 +190,47 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
             return;
         }
 
-        if (documentSession.Editor is not null && documentSession.Editor.IsAttachedToVisualTree() && documentSession.Editor.Focusable)
-            documentSession.Editor.Focus();
+        var session = GetSession();
+        if (session.Editor is not null && session.Editor.IsAttachedToVisualTree() && session.Editor.Focusable)
+            session.Editor.Focus();
     }
 
-    private void FocusSidebar() => sidebar?.Focus();
-    private void FocusEditor() => documentSession.Editor?.Focus();
-    private void CopyDocument() => documentSession.Copy();
-    private void UndoDocument() => documentSession.Undo();
-    private void RedoDocument() => documentSession.Redo();
-    private void SelectAllDocument() => documentSession.SelectAll();
+    private void FocusSidebar() => sidebar?.GetVisualDescendants().OfType<AccessibleWorkspaceListBox>().FirstOrDefault()?.Focus();
+    private void FocusEditor()
+    {
+        var editor = GetSession().Editor;
+        if (editor is null) return;
+        editor.Focus();
+        editor.TextArea.Focus();
+    }
+    private void CopyDocument() => GetSession().Copy();
+    private void UndoDocument() => GetSession().Undo();
+    private void RedoDocument() => GetSession().Redo();
+    private void SelectAllDocument() => GetSession().SelectAll();
 
     private void OpenWorkspaceNode(WorkspaceNode node)
     {
         if (node.Children.Count != 0) return;
         documentTitle.Update(node.Name);
-        documentSession.ReplaceText($"// {node.Name}\n");
+        GetSession().ReplaceText($"// {node.Name}\n");
     }
 
     private void SwitchDocument()
     {
         documentTitle.Update("README.md");
-        documentSession.ReplaceText("# Lucent Workbench\n");
+        GetSession().ReplaceText("# Lucent Workbench\n");
     }
 
     private void ToggleProblems()
     {
         showProblems.Update(value => !value);
+        SaveSettings();
         copyDiagnostic.NotifyCanExecuteChanged();
+    }
+    private void ToggleProblemsAndClosePalette()
+    {
+        ToggleProblems();
+        ClosePalette();
     }
 
     private void OpenSettings() => _ = OpenSettingsAsync();
@@ -179,7 +241,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         try
         {
             previousFocus = window.FocusManager?.GetFocusedElement();
-            using var dialog = new SettingsDialogComponent();
+            using var dialog = new SettingsDialogComponent(Settings(), ApplySettings, errorReporter);
             await desktopHost.ShowDialogAsync<bool>(window, dialog.MountRoot());
             if (!lifetime.IsCancellationRequested) RestoreFocus();
         }
@@ -210,7 +272,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     private void ShowGeneratedPreview()
     {
         if (!CanOpenWorkspace() || window is null) return;
-        var component = new GeneratedPreviewWindowComponent();
+        var component = new GeneratedPreviewWindowComponent(errorReporter);
         var preview = component.MountRoot();
         EventHandler? closed = null;
         closed = (_, _) => { preview.Closed -= closed; component.Dispose(); };
@@ -229,7 +291,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         Width: 960;
         Height: 680;
         Loaded: (sender, e) => window = sender;
-        Unloaded: (sender, e) => { if (ReferenceEquals(window, sender)) window = null; documentSession.Dispose(); };
+        Unloaded: (sender, e) => { if (ReferenceEquals(window, sender)) window = null; GetSession().Dispose(); };
         KeyBindings: [
             new KeyBinding { Gesture = new KeyGesture(Key.O, KeyModifiers.Control), Command = openWorkspace },
             new KeyBinding { Gesture = new KeyGesture(Key.W, KeyModifiers.Control), Command = closeWorkspace },
@@ -243,9 +305,10 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
             new KeyBinding { Gesture = new KeyGesture(Key.Z, KeyModifiers.Control), Command = undoDocument },
             new KeyBinding { Gesture = new KeyGesture(Key.Y, KeyModifiers.Control), Command = redoDocument },
             new KeyBinding { Gesture = new KeyGesture(Key.A, KeyModifiers.Control), Command = selectAllDocument },
+            new KeyBinding { Gesture = new KeyGesture(Key.R, KeyModifiers.Control | KeyModifiers.Shift), Command = refreshProblems },
         ];
         AutomationProperties.Name: "Lucent Workbench";
-        AutomationProperties.AutomationId: "workbench-window";
+        AutomationProperties.AutomationId: "Workbench.Window";
         StackPanel {
             Menu {
                 MenuItem { Header: "Open workspace"; Command: openWorkspace; }
@@ -261,19 +324,29 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                 Unloaded: (sender, e) => { if (ReferenceEquals(sidebar, sender)) sidebar = null; focusSidebar.NotifyCanExecuteChanged(); };
                 WorkspaceSidebar(workspaceName.Value, workspaceSelection, OpenWorkspaceNode, focusCommand: focusSidebar, compact: false) {}
             }
-            DocumentPane(documentTitle.Value, documentSession, focusCommand: focusEditor, copyCommand: copyDocument, undoCommand: undoDocument, redoCommand: redoDocument, selectAllCommand: selectAllDocument) {
+            DocumentPane(documentTitle.Value, GetSession(), focusCommand: focusEditor, copyCommand: copyDocument, undoCommand: undoDocument, redoCommand: redoDocument, selectAllCommand: selectAllDocument) {
                 slot toolbar {
                     Button { Content: "Switch document"; Click: () => SwitchDocument(); }
                 }
             }
-            Border {
-                if (showProblems.Value) {
-                    ProblemsPane(problems, copyCommand: copyDiagnostic) {}
+            ContentControl {
+                IsVisible: showProblems.Value;
+                try (loadedProblems) {
+                    ProblemsPane(loadedProblems.Value, loadedProblems.IsPending, copyCommand: copyDiagnostic) {}
                 }
-                else {
-                    TextBlock { Text: "Problems hidden"; }
+                catch (Exception error) {
+                    StackPanel {
+                        TextBlock { Text: error.Message; AutomationProperties.Name: "Problem loading error"; }
+                        Button {
+                            Content: "Retry problems";
+                            Focusable: true;
+                            Command: retryProblems;
+                            KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = retryProblems }];
+                        }
+                    }
                 }
             }
+            TextBlock { IsVisible: !showProblems.Value; Text: "Problems hidden"; }
             TextBlock { Text: lastDiagnostic.Value; AutomationProperties.Name: "Diagnostic status"; }
             StackPanel {
                 Orientation: Avalonia.Layout.Orientation.Horizontal;
@@ -286,18 +359,49 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                     Focusable: true;
                     KeyboardNavigation.TabNavigation: KeyboardNavigationMode.Cycle;
                     AutomationProperties.Name: "Command palette";
-                    AutomationProperties.AutomationId: "command-palette";
-                    Loaded: (sender, e) => { palette = sender; sender.Focus(); };
+                    AutomationProperties.AutomationId: "CommandPalette.Dialog";
+                    AutomationProperties.ControlTypeOverride: AutomationControlType.Window;
+                    Loaded: (sender, e) => palette = sender;
                     Unloaded: (sender, e) => { if (ReferenceEquals(palette, sender)) palette = null; };
-                    KeyDown: (sender, e) => { if (e.Key == Key.Escape) { e.Handled = true; ClosePalette(); } };
+                    KeyDown: (sender, e) => {
+                        if (e.Key == Key.Escape) { e.Handled = true; ClosePalette(); }
+                        else if (e.Key == Key.Enter) { e.Handled = true; OpenSelectedQuickOpen(); }
+                        else if (e.Key == Key.Tab) { e.Handled = true; quickOpenList?.Focus(); }
+                    };
                     StackPanel {
                         TextBlock { Text: "Command palette"; }
                         ListBox {
                             Height: 160;
+                            Focusable: true;
                             ItemsSource: quickOpenItems;
                             DisplayMemberBinding: new Binding("DisplayName");
+                            Loaded: (sender, e) => { quickOpenList = sender; sender.Focus(); };
+                            Unloaded: (sender, e) => { if (ReferenceEquals(quickOpenList, sender)) quickOpenList = null; };
+                            KeyDown: (sender, e) => {
+                                if (e.Key == Key.Down) {
+                                    sender.SelectedIndex = Math.Min(sender.Items.Count - 1, sender.SelectedIndex + 1);
+                                    e.Handled = true;
+                                }
+                                else if (e.Key == Key.Up) {
+                                    sender.SelectedIndex = Math.Max(0, sender.SelectedIndex - 1);
+                                    e.Handled = true;
+                                }
+                                else if (e.Key == Key.Enter) { e.Handled = true; OpenSelectedQuickOpen(); }
+                            };
+                            KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Enter), Command = acceptQuickOpen }];
                         }
                         Button { Content: "Open workspace"; Command: openWorkspace; }
+                        Button {
+                            Content: "Toggle problems";
+                            Click: () => ToggleProblemsAndClosePalette();
+                            KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = togglePaletteProblems }];
+                            KeyDown: (sender, e) => {
+                                if (e.Key is Key.Space or Key.Enter) {
+                                    e.Handled = true;
+                                    ToggleProblemsAndClosePalette();
+                                }
+                            };
+                        }
                         Button { Content: "Close palette"; Click: () => ClosePalette(); }
                     }
                     }

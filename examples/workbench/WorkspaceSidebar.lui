@@ -9,12 +9,15 @@ using Avalonia.Automation;
 component WorkspaceSidebar(string workspace, WorkspaceSelectionController selection, Action<WorkspaceNode> openNode, ICommand focusCommand, bool compact = false) => Border {
     Padding: new Avalonia.Thickness(compact ? 4 : 12);
     AutomationProperties.Name: "Workspace sidebar";
+    AutomationProperties.AutomationId: "Workspace.Sidebar";
     StackPanel {
         TextBlock { Text: $"Workspace: {workspace}"; }
         Button { Content: "Focus sidebar"; Command: focusCommand; }
-        ListBox {
+        AccessibleWorkspaceListBox {
             Height: 400;
-            AutomationProperties.Name: "Workspace files";
+            Focusable: true;
+            AutomationProperties.Name: "Workspace";
+            AutomationProperties.AutomationId: "Workspace.Tree";
             ItemsSource: selection.VisibleRows;
             ItemTemplate: new FuncDataTemplate<WorkspaceRow>((row, _) => new Border {
                 Padding = new Thickness(row.Depth * 16, 2, 2, 2),
@@ -23,6 +26,16 @@ component WorkspaceSidebar(string workspace, WorkspaceSelectionController select
             Loaded: (sender, e) => selection.Attach(sender);
             Unloaded: (sender, e) => selection.Detach(sender);
             SelectionChanged: (sender, e) => { if (sender.SelectedItem is WorkspaceRow row) openNode(row.Node); };
+            KeyDown: (sender, e) => {
+                if (e.Key == Avalonia.Input.Key.Down) {
+                    sender.SelectedIndex = Math.Min(sender.Items.Count - 1, sender.SelectedIndex + 1);
+                    e.Handled = true;
+                }
+                else if (e.Key == Avalonia.Input.Key.Up) {
+                    sender.SelectedIndex = Math.Max(0, sender.SelectedIndex - 1);
+                    e.Handled = true;
+                }
+            };
         }
     }
 };

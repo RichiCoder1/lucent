@@ -165,11 +165,7 @@ internal static class GeneralCSharpEmitter
 
         foreach (var computed in model.Computed)
         {
-            writer.Line($"private {computed.TypeName} {ComputedField(computed.Name)};");
-            writer.Line($"private bool {ComputedField(computed.Name)}Pending;");
-            writer.Line($"private string? {ComputedField(computed.Name)}ErrorMessage;");
-            writer.Line($"private global::System.Threading.CancellationTokenSource? {ComputedField(computed.Name)}Cancellation;");
-            writer.Line($"private int {ComputedField(computed.Name)}Generation;");
+            writer.Line($"private OwnedComputed<{computed.TypeName}> {ComputedField(computed.Name)} = null!;");
         }
 
         writer.Line("private readonly ComponentOwner __lucent_owner;");
@@ -214,19 +210,17 @@ internal static class GeneralCSharpEmitter
                 Statement: $"{item.Name} = {item.Expression};"))
             .Concat(model.States.Select(state => (Span: state.Span.Start,
                 Statement: $"{StateField(state.Name)} = {state.InitializerText};")))
-            .Concat(model.Computed.Select(computed => (Span: computed.Span.Start,
-                Statement: $"{ComputedField(computed.Name)} = {computed.InitialValueText};")))
             .OrderBy(item => item.Span)
             .ToArray();
         writer.Line();
         var topParameters = model.AllParameters.Select(parameter =>
                 $"{parameter.TypeName} {parameter.Name}" +
                 (parameter.DefaultValueText is null ? string.Empty : $" = {parameter.DefaultValueText}"))
-            .Concat(["IUiDispatcher? __lucent_dispatcher = null"]);
+            .Concat(["IUiDispatcher? __lucent_dispatcher = null", "global::System.Action<global::System.Exception>? __lucent_reportUnhandled = null"]);
         writer.Line($"internal {model.ComponentName}Component({string.Join(", ", topParameters)})");
         writer.Line("{");
         writer.Indent();
-        writer.Line("__lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance);");
+        writer.Line("__lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance, __lucent_reportUnhandled);");
         foreach (var parameter in model.AllParameters)
         {
             writer.Line($"__lucent_input{Pascal(parameter.Name)} = {parameter.Name};");
@@ -239,19 +233,14 @@ internal static class GeneralCSharpEmitter
         {
             writer.Line(initializer.Statement);
         }
+        foreach (var computed in model.Computed)
+        {
+            var sourceId = model.Sources.First(source => source.Name == computed.Name).Id;
+            writer.Line($"{ComputedField(computed.Name)} = new OwnedComputed<{computed.TypeName}>(__lucent_owner, {computed.InitialValueText}, (global::System.Func<global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<{computed.TypeName}>>)({computed.Factory.LoweredText}), () => __lucent_InvalidateSource{sourceId}(), {ComputedFailureReporter(model, computed.Name)});");
+        }
         foreach (var region in regions)
         {
             writer.Line($"__lucent_owner.OnDispose(__lucent_region{region.Index}.Clear);");
-        }
-        foreach (var computed in model.Computed)
-        {
-            writer.Line("__lucent_owner.OnDispose(() =>");
-            writer.Line("{");
-            writer.Indent();
-            writer.Line($"{ComputedField(computed.Name)}Cancellation?.Cancel();");
-            writer.Line($"{ComputedField(computed.Name)}Cancellation?.Dispose();");
-            writer.Unindent();
-            writer.Line("});");
         }
         writer.Unindent();
         writer.Line("}");
@@ -280,6 +269,11 @@ internal static class GeneralCSharpEmitter
         foreach (var initializer in initializers)
         {
             writer.Line(initializer.Statement);
+        }
+        foreach (var computed in model.Computed)
+        {
+            var sourceId = model.Sources.First(source => source.Name == computed.Name).Id;
+            writer.Line($"{ComputedField(computed.Name)} = new OwnedComputed<{computed.TypeName}>(__lucent_owner, {computed.InitialValueText}, (global::System.Func<global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<{computed.TypeName}>>)({computed.Factory.LoweredText}), () => __lucent_InvalidateSource{sourceId}(), {ComputedFailureReporter(model, computed.Name)});");
         }
         foreach (var region in regions)
         {
@@ -525,87 +519,10 @@ internal static class GeneralCSharpEmitter
         BoundComputedModel computed)
     {
         var pascalName = Pascal(computed.Name);
-        var factory = computed.Factory.LoweredText;
-        var sourceId = model.Sources.First(source => source.Name == computed.Name).Id;
-
         writer.Line($"private void __lucent_Refresh{pascalName}()");
         writer.Line("{");
         writer.Indent();
-        writer.Line("if (__lucent_owner.IsDisposed)");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("return;");
-        writer.Unindent();
-        writer.Line("}");
-        writer.Line();
-        writer.Line($"var generation = ++{ComputedField(computed.Name)}Generation;");
-        writer.Line($"{ComputedField(computed.Name)}Cancellation?.Cancel();");
-        writer.Line($"{ComputedField(computed.Name)}Cancellation?.Dispose();");
-        writer.Line(
-            $"{ComputedField(computed.Name)}Cancellation = global::System.Threading.CancellationTokenSource." +
-            "CreateLinkedTokenSource(__lucent_owner.CancellationToken);");
-        writer.Line($"{ComputedField(computed.Name)}Pending = true;");
-        writer.Line($"{ComputedField(computed.Name)}ErrorMessage = null;");
-        writer.Line($"__lucent_InvalidateSource{sourceId}();");
-        writer.Line($"_ = __lucent_Run{pascalName}Async(generation, {ComputedField(computed.Name)}Cancellation.Token);");
-        writer.Unindent();
-        writer.Line("}");
-        writer.Line();
-
-        writer.Line($"private async global::System.Threading.Tasks.Task __lucent_Run{pascalName}Async(");
-        writer.Indent();
-        writer.Line("int generation,");
-        writer.Line("global::System.Threading.CancellationToken cancellationToken)");
-        writer.Unindent();
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("try");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line(
-            $"var value = await ((global::System.Func<global::System.Threading.CancellationToken, " +
-            $"global::System.Threading.Tasks.Task<{computed.TypeName}>>)({factory}))" +
-            "(cancellationToken).ConfigureAwait(false);");
-        writer.Line("__lucent_owner.Dispatch(() =>");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line($"if (generation != {ComputedField(computed.Name)}Generation)");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("return;");
-        writer.Unindent();
-        writer.Line("}");
-        writer.Line();
-        writer.Line($"{ComputedField(computed.Name)} = value;");
-        writer.Line($"{ComputedField(computed.Name)}Pending = false;");
-        writer.Line($"__lucent_InvalidateSource{sourceId}();");
-        writer.Unindent();
-        writer.Line("});");
-        writer.Unindent();
-        writer.Line("}");
-        writer.Line("catch (global::System.OperationCanceledException) when (cancellationToken.IsCancellationRequested)");
-        writer.Line("{");
-        writer.Line("}");
-        writer.Line("catch (global::System.Exception exception)");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("__lucent_owner.Dispatch(() =>");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line($"if (generation != {ComputedField(computed.Name)}Generation)");
-        writer.Line("{");
-        writer.Indent();
-        writer.Line("return;");
-        writer.Unindent();
-        writer.Line("}");
-        writer.Line();
-        writer.Line($"{ComputedField(computed.Name)}Pending = false;");
-        writer.Line($"{ComputedField(computed.Name)}ErrorMessage = exception.Message;");
-        writer.Line($"__lucent_InvalidateSource{sourceId}();");
-        writer.Unindent();
-        writer.Line("});");
-        writer.Unindent();
-        writer.Line("}");
+        writer.Line($"{ComputedField(computed.Name)}.Refresh();");
         writer.Unindent();
         writer.Line("}");
     }
@@ -880,7 +797,7 @@ internal static class GeneralCSharpEmitter
             writer.Line($"{eventMember.DelegateTypeName} {handler} = (__sender, __eventArgs) =>");
             writer.Line("{"); writer.Indent();
             EmitEventParameterAliases(writer, control, eventMember);
-            EmitBody(writer, eventMember.Body.LoweredText);
+            EmitReportedBody(writer, eventMember.Body.LoweredText, owner);
             writer.Unindent(); writer.Line("};");
             writer.Line($"{name}.{eventMember.EventName} += {handler};");
             writer.Line($"{owner}.OnDispose(() =>");
@@ -1556,7 +1473,14 @@ internal static class GeneralCSharpEmitter
                     output.Indent();
                     EmitEventParameterAliases(output, control, eventMember);
                     EmitLineMapping(output, sourceDocument, eventMember.BodySpan);
+                    output.Line("try");
+                    output.Line("{"); output.Indent();
                     EmitBody(output, eventMember.Body.LoweredText);
+                    output.Unindent(); output.Line("}");
+                    output.Line("catch (global::System.Exception __lucent_error)");
+                    output.Line("{"); output.Indent();
+                    output.Line("branchOwner.ReportUnhandled(__lucent_error);");
+                    output.Unindent(); output.Line("}");
                     output.Line("#line default");
                     output.Unindent();
                     output.Line("};");
@@ -1640,12 +1564,7 @@ internal static class GeneralCSharpEmitter
         var body = eventMember.Body.LoweredText.Trim();
         if (body.Length > 0)
         {
-            foreach (var line in body.Split(
-                         ["\r\n", "\n", "\r"],
-                         StringSplitOptions.None))
-            {
-                writer.Line(line);
-            }
+            EmitReportedBody(writer, body, "__lucent_owner");
         }
 
         writer.Line("#line default");
@@ -1945,7 +1864,14 @@ internal static class GeneralCSharpEmitter
                 }
 
                 EmitLineMapping(writer, source, eventMember.BodySpan);
+                writer.Line("try");
+                writer.Line("{"); writer.Indent();
                 EmitBody(writer, body);
+                writer.Unindent(); writer.Line("}");
+                writer.Line("catch (global::System.Exception __lucent_error)");
+                writer.Line("{"); writer.Indent();
+                writer.Line("rowOwner.ReportUnhandled(__lucent_error);");
+                writer.Unindent(); writer.Line("}");
                 writer.Line("#line default");
                 writer.Unindent();
                 writer.Line("};");
@@ -2152,6 +2078,22 @@ internal static class GeneralCSharpEmitter
                 writer.Line($"control{index}.{route.PropertyName} = {roots}.Count == 0 ? null : {roots}[0];");
             }
         }
+    }
+
+    private static void EmitReportedBody(CodeWriter writer, string body, string owner)
+    {
+        writer.Line("try");
+        writer.Line("{");
+        writer.Indent();
+        EmitBody(writer, body);
+        writer.Unindent();
+        writer.Line("}");
+        writer.Line("catch (global::System.Exception __lucent_error)");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line($"{owner}.ReportUnhandled(__lucent_error);");
+        writer.Unindent();
+        writer.Line("}");
     }
 
     private static void EmitAttachedAndCollectionMembers(
@@ -2639,9 +2581,12 @@ internal static class GeneralCSharpEmitter
             {
                 return node.Name.Identifier.ValueText switch
                 {
-                    "Value" => SyntaxFactory.IdentifierName(ComputedField(computed.Name)).WithTriviaFrom(node),
-                    "IsPending" => SyntaxFactory.IdentifierName(ComputedField(computed.Name) + "Pending").WithTriviaFrom(node),
-                    "ErrorMessage" => SyntaxFactory.IdentifierName(ComputedField(computed.Name) + "ErrorMessage").WithTriviaFrom(node),
+                    "Value" => SyntaxFactory.ParseExpression($"{ComputedField(computed.Name)}.Value").WithTriviaFrom(node),
+                    "HasCommittedValue" => SyntaxFactory.ParseExpression($"{ComputedField(computed.Name)}.HasCommittedValue").WithTriviaFrom(node),
+                    "IsPending" => SyntaxFactory.ParseExpression($"{ComputedField(computed.Name)}.IsPending").WithTriviaFrom(node),
+                    "Error" => SyntaxFactory.ParseExpression($"{ComputedField(computed.Name)}.Error").WithTriviaFrom(node),
+                    "ErrorMessage" => SyntaxFactory.ParseExpression($"{ComputedField(computed.Name)}.ErrorMessage").WithTriviaFrom(node),
+                    "Refresh" => SyntaxFactory.ParseExpression($"{ComputedField(computed.Name)}.Refresh").WithTriviaFrom(node),
                     _ => base.VisitMemberAccessExpression(node),
                 };
             }
@@ -2912,6 +2857,37 @@ internal static class GeneralCSharpEmitter
 
     private static string StateField(string name) => "__lucent_state" + Pascal(name);
     private static string ComputedField(string name) => "__lucent_computed" + Pascal(name);
+
+    private static string ComputedFailureReporter(BoundComponentModel model, string sourceName) =>
+        HasBoundary(model.Roots, sourceName) ? "static _ => { }" : "null";
+
+    private static bool HasBoundary(IEnumerable<BoundRenderableModel> renderables, string sourceName)
+    {
+        foreach (var renderable in renderables)
+        {
+            if (renderable is not BoundControlModel control) continue;
+            foreach (var member in control.Members)
+            {
+                if (member is BoundConditionalMember conditional &&
+                    conditional.Condition.SourceText.Contains($"{sourceName}.Error", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+
+                var children = member switch
+                {
+                    BoundChildMember child => new[] { (BoundRenderableModel)child.Child },
+                    BoundComponentChildMember child => child.Invocation.Slots.SelectMany(slot => slot.Roots),
+                    BoundForEachMember loop => new[] { loop.Body },
+                    BoundConditionalMember nested => nested.TrueRoots.Concat(nested.FalseRoots ?? []),
+                    _ => [],
+                };
+                if (HasBoundary(children, sourceName)) return true;
+            }
+        }
+
+        return false;
+    }
 
     private sealed record BoundRegion(
         BoundControlModel Parent,

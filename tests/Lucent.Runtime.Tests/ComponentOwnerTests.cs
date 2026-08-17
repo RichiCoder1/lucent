@@ -101,4 +101,28 @@ public sealed class ComponentOwnerTests
             Assert.AreEqual(0, calls);
         }
     }
+
+    [TestMethod]
+    public void Unhandled_reporting_is_inherited_and_suppressed_after_disposal()
+    {
+        var errors = new List<Exception>();
+        var owner = new ComponentOwner(new TestUiDispatcher(), errors.Add);
+        var child = owner.CreateChild();
+        var error = new InvalidOperationException("boom");
+
+        child.ReportUnhandled(error);
+        owner.Dispose();
+        child.ReportUnhandled(new InvalidOperationException("late"));
+
+        Assert.AreSame(error, errors.Single());
+    }
+
+    [TestMethod]
+    public void Missing_reporter_rethrows_and_null_is_rejected()
+    {
+        using var owner = new ComponentOwner(new TestUiDispatcher());
+        Assert.ThrowsExactly<ArgumentNullException>(() => owner.ReportUnhandled(null!));
+        Assert.ThrowsExactly<InvalidOperationException>(() =>
+            owner.ReportUnhandled(new InvalidOperationException("boom")));
+    }
 }

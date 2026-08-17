@@ -163,6 +163,30 @@ signature, and narrows `sender` to the control type before running the body.
 A bare statement block is rejected because it hides both the function boundary
 and its arguments. One-argument event lambdas are also rejected as ambiguous.
 
+## Async boundaries
+
+`Computed<T>` work is owned by its component and exposes `Value`,
+`HasCommittedValue`, `IsPending`, `Error`, `ErrorMessage`, and `Refresh()`. A
+first refresh can render a loading state, later refreshes keep the last
+committed value visible, and failures remain inspectable. A bounded UI boundary
+can select an authored fallback without swallowing unrelated errors:
+
+```csharp
+ContentControl {
+    try (packages) {
+        PackageResults(items: packages.Value) {}
+    }
+    catch (Exception error) {
+        ErrorPane(message: error.Message) {}
+    }
+}
+```
+
+The source must be a declared `Computed<T>`, the catch type is exactly
+`System.Exception`, and `.Value` reads belong in that source's content branch.
+The compiler lowers the boundary to the existing owned conditional-region
+runtime; it does not add a second error-boundary or observer framework.
+
 ## UI declarations and control flow
 
 A declaration such as `Column { ... }` is not object-initializer shorthand. It gives the compiler a semantic view of node identity, properties, events, children, dependencies, CSS classes, and lifetime.

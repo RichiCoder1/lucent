@@ -200,7 +200,7 @@ internal static class EditorIntelligence
                 return resolver.ToSemanticSymbol(attached, attachedHeader.Span);
             }
         }
-        var scope = BuildExpressionScope(analysis, offset);
+        var scope = BuildExpressionScope(sourceText, analysis, offset);
         var (chain, span) = GetExpressionChainAt(sourceText, offset);
         if (chain.Length == 0)
         {
@@ -273,7 +273,7 @@ internal static class EditorIntelligence
         ComponentSemanticAnalysis analysis)
     {
         var resolver = analysis.Resolver;
-        var scope = BuildExpressionScope(analysis, offset);
+        var scope = BuildExpressionScope(sourceText, analysis, offset);
         var prefix = GetExpressionPrefix(sourceText, offset);
         if (!prefix.Contains('.'))
         {
@@ -346,6 +346,7 @@ internal static class EditorIntelligence
     }
 
     private static IReadOnlyList<ExpressionVariable> BuildExpressionScope(
+        string sourceText,
         ComponentSemanticAnalysis analysis,
         int offset)
     {
@@ -368,10 +369,11 @@ internal static class EditorIntelligence
                 .Select(group => group.OrderBy(local =>
                     local.Type.TypeKind == TypeKind.Dynamic).First())
                 .Select(local => new ExpressionVariable(
-                local.Name,
-                local.Type,
-                ExpressionContainer.Local,
-                $"{local.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {local.Name}")));
+                    local.Name,
+                    local.Type,
+                    ExpressionContainer.Local,
+                    $"{local.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {local.Name}",
+                    DefinitionSpan: FindCatchLocalSpan(sourceText, local.Name, offset))));
             variables.AddRange(scope.Context.LookupOrdinaryMembers(offset)
                 .Select(member => new ExpressionVariable(
                     member.Symbol.Name,
@@ -395,6 +397,13 @@ internal static class EditorIntelligence
             .ToArray();
     }
 
+    private static SourceSpan? FindCatchLocalSpan(string sourceText, string name, int offset)
+    {
+        var marker = " " + name + ")";
+        var end = sourceText.LastIndexOf(marker, Math.Min(offset, sourceText.Length - 1), StringComparison.Ordinal);
+        return end < 0 ? null : new SourceSpan(end + 1, name.Length);
+    }
+
     private static ExpressionMember? ResolveMember(
         ResolvedExpressionType target,
         string name,
@@ -415,8 +424,11 @@ internal static class EditorIntelligence
             ExpressionContainer.Computed =>
             [
                 new ExpressionMember("Value", new(target.Type, ExpressionContainer.Local), $"{target.Type.ToDisplayString()} Value", null, null),
+                new ExpressionMember("HasCommittedValue", new(resolver.ResolveTypeName("bool")!, ExpressionContainer.Local), "bool HasCommittedValue", null, null),
                 new ExpressionMember("IsPending", new(resolver.ResolveTypeName("bool")!, ExpressionContainer.Local), "bool IsPending", null, null),
+                new ExpressionMember("Error", new(resolver.ResolveTypeName("global::System.Exception")!, ExpressionContainer.Local), "Exception? Error", null, null),
                 new ExpressionMember("ErrorMessage", new(resolver.ResolveTypeName("string")!, ExpressionContainer.Local), "string? ErrorMessage", null, null),
+                new ExpressionMember("Refresh", new(resolver.ResolveTypeName("void")!, ExpressionContainer.Local), "void Refresh()", null, null),
             ],
             _ => [],
         };
@@ -722,6 +734,9 @@ internal static class EditorIntelligence
                     UiIfSyntax conditional => conditional.FalseRoot is null
                         ? [conditional.TrueRoot]
                         : new[] { conditional.TrueRoot, conditional.FalseRoot },
+                    UiAsyncBoundarySyntax boundary => boundary.Fallback.Roots.Count == 0
+                        ? boundary.Content.Roots
+                        : boundary.Content.Roots.Concat(boundary.Fallback.Roots),
                     _ => Array.Empty<UiElementSyntax>(),
                 };
                 foreach (var descendant in EnumerateElements(children))

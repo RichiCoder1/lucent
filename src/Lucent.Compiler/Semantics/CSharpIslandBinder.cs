@@ -79,7 +79,7 @@ internal sealed class CSharpIslandBinder(
         }
 
         text.Append("internal sealed class __LucentState<T> { public T Value = default!; public void Update(T value) {} public void Update(global::System.Func<T,T> update) {} }\n")
-            .Append("internal sealed class __LucentComputed<T> { public T Value = default!; public bool IsPending; public string? ErrorMessage; }\n")
+            .Append("internal sealed class __LucentComputed<T> { public T Value = default!; public bool HasCommittedValue; public bool IsPending; public global::System.Exception? Error; public string? ErrorMessage; public void Refresh() {} }\n")
             .Append("internal sealed class __LucentProbe {\n");
         foreach (var source in sources)
         {
@@ -406,7 +406,7 @@ internal sealed class CSharpIslandBinder(
                     model.GetSymbolInfo(access.Expression).Symbol is { } receiver &&
                     sourceFields.TryGetValue(receiver, out var source))
                 {
-                    if (access.Name.Identifier.ValueText is "Value" or "IsPending" or "ErrorMessage")
+                    if (access.Name.Identifier.ValueText is "Value" or "HasCommittedValue" or "IsPending" or "Error" or "ErrorMessage")
                         dependencies.Add(source.Id);
                     if (source.Kind == BoundReactiveSourceKind.State &&
                         access.Name.Identifier.ValueText == "Update") mutates = true;
@@ -458,14 +458,17 @@ internal sealed class CSharpIslandBinder(
             var lowered = node.Name.Identifier.ValueText switch
             {
                 "Value" when source.Kind == BoundReactiveSourceKind.State => "__lucent_state" + pascal,
-                "Value" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal,
+                "Value" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + ".Value",
+                "HasCommittedValue" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + ".HasCommittedValue",
                 "Update" when source.Kind == BoundReactiveSourceKind.State => "__lucent_Set" + pascal,
-                "IsPending" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + "Pending",
-                "ErrorMessage" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + "ErrorMessage",
+                "IsPending" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + ".IsPending",
+                "Error" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + ".Error",
+                "ErrorMessage" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + ".ErrorMessage",
+                "Refresh" when source.Kind == BoundReactiveSourceKind.Computed => "__lucent_computed" + pascal + ".Refresh",
                 _ => null,
             };
             return lowered is null ? base.VisitMemberAccessExpression(node) :
-                SyntaxFactory.IdentifierName(lowered).WithTriviaFrom(node);
+                SyntaxFactory.ParseExpression(lowered).WithTriviaFrom(node);
         }
     }
 
@@ -505,6 +508,14 @@ internal sealed class CSharpIslandBinder(
 
         public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
         {
+            var local = request.Locals.FirstOrDefault(candidate =>
+                candidate.Name == node.Identifier.ValueText &&
+                candidate.SourceExpression is not null &&
+                candidate.Type.TypeKind != TypeKind.Dynamic);
+            if (local?.SourceExpression is not null)
+            {
+                return SyntaxFactory.ParseExpression(local.SourceExpression).WithTriviaFrom(node);
+            }
             var symbol = model.GetSymbolInfo(node).Symbol;
             if (symbol is null || !sourceFields.TryGetValue(symbol, out var source) ||
                 source.Kind != BoundReactiveSourceKind.Parameter)
@@ -528,7 +539,7 @@ internal sealed class CSharpIslandBinder(
             }
 
             var name = node.Name.Identifier.ValueText;
-            if (name is "Value" or "IsPending" or "ErrorMessage")
+            if (name is "Value" or "HasCommittedValue" or "IsPending" or "Error" or "ErrorMessage")
             {
                 reads.Add(new BoundReactiveRead(
                     source.Id,
@@ -541,18 +552,24 @@ internal sealed class CSharpIslandBinder(
             {
                 "Value" => source.Kind == BoundReactiveSourceKind.State
                     ? "__lucent_state" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..]
-                    : "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..],
+                    : "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + ".Value",
+                "HasCommittedValue" when source.Kind == BoundReactiveSourceKind.Computed =>
+                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + ".HasCommittedValue",
                 "IsPending" when source.Kind == BoundReactiveSourceKind.Computed =>
-                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + "Pending",
+                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + ".IsPending",
+                "Error" when source.Kind == BoundReactiveSourceKind.Computed =>
+                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + ".Error",
                 "ErrorMessage" when source.Kind == BoundReactiveSourceKind.Computed =>
-                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + "ErrorMessage",
+                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + ".ErrorMessage",
+                "Refresh" when source.Kind == BoundReactiveSourceKind.Computed =>
+                    "__lucent_computed" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..] + ".Refresh",
                 "Update" when source.Kind == BoundReactiveSourceKind.State =>
                     "__lucent_Set" + char.ToUpperInvariant(source.Name[0]) + source.Name[1..],
                 _ => null,
             };
             return lowered is null
                 ? base.VisitMemberAccessExpression(node)
-                : SyntaxFactory.IdentifierName(lowered).WithTriviaFrom(node);
+                : SyntaxFactory.ParseExpression(lowered).WithTriviaFrom(node);
         }
     }
 }

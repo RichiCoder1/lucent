@@ -568,6 +568,10 @@ internal sealed partial class Parser
             {
                 members.Add(ParseIf());
             }
+            else if (IsIdentifier("try"))
+            {
+                members.Add(ParseAsyncBoundary());
+            }
             else if (IsIdentifier("foreach"))
             {
                 members.Add(ParseForEach());
@@ -771,6 +775,42 @@ internal sealed partial class Parser
 
         var end = falseBranch?.Span.End ?? trueBranch.Span.End;
         return new UiIfSyntax(condition, conditionSpan, trueBranch, falseBranch, SpanFrom(start, end));
+    }
+
+    private UiAsyncBoundarySyntax ParseAsyncBoundary()
+    {
+        var start = ExpectIdentifier("try").Span.Start;
+        Expect(TokenKind.OpenParen, "'(' after try");
+        var source = Expect(TokenKind.Identifier, "a computed source identifier");
+        Expect(TokenKind.CloseParen, "')' after the computed source");
+        var content = ParseConditionalBranch();
+        if (!IsIdentifier("catch"))
+        {
+            AddSyntax(Current.Span, "An async boundary requires catch (Exception name).");
+            return new UiAsyncBoundarySyntax(source.Text, source.Span, content,
+                new UiConditionalBranchSyntax([], content.Span), "System.Exception", content.Span,
+                "error", content.Span, SpanFrom(start, content.Span.End));
+        }
+        NextToken();
+        Expect(TokenKind.OpenParen, "'(' after catch");
+        var typeStart = Current.Span.Start;
+        var typeParts = new List<string>();
+        if (Current.Kind == TokenKind.Identifier)
+        {
+            typeParts.Add(NextToken().Text);
+            while (Current.Kind == TokenKind.Dot && Peek(1).Kind == TokenKind.Identifier)
+            {
+                typeParts.Add(NextToken().Text);
+                typeParts.Add(NextToken().Text);
+            }
+        }
+        var type = string.Concat(typeParts);
+        var typeSpan = new SourceSpan(typeStart, type.Length);
+        var name = Expect(TokenKind.Identifier, "a catch variable name");
+        Expect(TokenKind.CloseParen, "')' after catch variable");
+        var fallback = ParseConditionalBranch();
+        return new UiAsyncBoundarySyntax(source.Text, source.Span, content, fallback,
+            type, typeSpan, name.Text, name.Span, SpanFrom(start, fallback.Span.End));
     }
 
     private UiConditionalBranchSyntax ParseConditionalBranch()

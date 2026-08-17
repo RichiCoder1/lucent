@@ -31,15 +31,22 @@ internal sealed class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var lifetimeToken = new CancellationTokenSource();
+            void ReportUnhandled(Exception error) => Console.Error.WriteLine($"Workbench error: {error}");
+            var settingsPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "Lucent", "Workbench", "settings.json");
+            var settingsRepository = new JsonFileSettingsRepository(settingsPath, ReportUnhandled);
+            var settings = settingsRepository.LoadAsync(CancellationToken.None).GetAwaiter().GetResult();
+            var saveCoordinator = new SettingsSaveCoordinator(settingsRepository, CancellationToken.None);
+            var documentSession = new DocumentSession(new OpenDocument("Program.cs", "// Workbench document\n"), () => { });
+            var problemLoader = new PlaceholderProblemLoader();
 #pragma warning disable LUC004A003 // event-owned modeless component is disposed by the native Closed handler below
-            var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token);
+            var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token,
+                initialSettings: settings, saveCoordinator: saveCoordinator,
+                errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession,
+                __lucent_reportUnhandled: ReportUnhandled);
             var window = component.MountRoot();
-            window.Closed += (_, _) =>
-            {
-                lifetimeToken.Cancel();
-                component.Dispose();
-                lifetimeToken.Dispose();
-            };
+            AttachShutdown(window, lifetimeToken, component, documentSession, saveCoordinator, settingsRepository, ReportUnhandled);
             desktop.MainWindow = window;
 #pragma warning restore LUC004A003
         }
@@ -55,13 +62,28 @@ internal sealed class App : Application
         };
         Program.BuildAvaloniaApp().SetupWithLifetime(lifetime);
         var lifetimeToken = new CancellationTokenSource();
+        void ReportUnhandled(Exception error) => Console.Error.WriteLine($"Workbench error: {error}");
+        var settingsPath = Path.Combine(Path.GetTempPath(), "lucent-workbench-settings.json");
+        File.Delete(settingsPath);
+        var settingsRepository = new JsonFileSettingsRepository(settingsPath, ReportUnhandled);
+        var settings = settingsRepository.LoadAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var saveCoordinator = new SettingsSaveCoordinator(settingsRepository, CancellationToken.None);
+        var documentSession = new DocumentSession(new OpenDocument("Program.cs", "// Workbench document\n"), () => { });
+        var problemLoader = new PlaceholderProblemLoader();
 #pragma warning disable LUC004A003 // event-owned smoke component is disposed by the native Closed handler below
-        var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token);
+        var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token,
+            initialSettings: settings, saveCoordinator: saveCoordinator,
+            errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession,
+            __lucent_reportUnhandled: ReportUnhandled);
         var window = component.MountRoot();
         lifetime.MainWindow = window;
         var passed = false;
+        AttachShutdown(window, lifetimeToken, component, documentSession, saveCoordinator, settingsRepository, ReportUnhandled,
+            () => lifetime.Shutdown(passed ? 0 : 1));
         window.Opened += (_, _) => Dispatcher.UIThread.Post(() =>
         {
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
             var buttons = Descendants(window).OfType<Button>().ToArray();
             var before = Descendants(window).OfType<TextBlock>().Any(text => text.Text == "3 problems");
             var openBinding = window.KeyBindings.First(binding =>
@@ -109,21 +131,15 @@ internal sealed class App : Application
             buttons.First(button => button.Content?.ToString() == "Switch document")
                 .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             toggleBinding.Command!.Execute(null);
+            window.UpdateLayout();
             passed = before && Descendants(window).OfType<TextBlock>().Any(text => text.Text == "Edits: 1") &&
                 Descendants(window).OfType<TextBlock>().Any(text => text.Text == "README.md") &&
-                !Descendants(window).OfType<TextBlock>().Any(text => text.Text == "3 problems") &&
+                Descendants(window).OfType<TextBlock>().Any(text => text.Text == "Problems hidden" && text.IsVisible) &&
                 sameCommand && focusRestored && workspaceSelected && problemSelected && quickOpenSelected &&
                 editorChanged && workspaceOpened && dataVisible && quickOpenList.Items.Count > 0;
             window.Close();
             File.AppendAllText(Path.Combine(Path.GetTempPath(), "lucent-workbench-main.txt"), $"|passed:{passed}");
         }, DispatcherPriority.Loaded);
-        window.Closed += (_, _) =>
-        {
-            lifetimeToken.Cancel();
-            component.Dispose();
-            lifetimeToken.Dispose();
-            lifetime.Shutdown(passed ? 0 : 1);
-        };
 #pragma warning restore LUC004A003
         return lifetime.Start(Array.Empty<string>());
     }
@@ -133,5 +149,92 @@ internal sealed class App : Application
         yield return root;
         foreach (var child in root.GetVisualChildren().OfType<Control>())
             foreach (var nested in Descendants(child)) yield return nested;
+    }
+
+    private static void AttachShutdown(
+        Window window,
+        CancellationTokenSource lifetime,
+        WorkbenchAppComponent component,
+        DocumentSession documentSession,
+        SettingsSaveCoordinator saveCoordinator,
+        JsonFileSettingsRepository settingsRepository,
+        Action<Exception> reportUnhandled,
+        Action? afterClosed = null)
+    {
+        var shuttingDown = false;
+        var componentFaultReported = false;
+        var saveFaultReported = false;
+        var repositoryDisposed = false;
+
+        void ReportComponentFault(Exception error)
+        {
+            if (!componentFaultReported)
+            {
+                componentFaultReported = true;
+                reportUnhandled(error);
+            }
+        }
+
+        void ReportSaveFault(Exception error)
+        {
+            if (!saveFaultReported)
+            {
+                saveFaultReported = true;
+                reportUnhandled(error);
+            }
+        }
+
+        void DisposeRepository()
+        {
+            if (repositoryDisposed) return;
+            repositoryDisposed = true;
+            settingsRepository.Dispose();
+        }
+
+        window.Closing += (_, args) =>
+        {
+            if (shuttingDown) return;
+            args.Cancel = true;
+            shuttingDown = true;
+            window.IsEnabled = false;
+            lifetime.Cancel();
+            documentSession.Dispose();
+            try { component.Dispose(); } catch (Exception error) { ReportComponentFault(error); }
+            _ = FinishShutdownAsync();
+        };
+        window.Closed += (_, _) =>
+        {
+            saveCoordinator.Dispose();
+            if (repositoryDisposed) DisposeRepository();
+            lifetime.Dispose();
+            afterClosed?.Invoke();
+        };
+
+        async Task FinishShutdownAsync()
+        {
+            var tail = saveCoordinator.Tail;
+            try
+            {
+                await tail.WaitAsync(TimeSpan.FromSeconds(2));
+                DisposeRepository();
+            }
+            catch (TimeoutException)
+            {
+                _ = tail.ContinueWith(completed =>
+                {
+                    if (completed.IsFaulted && completed.Exception is { } error)
+                        ReportSaveFault(error);
+                    DisposeRepository();
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
+            }
+            catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { DisposeRepository(); }
+            catch (Exception error)
+            {
+                ReportSaveFault(error);
+                DisposeRepository();
+            }
+            window.Close();
+        }
     }
 }

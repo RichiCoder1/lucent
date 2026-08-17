@@ -179,6 +179,17 @@ public sealed record UiIfSyntax(
           new UiElementSyntax("Missing", [], new SourceSpan(FalseBranch.Span.Start, 0));
 }
 
+public sealed record UiAsyncBoundarySyntax(
+    string SourceIdentifier,
+    SourceSpan SourceIdentifierSpan,
+    UiConditionalBranchSyntax Content,
+    UiConditionalBranchSyntax Fallback,
+    string CatchType,
+    SourceSpan CatchTypeSpan,
+    string CatchName,
+    SourceSpan CatchNameSpan,
+    SourceSpan Span) : UiMemberSyntax(Span);
+
 public sealed record UiConditionalBranchSyntax(
     IReadOnlyList<UiElementSyntax> Roots,
     SourceSpan Span) : LucentSyntaxNode(Span);

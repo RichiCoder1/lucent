@@ -1,7 +1,5 @@
 namespace Lucent.Examples.PackagePulse;
 
-using Avalonia.Layout;
-
 component PackagePulse()
 {
     private readonly State<string> query = new("lucent");
@@ -9,96 +7,24 @@ component PackagePulse()
         cancellationToken => PackageCatalog.SearchAsync(query.Value, cancellationToken),
         PackageCatalog.Placeholders);
 
-    Fragment Render()
+    private void UpdateQuery(string value) => query.Update(value);
+    private void RetryPackages()
     {
-        return Border {
-            Class: "app-shell";
-            MaxWidth: 760;
-            HorizontalAlignment: HorizontalAlignment.Center;
+        UpdateQuery("lucent");
+        packages.Refresh();
+    }
 
-            StackPanel {
-                Class: "content";
-
-                TextBlock {
-                    Class: "eyebrow";
-                    Text: "LUCENT ASYNC + MOTION PROOF";
-                }
-
-                TextBlock {
-                    Class: "title";
-                    Text: "Package Pulse";
-                }
-
-                TextBlock {
-                    Class: "subtitle";
-                    Text: "Search a simulated package feed. Results stay in place while newer data loads.";
-                }
-
-                TextBox {
-                    Class: "search";
-                    Text: query.Value;
-                    PlaceholderText: "Try avalonia, reactive, toolkit, or fail";
-                    TextChanged: (sender, e) => query.Update(sender.Text ?? "");
-                }
-
-                Border {
-                    if (packages.IsPending && packages.Value == PackageCatalog.Placeholders) {
-                        TextBlock {
-                            Class: "status";
-                            Text: "Loading package index…";
-                        }
-                    }
-                }
-
-                Border {
-                    if (packages.ErrorMessage != null) {
-                        TextBlock {
-                            Class: "status";
-                            Text: packages.ErrorMessage;
-                        }
-                    }
-                }
-
-                Border {
-                    if (!packages.IsPending && packages.ErrorMessage == null && packages.Value.Length == 0) {
-                        TextBlock {
-                            Class: "status";
-                            Text: "No packages match this query.";
-                        }
-                    }
-                }
-
+    Fragment Render() => Border {
+        ContentControl {
+            try (packages) {
+                PackagePulseResults(query.Value, UpdateQuery, packages.Value, packages.IsPending) {}
+            }
+            catch (Exception error) {
                 StackPanel {
-                    Class: "results";
-                    Opacity: packages.IsPending ? 0.64 : 1;
-
-                    foreach (var package in packages.Value)
-                    keyed by package.Id {
-                        Border {
-                            Class: "package-row";
-
-                            StackPanel {
-                                Class: "package-copy";
-
-                                TextBlock {
-                                    Class: "package-name";
-                                    Text: package.Name;
-                                }
-
-                                TextBlock {
-                                    Class: "package-version";
-                                    Text: package.Version;
-                                }
-
-                                TextBlock {
-                                    Class: "package-description";
-                                    Text: package.Description;
-                                }
-                            }
-                        }
-                    }
+                    TextBlock { Class: "status"; Text: error.Message; }
+                    Button { Content: "Retry"; Click: () => RetryPackages(); }
                 }
             }
-        };
-    }
+        }
+    };
 }

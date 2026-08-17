@@ -7,12 +7,12 @@
     --accent: #8ca7ff;
 }
 
-.app-shell {
+Border.app-shell {
     background: var(--canvas);
     padding: 32px;
 }
 
-.content {
+StackPanel.content {
     gap: 12px;
 }
 
@@ -20,23 +20,23 @@ TextBlock {
     foreground: var(--text);
 }
 
-.eyebrow {
+TextBlock.eyebrow {
     foreground: var(--accent);
     font-size: 12px;
     font-weight: 600;
 }
 
-.title {
+TextBlock.title {
     font-size: 34px;
     font-weight: 700;
 }
 
-.subtitle {
+TextBlock.subtitle {
     foreground: var(--muted);
     opacity: 0.9;
 }
 
-.search {
+TextBox.search {
     background: var(--surface);
     foreground: var(--text);
     padding: 14px 12px;
@@ -44,45 +44,45 @@ TextBlock {
     transition: background 140ms ease-out;
 }
 
-.search:focus {
+TextBox.search:focus {
     background: var(--surface-hover);
 }
 
-.status {
+TextBlock.status {
     foreground: var(--muted);
     transition: opacity 160ms ease-out;
 }
 
-.results {
+StackPanel.results {
     gap: 8px;
     transition: opacity 180ms ease-out;
 }
 
-.package-row {
+Border.package-row {
     background: var(--surface);
     padding: 16px;
     border-radius: 10px;
     transition: background 140ms ease-out, opacity 140ms ease-out;
 }
 
-.package-row:pointerover {
+Border.package-row:pointerover {
     background: var(--surface-hover);
 }
 
-.package-copy {
+StackPanel.package-copy {
     gap: 4px;
 }
 
-.package-name {
+TextBlock.package-name {
     font-size: 17px;
     font-weight: 600;
 }
 
-.package-version {
+TextBlock.package-version {
     foreground: var(--accent);
     font-size: 12px;
 }
 
-.package-description {
+TextBlock.package-description {
     foreground: var(--muted);
 }

@@ -24,9 +24,9 @@ internal sealed class AppComponent : IDisposable
     private bool __lucent_mounted;
     private readonly Func<ComponentOwner, Fragment> __lucent_children;
 
-    internal AppComponent(IUiDispatcher? __lucent_dispatcher = null)
+    internal AppComponent(IUiDispatcher? __lucent_dispatcher = null, global::System.Action<global::System.Exception>? __lucent_reportUnhandled = null)
     {
-        __lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance);
+        __lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance, __lucent_reportUnhandled);
         __lucent_children = static _ => Fragment.Empty;
     }
 
@@ -125,9 +125,9 @@ internal sealed class HostComponent : IDisposable
     private readonly Func<ComponentOwner, Fragment> __lucent_children;
     private readonly Func<ComponentOwner, Fragment> __lucent_actions;
 
-    internal HostComponent(string title, IUiDispatcher? __lucent_dispatcher = null)
+    internal HostComponent(string title, IUiDispatcher? __lucent_dispatcher = null, global::System.Action<global::System.Exception>? __lucent_reportUnhandled = null)
     {
-        __lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance);
+        __lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance, __lucent_reportUnhandled);
         __lucent_inputTitle = title;
         __lucent_children = static _ => Fragment.Empty;
         __lucent_actions = static _ => Fragment.Empty;
@@ -225,9 +225,9 @@ internal sealed class LeafComponent : IDisposable
     private string text => __lucent_inputText;
     private readonly Func<ComponentOwner, Fragment> __lucent_children;
 
-    internal LeafComponent(string text, IUiDispatcher? __lucent_dispatcher = null)
+    internal LeafComponent(string text, IUiDispatcher? __lucent_dispatcher = null, global::System.Action<global::System.Exception>? __lucent_reportUnhandled = null)
     {
-        __lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance);
+        __lucent_owner = new ComponentOwner(__lucent_dispatcher ?? AvaloniaUiDispatcher.Instance, __lucent_reportUnhandled);
         __lucent_inputText = text;
         __lucent_children = static _ => Fragment.Empty;
     }

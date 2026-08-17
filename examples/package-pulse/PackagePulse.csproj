@@ -17,6 +17,8 @@
       ReferenceOutputAssembly="false"
       PrivateAssets="all" />
     <LucentSource Include="PackagePulse.lui" />
+    <LucentSource Include="PackagePulseResults.lui" />
+    <LucentSource Include="PackagePulseRows.lui" />
     <LucentSource Include="MainWindow.lui" />
   </ItemGroup>
 

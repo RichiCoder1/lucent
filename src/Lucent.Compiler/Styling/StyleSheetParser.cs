@@ -243,7 +243,7 @@ internal sealed partial class StyleSheetParser(string text, string path)
     private static string? EmptyToNull(string value) =>
         value.Length == 0 ? null : value;
 
-    [GeneratedRegex("^(?<type>[A-Za-z_][A-Za-z0-9_.]*)?(?<class>\\.[A-Za-z_][A-Za-z0-9_-]*)?(?<pseudo>:[A-Za-z_][A-Za-z0-9_-]*)?$")]
+    [GeneratedRegex("^(?<type>[A-Za-z_][A-Za-z0-9_]*)?(?<class>\\.[A-Za-z_][A-Za-z0-9_-]*)?(?<pseudo>:[A-Za-z_][A-Za-z0-9_-]*)?$")]
     private static partial Regex SelectorPattern();
 
     [GeneratedRegex(@"var\(\s*(?<name>--[A-Za-z_][A-Za-z0-9_-]*)\s*\)")]

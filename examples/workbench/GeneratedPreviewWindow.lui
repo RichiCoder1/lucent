@@ -2,7 +2,7 @@ namespace Lucent.Examples.Workbench;
 
 using Avalonia.Controls;
 
-component GeneratedPreviewWindow() => Window {
+component GeneratedPreviewWindow(Action<Exception> errorReporter) => Window {
     Title: "Generated C# preview";
     Width: 720;
     Height: 480;

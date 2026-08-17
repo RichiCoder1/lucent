@@ -16,6 +16,7 @@ public sealed class UiDispatcherContractTests
                 typeof(ComponentOwner),
                 typeof(ConditionalRegion),
                 typeof(Fragment),
+                typeof(OwnedComputed<int>).GetGenericTypeDefinition(),
             },
             typeof(ComponentOwner).Assembly.GetExportedTypes());
     }

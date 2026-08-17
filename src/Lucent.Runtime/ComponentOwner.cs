@@ -1,18 +1,27 @@
 namespace Lucent.Runtime;
 
+using System.Runtime.ExceptionServices;
+
 public sealed class ComponentOwner : IDisposable
 {
     private readonly object _gate = new();
     private readonly IUiDispatcher _dispatcher;
+    private readonly Action<Exception>? _reportUnhandled;
     private readonly CancellationTokenSource _cancellation = new();
     private readonly CancellationToken _cancellationToken;
     private List<Action>? _cleanups = [];
     private int _disposed;
 
     public ComponentOwner(IUiDispatcher dispatcher)
+        : this(dispatcher, null)
+    {
+    }
+
+    public ComponentOwner(IUiDispatcher dispatcher, Action<Exception>? reportUnhandled)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
         _dispatcher = dispatcher;
+        _reportUnhandled = reportUnhandled;
         _cancellationToken = _cancellation.Token;
     }
 
@@ -22,7 +31,7 @@ public sealed class ComponentOwner : IDisposable
 
     public ComponentOwner CreateChild()
     {
-        var child = new ComponentOwner(_dispatcher);
+        var child = new ComponentOwner(_dispatcher, _reportUnhandled);
         try
         {
             OnDispose(child.Dispose);
@@ -62,6 +71,23 @@ public sealed class ComponentOwner : IDisposable
                 action();
             }
         });
+    }
+
+    public void ReportUnhandled(Exception error)
+    {
+        ArgumentNullException.ThrowIfNull(error);
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (_reportUnhandled is not null)
+        {
+            _reportUnhandled(error);
+            return;
+        }
+
+        ExceptionDispatchInfo.Capture(error).Throw();
     }
 
     public void Dispose()

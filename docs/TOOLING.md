@@ -56,6 +56,11 @@ as design-time C# compile items, so C# tooling can resolve generated component
 types after a build without compiling `.lui` files during every design-time
 evaluation.
 
+Async-boundary fallback islands use the same project semantic model. The named
+`Exception` catch local participates in completion, hover, and definition only
+inside its fallback branch; computed status facets and `Refresh()` use the same
+symbol-aware member intelligence as `Value`.
+
 Useful follow-ups include Lucent-to-C# navigation, CSS class/token completion,
 signature help, metadata-as-source, document symbols,
 references, rename, reactive dependency inspection, and Lucent component

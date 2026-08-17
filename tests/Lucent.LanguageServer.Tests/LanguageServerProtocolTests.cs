@@ -995,6 +995,87 @@ public sealed class LanguageServerProtocolTests
     }
 
     [TestMethod]
+    public async Task Async_boundary_catch_local_is_scoped_in_protocol_tooling()
+    {
+        const string source = """
+            namespace Demo;
+            using System;
+            using System.Threading.Tasks;
+            component Main()
+            {
+                private readonly Computed<int> packages = new(ct => Task.FromResult(1), 0);
+                Fragment Render() => ContentControl {
+                    try (packages) {
+                        TextBlock { Text: packages.Value.ToString(); Tag: erro; }
+                    }
+                    catch (Exception error) {
+                        TextBlock { Text: error.Message; }
+                    }
+                };
+            }
+            """;
+        var sourcePath = Path.Combine(Path.GetTempPath(), $"lucent-boundary-{Guid.NewGuid():N}.lui");
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            var outside = source.IndexOf("erro;", StringComparison.Ordinal);
+            var declaration = source.IndexOf("error)", StringComparison.Ordinal);
+            var use = source.LastIndexOf("error.Message", StringComparison.Ordinal);
+            var input = BuildInput(
+            Request(1, "initialize", new { capabilities = new { } }),
+            Notification("initialized", new { }),
+            Notification("textDocument/didOpen", new
+            {
+                textDocument = new { uri, languageId = "lucent", version = 1, text = source },
+            }),
+            Request(2, "textDocument/completion", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, use + "error.M".Length),
+            }),
+            Request(3, "textDocument/hover", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, use),
+            }),
+            Request(4, "textDocument/definition", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, use),
+            }),
+            Request(5, "textDocument/completion", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, outside + "erro".Length),
+            }),
+            Request(6, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Message"));
+            StringAssert.Contains(HoverText(messages, 3), "Exception error");
+            var definition = Response(messages, 4).GetProperty("result");
+            Assert.AreEqual(uri, definition.GetProperty("uri").GetString());
+            var declarationPrefix = source[..declaration];
+            var definitionStart = definition.GetProperty("range").GetProperty("start");
+            Assert.AreEqual(declarationPrefix.Count(character => character == '\n'),
+                definitionStart.GetProperty("line").GetInt32());
+            Assert.AreEqual(declaration - (declarationPrefix.LastIndexOf('\n') + 1),
+                definitionStart.GetProperty("character").GetInt32());
+            Assert.IsFalse(Response(messages, 5).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "error"));
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+        }
+    }
+
+    [TestMethod]
     public async Task Cross_file_component_semantics_follow_unsaved_sibling_generations()
     {
         var directory = Path.Combine(Path.GetTempPath(), "lucent-lsp-composition-tests",

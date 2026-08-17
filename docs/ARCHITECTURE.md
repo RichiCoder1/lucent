@@ -79,6 +79,13 @@ For a keyed loop, the implementation must support insertion, deletion, movement,
 
 ## Runtime responsibilities
 
+`Computed<T>` execution is represented by one owner-bound `OwnedComputed<T>`
+per declaration. It owns cancellation, generation checks, stale-result
+suppression, pending/error state, and dispatcher commits. An explicit
+`try (source) { ... } catch (Exception error) { ... }` UI boundary reuses
+`ConditionalRegion` for its failure branch; otherwise a source failure reaches
+the component owner's root reporter exactly once.
+
 The runtime may own:
 
 - component instances and state-member storage;
@@ -90,7 +97,7 @@ The runtime may own:
 - Avalonia dispatcher integration;
 - development instrumentation.
 
-It should not create a second complete visual tree for generic diffing, another dependency-property system, another rendering or windowing layer, or reflection-heavy hot paths. Runtime CSS parsing should also be avoided where the compiler has the required information.
+It should not create a second complete visual tree for generic diffing, another dependency-property system, another rendering or windowing layer, or reflection-heavy hot paths. Runtime CSS parsing should also be avoided where the compiler has the required information. Application-owned persistence, document coordination, and native accessibility peers remain ordinary Workbench services rather than Lucent runtime features.
 
 ## Avalonia boundary
 

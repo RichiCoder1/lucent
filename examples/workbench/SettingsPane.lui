@@ -1,5 +1,25 @@
 namespace Lucent.Examples.Workbench;
 
-component SettingsPane() => Border {
-    TextBlock { Text: "Workbench settings"; }
-};
+using Avalonia.Automation;
+
+component SettingsPane(WorkbenchSettings settings, Action<WorkbenchSettings> onChanged)
+{
+    Fragment Render() => Border {
+    StackPanel {
+        Spacing: 8;
+        TextBlock { Text: "Workbench settings"; }
+        TextBox {
+            Loaded: (sender, e) => { AutomationProperties.SetAutomationId(sender, "Settings.Workspace"); AutomationProperties.SetName(sender, "Recent workspace"); sender.Focus(); };
+            Text: settings.RecentWorkspace ?? "";
+            TextChanged: (sender, e) => onChanged(settings with { RecentWorkspace = sender.Text });
+        }
+        CheckBox {
+            Focusable: true;
+            Loaded: (sender, e) => { AutomationProperties.SetAutomationId(sender, "Settings.Problems"); AutomationProperties.SetName(sender, "Show problems"); };
+            Content: "Show problems";
+            IsChecked: settings.ProblemsVisible;
+            IsCheckedChanged: (sender, e) => onChanged(settings with { ProblemsVisible = sender.IsChecked == true });
+        }
+    }
+    };
+}

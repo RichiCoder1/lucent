@@ -21,6 +21,7 @@
     <LucentSource Include="GeneratedPreviewPane.lui" />
     <LucentSource Include="SettingsDialog.lui" />
     <LucentSource Include="GeneratedPreviewWindow.lui" />
+    <LucentSource Include="ThrowingEvent.lui" />
   </ItemGroup>
   <Import Project="..\..\build\Lucent.Compiler.targets" />
 </Project>

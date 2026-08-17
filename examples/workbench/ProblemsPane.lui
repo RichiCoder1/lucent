@@ -2,20 +2,36 @@ namespace Lucent.Examples.Workbench;
 
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
-using System.Collections.ObjectModel;
 using System.Windows.Input;
 using Avalonia.Automation;
 
-component ProblemsPane(ObservableCollection<ProblemItem> items, ICommand copyCommand) => Border {
+component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand copyCommand) => Border {
     StackPanel {
         TextBlock { Text: $"{items.Count} problems"; AutomationProperties.Name: "Problems"; }
+        ContentControl {
+            if (loading) {
+                TextBlock { Text: "Loading problems"; AutomationProperties.Name: "Loading problems"; }
+            }
+        }
         ListBox {
             Height: 180;
-            AutomationProperties.Name: "Problems list";
+            Focusable: true;
+            AutomationProperties.Name: "Problems";
+            AutomationProperties.AutomationId: "Problems.List";
             ItemsSource: items;
             ItemTemplate: new FuncDataTemplate<ProblemItem>((item, _) => new TextBlock {
                 Text = $"{item.File}:{item.Line} {item.Message}",
             }, true);
+            KeyDown: (sender, e) => {
+                if (e.Key == Avalonia.Input.Key.Down) {
+                    sender.SelectedIndex = Math.Min(sender.Items.Count - 1, sender.SelectedIndex + 1);
+                    e.Handled = true;
+                }
+                else if (e.Key == Avalonia.Input.Key.Up) {
+                    sender.SelectedIndex = Math.Max(0, sender.SelectedIndex - 1);
+                    e.Handled = true;
+                }
+            };
         }
         Button { Content: "Copy diagnostic"; Command: copyCommand; }
     }

@@ -883,6 +883,28 @@ public sealed class GeneralCompilerTests
     }
 
     [TestMethod]
+    public void Generated_event_handlers_report_authored_failures_through_the_owner()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                Fragment Render() => StackPanel {
+                    Button { Click: () => throw new InvalidOperationException("event"); }
+                    ContentControl { if (true) { Button { Click: () => throw new InvalidOperationException("conditional"); } } }
+                };
+            }
+            """,
+            "Events.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "catch (global::System.Exception __lucent_error)");
+        StringAssert.Contains(result.GeneratedSource!, "__lucent_owner.ReportUnhandled(__lucent_error)");
+        StringAssert.Contains(result.GeneratedSource!, "branchOwner.ReportUnhandled(__lucent_error)");
+    }
+
+    [TestMethod]
     public void Computed_values_keep_stale_data_cancel_prior_work_and_ignore_late_results()
     {
         var result = LucentCompiler.Compile(
@@ -911,18 +933,15 @@ public sealed class GeneralCompilerTests
             "Search.lui");
 
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
-        StringAssert.Contains(result.GeneratedSource, "private string[] __lucent_computedResults;");
-        StringAssert.Contains(result.GeneratedSource, "__lucent_computedResults = [];");
-        StringAssert.Contains(result.GeneratedSource, "++__lucent_computedResultsGeneration");
-        StringAssert.Contains(result.GeneratedSource, "__lucent_computedResultsCancellation?.Cancel();");
-        StringAssert.Contains(result.GeneratedSource, "generation != __lucent_computedResultsGeneration");
-        StringAssert.Contains(
-            result.GeneratedSource,
-            "CreateLinkedTokenSource(__lucent_owner.CancellationToken)");
-        StringAssert.Contains(result.GeneratedSource, "__lucent_owner.Dispatch(() =>");
+        StringAssert.Contains(result.GeneratedSource, "private OwnedComputed<string[]> __lucent_computedResults");
+        StringAssert.Contains(result.GeneratedSource, "new OwnedComputed<string[]>(__lucent_owner");
+        StringAssert.Contains(result.GeneratedSource, "__lucent_computedResults.Refresh();");
+        Assert.IsFalse(result.GeneratedSource.Contains("CancellationTokenSource", StringComparison.Ordinal));
+        Assert.IsFalse(result.GeneratedSource.Contains("__lucent_computedResultsGeneration", StringComparison.Ordinal));
+        Assert.IsFalse(result.GeneratedSource.Contains("__lucent_RunResultsAsync", StringComparison.Ordinal));
         Assert.IsFalse(result.GeneratedSource.Contains("Dispatcher.UIThread", StringComparison.Ordinal));
         StringAssert.Contains(result.GeneratedSource, "Task.FromResult(new[] { __lucent_stateQuery })");
-        StringAssert.Contains(result.GeneratedSource, "var sourceItems = (__lucent_computedResults).ToArray();");
+        StringAssert.Contains(result.GeneratedSource, "var sourceItems = (__lucent_computedResults.Value).ToArray();");
     }
 
     [TestMethod]
@@ -1012,6 +1031,81 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(result.GeneratedSource, "Contains(\")\")");
         StringAssert.Contains(result.GeneratedSource, "loopValue =>");
+    }
+
+    [TestMethod]
+    public void Async_boundary_uses_computed_error_as_a_transactional_branch()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<string> value = new(ct => Task.FromResult("ok"), "loading");
+                Fragment Render() => Border {
+                    try (value) {
+                        ContentControl { Content: value.HasCommittedValue ? value.Value : "loading"; }
+                    }
+                    catch (Exception error) {
+                        TextBlock { Text: error.Message; }
+                    }
+                };
+            }
+            """,
+            "Main.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "__lucent_computedValue.Error is null");
+        StringAssert.Contains(result.GeneratedSource!, "__lucent_computedValue.Error.Message");
+        Assert.IsFalse(result.GeneratedSource!.Contains("CancellationTokenSource", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Async_boundary_catch_local_is_available_only_in_fallback()
+    {
+        const string source = """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<string> value = new(ct => Task.FromResult("ok"), "loading");
+                Fragment Render() => Border {
+                    try (value) { TextBlock { Text: value.Value; } }
+                    catch (Exception error) { TextBlock { Text: error.Message; } }
+                };
+            }
+            """;
+        var inside = source.IndexOf("error.Message", StringComparison.Ordinal);
+        var symbol = LucentCompiler.GetExpressionSymbol(source, inside, "Boundary.lui");
+        Assert.IsNotNull(symbol);
+        StringAssert.Contains(symbol.Display, "Exception error");
+        Assert.IsNotNull(symbol.Definition);
+        Assert.IsFalse(LucentCompiler.GetCompletions(source, source.IndexOf("catch (Exception error", StringComparison.Ordinal), "Boundary.lui")
+            .Any(item => item.Label == "error"));
+    }
+
+    [TestMethod]
+    public void Computed_value_reads_outside_the_matching_boundary_are_rejected()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<string> value = new(ct => Task.FromResult("ok"), "loading");
+                Fragment Render() => StackPanel {
+                    TextBlock { Text: value.Value; }
+                    ContentControl {
+                        try (value) { TextBlock { Text: value.Value; } }
+                        catch (Exception error) { TextBlock { Text: error.Message; } }
+                    }
+                };
+            }
+            """,
+            "computed-boundary-guard.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(string.Join(Environment.NewLine, result.Diagnostics),
+            "must be read inside its try (value) content branch");
     }
 
     [TestMethod]

@@ -1,11 +1,29 @@
 namespace Lucent.Examples.Workbench;
 
 using Avalonia.Controls;
+using Avalonia.Automation;
+using Avalonia.Input;
+using Avalonia.VisualTree;
+using System.Windows.Input;
 
-component SettingsDialog() => Window {
+component SettingsDialog(WorkbenchSettings settings, Action<WorkbenchSettings> onChanged, Action<Exception> errorReporter)
+{
+    private Window? window = null;
+    private readonly State<WorkbenchSettings> draft = new(settings);
+    private readonly DelegateCommand toggleProblems = new DelegateCommand(ToggleProblems, null, errorReporter);
+
+    private void ToggleProblems()
+    {
+        ChangeSettings(draft.Value with { ProblemsVisible = !draft.Value.ProblemsVisible });
+    }
+    private void ChangeSettings(WorkbenchSettings value) { draft.Update(value); onChanged(value); }
+
+    Fragment Render() => Window {
     Title: "Settings";
     Width: 420;
     Height: 280;
-    Loaded: (sender, e) => sender.Title = "Settings";
-    SettingsPane {}
-};
+    Loaded: (sender, e) => { window = sender; sender.Title = "Settings"; sender.Activate(); AutomationProperties.SetName(sender, "Settings"); AutomationProperties.SetAutomationId(sender, "Settings.Dialog"); };
+    KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = toggleProblems }];
+    SettingsPane(draft.Value, ChangeSettings) {}
+    };
+}

@@ -12,6 +12,8 @@ internal sealed class GeneralBinder
     private readonly DiagnosticBag _diagnostics;
     private readonly List<LucentSemanticSymbol> _symbols = [];
     private readonly List<CSharpIslandRequest> _requests = [];
+    private readonly HashSet<string> _asyncBoundaryValueSources = new(StringComparer.Ordinal);
+    private bool _componentHasAsyncBoundary;
     private IReadOnlyList<BoundIslandScope> _editorScopes = [];
     private readonly LucentProjectContext? _projectContext;
     private readonly ProjectSemanticCompilation? _semanticCompilation;
@@ -59,6 +61,7 @@ internal sealed class GeneralBinder
         }
 
         var component = syntax.Component;
+        _componentHasAsyncBoundary = ContainsAsyncBoundary(component.RenderMethod.RenderedFragment.Roots);
         _currentComponent = _componentIndex?.Symbols.FirstOrDefault(symbol =>
             string.Equals(symbol.SourcePath, _sourcePath, OperatingSystem.IsWindows()
                 ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
@@ -664,7 +667,7 @@ internal sealed class GeneralBinder
                     break;
 
                 case UiForEachSyntax loop:
-                    if (insideLoop || insideConditional)
+                    if (insideLoop)
                     {
                         AddUnsupported(
                             loop.Span,
@@ -794,6 +797,71 @@ internal sealed class GeneralBinder
                         seenMembers.Add(conditionalRoute.Property.Name);
                         hasStructuralRegion = true;
                     }
+                    break;
+
+                case UiAsyncBoundarySyntax boundary:
+                    if (insideLoop)
+                    {
+                        AddUnsupported(boundary.Span, "Async boundaries cannot be nested inside another structural region.");
+                        continue;
+                    }
+                    if (resolvedControl.ContentRoute is not { } boundaryRoute ||
+                        !resolver.ContentAcceptsControl(boundaryRoute) || hasStructuralRegion || childCount > 0 ||
+                        seenMembers.Contains(boundaryRoute.Property.Name))
+                    {
+                        AddUnsupported(boundary.Span,
+                            $"Control '{element.Name}' must dedicate its content route to one async boundary.");
+                        continue;
+                    }
+                    var source = _sources.FirstOrDefault(candidate => candidate.Name == boundary.SourceIdentifier &&
+                        candidate.Kind == BoundReactiveSourceKind.Computed);
+                    if (source is null)
+                    {
+                        AddUnsupported(boundary.SourceIdentifierSpan,
+                            $"Async boundary source '{boundary.SourceIdentifier}' must be a declared Computed<T>.");
+                        continue;
+                    }
+                    if (boundary.CatchType is not ("Exception" or "System.Exception" or "global::System.Exception"))
+                    {
+                        AddUnsupported(boundary.CatchTypeSpan, "Async boundary catches must use System.Exception.");
+                        continue;
+                    }
+                    var exceptionType = _resolver!.ResolveTypeName("global::System.Exception");
+                    var boundaryLocals = (locals ?? []).Concat([
+                        new BoundLocal(boundary.CatchName, exceptionType!, $"__lucent_computed{char.ToUpperInvariant(boundary.SourceIdentifier[0])}{boundary.SourceIdentifier[1..]}.Error")
+                    ]).ToArray();
+                    _asyncBoundaryValueSources.Add(boundary.SourceIdentifier);
+                    IReadOnlyList<BoundRenderableModel> boundaryTrue;
+                    IReadOnlyList<BoundRenderableModel> boundaryFalse;
+                    try
+                    {
+                        boundaryTrue = boundary.Content.Roots
+                            .Select(root => BindRenderable(root, locals: locals, insideConditional: false))
+                            .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
+                        boundaryFalse = boundary.Fallback.Roots
+                            .Select(root => BindRenderable(root, locals: boundaryLocals, insideConditional: false))
+                            .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
+                    }
+                    finally
+                    {
+                        _asyncBoundaryValueSources.Remove(boundary.SourceIdentifier);
+                    }
+                    if (!boundaryRoute.IsCollection && (RenderableCardinality(boundaryTrue) > 1 || RenderableCardinality(boundaryFalse) > 1))
+                    {
+                        AddUnsupported(boundary.Span, "An async boundary scalar content route accepts one root per branch.");
+                        continue;
+                    }
+                    var boundaryId = _nextConditionalId++;
+                    members.Add(new BoundConditionalMember(
+                        boundaryId,
+                        Request($"{boundary.SourceIdentifier}.Error is null", boundary.SourceIdentifierSpan,
+                            CSharpIslandKind.Expression, CSharpIslandRole.Condition,
+                            resolver.ResolveTypeName("bool"), locals),
+                        boundaryTrue,
+                        boundaryFalse,
+                        boundary.Span));
+                    seenMembers.Add(boundaryRoute.Property.Name);
+                    hasStructuralRegion = true;
                     break;
             }
         }
@@ -1157,6 +1225,23 @@ internal sealed class GeneralBinder
     private static SourceSpan PropertyNameSpan(UiPropertySyntax property) =>
         new(property.Span.Start, property.Name.Length);
 
+    private static bool ContainsAsyncBoundary(IEnumerable<UiElementSyntax> roots)
+    {
+        foreach (var root in roots)
+        {
+            foreach (var member in root.Members)
+            {
+                if (member is UiAsyncBoundarySyntax) return true;
+                if (member is UiChildSyntax child && ContainsAsyncBoundary([child.Element])) return true;
+                if (member is UiIfSyntax conditional &&
+                    (ContainsAsyncBoundary(conditional.TrueBranch.Roots) ||
+                     (conditional.FalseBranch is { } falseBranch && ContainsAsyncBoundary(falseBranch.Roots))))
+                    return true;
+            }
+        }
+        return false;
+    }
+
     private BoundCSharpIsland Request(
         string text,
         SourceSpan span,
@@ -1166,6 +1251,25 @@ internal sealed class GeneralBinder
         IReadOnlyList<BoundLocal>? locals = null,
         SourceSpan? editorSpan = null)
     {
+        if (_componentHasAsyncBoundary &&
+            role is CSharpIslandRole.Property or CSharpIslandRole.Content or
+            CSharpIslandRole.Condition or CSharpIslandRole.LoopSource or
+            CSharpIslandRole.LoopKey or CSharpIslandRole.ComponentArgument)
+        {
+            var expression = SyntaxFactory.ParseExpression(text);
+            foreach (var access in expression.DescendantNodesAndSelf().OfType<MemberAccessExpressionSyntax>()
+                         .Where(access => access.Name.Identifier.ValueText == "Value" &&
+                                          access.Expression is IdentifierNameSyntax))
+            {
+                var sourceName = ((IdentifierNameSyntax)access.Expression).Identifier.ValueText;
+                if (_sources.Any(source => source.Name == sourceName && source.Kind == BoundReactiveSourceKind.Computed) &&
+                    !_asyncBoundaryValueSources.Contains(sourceName))
+                {
+                    AddUnsupported(new SourceSpan(span.Start + access.SpanStart, access.Span.Length),
+                        $"Computed source '{sourceName}.Value' must be read inside its try ({sourceName}) content branch.");
+                }
+            }
+        }
         var id = _requests.Count;
         _requests.Add(new CSharpIslandRequest(
             id, text, span, kind, role, expectedType, locals ?? [], editorSpan ?? span));

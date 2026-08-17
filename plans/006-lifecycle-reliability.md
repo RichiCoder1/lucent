@@ -418,8 +418,10 @@ hooks.
 - `examples/workbench/PlaceholderProblemLoader.cs`
 - `examples/workbench/AccessibleWorkspaceListBox.cs`
 - `examples/workbench/AccessibleTextEditor.cs`
+- `examples/workbench/ThrowingEvent.lui`
 - `tests/Lucent.Workbench.Tests/SettingsRepositoryTests.cs`
 - `tests/Lucent.Workbench.Tests/AccessibilityTests.cs`
+- `tests/Lucent.Workbench.Tests/EventReportingTests.cs`
 - `tests/Lucent.Workbench.Tests/UserFlowTests.cs`
 
 **Modify**:
@@ -449,8 +451,8 @@ hooks.
 - `examples/workbench/DocumentPane.lui`
 - `examples/workbench/ProblemsPane.lui`
 - `examples/workbench/SettingsPane.lui`
-- `examples/workbench/SettingsDialog.cs`
-- `examples/workbench/GeneratedPreviewWindow.cs`
+- `examples/workbench/SettingsDialog.lui`
+- `examples/workbench/GeneratedPreviewWindow.lui`
 - `examples/workbench/README.md`
 - `tests/Lucent.Workbench.Tests/HeadlessTestApp.cs`
 - `tests/Lucent.Workbench.Tests/HeadlessTestHarness.cs`
@@ -554,15 +556,15 @@ post-close mutations; then run native reliability smoke and all gates.
 
 ## Done criteria
 
-- [ ] Generated computed work uses one owner-bound node and preserves first-load,
+- [x] Generated computed work uses one owner-bound node and preserves first-load,
       stale-refresh, replacement, failure, and disposal semantics.
-- [ ] Explicit async boundaries own their source failure branches; all other
+- [x] Explicit async boundaries own their source failure branches; all other
       failures reach one root reporter exactly once.
-- [ ] No general effects, DI, observable, or second resource framework is added.
-- [ ] Settings commits preserve the old file on pre-rename failure.
-- [ ] Primary controls retain native peers, stable IDs/names, and keyboard focus.
-- [ ] All seven Workbench flows pass in the single headless harness.
-- [ ] Full build, tests, native smoke, and VS Code tests pass.
+- [x] No general effects, DI, observable, or second resource framework is added.
+- [x] Settings commits preserve the old file on pre-rename failure.
+- [x] Primary controls retain native peers, stable IDs/names, and keyboard focus.
+- [x] All seven Workbench flows pass in the single headless harness.
+- [x] Full build, tests, native smoke, and VS Code tests pass.
 
 ## STOP conditions
 

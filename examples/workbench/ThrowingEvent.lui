@@ -1,0 +1,9 @@
+namespace Lucent.Examples.Workbench;
+
+using System;
+using Avalonia.Controls;
+
+component ThrowingEvent() => Button {
+    Content: "Throw";
+    Click: () => throw new InvalidOperationException("event failure");
+};
