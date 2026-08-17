@@ -1,5 +1,5 @@
 Border {
-    background: resource(Lucent.Canvas);
+    background: resource("Lucent.Canvas");
 }
 
 Border.todo-row {
@@ -7,15 +7,15 @@ Border.todo-row {
 }
 
 TextBlock {
-    foreground: resource(Lucent.Text);
+    foreground: resource("Lucent.Text");
 }
 
 TextBlock.todo-subtitle {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
 }
 
 TextBlock.todo-status {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
 }
 
 StackPanel.todo-entry {
@@ -28,21 +28,21 @@ StackPanel.filter-bar {
 
 .todo-row {
     border-width: 1px;
-    border-color: resource(Lucent.Border);
+    border-color: resource("Lucent.Border");
     transition: background 120ms ease-out;
 }
 
 .todo-row.active {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
 }
 
 .todo-row.completed {
-    background: resource(Lucent.Surface);
-    border-color: resource(Lucent.Success);
+    background: resource("Lucent.Surface");
+    border-color: resource("Lucent.Success");
 }
 
 TextBlock.completion-state {
-    foreground: resource(Lucent.Success);
+    foreground: resource("Lucent.Success");
     font-weight: 600;
 }
 
@@ -51,16 +51,16 @@ TextBlock.completion-state {
 }
 
 .todo-row:pointerover {
-    border-color: resource(Lucent.Accent);
+    border-color: resource("Lucent.Accent");
 }
 
 TextBox:focus-visible {
-    border-color: resource(Lucent.Focus);
+    border-color: resource("Lucent.Focus");
     border-width: 2px;
 }
 
 CheckBox:checked {
-    foreground: resource(Lucent.Success);
+    foreground: resource("Lucent.Success");
 }
 
 Button:disabled {
@@ -68,6 +68,6 @@ Button:disabled {
 }
 
 Button:focus-visible {
-    border-color: resource(Lucent.Focus);
+    border-color: resource("Lucent.Focus");
     border-width: 2px;
 }

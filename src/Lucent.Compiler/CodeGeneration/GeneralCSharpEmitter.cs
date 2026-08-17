@@ -893,8 +893,8 @@ internal static class GeneralCSharpEmitter
 
     private static string LowerStyleValue(string propertyName, string value)
     {
-        if (value.StartsWith("resource(", StringComparison.Ordinal) && value.EndsWith(')'))
-            return $"new global::Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension({Quote(value[9..^1].Trim())})";
+        if (CssPropertyCatalog.TryGetResourceKey(value, out var resourceKey))
+            return $"new global::Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension({Quote(resourceKey)})";
 
         return propertyName switch
         {
@@ -967,11 +967,8 @@ internal static class GeneralCSharpEmitter
 
     private static string LowerBrush(string value)
     {
-        if (value.StartsWith("resource(", StringComparison.Ordinal) && value.EndsWith(')'))
-        {
-            var key = value[9..^1].Trim();
-            return $"new global::Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension({Quote(key)})";
-        }
+        if (CssPropertyCatalog.TryGetResourceKey(value, out var resourceKey))
+            return $"new global::Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension({Quote(resourceKey)})";
         if (!value.StartsWith('#'))
         {
             return value switch

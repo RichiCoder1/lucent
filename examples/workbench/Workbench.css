@@ -1,86 +1,86 @@
 Window {
-    background: resource(Lucent.Canvas);
+    background: resource("Lucent.Canvas");
 }
 
 Grid.shell {
-    background: resource(Lucent.Canvas);
+    background: resource("Lucent.Canvas");
 }
 
 Menu.topbar {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
     padding: 4px 8px;
-    border-color: resource(Lucent.Border);
+    border-color: resource("Lucent.Border");
     border-width: 1px;
 }
 
 Grid.work-area {
-    background: resource(Lucent.Canvas);
+    background: resource("Lucent.Canvas");
     padding: 8px;
 }
 
 Border.sidebar-host {
-    background: resource(Lucent.Surface);
-    border-color: resource(Lucent.Border);
+    background: resource("Lucent.Surface");
+    border-color: resource("Lucent.Border");
     border-width: 1px;
     padding: 8px;
 }
 
 Border.editor-host {
-    background: resource(Lucent.Surface);
-    border-color: resource(Lucent.Border);
+    background: resource("Lucent.Surface");
+    border-color: resource("Lucent.Border");
     border-width: 1px;
     padding: 8px;
 }
 
 ContentControl.problems-host {
-    background: resource(Lucent.Surface);
-    border-color: resource(Lucent.Border);
+    background: resource("Lucent.Surface");
+    border-color: resource("Lucent.Border");
     border-width: 1px;
     padding: 8px;
 }
 
 TextBlock {
-    foreground: resource(Lucent.Text);
+    foreground: resource("Lucent.Text");
 }
 
 TextBlock.status-line {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
     padding: 4px 8px;
 }
 
 TextBlock.problems-hidden {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
     padding: 4px 8px;
 }
 
 StackPanel.action-bar {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
     padding: 4px 8px;
     gap: 8px;
 }
 
 Button:pointerover {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
 }
 
 Button:focus-visible {
-    border-color: resource(Lucent.Focus);
+    border-color: resource("Lucent.Focus");
     border-width: 2px;
 }
 
 TextBox:focus-visible {
-    border-color: resource(Lucent.Focus);
+    border-color: resource("Lucent.Focus");
     border-width: 2px;
 }
 
 ListBox:focus-visible {
-    border-color: resource(Lucent.Focus);
+    border-color: resource("Lucent.Focus");
     border-width: 2px;
 }
 
 Border.command-palette {
-    background: resource(Lucent.SurfaceRaised);
-    border-color: resource(Lucent.Accent);
+    background: resource("Lucent.SurfaceRaised");
+    border-color: resource("Lucent.Accent");
     border-width: 1px;
     padding: 16px;
     box-shadow: 0 8px 24px #101821;
@@ -88,11 +88,11 @@ Border.command-palette {
 }
 
 TextBlock.error-title {
-    foreground: resource(Lucent.Danger);
+    foreground: resource("Lucent.Danger");
     font-weight: bold;
 }
 
 TextBlock.error-message {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
     text-wrap: wrap;
 }

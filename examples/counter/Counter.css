@@ -1,24 +1,24 @@
 .counter {
-    background: resource(Lucent.Canvas);
+    background: resource("Lucent.Canvas");
     margin: 24px;
     gap: 12px;
 }
 
 .count {
-    foreground: resource(Lucent.Text);
+    foreground: resource("Lucent.Text");
     font-size: 40px;
     font-weight: bold;
     text-align: center;
 }
 
 .label {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
     text-align: center;
 }
 
 .primary {
-    background: resource(Lucent.Accent);
-    foreground: resource(Lucent.Surface);
+    background: resource("Lucent.Accent");
+    foreground: resource("Lucent.Surface");
     border-radius: 4px;
     transition: opacity 120ms ease-out;
 }
@@ -28,7 +28,7 @@
 }
 
 .primary:focus-visible {
-    border-color: resource(Lucent.Focus);
+    border-color: resource("Lucent.Focus");
     border-width: 2px;
 }
 

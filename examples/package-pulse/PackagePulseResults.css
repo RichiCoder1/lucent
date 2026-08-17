@@ -1,10 +1,10 @@
 Border.app-shell {
-    background: resource(Lucent.Canvas);
+    background: resource("Lucent.Canvas");
     padding: 24px;
 }
 
 Border.app-shell TextBox.search:focus-visible {
-    border-color: resource(Lucent.Focus);
+    border-color: resource("Lucent.Focus");
     border-width: 2px;
 }
 
@@ -13,11 +13,11 @@ StackPanel.content {
 }
 
 TextBlock {
-    foreground: resource(Lucent.Text);
+    foreground: resource("Lucent.Text");
 }
 
 TextBlock.eyebrow {
-    foreground: resource(Lucent.Accent);
+    foreground: resource("Lucent.Accent");
     font-size: 12px;
     font-weight: 600;
 }
@@ -28,24 +28,24 @@ TextBlock.title {
 }
 
 TextBlock.subtitle {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
     opacity: 0.9;
 }
 
 TextBox.search {
-    background: resource(Lucent.Surface);
-    foreground: resource(Lucent.Text);
+    background: resource("Lucent.Surface");
+    foreground: resource("Lucent.Text");
     padding: 12px 8px;
     font-size: 16px;
     transition: background 120ms ease-out;
 }
 
 TextBox.search:focus {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
 }
 
 TextBlock.status {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
     transition: opacity 120ms ease-out;
 }
 
@@ -55,14 +55,14 @@ StackPanel.results {
 }
 
 Border.package-row {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
     padding: 16px;
     border-radius: 8px;
     transition: background 120ms ease-out, opacity 120ms ease-out;
 }
 
 Border.package-row:pointerover {
-    background: resource(Lucent.SurfaceRaised);
+    background: resource("Lucent.SurfaceRaised");
 }
 
 StackPanel.package-copy {
@@ -75,17 +75,17 @@ TextBlock.package-name {
 }
 
 TextBlock.package-version {
-    foreground: resource(Lucent.Accent);
+    foreground: resource("Lucent.Accent");
     font-size: 12px;
 }
 
 TextBlock.package-description {
-    foreground: resource(Lucent.TextMuted);
+    foreground: resource("Lucent.TextMuted");
 }
 
 Border.error-state {
-    background: resource(Lucent.SurfaceRaised);
-    border-color: resource(Lucent.Danger);
+    background: resource("Lucent.SurfaceRaised");
+    border-color: resource("Lucent.Danger");
     border-width: 1px;
     padding: 16px;
 }

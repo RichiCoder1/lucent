@@ -1,14 +1,14 @@
 Border.workspace-sidebar {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
     padding: 12px;
 }
 
 TextBlock {
-    foreground: resource(Lucent.Text);
+    foreground: resource("Lucent.Text");
 }
 
 TextBlock.pane-title {
-    foreground: resource(Lucent.Text);
+    foreground: resource("Lucent.Text");
     font-size: 14px;
     font-weight: 600;
 }
@@ -18,8 +18,8 @@ Button.pane-action {
 }
 
 ListBox.workspace-tree {
-    background: resource(Lucent.Surface);
-    foreground: resource(Lucent.Text);
-    border-color: resource(Lucent.Border);
+    background: resource("Lucent.Surface");
+    foreground: resource("Lucent.Text");
+    border-color: resource("Lucent.Border");
     border-width: 1px;
 }

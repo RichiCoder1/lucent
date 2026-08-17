@@ -1,14 +1,14 @@
 Border.problems-pane {
-    background: resource(Lucent.Surface);
+    background: resource("Lucent.Surface");
     padding: 8px;
 }
 
 ListBox.problems-list {
-    background: resource(Lucent.SurfaceRaised);
-    border-color: resource(Lucent.Border);
+    background: resource("Lucent.SurfaceRaised");
+    border-color: resource("Lucent.Border");
     border-width: 1px;
 }
 
 TextBlock.loading-state {
-    foreground: resource(Lucent.Warning);
+    foreground: resource("Lucent.Warning");
 }

@@ -30,10 +30,12 @@ line height, letter spacing, dimensions, alignment, visibility, clipping,
 cursor, and native transitions. Values are emitted as typed Avalonia setters;
 unsupported units, values, and transitions produce a Lucent diagnostic.
 
-`resource(Key)` lowers to Avalonia's public
+`resource("Key")` lowers to Avalonia's public
 `DynamicResourceExtension`, so a coded setter follows changes in the owning
 application resource dictionary without polling or reparsing. `var(--token)`
-is still only a compile-time alias. Example:
+is still only a compile-time alias. Unquoted keys remain accepted for backward
+compatibility, but quoted keys are preferred because ordinary CSS tooling parses
+dotted resource names correctly. Example:
 
 Adjacent `.lui` and `.css` files are compiled together. The compiler emits
 native Avalonia `Style`, `Setter`, and typed `Transition` objects; it does not
@@ -41,7 +43,7 @@ ship CSS strings or a runtime CSS parser.
 
 ```css
 :root {
-    --surface: #ffffff;
+    --surface: resource("Lucent.Surface");
     --surface-hover: #f5f5f5;
     --accent: #7357e6;
     --space-3: 12px;

@@ -96,6 +96,23 @@ internal static class CssPropertyCatalog
     public static bool TryGet(string name, out CssPropertyDefinition definition) =>
         Definitions.TryGetValue(name, out definition!);
 
+    public static bool TryGetResourceKey(string value, out string key)
+    {
+        key = string.Empty;
+        if (!value.StartsWith("resource(", StringComparison.Ordinal) || !value.EndsWith(')'))
+            return false;
+
+        var candidate = value[9..^1].Trim();
+        if (candidate.Length >= 2 && candidate[0] is '\'' or '"')
+        {
+            if (candidate[^1] != candidate[0]) return false;
+            candidate = candidate[1..^1];
+        }
+
+        key = candidate;
+        return key.Length > 0;
+    }
+
     public static IReadOnlyList<string> InferProjectedTargetTypes(
         IReadOnlyList<BoundStyleDeclaration> declarations)
     {
@@ -149,8 +166,8 @@ internal static class CssPropertyCatalog
         {
             if (!definition.SupportsResource)
                 error = $"CSS property '{definition.CssName}' does not accept dynamic resources.";
-            else if (value[9..^1].Trim().Length == 0)
-                error = "CSS resource keys cannot be empty.";
+            else if (!TryGetResourceKey(value, out _))
+                error = "CSS resource keys must be non-empty and use matching quotes.";
             return error is null;
         }
 

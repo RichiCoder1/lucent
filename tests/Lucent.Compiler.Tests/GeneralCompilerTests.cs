@@ -1029,7 +1029,7 @@ public sealed class GeneralCompilerTests
             "Main.lui",
             projectContext: null,
             """
-            :root { --canvas: resource(Lucent.Canvas); }
+            :root { --canvas: resource("Lucent.Canvas"); }
             #Shell > #SearchBox.toolbar.primary:focus-visible {
                 background: var(--canvas);
                 border-color: #007a7b;
@@ -1048,6 +1048,22 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(result.GeneratedSource!, ".Name(\"SearchBox\")");
         StringAssert.Contains(result.GeneratedSource!, "DynamicResourceExtension(\"Lucent.Canvas\")");
         StringAssert.Contains(result.GeneratedSource!, "CornerRadiusTransition");
+    }
+
+    [TestMethod]
+    public void Css_resource_accepts_quoted_keys_without_preserving_the_quotes()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() => Border { Class: \"surface\"; };",
+            "Main.lui",
+            projectContext: null,
+            ".surface { background: resource(\"Lucent.Canvas\"); }",
+            "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "DynamicResourceExtension(\"Lucent.Canvas\")");
+        Assert.IsFalse(result.GeneratedSource!.Contains("\\\"Lucent.Canvas\\\"",
+            StringComparison.Ordinal));
     }
 
     [TestMethod]
