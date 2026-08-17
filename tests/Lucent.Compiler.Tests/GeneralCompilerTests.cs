@@ -506,6 +506,20 @@ public sealed class GeneralCompilerTests
     }
 
     [TestMethod]
+    public void String_literals_use_the_target_property_types_string_constructor()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using Avalonia.Controls; component App() => Grid { RowDefinitions: \"auto auto 1,* auto\"; ColumnDefinitions: \"auto *\"; };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!,
+            ".RowDefinitions = new global::Avalonia.Controls.RowDefinitions(\"auto auto 1,* auto\")");
+        StringAssert.Contains(result.GeneratedSource!,
+            ".ColumnDefinitions = new global::Avalonia.Controls.ColumnDefinitions(\"auto *\")");
+    }
+
+    [TestMethod]
     public void General_state_and_keyed_foreach_emit_a_retained_native_region()
     {
         var result = LucentCompiler.Compile(

@@ -9,12 +9,7 @@ using Avalonia.Automation;
 component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand copyCommand) => Border {
     Class: "problems-pane";
     Grid {
-        RowDefinitions: [
-            new RowDefinition(GridLength.Auto),
-            new RowDefinition(GridLength.Auto),
-            new RowDefinition(new GridLength(1, GridUnitType.Star)),
-            new RowDefinition(GridLength.Auto)
-        ];
+        RowDefinitions: "Auto Auto * Auto";
         TextBlock { Class: "pane-title"; Grid.Row: 0; Text: $"{items.Count} problems"; AutomationProperties.Name: "Problems"; }
         ContentControl {
             Grid.Row: 1;

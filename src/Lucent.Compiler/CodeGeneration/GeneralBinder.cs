@@ -1085,10 +1085,17 @@ internal sealed class GeneralBinder
             return;
         }
 
+        var expressionText = property.Value.Text;
+        if (property.Value is StringValueSyntax &&
+            resolver.RequiresStringConstructor(resolvedProperty.Symbol.Type))
+        {
+            expressionText = $"new {resolvedProperty.TypeName}({expressionText})";
+        }
+
         members.Add(
             new BoundPropertyMember(
                 resolvedProperty.Name,
-                Request(property.Value.Text, property.Value.Span,
+                Request(expressionText, property.Value.Span,
                     CSharpIslandKind.Expression, CSharpIslandRole.Property,
                     resolvedProperty.NativeValueKind == BoundNativeValueKind.None
                         ? resolvedProperty.Symbol.Type

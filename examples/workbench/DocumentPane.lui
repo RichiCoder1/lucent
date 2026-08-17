@@ -16,20 +16,11 @@ component DocumentPane(string title, DocumentSession session, ICommand focusComm
         Class: "editor-pane";
         Grid {
             Class: "editor-content";
-            RowDefinitions: [
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(new GridLength(1, GridUnitType.Star)),
-                new RowDefinition(GridLength.Auto)
-            ];
+            RowDefinitions: "Auto Auto Auto * Auto";
             Grid {
                 Class: "document-header";
                 Grid.Row: 0;
-                ColumnDefinitions: [
-                    new ColumnDefinition(new GridLength(1, GridUnitType.Star)),
-                    new ColumnDefinition(GridLength.Auto)
-                ];
+                ColumnDefinitions: "* Auto";
                 StackPanel {
                     TextBlock { Class: "document-title"; Text: title; AutomationProperties.Name: "Document title"; }
                     TextBlock { Class: "document-language"; Text: language; }

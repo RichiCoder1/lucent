@@ -314,13 +314,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         AutomationProperties.AutomationId: "Workbench.Window";
         Grid {
             Class: "shell";
-            RowDefinitions: [
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(new GridLength(1, GridUnitType.Star)),
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Auto),
-                new RowDefinition(GridLength.Auto)
-            ];
+            RowDefinitions: "Auto * Auto Auto Auto";
             Menu {
                 Class: "topbar";
                 Grid.Row: 0;

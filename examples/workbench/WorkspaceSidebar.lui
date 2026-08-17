@@ -12,11 +12,7 @@ component WorkspaceSidebar(string workspace, WorkspaceSelectionController select
     AutomationProperties.Name: "Workspace sidebar";
     AutomationProperties.AutomationId: "Workspace.Sidebar";
     Grid {
-        RowDefinitions: [
-            new RowDefinition(GridLength.Auto),
-            new RowDefinition(GridLength.Auto),
-            new RowDefinition(new GridLength(1, GridUnitType.Star))
-        ];
+        RowDefinitions: "Auto Auto *";
         TextBlock { Class: "pane-title"; Grid.Row: 0; Text: $"Workspace: {workspace}"; }
         Button { Class: "pane-action"; Grid.Row: 1; Content: "Focus sidebar"; Command: focusCommand; }
         AccessibleWorkspaceListBox {

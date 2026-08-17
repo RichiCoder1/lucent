@@ -111,6 +111,13 @@ internal sealed class NativeSymbolResolver
             GetNativeValueKind(property.Type));
     }
 
+    public bool RequiresStringConstructor(ITypeSymbol targetType) =>
+        !_compilation.ClassifyConversion(_stringType!, targetType).IsImplicit &&
+        targetType is INamedTypeSymbol { IsAbstract: false } named &&
+        named.InstanceConstructors.Count(constructor =>
+            IsAccessible(constructor) &&
+            constructor.Parameters is [{ Type.SpecialType: SpecialType.System_String }]) == 1;
+
     public ResolvedNativeEvent? ResolveEvent(
         ResolvedNativeControl control,
         string sourceName)

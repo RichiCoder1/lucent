@@ -123,8 +123,8 @@ available when floating text would be less clear. Explicit content and nested
 implicit content cannot be combined.
 
 The language rule is that literal conveniences are selected from the resolved
-target property type, not from a control or property-name table. The current
-proof of concept implements that rule for `Thickness` and `CornerRadius`:
+target property type, not from a control or property-name table. Numeric and
+tuple literals support `Thickness` and `CornerRadius`:
 
 ```csharp
 Border {
@@ -135,13 +135,20 @@ Border {
 Border {
     Padding: (16, 8);
 }
+
+Grid {
+    RowDefinitions: "Auto Auto * Auto";
+}
 ```
 
 Those recognized values lower to typed `Thickness` and `CornerRadius`
 construction, while the same numeric literal remains numeric for a property
-such as `Width`. Explicit C# construction always remains available. General
-target-type conversion beyond those two framework primitives, including string
-parsing for enums, brushes, colors, and `GridLength`, remains deferred.
+such as `Width`. A string literal or interpolation lowers through exactly one
+accessible `TargetType(string)` constructor when normal C# string conversion is
+not available; `RowDefinitions` above therefore uses Avalonia's native parser.
+Explicit C# construction always remains available. Other target-type conversion,
+including implicit string parsing for enums, brushes, colors, and `GridLength`,
+remains deferred.
 
 Native events are always visibly C# lambdas. A zero-argument lambda ignores the
 delegate arguments; a two-argument lambda receives them:
