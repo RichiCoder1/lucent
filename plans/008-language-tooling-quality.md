@@ -1,4 +1,4 @@
-# Plan 007: Make language tooling release-ready
+# Plan 008: Make language tooling release-ready
 
 > **Executor instructions**: Keep Lucent's LSP host thin and independent. Reuse
 > the shared compiler frontend and public Roslyn APIs; do not create a second C#
@@ -11,7 +11,7 @@
 - **Priority**: P1
 - **Effort**: M
 - **Risk**: MEDIUM
-- **Depends on**: plans 003, 004a
+- **Depends on**: plans 003, 004a, 006a, 007
 - **Category**: tooling / performance / DX
 - **Planned at**: commit `3b27cfe`, 2026-08-16
 
@@ -47,8 +47,9 @@ Roslyn compilations.
   metadata references and syntax trees, and evict superseded generations.
 - Make completion, formatting, Lucent↔generated-C# source mapping, and supported
   embedded-C# semantics explicit quality gates.
-- Add document symbols, component references/rename, CSS class/token completion
-  and navigation through the shared frontend.
+- Add document symbols, component references/rename, and CSS property/class/token
+  completion and navigation by consuming Plan 007's typed CSS catalog through the
+  shared frontend.
 - Add a repeatable protocol benchmark for completion latency, edit latency, cache
   behavior, allocations, and retained managed memory.
 
@@ -148,6 +149,8 @@ edits and renames a `.lui`, runs generation, and proves the next design-time
 Implement context-correct completion, deterministic formatting, bidirectional
 Lucent↔generated-C# source mapping, document symbols, component
 references/rename, and CSS completion/navigation through the shared frontend.
+Reuse Plan 007's property/value/selector catalog and diagnostics; do not create a
+language-server-only CSS schema.
 For supported embedded C#, completion, hover, definition, and diagnostics must
 resolve against the same evaluated-project snapshot defined above. Keep ordinary
 and generated `.cs` documents owned by installed C# tooling; exchange
@@ -186,7 +189,7 @@ how to reproduce the result.
 - [ ] The 500-cycle benchmark meets allocation, peak/retained-memory, and
       generation budgets.
 - [ ] Completion, formatting, source mapping, and supported embedded-C# semantics
-      meet the Plan 007 quality checks.
+      meet the Plan 008 quality checks.
 - [ ] Every advertised LSP capability has a protocol test.
 - [ ] Benchmark inputs, method, environment, and results are reproducible.
 

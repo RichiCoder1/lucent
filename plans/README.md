@@ -23,8 +23,9 @@ recent workspaces. It is not a full IDE.
 | [004a](004a-typed-native-roots.md) | Expose typed native roots and lifecycle diagnostics | P1 | S | 003, 004 | DONE |
 | [005](005-virtualized-collections.md) | Add scalable native collections and AvaloniaEdit | P1 | M | 003, 004 | DONE |
 | [006](006-lifecycle-reliability.md) | Close lifecycle, failure, accessibility, and UI-test gaps | P1 | L | 001–005 | DONE |
+| [006a](006a-loading-boundaries.md) | Add explicit loading clauses to async boundaries | P1 | S | 006 | TODO |
 | [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
-| [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 007 | TODO |
+| [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007 | TODO |
 | [009](009-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–008 | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED` with a
@@ -33,7 +34,8 @@ one-line reason.
 Review records: [001–002](REVIEW-001-002.md),
 [003](REVIEW-003.md), [001–003 cross-check](REVIEW-001-003-CROSSCHECK.md),
 [004](REVIEW-004.md), [005](REVIEW-005.md), [006](REVIEW-006.md), and
-[001–006 Sol/high cross-check](REVIEW-001-006-CROSSCHECK.md).
+[001–006 Sol/high cross-check](REVIEW-001-006-CROSSCHECK.md). Plan review:
+[006a](REVIEW-006A.md), [007](REVIEW-007.md).
 
 ## Dependency notes
 
@@ -49,10 +51,14 @@ Review records: [001–002](REVIEW-001-002.md),
   controls. They solve different problems and should have different interfaces.
 - 006 is the quality gate before distribution: cancellation, error routing,
   automation metadata, and headless UI tests must be observable contracts.
-- 007 makes the shared compiler/LSP seam correct, bounded, and fast before its
+- 006a adds first-load fallback syntax without changing 006's async ownership,
+  stale-refresh, error-routing, or runtime contracts.
+- 007 turns the examples into one credible visual family and closes the common
+  Avalonia styling gaps they expose without adding a component/theme framework.
+- 008 makes the shared compiler/LSP seam correct, bounded, and fast before its
   artifacts are packaged. It must not depend on another language server's
   in-memory workspace.
-- 008 packages only the system proven by Workbench. It must not stabilize APIs
+- 009 packages only the system proven by Workbench. It must not stabilize APIs
   that Workbench has not exercised.
 
 ## Release gates
@@ -66,9 +72,11 @@ npm test
 Pop-Location
 ```
 
-Plans 004–006 and 008 must also add a user-flow gate to Lucent Workbench. Plan
-006 replaces manual-only smoke coverage with Avalonia headless interaction
-tests; Plan 007 instead owns protocol and performance gates for language tooling.
+Plans 004–007, including 006a, and 009 must also add a user-flow gate to Lucent
+Workbench. Plan 006 replaces manual-only smoke coverage with Avalonia headless
+interaction tests; Plan 006a extends that flow with first-load/stale-refresh
+boundary evidence; Plan 007 adds bounded visual evidence without pixel-golden
+tests; Plan 008 owns protocol and performance gates for language tooling.
 
 ## Explicit non-goals
 

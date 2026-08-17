@@ -1,4 +1,4 @@
-# Plan 008: Package Lucent and finish the Workbench release gate
+# Plan 009: Package Lucent and finish the Workbench release gate
 
 > **Executor instructions**: Package only interfaces exercised by Workbench and
 > proven by tests. Do not declare a stable public API merely because it compiles.
@@ -10,7 +10,7 @@
 - **Priority**: P1
 - **Effort**: L
 - **Risk**: MEDIUM
-- **Depends on**: plans 001–007
+- **Depends on**: plans 001–008
 - **Category**: direction / DX / distribution
 - **Planned at**: commit `3b27cfe`, 2026-08-16
 
@@ -19,7 +19,7 @@
 The current build imports repository-relative task binaries and the extension is
 packaged manually. A real dogfood release needs a clean project install,
 cross-platform verification, and one application that can be built from a fresh
-checkout using the language tooling proven by Plan 007.
+checkout using the language tooling proven by Plan 008.
 
 ## Current state
 
@@ -40,7 +40,8 @@ checkout using the language tooling proven by Plan 007.
 - Build/package the VSIX reproducibly.
 - Add Windows, Linux, and macOS CI where supported, plus package-consumer tests.
 - Finish Workbench's real project loading, compiler diagnostics, source editing,
-  generated-C# preview, settings, themes, and release documentation.
+  generated-C# preview, settings, themes, and release documentation while
+  preserving Plan 007's visual, adaptive, and accessibility quality gates.
 - Publish the existing Markdown through Blume, including its generated
   `llms.txt`, `llms-full.txt`, and raw Markdown routes.
 
@@ -51,7 +52,7 @@ checkout using the language tooling proven by Plan 007.
 - Native AOT as a promise; it may be an informational experiment after normal
   self-contained publishing passes.
 - New language-server capabilities or performance work beyond fixing a release
-  regression against Plan 007's accepted contracts.
+  regression against Plan 008's accepted contracts.
 
 ## Steps
 
@@ -73,7 +74,7 @@ layout. Pin package versions centrally and include license/credits metadata.
 ### 3. Add template, VSIX, and CI
 
 Create a minimal app template and reproducible VSIX/package commands. Add CI for
-restore, build, .NET tests, VS Code tests, package-consumer tests, Plan 007's
+restore, build, .NET tests, VS Code tests, package-consumer tests, Plan 008's
 deterministic LSP gates, and headless Workbench flows. Cache dependencies but do
 not cache generated correctness artifacts as test results.
 
@@ -93,15 +94,19 @@ save coordinator, intercepted shutdown, accessibility peers, and Plan 005's
 single headless harness—do not introduce parallel loader/resource/settings/
 lifecycle/test models.
 
+Preserve Plan 007's application shell, visual states, theme resources, minimum
+sizes, and reference-review contract while replacing placeholder data. Real data
+must not reintroduce clipping, unbounded panels, or color-only status.
+
 **Verify**: the walkthrough is automated headlessly where possible and manually
 recorded only for native dialogs/platform behavior. The release record lists
-which Plan 007 capabilities are exercised through VS Code and which Workbench
+which Plan 008 capabilities are exercised through VS Code and which Workbench
 flows consume diagnostics, navigation, and generated-source mapping.
 
 ### 5. Publish preview documentation, not compatibility promises
 
 Document install, template use, supported syntax, interop boundaries, debugging,
-known limits, package versioning, Plan 007's tooling-performance evidence, and
+known limits, package versioning, Plan 008's tooling-performance evidence, and
 the Workbench evidence. Mark the release experimental and list unsupported
 behavior explicitly.
 
@@ -109,8 +114,13 @@ Use the repository's Blume site as the publication surface so the same source
 serves people and AI clients. Keep MCP deferred until server deployment is
 needed; the static AI endpoints cover the preview release.
 
+Apply `PRODUCT.md`, `DESIGN.md`, `design/tokens.css`, and the committed Lucent mark
+to Blume's reading-mode surface: paper-first content, graphite navigation/code,
+teal links/current location, and coral only for caveats or experimental change.
+Do not let the documentation imply maturity or capabilities beyond the preview.
+
 **Verify**: every README command runs from a clean temporary directory.
-On the recorded Plan 007 reference machine, rerun its benchmark against the
+On the recorded Plan 008 reference machine, rerun its benchmark against the
 staged VSIX/server and package-consumer fixture using the exact accepted workload
 manifest; the packaged result must meet the latency, allocation, memory, and
 generation budgets.
@@ -119,8 +129,8 @@ generation budgets.
 
 - [ ] A clean consumer uses NuGet packages, not repository-relative binaries.
 - [ ] Template, packages, VSIX, and Workbench build in CI.
-- [ ] Plan 007's deterministic LSP gates remain green in packaged form.
-- [ ] The staged VSIX/server passes Plan 007's benchmark on its recorded
+- [ ] Plan 008's deterministic LSP gates remain green in packaged form.
+- [ ] The staged VSIX/server passes Plan 008's benchmark on its recorded
       reference machine.
 - [ ] Workbench completes the documented keyboard-first workflow.
 - [ ] Preview docs distinguish proven behavior from deferred design.
@@ -129,7 +139,7 @@ generation budgets.
 
 - Packaging requires consumers to reference this repository checkout.
 - CI is green only because Workbench or headless interaction tests are skipped.
-- Packaging regresses Plan 007's accepted LSP correctness or performance
+- Packaging regresses Plan 008's accepted LSP correctness or performance
   contracts.
 - Publication or marketplace credentials are required; stop for user approval.
 

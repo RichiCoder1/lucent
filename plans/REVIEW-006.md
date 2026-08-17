@@ -29,7 +29,7 @@ read-only tools, no extensions, and no repository write authority.
   peers for the flattened workspace ListBox and AvaloniaEdit; native peers remain
   elsewhere.
 - **Workbench lacked an async test source:** accepted. IProblemLoader supplies a
-  bounded computed flow and physical Refresh/Retry route; Plan 008 swaps only its
+  bounded computed flow and physical Refresh/Retry route; Plan 009 swaps only its
   placeholder implementation.
 - **Shutdown ownership was incomplete:** accepted. App owns the serialized save
   tail and DocumentSession, detaches the editor, disposes the root immediately

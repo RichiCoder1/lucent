@@ -164,7 +164,7 @@ dependency for every current targets consumer, not only the POC:
   as the compile reference.
 - Add a temporary consumer integration test that imports the repo props/targets,
   contains one `.lui`, and runs `dotnet build` without manually referencing the
-  runtime. Plan 008 will replace local hint paths with NuGet package assets.
+  runtime. Plan 009 will replace local hint paths with NuGet package assets.
 
 ## Commands
 
