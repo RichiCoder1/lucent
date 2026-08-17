@@ -8,5 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Lucent.Compiler\Lucent.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Lucent.Compiler.Cli\Lucent.Compiler.Cli.csproj" />
+    <ProjectReference Include="..\..\src\Lucent.Runtime\Lucent.Runtime.csproj" />
   </ItemGroup>
 </Project>

@@ -193,6 +193,8 @@ public sealed record UiAsyncBoundarySyntax(
     string SourceIdentifier,
     SourceSpan SourceIdentifierSpan,
     UiConditionalBranchSyntax Content,
+    UiConditionalBranchSyntax? Loading,
+    SourceSpan? LoadingSpan,
     UiConditionalBranchSyntax Fallback,
     string CatchType,
     SourceSpan CatchTypeSpan,

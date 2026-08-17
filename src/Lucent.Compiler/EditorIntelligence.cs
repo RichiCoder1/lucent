@@ -753,9 +753,9 @@ internal static class EditorIntelligence
                     UiIfSyntax conditional => conditional.FalseRoot is null
                         ? [conditional.TrueRoot]
                         : new[] { conditional.TrueRoot, conditional.FalseRoot },
-                    UiAsyncBoundarySyntax boundary => boundary.Fallback.Roots.Count == 0
-                        ? boundary.Content.Roots
-                        : boundary.Content.Roots.Concat(boundary.Fallback.Roots),
+                    UiAsyncBoundarySyntax boundary => boundary.Content.Roots
+                        .Concat(boundary.Loading?.Roots ?? [])
+                        .Concat(boundary.Fallback.Roots),
                     UiTemplateSyntax template => template.Body.Roots,
                     _ => Array.Empty<UiElementSyntax>(),
                 };

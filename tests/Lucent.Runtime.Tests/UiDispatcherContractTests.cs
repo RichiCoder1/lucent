@@ -55,6 +55,11 @@ internal sealed class TestUiDispatcher : IUiDispatcher
 {
     private readonly Queue<Action> _actions = new();
 
+    public bool HasPending
+    {
+        get { lock (_actions) return _actions.Count > 0; }
+    }
+
     public void Dispatch(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);

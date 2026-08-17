@@ -846,10 +846,28 @@ internal sealed partial class Parser
         var source = Expect(TokenKind.Identifier, "a computed source identifier");
         Expect(TokenKind.CloseParen, "')' after the computed source");
         var content = ParseConditionalBranch();
+        UiConditionalBranchSyntax? loading = null;
+        SourceSpan? loadingSpan = null;
+        while (IsIdentifier("loading"))
+        {
+            var loadingStart = NextToken().Span.Start;
+            var branch = ParseConditionalBranch();
+            if (loading is null)
+            {
+                loading = branch;
+                loadingSpan = SpanFrom(loadingStart, branch.Span.End);
+            }
+            else
+            {
+                AddSyntax(new SourceSpan(loadingStart, "loading".Length),
+                    "An async boundary may contain only one loading clause.");
+            }
+        }
         if (!IsIdentifier("catch"))
         {
             AddSyntax(Current.Span, "An async boundary requires catch (Exception name).");
             return new UiAsyncBoundarySyntax(source.Text, source.Span, content,
+                loading, loadingSpan,
                 new UiConditionalBranchSyntax([], content.Span), "System.Exception", content.Span,
                 "error", content.Span, SpanFrom(start, content.Span.End));
         }
@@ -871,7 +889,15 @@ internal sealed partial class Parser
         var name = Expect(TokenKind.Identifier, "a catch variable name");
         Expect(TokenKind.CloseParen, "')' after catch variable");
         var fallback = ParseConditionalBranch();
-        return new UiAsyncBoundarySyntax(source.Text, source.Span, content, fallback,
+        while (IsIdentifier("loading"))
+        {
+            var trailingStart = NextToken().Span.Start;
+            ParseConditionalBranch();
+            AddSyntax(new SourceSpan(trailingStart, "loading".Length),
+                "The loading clause must appear before catch and may not be repeated.");
+        }
+        return new UiAsyncBoundarySyntax(source.Text, source.Span, content,
+            loading, loadingSpan, fallback,
             type, typeSpan, name.Text, name.Span, SpanFrom(start, fallback.Span.End));
     }
 

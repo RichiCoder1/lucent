@@ -178,7 +178,11 @@ internal static class StyleSheetValidator
             IEnumerable<BoundRenderableModel> children = member switch
             {
                 BoundChildMember child => [child.Child],
-                BoundConditionalMember conditional => conditional.TrueRoots.Concat(conditional.FalseRoots ?? []),
+                BoundConditionalMember conditional => conditional is BoundAsyncBoundary asyncBoundary
+                    ? asyncBoundary.ContentRoots
+                        .Concat(asyncBoundary.LoadingRoots ?? [])
+                        .Concat(asyncBoundary.FallbackRoots)
+                    : conditional.TrueRoots.Concat(conditional.FalseRoots ?? []),
                 BoundForEachMember loop when loop.Body is not null => [loop.Body],
                 _ => [],
             };

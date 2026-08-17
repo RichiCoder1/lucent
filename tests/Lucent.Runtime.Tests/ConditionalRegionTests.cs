@@ -314,4 +314,136 @@ public sealed class ConditionalRegionTests
         Assert.AreEqual(1, disposed);
         Assert.IsNull(region.ActiveBranch);
     }
+
+    [TestMethod]
+    public async Task Async_boundary_branch_lifecycle_keeps_stale_content_and_cleans_each_branch()
+    {
+        var dispatcher = new TestUiDispatcher();
+        using var owner = new ComponentOwner(dispatcher);
+        var first = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disposed = new[] { 0, 0, 0 };
+        var calls = 0;
+        ConditionalRegion? region = null;
+        OwnedComputed<int>? computed = null;
+        region = new ConditionalRegion(owner, _ => { });
+        computed = new OwnedComputed<int>(owner, 0,
+            _ => ++calls == 1
+                ? first.Task
+                : second.Task,
+            () =>
+            {
+                var branch = computed!.Error is not null ? 2 :
+                    computed.HasCommittedValue ? 1 : 0;
+                region.Show(branch, branchOwner =>
+                {
+                    branchOwner.OnDispose(() => disposed[branch]++);
+                    return Fragment.From(branch switch
+                    {
+                        0 => new ProgressBar(),
+                        1 => new TextBlock { Text = computed.Value.ToString() },
+                        _ => new Border(),
+                    });
+                });
+            },
+            static _ => { });
+
+        computed.Refresh();
+        Assert.AreEqual(0, region.ActiveBranch);
+        first.SetResult(1);
+        await DrainUntilSettledAsync(computed, dispatcher);
+        Assert.AreEqual(1, region.ActiveBranch);
+        Assert.AreEqual(1, disposed[0]);
+
+        computed.Refresh();
+        Assert.AreEqual(1, region.ActiveBranch, "Committed refreshes keep stale content mounted.");
+        second.SetException(new InvalidOperationException("load failed"));
+        await DrainUntilSettledAsync(computed, dispatcher);
+        Assert.AreEqual(2, region.ActiveBranch);
+        Assert.AreEqual(1, disposed[1]);
+
+        owner.Dispose();
+        Assert.AreEqual(1, disposed[2]);
+    }
+
+    [TestMethod]
+    public void Async_boundary_branch_ids_share_transactional_rollback_and_exact_cleanup()
+    {
+        for (var branch = 0; branch < 3; branch++)
+        {
+            using var owner = new ComponentOwner(new TestUiDispatcher());
+            var disposed = new[] { 0, 0, 0 };
+            var region = new ConditionalRegion(owner, _ => { });
+            region.Show(branch, branchOwner =>
+            {
+                branchOwner.OnDispose(() => disposed[branch]++);
+                return Fragment.From(new Border());
+            });
+
+            var replacement = (branch + 1) % 3;
+            Assert.ThrowsExactly<InvalidOperationException>(() => region.Show(replacement, _ =>
+                throw new InvalidOperationException("mount failed")));
+            Assert.AreEqual(branch, region.ActiveBranch);
+            Assert.AreEqual(0, disposed[branch]);
+
+            region.Show(replacement, branchOwner =>
+            {
+                branchOwner.OnDispose(() => disposed[replacement]++);
+                return Fragment.From(new Border());
+            });
+            Assert.AreEqual(1, disposed[branch]);
+
+            owner.Dispose();
+            Assert.AreEqual(1, disposed[replacement]);
+        }
+    }
+
+    [TestMethod]
+    public async Task Computed_invalidation_boundary_mount_failure_reports_once()
+    {
+        var dispatcher = new TestUiDispatcher();
+        var errors = new List<Exception>();
+        using var owner = new ComponentOwner(dispatcher, error =>
+        {
+            errors.Add(error);
+            throw error;
+        });
+        var pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ConditionalRegion? region = null;
+        OwnedComputed<int>? computed = null;
+        region = new ConditionalRegion(owner, _ => { });
+        computed = new OwnedComputed<int>(owner, 0, _ => pending.Task, () =>
+        {
+            var branch = computed!.Error is not null ? 2 : computed.HasCommittedValue ? 1 : 0;
+            region.Show(branch, _ => branch == 2
+                ? throw new InvalidOperationException("catch mount")
+                : Fragment.From(new ProgressBar()));
+        }, static _ => { });
+
+        computed.Refresh();
+        pending.SetException(new InvalidOperationException("load failed"));
+        await WaitForDispatchAsync(dispatcher);
+
+        var failure = Assert.ThrowsExactly<InvalidOperationException>(dispatcher.DrainAll);
+        Assert.AreEqual("catch mount", failure.Message);
+        Assert.AreEqual(1, errors.Count);
+        Assert.AreEqual("catch mount", errors[0].Message);
+    }
+
+    private static async Task DrainUntilSettledAsync<T>(OwnedComputed<T> computed, TestUiDispatcher dispatcher)
+    {
+        for (var attempt = 0; attempt < 100 && computed.IsPending; attempt++)
+        {
+            await Task.Delay(1);
+            dispatcher.DrainAll();
+        }
+        Assert.IsFalse(computed.IsPending, "The computed did not settle within the bounded drain.");
+    }
+
+    private static async Task WaitForDispatchAsync(TestUiDispatcher dispatcher)
+    {
+        for (var attempt = 0; attempt < 100 && !dispatcher.HasPending; attempt++)
+            await Task.Delay(1);
+        Assert.IsTrue(dispatcher.HasPending, "The computed did not dispatch within the bounded wait.");
+    }
 }

@@ -139,30 +139,70 @@ public sealed class UserFlowTests
         var loader = new ControllableProblemLoader();
         await WithWorkbenchAsync(new TestHost(), async (root, _) =>
         {
-            root.KeyPress(Key.O, RawInputModifiers.Control, PhysicalKey.O, "o");
-            await DrainAsync(() => loader.Calls == 1);
-            Assert.IsTrue(FindText(root, "Loading problems"));
+            await DrainAsync(() => loader.Calls == 1 && HasClass(root, "problems-loading"));
+            Assert.IsFalse(HasClass(root, "problems-pane"),
+                "The authored loading branch must replace ProblemsPane before the first commit.");
 
+            root.KeyPress(Key.O, RawInputModifiers.Control, PhysicalKey.O, "o");
+            await DrainAsync(() => loader.Calls == 2 && HasClass(root, "problems-loading"));
+            Assert.IsTrue(FindText(root, "Loading problems…"));
+            Assert.IsTrue(HasClass(root, "problems-loading"));
+            Assert.AreEqual(1, loader.CancellationCount,
+                "Opening the workspace must cancel the superseded first load.");
+
+            loader.Fail(new InvalidOperationException("initial problem load failed"));
+            await DrainAsync(() => FindText(root, "initial problem load failed"));
+            Assert.IsTrue(HasClass(root, "problem-error"));
+            Assert.IsFalse(HasClass(root, "problems-loading"));
+
+            var precommitRetry = root.GetVisualDescendants().OfType<Button>().Single(button =>
+                button.Content?.ToString() == "Retry problems");
+            precommitRetry.Focus();
+            Dispatcher.UIThread.RunJobs();
+            root.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
+            await DrainAsync(() => loader.Calls == 3 && HasClass(root, "problems-loading"));
             loader.Complete([
                 new ProblemItem("one", "WorkbenchApp.lui", 1, "first", ProblemSeverity.Warning),
                 new ProblemItem("two", "DocumentPane.lui", 2, "second", ProblemSeverity.Info),
                 new ProblemItem("three", "WorkspaceSidebar.lui", 3, "third", ProblemSeverity.Error),
             ]);
             await DrainAsync(() => FindText(root, "3 problems"));
+            Assert.IsTrue(HasClass(root, "problems-pane"));
 
             root.KeyPress(Key.R, RawInputModifiers.Control | RawInputModifiers.Shift,
                 PhysicalKey.R, "r");
-            await DrainAsync(() => loader.Calls == 2);
+            await DrainAsync(() => loader.Calls == 4);
             Assert.IsTrue(FindText(root, "3 problems"));
+            Assert.IsTrue(HasClass(root, "problems-pane"));
+            Assert.IsFalse(HasClass(root, "problems-loading"),
+                "A committed refresh keeps stale content mounted.");
             loader.Fail(new InvalidOperationException("problem load failed"));
             await DrainAsync(() => FindText(root, "problem load failed"));
+            Assert.IsTrue(HasClass(root, "problem-error"));
+            Assert.IsFalse(HasClass(root, "problems-pane"));
 
             var retry = root.GetVisualDescendants().OfType<Button>().Single(button =>
                 button.Content?.ToString() == "Retry problems");
             retry.Focus();
             Dispatcher.UIThread.RunJobs();
             root.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
-            await DrainAsync(() => loader.Calls == 3);
+            await DrainAsync(() => loader.Calls == 5 && HasClass(root, "problems-pane"));
+            Assert.IsTrue(FindText(root, "3 problems"));
+            loader.ThrowSynchronously = true;
+            root.KeyPress(Key.R, RawInputModifiers.Control | RawInputModifiers.Shift,
+                PhysicalKey.R, "r");
+            await DrainAsync(() => FindText(root, "synchronous problem load failure"));
+            loader.ThrowSynchronously = false;
+            Assert.IsTrue(HasClass(root, "problem-error"));
+
+            retry = root.GetVisualDescendants().OfType<Button>().Single(button =>
+                button.Content?.ToString() == "Retry problems");
+            retry.Focus();
+            Dispatcher.UIThread.RunJobs();
+            root.KeyPress(Key.Space, RawInputModifiers.None, PhysicalKey.Space, " ");
+            await DrainAsync(() => loader.Calls == 7 && HasClass(root, "problems-pane"));
+            Assert.AreEqual(2, loader.CancellationCount,
+                "Replacing a pending retry must cancel exactly the superseded request.");
             loader.Complete([
                 new ProblemItem("recovered", "WorkbenchApp.lui", 4, "recovered", ProblemSeverity.Info),
             ]);
@@ -262,6 +302,9 @@ public sealed class UserFlowTests
     private static bool FindText(Control root, string text) => root.GetVisualDescendants().OfType<TextBlock>()
         .Any(block => block.Text == text);
 
+    private static bool HasClass(Control root, string className) => root.GetVisualDescendants()
+        .OfType<Control>().Any(control => control.Classes.Contains(className));
+
     private static bool IsInside(Control root, IInputElement? element) => element is Visual visual &&
         (ReferenceEquals(visual, root) || visual.GetVisualAncestors().Contains(root));
 
@@ -327,19 +370,36 @@ public sealed class UserFlowTests
     {
         private readonly Queue<TaskCompletionSource<IReadOnlyList<ProblemItem>>> _pending = new();
         public int Calls { get; private set; }
+        public int CancellationCount { get; private set; }
+        public bool ThrowSynchronously { get; set; }
 
         public Task<IReadOnlyList<ProblemItem>> LoadAsync(string? workspace, CancellationToken cancellationToken)
         {
             Calls++;
+            if (ThrowSynchronously)
+                throw new InvalidOperationException("synchronous problem load failure");
             var result = new TaskCompletionSource<IReadOnlyList<ProblemItem>>(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             _pending.Enqueue(result);
-            cancellationToken.Register(() => result.TrySetCanceled(cancellationToken));
+            cancellationToken.Register(() =>
+            {
+                if (result.TrySetCanceled(cancellationToken)) CancellationCount++;
+            });
             return result.Task;
         }
 
-        public void Complete(IReadOnlyList<ProblemItem> problems) => _pending.Dequeue().TrySetResult(problems);
-        public void Fail(Exception error) => _pending.Dequeue().TrySetException(error);
+        public void Complete(IReadOnlyList<ProblemItem> problems) => Next().TrySetResult(problems);
+        public void Fail(Exception error) => Next().TrySetException(error);
+
+        private TaskCompletionSource<IReadOnlyList<ProblemItem>> Next()
+        {
+            while (_pending.Count > 0)
+            {
+                var next = _pending.Dequeue();
+                if (!next.Task.IsCompleted) return next;
+            }
+            throw new InvalidOperationException("No pending problem load.");
+        }
     }
 
     private class FolderProxy : DispatchProxy

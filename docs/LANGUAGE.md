@@ -209,6 +209,9 @@ ContentControl {
     try (packages) {
         PackageResults(items: packages.Value) {}
     }
+    loading {
+        ProgressBar { AutomationProperties.Name: "Loading packages"; }
+    }
     catch (Exception error) {
         ErrorPane(message: error.Message) {}
     }
@@ -217,8 +220,14 @@ ContentControl {
 
 The source must be a declared `Computed<T>`, the catch type is exactly
 `System.Exception`, and `.Value` reads belong in that source's content branch.
-The compiler lowers the boundary to the existing owned conditional-region
-runtime; it does not add a second error-boundary or observer framework.
+With a loading clause, the boundary selects catch when `Error` is non-null,
+loading when no committed value exists, and content otherwise. Refreshes after
+a commit keep the content branch mounted while work is pending; authored
+content can inspect `IsPending` for an indicator. A loading clause introduces no
+local and must appear before catch; duplicate or trailing clauses are diagnosed.
+The compiler lowers all branches through one existing `ConditionalRegion` and
+`OwnedComputed<T>`; it does not add a second error-boundary or observer
+framework. Without a loading clause, existing try/catch behavior is unchanged.
 
 ## UI declarations and control flow
 
@@ -406,12 +415,10 @@ computed.IsPending
 computed.ErrorMessage
 ```
 
-This is a deliberately narrow checkpoint, not the final error/loading
-interface. Structural `Loading` and error boundaries, symbol-derived
-per-computation dependencies, synchronous derived values, composition between
-computed nodes, async streams, refresh, and optimistic mutation remain to be
-designed. The current compiler conservatively refreshes every computed member
-when component state changes.
+This remains a deliberately narrow checkpoint: boundaries name one computed
+source explicitly and do not discover pending reads, coordinate reveal, or
+accept arbitrary tasks. The current compiler derives source-specific
+dependencies and refreshes only affected computed members.
 
 ## Reusable state and effects
 

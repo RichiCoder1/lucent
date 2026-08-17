@@ -236,7 +236,7 @@ internal static class GeneralCSharpEmitter
         foreach (var computed in model.Computed)
         {
             var sourceId = model.Sources.First(source => source.Name == computed.Name).Id;
-            writer.Line($"{ComputedField(computed.Name)} = new OwnedComputed<{computed.TypeName}>(__lucent_owner, {computed.InitialValueText}, (global::System.Func<global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<{computed.TypeName}>>)({computed.Factory.LoweredText}), () => __lucent_InvalidateSource{sourceId}(), {ComputedFailureReporter(model, computed.Name)});");
+            writer.Line($"{ComputedField(computed.Name)} = new OwnedComputed<{computed.TypeName}>(__lucent_owner, {computed.InitialValueText}, (global::System.Func<global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<{computed.TypeName}>>)({computed.Factory.LoweredText}), () => __lucent_InvalidateSource{sourceId}(), {ComputedFailureReporter(model, sourceId)});");
         }
         foreach (var region in regions)
         {
@@ -273,7 +273,7 @@ internal static class GeneralCSharpEmitter
         foreach (var computed in model.Computed)
         {
             var sourceId = model.Sources.First(source => source.Name == computed.Name).Id;
-            writer.Line($"{ComputedField(computed.Name)} = new OwnedComputed<{computed.TypeName}>(__lucent_owner, {computed.InitialValueText}, (global::System.Func<global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<{computed.TypeName}>>)({computed.Factory.LoweredText}), () => __lucent_InvalidateSource{sourceId}(), {ComputedFailureReporter(model, computed.Name)});");
+            writer.Line($"{ComputedField(computed.Name)} = new OwnedComputed<{computed.TypeName}>(__lucent_owner, {computed.InitialValueText}, (global::System.Func<global::System.Threading.CancellationToken, global::System.Threading.Tasks.Task<{computed.TypeName}>>)({computed.Factory.LoweredText}), () => __lucent_InvalidateSource{sourceId}(), {ComputedFailureReporter(model, sourceId)});");
         }
         foreach (var region in regions)
         {
@@ -687,6 +687,9 @@ internal static class GeneralCSharpEmitter
                     ? new[] { loopControl }
                     : [],
                 BoundConditionalMember conditional => conditional.TrueRoots
+                    .Concat(conditional is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary
+                        ? asyncBoundary.LoadingRoots
+                        : [])
                     .Concat(conditional.FalseRoots ?? [])
                     .OfType<BoundControlModel>(),
                 _ => [],
@@ -818,6 +821,24 @@ internal static class GeneralCSharpEmitter
         }
         foreach (var conditional in control.Members.OfType<BoundConditionalMember>())
         {
+            if (conditional is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary)
+            {
+                writer.Line($"if ({ComputedField(asyncBoundary.SourceIdentifier)}.Error is not null)");
+                writer.Line("{"); writer.Indent();
+                foreach (var root in asyncBoundary.FallbackRoots)
+                    EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, root, owner, source, ref counter));
+                writer.Unindent(); writer.Line("}");
+                writer.Line($"else if (!{ComputedField(asyncBoundary.SourceIdentifier)}.HasCommittedValue)");
+                writer.Line("{"); writer.Indent();
+                foreach (var root in asyncBoundary.LoadingRoots)
+                    EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, root, owner, source, ref counter));
+                writer.Unindent(); writer.Line("}");
+                writer.Line("else"); writer.Line("{"); writer.Indent();
+                foreach (var root in asyncBoundary.ContentRoots)
+                    EmitSlotAttach(writer, name, control.ContentRoute!, EmitSlotRenderable(writer, supply, root, owner, source, ref counter));
+                writer.Unindent(); writer.Line("}");
+                continue;
+            }
             writer.Line($"if ({conditional.Condition.LoweredText})");
             writer.Line("{"); writer.Indent();
             foreach (var root in conditional.TrueRoots)
@@ -1361,6 +1382,24 @@ internal static class GeneralCSharpEmitter
     private static IEnumerable<(BoundControlModel Control, string Name)> ConditionalControls(
         BoundConditionalRegion region)
     {
+        if (region.Member is BoundAsyncBoundary asyncBoundary)
+        {
+            if (asyncBoundary.LoadingRoots is not null)
+            {
+                foreach (var item in ConditionalBranchControls(region, asyncBoundary.LoadingRoots, "Loading"))
+                    yield return (item.Control, item.Name);
+                foreach (var item in ConditionalBranchControls(region, asyncBoundary.ContentRoots, "Content"))
+                    yield return (item.Control, item.Name);
+                foreach (var item in ConditionalBranchControls(region, asyncBoundary.FallbackRoots, "Catch"))
+                    yield return (item.Control, item.Name);
+                yield break;
+            }
+            foreach (var item in ConditionalBranchControls(region, asyncBoundary.TrueRoots, "True"))
+                yield return (item.Control, item.Name);
+            foreach (var item in ConditionalBranchControls(region, asyncBoundary.FalseRoots!, "False"))
+                yield return (item.Control, item.Name);
+            yield break;
+        }
         foreach (var item in ConditionalBranchControls(region, region.Member.TrueRoots, "True"))
         {
             yield return (item.Control, item.Name);
@@ -1389,10 +1428,20 @@ internal static class GeneralCSharpEmitter
                     item.Name,
                     member, region.Index, 0)));
 
-        return Branch(region.Member.TrueRoots, "True")
-            .Concat(region.Member.FalseRoots is null
+        var (trueRoots, falseRoots) = region.Member is BoundAsyncBoundary asyncBoundaryBase
+            ? (asyncBoundaryBase.TrueRoots, asyncBoundaryBase.FalseRoots)
+            : (region.Member.TrueRoots, region.Member.FalseRoots);
+        var branches = Branch(trueRoots, "True")
+            .Concat(falseRoots is null
                 ? []
-                : Branch(region.Member.FalseRoots, "False"));
+                : Branch(falseRoots, "False"));
+        if (region.Member is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary)
+        {
+            branches = Branch(asyncBoundary.LoadingRoots, "Loading")
+                .Concat(Branch(asyncBoundary.ContentRoots, "Content"))
+                .Concat(Branch(asyncBoundary.FallbackRoots, "Catch"));
+        }
+        return branches;
     }
 
     private static void EmitConditionalSetup(CodeWriter writer, BoundConditionalRegion region)
@@ -1427,15 +1476,45 @@ internal static class GeneralCSharpEmitter
         writer.Line($"private void __lucent_UpdateConditional{region.Index}()");
         writer.Line("{");
         writer.Indent();
+        if (region.Member is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary)
+        {
+            writer.Line($"if ({ComputedField(asyncBoundary.SourceIdentifier)}.Error is not null)");
+            writer.Line("{");
+            writer.Indent();
+            EmitConditionalBranch(writer, region, asyncBoundary.FallbackRoots, "Catch", 2, source);
+            writer.Unindent();
+            writer.Line("}");
+            writer.Line($"else if (!{ComputedField(asyncBoundary.SourceIdentifier)}.HasCommittedValue)");
+            writer.Line("{");
+            writer.Indent();
+            EmitConditionalBranch(writer, region, asyncBoundary.LoadingRoots, "Loading", 0, source);
+            writer.Unindent();
+            writer.Line("}");
+            writer.Line("else");
+            writer.Line("{");
+            writer.Indent();
+            EmitConditionalBranch(writer, region, asyncBoundary.ContentRoots, "Content", 1, source);
+            writer.Unindent();
+            writer.Line("}");
+            writer.Unindent();
+            writer.Line("}");
+            return;
+        }
         EmitLineMapping(writer, source, region.Member.Condition.Span);
         writer.Line($"if ({region.Member.Condition.LoweredText})");
         writer.Line("#line default");
         writer.Line("{");
         writer.Indent();
-        EmitConditionalBranch(writer, region, region.Member.TrueRoots, "True", 0, source);
+        var contentRoots = region.Member is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundaryBase
+            ? asyncBoundaryBase.ContentRoots
+            : region.Member.TrueRoots;
+        var fallbackRoots = region.Member is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundaryFallback
+            ? asyncBoundaryFallback.FallbackRoots
+            : region.Member.FalseRoots;
+        EmitConditionalBranch(writer, region, contentRoots, "True", 0, source);
         writer.Unindent();
         writer.Line("}");
-        if (region.Member.FalseRoots is { } falseRoots)
+        if (fallbackRoots is { } falseRoots)
         {
             writer.Line("else");
             writer.Line("{");
@@ -2596,6 +2675,30 @@ internal static class GeneralCSharpEmitter
         }
         foreach (var conditional in control.Members.OfType<BoundConditionalMember>())
         {
+            if (conditional is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary)
+            {
+                writer.Line($"if ({ComputedField(asyncBoundary.SourceIdentifier)}.Error is not null)");
+                writer.Line("{"); writer.Indent();
+                foreach (var root in asyncBoundary.FallbackRoots)
+                    EmitSlotAttach(writer, name, control.ContentRoute!,
+                        EmitLoopSlotRenderable(writer, root, owner, itemName, source,
+                            ref counter, refreshStatements, namePrefix));
+                writer.Unindent(); writer.Line("}");
+                writer.Line($"else if (!{ComputedField(asyncBoundary.SourceIdentifier)}.HasCommittedValue)");
+                writer.Line("{"); writer.Indent();
+                foreach (var root in asyncBoundary.LoadingRoots)
+                    EmitSlotAttach(writer, name, control.ContentRoute!,
+                        EmitLoopSlotRenderable(writer, root, owner, itemName, source,
+                            ref counter, refreshStatements, namePrefix));
+                writer.Unindent(); writer.Line("}");
+                writer.Line("else"); writer.Line("{"); writer.Indent();
+                foreach (var root in asyncBoundary.ContentRoots)
+                    EmitSlotAttach(writer, name, control.ContentRoute!,
+                        EmitLoopSlotRenderable(writer, root, owner, itemName, source,
+                            ref counter, refreshStatements, namePrefix));
+                writer.Unindent(); writer.Line("}");
+                continue;
+            }
             writer.Line($"if ({conditional.Condition.LoweredText})");
             writer.Line("{"); writer.Indent();
             foreach (var root in conditional.TrueRoots)
@@ -2793,7 +2896,12 @@ internal static class GeneralCSharpEmitter
         }
         foreach (var conditional in root.Members.OfType<BoundConditionalMember>())
         {
-            foreach (var nestedRoot in conditional.TrueRoots.Concat(conditional.FalseRoots ?? []))
+            var roots = conditional is BoundAsyncBoundary asyncBoundary
+                ? asyncBoundary.ContentRoots
+                    .Concat(asyncBoundary.LoadingRoots ?? [])
+                    .Concat(asyncBoundary.FallbackRoots)
+                : conditional.TrueRoots.Concat(conditional.FalseRoots ?? []);
+            foreach (var nestedRoot in roots)
             {
                 if (nestedRoot is BoundControlModel control)
                 {
@@ -2846,7 +2954,12 @@ internal static class GeneralCSharpEmitter
                 }
                 foreach (var conditional in control.Members.OfType<BoundConditionalMember>())
                 {
-                    foreach (var nested in EnumerateInvocations(conditional.TrueRoots.Concat(conditional.FalseRoots ?? [])))
+                    var conditionalRoots = conditional is BoundAsyncBoundary asyncBoundary
+                        ? asyncBoundary.ContentRoots
+                            .Concat(asyncBoundary.LoadingRoots ?? [])
+                            .Concat(asyncBoundary.FallbackRoots)
+                        : conditional.TrueRoots.Concat(conditional.FalseRoots ?? []);
+                    foreach (var nested in EnumerateInvocations(conditionalRoots))
                     {
                         yield return nested;
                     }
@@ -2866,13 +2979,17 @@ internal static class GeneralCSharpEmitter
     {
         var staticInvocations = staticSites
             .Select(site => site.Invocation)
-            .ToHashSet();
+            .ToHashSet(ReferenceEqualityComparer.Instance);
         foreach (var field in fields)
         {
             foreach (var conditional in field.control.Members.OfType<BoundConditionalMember>())
             {
-                foreach (var invocation in EnumerateInvocations(
-                             conditional.TrueRoots.Concat(conditional.FalseRoots ?? [])))
+                var roots = conditional is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary
+                    ? asyncBoundary.ContentRoots
+                        .Concat(asyncBoundary.LoadingRoots)
+                        .Concat(asyncBoundary.FallbackRoots)
+                    : conditional.TrueRoots.Concat(conditional.FalseRoots ?? []);
+                foreach (var invocation in EnumerateInvocations(roots))
                 {
                     if (!staticInvocations.Contains(invocation))
                     {
@@ -2990,6 +3107,12 @@ internal static class GeneralCSharpEmitter
                 foreach (var root in conditional.TrueRoots.Concat(conditional.FalseRoots ?? []))
                 foreach (var dependency in RenderableDependencies(root))
                     yield return dependency;
+                if (conditional is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary)
+                {
+                    foreach (var root in asyncBoundary.LoadingRoots)
+                    foreach (var dependency in RenderableDependencies(root))
+                        yield return dependency;
+                }
                 break;
             case BoundForEachMember loop:
                 foreach (var dependency in loop.SourceExpression.Dependencies.Concat(loop.KeyExpression.Dependencies))
@@ -3017,18 +3140,18 @@ internal static class GeneralCSharpEmitter
     private static string StateField(string name) => "__lucent_state" + Pascal(name);
     private static string ComputedField(string name) => "__lucent_computed" + Pascal(name);
 
-    private static string ComputedFailureReporter(BoundComponentModel model, string sourceName) =>
-        HasBoundary(model.Roots, sourceName) ? "static _ => { }" : "null";
+    private static string ComputedFailureReporter(BoundComponentModel model, int sourceId) =>
+        HasBoundary(model.Roots, sourceId) ? "static _ => { }" : "null";
 
-    private static bool HasBoundary(IEnumerable<BoundRenderableModel> renderables, string sourceName)
+    private static bool HasBoundary(IEnumerable<BoundRenderableModel> renderables, int sourceId)
     {
         foreach (var renderable in renderables)
         {
             if (renderable is not BoundControlModel control) continue;
             foreach (var member in control.Members)
             {
-                if (member is BoundConditionalMember conditional &&
-                    conditional.Condition.SourceText.Contains($"{sourceName}.Error", StringComparison.Ordinal))
+                if (member is BoundAsyncBoundary boundary &&
+                    boundary.SourceId == sourceId)
                 {
                     return true;
                 }
@@ -3038,10 +3161,14 @@ internal static class GeneralCSharpEmitter
                     BoundChildMember child => new[] { (BoundRenderableModel)child.Child },
                     BoundComponentChildMember child => child.Invocation.Slots.SelectMany(slot => slot.Roots),
                     BoundForEachMember loop => new[] { loop.Body },
-                    BoundConditionalMember nested => nested.TrueRoots.Concat(nested.FalseRoots ?? []),
+                    BoundConditionalMember nested => nested.TrueRoots
+                        .Concat(nested is BoundAsyncBoundary { LoadingRoots: not null } asyncBoundary
+                            ? asyncBoundary.LoadingRoots
+                            : [])
+                        .Concat(nested.FalseRoots ?? []),
                     _ => [],
                 };
-                if (HasBoundary(children, sourceName)) return true;
+                if (HasBoundary(children, sourceId)) return true;
             }
         }
 

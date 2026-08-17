@@ -14,7 +14,7 @@
 - **Risk**: MEDIUM
 - **Depends on**: Plan 006
 - **Category**: language / async UX / tooling
-- **Status**: TODO
+- **Status**: DONE
 
 ## Why this matters
 
@@ -223,21 +223,21 @@ fresh final blocker/high review gate pass.
 
 ## Done criteria
 
-- [ ] Existing async boundaries compile unchanged without a loading clause.
-- [ ] First unresolved work selects loading; committed refresh keeps content.
-- [ ] Error always selects catch before loading/content consideration.
-- [ ] Retry transitions match the pre-commit and post-commit contracts.
-- [ ] One `ConditionalRegion` owns all branches with transactional rollback and
+- [x] Existing async boundaries compile unchanged without a loading clause.
+- [x] First unresolved work selects loading; committed refresh keeps content.
+- [x] Error always selects catch before loading/content consideration.
+- [x] Retry transitions match the pre-commit and post-commit contracts.
+- [x] One `ConditionalRegion` owns all branches with transactional rollback and
       exact cleanup; `Lucent.Runtime` has no new public type.
-- [ ] Source-reporter suppression uses bound source identity, not generated
+- [x] Source-reporter suppression uses bound source identity, not generated
       condition text, and bounded/unbounded sources report exactly as intended.
-- [ ] Initial branch failure rethrows without duplicate reporting; later
+- [x] Initial branch failure rethrows without duplicate reporting; later
       invalidation failures follow their existing root route once.
-- [ ] `Value` is guarded only in the matching content branch, with mapped
+- [x] `Value` is guarded only in the matching content branch, with mapped
       diagnostics elsewhere.
-- [ ] Compiler, LSP, and Workbench tests cover syntax, state, tooling, ownership,
+- [x] Compiler, LSP, and Workbench tests cover syntax, state, tooling, ownership,
       and source mapping.
-- [ ] Documentation does not claim automatic source discovery, reset keys, or
+- [x] Documentation does not claim automatic source discovery, reset keys, or
       reveal coordination.
 
 ## STOP conditions

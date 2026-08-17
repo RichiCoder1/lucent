@@ -21,7 +21,7 @@ component PackagePulse()
             }
             catch (Exception error) {
                 StackPanel { Class: "pulse-error-state";
-                    PackagePulseResults(query.Value, UpdateQuery, packages.Value, false) {}
+                    PackagePulseResults(query.Value, UpdateQuery, PackageCatalog.Placeholders, false) {}
                     Border {
                         Class: "error-state";
                         StackPanel {

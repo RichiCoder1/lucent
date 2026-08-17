@@ -213,6 +213,10 @@ internal sealed class GeneralBinder
                 {
                     BoundChildMember child => EnumerateControls([child.Child]),
                     BoundComponentChildMember child => EnumerateControls([child.Invocation]),
+                    BoundAsyncBoundary boundary => EnumerateControls(
+                        boundary.ContentRoots
+                            .Concat(boundary.LoadingRoots ?? [])
+                            .Concat(boundary.FallbackRoots)),
                     BoundConditionalMember conditional =>
                         EnumerateControls(conditional.TrueRoots.Concat(conditional.FalseRoots ?? [])),
                     BoundForEachMember loop => EnumerateControls([loop.Body]),
@@ -368,6 +372,15 @@ internal sealed class GeneralBinder
             foreach (var root in conditional.TrueBranch.Roots)
                 foreach (var yield in AllYields(root)) yield return yield;
             foreach (var root in conditional.FalseBranch?.Roots ?? [])
+                foreach (var yield in AllYields(root)) yield return yield;
+        }
+        foreach (var boundary in element.Members.OfType<UiAsyncBoundarySyntax>())
+        {
+            foreach (var root in boundary.Content.Roots)
+                foreach (var yield in AllYields(root)) yield return yield;
+            foreach (var root in boundary.Loading?.Roots ?? [])
+                foreach (var yield in AllYields(root)) yield return yield;
+            foreach (var root in boundary.Fallback.Roots)
                 foreach (var yield in AllYields(root)) yield return yield;
         }
     }
@@ -697,7 +710,7 @@ internal sealed class GeneralBinder
                     break;
 
                 case UiForEachSyntax loop:
-                    if (insideLoop)
+                    if (insideLoop || insideConditional)
                     {
                         AddUnsupported(
                             loop.Span,
@@ -830,7 +843,7 @@ internal sealed class GeneralBinder
                     break;
 
                 case UiAsyncBoundarySyntax boundary:
-                    if (insideLoop)
+                    if (insideLoop || insideConditional)
                     {
                         AddUnsupported(boundary.Span, "Async boundaries cannot be nested inside another structural region.");
                         continue;
@@ -860,35 +873,49 @@ internal sealed class GeneralBinder
                     var boundaryLocals = (locals ?? []).Concat([
                         new BoundLocal(boundary.CatchName, exceptionType!, $"__lucent_computed{char.ToUpperInvariant(boundary.SourceIdentifier[0])}{boundary.SourceIdentifier[1..]}.Error")
                     ]).ToArray();
+                    IReadOnlyList<BoundRenderableModel> boundaryContent;
+                    IReadOnlyList<BoundRenderableModel>? boundaryLoading = null;
+                    IReadOnlyList<BoundRenderableModel> boundaryFallback;
                     _asyncBoundaryValueSources.Add(boundary.SourceIdentifier);
-                    IReadOnlyList<BoundRenderableModel> boundaryTrue;
-                    IReadOnlyList<BoundRenderableModel> boundaryFalse;
                     try
                     {
-                        boundaryTrue = boundary.Content.Roots
-                            .Select(root => BindRenderable(root, locals: locals, insideConditional: false))
-                            .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
-                        boundaryFalse = boundary.Fallback.Roots
-                            .Select(root => BindRenderable(root, locals: boundaryLocals, insideConditional: false))
+                        boundaryContent = boundary.Content.Roots
+                            .Select(root => BindRenderable(root, locals: locals, insideConditional: true))
                             .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
                     }
                     finally
                     {
                         _asyncBoundaryValueSources.Remove(boundary.SourceIdentifier);
                     }
-                    if (!boundaryRoute.IsCollection && (RenderableCardinality(boundaryTrue) > 1 || RenderableCardinality(boundaryFalse) > 1))
+                    if (boundary.Loading is { } loading)
+                    {
+                        boundaryLoading = loading.Roots
+                            .Select(root => BindRenderable(root, locals: locals, insideConditional: true))
+                            .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
+                    }
+                    boundaryFallback = boundary.Fallback.Roots
+                        .Select(root => BindRenderable(root, locals: boundaryLocals, insideConditional: true))
+                        .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
+                    if (!boundaryRoute.IsCollection &&
+                        (RenderableCardinality(boundaryContent) > 1 ||
+                         (boundaryLoading is not null && RenderableCardinality(boundaryLoading) > 1) ||
+                         RenderableCardinality(boundaryFallback) > 1))
                     {
                         AddUnsupported(boundary.Span, "An async boundary scalar content route accepts one root per branch.");
                         continue;
                     }
                     var boundaryId = _nextConditionalId++;
-                    members.Add(new BoundConditionalMember(
+                    members.Add(new BoundAsyncBoundary(
+                        boundary.SourceIdentifier,
+                        source.Id,
                         boundaryId,
                         Request($"{boundary.SourceIdentifier}.Error is null", boundary.SourceIdentifierSpan,
                             CSharpIslandKind.Expression, CSharpIslandRole.Condition,
                             resolver.ResolveTypeName("bool"), locals),
-                        boundaryTrue,
-                        boundaryFalse,
+                        boundaryContent,
+                        boundaryLoading,
+                        boundaryFallback,
+                        boundary.CatchName,
                         boundary.Span));
                     seenMembers.Add(boundaryRoute.Property.Name);
                     hasStructuralRegion = true;
@@ -1507,6 +1534,15 @@ internal sealed class GeneralBinder
                     SourceExpression = Resolve(loop.SourceExpression, islands),
                     KeyExpression = Resolve(loop.KeyExpression, islands),
                     Body = FinalizeRenderable(loop.Body, islands),
+                },
+                BoundAsyncBoundary boundary => boundary with
+                {
+                    Condition = Resolve(boundary.Condition, islands),
+                    ContentRoots = boundary.ContentRoots.Select(root => FinalizeRenderable(root, islands)).ToArray(),
+                    LoadingRoots = boundary.LoadingRoots?.Select(root => FinalizeRenderable(root, islands)).ToArray(),
+                    FallbackRoots = boundary.FallbackRoots.Select(root => FinalizeRenderable(root, islands)).ToArray(),
+                    TrueRoots = boundary.ContentRoots.Select(root => FinalizeRenderable(root, islands)).ToArray(),
+                    FalseRoots = boundary.FallbackRoots.Select(root => FinalizeRenderable(root, islands)).ToArray(),
                 },
                 BoundConditionalMember conditional => conditional with
                 {

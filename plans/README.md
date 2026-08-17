@@ -23,7 +23,7 @@ recent workspaces. It is not a full IDE.
 | [004a](004a-typed-native-roots.md) | Expose typed native roots and lifecycle diagnostics | P1 | S | 003, 004 | DONE |
 | [005](005-virtualized-collections.md) | Add scalable native collections and AvaloniaEdit | P1 | M | 003, 004 | DONE |
 | [006](006-lifecycle-reliability.md) | Close lifecycle, failure, accessibility, and UI-test gaps | P1 | L | 001–005 | DONE |
-| [006a](006a-loading-boundaries.md) | Add explicit loading clauses to async boundaries | P1 | S | 006 | TODO |
+| [006a](006a-loading-boundaries.md) | Add explicit loading clauses to async boundaries | P1 | S | 006 | DONE |
 | [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
 | [007a](007a-native-compiled-bindings.md) | Use Avalonia compiled bindings at native seams | P1 | M | 005–007 | TODO |
 | [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007a | TODO |

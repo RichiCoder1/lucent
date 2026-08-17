@@ -189,7 +189,7 @@ internal sealed record BoundForEachMember(
     public SourceSpan KeyExpressionSpan => KeyExpression.Span;
 }
 
-internal sealed record BoundConditionalMember(
+internal record BoundConditionalMember(
     int Id,
     BoundCSharpIsland Condition,
     IReadOnlyList<BoundRenderableModel> TrueRoots,
@@ -198,8 +198,16 @@ internal sealed record BoundConditionalMember(
 
 internal sealed record BoundAsyncBoundary(
     string SourceIdentifier,
+    int SourceId,
+    int Id,
     BoundCSharpIsland Condition,
     IReadOnlyList<BoundRenderableModel> ContentRoots,
+    IReadOnlyList<BoundRenderableModel>? LoadingRoots,
     IReadOnlyList<BoundRenderableModel> FallbackRoots,
     string CatchName,
-    SourceSpan Span) : BoundControlMember(Span);
+    SourceSpan Span) : BoundConditionalMember(
+        Id,
+        Condition,
+        ContentRoots,
+        FallbackRoots,
+        Span);

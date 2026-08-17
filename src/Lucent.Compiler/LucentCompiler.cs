@@ -347,9 +347,12 @@ public static class LucentCompiler
                     yield return nested;
                 foreach (var conditional in control.Members.OfType<BoundConditionalMember>())
                 {
-                    foreach (var nested in ComponentInvocations(conditional.TrueRoots))
-                        yield return nested;
-                    foreach (var nested in ComponentInvocations(conditional.FalseRoots ?? []))
+                    var branchRoots = conditional is BoundAsyncBoundary asyncBoundary
+                        ? asyncBoundary.ContentRoots
+                            .Concat(asyncBoundary.LoadingRoots ?? [])
+                            .Concat(asyncBoundary.FallbackRoots)
+                        : conditional.TrueRoots.Concat(conditional.FalseRoots ?? []);
+                    foreach (var nested in ComponentInvocations(branchRoots))
                         yield return nested;
                 }
                 foreach (var loop in control.Members.OfType<BoundForEachMember>())

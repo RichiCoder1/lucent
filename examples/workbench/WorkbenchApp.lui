@@ -44,9 +44,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     ];
     private DocumentSession GetSession() => session;
     private readonly Computed<IReadOnlyList<ProblemItem>> loadedProblems = new(
-        ct => workspaceOpened.Value
-            ? problemLoader.LoadAsync(workspaceName.Value, ct)
-            : Task.FromResult<IReadOnlyList<ProblemItem>>(placeholderProblems),
+        ct => problemLoader.LoadAsync(workspaceName.Value, ct),
         placeholderProblems);
     private Window? window = null;
     private Border? sidebar = null;
@@ -353,6 +351,11 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                     IsVisible: showProblems.Value;
                     try (loadedProblems) {
                         ProblemsPane(loadedProblems.Value, loadedProblems.IsPending, copyCommand: copyDiagnostic) {}
+                    }
+                    loading {
+                        Border { Class: "problems-loading";
+                            TextBlock { Class: "loading-state"; Text: "Loading problems…"; AutomationProperties.Name: "Loading problems"; }
+                        }
                     }
                     catch (Exception error) {
                         StackPanel { Class: "problem-error";

@@ -1008,6 +1008,9 @@ public sealed class LanguageServerProtocolTests
                     try (packages) {
                         TextBlock { Text: packages.Value.ToString(); Tag: erro; }
                     }
+                    loading {
+                        ProgressBar { Value: 0; Tag: packages.; DefinitelyNotAProperty: 1; }
+                    }
                     catch (Exception error) {
                         TextBlock { Text: error.Message; }
                     }
@@ -1020,6 +1023,8 @@ public sealed class LanguageServerProtocolTests
         {
             var uri = new Uri(sourcePath).AbsoluteUri;
             var outside = source.IndexOf("erro;", StringComparison.Ordinal);
+            var loadingControl = source.IndexOf("ProgressBar", StringComparison.Ordinal);
+            var loadingSource = source.IndexOf("packages.;", StringComparison.Ordinal) + "packages.".Length;
             var declaration = source.IndexOf("error)", StringComparison.Ordinal);
             var use = source.LastIndexOf("error.Message", StringComparison.Ordinal);
             var input = BuildInput(
@@ -1049,7 +1054,17 @@ public sealed class LanguageServerProtocolTests
                 textDocument = new { uri },
                 position = PositionAtOffset(source, outside + "erro".Length),
             }),
-            Request(6, "shutdown", null),
+            Request(6, "textDocument/hover", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, loadingControl),
+            }),
+            Request(7, "textDocument/completion", new
+            {
+                textDocument = new { uri },
+                position = PositionAtOffset(source, loadingSource),
+            }),
+            Request(8, "shutdown", null),
                 Notification("exit", null));
             using var output = new MemoryStream();
 
@@ -1068,6 +1083,20 @@ public sealed class LanguageServerProtocolTests
                 definitionStart.GetProperty("character").GetInt32());
             Assert.IsFalse(Response(messages, 5).GetProperty("result").EnumerateArray()
                 .Any(item => item.GetProperty("label").GetString() == "error"));
+            StringAssert.Contains(HoverText(messages, 6), "ProgressBar");
+            Assert.IsTrue(Response(messages, 7).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "IsPending"));
+            var loadingDiagnostic = PublishedDiagnostics(messages, uri)
+                .SelectMany(batch => batch.EnumerateArray())
+                .First(item => item.GetProperty("message").GetString()?.Contains(
+                    "DefinitelyNotAProperty", StringComparison.Ordinal) == true);
+            var diagnosticOffset = source.IndexOf("DefinitelyNotAProperty", StringComparison.Ordinal);
+            var diagnosticPrefix = source[..diagnosticOffset];
+            var actualPosition = loadingDiagnostic.GetProperty("range").GetProperty("start");
+            Assert.AreEqual(diagnosticPrefix.Count(character => character == '\n'),
+                actualPosition.GetProperty("line").GetInt32());
+            Assert.AreEqual(diagnosticOffset - (diagnosticPrefix.LastIndexOf('\n') + 1),
+                actualPosition.GetProperty("character").GetInt32());
         }
         finally
         {

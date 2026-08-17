@@ -1,4 +1,8 @@
 using Lucent.Compiler.Syntax;
+using Lucent.Runtime;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using System.Reflection;
 
 namespace Lucent.Compiler.Tests;
 
@@ -1430,6 +1434,204 @@ public sealed class GeneralCompilerTests
         StringAssert.Contains(result.GeneratedSource!, "__lucent_computedValue.Error is null");
         StringAssert.Contains(result.GeneratedSource!, "__lucent_computedValue.Error.Message");
         Assert.IsFalse(result.GeneratedSource!.Contains("CancellationTokenSource", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Async_boundary_loading_clause_uses_three_fixed_branches()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<string> value = new(ct => Task.FromResult("ok"), "loading");
+                Fragment Render() => Border {
+                    try (value) { TextBlock { Text: value.Value; } }
+                    loading { ProgressBar { Value: 0; } }
+                    catch (Exception error) { TextBlock { Text: error.Message; } }
+                };
+            }
+            """,
+            "loading-boundary.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var source = result.GeneratedSource!;
+        StringAssert.Contains(source, "__lucent_computedValue.Error is not null");
+        StringAssert.Contains(source, "!__lucent_computedValue.HasCommittedValue");
+        StringAssert.Contains(source, "Show(0, branchOwner");
+        StringAssert.Contains(source, "Show(1, branchOwner");
+        StringAssert.Contains(source, "Show(2, branchOwner");
+        StringAssert.Contains(source, "__lucent_conditional1LoadingControl1");
+        StringAssert.Contains(source, "#line 7 \"loading-boundary.lui\"");
+        Assert.IsFalse(source.Contains("__lucent_computedValue.Error is null", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Async_boundary_loading_clause_rejects_value_reads_outside_content()
+    {
+        var result = LucentCompiler.Compile(
+            """
+            namespace Demo;
+            component Main()
+            {
+                private readonly Computed<string> value = new(ct => Task.FromResult("ok"), "loading");
+                Fragment Render() => Border {
+                    try (value) { TextBlock { Text: value.Value; } }
+                    loading { TextBlock { Text: value.Value; } }
+                    catch (Exception error) { TextBlock { Text: error.Message; } }
+                };
+            }
+            """,
+            "loading-value-guard.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(string.Join(Environment.NewLine, result.Diagnostics),
+            "must be read inside its try (value) content branch");
+    }
+
+    [TestMethod]
+    public void Async_boundary_loading_clause_recovers_duplicate_and_trailing_clauses()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() { private readonly Computed<string> value = new(ct => Task.FromResult(\"ok\"), \"loading\"); Fragment Render() => StackPanel { ContentControl { try (value) { TextBlock { Text: value.Value; } } loading { TextBlock { Text: \"one\"; } } loading { TextBlock { Text: \"two\"; } } catch (Exception error) { TextBlock { Text: error.Message; } } loading { TextBlock { Text: \"three\"; } } } TextBlock { Text: \"after\"; } }; }",
+            "loading-recovery.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Count(diagnostic =>
+            diagnostic.Message.Contains("loading clause", StringComparison.OrdinalIgnoreCase)) >= 2);
+        StringAssert.Contains(result.Diagnostics[^1].Message, "loading clause");
+        var sibling = LucentCompiler.Compile(
+            "namespace Demo; component Main() { private readonly Computed<string> value = new(ct => Task.FromResult(\"ok\"), \"loading\"); Fragment Render() => StackPanel { ContentControl { try (value) { TextBlock { Text: value.Value; } } loading { TextBlock { Text: \"one\"; } } loading { TextBlock { Text: \"two\"; } } catch (Exception error) { TextBlock { Text: error.Message; } } TextBlock { Text: \"after\"; } } TextBlock { Text: \"tail\"; }; }",
+            "loading-recovery-sibling.lui");
+        Assert.IsTrue(sibling.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("loading clause", StringComparison.OrdinalIgnoreCase)));
+        Assert.IsTrue(sibling.Syntax!.Component.RenderMethod.Root.Children
+            .Any(element => element.Name == "TextBlock"),
+            "Parser recovery must retain the sibling after the malformed boundary.");
+    }
+
+    [TestMethod]
+    public void Async_boundary_reporter_suppression_uses_bound_source_identity()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() { private readonly Computed<string> first = new(ct => Task.FromResult(\"one\"), \"one\"); private readonly Computed<string> second = new(ct => Task.FromResult(\"two\"), \"two\"); Fragment Render() => StackPanel { ContentControl { try (first) { TextBlock { Text: first.Value; } } catch (Exception error) { TextBlock { Text: error.Message; } } } TextBlock { Text: \"unbounded\"; } }; }",
+            "source-identity.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var source = result.GeneratedSource!;
+        var firstStart = source.IndexOf("new OwnedComputed<string>", StringComparison.Ordinal);
+        var secondStart = source.IndexOf("new OwnedComputed<string>", firstStart + 1, StringComparison.Ordinal);
+        var first = source[firstStart..secondStart];
+        var second = source[secondStart..];
+        StringAssert.Contains(first, "static _ => { }");
+        StringAssert.Contains(second, ", null);");
+    }
+
+    [TestMethod]
+    public void Generated_async_boundaries_suppress_only_their_bound_source_reporter()
+    {
+        var result = LucentCompiler.CompileProject([
+            new LucentSourceInput("Bounded.lui",
+                "namespace Demo; using System; using System.Threading.Tasks; using Avalonia.Controls; component Bounded() { private readonly Computed<string> value = new(ct => Task.FromException<string>(new InvalidOperationException(\"bounded\")), \"loading\"); Fragment Render() => ContentControl { try (value) { TextBlock { Text: value.Value; } } loading { ProgressBar {} } catch (Exception error) { TextBlock { Text: error.Message; } } }; }"),
+            new LucentSourceInput("Unbounded.lui",
+                "namespace Demo; using System; using System.Threading.Tasks; using Avalonia.Controls; component Unbounded() { private readonly Computed<string> value = new(ct => Task.FromException<string>(new InvalidOperationException(\"unbounded\")), \"loading\"); Fragment Render() => Border {}; }"),
+            new LucentSourceInput("InitialFailure.lui",
+                "namespace Demo; using System; using System.Threading.Tasks; using Avalonia.Controls; component InitialFailure() { private readonly Computed<string> value = new(ct => Task.FromResult(\"ok\"), \"loading\"); private string FailMount() => throw new InvalidOperationException(\"initial mount\"); Fragment Render() => ContentControl { try (value) { TextBlock { Text: value.Value; } } loading { TextBlock { Text: FailMount(); } } catch (Exception error) { TextBlock { Text: error.Message; } } }; }")
+        ]);
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine,
+            result.Sources.SelectMany(source => source.Result.Diagnostics)));
+
+        const string harness = """
+            namespace Demo;
+            using System;
+            using System.Collections.Generic;
+            using System.Linq;
+            using Lucent.Runtime;
+            internal sealed class QueueDispatcher : IUiDispatcher
+            {
+                private readonly Queue<Action> actions = new();
+                public void Dispatch(Action action) => actions.Enqueue(action);
+                public void Drain() { while (actions.TryDequeue(out var action)) action(); }
+            }
+            public static class BoundaryProbe
+            {
+                public static string Run()
+                {
+                    var dispatcher = new QueueDispatcher();
+                    var boundedErrors = new List<Exception>();
+                    var unboundedErrors = new List<Exception>();
+                    var initialErrors = new List<Exception>();
+                    using var bounded = new BoundedComponent(dispatcher, boundedErrors.Add);
+                    using var unbounded = new UnboundedComponent(dispatcher, unboundedErrors.Add);
+                    using var initial = new InitialFailureComponent(dispatcher, initialErrors.Add);
+                    string? initialFailure = null;
+                    try { initial.Mount(); }
+                    catch (InvalidOperationException error) { initialFailure = error.Message; }
+                    bounded.Mount();
+                    unbounded.Mount();
+                    dispatcher.Drain();
+                    return $"{boundedErrors.Count}:{unboundedErrors.Count}:{unboundedErrors.SingleOrDefault()?.Message}:{initialErrors.Count}:{initialFailure}";
+                }
+            }
+            """;
+        var trees = result.Sources.Select(source => CSharpSyntaxTree.ParseText(source.Result.GeneratedSource!))
+            .Append(CSharpSyntaxTree.ParseText(harness));
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+            .Append(typeof(Avalonia.Controls.Border).Assembly.Location)
+            .Append(typeof(ComponentOwner).Assembly.Location)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => MetadataReference.CreateFromFile(path));
+        var compilation = CSharpCompilation.Create(
+            $"LucentBoundaryProbe{Guid.NewGuid():N}", trees, references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var assemblyBytes = new MemoryStream();
+        var emit = compilation.Emit(assemblyBytes);
+        Assert.IsTrue(emit.Success, string.Join(Environment.NewLine, emit.Diagnostics));
+        var assembly = Assembly.Load(assemblyBytes.ToArray());
+        var observed = assembly.GetType("Demo.BoundaryProbe")!.GetMethod("Run")!.Invoke(null, null);
+        Assert.AreEqual("0:1:unbounded:0:initial mount", observed);
+    }
+
+    [TestMethod]
+    public void Loading_branch_component_and_style_are_traversed()
+    {
+        var result = LucentCompiler.CompileProject([
+            new LucentSourceInput("LoadingView.lui",
+                "namespace Demo; component LoadingView() => Border { Class: \"loading-view\"; };"),
+            new LucentSourceInput("Main.lui",
+                "namespace Demo; component Main() { private readonly Computed<string> value = new(ct => Task.FromResult(\"ok\"), \"loading\"); Fragment Render() => ContentControl { try (value) { TextBlock { Text: value.Value; } } loading { LoadingView() {} } catch (Exception error) { TextBlock { Text: error.Message; } } }; }",
+                "Main.css", ".loading-view { opacity: 0.5; }")]);
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine,
+            result.Sources.SelectMany(source => source.Result.Diagnostics)));
+        var generated = result.Sources.Single(source => source.SourcePath == "Main.lui")
+            .Result.GeneratedSource!;
+        StringAssert.Contains(generated, "LoadingViewComponent");
+        StringAssert.Contains(generated, "__lucent_conditionalStyle1Loading");
+    }
+
+    [TestMethod]
+    public void Async_boundary_branches_reject_nested_structural_regions_instead_of_omitting_them()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() { private readonly State<bool> visible = new(true); private readonly Computed<string> value = new(ct => Task.FromResult(\"ok\"), \"loading\"); Fragment Render() => ContentControl { try (value) { Border {} } loading { StackPanel { if (visible.Value) { TextBlock { Text: \"hidden\"; } } } } catch (Exception error) { Border {} } }; }",
+            "nested-loading.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        StringAssert.Contains(string.Join(Environment.NewLine, result.Diagnostics),
+            "Nested conditionals are not supported");
+    }
+
+    [TestMethod]
+    public void Async_boundary_branches_participate_in_duplicate_slot_yield_validation()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; component Main() { slot status; private readonly Computed<string> value = new(ct => Task.FromResult(\"ok\"), \"loading\"); Fragment Render() => ContentControl { try (value) { Border {} } loading { ContentControl { yield status; } } catch (Exception error) { ContentControl { yield status; } } }; }",
+            "loading-yields.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.AreEqual(2, result.Diagnostics.Count(diagnostic =>
+            diagnostic.Message.Contains("only one syntactic yield site", StringComparison.Ordinal)));
     }
 
     [TestMethod]
