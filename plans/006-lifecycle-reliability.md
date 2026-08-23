@@ -368,7 +368,7 @@ dispatcher drains:
    first load; Ctrl+Shift+R invokes the root Refresh Problems command. First load
    shows loading, refresh keeps stale results, failure switches the explicit
    catch branch, keyboard-activating Retry recovers, and nested owners clean up.
-   Plan 009 replaces only the placeholder loader implementation.
+   Plan 010 replaces only the placeholder loader implementation.
 6. Settings loads, changes, saves, reopens, and survives injected pre-rename
    failure with the old file intact.
 7. App constructs and retains `SettingsSaveCoordinator`, passes it as a required
@@ -473,7 +473,7 @@ hooks.
   global services/settings, cloud sync, migration framework, or secrets storage.
 - Custom automation peers beyond the two accessibility-only third-party-control
   peers above, OS picker automation, screenshot/pixel assertions, custom editor,
-  telemetry, or packaging (Plan 009).
+  telemetry, or packaging (Plan 010).
 
 ## Steps
 
@@ -528,7 +528,7 @@ timed-out-save continuation. The old destination bytes must remain exact.
 
 Add `IProblemLoader`, placeholder/fake implementations, the Workbench computed
 source, and root Refresh Problems/Retry commands here. Keep the loader bounded
-to placeholder problems; Plan 009 may replace its implementation, not its async
+to placeholder problems; Plan 010 may replace its implementation, not its async
 lifetime/error contract.
 
 **Verify**: repository tests pass on the supported CI OSes; Workbench settings
@@ -581,7 +581,7 @@ post-close mutations; then run native reliability smoke and all gates.
 
 ## Maintenance notes
 
-Plan 009 consumes these deterministic shutdown/settings/headless gates for
+Plan 010 consumes these deterministic shutdown/settings/headless gates for
 packaging. Observable-model/effect APIs remain deferred until a concrete app
 cannot use native collection binding, generated event ownership, or explicit
 application coordination.

@@ -363,6 +363,6 @@ tests pass.
 Plan 006 expands the same headless project for accessibility/lifecycle flows.
 If the pinned ListBox/AvaloniaEdit versions lack adequate native automation
 peers, Plan 006 may add accessibility-only subclasses; those subclasses must add
-peers only and must not mirror control APIs. Plan 009 may add actual
+peers only and must not mirror control APIs. Plan 010 may add actual
 project/document I/O but must keep these native controls and stable selection
 contracts.

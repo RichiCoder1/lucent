@@ -1,4 +1,4 @@
-# Plan 009: Package Lucent and finish the Workbench release gate
+# Plan 010: Package Lucent and finish the Workbench release gate
 
 > **Executor instructions**: Package only interfaces exercised by Workbench and
 > proven by tests. Do not declare a stable public API merely because it compiles.
@@ -8,9 +8,9 @@
 ## Status
 
 - **Priority**: P1
-- **Effort**: L
-- **Risk**: MEDIUM
-- **Depends on**: plans 001–008
+- **Effort**: XL
+- **Risk**: HIGH
+- **Depends on**: plans 001–009b
 - **Category**: direction / DX / distribution
 - **Planned at**: commit `3b27cfe`, 2026-08-16
 
@@ -34,14 +34,18 @@ checkout using the language tooling proven by Plan 008.
 
 **In scope**:
 
-- Produce NuGet packages for the runtime, compiler/MSBuild integration, and any
-  required build assets with reproducible package tests.
-- Add a minimal `dotnet new` template containing a Lucent/Avalonia desktop app.
+- Produce NuGet packages for the runtime, compiler/MSBuild integration,
+  `Lucent.Themes.Shadcn`, Plan 009's theme manifests, Plan 009a's global-style
+  build assets, and Plan 009b's opt-in utility catalog, with reproducible package
+  tests.
+- Add a minimal `dotnet new` template containing a Lucent/Avalonia desktop app
+  with explicit Fluent plus Shadcn theme installation.
 - Build/package the VSIX reproducibly.
 - Add Windows, Linux, and macOS CI where supported, plus package-consumer tests.
-- Finish Workbench's real project loading, compiler diagnostics, source editing,
-  generated-C# preview, settings, themes, and release documentation while
-  preserving Plan 007's visual, adaptive, and accessibility quality gates.
+- Migrate every example to the accepted Plan 009 Shadcn theme before finishing
+  Workbench's real project loading, compiler diagnostics, source editing,
+  generated-C# preview, settings, themes, and release documentation. Preserve
+  Plan 007's adaptive and accessibility gates, not its superseded visual tokens.
 - Publish the existing Markdown through Blume, including its generated
   `llms.txt`, `llms-full.txt`, and raw Markdown routes.
 
@@ -52,22 +56,27 @@ checkout using the language tooling proven by Plan 008.
 - Native AOT as a promise; it may be an informational experiment after normal
   self-contained publishing passes.
 - New language-server capabilities or performance work beyond fixing a release
-  regression against Plan 008's accepted contracts.
+  regression against Plans 008–009b's accepted contracts.
+- Installing Plan 009b utilities in the default template or migrating examples
+  to utility-first styling without a separate accepted product decision.
 
 ## Steps
 
 ### 1. Add package-consumer tests first
 
 Create temporary sample projects that install local `.nupkg` files, compile
-`.lui` and adjacent CSS, run generated code, and report source diagnostics.
-These tests must not reference repository `bin` paths.
+`.lui`, adjacent CSS, and ordered `LucentStyle` items, install the generated
+global style type, Shadcn theme, and opt-in utility catalog, run generated code,
+and report source diagnostics. These tests must not reference repository `bin`
+paths.
 
 **Verify**: tests fail against the current local-path build assets.
 
 ### 2. Produce build/runtime packages
 
-Pack runtime and compiler assets using standard NuGet `build`/`buildTransitive`
-layout. Pin package versions centrally and include license/credits metadata.
+Pack runtime, compiler, Shadcn theme, manifest, global-style assets, and the
+opt-in utility catalog using standard NuGet `build`/`buildTransitive` layout.
+Pin package versions centrally and include license/credits metadata.
 
 **Verify**: a clean temporary consumer restores, builds, tests, and cleans.
 
@@ -82,6 +91,19 @@ not cache generated correctness artifacts as test results.
 
 ### 4. Complete the Workbench release gate
 
+First perform the separately reviewed example migration required by Plan 009:
+install Fluent plus `ShadcnTheme`, rewrite adjacent CSS and application resources
+to `Shadcn.*` semantics, and remove duplicated `Lucent.*` visual dictionaries
+without compatibility aliases. Preserve behavior, teaching purpose, keyboard
+flows, automation, minimum-size handling, and existing interaction tests. Do not
+start this migration until Plan 009's theme gallery has passed its acceptance
+gate.
+
+Update `DESIGN.md`, `design/tokens.css`, and Plan 007's visual-authority text as
+the migration is accepted. Remove or explicitly supersede every Registration
+Overlay application token/instruction so the repository does not retain two
+competing application design systems.
+
 Replace placeholder data with real project/compiler integration. Document one
 keyboard-first walkthrough: open workspace, navigate tree, edit `.lui`, inspect
 problems, jump to source, preview generated C#, change theme/settings, close and
@@ -94,14 +116,16 @@ save coordinator, intercepted shutdown, accessibility peers, and Plan 005's
 single headless harness—do not introduce parallel loader/resource/settings/
 lifecycle/test models.
 
-Preserve Plan 007's application shell, visual states, theme resources, minimum
-sizes, and reference-review contract while replacing placeholder data. Real data
-must not reintroduce clipping, unbounded panels, or color-only status.
+Preserve Plan 007's application shell, visual-state coverage, minimum sizes, and
+reference-review contract while applying Plan 009's accepted visual authority.
+Real data must not reintroduce clipping, unbounded panels, or color-only status.
 
 **Verify**: the walkthrough is automated headlessly where possible and manually
 recorded only for native dialogs/platform behavior. The release record lists
 which Plan 008 capabilities are exercised through VS Code and which Workbench
-flows consume diagnostics, navigation, and generated-source mapping.
+flows consume diagnostics, navigation, and generated-source mapping. Repository
+search and review confirm `DESIGN.md`, `design/tokens.css`, and Plan 007 point to
+one accepted application visual authority with no compatibility alias layer.
 
 ### 5. Publish preview documentation, not compatibility promises
 
@@ -114,10 +138,11 @@ Use the repository's Blume site as the publication surface so the same source
 serves people and AI clients. Keep MCP deferred until server deployment is
 needed; the static AI endpoints cover the preview release.
 
-Apply `PRODUCT.md`, `DESIGN.md`, `design/tokens.css`, and the committed Lucent mark
-to Blume's reading-mode surface: paper-first content, graphite navigation/code,
-teal links/current location, and coral only for caveats or experimental change.
-Do not let the documentation imply maturity or capabilities beyond the preview.
+Apply the visual authorities updated by this plan's Plan 009-directed example
+migration and the committed Lucent mark to Blume's reading-mode surface. Do not
+preserve superseded Registration Overlay application tokens merely because
+documentation previously used them, and do not imply maturity or capabilities
+beyond the preview.
 
 **Verify**: every README command runs from a clean temporary directory.
 On the recorded Plan 008 reference machine, rerun its benchmark against the
@@ -128,6 +153,13 @@ generation budgets.
 ## Done criteria
 
 - [ ] A clean consumer uses NuGet packages, not repository-relative binaries.
+- [ ] Shadcn theme/manifests and global-style build assets work from packages.
+- [ ] The optional utility catalog installs explicitly and its runtime styles
+      match packaged completion metadata without entering the default template.
+- [ ] Every example uses the accepted Shadcn visual authority without old
+      `Lucent.*` compatibility tokens.
+- [ ] `DESIGN.md`, `design/tokens.css`, and Plan 007 no longer compete with the
+      accepted Shadcn application direction.
 - [ ] Template, packages, VSIX, and Workbench build in CI.
 - [ ] Plan 008's deterministic LSP gates remain green in packaged form.
 - [ ] The staged VSIX/server passes Plan 008's benchmark on its recorded

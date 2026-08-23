@@ -26,8 +26,11 @@ recent workspaces. It is not a full IDE.
 | [006a](006a-loading-boundaries.md) | Add explicit loading clauses to async boundaries | P1 | S | 006 | DONE |
 | [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
 | [007a](007a-native-compiled-bindings.md) | Use Avalonia compiled bindings at native seams | P1 | M | 005–007 | DONE |
-| [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007a | TODO |
-| [009](009-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–008 | TODO |
+| [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007a | IN PROGRESS |
+| [009](009-shadcn-theme-css-completion.md) | Add the Shadcn theme and theme-aware CSS completion | P1 | XL | 007, 008 | TODO |
+| [009a](009a-global-lucent-styles.md) | Add explicit global Lucent styles | P1 | L | 009 | TODO |
+| [009b](009b-avalonia-utility-styles.md) | Add a finite Avalonia utility-style catalog | P2 | M | 009, 009a | TODO |
+| [010](010-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | XL | 001–009b | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED` with a
 one-line reason.
@@ -36,7 +39,8 @@ Review records: [001–002](REVIEW-001-002.md),
 [003](REVIEW-003.md), [001–003 cross-check](REVIEW-001-003-CROSSCHECK.md),
 [004](REVIEW-004.md), [005](REVIEW-005.md), [006](REVIEW-006.md), and
 [001–006 Sol/high cross-check](REVIEW-001-006-CROSSCHECK.md). Plan review:
-[006a](REVIEW-006A.md), [007](REVIEW-007.md), and [007a](REVIEW-007A.md).
+[006a](REVIEW-006A.md), [007](REVIEW-007.md), [007a](REVIEW-007A.md),
+[009/009a](REVIEW-009.md), and [009b](REVIEW-009B.md).
 
 ## Dependency notes
 
@@ -61,7 +65,13 @@ Review records: [001–002](REVIEW-001-002.md),
 - 008 makes the shared compiler/LSP seam correct, bounded, and fast before its
   artifacts are packaged. It must not depend on another language server's
   in-memory workspace.
-- 009 packages only the system proven by Workbench. It must not stabilize APIs
+- 009 adds the concrete Shadcn theme need and theme-aware `Class:` completion
+  without weakening 008's cache or latency contracts.
+- 009a separately adds honest project-global CSS runtime/build semantics and
+  reuses 009's class catalog.
+- 009b optionally generates a finite Avalonia-native utility catalog from those
+  seams without importing Tailwind or adding runtime source scanning.
+- 010 packages only the system proven by Workbench. It must not stabilize APIs
   that Workbench has not exercised.
 
 ## Release gates
@@ -75,11 +85,14 @@ npm test
 Pop-Location
 ```
 
-Plans 004–007a, including 006a, and 009 must also add a user-flow gate to Lucent
+Plans 004–007a, including 006a, and 010 must also add a user-flow gate to Lucent
 Workbench. Plan 006 replaces manual-only smoke coverage with Avalonia headless
 interaction tests; Plan 006a extends that flow with first-load/stale-refresh
 boundary evidence; Plan 007 adds bounded visual evidence without pixel-golden
-tests; Plan 008 owns protocol and performance gates for language tooling.
+tests; Plan 008 owns protocol and performance gates for language tooling; Plan
+009 owns a deterministic theme-gallery gate; and Plan 009a owns app/library
+global-style fixtures. Plan 009b owns a separate utility gallery and catalog
+parity gate before Plan 010 packages the opt-in result or migrates the examples.
 
 ## Explicit non-goals
 
@@ -123,8 +136,11 @@ The sequence follows patterns exposed by mature desktop frameworks:
   recycled collection containers have different lifetime contracts.
 - **Prioritize hot reload:** rejected until owner identity, component metadata,
   source maps, and disposal are stable enough to patch safely.
-- **Expand CSS now:** rejected. Commands, focus, composition, data, testing, and
-  packaging are more important for real applications than more selectors.
+- **Expand CSS before a concrete application need:** rejected. Plan 009 now adds
+  only the bounded OKLCH and class-completion seams required by the accepted
+  Shadcn workflow; Plan 009a separately gates global styles. Plan 009b adds only
+  a finite opt-in Avalonia utility vocabulary and explicitly declines browser
+  Tailwind compatibility.
 
 ## Audit scope
 
