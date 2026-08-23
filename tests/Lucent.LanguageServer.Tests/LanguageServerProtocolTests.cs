@@ -9,6 +9,49 @@ namespace Lucent.LanguageServer.Tests;
 public sealed class LanguageServerProtocolTests
 {
     [TestMethod]
+    public async Task Native_binding_protocol_completes_paths_and_explains_inherited_context()
+    {
+        var sourcePath = Path.Combine(Path.GetTempPath(), $"lucent-binding-{Guid.NewGuid():N}.lui");
+        const string source = "namespace Demo; using System; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(Uri item) { TextBlock { Text: binding(item.Host); } } };";
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new
+                {
+                    textDocument = new { uri, languageId = "lucent", version = 1, text = source },
+                }),
+                Request(2, "textDocument/completion", new
+                {
+                    textDocument = new { uri },
+                    position = PositionAtOffset(source,
+                        source.IndexOf("item.Host", StringComparison.Ordinal) + "item.H".Length),
+                }),
+                Request(3, "textDocument/hover", new
+                {
+                    textDocument = new { uri },
+                    position = PositionOf(source, "binding"),
+                }),
+                Request(4, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Host"));
+            StringAssert.Contains(HoverText(messages, 3), "inherited DataContext");
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+        }
+    }
+
+    [TestMethod]
     public async Task Project_implicit_usings_preserve_method_group_conversions()
     {
         var directory = Path.Combine(Path.GetTempPath(), "lucent-implicit-usings",

@@ -273,11 +273,18 @@ public sealed class CompileLucentTests
         var repository = FindRepositoryRoot();
         await File.WriteAllTextAsync(
             Path.Combine(temporary.Path, "Main.lui"),
-            "namespace Demo; using Avalonia.Controls; component Main() => Window { Title: \"Main\"; };" );
+            "namespace Demo; using System; using Avalonia.Controls; component Main(Uri model) { " +
+            "private readonly Uri[] items = [new Uri(\"https://example.com/a\")]; " +
+            "private readonly Uri @event = new(\"https://example.com/escaped\"); " +
+            "Fragment Render() => Window { StackPanel { " +
+            "TextBlock { Text: binding(@event.Host); } " +
+            "ContentControl { if (true) { TextBlock { Text: binding(model.Host); } } } " +
+            "StackPanel { foreach (var item in items) keyed by item { TextBlock { Text: binding(model.Host); } } } " +
+            "} }; }" );
         await File.WriteAllTextAsync(
             Path.Combine(temporary.Path, "Host.cs"),
             "using Avalonia.Controls; namespace Demo; internal sealed class Host { " +
-            "internal void Create() { using var component = new MainComponent(); var root = component.MountRoot(); root.Title = \"Shown\"; } }");
+            "internal void Create() { using var component = new MainComponent(new System.Uri(\"https://example.com\")); var root = component.MountRoot(); root.Title = \"Shown\"; } }");
         var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
         await File.WriteAllTextAsync(projectPath, $$"""
             <Project Sdk="Microsoft.NET.Sdk">
@@ -304,9 +311,9 @@ public sealed class CompileLucentTests
         var repository = FindRepositoryRoot();
         await File.WriteAllTextAsync(
             Path.Combine(temporary.Path, "Main.lui"),
-            "namespace Demo; using Avalonia.Controls; component Main() => ListBox { " +
-            "ItemsSource: new[] { \"one\" }; " +
-            "template ItemTemplate(string @class) { TextBlock { Text: @class.ToUpperInvariant(); } } };" );
+            "namespace Demo; using System; using Avalonia.Controls; component Main() => ListBox { " +
+            "ItemsSource: new[] { new Uri(\"https://example.com\") }; " +
+            "template ItemTemplate(Uri @class) { TextBlock { Text: binding(@class.Host); } } };" );
         var projectPath = Path.Combine(temporary.Path, "Consumer.csproj");
         await File.WriteAllTextAsync(projectPath, $$"""
             <Project Sdk="Microsoft.NET.Sdk">

@@ -1,0 +1,13 @@
+namespace Demo;
+using System;
+using Avalonia.Controls;
+
+component CompiledNativeBinding(Uri model)
+{
+    private readonly Uri @event = new("https://example.com");
+
+    Fragment Render() => StackPanel {
+        TextBlock { Text: binding(model.Host); }
+        TextBlock { Text: binding(@event.Host); }
+    };
+}

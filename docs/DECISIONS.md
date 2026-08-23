@@ -21,6 +21,7 @@ This page separates project direction from illustrative syntax. Update it when a
 | Native content | Allow both explicit `Content: value` and concise trailing scalar content; both occupy the same resolved Avalonia content route. |
 | Native values | Apply convenience conversion from the resolved target .NET type. Keep explicit C# unchanged and do not infer from control/property names. |
 | Native events | Require explicit zero- or two-argument lambdas. Resolve the real delegate and narrow `sender` to the concrete control type; reject magical bare blocks. |
+| Native bindings | Keep direct Lucent assignment as the default. Lower explicit `binding(source.Path)` to Avalonia coded `CompiledBinding`; use inherited `DataContext` for item templates and explicit stable sources elsewhere. Keep `FuncDataTemplate` non-recycling because Avalonia 12.1.1 `ListBox` does not supply existing roots. |
 | Tooling | Share frontend infrastructure between the compiler and language server; include a minimal language server in the proof of concept. |
 | Scope | Prove one Avalonia backend and a narrow language before pursuing other platforms or broad compatibility. |
 

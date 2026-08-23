@@ -24,6 +24,9 @@ internal static class RepositoryPaths
     public static string GeneratedConditionalSnapshot =>
         Path.Combine(Root, "tests", "Lucent.Compiler.Tests", "Snapshots", "ConditionalRegion.g.cs.snap");
 
+    public static string Snapshot(string fileName) =>
+        Path.Combine(Root, "tests", "Lucent.Compiler.Tests", "Snapshots", fileName);
+
     private static string FindRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

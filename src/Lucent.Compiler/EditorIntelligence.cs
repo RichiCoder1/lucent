@@ -124,6 +124,16 @@ internal static class EditorIntelligence
                         candidate.Display,
                         candidate.InsertText,
                         candidate.Documentation));
+            if (property is not null && resolver.ResolveAvaloniaProperty(control, property) is not null)
+            {
+                nativeItems = nativeItems.Append(new LucentCompletionItem(
+                    "binding",
+                    LucentCompletionItemKind.Method,
+                    "native compiled binding",
+                    "binding(${0})",
+                    "Binds this Avalonia property through CompiledBinding.Create using its native default BindingMode.",
+                    IsSnippet: true));
+            }
             return expressionItems
                 .Concat(nativeItems)
                 .GroupBy(item => item.Label, StringComparer.Ordinal)
@@ -204,6 +214,20 @@ internal static class EditorIntelligence
     {
         var syntax = analysis.Syntax;
         var resolver = analysis.Resolver;
+        if (FindBindingKeyword(sourceText, offset) is { } bindingSpan)
+        {
+            var inherited = EnumerateElements(syntax.Component.RenderMethod.RenderedFragment.Roots)
+                .SelectMany(element => element.Members.OfType<UiTemplateSyntax>())
+                .Any(template => offset >= template.Span.Start && offset <= template.Span.End);
+            return new LucentSemanticSymbol(
+                "binding",
+                LucentSemanticSymbolKind.Expression,
+                bindingSpan,
+                inherited
+                    ? "binding(item.Path) — inherited DataContext"
+                    : "binding(source.Path) — explicit source",
+                "Creates an Avalonia coded CompiledBinding and uses the native target property's default BindingMode.");
+        }
         if (FindAttachedHeaderAt(sourceText, offset, syntax) is { } attachedHeader)
         {
             var element = EnumerateElements(syntax.Component.RenderMethod.RenderedFragment.Roots)
@@ -414,6 +438,22 @@ internal static class EditorIntelligence
             .GroupBy(variable => variable.Name, StringComparer.Ordinal)
             .Select(group => group.Last())
             .ToArray();
+    }
+
+    private static SourceSpan? FindBindingKeyword(string sourceText, int offset)
+    {
+        const string keyword = "binding";
+        var start = Math.Clamp(offset, 0, sourceText.Length);
+        while (start > 0 && char.IsLetter(sourceText[start - 1])) start--;
+        var end = Math.Clamp(offset, 0, sourceText.Length);
+        while (end < sourceText.Length && char.IsLetter(sourceText[end])) end++;
+        if (end - start != keyword.Length ||
+            !sourceText.AsSpan(start, keyword.Length).SequenceEqual(keyword) ||
+            end >= sourceText.Length || sourceText[end] != '(')
+        {
+            return null;
+        }
+        return new SourceSpan(start, keyword.Length);
     }
 
     private static SourceSpan? FindCatchLocalSpan(string sourceText, string name, int offset)

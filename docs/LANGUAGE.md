@@ -147,6 +147,33 @@ templates because Avalonia owns realization and no per-realization
 native controls and ordinary item expressions for virtualized rows. Existing
 raw `ItemTemplate: new FuncDataTemplate<T>(...)` expressions remain supported.
 
+Use `binding(...)` when a native property should follow Avalonia's binding
+contract instead of Lucent's direct assignment contract:
+
+```csharp
+template ItemTemplate(TodoItem item) {
+    TextBlock { Text: binding(item.Title); }
+}
+```
+
+The accepted subset is a typed property path, nested property path, constant
+indexer, cast followed by a path, or logical NOT over a Boolean path. In an
+item template the first segment must be the item local; the generated compiled
+binding uses inherited `DataContext`. Item templates remain non-recycling:
+Avalonia 12.1.1's `ListBox` does not pass existing template roots back through
+`Build(data, existing)`, so Lucent does not claim root reuse that the native
+control does not perform. Outside a template, the path must begin with a
+readonly ordinary field or component parameter and uses that object as the explicit
+source. Parameter-source bindings are replaced when inputs change. All forms
+use the target Avalonia property's default binding mode. Delayed slot content
+currently diagnoses explicit-source `binding(...)`; use a plain expression or
+raw Avalonia binding there until slot-owned replacement has a concrete use case.
+
+`binding(...)` is contextual syntax, not a C# helper. Method calls,
+interpolation, arithmetic, conditional access, and Lucent `State`/`Computed`
+reads remain ordinary expressions. Use raw Avalonia binding C# for converters,
+explicit modes, relative sources, element names, delays, or fallbacks.
+
 The language rule is that literal conveniences are selected from the resolved
 target property type, not from a control or property-name table. Numeric and
 tuple literals support `Thickness` and `CornerRadius`:

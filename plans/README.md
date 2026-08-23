@@ -25,7 +25,7 @@ recent workspaces. It is not a full IDE.
 | [006](006-lifecycle-reliability.md) | Close lifecycle, failure, accessibility, and UI-test gaps | P1 | L | 001–005 | DONE |
 | [006a](006a-loading-boundaries.md) | Add explicit loading clauses to async boundaries | P1 | S | 006 | DONE |
 | [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
-| [007a](007a-native-compiled-bindings.md) | Use Avalonia compiled bindings at native seams | P1 | M | 005–007 | TODO |
+| [007a](007a-native-compiled-bindings.md) | Use Avalonia compiled bindings at native seams | P1 | M | 005–007 | DONE |
 | [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007a | TODO |
 | [009](009-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | L | 001–008 | TODO |
 
@@ -36,7 +36,7 @@ Review records: [001–002](REVIEW-001-002.md),
 [003](REVIEW-003.md), [001–003 cross-check](REVIEW-001-003-CROSSCHECK.md),
 [004](REVIEW-004.md), [005](REVIEW-005.md), [006](REVIEW-006.md), and
 [001–006 Sol/high cross-check](REVIEW-001-006-CROSSCHECK.md). Plan review:
-[006a](REVIEW-006A.md), [007](REVIEW-007.md).
+[006a](REVIEW-006A.md), [007](REVIEW-007.md), and [007a](REVIEW-007A.md).
 
 ## Dependency notes
 

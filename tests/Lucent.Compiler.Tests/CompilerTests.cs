@@ -152,6 +152,21 @@ public sealed class CompilerTests
     }
 
     [TestMethod]
+    [DataRow("CompiledItemTemplate")]
+    [DataRow("CompiledNativeBinding")]
+    public void Compiled_binding_generation_matches_checked_in_snapshot(string name)
+    {
+        var relative = $"tests/Lucent.Compiler.Tests/Snapshots/{name}.lui";
+        var result = LucentCompiler.Compile(
+            File.ReadAllText(RepositoryPaths.Snapshot(name + ".lui")), relative);
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        Assert.AreEqual(
+            File.ReadAllText(RepositoryPaths.Snapshot(name + ".g.cs.snap")).Replace("\r\n", "\n"),
+            result.GeneratedSource!.Replace("\r\n", "\n"));
+    }
+
+    [TestMethod]
     public void Conditional_parser_preserves_multiple_branch_roots_for_the_binder()
     {
         var result = LucentCompiler.Compile(

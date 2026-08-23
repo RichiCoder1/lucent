@@ -132,7 +132,7 @@ internal sealed class CSharpIslandBinder(
             foreach (var assignment in constructorAssignments)
             {
                 var start = text.Length;
-                text.Append(assignment.Name).Append(" = ").Append(assignment.Expression).Append(";\n");
+                text.Append(EscapeIdentifier(assignment.Name)).Append(" = ").Append(assignment.Expression).Append(";\n");
                 ordinaryMappings.Add((new TextSpan(start, assignment.Expression.Length), assignment.Source, false));
             }
             text.Append("}\n");

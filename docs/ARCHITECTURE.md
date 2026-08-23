@@ -125,7 +125,13 @@ The priority order is:
 3. Automatic or low-friction .NET observable interop.
 4. Slower fallback mechanisms only where necessary.
 
-For a view model that implements `INotifyPropertyChanged`, the compiler should generate a property-specific subscription when it has enough information. For `ObservableCollection<T>`, keyed regions should consume collection-change events incrementally. Lucent-native state should not implement legacy notification interfaces merely for compatibility.
+At an explicitly authored native property seam, `binding(source.Path)` lowers
+to Avalonia's public coded `CompiledBinding` API. Avalonia then owns
+`DataContext` changes, property notifications, validation, and default binding
+modes. Ordinary Lucent expressions still lower to direct assignments and
+compiler-derived invalidation. The two schedulers do
+not drive the same property, and Lucent-native state does not implement legacy
+notification interfaces merely for compatibility.
 
 ## Performance constraints
 

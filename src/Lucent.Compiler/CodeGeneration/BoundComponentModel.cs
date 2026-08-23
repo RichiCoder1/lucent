@@ -119,12 +119,24 @@ internal sealed record BoundPropertyMember(
     bool IsInterpolated,
     SourceSpan Span,
     BoundNativeValueKind NativeValueKind = BoundNativeValueKind.None,
-    string? TargetTypeName = null)
+    string? TargetTypeName = null,
+    BoundNativeBinding? NativeBinding = null)
     : BoundControlMember(Span)
 {
     public string ExpressionText => Expression.LoweredText;
     public SourceSpan ExpressionSpan => Expression.Span;
 }
+
+internal enum BoundNativeBindingSourceKind { Item, OrdinaryMember, Parameter }
+
+internal sealed record BoundNativeBinding(
+    int Id,
+    BoundNativeBindingSourceKind SourceKind,
+    string SourceName,
+    string SourceTypeName,
+    string PathText,
+    string TargetPropertyOwnerTypeName,
+    string TargetPropertyFieldName);
 
 internal sealed record BoundItemTemplateMember(
     string Name,

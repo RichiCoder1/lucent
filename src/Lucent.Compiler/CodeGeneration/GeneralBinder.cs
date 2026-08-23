@@ -23,8 +23,12 @@ internal sealed class GeneralBinder
     private ITypeSymbol? _dynamicType;
     private int _nextConditionalId;
     private int _nextComponentSiteId;
+    private int _nextNativeBindingId;
     private IReadOnlyList<BoundReactiveSource> _sources = [];
     private ComponentSymbol? _currentComponent;
+    private IReadOnlyDictionary<string, string> _parameterTypes = new Dictionary<string, string>();
+    private IReadOnlyDictionary<string, string> _ordinaryMemberTypes = new Dictionary<string, string>();
+    private string? _itemTemplateName;
 
     public GeneralBinder(
         DiagnosticBag diagnostics,
@@ -61,6 +65,12 @@ internal sealed class GeneralBinder
         }
 
         var component = syntax.Component;
+        _parameterTypes = component.AllParameters.ToDictionary(
+            parameter => parameter.Name, parameter => parameter.TypeName, StringComparer.Ordinal);
+        _ordinaryMemberTypes = component.AllOrdinaryMembers
+            .Select(member => (member.Name, Type: GetOrdinaryMemberType(member.Text)))
+            .Where(member => member.Type is not null)
+            .ToDictionary(member => member.Name, member => member.Type!, StringComparer.Ordinal);
         _componentHasAsyncBoundary = ContainsAsyncBoundary(component.RenderMethod.RenderedFragment.Roots);
         _currentComponent = _componentIndex?.Symbols.FirstOrDefault(symbol =>
             string.Equals(symbol.SourcePath, _sourcePath, OperatingSystem.IsWindows()
@@ -184,6 +194,7 @@ internal sealed class GeneralBinder
                     "ItemTemplate property values must depend on the typed item; component state, inputs, and computed values are not refreshed by Avalonia template realization.");
             }
         }
+        ValidateSlotNativeBindings(model.Roots, inSlot: false);
         DetectComputedCycles(model);
         return HasErrors ? null : model;
 
@@ -225,7 +236,7 @@ internal sealed class GeneralBinder
                 };
         }
 
-    static bool ContainsReactiveTemplateDependency(BoundControlModel control) =>
+        static bool ContainsReactiveTemplateDependency(BoundControlModel control) =>
         control.Members.Any(member => member switch
         {
             BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
@@ -326,6 +337,48 @@ internal sealed class GeneralBinder
         {
             AddUnsupported(duplicate.NameSpan,
                 $"Slot '{duplicate.Name}' may have only one syntactic yield site.");
+        }
+    }
+
+    private void ValidateSlotNativeBindings(IEnumerable<BoundRenderableModel> renderables, bool inSlot)
+    {
+        foreach (var renderable in renderables)
+        {
+            if (renderable is BoundComponentInvocationModel invocation)
+            {
+                foreach (var slot in invocation.Slots)
+                    ValidateSlotNativeBindings(slot.Roots, inSlot: true);
+                continue;
+            }
+            if (renderable is not BoundControlModel control) continue;
+            foreach (var property in control.Members.OfType<BoundPropertyMember>().Where(property =>
+                         inSlot && property.NativeBinding is { SourceKind: not BoundNativeBindingSourceKind.Item }))
+            {
+                AddUnsupported(property.Span,
+                    "Explicit-source binding(...) is not supported inside delayed slot content; use a plain Lucent expression or raw Avalonia binding there.");
+            }
+            foreach (var member in control.Members)
+            {
+                switch (member)
+                {
+                    case BoundChildMember child:
+                        ValidateSlotNativeBindings([child.Child], inSlot);
+                        break;
+                    case BoundComponentChildMember component:
+                        ValidateSlotNativeBindings([component.Invocation], inSlot);
+                        break;
+                    case BoundConditionalMember conditional:
+                        ValidateSlotNativeBindings(conditional.TrueRoots, inSlot);
+                        ValidateSlotNativeBindings(conditional.FalseRoots ?? [], inSlot);
+                        break;
+                    case BoundForEachMember loop:
+                        ValidateSlotNativeBindings([loop.Body], inSlot);
+                        break;
+                    case BoundItemTemplateMember template:
+                        ValidateSlotNativeBindings([template.Root], inSlot);
+                        break;
+                }
+            }
         }
     }
 
@@ -980,11 +1033,20 @@ internal sealed class GeneralBinder
         }
 
         var locals = new[] { new BoundLocal(template.ItemName, itemType) };
-        var roots = template.Body.Roots
-            .Select(root => BindRenderable(root, locals: locals))
-            .Where(root => root is not null)
-            .Cast<BoundRenderableModel>()
-            .ToArray();
+        _itemTemplateName = template.ItemName;
+        BoundRenderableModel[] roots;
+        try
+        {
+            roots = template.Body.Roots
+                .Select(root => BindRenderable(root, locals: locals))
+                .Where(root => root is not null)
+                .Cast<BoundRenderableModel>()
+                .ToArray();
+        }
+        finally
+        {
+            _itemTemplateName = null;
+        }
         if (roots.Length != 1)
         {
             AddUnsupported(template.Body.Span,
@@ -1305,6 +1367,39 @@ internal sealed class GeneralBinder
         }
 
         var expressionText = property.Value.Text;
+        var expressionSpan = property.Value.Span;
+        BoundNativeBinding? nativeBinding = null;
+        if (SyntaxFactory.ParseExpression(expressionText) is InvocationExpressionSyntax
+            {
+                Expression: IdentifierNameSyntax { Identifier.ValueText: "binding" },
+            } bindingInvocation)
+        {
+            if (bindingInvocation.ArgumentList.Arguments.Count != 1)
+            {
+                AddUnsupported(property.Value.Span,
+                    "binding(...) requires exactly one native property path.");
+                return;
+            }
+
+            var avaloniaProperty = resolver.ResolveAvaloniaProperty(control, resolvedProperty);
+            if (avaloniaProperty is null)
+            {
+                AddUnsupported(PropertyNameSpan(property),
+                    $"Property '{resolvedProperty.Name}' has no public Avalonia property identifier and cannot use binding(...).");
+                return;
+            }
+
+            var path = bindingInvocation.ArgumentList.Arguments[0].Expression;
+            var pathSpan = new SourceSpan(
+                property.Value.Span.Start + path.SpanStart,
+                Math.Max(1, path.Span.Length));
+            if (!TryCreateNativeBinding(path, locals, avaloniaProperty, pathSpan, out nativeBinding))
+            {
+                return;
+            }
+            expressionText = path.ToFullString().Trim();
+            expressionSpan = pathSpan;
+        }
         if (property.Value is StringValueSyntax &&
             resolver.RequiresStringConstructor(resolvedProperty.Symbol.Type))
         {
@@ -1319,7 +1414,7 @@ internal sealed class GeneralBinder
         members.Add(
             new BoundPropertyMember(
                 resolvedProperty.Name,
-                Request(expressionText, property.Value.Span,
+                Request(expressionText, expressionSpan,
                     CSharpIslandKind.Expression, CSharpIslandRole.Property,
                     resolvedProperty.NativeValueKind == BoundNativeValueKind.None
                         ? resolvedProperty.Symbol.Type
@@ -1329,7 +1424,8 @@ internal sealed class GeneralBinder
                 property.Value is StringValueSyntax { IsInterpolated: true },
                 property.Span,
                 resolvedProperty.NativeValueKind,
-                resolvedProperty.TypeName));
+                resolvedProperty.TypeName,
+                nativeBinding));
         _symbols.Add(
             resolver.ToSemanticSymbol(
                 control,
@@ -1620,6 +1716,120 @@ internal sealed class GeneralBinder
             Visit(id);
         }
     }
+
+    private bool TryCreateNativeBinding(
+        ExpressionSyntax path,
+        IReadOnlyList<BoundLocal> locals,
+        ResolvedAvaloniaProperty target,
+        SourceSpan span,
+        out BoundNativeBinding? binding)
+    {
+        binding = null;
+        if (!TryGetBindingRoot(path, out var root) ||
+            !path.DescendantNodesAndSelf().Any(node =>
+                node is MemberAccessExpressionSyntax or ElementAccessExpressionSyntax))
+        {
+            AddUnsupported(span,
+                "binding(...) supports property paths, nested paths, constant indexers, casts, and logical NOT; use a plain expression or raw Avalonia binding for this value.");
+            return false;
+        }
+
+        BoundNativeBindingSourceKind kind;
+        string typeName;
+        var local = locals.FirstOrDefault(candidate => candidate.Name == root.Identifier.ValueText);
+        if (_itemTemplateName is not null &&
+            (_itemTemplateName != root.Identifier.ValueText || local is null))
+        {
+            AddUnsupported(span,
+                $"An ItemTemplate binding path must start with its typed item local '{_itemTemplateName}'.");
+            return false;
+        }
+        if (_itemTemplateName == root.Identifier.ValueText && local is not null)
+        {
+            kind = BoundNativeBindingSourceKind.Item;
+            typeName = local.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        }
+        else if (_parameterTypes.TryGetValue(root.Identifier.ValueText, out typeName!))
+        {
+            kind = BoundNativeBindingSourceKind.Parameter;
+            typeName = _resolver!.ResolveTypeName(typeName)?.ToDisplayString(
+                SymbolDisplayFormat.FullyQualifiedFormat) ?? typeName;
+        }
+        else if (_ordinaryMemberTypes.TryGetValue(root.Identifier.ValueText, out typeName!))
+        {
+            kind = BoundNativeBindingSourceKind.OrdinaryMember;
+            typeName = _resolver!.ResolveTypeName(typeName)?.ToDisplayString(
+                SymbolDisplayFormat.FullyQualifiedFormat) ?? typeName;
+        }
+        else
+        {
+            var reactive = _sources.FirstOrDefault(source => source.Name == root.Identifier.ValueText);
+            AddUnsupported(span, reactive is null
+                ? "binding(...) must start with the ItemTemplate item, a component parameter, or a stable ordinary component member."
+                : $"Lucent reactive source '{reactive.Name}' cannot use native binding(...); use its ordinary Lucent expression instead.");
+            return false;
+        }
+
+        binding = new BoundNativeBinding(
+            ++_nextNativeBindingId,
+            kind,
+            root.Identifier.ValueText,
+            typeName,
+            path.ToFullString().Trim(),
+            target.OwnerTypeName,
+            target.FieldName);
+        return true;
+    }
+
+    private static bool TryGetBindingRoot(ExpressionSyntax expression, out IdentifierNameSyntax root)
+    {
+        switch (expression)
+        {
+            case IdentifierNameSyntax identifier:
+                root = identifier;
+                return true;
+            case ParenthesizedExpressionSyntax parenthesized:
+                return TryGetBindingRoot(parenthesized.Expression, out root);
+            case PostfixUnaryExpressionSyntax postfix
+                when postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression):
+                return TryGetBindingRoot(postfix.Operand, out root);
+            case PrefixUnaryExpressionSyntax prefix
+                when prefix.IsKind(SyntaxKind.LogicalNotExpression):
+                return TryGetBindingRoot(prefix.Operand, out root);
+            case CastExpressionSyntax cast:
+                return TryGetBindingRoot(cast.Expression, out root);
+            case MemberAccessExpressionSyntax access
+                when access.Name is IdentifierNameSyntax:
+                return TryGetBindingRoot(access.Expression, out root);
+            case ElementAccessExpressionSyntax element
+                when element.ArgumentList.Arguments.All(argument =>
+                    IsConstantIndexerArgument(argument.Expression)):
+                return TryGetBindingRoot(element.Expression, out root);
+            default:
+                root = null!;
+                return false;
+        }
+    }
+
+    private static bool IsConstantIndexerArgument(ExpressionSyntax expression) => expression switch
+    {
+        LiteralExpressionSyntax => true,
+        ParenthesizedExpressionSyntax parenthesized => IsConstantIndexerArgument(parenthesized.Expression),
+        PrefixUnaryExpressionSyntax prefix when prefix.IsKind(SyntaxKind.UnaryMinusExpression) ||
+                                                prefix.IsKind(SyntaxKind.UnaryPlusExpression) =>
+            IsConstantIndexerArgument(prefix.Operand),
+        _ => false,
+    };
+
+    private static string? GetOrdinaryMemberType(string text) =>
+        SyntaxFactory.ParseMemberDeclaration(text) switch
+        {
+            FieldDeclarationSyntax field when field.Declaration.Variables.Count == 1 &&
+                                              field.Modifiers.Any(SyntaxKind.ReadOnlyKeyword) &&
+                                              !field.Modifiers.Any(SyntaxKind.StaticKeyword) =>
+                field.Declaration.Type.ToFullString().Trim(),
+            _ => null,
+        };
 
     private bool HasErrors =>
         _diagnostics.Items.Any(diagnostic =>

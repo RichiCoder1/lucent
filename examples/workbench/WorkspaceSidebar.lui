@@ -24,7 +24,7 @@ component WorkspaceSidebar(string workspace, WorkspaceSelectionController select
             template ItemTemplate(WorkspaceRow row) {
                 Border {
                     Padding: new Thickness(row.Depth * 16, 2, 2, 2);
-                    TextBlock { Text: row.Node.Name; }
+            TextBlock { Text: binding(row.Node.Name); }
                 }
             }
             Loaded: (sender, e) => selection.Attach(sender);

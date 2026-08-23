@@ -1,18 +1,160 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
+using Avalonia.Data;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Lucent.Examples.Workbench;
+using System.Collections;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 
 namespace Lucent.Workbench.Tests;
 
 [TestClass]
 public sealed class VirtualizationTests
 {
+    [TestMethod]
+    public async Task Coded_compiled_binding_follows_recycled_inherited_data_context()
+    {
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            var first = new BindingRow(new BindingNode("first"));
+            var second = new BindingRow(new BindingNode("second"));
+            var template = new FuncDataTemplate<BindingRow>((_, _) =>
+            {
+                var text = new TextBlock();
+                text.Bind(TextBlock.TextProperty,
+                    CompiledBinding.Create<BindingRow, string?>(row => row.Node!.Name));
+                return text;
+            }, true);
+
+            var recycling = (IRecyclingDataTemplate)template;
+            var root = recycling.Build(first, null)!;
+            root.DataContext = first;
+            Assert.AreEqual("first", ((TextBlock)root).Text);
+
+            var recycled = recycling.Build(second, root)!;
+            Assert.AreSame(root, recycled);
+            recycled.DataContext = second;
+            Assert.AreEqual("second", ((TextBlock)recycled).Text);
+
+            second.Node!.Name = "changed";
+            Assert.AreEqual("changed", ((TextBlock)recycled).Text);
+            second.Node = null;
+            Assert.IsNull(((TextBlock)recycled).Text);
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    public async Task Listbox_replaces_template_root_when_a_realized_item_changes()
+    {
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            var items = new ObservableCollection<BindingRow>([
+                new(new BindingNode("first")),
+                new(new BindingNode("second")),
+            ]);
+            var template = new FuncDataTemplate<BindingRow>((_, _) =>
+            {
+                var text = new TextBlock();
+                text.Bind(TextBlock.TextProperty,
+                    CompiledBinding.Create<BindingRow, string?>(row => row.Node!.Name));
+                return text;
+            }, true);
+            var list = new ListBox
+            {
+                Width = 300,
+                Height = 200,
+                ItemsSource = items,
+                ItemTemplate = template,
+            };
+            window.Content = list;
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            var original = list.GetVisualDescendants().OfType<TextBlock>()
+                .Single(text => text.Text == "first");
+
+            items[0] = new BindingRow(new BindingNode("replacement"));
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+
+            var replacement = list.GetVisualDescendants().OfType<TextBlock>()
+                .Single(text => text.Text == "replacement");
+            Assert.AreNotSame(original, replacement,
+                "Avalonia 12.1.1 ListBox does not pass the old root to its recycling template.");
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    public async Task Coded_compiled_binding_uses_native_default_two_way_mode()
+    {
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            var row = new BindingRow(new BindingNode("before"));
+            var textBox = new TextBox { DataContext = row };
+            textBox.Bind(TextBox.TextProperty,
+                CompiledBinding.Create<BindingRow, string?>(item => item.Node!.Name));
+            window.Content = textBox;
+
+            Assert.AreEqual("before", textBox.Text);
+            textBox.Text = "after";
+            Assert.AreEqual("after", row.Node!.Name);
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    public async Task Coded_compiled_binding_propagates_native_validation()
+    {
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            var node = new BindingNode("valid");
+            var textBox = new TextBox { DataContext = node };
+            textBox.Bind(TextBox.TextProperty,
+                CompiledBinding.Create<BindingNode, string?>(item => item.Name));
+            window.Content = textBox;
+
+            node.SetNameError("invalid name");
+            Dispatcher.UIThread.RunJobs();
+
+            Assert.IsTrue(textBox.GetValue(DataValidationErrors.HasErrorsProperty));
+            return Task.CompletedTask;
+        });
+    }
+
+    [TestMethod]
+    public async Task Explicit_compiled_binding_source_can_be_replaced_and_disposed()
+    {
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            var first = new BindingNode("first");
+            var second = new BindingNode("second");
+            var text = new TextBlock();
+            window.Content = text;
+
+            var binding = text.Bind(TextBlock.TextProperty,
+                CompiledBinding.Create<BindingNode, string?>(model => model.Name, source: first));
+            Assert.AreEqual("first", text.Text);
+
+            binding.Dispose();
+            binding = text.Bind(TextBlock.TextProperty,
+                CompiledBinding.Create<BindingNode, string?>(model => model.Name, source: second));
+            first.Name = "ignored";
+            second.Name = "replacement";
+            Assert.AreEqual("replacement", text.Text);
+
+            binding.Dispose();
+            second.Name = "disposed";
+            Assert.AreNotEqual("disposed", text.Text);
+            return Task.CompletedTask;
+        });
+    }
+
     [TestMethod]
     public void Workspace_selection_preserves_id_and_uses_sibling_parent_fallback()
     {
@@ -326,6 +468,59 @@ public sealed class VirtualizationTests
             root.AttachedToVisualTree += (_, _) => AttachedCount++;
             root.DetachedFromVisualTree += (_, _) => DetachedCount++;
             return root;
+        }
+    }
+
+    private sealed class BindingRow : INotifyPropertyChanged
+    {
+        private BindingNode? _node;
+
+        public BindingRow(BindingNode? node) => _node = node;
+
+        public BindingNode? Node
+        {
+            get => _node;
+            set
+            {
+                if (ReferenceEquals(_node, value)) return;
+                _node = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Node)));
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+    }
+
+    private sealed class BindingNode : INotifyPropertyChanged, INotifyDataErrorInfo
+    {
+        private string? _name;
+
+        public BindingNode(string? name) => _name = name;
+
+        public string? Name
+        {
+            get => _name;
+            set
+            {
+                if (_name == value) return;
+                _name = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+            }
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        public bool HasErrors { get; private set; }
+
+        public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
+
+        public IEnumerable GetErrors(string? propertyName) =>
+            HasErrors && propertyName == nameof(Name) ? new[] { "invalid name" } : [];
+
+        public void SetNameError(string message)
+        {
+            HasErrors = true;
+            ErrorsChanged?.Invoke(this, new DataErrorsChangedEventArgs(nameof(Name)));
         }
     }
 }

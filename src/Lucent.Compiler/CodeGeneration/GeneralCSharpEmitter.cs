@@ -60,7 +60,8 @@ internal static class GeneralCSharpEmitter
             .SelectMany(field => field.control.Members
                 .Where(member => member switch
                 {
-                    BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
+                    BoundPropertyMember property => property.NativeBinding is null &&
+                                                    property.Expression.Dependencies.Count > 0,
                     BoundAttachedPropertyMember attached => attached.Expression.Dependencies.Count > 0,
                     BoundContentMember content => content.Expression.Dependencies.Count > 0,
                     _ => false,
@@ -70,6 +71,15 @@ internal static class GeneralCSharpEmitter
                 binding.control, $"__lucent_control{binding.index}", binding.member, null, 0))
             .Concat(conditionals.SelectMany(ConditionalBindings))
             .Select((binding, index) => binding with { Index = index + 1 })
+            .ToArray();
+        var nativeBindings = fields.SelectMany(field => field.control.Members
+                .OfType<BoundPropertyMember>()
+                .Where(property => property.NativeBinding is { SourceKind: not BoundNativeBindingSourceKind.Item })
+                .Select(property => (Target: $"__lucent_control{field.index}", property)))
+            .Concat(conditionals.SelectMany(conditional => ConditionalControls(conditional)
+                .SelectMany(control => control.Control.Members.OfType<BoundPropertyMember>()
+                    .Where(property => property.NativeBinding is { SourceKind: not BoundNativeBindingSourceKind.Item })
+                    .Select(property => (Target: control.Name, property)))))
             .ToArray();
         writer.Line("#nullable enable");
         writer.Line();
@@ -112,6 +122,10 @@ internal static class GeneralCSharpEmitter
         foreach (var (control, index) in fields)
         {
             writer.Line($"private {control.TypeName}? __lucent_control{index};");
+        }
+        foreach (var nativeBinding in nativeBindings)
+        {
+            writer.Line($"private global::System.IDisposable? __lucent_nativeBinding{nativeBinding.property.NativeBinding!.Id};");
         }
 
         foreach (var site in componentSites)
@@ -207,7 +221,7 @@ internal static class GeneralCSharpEmitter
         }
         var initializers = ordinaryInitializers
             .Select(item => (Span: model.Members.First(member => member.Name == item.Name).Span.Start,
-                Statement: $"{item.Name} = {item.Expression};"))
+                Statement: $"{EscapeIdentifier(item.Name)} = {item.Expression};"))
             .Concat(model.States.Select(state => (Span: state.Span.Start,
                 Statement: $"{StateField(state.Name)} = {state.InitializerText};")))
             .OrderBy(item => item.Span)
@@ -241,6 +255,10 @@ internal static class GeneralCSharpEmitter
         foreach (var region in regions)
         {
             writer.Line($"__lucent_owner.OnDispose(__lucent_region{region.Index}.Clear);");
+        }
+        foreach (var nativeBinding in nativeBindings)
+        {
+            writer.Line($"__lucent_owner.OnDispose(() => __lucent_nativeBinding{nativeBinding.property.NativeBinding!.Id}?.Dispose());");
         }
         writer.Unindent();
         writer.Line("}");
@@ -278,6 +296,10 @@ internal static class GeneralCSharpEmitter
         foreach (var region in regions)
         {
             writer.Line($"__lucent_owner.OnDispose(__lucent_region{region.Index}.Clear);");
+        }
+        foreach (var nativeBinding in nativeBindings)
+        {
+            writer.Line($"__lucent_owner.OnDispose(() => __lucent_nativeBinding{nativeBinding.property.NativeBinding!.Id}?.Dispose());");
         }
         writer.Unindent();
         writer.Line("}");
@@ -440,10 +462,22 @@ internal static class GeneralCSharpEmitter
             var sourceId = model.Sources.First(source => source.Name == parameter.Name &&
                 source.Kind == BoundReactiveSourceKind.Parameter).Id;
             writer.Line($"if (__lucent_changed{Pascal(parameter.Name)}) __lucent_InvalidateSource{sourceId}();");
+            foreach (var nativeBinding in nativeBindings.Where(candidate =>
+                         candidate.property.NativeBinding!.SourceKind == BoundNativeBindingSourceKind.Parameter &&
+                         candidate.property.NativeBinding.SourceName == parameter.Name))
+            {
+                writer.Line($"if (__lucent_changed{Pascal(parameter.Name)}) __lucent_UpdateNativeBinding{nativeBinding.property.NativeBinding!.Id}();");
+            }
         }
         writer.Unindent();
         writer.Line("}");
         writer.Line();
+
+        foreach (var nativeBinding in nativeBindings)
+        {
+            EmitNativeBindingUpdater(writer, nativeBinding.Target, nativeBinding.property);
+            writer.Line();
+        }
 
         foreach (var (control, index) in fields)
         {
@@ -1129,6 +1163,13 @@ internal static class GeneralCSharpEmitter
         foreach (var property in control.Members.OfType<BoundPropertyMember>())
         {
             var target = $"__lucent_control{index}!";
+            if (property.NativeBinding is { SourceKind: not BoundNativeBindingSourceKind.Item } nativeBinding)
+            {
+                EmitLineMapping(writer, source, property.ExpressionSpan);
+                writer.Line($"__lucent_UpdateNativeBinding{nativeBinding.Id}();");
+                writer.Line("#line default");
+                continue;
+            }
             if (property.Name == "Class")
             {
                 if (property.Expression.Dependencies.Count > 0)
@@ -1419,7 +1460,8 @@ internal static class GeneralCSharpEmitter
             ConditionalBranchControls(region, roots, side).SelectMany(item => item.Control.Members
                 .Where(member => member switch
                 {
-                    BoundPropertyMember property => property.Expression.Dependencies.Count > 0,
+                    BoundPropertyMember property => property.NativeBinding is null &&
+                                                    property.Expression.Dependencies.Count > 0,
                     BoundAttachedPropertyMember attached => attached.Expression.Dependencies.Count > 0,
                     BoundContentMember content => content.Expression.Dependencies.Count > 0,
                     _ => false,
@@ -1566,10 +1608,16 @@ internal static class GeneralCSharpEmitter
             foreach (var (control, name) in controls)
             {
                 foreach (var property in control.Members.OfType<BoundPropertyMember>()
-                             .Where(property => property.Expression.Dependencies.Count == 0))
+                             .Where(property => property.NativeBinding is not null ||
+                                                property.Expression.Dependencies.Count == 0))
                 {
                     EmitLineMapping(output, sourceDocument, property.ExpressionSpan);
-                    if (property.Name == "Class")
+                    if (property.NativeBinding is { } nativeBinding)
+                    {
+                        output.Line($"__lucent_UpdateNativeBinding{nativeBinding.Id}();");
+                        output.Line($"branchOwner.OnDispose(() => {{ __lucent_nativeBinding{nativeBinding.Id}?.Dispose(); __lucent_nativeBinding{nativeBinding.Id} = null; }});");
+                    }
+                    else if (property.Name == "Class")
                     {
                         output.Line($"{name}!.Classes.Add({property.ExpressionText});");
                     }
@@ -1986,7 +2034,8 @@ internal static class GeneralCSharpEmitter
                 loop.ItemName,
                 model.States,
                 model.Computed,
-                source);
+                source,
+                "rowOwner");
         }
 
         foreach (var (control, index) in templateControls)
@@ -2031,7 +2080,8 @@ internal static class GeneralCSharpEmitter
                 loop.ItemName,
                 model.States,
                 model.Computed,
-                source);
+                source,
+                "rowOwner");
         }
 
         writer.Unindent();
@@ -2155,10 +2205,20 @@ internal static class GeneralCSharpEmitter
         string itemName,
         IReadOnlyList<BoundStateModel> states,
         IReadOnlyList<BoundComputedModel> computed,
-        SourceDocument source)
+        SourceDocument source,
+        string? owner = null)
     {
         foreach (var property in control.Members.OfType<BoundPropertyMember>())
         {
+            if (property.NativeBinding is not null)
+            {
+                if (owner is not null && property.NativeBinding.SourceKind != BoundNativeBindingSourceKind.Item)
+                {
+                    writer.Line($"global::System.IDisposable? __lucent_rowNativeBinding{property.NativeBinding.Id} = null;");
+                    writer.Line($"{owner}.OnDispose(() => __lucent_rowNativeBinding{property.NativeBinding.Id}?.Dispose());");
+                }
+                continue;
+            }
             if (property.Name == "Class")
             {
                 EmitLineMapping(writer, source, property.ExpressionSpan);
@@ -2204,10 +2264,35 @@ internal static class GeneralCSharpEmitter
         string itemName,
         IReadOnlyList<BoundStateModel> states,
         IReadOnlyList<BoundComputedModel> computed,
-        SourceDocument source)
+        SourceDocument source,
+        string? owner = null)
     {
         foreach (var property in control.Members.OfType<BoundPropertyMember>())
         {
+            if (property.NativeBinding is { SourceKind: BoundNativeBindingSourceKind.Item } nativeBinding)
+            {
+                EmitLineMapping(writer, source, property.ExpressionSpan);
+                writer.Line($"control{index}.Bind(" +
+                    $"{nativeBinding.TargetPropertyOwnerTypeName}.{nativeBinding.TargetPropertyFieldName}, " +
+                    $"global::Avalonia.Data.CompiledBinding.Create<{nativeBinding.SourceTypeName}, {property.TargetTypeName}>(" +
+                    $"{EscapeIdentifier(nativeBinding.SourceName)} => {nativeBinding.PathText}));");
+                writer.Line("#line default");
+                continue;
+            }
+            if (owner is not null && property.NativeBinding is { } explicitBinding)
+            {
+                var explicitSource = explicitBinding.SourceKind == BoundNativeBindingSourceKind.Parameter
+                    ? "__lucent_input" + Pascal(explicitBinding.SourceName)
+                    : EscapeIdentifier(explicitBinding.SourceName);
+                EmitLineMapping(writer, source, property.ExpressionSpan);
+                writer.Line($"__lucent_rowNativeBinding{explicitBinding.Id}?.Dispose();");
+                writer.Line($"__lucent_rowNativeBinding{explicitBinding.Id} = control{index}.Bind(" +
+                    $"{explicitBinding.TargetPropertyOwnerTypeName}.{explicitBinding.TargetPropertyFieldName}, " +
+                    $"global::Avalonia.Data.CompiledBinding.Create<{explicitBinding.SourceTypeName}, {property.TargetTypeName}>(" +
+                    $"{EscapeIdentifier(explicitBinding.SourceName)} => {explicitBinding.PathText}, source: {explicitSource}));");
+                writer.Line("#line default");
+                continue;
+            }
             if (property.Name == "Class" ||
                 (property.Expression.Dependencies.Count == 0 &&
                  !ReferencesItem(property.ExpressionText, itemName)))
@@ -2309,6 +2394,29 @@ internal static class GeneralCSharpEmitter
         writer.Line("return control1;");
         writer.Unindent();
         writer.Line("}, false);");
+    }
+
+    private static void EmitNativeBindingUpdater(
+        CodeWriter writer,
+        string target,
+        BoundPropertyMember property)
+    {
+        var binding = property.NativeBinding!;
+        var source = binding.SourceKind == BoundNativeBindingSourceKind.Parameter
+            ? "__lucent_input" + Pascal(binding.SourceName)
+            : EscapeIdentifier(binding.SourceName);
+        writer.Line($"private void __lucent_UpdateNativeBinding{binding.Id}()");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line($"__lucent_nativeBinding{binding.Id}?.Dispose();");
+        writer.Line($"__lucent_nativeBinding{binding.Id} = null;");
+        writer.Line($"if ({target} is null) return;");
+        writer.Line($"__lucent_nativeBinding{binding.Id} = {target}!.Bind(" +
+            $"{binding.TargetPropertyOwnerTypeName}.{binding.TargetPropertyFieldName}, " +
+            $"global::Avalonia.Data.CompiledBinding.Create<{binding.SourceTypeName}, {property.TargetTypeName}>(" +
+            $"{EscapeIdentifier(binding.SourceName)} => {binding.PathText}, source: {source}));");
+        writer.Unindent();
+        writer.Line("}");
     }
 
     private static void EmitReportedBody(CodeWriter writer, string body, string owner)

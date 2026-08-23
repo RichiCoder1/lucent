@@ -10,6 +10,215 @@ namespace Lucent.Compiler.Tests;
 public sealed class GeneralCompilerTests
 {
     [TestMethod]
+    public void Native_compiled_item_binding_uses_inherited_data_context()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(Uri item) { TextBlock { Text: binding(item.Host); } } };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!,
+            "control1.Bind(global::Avalonia.Controls.TextBlock.TextProperty");
+        StringAssert.Contains(result.GeneratedSource!,
+            "CompiledBinding.Create<global::System.Uri, string?>(item => item.Host)");
+        StringAssert.Contains(result.GeneratedSource!, "}, false);");
+    }
+
+    [TestMethod]
+    public void Native_binding_tooling_uses_the_item_scope_and_explains_the_seam()
+    {
+        const string source = "namespace Demo; using System; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(Uri item) { TextBlock { Text: binding(item.Host); } } };";
+        var memberOffset = source.IndexOf("item.Host", StringComparison.Ordinal) + "item.H".Length;
+        Assert.IsTrue(LucentCompiler.GetCompletions(source, memberOffset, "App.lui")
+            .Any(item => item.Label == "Host"));
+
+        var bindingOffset = source.IndexOf("binding", StringComparison.Ordinal) + 2;
+        var symbol = LucentCompiler.GetExpressionSymbol(source, bindingOffset, "App.lui");
+        Assert.IsNotNull(symbol);
+        StringAssert.Contains(symbol.Display, "inherited DataContext");
+        StringAssert.Contains(symbol.Documentation, "default BindingMode");
+    }
+
+    [TestMethod]
+    public void Mixed_item_template_binding_remains_non_recycling()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(Uri item) { StackPanel { TextBlock { Text: binding(item.Host); } TextBlock { Text: item.Port.ToString(); } } } };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "}, false);");
+    }
+
+    [TestMethod]
+    public void Native_binding_rejects_unsupported_paths()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(Uri item) { TextBlock { Text: binding(item.ToString()); } } };",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("supports property paths", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Item_template_binding_requires_the_item_root()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; using Avalonia.Controls; component App(Uri model) => ListBox { template ItemTemplate(Uri item) { TextBlock { Text: binding(model.Host); } } };",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("must start with its typed item local 'item'", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Native_binding_accepts_nested_indexed_cast_and_not_paths()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(Uri item) { StackPanel { TextBlock { Text: binding(item.Segments[0]); } Border { IsVisible: binding(!item.IsFile); Tag: binding((object)item.Host); } } } };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "item => item.Segments[0]");
+        StringAssert.Contains(result.GeneratedSource!, "item => !item.IsFile");
+        StringAssert.Contains(result.GeneratedSource!, "item => (object)item.Host");
+    }
+
+    [TestMethod]
+    public void Native_binding_resolves_project_defined_avalonia_properties_semantically()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-binding-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "Models.cs");
+            File.WriteAllText(sourcePath,
+                "namespace Demo; public sealed class Model { public string Name { get; set; } = string.Empty; } " +
+                "public sealed class FakeControl : Avalonia.Controls.Control { " +
+                "public static readonly Avalonia.StyledProperty<string?> AccentProperty = Avalonia.AvaloniaProperty.Register<FakeControl, string?>(nameof(Accent)); " +
+                "public string? Accent { get => GetValue(AccentProperty); set => SetValue(AccentProperty, value); } }");
+
+            const string lucent = "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(Model item) { FakeControl { Accent: binding(item.Name); } } };";
+            var result = LucentCompiler.Compile(
+                lucent,
+                "App.lui",
+                new LucentProjectContext(SourcePaths: [sourcePath]));
+
+            Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+            StringAssert.Contains(result.GeneratedSource!,
+                "global::Demo.FakeControl.AccentProperty");
+            var symbol = LucentCompiler.GetExpressionSymbol(
+                lucent,
+                lucent.IndexOf("item.Name", StringComparison.Ordinal) + "item.".Length,
+                result);
+            Assert.IsNotNull(symbol?.Definition);
+            Assert.AreEqual(sourcePath, symbol.Definition.SourcePath);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void Native_binding_rejects_clr_only_targets()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-binding-target-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "PlainControl.cs");
+            File.WriteAllText(sourcePath,
+                "namespace Demo; public sealed class PlainControl : Avalonia.Controls.Control { public string? Plain { get; set; } }");
+            var result = LucentCompiler.Compile(
+                "namespace Demo; component App(string model) => PlainControl { Plain: binding(model.Length); };",
+                "App.lui",
+                new LucentProjectContext(SourcePaths: [sourcePath]));
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+                diagnostic.Message.Contains("no public Avalonia property identifier", StringComparison.Ordinal)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void Explicit_native_binding_owns_and_replaces_parameter_sources()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; using Avalonia.Controls; component App(Uri model) { private readonly Uri fallback = new(\"https://example.com\"); Fragment Render() => StackPanel { TextBlock { Text: binding(model.Host); } TextBlock { Text: binding(fallback.Host); } }; }",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "source: __lucent_inputModel");
+        StringAssert.Contains(result.GeneratedSource!, "source: fallback");
+        StringAssert.Contains(result.GeneratedSource!, "__lucent_nativeBinding1?.Dispose();");
+        StringAssert.Contains(result.GeneratedSource!, "if (__lucent_changedModel) __lucent_UpdateNativeBinding1();");
+    }
+
+    [TestMethod]
+    public void Keyed_parameter_binding_replaces_live_row_sources_on_input_change()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; component App(Uri model) { private readonly Uri[] items = [new Uri(\"https://example.com\")]; Fragment Render() => StackPanel { foreach (var item in items) keyed by item { TextBlock { Text: binding(model.Host); } } }; }",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var generated = result.GeneratedSource!;
+        StringAssert.Contains(generated, "global::System.IDisposable? __lucent_rowNativeBinding1 = null;");
+        StringAssert.Contains(generated, "__lucent_rowNativeBinding1?.Dispose();");
+        StringAssert.Contains(generated, "source: __lucent_inputModel");
+        var invalidation = generated[generated.IndexOf("private void __lucent_InvalidateSource0", StringComparison.Ordinal)..];
+        StringAssert.Contains(invalidation, "__lucent_UpdateRegion1();");
+    }
+
+    [TestMethod]
+    public void Conditional_native_binding_has_one_scheduler()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; component App(Uri model) => ContentControl { if (true) { TextBlock { Text: binding(model.Host); } } };",
+            "App.lui");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "__lucent_UpdateNativeBinding1");
+        Assert.IsFalse(result.GeneratedSource!.Contains(
+            "private void __lucent_UpdateBinding", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Native_binding_rejects_getter_properties_as_unstable_sources()
+    {
+        var result = LucentCompiler.Compile(
+            "namespace Demo; using System; component App() { private Uri model => new(\"https://example.com\"); Fragment Render() => TextBlock { Text: binding(model.Host); }; }",
+            "App.lui");
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+            diagnostic.Message.Contains("stable ordinary component member", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void Explicit_native_binding_in_delayed_slot_is_diagnosed()
+    {
+        var result = LucentCompiler.CompileProject([
+            new LucentSourceInput("Shell.lui",
+                "namespace Demo; component Shell() { slot body; Fragment Render() => Border { yield body; }; }"),
+            new LucentSourceInput("App.lui",
+                "namespace Demo; using System; component App(Uri model) => Shell { slot body { TextBlock { Text: binding(model.Host); } } };")
+        ]);
+
+        Assert.IsFalse(result.Succeeded);
+        Assert.IsTrue(result.Sources.SelectMany(source => source.Result.Diagnostics).Any(diagnostic =>
+            diagnostic.Message.Contains("delayed slot content", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     public void Direct_native_roots_emit_typed_mount_root_and_generated_code_attribute()
     {
         var result = LucentCompiler.Compile(

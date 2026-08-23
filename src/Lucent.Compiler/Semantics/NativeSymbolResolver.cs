@@ -111,6 +111,21 @@ internal sealed class NativeSymbolResolver
             GetNativeValueKind(property.Type));
     }
 
+    public ResolvedAvaloniaProperty? ResolveAvaloniaProperty(
+        ResolvedNativeControl control,
+        ResolvedNativeProperty property)
+    {
+        var fields = GetNearestMembers<IFieldSymbol>(control.Symbol, property.Name + "Property")
+            .Where(field => field is { IsStatic: true, DeclaredAccessibility: Accessibility.Public } &&
+                            IsAvaloniaProperty(field.Type))
+            .ToArray();
+        return fields.Length == 1
+            ? new ResolvedAvaloniaProperty(
+                fields[0].ContainingType.ToDisplayString(FullyQualifiedFormat),
+                fields[0].Name)
+            : null;
+    }
+
     public bool RequiresStringConstructor(ITypeSymbol targetType) =>
         !_compilation.ClassifyConversion(_stringType!, targetType).IsImplicit &&
         targetType is INamedTypeSymbol { IsAbstract: false } named &&
@@ -825,6 +840,10 @@ internal sealed record ResolvedNativeProperty(
     IPropertySymbol Symbol,
     string TypeName,
     BoundNativeValueKind NativeValueKind);
+
+internal sealed record ResolvedAvaloniaProperty(
+    string OwnerTypeName,
+    string FieldName);
 
 internal sealed record ResolvedNativeAttachedProperty(
     string SourceName,
