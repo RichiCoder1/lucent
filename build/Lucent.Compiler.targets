@@ -7,34 +7,44 @@
     <ProjectReference Include="$(LucentRuntimeProject)" />
   </ItemGroup>
 
-  <!-- ponytail: design-time uses the last successful output directory; Plan 008 adds a generated manifest when project invalidation lands. -->
-  <ItemGroup Condition="'$(DesignTimeBuild)' == 'true' and '@(LucentSource)' != ''">
-    <Compile Include="$(LucentCompilerOutputDirectory)*Component.g.cs"
-             AutoGen="true"
-             DesignTime="true"
-             Visible="false" />
-  </ItemGroup>
+  <PropertyGroup>
+    <_LucentCompilerManifestFullPath Condition="$([System.IO.Path]::IsPathFullyQualified('$(LucentCompilerManifestPath)'))">$(LucentCompilerManifestPath)</_LucentCompilerManifestFullPath>
+    <_LucentCompilerManifestFullPath Condition="'$(_LucentCompilerManifestFullPath)' == ''">$(MSBuildProjectDirectory)\$(LucentCompilerManifestPath)</_LucentCompilerManifestFullPath>
+  </PropertyGroup>
+
+  <!-- The last successful manifest is imported only by the next design-time
+       evaluation. It is atomic and contains no stale wildcard outputs. -->
+  <Import Project="$(_LucentCompilerManifestFullPath)"
+          Condition="'$(DesignTimeBuild)' == 'true' and Exists('$(_LucentCompilerManifestFullPath)')" />
 
   <!-- ponytail: generation always runs; add an output manifest when generation time is measurable. -->
   <Target
     Name="GenerateLucent"
     BeforeTargets="CoreCompile"
     DependsOnTargets="ResolveReferences;GenerateGlobalUsings"
-    Condition="'$(LucentCompilerEnabled)' == 'true' and '@(LucentSource)' != '' and '$(DesignTimeBuild)' != 'true'">
+    Condition="'$(LucentCompilerEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'">
     <MakeDir Directories="$(LucentCompilerOutputDirectory)" />
 
     <CompileLucent
       Sources="@(LucentSource)"
       OutputDirectory="$(LucentCompilerOutputDirectory)"
+      ManifestPath="$(LucentCompilerManifestPath)"
       References="@(ReferencePathWithRefAssemblies)"
       CSharpSources="@(Compile)"
-      ProjectPath="$(MSBuildProjectFullPath)">
+      ProjectPath="$(MSBuildProjectFullPath)"
+      TargetFramework="$(TargetFramework)"
+      LanguageVersion="$(LangVersion)"
+      Nullable="$(Nullable)"
+      DefineConstants="$(DefineConstants)"
+      GlobalUsings="@(Using)"
+      ProjectReferences="@(ProjectReference)">
       <Output TaskParameter="GeneratedFiles" ItemName="_LucentGeneratedFiles" />
     </CompileLucent>
 
     <ItemGroup>
       <Compile Include="@(_LucentGeneratedFiles)" AutoGen="true" />
       <FileWrites Include="@(_LucentGeneratedFiles)" />
+      <FileWrites Include="$(LucentCompilerManifestPath)" />
     </ItemGroup>
   </Target>
 </Project>

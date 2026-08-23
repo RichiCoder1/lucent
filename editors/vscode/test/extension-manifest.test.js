@@ -34,6 +34,16 @@ test('manifest packages the language client runtime', () => {
         ['off', 'messages', 'verbose']);
 });
 
+test('client forwards semantic project file changes to the server', () => {
+    const source = fs.readFileSync(
+        path.join(extensionRoot, 'extension.js'),
+        'utf8');
+
+    assert.match(source, /createFileSystemWatcher/);
+    assert.match(source, /cs,csproj,props,targets,lui,css/);
+    assert.match(source, /fileEvents:\s*projectFiles/);
+});
+
 test('grammar and language configuration are valid JSON with Lucent constructs', () => {
     const grammar = readJson('syntaxes/lucent.tmLanguage.json');
     const configuration = readJson('language-configuration.json');

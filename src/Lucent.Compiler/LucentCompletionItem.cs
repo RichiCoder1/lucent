@@ -21,4 +21,7 @@ public sealed record LucentCompletionItem(
     string Detail,
     string InsertText,
     string? Documentation = null,
-    bool IsSnippet = false);
+    bool IsSnippet = false,
+    string? SortText = null,
+    string? FilterText = null,
+    bool IsDeprecated = false);

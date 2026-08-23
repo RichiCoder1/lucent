@@ -187,7 +187,7 @@ internal sealed class CSharpIslandBinder(
 
         var tree = CSharpSyntaxTree.ParseText(
             text.ToString(),
-            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview));
+            project.ParseOptions);
         var compilation = project.Compilation.AddSyntaxTrees(tree);
         var model = compilation.GetSemanticModel(tree);
         var root = tree.GetRoot();

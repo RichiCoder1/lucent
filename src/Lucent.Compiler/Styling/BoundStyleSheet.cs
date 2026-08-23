@@ -8,7 +8,8 @@ internal sealed record BoundStyleSheet(
 
 internal sealed record BoundStyleRule(
     BoundStyleSelector Selector,
-    IReadOnlyList<BoundStyleDeclaration> Declarations)
+    IReadOnlyList<BoundStyleDeclaration> Declarations,
+    int SelectorOffset = 0)
 {
     public IReadOnlyList<string> TargetTypeNames { get; init; } = [];
     public string? TypeName => Selector.Terminal.TypeName;

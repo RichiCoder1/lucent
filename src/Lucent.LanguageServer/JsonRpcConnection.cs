@@ -112,10 +112,16 @@ internal sealed class JsonRpcConnection(Stream input, Stream output)
             SerializerOptions);
         var header = Encoding.ASCII.GetBytes(
             $"Content-Length: {payload.Length}\r\n\r\n");
+        var frame = new byte[header.Length + payload.Length];
+        header.CopyTo(frame, 0);
+        payload.CopyTo(frame, header.Length);
 
-        await _output.WriteAsync(header, cancellationToken);
-        await _output.WriteAsync(payload, cancellationToken);
-        await _output.FlushAsync(cancellationToken);
+        // A cancelled request must not leave half a JSON-RPC frame on stdout.
+        // Observe cancellation before publication, then make publication one
+        // indivisible, non-request-cancellable write.
+        cancellationToken.ThrowIfCancellationRequested();
+        await _output.WriteAsync(frame, CancellationToken.None);
+        await _output.FlushAsync(CancellationToken.None);
     }
 
     private static int ParseContentLength(ReadOnlySpan<byte> header)

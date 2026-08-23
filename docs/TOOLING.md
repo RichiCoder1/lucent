@@ -61,10 +61,14 @@ Async-boundary fallback islands use the same project semantic model. The named
 inside its fallback branch; computed status facets and `Refresh()` use the same
 symbol-aware member intelligence as `Value`.
 
-Useful follow-ups include Lucent-to-C# navigation, CSS class/token completion,
-signature help, metadata-as-source, document symbols,
-references, rename, reactive dependency inspection, and Lucent component
-navigation.
+The server also supports deterministic document formatting (line-ending and
+trailing-whitespace normalization) and a versioned `lucent/sourceMap` request
+for generated-code tooling. The request requires the generated-content hash;
+stale generated text intentionally receives no map. Generated C# remains owned
+by installed C# tooling rather than this server.
+
+Useful follow-ups include signature help, metadata-as-source, references,
+rename, reactive dependency inspection, and richer component navigation.
 
 ## Diagnostics
 
@@ -87,6 +91,61 @@ The diagnostic model needs source spans and concepts for components, render meth
 The custom format needs a formatter early enough that syntax discussions are not distorted by hand-formatted examples. Formatting must preserve stable output and should be based on the shared syntax tree.
 
 Generated C# should include deterministic names and source mappings. Developers need to debug application behavior without treating generated code as the primary authoring surface, while framework contributors still need generated output that is readable enough to inspect.
+
+## Project cache and benchmark
+
+The shared frontend retains at most eight immutable project Roslyn bases, keyed
+by project inputs, global usings, reference identities, and C# source content.
+It reuses a base across Lucent edits, evicts least-recently-used bases, and can
+never publish a result from a different input generation. The language-server
+batch remains project-scoped; open buffers overlay disk sources.
+
+`tools/Lucent.LanguageServer.Benchmarks` runs 500 sequential JSON-RPC completion
+requests and 500 edit-then-completion cycles in Release. Its checked-in fixture,
+workload, baseline, and final evidence are under `tools/Lucent.LanguageServer.Benchmarks`
+and `docs/quality/008-tooling`. Reproduce with:
+
+```powershell
+$env:LUCENT_DISABLE_BASE_CACHE = "1"
+$env:LUCENT_DISABLE_INCREMENTAL_REBIND = "1"
+dotnet run --project tools/Lucent.LanguageServer.Benchmarks -c Release -- docs/quality/008-tooling/baseline.json
+Remove-Item Env:LUCENT_DISABLE_BASE_CACHE
+Remove-Item Env:LUCENT_DISABLE_INCREMENTAL_REBIND
+dotnet run --project tools/Lucent.LanguageServer.Benchmarks -c Release -- docs/quality/008-tooling/final.json
+```
+
+The environment switch exists only to capture a comparable pre-cache baseline;
+normal server execution always uses the bounded cache.
+
+## Native-C# quality matrix
+
+`NativeCSharpQualityMatrixTests.Supported_native_csharp_quality_cells_execute_protocol_assertions`
+is the bounded parity matrix for Lucent's supported authoring seams, not a claim
+of full C# language-service parity. It opens real documents and asserts LSP
+completion shape and hover output for each matrix cell.
+`NativeCSharpQualityMatrixTests.Matrix_executes_malformed_utf16_unsaved_overlay_and_generation_freshness`
+owns malformed, astral UTF-16, open-overlay, and newest-generation behavior.
+`NativeCSharpQualityMatrixTests.Project_member_completion_exposes_native_csharp_quality_indicators`
+owns deterministic sort/filter text, generic signatures, nullable displays,
+obsolete tags, XML documentation, hover, and source definitions.
+`NativeCSharpQualityMatrixTests.Project_xml_documentation_is_rendered_without_generated_qualification`
+owns the complete project XML-doc rendering contract. Together they exercise
+the protocol assertions named above. CSS, source maps, trigger characters,
+diagnostics, and component-only rename are separately owned by explicit
+`LanguageServerProtocolTests` fixtures. All asserted native display text is
+clean of generated `global::` qualification. Request execution remains serial
+to protect project generations, while a dedicated reader recognizes
+`$/cancelRequest` concurrently and cancels only the matching request. Cancelled
+requests return JSON-RPC/LSP error `-32800` and cannot publish a stale result.
+The VS Code client also watches C#, project, props/targets, Lucent, and adjacent
+CSS files. A watched change invalidates and rebuilds the affected open project
+generation before the next completion request; completion itself performs no
+filesystem or project-loading work.
+
+CSS selector/resource/token completion and navigation use the shared compiler
+catalog. Deliberately, CSS class *values* in `Class:` have no completion: a
+class name is authored in Lucent, while selector semantics are provided in its
+adjacent CSS file.
 
 ## Hot reload
 

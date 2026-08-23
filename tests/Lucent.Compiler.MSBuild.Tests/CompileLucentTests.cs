@@ -98,6 +98,75 @@ public sealed class CompileLucentTests
     }
 
     [TestMethod]
+    public void Evaluated_project_semantic_settings_flow_to_the_compiler_task()
+    {
+        using var temporary = new TemporaryDirectory();
+        var model = Path.Combine(temporary.Path, "Feature.cs");
+        var source = Path.Combine(temporary.Path, "App.lui");
+        File.WriteAllText(model, "#if FEATURE\nnamespace Demo; public static class Feature { public static string? Name => \"ok\"; }\n#endif");
+        File.WriteAllText(source, "namespace Ui; component App() => TextBlock { Text: Feature.Name; };");
+        var (task, engine) = CreateTask(temporary, source);
+        task.ProjectPath = Path.Combine(temporary.Path, "Consumer.csproj");
+        task.CSharpSources = [new TaskItem(model)];
+        task.GlobalUsings = [new TaskItem("Demo")];
+        task.TargetFramework = "net9.0";
+        task.LanguageVersion = "12.0";
+        task.Nullable = "enable";
+        task.DefineConstants = "FEATURE";
+
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        Assert.IsEmpty(engine.Errors);
+    }
+
+    [TestMethod]
+    public void Generated_manifest_is_atomic_and_contains_only_current_outputs()
+    {
+        using var temporary = new TemporaryDirectory();
+        var first = Path.Combine(temporary.Path, "First.lui");
+        var second = Path.Combine(temporary.Path, "Second.lui");
+        File.WriteAllText(first, "namespace Demo; component First() => Border {}; ");
+        File.WriteAllText(second, "namespace Demo; component Second() => Border {}; ");
+        var engine = new CapturingBuildEngine();
+        var task = new CompileLucent
+        {
+            BuildEngine = engine,
+            Sources = [new TaskItem(first), new TaskItem(second)],
+            OutputDirectory = temporary.OutputDirectory,
+        };
+
+        Assert.IsTrue(task.Execute());
+        task.Sources = [new TaskItem(second)];
+        Assert.IsTrue(task.Execute());
+
+        var manifest = File.ReadAllText(Path.Combine(temporary.OutputDirectory, "Lucent.GeneratedFiles.props"));
+        StringAssert.Contains(manifest, "SecondComponent.g.cs");
+        Assert.IsFalse(manifest.Contains("FirstComponent.g.cs", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void Removing_the_last_source_replaces_manifest_with_no_compile_items()
+    {
+        using var temporary = new TemporaryDirectory();
+        var source = Path.Combine(temporary.Path, "Only.lui");
+        File.WriteAllText(source, "namespace Demo; component Only() => Border {}; ");
+        var task = new CompileLucent
+        {
+            BuildEngine = new CapturingBuildEngine(),
+            Sources = [new TaskItem(source)],
+            OutputDirectory = temporary.OutputDirectory,
+        };
+
+        Assert.IsTrue(task.Execute());
+        task.Sources = [];
+        Assert.IsTrue(task.Execute());
+
+        var manifest = File.ReadAllText(Path.Combine(temporary.OutputDirectory,
+            "Lucent.GeneratedFiles.props"));
+        Assert.IsFalse(manifest.Contains("Compile Include", StringComparison.Ordinal));
+        Assert.HasCount(0, task.GeneratedFiles);
+    }
+
+    [TestMethod]
     public void Caller_before_callee_is_compiled_as_one_batch()
     {
         using var temporary = new TemporaryDirectory();
@@ -367,6 +436,51 @@ public sealed class CompileLucentTests
             "-p:Configuration=Debug", "-nologo");
         Assert.AreEqual(0, designTime.ExitCode, designTime.Output);
         StringAssert.Contains(designTime.Output, "SettingsPaneComponent.g.cs");
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Design_time_manifest_drops_renamed_and_deleted_final_lucent_sources()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        var project = Path.Combine(temporary.Path, "Consumer.csproj");
+        var first = Path.Combine(temporary.Path, "First.lui");
+        var second = Path.Combine(temporary.Path, "Second.lui");
+        await File.WriteAllTextAsync(first, "namespace Demo; component First() => Border {}; ");
+
+        async System.Threading.Tasks.Task WriteProjectAsync(string sources) => await File.WriteAllTextAsync(project, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                {{sources}}
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        await WriteProjectAsync("<LucentSource Include=\"First.lui\" />");
+        var initial = await RunDotNetAsync(temporary.Path, "build", project, "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, initial.ExitCode, initial.Output);
+
+        File.Move(first, second);
+        await WriteProjectAsync("<LucentSource Include=\"Second.lui\" />");
+        var renamed = await RunDotNetAsync(temporary.Path, "build", project, "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, renamed.ExitCode, renamed.Output);
+        var designTime = await RunDotNetAsync(temporary.Path, "msbuild", project, "-getItem:Compile", "-p:DesignTimeBuild=true", "-nologo");
+        Assert.AreEqual(0, designTime.ExitCode, designTime.Output);
+        StringAssert.Contains(designTime.Output, "SecondComponent.g.cs");
+        Assert.IsFalse(designTime.Output.Contains("FirstComponent.g.cs", StringComparison.Ordinal));
+
+        File.Delete(second);
+        await WriteProjectAsync(string.Empty);
+        var deleted = await RunDotNetAsync(temporary.Path, "build", project, "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, deleted.ExitCode, deleted.Output);
+        designTime = await RunDotNetAsync(temporary.Path, "msbuild", project, "-getItem:Compile", "-p:DesignTimeBuild=true", "-nologo");
+        Assert.AreEqual(0, designTime.ExitCode, designTime.Output);
+        Assert.IsFalse(designTime.Output.Contains("SecondComponent.g.cs", StringComparison.Ordinal));
     }
 
     [TestMethod]

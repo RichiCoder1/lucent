@@ -110,7 +110,8 @@ internal sealed partial class StyleSheetParser(string text, string path)
                     selector.Parts,
                     selector.Combinators,
                     selector.PseudoClass),
-                declarations));
+                declarations,
+                rule.Offset));
         }
 
         return new BoundStyleSheet(boundRules);

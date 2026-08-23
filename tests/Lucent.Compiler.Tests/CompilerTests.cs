@@ -6,6 +6,71 @@ namespace Lucent.Compiler.Tests;
 public sealed class CompilerTests
 {
     [TestMethod]
+    public void Source_map_preserves_exact_unicode_ranges_and_real_multi_origin_provenance()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-source-map-{Guid.NewGuid():N}");
+        var sourcePath = Path.Combine(directory, "App.lui");
+        var generatedPath = Path.Combine(directory, "obj", "AppComponent.g.cs");
+        const string source = """
+            namespace Demo;
+            using System;
+            component App(Uri model) =>
+                TextBlock {
+                    Name: "😀";
+                    Text: binding(model.Host);
+                };
+            """;
+
+        var result = LucentCompiler.CompileProject(
+            [new LucentSourceInput(sourcePath, source, GeneratedOutputPath: generatedPath)])
+            .Sources.Single().Result;
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        var map = result.SourceMap!;
+        var generated = result.GeneratedSource!;
+        Assert.AreEqual(new Uri(Path.GetFullPath(sourcePath)).AbsoluteUri,
+            map.Entries[0].LucentUri);
+        Assert.AreEqual(new Uri(Path.GetFullPath(generatedPath)).AbsoluteUri,
+            map.Entries[0].GeneratedUri);
+        Assert.AreNotEqual(map.Entries[0].LucentUri, map.Entries[0].GeneratedUri);
+        Assert.HasCount(map.Entries.Count, map.Entries.Distinct());
+        CollectionAssert.AreEqual(map.Entries.OrderBy(entry => entry.GeneratedUri, StringComparer.Ordinal)
+            .ThenBy(entry => entry.GeneratedRange.StartLine)
+            .ThenBy(entry => entry.GeneratedRange.StartCharacter)
+            .ThenBy(entry => entry.GeneratedRange.EndLine)
+            .ThenBy(entry => entry.GeneratedRange.EndCharacter)
+            .ThenBy(entry => entry.LucentUri, StringComparer.Ordinal)
+            .ThenBy(entry => entry.LucentRange.StartLine)
+            .ThenBy(entry => entry.LucentRange.StartCharacter)
+            .ToArray(), map.Entries.ToArray());
+
+        var unicode = map.Entries.Single(entry => Slice(source, entry.LucentRange) == "\"😀\"");
+        Assert.AreEqual("\"😀\"".Length,
+            unicode.LucentRange.EndCharacter - unicode.LucentRange.StartCharacter,
+            "An astral character occupies two UTF-16 code units.");
+        Assert.AreEqual("\"😀\"", Slice(source, unicode.LucentRange));
+        Assert.IsTrue(Slice(generated, unicode.GeneratedRange).Contains("\"😀\"", StringComparison.Ordinal));
+
+        var binding = map.Entries.Where(entry =>
+            Slice(source, entry.LucentRange) == "model.Host").ToArray();
+        Assert.IsGreaterThanOrEqualTo(2, binding.Select(entry => entry.GeneratedRange).Distinct().Count(),
+            "The native binding source is emitted both at setup and in its owned updater.");
+        Assert.IsTrue(map.Entries.GroupBy(entry => entry.GeneratedRange).Any(group =>
+            group.Select(entry => Slice(source, entry.LucentRange)).Contains("model.Host") &&
+            group.Select(entry => Slice(source, entry.LucentRange)).Any(span =>
+                span.Contains("Text: binding(model.Host)", StringComparison.Ordinal))),
+            "The generated Bind statement combines the property target and expression origins.");
+
+        foreach (var entry in map.Entries)
+        {
+            var mapped = Slice(generated, entry.GeneratedRange).Trim();
+            Assert.IsFalse(mapped.StartsWith("#line", StringComparison.Ordinal));
+            Assert.IsFalse(mapped is "{" or "}");
+            Assert.IsFalse(mapped.StartsWith("private ", StringComparison.Ordinal));
+        }
+    }
+
+    [TestMethod]
     public void Counter_parses_and_generates_without_diagnostics()
     {
         var source = File.ReadAllText(RepositoryPaths.CounterSource);
@@ -134,6 +199,24 @@ public sealed class CompilerTests
             diagnostic.Message.Contains(
                 "only one 'Class'",
                 StringComparison.Ordinal)));
+    }
+
+    private static string Slice(string text, LucentSourceMapRange range)
+    {
+        var start = Offset(text, range.StartLine, range.StartCharacter);
+        var end = Offset(text, range.EndLine, range.EndCharacter);
+        return text[start..end];
+    }
+
+    private static int Offset(string text, int line, int character)
+    {
+        var offset = 0;
+        for (var current = 0; current < line; current++)
+        {
+            offset = text.IndexOf('\n', offset) + 1;
+            Assert.IsGreaterThan(0, offset);
+        }
+        return offset + character;
     }
 
     [TestMethod]

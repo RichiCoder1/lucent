@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Lucent.Compiler;
 using Lucent.LanguageServer;
 
@@ -49,6 +50,32 @@ public sealed class LanguageServerProtocolTests
         {
             File.Delete(sourcePath);
         }
+    }
+
+    [TestMethod]
+    public async Task Benchmark_metrics_use_nonnegative_process_wide_allocations()
+    {
+        const string source = "namespace Demo; component App() => TextBlock {};";
+        var path = Path.Combine(Path.GetTempPath(), $"lucent-metrics-{Guid.NewGuid():N}.lui");
+        await File.WriteAllTextAsync(path, source);
+        try
+        {
+            var uri = new Uri(path).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionOf(source, "TextBlock") }),
+                Request(3, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+            var metrics = new List<LanguageServerRequestMetric>();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output, metrics.Add));
+            Assert.IsTrue(metrics.All(metric => metric.AllocatedBytes >= 0));
+            Assert.IsTrue(metrics.Single(metric => metric.Method == "textDocument/completion").AllocatedBytes > 0);
+        }
+        finally { File.Delete(path); }
     }
 
     [TestMethod]
@@ -537,6 +564,35 @@ public sealed class LanguageServerProtocolTests
     }
 
     [TestMethod]
+    public async Task Every_advertised_completion_trigger_executes_a_protocol_completion()
+    {
+        const string uri = "file:///Triggers.lui";
+        const string source = "namespace Demo; component App() => TextBlock { Text: string.Em; };";
+        var position = PositionAtOffset(
+            source,
+            source.IndexOf("string.Em", StringComparison.Ordinal) + "string.Em".Length);
+        using var input = BuildInput(
+            Request(1, "initialize", new { capabilities = new { } }),
+            Notification("initialized", new { }),
+            Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+            Request(2, "textDocument/completion", new { textDocument = new { uri }, position, context = new { triggerKind = 2, triggerCharacter = ":" } }),
+            Request(3, "textDocument/completion", new { textDocument = new { uri }, position, context = new { triggerKind = 2, triggerCharacter = "." } }),
+            Request(4, "textDocument/completion", new { textDocument = new { uri }, position, context = new { triggerKind = 2, triggerCharacter = "(" } }),
+            Request(5, "textDocument/completion", new { textDocument = new { uri }, position, context = new { triggerKind = 2, triggerCharacter = "," } }),
+            Request(6, "shutdown", null),
+            Notification("exit", null));
+        using var output = new MemoryStream();
+
+        Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+        var messages = ReadMessages(output.ToArray());
+        for (var id = 2; id <= 5; id++)
+        {
+            Assert.IsTrue(Response(messages, id).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Empty"));
+        }
+    }
+
+    [TestMethod]
     public async Task Did_change_republishes_diagnostics_and_close_clears_them()
     {
         var uri = "file:///Counter.lui";
@@ -971,13 +1027,38 @@ public sealed class LanguageServerProtocolTests
         var values = Response(messages, 3).GetProperty("result").EnumerateArray().ToArray();
         Assert.IsTrue(values.Any(item =>
             item.GetProperty("label").GetString() == "Orientation.Horizontal"));
-        StringAssert.Contains(
-            Response(messages, 4)
-                .GetProperty("result")
-                .GetProperty("contents")
-                .GetProperty("value")
-                .GetString()!,
-            "Orientation.Horizontal");
+        var valueHover = Response(messages, 4)
+            .GetProperty("result")
+            .GetProperty("contents")
+            .GetProperty("value")
+            .GetString()!;
+        StringAssert.Contains(valueHover, "Orientation.Horizontal");
+        Assert.IsFalse(valueHover.Contains("global::", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Project_context_keeps_non_lucent_generated_compile_inputs()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-generated-context", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(directory, "obj"));
+        try
+        {
+            var project = Path.Combine(directory, "Example.csproj");
+            var lucent = Path.Combine(directory, "Main.lui");
+            var generated = Path.Combine(directory, "obj", "OtherGenerator.g.cs");
+            await File.WriteAllTextAsync(lucent, "namespace Demo;");
+            await File.WriteAllTextAsync(generated, "namespace Demo; public static class OtherGenerator { public static string Value => \"ok\"; }");
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"Main.lui\"/><Compile Include=\"obj/OtherGenerator.g.cs\" AutoGen=\"true\"/></ItemGroup></Project>");
+            var loader = new ProjectContextLoader();
+            using var initialize = JsonDocument.Parse("{}");
+            loader.Configure(initialize.RootElement);
+
+            var context = await loader.LoadAsync(lucent, CancellationToken.None);
+
+            Assert.IsNotNull(context);
+            Assert.IsTrue(context.Sources.Contains(generated));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
     }
 
     [TestMethod]
@@ -1263,6 +1344,438 @@ public sealed class LanguageServerProtocolTests
         }
     }
 
+    [TestMethod]
+    public async Task Formatting_is_advertised_and_idempotent()
+    {
+        var sourcePath = Path.Combine(Path.GetTempPath(), $"lucent-format-{Guid.NewGuid():N}.lui");
+        const string source = "namespace Demo;  \r\ncomponent App() => Border {};   \r\n";
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/formatting", new { textDocument = new { uri }, options = new { tabSize = 4, insertSpaces = true } }),
+                Request(3, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            var capabilities = Response(messages, 1).GetProperty("result").GetProperty("capabilities");
+            Assert.IsTrue(capabilities.GetProperty("documentFormattingProvider").GetBoolean());
+            Assert.AreEqual("namespace Demo;\ncomponent App() => Border {};\n",
+                Response(messages, 2).GetProperty("result")[0].GetProperty("newText").GetString());
+        }
+        finally { File.Delete(sourcePath); }
+    }
+
+    [TestMethod]
+    public async Task Cancel_request_cancels_the_matching_queued_request_without_a_stale_result()
+    {
+        var sourcePath = Path.Combine(
+            Path.GetTempPath(),
+            $"lucent-cancel-{Guid.NewGuid():N}.lui");
+        const string source = "namespace Demo;\ncomponent App() => Border {};\n";
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = new { line = 1, character = 28 } }),
+                Notification("$/cancelRequest", new { id = 2 }),
+                Request(3, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var response = Response(ReadMessages(output.ToArray()), 2);
+            Assert.IsFalse(response.TryGetProperty("result", out _));
+            Assert.AreEqual(-32800, response.GetProperty("error").GetProperty("code").GetInt32());
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+        }
+    }
+
+    [TestMethod]
+    public async Task Cancel_request_interrupts_an_in_flight_request_without_corrupting_framing()
+    {
+        const string uri = "file:///InFlightCancel.lui";
+        const string source = "namespace Demo;\ncomponent App() => Border {};\n";
+        using var input = new AppendableInputStream();
+        using var output = new MemoryStream();
+        var requestStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = LanguageServer.RunAsync(
+            input,
+            output,
+            _ => { },
+            async (method, cancellationToken) =>
+            {
+                if (method != "textDocument/completion")
+                    return;
+
+                requestStarted.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            });
+
+        input.Append(
+            Request(1, "initialize", new { capabilities = new { } }),
+            Notification("initialized", new { }),
+            Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+            Request(2, "textDocument/completion", new { textDocument = new { uri }, position = new { line = 1, character = 28 } }));
+        await requestStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        input.Append(
+            Notification("$/cancelRequest", new { id = 2 }),
+            Request(3, "shutdown", null),
+            Notification("exit", null));
+        input.CompleteWriting();
+
+        Assert.AreEqual(0, await server.WaitAsync(TimeSpan.FromSeconds(10)));
+        var messages = ReadMessages(output.ToArray());
+        Assert.AreEqual(-32800,
+            Response(messages, 2).GetProperty("error").GetProperty("code").GetInt32());
+        Assert.AreEqual(JsonValueKind.Null,
+            Response(messages, 3).GetProperty("result").ValueKind);
+    }
+
+    [TestMethod]
+    public async Task Document_symbols_are_advertised_and_return_component_members()
+    {
+        var sourcePath = Path.Combine(
+            Path.GetTempPath(),
+            $"lucent-symbols-{Guid.NewGuid():N}.lui");
+        const string source = "namespace Demo;\ncomponent Card(string Title, slot Body) => Border {};\n";
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/documentSymbol", new { textDocument = new { uri } }),
+                Request(3, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 1).GetProperty("result").GetProperty("capabilities").GetProperty("documentSymbolProvider").GetBoolean());
+            var names = Response(messages, 2).GetProperty("result").EnumerateArray()
+                .Select(symbol => symbol.GetProperty("name").GetString())
+                .ToArray();
+            CollectionAssert.Contains(names, "Card");
+            CollectionAssert.Contains(names, "Title");
+            CollectionAssert.Contains(names, "Body");
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+        }
+    }
+
+    [TestMethod]
+    public async Task Watched_csharp_change_refreshes_completion_before_the_next_request()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"lucent-watched-csharp-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var projectPath = Path.Combine(directory, "Demo.csproj");
+        var modelPath = Path.Combine(directory, "Feature.cs");
+        var sourcePath = Path.Combine(directory, "App.lui");
+        const string oldModel = "namespace Demo; public static class Feature { public static string Old => \"old\"; }";
+        const string newModel = "namespace Demo; public static class Feature { public static string New => \"new\"; }";
+        const string oldSource = "namespace Demo; component App() => TextBlock { Text: Feature.O; };";
+        const string newSource = "namespace Demo; component App() => TextBlock { Text: Feature.N; };";
+        await File.WriteAllTextAsync(projectPath,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+        await File.WriteAllTextAsync(modelPath, oldModel);
+        await File.WriteAllTextAsync(sourcePath, oldSource);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            var modelUri = new Uri(modelPath).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = oldSource } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(oldSource, oldSource.IndexOf("Feature.O", StringComparison.Ordinal) + "Feature.O".Length) }),
+                Notification("textDocument/didChange", new { textDocument = new { uri, version = 2 }, contentChanges = new[] { new { text = newSource } } }),
+                Notification("workspace/didChangeWatchedFiles", new { changes = new[] { new { uri = modelUri, type = 2 } } }),
+                Request(3, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(newSource, newSource.IndexOf("Feature.N", StringComparison.Ordinal) + "Feature.N".Length) }),
+                Request(4, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+            var firstCompletionObserved = 0;
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output, metric =>
+            {
+                if (metric.Method == "textDocument/completion" &&
+                    Interlocked.Exchange(ref firstCompletionObserved, 1) == 0)
+                {
+                    File.WriteAllText(modelPath, newModel);
+                }
+            }));
+
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Old"));
+            Assert.IsTrue(Response(messages, 3).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "New"));
+            Assert.IsFalse(Response(messages, 3).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "Old"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task Source_maps_are_versioned_and_reject_stale_generated_content()
+    {
+        var sourcePath = Path.Combine(Path.GetTempPath(), $"lucent-map-{Guid.NewGuid():N}.lui");
+        const string source = """
+            namespace Demo;
+            using System;
+            component App(Uri model) =>
+                TextBlock {
+                    Name: "😀";
+                    Text: binding(model.Host);
+                };
+            """;
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var compilation = LucentCompiler.Compile(source, sourcePath);
+            var map = compilation.SourceMap!;
+            var mapGenerated = compilation.GeneratedSource!;
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 7, text = source } }),
+                Request(2, "lucent/sourceMap", new { textDocument = new { uri }, generatedHash = map.GeneratedHash, lucentHash = map.LucentHash, version = 7 }),
+                Request(3, "lucent/sourceMap", new { textDocument = new { uri }, generatedHash = "stale" }),
+                Request(5, "lucent/sourceMap", new { textDocument = new { uri }, generatedHash = map.GeneratedHash, lucentHash = "stale", version = 7 }),
+                Request(6, "lucent/sourceMap", new { textDocument = new { uri }, generatedHash = map.GeneratedHash, lucentHash = map.LucentHash, version = 8 }),
+                Request(7, "lucent/sourceMap", new { textDocument = new { uri }, generatedHash = map.GeneratedHash, lucentHash = map.LucentHash }),
+                Request(4, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            var response = Response(messages, 2).GetProperty("result");
+            Assert.AreEqual(map.LucentHash, response.GetProperty("lucentHash").GetString());
+            Assert.AreEqual(map.GeneratedHash, response.GetProperty("generatedHash").GetString());
+            Assert.AreEqual(7, response.GetProperty("version").GetInt32());
+            var forward = response.GetProperty("generatedToLucent").EnumerateArray().ToArray();
+            Assert.HasCount(map.Entries.Count, forward);
+            for (var index = 0; index < map.Entries.Count; index++)
+            {
+                var expected = map.Entries[index];
+                var actual = forward[index];
+                Assert.AreEqual(expected.GeneratedUri, actual.GetProperty("generatedUri").GetString());
+                Assert.AreEqual(expected.LucentUri, actual.GetProperty("lucentUri").GetString());
+                Assert.AreEqual(Slice(source, expected.LucentRange),
+                    Slice(source, ReadRange(actual.GetProperty("lucentRange"))));
+                Assert.AreEqual(Slice(mapGenerated, expected.GeneratedRange),
+                    Slice(mapGenerated, ReadRange(actual.GetProperty("generatedRange"))));
+            }
+            Assert.IsTrue(forward.All(entry => entry.GetProperty("generatedUri").GetString() != entry.GetProperty("lucentUri").GetString()));
+            Assert.IsTrue(forward.All(entry => !Slice(mapGenerated, ReadRange(entry.GetProperty("generatedRange"))).Contains("#line", StringComparison.Ordinal)));
+            Assert.IsTrue(response.GetProperty("lucentToGenerated").GetArrayLength() > 0);
+            Assert.AreEqual(JsonValueKind.Null, Response(messages, 3).GetProperty("result").ValueKind);
+            Assert.AreEqual(JsonValueKind.Null, Response(messages, 5).GetProperty("result").ValueKind);
+            Assert.AreEqual(JsonValueKind.Null, Response(messages, 6).GetProperty("result").ValueKind);
+            Assert.AreEqual(JsonValueKind.Null, Response(messages, 7).GetProperty("result").ValueKind);
+        }
+        finally { File.Delete(sourcePath); }
+    }
+
+    [TestMethod]
+    public async Task Css_documents_use_the_shared_typed_catalog_for_completion()
+    {
+        var sourcePath = Path.Combine(Path.GetTempPath(), $"lucent-css-{Guid.NewGuid():N}.css");
+        const string source = ".card {  }";
+        await File.WriteAllTextAsync(sourcePath, source);
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "css", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(source, source.IndexOf("}" , StringComparison.Ordinal)) }),
+                Request(3, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            Assert.IsTrue(Response(ReadMessages(output.ToArray()), 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "background"));
+        }
+        finally { File.Delete(sourcePath); }
+    }
+
+    [TestMethod]
+    public async Task Css_documents_complete_classes_and_resource_tokens_without_lucent_class_value_completion()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-css-nav-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var sourcePath = Path.Combine(directory, "App.css");
+        var luiPath = Path.Combine(directory, "App.lui");
+        var projectPath = Path.Combine(directory, "App.csproj");
+        const string source = ".pan { background: resource(\"Lucent.\"); }\n.";
+        await File.WriteAllTextAsync(sourcePath, source);
+        await File.WriteAllTextAsync(luiPath, "namespace Demo; component App() => Border { Class: \"panel\"; };");
+        await File.WriteAllTextAsync(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+        try
+        {
+            var uri = new Uri(sourcePath).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "css", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(source, source.IndexOf("Lucent.", StringComparison.Ordinal) + "Lucent.".Length) }),
+                Request(3, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(source, source.Length) }),
+                Request(4, "textDocument/definition", new { textDocument = new { uri }, position = PositionAtOffset(source, source.IndexOf("Lucent.", StringComparison.Ordinal) + 2) }),
+                Request(5, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray().Any(item => item.GetProperty("label").GetString() == "Lucent."));
+            Assert.IsTrue(Response(messages, 3).GetProperty("result").EnumerateArray().Any(item => item.GetProperty("label").GetString() == "panel"));
+            Assert.AreEqual(uri, Response(messages, 4).GetProperty("result").GetProperty("uri").GetString());
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task Css_token_index_is_project_scoped_overlay_aware_and_maps_each_class_literal_token()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-css-project-index-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var alphaProject = Path.Combine(directory, "Alpha.csproj");
+            var betaProject = Path.Combine(directory, "Beta.csproj");
+            var alphaLui = Path.Combine(directory, "Alpha.lui");
+            var betaLui = Path.Combine(directory, "Beta.lui");
+            var alphaCss = Path.Combine(directory, "Alpha.css");
+            var betaCss = Path.Combine(directory, "Beta.css");
+            const string alphaSource = "namespace Demo; component Alpha() => Border { Class: \"first second\"; };";
+            const string alphaOverlay = "namespace Demo; component Alpha() => Border { Class: \"first overlay-second\"; };";
+            const string betaSource = "namespace Other; component Beta() => Border { Class: \"beta-only\"; };";
+            const string alphaStyle = ".second { background: resource(\"Lucent.Initial.Key\"); }\n.";
+            const string alphaStyleOverlay = ".overlay-second { background: resource('Lucent.Updated.Key'); }\n.";
+            const string betaStyle = ".beta-only { background: resource(\"Beta.Only\"); }";
+            await File.WriteAllTextAsync(alphaProject, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"Alpha.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(betaProject, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"Beta.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(alphaLui, alphaSource);
+            await File.WriteAllTextAsync(betaLui, betaSource);
+            await File.WriteAllTextAsync(alphaCss, alphaStyle);
+            await File.WriteAllTextAsync(betaCss, betaStyle);
+            var alphaCssUri = new Uri(alphaCss).AbsoluteUri;
+            var alphaLuiUri = new Uri(alphaLui).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = alphaLuiUri, languageId = "lucent", version = 1, text = alphaSource } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = alphaCssUri, languageId = "css", version = 1, text = alphaStyle } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri = alphaCssUri }, position = PositionAtOffset(alphaStyle, alphaStyle.Length) }),
+                Request(3, "textDocument/definition", new { textDocument = new { uri = alphaCssUri }, position = PositionAtOffset(alphaStyle, alphaStyle.IndexOf("second", StringComparison.Ordinal) + 2) }),
+                Notification("textDocument/didChange", new { textDocument = new { uri = alphaLuiUri, version = 2 }, contentChanges = new[] { new { text = alphaOverlay } } }),
+                Notification("textDocument/didChange", new { textDocument = new { uri = alphaCssUri, version = 2 }, contentChanges = new[] { new { text = alphaStyleOverlay } } }),
+                Request(4, "textDocument/completion", new { textDocument = new { uri = alphaCssUri }, position = PositionAtOffset(alphaStyleOverlay, alphaStyleOverlay.Length) }),
+                Request(5, "textDocument/completion", new { textDocument = new { uri = alphaCssUri }, position = PositionAtOffset(alphaStyleOverlay, alphaStyleOverlay.IndexOf("Lucent.Updated", StringComparison.Ordinal) + "Lucent.Updated".Length) }),
+                Request(6, "textDocument/definition", new { textDocument = new { uri = alphaCssUri }, position = PositionAtOffset(alphaStyleOverlay, alphaStyleOverlay.IndexOf("Lucent.Updated", StringComparison.Ordinal) + 8) }),
+                Request(7, "textDocument/completion", new { textDocument = new { uri = alphaLuiUri }, position = PositionAtOffset(alphaSource, alphaSource.IndexOf("second", StringComparison.Ordinal) + 2) }),
+                Request(8, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            var labels = Response(messages, 2).GetProperty("result").EnumerateArray().Select(item => item.GetProperty("label").GetString()).ToArray();
+            CollectionAssert.Contains(labels, "first");
+            CollectionAssert.Contains(labels, "second");
+            CollectionAssert.DoesNotContain(labels, "beta-only");
+            var definition = Response(messages, 3).GetProperty("result");
+            Assert.AreEqual(alphaLuiUri, definition.GetProperty("uri").GetString());
+            var expectedSecond = alphaSource.IndexOf("second", StringComparison.Ordinal);
+            Assert.AreEqual(0, definition.GetProperty("range").GetProperty("start").GetProperty("line").GetInt32());
+            Assert.AreEqual(expectedSecond, definition.GetProperty("range").GetProperty("start").GetProperty("character").GetInt32());
+            var overlayLabels = Response(messages, 4).GetProperty("result").EnumerateArray().Select(item => item.GetProperty("label").GetString()).ToArray();
+            CollectionAssert.Contains(overlayLabels, "overlay-second");
+            CollectionAssert.DoesNotContain(overlayLabels, "second");
+            var resources = Response(messages, 5).GetProperty("result").EnumerateArray().Select(item => item.GetProperty("label").GetString()).ToArray();
+            CollectionAssert.Contains(resources, "Lucent.Updated.Key");
+            var resourceDefinition = Response(messages, 6).GetProperty("result");
+            Assert.AreEqual(alphaCssUri, resourceDefinition.GetProperty("uri").GetString());
+            Assert.AreEqual(alphaStyleOverlay.IndexOf("Lucent.Updated.Key", StringComparison.Ordinal),
+                resourceDefinition.GetProperty("range").GetProperty("start").GetProperty("character").GetInt32());
+            var lucentClassValueLabels = Response(messages, 7).GetProperty("result").EnumerateArray()
+                .Select(item => item.GetProperty("label").GetString())
+                .ToArray();
+            CollectionAssert.DoesNotContain(lucentClassValueLabels, "first");
+            CollectionAssert.DoesNotContain(lucentClassValueLabels, "second");
+            CollectionAssert.DoesNotContain(lucentClassValueLabels, "overlay-second");
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task Component_references_and_rename_are_project_scoped_and_safe()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-rename", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var project = Path.Combine(directory, "Demo.csproj");
+            var caller = Path.Combine(directory, "Main.lui");
+            var child = Path.Combine(directory, "Child.lui");
+            const string main = "namespace Demo; component Main() => Border { Child {}; };";
+            const string leaf = "namespace Demo; component Child() => TextBlock {};";
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"Main.lui\"/><LucentSource Include=\"Child.lui\"/></ItemGroup></Project>");
+            await File.WriteAllTextAsync(caller, main);
+            await File.WriteAllTextAsync(child, leaf);
+            var callerUri = new Uri(caller).AbsoluteUri;
+            var childUri = new Uri(child).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = callerUri, languageId = "lucent", version = 1, text = main } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = childUri, languageId = "lucent", version = 1, text = leaf } }),
+                Request(2, "textDocument/references", new { textDocument = new { uri = callerUri }, position = PositionOf(main, "Child") }),
+                Request(3, "textDocument/rename", new { textDocument = new { uri = callerUri }, position = PositionOf(main, "Child"), newName = "Renamed" }),
+                Request(4, "textDocument/rename", new { textDocument = new { uri = callerUri }, position = PositionOf(main, "Child"), newName = "not valid" }),
+                Request(5, "textDocument/rename", new { textDocument = new { uri = callerUri }, position = PositionOf(main, "Child"), newName = "@Child" }),
+                Request(6, "shutdown", null),
+                Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.AreEqual(2, Response(messages, 2).GetProperty("result").GetArrayLength());
+            var changes = Response(messages, 3).GetProperty("result").GetProperty("changes");
+            Assert.AreEqual(2, changes.EnumerateObject().Count());
+            Assert.AreEqual(JsonValueKind.Null, Response(messages, 4).GetProperty("result").ValueKind);
+            Assert.AreEqual(JsonValueKind.Null, Response(messages, 5).GetProperty("result").ValueKind);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     private static IEnumerable<JsonElement> PublishedDiagnostics(
         IReadOnlyList<JsonDocument> messages,
         string uri) => messages
@@ -1302,6 +1815,75 @@ public sealed class LanguageServerProtocolTests
         var header = Encoding.ASCII.GetBytes(
             $"Content-Length: {payload.Length}\r\n\r\n");
         return header.Concat(payload).ToArray();
+    }
+
+    private sealed class AppendableInputStream : Stream
+    {
+        private readonly Channel<byte[]> _chunks = Channel.CreateUnbounded<byte[]>();
+        private byte[]? _current;
+        private int _offset;
+
+        public void Append(params byte[][] messages)
+        {
+            foreach (var message in messages)
+                Assert.IsTrue(_chunks.Writer.TryWrite(message));
+        }
+
+        public void CompleteWriting() => _chunks.Writer.TryComplete();
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            while (_current is null || _offset == _current.Length)
+            {
+                if (!_chunks.Reader.TryRead(out _current))
+                {
+                    try
+                    {
+                        _current = await _chunks.Reader.ReadAsync(cancellationToken);
+                    }
+                    catch (ChannelClosedException)
+                    {
+                        return 0;
+                    }
+                }
+
+                _offset = 0;
+            }
+
+            var count = Math.Min(buffer.Length, _current.Length - _offset);
+            _current.AsMemory(_offset, count).CopyTo(buffer);
+            _offset += count;
+            return count;
+        }
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                CompleteWriting();
+            base.Dispose(disposing);
+        }
     }
 
     private static IReadOnlyList<JsonDocument> ReadMessages(byte[] bytes)
@@ -1371,6 +1953,30 @@ public sealed class LanguageServerProtocolTests
         var line = prefix.Count(character => character == '\n');
         var lineStart = prefix.LastIndexOf('\n') + 1;
         return new { line, character = offset - lineStart };
+    }
+
+    private static LucentSourceMapRange ReadRange(JsonElement range) => new(
+        range.GetProperty("start").GetProperty("line").GetInt32(),
+        range.GetProperty("start").GetProperty("character").GetInt32(),
+        range.GetProperty("end").GetProperty("line").GetInt32(),
+        range.GetProperty("end").GetProperty("character").GetInt32());
+
+    private static string Slice(string text, LucentSourceMapRange range)
+    {
+        var start = Offset(text, range.StartLine, range.StartCharacter);
+        var end = Offset(text, range.EndLine, range.EndCharacter);
+        return text[start..end];
+    }
+
+    private static int Offset(string text, int line, int character)
+    {
+        var offset = 0;
+        for (var current = 0; current < line; current++)
+        {
+            offset = text.IndexOf('\n', offset) + 1;
+            Assert.IsGreaterThan(0, offset);
+        }
+        return offset + character;
     }
 
     private const string InvalidSource =

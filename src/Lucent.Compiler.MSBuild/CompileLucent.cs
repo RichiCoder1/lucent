@@ -27,6 +27,9 @@ public sealed class CompileLucent : Task
     [Required]
     public string OutputDirectory { get; set; } = string.Empty;
 
+    /// <summary>Deterministic list of generated files consumed by design-time builds.</summary>
+    public string ManifestPath { get; set; } = string.Empty;
+
     /// <summary>
     /// The consuming project's resolved metadata references.
     /// </summary>
@@ -43,6 +46,18 @@ public sealed class CompileLucent : Task
     /// </summary>
     public string? ProjectPath { get; set; }
 
+    /// <summary>Evaluated project semantic settings, passed unchanged to Roslyn.</summary>
+    public string? TargetFramework { get; set; }
+    public string? LanguageVersion { get; set; }
+    public string? Nullable { get; set; }
+    public string? DefineConstants { get; set; }
+
+    /// <summary>Evaluated implicit/global using directives.</summary>
+    public ITaskItem[] GlobalUsings { get; set; } = [];
+
+    /// <summary>Evaluated project-reference identities.</summary>
+    public ITaskItem[] ProjectReferences { get; set; } = [];
+
     /// <summary>
     /// Generated C# files written by the task.
     /// </summary>
@@ -53,9 +68,34 @@ public sealed class CompileLucent : Task
     {
         if (Sources.Length == 0)
         {
-            Log.LogMessage(
-                MessageImportance.Low,
-                "Lucent compiler skipped because no .lui sources were provided.");
+            if (string.IsNullOrWhiteSpace(OutputDirectory))
+            {
+                LogError("LUC9002", null, 0, 0,
+                    "The Lucent compiler output directory is required.");
+                return false;
+            }
+
+            ManifestPath = string.IsNullOrWhiteSpace(ManifestPath)
+                ? Path.Combine(OutputDirectory, "Lucent.GeneratedFiles.props")
+                : ManifestPath;
+            try
+            {
+                // This is intentionally an atomic empty replacement, rather than a
+                // skipped task: the last .lui may have been deleted or renamed.
+                WriteIfChanged(ManifestPath, "<Project>\n  <ItemGroup />\n</Project>\n");
+            }
+            catch (IOException exception)
+            {
+                LogError("LUC9002", null, 0, 0,
+                    $"Unable to write Lucent generated output: {exception.Message}");
+                return false;
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                LogError("LUC9002", null, 0, 0,
+                    $"Unable to write Lucent generated output: {exception.Message}");
+                return false;
+            }
             GeneratedFiles = [];
             return true;
         }
@@ -79,7 +119,14 @@ public sealed class CompileLucent : Task
         var projectContext = new LucentProjectContext(
             ProjectPath,
             GetExistingPaths(References),
-            GetExistingPaths(CSharpSources));
+            GetExistingPaths(CSharpSources),
+            Sources.Select(GetFullPath).Where(path => path is not null).Cast<string>().ToArray(),
+            GetUsingDirectives(GlobalUsings),
+            TargetFramework,
+            LanguageVersion,
+            Nullable,
+            DefineConstants,
+            GetExistingPaths(ProjectReferences));
 
         foreach (var sourceItem in Sources)
         {
@@ -113,7 +160,8 @@ public sealed class CompileLucent : Task
                 var styleText = File.Exists(stylePath)
                     ? File.ReadAllText(stylePath)
                     : null;
-                inputs.Add(new LucentSourceInput(sourcePath, sourceText, stylePath, styleText));
+                inputs.Add(new LucentSourceInput(sourcePath, sourceText, stylePath, styleText,
+                    GetOutputPath(sourcePath)));
             }
             catch (IOException exception)
             {
@@ -144,6 +192,9 @@ public sealed class CompileLucent : Task
             GeneratedFiles = [];
             return false;
         }
+        ManifestPath = string.IsNullOrWhiteSpace(ManifestPath)
+            ? Path.Combine(OutputDirectory, "Lucent.GeneratedFiles.props")
+            : ManifestPath;
 
         var projectResult = LucentCompiler.CompileProject(inputs, projectContext);
         foreach (var source in projectResult.Sources)
@@ -169,6 +220,16 @@ public sealed class CompileLucent : Task
             {
                 WriteIfChanged(pendingOutput.Path, pendingOutput.Content);
             }
+            var manifestItems = string.Join(Environment.NewLine, pendingOutputs
+                .Select(output => Path.GetFullPath(output.Path))
+                .OrderBy(path => path, GetPathComparer())
+                .Select(path => "    <Compile Include=\"" +
+                    System.Security.SecurityElement.Escape(path) +
+                    "\" AutoGen=\"true\" DesignTime=\"true\" Visible=\"false\" />"));
+            WriteIfChanged(ManifestPath,
+                "<Project>" + Environment.NewLine + "  <ItemGroup>" + Environment.NewLine +
+                manifestItems + Environment.NewLine + "  </ItemGroup>" + Environment.NewLine +
+                "</Project>" + Environment.NewLine);
         }
         catch (IOException exception)
         {
@@ -252,6 +313,20 @@ public sealed class CompileLucent : Task
             .Where(File.Exists)
             .Distinct(GetPathComparer())
             .ToArray();
+
+    private static IReadOnlyList<string> GetUsingDirectives(IEnumerable<ITaskItem> items) =>
+        items.Select(item =>
+        {
+            var identity = item.ItemSpec;
+            var alias = item.GetMetadata("Alias");
+            if (!string.IsNullOrWhiteSpace(alias)) return $"{alias} = {identity}";
+            return string.Equals(item.GetMetadata("Static"), "true", StringComparison.OrdinalIgnoreCase)
+                ? $"static {identity}"
+                : identity;
+        })
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
 
     private void LogDiagnostics(
         string sourcePath,

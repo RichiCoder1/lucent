@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Diagnostics;
+using System.Threading.Channels;
 using Lucent.Compiler;
 
 namespace Lucent.LanguageServer;
@@ -21,61 +23,258 @@ public static class LanguageServer
         return new ServerSession(input, output).RunAsync(cancellationToken);
     }
 
-    private sealed class ServerSession(Stream input, Stream output)
+    internal static Task<int> RunAsync(
+        Stream input,
+        Stream output,
+        Action<LanguageServerRequestMetric> observe,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(observe);
+        return new ServerSession(input, output, observe).RunAsync(cancellationToken);
+    }
+
+    internal static Task<int> RunAsync(
+        Stream input,
+        Stream output,
+        Action<LanguageServerRequestMetric> observe,
+        Func<string, CancellationToken, Task> beforeRequest,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(observe);
+        ArgumentNullException.ThrowIfNull(beforeRequest);
+        return new ServerSession(input, output, observe, beforeRequest)
+            .RunAsync(cancellationToken);
+    }
+
+    private sealed class ServerSession(
+        Stream input,
+        Stream output,
+        Action<LanguageServerRequestMetric>? observe = null,
+        Func<string, CancellationToken, Task>? beforeRequest = null)
+    {
+        private const int MaxProjectAnalyses = 8;
         private readonly JsonRpcConnection _connection = new(input, output);
         private readonly Dictionary<string, DocumentState> _documents =
             new(StringComparer.Ordinal);
         private readonly ProjectContextLoader _projectContexts = new();
         private readonly Dictionary<string, ProjectAnalysis> _projectAnalyses =
             new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _requestCancellationGate = new();
+        private readonly Dictionary<string, CancellationTokenSource> _requestCancellations =
+            new(StringComparer.Ordinal);
 
         private bool _shutdownRequested;
 
         public async Task<int> RunAsync(CancellationToken cancellationToken)
         {
-            while (true)
+            using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken);
+            var messages = Channel.CreateUnbounded<InboundMessage>(new UnboundedChannelOptions
             {
-                JsonDocument? message;
-                try
-                {
-                    message = await _connection.ReadAsync(cancellationToken);
-                }
-                catch (JsonException exception)
-                {
-                    LanguageServerLog.MalformedPayload(
-                        LanguageServerLog.Logger,
-                        exception);
-                    // A malformed message cannot be associated with a request ID.
-                    // Keep the stream alive so a client can recover with a later
-                    // well-formed message.
-                    continue;
-                }
-                catch (Exception exception) when (
-                    exception is InvalidDataException or EndOfStreamException)
-                {
-                    LanguageServerLog.TransportFailed(
-                        LanguageServerLog.Logger,
-                        exception);
-                    return 1;
-                }
+                SingleReader = true,
+                SingleWriter = true,
+                AllowSynchronousContinuations = false,
+            });
+            var reader = ReadMessagesAsync(messages.Writer, sessionCancellation.Token);
 
-                if (message is null)
+            try
+            {
+                await foreach (var inbound in messages.Reader.ReadAllAsync(cancellationToken))
                 {
-                    return _shutdownRequested ? 0 : 1;
-                }
+                    if (inbound.TransportException is not null)
+                    {
+                        LanguageServerLog.TransportFailed(
+                            LanguageServerLog.Logger,
+                            inbound.TransportException);
+                        return 1;
+                    }
 
-                using (message)
-                {
-                    var result = await HandleMessageAsync(
-                        message.RootElement,
-                        cancellationToken);
+                    if (inbound.EndOfStream)
+                    {
+                        return _shutdownRequested ? 0 : 1;
+                    }
+
+                    using var message = inbound.Message!;
+                    using var requestCancellation = inbound.RequestCancellation;
+                    // The benchmark drives this serial server in isolation. Per-thread
+                    // counters are invalid across awaited continuations, so measure the
+                    // process-wide monotonic counter only when a benchmark observer asks.
+                    var allocated = observe is null ? 0 : GC.GetTotalAllocatedBytes(precise: true);
+                    var started = Stopwatch.GetTimestamp();
+                    int? result;
+                    try
+                    {
+                        result = await HandleMessageAsync(
+                            message.RootElement,
+                            requestCancellation?.Token ?? cancellationToken);
+                    }
+                    catch (OperationCanceledException) when (
+                        requestCancellation?.IsCancellationRequested == true &&
+                        !cancellationToken.IsCancellationRequested)
+                    {
+                        result = null;
+                        if (message.RootElement.TryGetProperty("id", out var cancelledId))
+                        {
+                            await _connection.WriteErrorAsync(
+                                cancelledId,
+                                -32800,
+                                "Request cancelled.",
+                                cancellationToken);
+                        }
+                    }
+                    finally
+                    {
+                        if (inbound.RequestKey is not null)
+                        {
+                            lock (_requestCancellationGate)
+                            {
+                                _requestCancellations.Remove(inbound.RequestKey);
+                            }
+                        }
+
+                        if (observe is not null)
+                        {
+                            var allocatedAfter = GC.GetTotalAllocatedBytes(precise: true);
+                            observe(new LanguageServerRequestMetric(
+                                message.RootElement.TryGetProperty("method", out var method) &&
+                                method.ValueKind == JsonValueKind.String ? method.GetString()! : "<invalid>",
+                                Stopwatch.GetElapsedTime(started),
+                                allocatedAfter - allocated,
+                                _projectAnalyses.Count));
+                        }
+                    }
+
                     if (result.HasValue)
                     {
                         return result.Value;
                     }
                 }
+
+                return _shutdownRequested ? 0 : 1;
             }
+            finally
+            {
+                sessionCancellation.Cancel();
+                try
+                {
+                    await reader;
+                }
+                catch (OperationCanceledException) when (sessionCancellation.IsCancellationRequested)
+                {
+                }
+
+                while (messages.Reader.TryRead(out var pending))
+                {
+                    pending.Message?.Dispose();
+                    pending.RequestCancellation?.Dispose();
+                }
+
+                lock (_requestCancellationGate)
+                {
+                    _requestCancellations.Clear();
+                }
+            }
+        }
+
+        private async Task ReadMessagesAsync(
+            ChannelWriter<InboundMessage> writer,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                while (true)
+                {
+                    JsonDocument? message;
+                    try
+                    {
+                        message = await _connection.ReadAsync(cancellationToken);
+                    }
+                    catch (JsonException exception)
+                    {
+                        LanguageServerLog.MalformedPayload(
+                            LanguageServerLog.Logger,
+                            exception);
+                        // A malformed message cannot be associated with a request ID.
+                        // Keep the stream alive so a client can recover with a later
+                        // well-formed message.
+                        continue;
+                    }
+                    catch (Exception exception) when (
+                        exception is InvalidDataException or EndOfStreamException)
+                    {
+                        await writer.WriteAsync(
+                            new InboundMessage(null, null, null, exception, false),
+                            cancellationToken);
+                        return;
+                    }
+
+                    if (message is null)
+                    {
+                        await writer.WriteAsync(
+                            new InboundMessage(null, null, null, null, true),
+                            cancellationToken);
+                        return;
+                    }
+
+                    if (IsCancellationNotification(message.RootElement, out var cancelledKey))
+                    {
+                        lock (_requestCancellationGate)
+                        {
+                            if (_requestCancellations.TryGetValue(cancelledKey, out var request))
+                            {
+                                request.Cancel();
+                            }
+                        }
+
+                        message.Dispose();
+                        continue;
+                    }
+
+                    CancellationTokenSource? requestCancellation = null;
+                    string? requestKey = null;
+                    if (message.RootElement.TryGetProperty("id", out var id))
+                    {
+                        requestKey = id.GetRawText();
+                        requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                            cancellationToken);
+                        lock (_requestCancellationGate)
+                        {
+                            _requestCancellations[requestKey] = requestCancellation;
+                        }
+                    }
+
+                    await writer.WriteAsync(
+                        new InboundMessage(
+                            message,
+                            requestCancellation,
+                            requestKey,
+                            null,
+                            false),
+                        cancellationToken);
+                }
+            }
+            finally
+            {
+                writer.TryComplete();
+            }
+        }
+
+        private static bool IsCancellationNotification(
+            JsonElement message,
+            out string requestKey)
+        {
+            requestKey = string.Empty;
+            if (!message.TryGetProperty("method", out var method) ||
+                method.ValueKind != JsonValueKind.String ||
+                method.GetString() != "$/cancelRequest" ||
+                !message.TryGetProperty("params", out var parameters) ||
+                !parameters.TryGetProperty("id", out var id))
+            {
+                return false;
+            }
+
+            requestKey = id.GetRawText();
+            return true;
         }
 
         private async Task<int?> HandleMessageAsync(
@@ -104,6 +303,11 @@ public static class LanguageServer
 
             try
             {
+                if (beforeRequest is not null)
+                {
+                    await beforeRequest(method, cancellationToken);
+                }
+
                 switch (method)
                 {
                     case "initialize":
@@ -124,6 +328,9 @@ public static class LanguageServer
                                         hoverProvider = true,
                                         definitionProvider = true,
                                         documentSymbolProvider = true,
+                                        documentFormattingProvider = true,
+                                        referencesProvider = true,
+                                        renameProvider = new { prepareProvider = false },
                                         completionProvider = new
                                         {
                                             resolveProvider = false,
@@ -172,6 +379,10 @@ public static class LanguageServer
                         await DidCloseAsync(parameters, cancellationToken);
                         break;
 
+                    case "workspace/didChangeWatchedFiles":
+                        await DidChangeWatchedFilesAsync(parameters, cancellationToken);
+                        break;
+
                     case "textDocument/hover":
                         if (hasId)
                         {
@@ -205,10 +416,38 @@ public static class LanguageServer
 
                         break;
 
+                    case "textDocument/references":
+                        if (hasId)
+                        {
+                            await ReferencesAsync(id!.Value, parameters, cancellationToken);
+                        }
+                        break;
+
+                    case "textDocument/rename":
+                        if (hasId)
+                        {
+                            await RenameAsync(id!.Value, parameters, cancellationToken);
+                        }
+                        break;
+
                     case "textDocument/documentSymbol":
                         if (hasId)
                         {
                             await DocumentSymbolsAsync(id!.Value, parameters, cancellationToken);
+                        }
+                        break;
+
+                    case "textDocument/formatting":
+                        if (hasId)
+                        {
+                            await FormattingAsync(id!.Value, parameters, cancellationToken);
+                        }
+                        break;
+
+                    case "lucent/sourceMap":
+                        if (hasId)
+                        {
+                            await SourceMapAsync(id!.Value, parameters, cancellationToken);
                         }
                         break;
 
@@ -273,7 +512,8 @@ public static class LanguageServer
                 : (int?)null;
 
             var analysis = await AnalyzeAsync(uri, text, cancellationToken);
-            _documents[uri] = new DocumentState(text, version, analysis);
+            _documents[uri] = new DocumentState(text, version, analysis, null);
+            await RefreshCssIndexesAsync(cancellationToken);
             await PublishAllDiagnosticsAsync(cancellationToken);
         }
 
@@ -316,7 +556,8 @@ public static class LanguageServer
                 ? versionElement.GetInt32()
                 : document?.Version;
             var analysis = await AnalyzeAsync(uri, current, cancellationToken);
-            _documents[uri] = new DocumentState(current, version, analysis);
+            _documents[uri] = new DocumentState(current, version, analysis, document?.CssTokens);
+            await RefreshCssIndexesAsync(cancellationToken);
             await PublishAllDiagnosticsAsync(cancellationToken);
         }
 
@@ -331,6 +572,7 @@ public static class LanguageServer
                 ?? throw new InvalidOperationException("A document URI is required.");
 
             _documents.Remove(uri);
+            await RefreshCssIndexesAsync(cancellationToken);
             await _connection.WriteNotificationAsync(
                 "textDocument/publishDiagnostics",
                 new
@@ -345,6 +587,51 @@ public static class LanguageServer
                 _documents[remainingUri] = remaining with { Analysis = analysis };
             }
             await PublishAllDiagnosticsAsync(cancellationToken);
+        }
+
+        private async Task DidChangeWatchedFilesAsync(
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            if (!parameters.TryGetProperty("changes", out var changes) ||
+                changes.ValueKind != JsonValueKind.Array ||
+                !changes.EnumerateArray().Any(change =>
+                    change.TryGetProperty("uri", out var uri) &&
+                    uri.ValueKind == JsonValueKind.String &&
+                    IsSemanticProjectFile(uri.GetString())))
+            {
+                return;
+            }
+
+            // Watched-file notifications are the project-generation boundary.
+            // Re-evaluate off the completion path, then publish one coherent new
+            // snapshot to every open document in the affected workspace.
+            _projectAnalyses.Clear();
+            foreach (var (uri, document) in _documents.ToArray())
+            {
+                if (uri.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var analysis = await AnalyzeAsync(uri, document.Text, cancellationToken);
+                _documents[uri] = document with { Analysis = analysis };
+            }
+
+            await RefreshCssIndexesAsync(cancellationToken);
+            await PublishAllDiagnosticsAsync(cancellationToken);
+        }
+
+        private static bool IsSemanticProjectFile(string? uri)
+        {
+            if (string.IsNullOrWhiteSpace(uri))
+                return false;
+
+            var path = GetSourcePath(uri);
+            return path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".props", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase) ||
+                path.EndsWith(".css", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task PublishAllDiagnosticsAsync(CancellationToken cancellationToken)
@@ -387,6 +674,10 @@ public static class LanguageServer
             CancellationToken cancellationToken)
         {
             var sourcePath = GetSourcePath(uri);
+            if (sourcePath.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+            {
+                return new CompilationResult(null, null, []);
+            }
             var projectContext = await _projectContexts.LoadAsync(
                 sourcePath,
                 cancellationToken);
@@ -420,9 +711,26 @@ public static class LanguageServer
             if (!_projectAnalyses.TryGetValue(projectKey, out var cached) ||
                 !string.Equals(cached.Generation, generation, StringComparison.Ordinal))
             {
-                var projectResult = LucentCompiler.CompileProject(inputs.Values.ToArray(), projectContext);
-                cached = new ProjectAnalysis(generation, projectResult.Sources.ToArray());
+                var previous = cached?.Results.FirstOrDefault(source =>
+                    PathsEqual(source.SourcePath, sourcePath));
+                if (!string.Equals(Environment.GetEnvironmentVariable("LUCENT_DISABLE_INCREMENTAL_REBIND"), "1", StringComparison.Ordinal) &&
+                    previous is not null && LucentCompiler.TryRecompileUnchangedComponentSignatures(
+                        text, sourcePath, previous.Result, projectContext, out var updated))
+                {
+                    cached = new ProjectAnalysis(generation, cached!.Results
+                        .Select(source => PathsEqual(source.SourcePath, sourcePath)
+                            ? new LucentSourceCompilation(sourcePath, updated)
+                            : source)
+                        .ToArray());
+                }
+                else
+                {
+                    var projectResult = LucentCompiler.CompileProject(inputs.Values.ToArray(), projectContext);
+                    cached = new ProjectAnalysis(generation, projectResult.Sources.ToArray());
+                }
                 _projectAnalyses[projectKey] = cached;
+                while (_projectAnalyses.Count > MaxProjectAnalyses)
+                    _projectAnalyses.Remove(_projectAnalyses.Keys.First());
             }
             foreach (var source in cached.Results)
             {
@@ -528,7 +836,6 @@ public static class LanguageServer
                 .GetProperty("uri")
                 .GetString()
                 ?? throw new InvalidOperationException("A document URI is required.");
-            await RefreshDocumentAnalysisAsync(uri, cancellationToken);
             if (!_documents.TryGetValue(uri, out var document))
             {
                 await _connection.WriteResponseAsync(id, Array.Empty<object>(), cancellationToken);
@@ -536,10 +843,15 @@ public static class LanguageServer
             }
 
             var offset = GetOffset(document.Text, parameters.GetProperty("position"));
-            var completions = LucentCompiler.GetCompletions(document.Text, offset,
-                    document.Analysis)
+            var completions = (uri.EndsWith(".css", StringComparison.OrdinalIgnoreCase)
+                    ? LucentCompiler.GetCssCompletions(document.Text, offset, GetSourcePath(uri),
+                        document.CssTokens ?? CssProjectTokenIndex.Create(
+                            [new CssProjectDocument(GetSourcePath(uri), document.Text)]))
+                    : LucentCompiler.GetCompletions(document.Text, offset, document.Analysis))
                 .GroupBy(item => item.Label, StringComparer.Ordinal)
                 .Select(group => group.First())
+                .OrderBy(item => item.SortText ?? item.Label, StringComparer.Ordinal)
+                .ThenBy(item => item.Label, StringComparer.Ordinal)
                 .ToArray();
             await _connection.WriteResponseAsync(
                 id,
@@ -564,6 +876,9 @@ public static class LanguageServer
                         : new { kind = "markdown", value = item.Documentation },
                     insertText = item.InsertText,
                     insertTextFormat = item.IsSnippet ? 2 : 1,
+                    sortText = item.SortText ?? item.Label,
+                    filterText = item.FilterText ?? item.Label,
+                    tags = item.IsDeprecated ? new[] { 1 } : null,
                 }).ToArray(),
                 cancellationToken);
         }
@@ -604,6 +919,92 @@ public static class LanguageServer
             await _connection.WriteResponseAsync(id, symbols, cancellationToken);
         }
 
+        private async Task FormattingAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var uri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
+            if (uri is null || !_documents.TryGetValue(uri, out var document))
+            {
+                await _connection.WriteResponseAsync(id, Array.Empty<object>(), cancellationToken);
+                return;
+            }
+
+            var formatted = LucentCompiler.Format(document.Text);
+            if (string.Equals(formatted, document.Text, StringComparison.Ordinal))
+            {
+                await _connection.WriteResponseAsync(id, Array.Empty<object>(), cancellationToken);
+                return;
+            }
+
+            await _connection.WriteResponseAsync(id, new[]
+            {
+                new
+                {
+                    range = new LspRange(new LspPosition(0, 0), ToPosition(document.Text, document.Text.Length)),
+                    newText = formatted,
+                },
+            }, cancellationToken);
+        }
+
+        private async Task SourceMapAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var uri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
+            if (uri is null || !_documents.TryGetValue(uri, out var document) ||
+                document.Analysis.SourceMap is not { } map ||
+                !parameters.TryGetProperty("generatedHash", out var hash) ||
+                !string.Equals(hash.GetString(), map.GeneratedHash, StringComparison.Ordinal) ||
+                !parameters.TryGetProperty("lucentHash", out var lucentHash) ||
+                !string.Equals(lucentHash.GetString(), map.LucentHash, StringComparison.Ordinal) ||
+                !parameters.TryGetProperty("version", out var version) ||
+                !version.TryGetInt32(out var requestedVersion) ||
+                requestedVersion != document.Version)
+            {
+                await _connection.WriteResponseAsync(id, null, cancellationToken);
+                return;
+            }
+
+            await _connection.WriteResponseAsync(id, new
+            {
+                lucentHash = map.LucentHash,
+                generatedHash = map.GeneratedHash,
+                version = document.Version,
+                generatedToLucent = map.Entries.Select(entry => new
+                {
+                    generatedUri = entry.GeneratedUri,
+                    generatedRange = ToProtocolRange(entry.GeneratedRange),
+                    lucentUri = entry.LucentUri,
+                    lucentRange = ToProtocolRange(entry.LucentRange),
+                }),
+                lucentToGenerated = map.Entries.GroupBy(entry => new
+                    { entry.LucentUri, entry.LucentRange })
+                    .OrderBy(group => group.Key.LucentUri, StringComparer.Ordinal)
+                    .ThenBy(group => group.Key.LucentRange.StartLine)
+                    .ThenBy(group => group.Key.LucentRange.StartCharacter)
+                    .Select(group => new
+                    {
+                        lucentUri = group.Key.LucentUri,
+                        lucentRange = ToProtocolRange(group.Key.LucentRange),
+                        generated = group.OrderBy(entry => entry.GeneratedUri, StringComparer.Ordinal)
+                            .ThenBy(entry => entry.GeneratedRange.StartLine)
+                            .ThenBy(entry => entry.GeneratedRange.StartCharacter)
+                            .Select(entry => new
+                            {
+                                generatedUri = entry.GeneratedUri,
+                                generatedRange = ToProtocolRange(entry.GeneratedRange),
+                            }),
+                    }),
+            }, cancellationToken);
+        }
+
+        private static LspRange ToProtocolRange(LucentSourceMapRange range) => new(
+            new LspPosition(range.StartLine, range.StartCharacter),
+            new LspPosition(range.EndLine, range.EndCharacter));
+
         private async Task DefinitionAsync(
             JsonElement id,
             JsonElement parameters,
@@ -613,6 +1014,28 @@ public static class LanguageServer
             if (requestUri is not null)
             {
                 await RefreshDocumentAnalysisAsync(requestUri, cancellationToken);
+            }
+            if (requestUri is not null && requestUri.EndsWith(".css", StringComparison.OrdinalIgnoreCase) &&
+                _documents.TryGetValue(requestUri, out var cssDocument) &&
+                FileUri.TryGetPath(requestUri, out var cssPath) &&
+                LucentCompiler.GetCssDefinition(cssDocument.Text,
+                    GetOffset(cssDocument.Text, parameters.GetProperty("position")), cssPath,
+                    cssDocument.CssTokens) is { } css)
+            {
+                var definitionPath = string.IsNullOrWhiteSpace(css.SourcePath) ? cssPath : css.SourcePath;
+                var cssDefinitionUri = new Uri(definitionPath).AbsoluteUri;
+                var cssDefinitionText = cssDocument.CssTokens?.TryGetDocumentText(
+                    definitionPath, out var indexedText) == true
+                    ? indexedText
+                    : _documents.TryGetValue(cssDefinitionUri, out var openCss)
+                        ? openCss.Text
+                        : string.Empty;
+                await _connection.WriteResponseAsync(id, new
+                {
+                    uri = cssDefinitionUri,
+                    range = ToRange(cssDefinitionText, css.Span),
+                }, cancellationToken);
+                return;
             }
             var (document, symbol) = FindSymbol(parameters);
             if (document is not null && symbol is null)
@@ -649,6 +1072,136 @@ public static class LanguageServer
                 },
                 cancellationToken);
         }
+
+        private async Task<CssProjectTokenIndex> BuildCssTokenIndexAsync(
+            string cssPath,
+            CancellationToken cancellationToken)
+        {
+            var context = await _projectContexts.LoadAsync(cssPath, cancellationToken);
+            var paths = new HashSet<string>(OperatingSystem.IsWindows()
+                ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            {
+                Path.GetFullPath(cssPath),
+            };
+            foreach (var lui in context?.LucentSources ?? [])
+            {
+                paths.Add(Path.GetFullPath(lui));
+                paths.Add(Path.ChangeExtension(Path.GetFullPath(lui), ".css"));
+            }
+
+            var documents = new List<CssProjectDocument>();
+            foreach (var path in paths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            {
+                var uri = new Uri(path).AbsoluteUri;
+                if (_documents.TryGetValue(uri, out var open))
+                {
+                    documents.Add(new CssProjectDocument(path, open.Text));
+                }
+                else if (File.Exists(path))
+                {
+                    documents.Add(new CssProjectDocument(path,
+                        await File.ReadAllTextAsync(path, cancellationToken)));
+                }
+            }
+            return CssProjectTokenIndex.Create(documents);
+        }
+
+        private async Task RefreshCssIndexesAsync(CancellationToken cancellationToken)
+        {
+            foreach (var (uri, document) in _documents.ToArray())
+            {
+                if (!uri.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var index = await BuildCssTokenIndexAsync(GetSourcePath(uri), cancellationToken);
+                _documents[uri] = document with { CssTokens = index };
+            }
+        }
+
+        private async Task ReferencesAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var references = await FindComponentReferencesAsync(parameters, cancellationToken);
+            await _connection.WriteResponseAsync(id, references?.Select(reference => new
+            {
+                uri = new Uri(reference.SourcePath).AbsoluteUri,
+                range = ToRange(reference.Text, reference.Symbol.ReferenceSpan),
+            }).ToArray(), cancellationToken);
+        }
+
+        private async Task RenameAsync(
+            JsonElement id,
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var newName = parameters.TryGetProperty("newName", out var name) ? name.GetString() : null;
+            if (string.IsNullOrWhiteSpace(newName) ||
+                !System.Text.RegularExpressions.Regex.IsMatch(newName, "^[A-Za-z_][A-Za-z0-9_]*$"))
+            {
+                await _connection.WriteResponseAsync(id, null, cancellationToken);
+                return;
+            }
+
+            var references = await FindComponentReferencesAsync(parameters, cancellationToken);
+            var project = references is null ? null : _projectAnalyses.Values.FirstOrDefault(analysis =>
+                analysis.Results.Any(result => PathsEqual(result.SourcePath, references[0].SourcePath)));
+            if (references is null || project is null || project.Results.SelectMany(result => result.Result.Symbols)
+                    .Any(symbol => symbol.Kind == LucentSemanticSymbolKind.Component &&
+                        string.Equals(symbol.Name, newName, StringComparison.Ordinal) &&
+                        symbol.Definition is not null && !SameDefinition(symbol.Definition, references[0].Symbol.Definition)))
+            {
+                await _connection.WriteResponseAsync(id, null, cancellationToken);
+                return;
+            }
+
+            var changes = references.GroupBy(reference => new Uri(reference.SourcePath).AbsoluteUri)
+                .ToDictionary(group => group.Key, group => group.Select(reference => new
+                {
+                    range = ToRange(reference.Text, reference.Symbol.ReferenceSpan),
+                    newText = newName,
+                }).OrderByDescending(edit => edit.range.Start.Line)
+                  .ThenByDescending(edit => edit.range.Start.Character).ToArray());
+            await _connection.WriteResponseAsync(id, new { changes }, cancellationToken);
+        }
+
+        private async Task<IReadOnlyList<ComponentReference>?> FindComponentReferencesAsync(
+            JsonElement parameters,
+            CancellationToken cancellationToken)
+        {
+            var uri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
+            if (uri is null)
+                return null;
+            await RefreshDocumentAnalysisAsync(uri, cancellationToken);
+            if (!_documents.TryGetValue(uri, out var document))
+                return null;
+            var offset = GetOffset(document.Text, parameters.GetProperty("position"));
+            var selected = document.Analysis.Symbols.Where(symbol =>
+                    symbol.Kind == LucentSemanticSymbolKind.Component &&
+                    offset >= symbol.ReferenceSpan.Start && offset <= symbol.ReferenceSpan.End)
+                .OrderBy(symbol => symbol.ReferenceSpan.Length).FirstOrDefault();
+            if (selected?.Definition is null)
+                return null;
+
+            var project = _projectAnalyses.Values.FirstOrDefault(analysis => analysis.Results.Any(result =>
+                PathsEqual(result.SourcePath, GetSourcePath(uri))));
+            if (project is null)
+                return null;
+            return project.Results.SelectMany(result => result.Result.Symbols
+                    .Where(symbol => symbol.Kind == LucentSemanticSymbolKind.Component &&
+                        SameDefinition(symbol.Definition, selected.Definition))
+                    .Select(symbol => new ComponentReference(result.SourcePath,
+                        _documents.FirstOrDefault(open => PathsEqual(GetSourcePath(open.Key), result.SourcePath)).Value?.Text
+                            ?? File.ReadAllText(result.SourcePath), symbol)))
+                .OrderBy(reference => reference.SourcePath, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(reference => reference.Symbol.ReferenceSpan.Start)
+                .ToArray();
+        }
+
+        private static bool SameDefinition(LucentDefinition? left, LucentDefinition? right) =>
+            left is not null && right is not null && PathsEqual(left.SourcePath, right.SourcePath) &&
+            left.Span == right.Span;
 
         private async Task RefreshDocumentAnalysisAsync(
             string uri,
@@ -754,11 +1307,24 @@ public static class LanguageServer
         private sealed record DocumentState(
             string Text,
             int? Version,
-            CompilationResult Analysis);
+            CompilationResult Analysis,
+            CssProjectTokenIndex? CssTokens);
 
         private sealed record ProjectAnalysis(
             string Generation,
             IReadOnlyList<LucentSourceCompilation> Results);
+
+        private sealed record InboundMessage(
+            JsonDocument? Message,
+            CancellationTokenSource? RequestCancellation,
+            string? RequestKey,
+            Exception? TransportException,
+            bool EndOfStream);
+
+        private sealed record ComponentReference(
+            string SourcePath,
+            string Text,
+            LucentSemanticSymbol Symbol);
 
         private sealed record LspPosition(int Line, int Character);
 

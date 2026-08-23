@@ -7,15 +7,19 @@ namespace Lucent.LanguageServer;
 
 internal sealed class ProjectContextLoader
 {
+    private const int MaxContexts = 8;
+    private const int MaxSourceProjects = 256;
     private readonly StringComparer _pathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
     private readonly Dictionary<string, CachedProjectContext> _contexts;
+    private readonly Dictionary<string, string> _sourceProjects;
     private IReadOnlyList<string> _workspaceRoots = [];
 
     public ProjectContextLoader()
     {
         _contexts = new Dictionary<string, CachedProjectContext>(_pathComparer);
+        _sourceProjects = new Dictionary<string, string>(_pathComparer);
     }
 
     public void Configure(JsonElement initializeParameters)
@@ -43,6 +47,7 @@ internal sealed class ProjectContextLoader
 
         _workspaceRoots = roots.Distinct(_pathComparer).ToArray();
         _contexts.Clear();
+        _sourceProjects.Clear();
         LanguageServerLog.WorkspaceConfigured(
             LanguageServerLog.Logger,
             string.Join(Path.PathSeparator, _workspaceRoots));
@@ -69,7 +74,9 @@ internal sealed class ProjectContextLoader
             projectPath,
             sourcePath);
 
-        var stamp = GetProjectStamp(projectPath);
+        var stamp = _contexts.TryGetValue(projectPath, out var cachedForStamp)
+            ? GetProjectStamp(projectPath, cachedForStamp.Context)
+            : GetProjectStamp(projectPath, context: null);
         if (_contexts.TryGetValue(projectPath, out var cached) &&
             cached.Stamp == stamp)
         {
@@ -96,9 +103,14 @@ internal sealed class ProjectContextLoader
 
         if (context is not null)
         {
+            foreach (var source in _sourceProjects.Where(entry => _pathComparer.Equals(entry.Value, projectPath))
+                         .Select(entry => entry.Key).ToArray())
+                _sourceProjects.Remove(source);
             _contexts[projectPath] = new CachedProjectContext(
                 context,
-                GetProjectStamp(projectPath));
+                GetProjectStamp(projectPath, context));
+            while (_contexts.Count > MaxContexts)
+                _contexts.Remove(_contexts.Keys.First());
             LanguageServerLog.ProjectLoaded(
                 LanguageServerLog.Logger,
                 projectPath,
@@ -109,39 +121,65 @@ internal sealed class ProjectContextLoader
         return context;
     }
 
-    private static ProjectStamp GetProjectStamp(string projectPath)
+    private static ProjectStamp GetProjectStamp(
+        string projectPath,
+        LucentProjectContext? context)
     {
         var hash = new HashCode();
-        hash.Add(File.GetLastWriteTimeUtc(projectPath));
-        var pending = new Stack<string>();
-        pending.Push(Path.GetDirectoryName(projectPath)!);
-        while (pending.TryPop(out var directory))
+        AddFile(projectPath);
+        AddDirectory(Path.GetDirectoryName(projectPath)!);
+        foreach (var path in context?.Sources ?? [])
+        {
+            AddFile(path);
+            AddDirectory(Path.GetDirectoryName(path)!);
+        }
+        foreach (var path in context?.References ?? [])
+        {
+            AddFile(path);
+        }
+
+        return new ProjectStamp(hash.ToHashCode());
+
+        void AddFile(string path)
         {
             try
             {
-                hash.Add(directory, StringComparer.OrdinalIgnoreCase);
-                hash.Add(Directory.GetLastWriteTimeUtc(directory));
-                foreach (var child in Directory.EnumerateDirectories(directory))
-                {
-                    if (!IgnoredDirectoryNames.Contains(Path.GetFileName(child)))
-                    {
-                        pending.Push(child);
-                    }
-                }
+                var file = new FileInfo(path);
+                hash.Add(Path.GetFullPath(path), StringComparer.OrdinalIgnoreCase);
+                hash.Add(file.Exists);
+                hash.Add(file.Exists ? file.Length : 0L);
+                hash.Add(file.Exists ? file.LastWriteTimeUtc : DateTime.MinValue);
             }
             catch (Exception exception) when (
                 exception is IOException or UnauthorizedAccessException)
             {
-                hash.Add(directory);
+                hash.Add(path, StringComparer.OrdinalIgnoreCase);
             }
         }
 
-        return new ProjectStamp(hash.ToHashCode());
+        void AddDirectory(string path)
+        {
+            try
+            {
+                hash.Add(Path.GetFullPath(path), StringComparer.OrdinalIgnoreCase);
+                hash.Add(Directory.GetLastWriteTimeUtc(path));
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                hash.Add(path, StringComparer.OrdinalIgnoreCase);
+            }
+        }
     }
 
     private string? FindProject(string sourcePath)
     {
         var fullSourcePath = Path.GetFullPath(sourcePath);
+        if (_sourceProjects.TryGetValue(fullSourcePath, out var knownProject) &&
+            File.Exists(knownProject))
+        {
+            return knownProject;
+        }
         var roots = _workspaceRoots;
         if (FindFallbackRoot(fullSourcePath) is { } fallbackRoot &&
             !roots.Contains(fallbackRoot, _pathComparer))
@@ -159,17 +197,30 @@ internal sealed class ProjectContextLoader
         {
             if (ProjectIncludesSource(project, fullSourcePath))
             {
+                RememberSourceProject(fullSourcePath, project);
                 return project;
             }
         }
 
         var sourceDirectory = Path.GetDirectoryName(fullSourcePath);
-        return projects
+        var fallback = projects
             .Where(project => IsWithin(
                 sourceDirectory,
                 Path.GetDirectoryName(project)))
             .OrderByDescending(project => Path.GetDirectoryName(project)!.Length)
             .FirstOrDefault();
+        if (fallback is not null)
+        {
+            RememberSourceProject(fullSourcePath, fallback);
+        }
+        return fallback;
+    }
+
+    private void RememberSourceProject(string sourcePath, string projectPath)
+    {
+        _sourceProjects[sourcePath] = projectPath;
+        while (_sourceProjects.Count > MaxSourceProjects)
+            _sourceProjects.Remove(_sourceProjects.Keys.First());
     }
 
     private static string? FindFallbackRoot(string sourcePath)
@@ -247,13 +298,17 @@ internal sealed class ProjectContextLoader
         {
             var projectDirectory = Path.GetDirectoryName(projectPath)!;
             var document = XDocument.Load(projectPath);
-            return document.Descendants()
+            var lucentSources = document.Descendants()
                 .Where(element => element.Name.LocalName == "LucentSource")
                 .Select(element => element.Attribute("Include")?.Value)
                 .Where(include => !string.IsNullOrWhiteSpace(include))
                 .Where(include => !include!.Contains('*') && !include.Contains('$'))
                 .Select(include => Path.GetFullPath(include!, projectDirectory))
-                .Any(path => _pathComparer.Equals(path, sourcePath));
+                .ToArray();
+            return lucentSources.Any(path => _pathComparer.Equals(path, sourcePath)) ||
+                sourcePath.EndsWith(".css", StringComparison.OrdinalIgnoreCase) &&
+                lucentSources.Any(path => _pathComparer.Equals(
+                    Path.ChangeExtension(path, ".css"), sourcePath));
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException or
@@ -282,6 +337,8 @@ internal sealed class ProjectContextLoader
         startInfo.ArgumentList.Add("-getItem:Compile");
         startInfo.ArgumentList.Add("-getItem:LucentSource");
         startInfo.ArgumentList.Add("-getItem:Using");
+        startInfo.ArgumentList.Add("-getItem:ProjectReference");
+        startInfo.ArgumentList.Add("-getProperty:TargetFramework,LangVersion,Nullable,DefineConstants,ImplicitUsings");
         startInfo.ArgumentList.Add("-p:DesignTimeBuild=true");
         startInfo.ArgumentList.Add("-p:BuildingProject=false");
         startInfo.ArgumentList.Add("-nologo");
@@ -294,7 +351,16 @@ internal sealed class ProjectContextLoader
 
         var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+                process.Kill(entireProcessTree: true);
+            throw;
+        }
         var output = await standardOutput;
         var error = await standardError;
         if (process.ExitCode != 0)
@@ -330,7 +396,17 @@ internal sealed class ProjectContextLoader
             items.TryGetProperty("Compile", out var compileItems)
                 ? ReadItems(compileItems)
                     .Where(path => path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-                    .Where(path => !IsBuildOutput(path))
+                    // Other generators' evaluated Compile items are normal project
+                    // semantics, including their obj outputs. Only Lucent's own
+                    // generated files require the active manifest as authority.
+                    .Where(path => !IsBuildOutput(path) || !IsLucentGenerated(path) ||
+                                   IsManifestGenerated(compileItems, path))
+                    // The active Lucent manifest is a design-time C# input, but
+                    // Lucent rebuilds those same sources from their .lui files.
+                    // Feeding its own generated components back into the semantic
+                    // base duplicates generated types and makes every edit pay for
+                    // stale implementation trees. Keep other SDK generated inputs.
+                    .Where(path => !IsLucentGenerated(path))
                     .ToArray()
                 : [];
         var lucentSources = root.TryGetProperty("Items", out items) &&
@@ -343,10 +419,35 @@ internal sealed class ProjectContextLoader
             items.TryGetProperty("Using", out var usingItems)
                 ? ReadUsingItems(usingItems).ToArray()
                 : [];
+        var projectReferences = root.TryGetProperty("Items", out items) &&
+            items.TryGetProperty("ProjectReference", out var projectReferenceItems)
+                ? ReadItems(projectReferenceItems).ToArray()
+                : [];
+        var properties = root.TryGetProperty("Properties", out var propertyElement)
+            ? propertyElement : default;
+        string? Property(string name) => properties.ValueKind == JsonValueKind.Object &&
+            properties.TryGetProperty(name, out var value) ? value.GetString() : null;
 
         return new LucentProjectContext(
-            projectPath, references, sources, lucentSources, globalUsings);
+            projectPath, references, sources, lucentSources, globalUsings,
+            Property("TargetFramework"), Property("LangVersion"), Property("Nullable"),
+            Property("DefineConstants"), projectReferences);
     }
+
+    private static bool IsManifestGenerated(JsonElement compileItems, string path) =>
+        compileItems.EnumerateArray().Any(item =>
+        {
+            var candidate = item.TryGetProperty("FullPath", out var full) ? full.GetString() :
+                item.TryGetProperty("Identity", out var identity) ? identity.GetString() : null;
+            return !string.IsNullOrWhiteSpace(candidate) &&
+                string.Equals(Path.GetFullPath(candidate), path,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) &&
+                item.TryGetProperty("AutoGen", out var auto) &&
+                string.Equals(auto.GetString(), "true", StringComparison.OrdinalIgnoreCase);
+        });
+
+    private static bool IsLucentGenerated(string path) =>
+        path.EndsWith("Component.g.cs", StringComparison.OrdinalIgnoreCase);
 
     private static LucentProjectContext CreateFallbackContext(string projectPath)
     {

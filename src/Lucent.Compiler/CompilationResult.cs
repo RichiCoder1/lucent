@@ -16,6 +16,8 @@ public sealed record CompilationResult(
 {
     public IReadOnlyList<LucentSemanticSymbol> Symbols { get; init; } = [];
 
+    public LucentSourceMap? SourceMap { get; init; }
+
     internal ComponentSemanticAnalysis? Analysis { get; init; }
 
     public bool Succeeded =>

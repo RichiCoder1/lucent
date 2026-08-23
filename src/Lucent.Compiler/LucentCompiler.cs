@@ -2,6 +2,7 @@ using Lucent.Compiler.CodeGeneration;
 using Lucent.Compiler.Parsing;
 using Lucent.Compiler.Semantics;
 using Lucent.Compiler.Styling;
+using Lucent.Compiler.Syntax;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
@@ -9,6 +10,104 @@ namespace Lucent.Compiler;
 
 public static class LucentCompiler
 {
+    /// <summary>
+    /// Rebinds one open source against its existing project snapshot when its
+    /// exported component signatures have not changed. Callers must rebuild the
+    /// project when this returns <see langword="false"/>.
+    /// </summary>
+    public static bool TryRecompileUnchangedComponentSignatures(
+        string sourceText,
+        string sourcePath,
+        CompilationResult previous,
+        LucentProjectContext? projectContext,
+        out CompilationResult result)
+    {
+        ArgumentNullException.ThrowIfNull(sourceText);
+        ArgumentNullException.ThrowIfNull(previous);
+        var previousAnalysis = previous.Analysis;
+        if (previousAnalysis?.ComponentIndex is null)
+        {
+            result = previous;
+            return false;
+        }
+
+        var parser = new Parser(sourceText, sourcePath);
+        var syntax = parser.Parse();
+        if (!SameComponentSignatures(previousAnalysis.Syntax, syntax))
+        {
+            result = previous;
+            return false;
+        }
+
+        var analysis = ComponentSemanticAnalysis.Create(
+            sourceText,
+            sourcePath,
+            syntax,
+            parser.Diagnostics.ToArray(),
+            projectContext,
+            previousAnalysis.Project.Compilation,
+            previousAnalysis.ComponentIndex);
+        var diagnostics = analysis.Diagnostics.ToList();
+        GeneratedCSharp? emitted = null;
+        if (!diagnostics.Any(diagnostic => diagnostic.Severity == LucentDiagnosticSeverity.Error) &&
+            analysis.Model is not null)
+        {
+            try
+            {
+                emitted = GeneralCSharpEmitter.EmitWithProvenance(analysis.Model, sourcePath,
+                    sourceText, BoundStyleSheet.Empty);
+            }
+            catch (InvalidOperationException exception)
+            {
+                diagnostics.Add(new LucentDiagnostic("LUC4001",
+                    LucentDiagnosticSeverity.Error, exception.Message,
+                    new SourceSpan(0, 1), 1, 1, sourcePath));
+            }
+        }
+
+        var generated = emitted?.Text;
+        result = new CompilationResult(analysis.Syntax, generated, diagnostics)
+        {
+            Symbols = analysis.Symbols,
+            SourceMap = emitted is null ? null : LucentSourceMap.Create(sourceText, emitted, sourcePath),
+            Analysis = analysis,
+        };
+        return true;
+    }
+
+    /// <summary>Normalizes line endings and trailing whitespace without changing syntax.</summary>
+    public static string Format(string sourceText)
+    {
+        ArgumentNullException.ThrowIfNull(sourceText);
+        var lines = sourceText.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n').Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+            lines[index] = lines[index].TrimEnd();
+        return string.Join("\n", lines).TrimEnd() + "\n";
+    }
+
+    private static bool SameComponentSignatures(
+        CompilationUnitSyntax previous,
+        CompilationUnitSyntax current)
+    {
+        if (!string.Equals(previous.NamespaceName, current.NamespaceName, StringComparison.Ordinal) ||
+            previous.AllComponents.Count != current.AllComponents.Count)
+        {
+            return false;
+        }
+
+        return previous.AllComponents.Zip(current.AllComponents, (left, right) =>
+                string.Equals(left.Name, right.Name, StringComparison.Ordinal) &&
+                left.AllParameters.Count == right.AllParameters.Count &&
+                left.AllSlots.Select(slot => slot.Name).SequenceEqual(right.AllSlots.Select(slot => slot.Name), StringComparer.Ordinal) &&
+                left.AllParameters.Zip(right.AllParameters, (leftParameter, rightParameter) =>
+                    string.Equals(leftParameter.Name, rightParameter.Name, StringComparison.Ordinal) &&
+                    string.Equals(leftParameter.TypeName, rightParameter.TypeName, StringComparison.Ordinal) &&
+                    string.Equals(leftParameter.DefaultValueText, rightParameter.DefaultValueText, StringComparison.Ordinal))
+                    .All(equal => equal))
+            .All(equal => equal);
+    }
+
     public static LucentSemanticSymbol? GetExpressionSymbol(
         string sourceText,
         int offset,
@@ -30,10 +129,27 @@ public static class LucentCompiler
         ArgumentNullException.ThrowIfNull(sourceText);
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         if (sourcePath.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
-            return EditorIntelligence.GetCssCompletions(sourceText, offset);
+            return EditorIntelligence.GetCssCompletions(sourceText, offset, LocalPath(sourcePath));
         var analysis = ComponentSemanticAnalysis.Create(sourceText, sourcePath, projectContext);
         return EditorIntelligence.GetCompletions(sourceText, offset, analysis);
     }
+
+    public static IReadOnlyList<LucentCompletionItem> GetCssCompletions(
+        string sourceText,
+        int offset,
+        string sourcePath,
+        CssProjectTokenIndex projectTokens) =>
+        EditorIntelligence.GetCssCompletions(sourceText, offset, LocalPath(sourcePath), projectTokens);
+
+    public static CssNavigation? GetCssDefinition(
+        string sourceText,
+        int offset,
+        string sourcePath,
+        CssProjectTokenIndex? projectTokens = null) =>
+        EditorIntelligence.GetCssDefinition(sourceText, offset, LocalPath(sourcePath), projectTokens);
+
+    private static string LocalPath(string path) => Uri.TryCreate(path, UriKind.Absolute, out var uri) && uri.IsFile
+        ? uri.LocalPath : path;
 
     public static IReadOnlyList<LucentCompletionItem> GetCompletions(
         string sourceText,
@@ -129,7 +245,7 @@ public static class LucentCompiler
         var index = ComponentIndex.Create(parsed.Select(source =>
             (source.Input.SourcePath, source.Input.SourceText, source.Syntax, source.BatchDiagnostics)).ToArray(),
             indexProject);
-        baseCompilation = AddComponentSemanticStubs(baseCompilation, parsed, index);
+        baseCompilation = AddComponentSemanticStubs(baseCompilation, parsed, index, projectContext);
         var analyses = parsed.Select(source => ComponentSemanticAnalysis.Create(
             source.Input.SourceText,
             source.Input.SourcePath,
@@ -182,12 +298,12 @@ public static class LucentCompiler
         for (var indexValue = 0; indexValue < parsed.Count; indexValue++)
         {
             var analysis = analyses[indexValue];
-            string? generated = null;
+            GeneratedCSharp? emitted = null;
             if (!projectHasErrors && analysis.Model is not null)
             {
                 try
                 {
-                    generated = GeneralCSharpEmitter.Emit(analysis.Model,
+                    emitted = GeneralCSharpEmitter.EmitWithProvenance(analysis.Model,
                         parsed[indexValue].Input.SourcePath,
                         parsed[indexValue].Input.SourceText,
                         styleSheets[indexValue]);
@@ -201,10 +317,16 @@ public static class LucentCompiler
                 }
             }
 
+            var generated = emitted?.Text;
             results.Add(new LucentSourceCompilation(parsed[indexValue].Input.SourcePath,
                 new CompilationResult(analysis.Syntax, generated, diagnostics[indexValue])
                 {
                     Symbols = analysis.Symbols,
+                    SourceMap = emitted is null
+                        ? null
+                        : LucentSourceMap.Create(parsed[indexValue].Input.SourceText, emitted,
+                            parsed[indexValue].Input.SourcePath,
+                            parsed[indexValue].Input.GeneratedOutputPath),
                     Analysis = analysis,
                 }));
         }
@@ -215,7 +337,8 @@ public static class LucentCompiler
     private static CSharpCompilation AddComponentSemanticStubs(
         CSharpCompilation compilation,
         IReadOnlyList<ParsedSource> parsed,
-        ComponentIndex index)
+        ComponentIndex index,
+        LucentProjectContext? projectContext)
     {
         var stubs = new List<SyntaxTree>();
         foreach (var symbol in index.Symbols)
@@ -256,7 +379,7 @@ public static class LucentCompiler
                 source.Syntax.AllUsings.Select(usingDirective => usingDirective.Text));
             stubs.Add(CSharpSyntaxTree.ParseText(
                 imports + Environment.NewLine + sourceText,
-                CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
+                ProjectSemanticCompilation.CreateParseOptions(projectContext),
                 symbol.GeneratedTypeName + ".SemanticStub.g.cs"));
         }
 

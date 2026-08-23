@@ -14,6 +14,12 @@ internal static class GeneralCSharpEmitter
         BoundComponentModel model,
         string sourcePath,
         string sourceText,
+        BoundStyleSheet? styles = null) => EmitWithProvenance(model, sourcePath, sourceText, styles).Text;
+
+    public static GeneratedCSharp EmitWithProvenance(
+        BoundComponentModel model,
+        string sourcePath,
+        string sourceText,
         BoundStyleSheet? styles = null)
     {
         var source = new SourceDocument(sourceText, sourcePath);
@@ -475,7 +481,7 @@ internal static class GeneralCSharpEmitter
 
         foreach (var nativeBinding in nativeBindings)
         {
-            EmitNativeBindingUpdater(writer, nativeBinding.Target, nativeBinding.property);
+            EmitNativeBindingUpdater(writer, nativeBinding.Target, nativeBinding.property, source);
             writer.Line();
         }
 
@@ -544,7 +550,7 @@ internal static class GeneralCSharpEmitter
 
         writer.Unindent();
         writer.Line("}");
-        return writer.ToString();
+        return new GeneratedCSharp(writer.ToString(), writer.Provenance);
     }
 
     private static void EmitComputed(
@@ -1165,7 +1171,7 @@ internal static class GeneralCSharpEmitter
             var target = $"__lucent_control{index}!";
             if (property.NativeBinding is { SourceKind: not BoundNativeBindingSourceKind.Item } nativeBinding)
             {
-                EmitLineMapping(writer, source, property.ExpressionSpan);
+                EmitLineMapping(writer, source, property.ExpressionSpan, property.Span);
                 writer.Line($"__lucent_UpdateNativeBinding{nativeBinding.Id}();");
                 writer.Line("#line default");
                 continue;
@@ -2399,7 +2405,8 @@ internal static class GeneralCSharpEmitter
     private static void EmitNativeBindingUpdater(
         CodeWriter writer,
         string target,
-        BoundPropertyMember property)
+        BoundPropertyMember property,
+        SourceDocument sourceDocument)
     {
         var binding = property.NativeBinding!;
         var source = binding.SourceKind == BoundNativeBindingSourceKind.Parameter
@@ -2411,10 +2418,13 @@ internal static class GeneralCSharpEmitter
         writer.Line($"__lucent_nativeBinding{binding.Id}?.Dispose();");
         writer.Line($"__lucent_nativeBinding{binding.Id} = null;");
         writer.Line($"if ({target} is null) return;");
+        writer.Map(sourceDocument.Path, property.ExpressionSpan);
+        writer.MapAdditional(sourceDocument.Path, property.Span);
         writer.Line($"__lucent_nativeBinding{binding.Id} = {target}!.Bind(" +
             $"{binding.TargetPropertyOwnerTypeName}.{binding.TargetPropertyFieldName}, " +
             $"global::Avalonia.Data.CompiledBinding.Create<{binding.SourceTypeName}, {property.TargetTypeName}>(" +
             $"{EscapeIdentifier(binding.SourceName)} => {binding.PathText}, source: {source}));");
+        writer.Unmap();
         writer.Unindent();
         writer.Line("}");
     }
@@ -3234,8 +3244,12 @@ internal static class GeneralCSharpEmitter
     private static void EmitLineMapping(
         CodeWriter writer,
         SourceDocument source,
-        SourceSpan span)
+        SourceSpan span,
+        SourceSpan? additionalOrigin = null)
     {
+        writer.Map(source.Path, span);
+        if (additionalOrigin is { } additional && additional != span)
+            writer.MapAdditional(source.Path, additional);
         var (line, _) = source.GetLineAndColumn(span.Start);
         writer.Line($"#line {line} \"{EscapeLinePath(source.Path)}\"");
     }
@@ -3324,3 +3338,5 @@ internal static class GeneralCSharpEmitter
     private static string EscapeIdentifier(string name) =>
         SyntaxFacts.GetKeywordKind(name) == SyntaxKind.None ? name : "@" + name;
 }
+
+internal sealed record GeneratedCSharp(string Text, IReadOnlyList<GeneratedProvenance> Provenance);

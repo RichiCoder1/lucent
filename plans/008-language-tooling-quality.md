@@ -52,6 +52,14 @@ Roslyn compilations.
   shared frontend.
 - Add a repeatable protocol benchmark for completion latency, edit latency, cache
   behavior, allocations, and retained managed memory.
+- Maintain a bounded native-C# quality comparison matrix for Lucent's supported
+  seams: native controls/properties/events/attached properties, project types,
+  component declarations/invocations, component members and islands, structural
+  regions/loops/templates/bindings/slots, CSS documents, malformed edits, and
+  unsaved cross-file overlays. It verifies hover, completion, definition,
+  diagnostics, UTF-16 positions, triggers, docs, overloads/nullability where
+  exposed by Roslyn, cancellation and latency. This is explicitly not general
+  C# language-service parity.
 
 **Out of scope**:
 
@@ -182,16 +190,16 @@ how to reproduce the result.
 
 ## Done criteria
 
-- [ ] Project changes refresh LSP semantics without restart or stale publication.
-- [ ] The LSP retains a bounded incremental Roslyn project cache without
+- [x] Project changes refresh LSP semantics without restart or stale publication.
+- [x] The LSP retains a bounded incremental Roslyn project cache without
       depending on another language server's process or workspace.
-- [ ] Warm and post-edit completion meet the recorded p95/p99 latency budgets.
-- [ ] The 500-cycle benchmark meets allocation, peak/retained-memory, and
+- [x] Warm and post-edit completion meet the recorded p95/p99 latency budgets.
+- [x] The 500-cycle benchmark meets allocation, peak/retained-memory, and
       generation budgets.
-- [ ] Completion, formatting, source mapping, and supported embedded-C# semantics
+- [x] Completion, formatting, source mapping, and supported embedded-C# semantics
       meet the Plan 008 quality checks.
-- [ ] Every advertised LSP capability has a protocol test.
-- [ ] Benchmark inputs, method, environment, and results are reproducible.
+- [x] Every advertised LSP capability has a protocol test.
+- [x] Benchmark inputs, method, environment, and results are reproducible.
 
 ## STOP conditions
 
@@ -200,6 +208,17 @@ how to reproduce the result.
 - A proposed optimization requires private APIs or another language server's
   in-memory workspace.
 - A performance budget is weakened without a recorded profile and user approval.
+
+## Native-C# quality boundary
+
+Native and project symbols retain available Roslyn XML documentation and clean
+display text (no generated `global::` qualification in editor output). Every
+supported authoring context is represented in protocol fixtures so a missing
+hover or completion result is a regression, not an undocumented dead spot.
+
+CSS completion and navigation consume the shared catalog. Class selector and
+resource-token semantics belong to CSS files; Lucent intentionally does **not**
+complete CSS class names inside `Class:` values.
 
 ## Maintenance notes
 

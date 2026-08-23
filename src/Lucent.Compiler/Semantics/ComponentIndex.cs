@@ -181,7 +181,7 @@ internal sealed class ComponentIndex
                     $"namespace {symbol.NamespaceName}; class __LucentSignature {{ void M({parameter.TypeName} {parameter.Name} = {parameter.DefaultValueText}) {{ }} }}";
                 var tree = CSharpSyntaxTree.ParseText(
                     text,
-                    CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
+                    project.ParseOptions,
                     path: source.Path);
                 var model = project.Compilation.AddSyntaxTrees(tree).GetSemanticModel(tree);
                 foreach (var diagnostic in model.GetDiagnostics().Where(diagnostic =>

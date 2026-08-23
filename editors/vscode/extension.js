@@ -44,6 +44,10 @@ async function activate(context) {
         },
     };
 
+    const projectFiles = vscode.workspace.createFileSystemWatcher(
+        '**/*.{cs,csproj,props,targets,lui,css}');
+    context.subscriptions.push(projectFiles);
+
     const clientOptions = {
         documentSelector: [
             { scheme: 'file', language: 'lucent' },
@@ -52,6 +56,7 @@ async function activate(context) {
         outputChannelName: 'Lucent Language Server',
         synchronize: {
             configurationSection: 'lucent',
+            fileEvents: projectFiles,
         },
     };
 

@@ -9,8 +9,15 @@ namespace Lucent.Compiler;
 
 internal static class EditorIntelligence
 {
-    public static IReadOnlyList<LucentCompletionItem> GetCssCompletions(string sourceText, int offset)
+    public static IReadOnlyList<LucentCompletionItem> GetCssCompletions(
+        string sourceText,
+        int offset,
+        string sourcePath,
+        CssProjectTokenIndex? projectTokens = null)
     {
+        var tokens = projectTokens ?? CssProjectTokenIndex.Create([new CssProjectDocument(sourcePath, sourceText)]);
+        var indexed = tokens.GetCompletions(sourcePath, offset);
+        if (indexed.Count > 0) return indexed;
         var prefixStart = Math.Max(0, Math.Min(offset, sourceText.Length));
         while (prefixStart > 0 && (char.IsLetterOrDigit(sourceText[prefixStart - 1]) || sourceText[prefixStart - 1] == '-'))
             prefixStart--;
@@ -26,6 +33,14 @@ internal static class EditorIntelligence
             .OrderBy(item => item.Label, StringComparer.Ordinal)
             .ToArray();
     }
+
+    public static CssNavigation? GetCssDefinition(
+        string sourceText,
+        int offset,
+        string sourcePath,
+        CssProjectTokenIndex? projectTokens = null) =>
+        (projectTokens ?? CssProjectTokenIndex.Create([new CssProjectDocument(sourcePath, sourceText)]))
+            .GetDefinition(sourcePath, offset);
 
     public static IReadOnlyList<LucentCompletionItem> GetCompletions(
         string sourceText,
@@ -156,7 +171,7 @@ internal static class EditorIntelligence
                 return new LucentCompletionItem(
                     property.Name,
                     LucentCompletionItemKind.Property,
-                    property.TypeName,
+                     NativeSymbolResolver.DisplayTypeName(property.TypeName),
                     property.Name + ": ",
                     symbol.Documentation);
             })
@@ -171,7 +186,7 @@ internal static class EditorIntelligence
                     return new LucentCompletionItem(
                         @event.Name,
                         LucentCompletionItemKind.Event,
-                        @event.DelegateTypeName,
+                         NativeSymbolResolver.DisplayTypeName(@event.DelegateTypeName),
                         @event.Name + ": (sender, e) => { ${0} };",
                         symbol.Documentation,
                         IsSnippet: true);
@@ -383,7 +398,11 @@ internal static class EditorIntelligence
                 },
                 member.Display,
                 member.Name,
-                member.Documentation))
+                member.Documentation,
+                SortText: member.Name,
+                FilterText: member.Name,
+                IsDeprecated: member.Symbol?.GetAttributes().Any(attribute =>
+                    attribute.AttributeClass?.ToDisplayString() == "System.ObsoleteAttribute") == true))
             .ToArray();
         return members;
     }
@@ -832,3 +851,5 @@ internal static class EditorIntelligence
         ISymbol? Symbol,
         string? Documentation);
 }
+
+public sealed record CssNavigation(string Name, string SourcePath, SourceSpan Span);

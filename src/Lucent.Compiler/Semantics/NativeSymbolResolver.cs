@@ -21,10 +21,17 @@ internal sealed class NativeSymbolResolver
             SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers |
             SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
 
+    private static readonly SymbolDisplayFormat UserDisplayFormat =
+        SymbolDisplayFormat.CSharpErrorMessageFormat.WithMiscellaneousOptions(
+            SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier |
+            SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers |
+            SymbolDisplayMiscellaneousOptions.UseSpecialTypes);
+
     private readonly CSharpCompilation _compilation;
     private readonly INamedTypeSymbol? _controlType;
     private readonly INamedTypeSymbol? _stringType;
     private readonly IReadOnlyList<string> _imports;
+    private readonly CSharpParseOptions _parseOptions;
     private readonly Dictionary<string, ITypeSymbol?> _resolvedTypes = new(StringComparer.Ordinal);
 
     public NativeSymbolResolver(
@@ -34,6 +41,7 @@ internal sealed class NativeSymbolResolver
         _controlType = _compilation.GetTypeByMetadataName("Avalonia.Controls.Control");
         _stringType = _compilation.GetSpecialType(SpecialType.System_String);
         _imports = project.Imports;
+        _parseOptions = project.ParseOptions;
     }
 
     public NativeSymbolResolver(
@@ -218,7 +226,7 @@ internal sealed class NativeSymbolResolver
             $"{Environment.NewLine}internal sealed class __LucentTypeProbe {{ public {typeName} Value = default!; }}";
         var tree = CSharpSyntaxTree.ParseText(
             source,
-            CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview));
+            _parseOptions);
         var compilation = _compilation.AddSyntaxTrees(tree);
         var field = tree.GetRoot()
             .DescendantNodes()
@@ -384,6 +392,9 @@ internal sealed class NativeSymbolResolver
     public static string? GetExpressionDocumentation(ISymbol symbol) =>
         GetDocumentation(symbol);
 
+    internal static string DisplayTypeName(string typeName) =>
+        typeName.Replace("global::", string.Empty, StringComparison.Ordinal);
+
     public IReadOnlyList<INamedTypeSymbol> GetExpressionTypes() =>
         _imports
             .Select(ResolveNamespace)
@@ -464,7 +475,7 @@ internal sealed class NativeSymbolResolver
                 .Select(field => new NativeValueCandidate(
                     $"{type.Name}.{field.Name}",
                     $"{type.ToDisplayString(FullyQualifiedFormat)}.{field.Name}",
-                    $"{type.ToDisplayString(FullyQualifiedFormat)}.{field.Name}",
+                    $"{type.ToDisplayString(UserDisplayFormat)}.{field.Name}",
                     GetDocumentation(field),
                     field))
                 .ToArray();
@@ -495,7 +506,7 @@ internal sealed class NativeSymbolResolver
             .Select(candidate => new NativeValueCandidate(
                 $"{type.Name}.{candidate.Symbol!.Name}",
                 $"{type.ToDisplayString(FullyQualifiedFormat)}.{candidate.Symbol.Name}",
-                $"{type.ToDisplayString(FullyQualifiedFormat)}.{candidate.Symbol.Name}",
+                $"{type.ToDisplayString(UserDisplayFormat)}.{candidate.Symbol.Name}",
                 GetDocumentation(candidate.Symbol),
                 candidate.Symbol));
 
@@ -509,7 +520,7 @@ internal sealed class NativeSymbolResolver
             .Select(candidate => new NativeValueCandidate(
                 $"Brushes.{candidate.Name}",
                 $"global::Avalonia.Media.Brushes.{candidate.Name}",
-                candidate.Type.ToDisplayString(FullyQualifiedFormat),
+                candidate.Type.ToDisplayString(UserDisplayFormat),
                 GetDocumentation(candidate),
                 candidate)) ?? [];
 
@@ -565,7 +576,7 @@ internal sealed class NativeSymbolResolver
             control.SourceName,
             LucentSemanticSymbolKind.NativeControl,
             referenceSpan,
-            $"class {control.Symbol.ToDisplayString(FullyQualifiedFormat)}",
+            $"class {control.Symbol.ToDisplayString(UserDisplayFormat)}",
             control.Symbol);
 
     public LucentSemanticSymbol ToSemanticSymbol(
@@ -576,7 +587,7 @@ internal sealed class NativeSymbolResolver
             property.SourceName,
             LucentSemanticSymbolKind.NativeProperty,
             referenceSpan,
-            $"{property.TypeName} {control.TypeName}.{property.Name} {{ " +
+            $"{property.Symbol.Type.ToDisplayString(UserDisplayFormat)} {control.Symbol.ToDisplayString(UserDisplayFormat)}.{property.Name} {{ " +
             $"{(property.Symbol.GetMethod is null ? string.Empty : "get; ")}" +
             $"{(property.Symbol.SetMethod is null ? string.Empty : "set; ")}}}",
             property.Symbol);
@@ -589,8 +600,8 @@ internal sealed class NativeSymbolResolver
             @event.SourceName,
             LucentSemanticSymbolKind.NativeEvent,
             referenceSpan,
-            $"event {@event.Symbol.Type.ToDisplayString(FullyQualifiedFormat)} " +
-            $"{control.TypeName}.{@event.Name}",
+            $"event {@event.Symbol.Type.ToDisplayString(UserDisplayFormat)} " +
+            $"{control.Symbol.ToDisplayString(UserDisplayFormat)}.{@event.Name}",
             @event.Symbol);
 
     public bool ContentAcceptsControl(NativeContentRoute route) =>
@@ -815,17 +826,75 @@ internal sealed class NativeSymbolResolver
 
         try
         {
-            return XElement.Parse($"<root>{xml}</root>")
-                .Descendants("summary")
-                .FirstOrDefault()?
-                .Value
-                .Trim();
+            var root = XElement.Parse($"<root>{xml}</root>");
+            // Roslyn commonly returns a <member> wrapper. It is metadata, not a
+            // documentation section, so render its children as the author wrote
+            // them rather than flattening every section into one "member" line.
+            var sections = root.Elements()
+                .SelectMany(element => element.Name.LocalName == "member"
+                    ? element.Elements()
+                    : [element])
+                .Select(FormatDocumentationElement)
+                .Where(section => !string.IsNullOrWhiteSpace(section));
+            var documentation = string.Join("\n\n", sections);
+            return string.IsNullOrWhiteSpace(documentation) ? null : documentation;
         }
         catch (System.Xml.XmlException)
         {
             return null;
         }
     }
+
+    private static string? FormatDocumentationElement(XElement element)
+    {
+        var text = string.Join(" ", DocumentationText(element).Split((char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrWhiteSpace(text) && !element.HasElements)
+        {
+            return null;
+        }
+
+        var prefix = element.Name.LocalName switch
+        {
+            "summary" => string.Empty,
+            "remarks" => "**Remarks:** ",
+            "returns" => "**Returns:** ",
+            "value" => "**Value:** ",
+            "example" => "**Example:** ",
+            "param" => $"**{element.Attribute("name")?.Value}:** ",
+            "typeparam" => $"**{element.Attribute("name")?.Value}:** ",
+            "exception" => $"**Throws {DisplayCref(element.Attribute("cref")?.Value)}:** ",
+            _ => $"**{element.Name.LocalName}:** ",
+        };
+        return prefix + text;
+    }
+
+    private static string DocumentationText(XElement element) => string.Concat(element.Nodes()
+        .Select(DocumentationNodeText));
+
+    private static string DocumentationNodeText(XNode node) => node switch
+    {
+        XText text => text.Value,
+        XElement { Name.LocalName: "see" or "seealso" } link =>
+            DisplayCref(link.Attribute("cref")?.Value),
+        XElement { Name.LocalName: "paramref" or "typeparamref" } reference =>
+            reference.Attribute("name")?.Value ?? string.Empty,
+        XElement { Name.LocalName: "c" or "code" } code =>
+            $"`{DocumentationText(code).Trim()}`",
+        XElement { Name.LocalName: "para" } paragraph =>
+            $"\n\n{DocumentationText(paragraph).Trim()}\n\n",
+        XElement { Name.LocalName: "list" } list => string.Concat(list.Elements("item")
+            .Select(item => $"\n- {DocumentationText(item).Trim()}")),
+        XElement child => DocumentationText(child),
+        _ => node.ToString(),
+    };
+
+    private static string DisplayCref(string? cref) =>
+        string.IsNullOrWhiteSpace(cref) ? "exception" :
+        cref.Replace("global::", string.Empty, StringComparison.Ordinal)
+            .Replace("T:", string.Empty, StringComparison.Ordinal)
+            .Replace("M:", string.Empty, StringComparison.Ordinal)
+            .Replace("P:", string.Empty, StringComparison.Ordinal);
 }
 
 internal sealed record ResolvedNativeControl(
