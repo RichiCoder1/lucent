@@ -3,7 +3,9 @@
 > **Executor instructions**: Keep three seams distinct: Lucent's compiler owns
 > live CSS syntax and applicability, the LSP owns bounded immutable caches and
 > protocol adaptation, and Avalonia owns runtime style matching. Never execute a
-> project or third-party assembly in the language-server process.
+> project or third-party assembly in the language-server process. Reuse Plan
+> 008a's manifest reader and class-catalog contract; do not create theme-specific
+> metadata infrastructure.
 >
 > **Drift check**: `git diff --stat e2a9a5f..HEAD -- build src editors examples tests docs design plans`
 
@@ -12,7 +14,7 @@
 - **Priority**: P1
 - **Effort**: XL
 - **Risk**: HIGH
-- **Depends on**: plans 007, 008
+- **Depends on**: plans 007, 008a
 - **Category**: styling / theme / tooling / DX
 - **Planned at**: commit `e2a9a5f`, 2026-08-23
 - **Design authority**: [`docs/SHADCN_THEME.md`](../docs/SHADCN_THEME.md)
@@ -27,10 +29,10 @@ classes such as `secondary`, `destructive`, `outline`, `ghost`, `link`, and
 `card`, and exact OKLCH source colors.
 
 This plan adds the reusable theme and gallery first, then makes Lucent class
-completion consume live CSS and non-executable theme metadata. It does not
-redesign the examples or add project-global CSS in the same delivery; Plan 009a
-owns global styles and Plan 010 performs the visual migration after the gallery
-is accepted.
+completion consume live CSS and Plan 008a's non-executable package metadata. It
+does not redesign the examples or add project-global CSS in the same delivery;
+Plan 009a owns global styles and Plan 010 performs the visual migration after
+the gallery is accepted.
 
 ## Current state
 
@@ -42,6 +44,9 @@ is accepted.
   values, and Plan 008 records that boundary.
 - The LSP has project-aware Roslyn semantics and bounded project generations,
   but no style-class catalog or active-theme model.
+- Plan 008a defines the immutable style-class contract, versioned module
+  manifest, non-executing reference reader, and native-compatibility matrix;
+  this plan supplies theme/live-CSS producers and completion behavior.
 - Examples activate Fluent programmatically with `Styles.Add(new FluentTheme())`;
   App.axaml-only theme detection would miss every checked-in example.
 - `docs/SHADCN_THEME.md` is proposed authority. `DESIGN.md`,
@@ -52,16 +57,9 @@ is accepted.
 
 ### One class-catalog contract, separate producers
 
-Normalize every completion source to immutable metadata equivalent to:
-
-```csharp
-StyleClassEntry(
-    string Name,
-    string? ApplicableType,
-    StyleClassOrigin Origin,
-    SourceSpan? Definition,
-    string Detail);
-```
+Normalize every completion source to Plan 008a's immutable `StyleClassEntry`
+and catalog interface. Do not extend that interface merely because a theme has
+private template classes or values that completion does not consume.
 
 The compiler frontend tolerantly extracts selector classes from live Lucent
 CSS, even while declarations or later rules are incomplete. Applicability is
@@ -69,19 +67,27 @@ recorded for the compound selector containing each class: `Button.accent`
 associates `accent` with `Button`, while `.surface` is untyped. Do not add a
 second CSS parser or selector schema to the LSP.
 
-Theme packages provide reviewed, versioned metadata. The first manifests cover
-documented author-facing classes from exact resolved Fluent/Simple assembly
-identities (name, version, culture, and public-key token) and from
-`Lucent.Themes.Shadcn`; internal template-part classes are excluded.
-The Shadcn package's metadata is authoritative and tested against its runtime
-styles. A developer-only, out-of-process generator may load allowlisted pinned
-official theme assemblies to refresh checked-in manifests. User completion
-never executes those assemblies, downloads metadata, or guesses across versions.
+Theme packages provide reviewed entries through Plan 008a's versioned manifest.
+Because Fluent/Simple are not Lucent packages, the first checked-in tooling
+catalogs cover their documented author-facing classes and exact resolved
+assembly identities (name, version, culture, and public-key token). The Shadcn
+manifest covers its own author-facing classes; internal template-part classes
+are excluded.
+The Shadcn package's embedded metadata is authoritative and tested against its
+runtime styles. Because Fluent/Simple are not Lucent packages, a developer-only,
+out-of-process generator may load allowlisted pinned official theme assemblies
+to refresh checked-in immutable catalog source using the same class-entry
+contract. That source is compiled into tooling and does not add a serialized
+manifest reader. User completion never executes those assemblies, downloads
+metadata, or guesses across versions.
 
-Enable a native manifest only when every assembly-identity field resolves and the
-theme is visibly activated through App.axaml or direct, semantically resolved
-C# construction such as `new FluentTheme()` or `new ShadcnTheme()`. When
-evidence or an exact manifest is missing, omit those native entries silently.
+Enable native theme metadata only when every assembly-identity field resolves
+and the theme is visibly installed through App.axaml or a direct, semantically
+resolved `Application.Styles.Add(new FluentTheme())` / `Styles.Add(new
+ShadcnTheme())` call (including the equivalent direct `this.Styles.Add(...)`
+inside the `Application` subclass). Bare construction, fields, aliases,
+factories, and indirect flows are not installation evidence. When installation
+evidence or exact metadata is missing, omit those entries silently.
 
 ### Literal-segment completion
 
@@ -103,12 +109,14 @@ it. Classes remain an open Avalonia string surface.
 
 ### No I/O on completion
 
-The LSP owns bounded per-document and per-project immutable snapshots. Document,
-watched-file, project, and active-theme changes rebuild snapshots off the request
-path. Completion serves the last snapshot immediately while a replacement is
-computed, then swaps atomically. A completion request performs no file read,
-MSBuild evaluation, assembly load, or network access and cannot publish a stale
-document/project generation.
+The LSP owns bounded per-document and per-project immutable snapshots. Plan
+008a's reference reader publishes package entries at the project-generation
+seam; this plan adds live CSS and active-theme producers to that same snapshot.
+Document, watched-file, project, and active-theme changes rebuild snapshots off
+the request path. Completion serves the last snapshot immediately while a
+replacement is computed, then swaps atomically. A completion request performs
+no file read, MSBuild evaluation, assembly load, or network access and cannot
+publish a stale document/project generation.
 
 ## Scope
 
@@ -124,9 +132,9 @@ document/project generation.
 - Add the deterministic light/dark control gallery and reviewed upstream Shadcn
   New York/neutral snapshot.
 - Add adjacent `Class:` completion from unsaved/tolerantly parsed CSS and exact
-  active-theme manifests without request-path I/O.
-- Add checked-in official manifests and the bounded developer generator used to
-  refresh them.
+  active-theme metadata without request-path I/O.
+- Add checked-in official immutable catalogs using Plan 008a's class-entry
+  contract and the bounded developer generator used to refresh them.
 - Update tooling, styling, theme, and build documentation plus Plan 009 evidence.
 
 **Out of scope**:
@@ -152,14 +160,16 @@ Add focused compiler and protocol tests for unsaved adjacent CSS, broken-rule
 recovery, ordinary/interpolated literal segments, duplicate suppression, token
 replacement, type ranking, exact theme activation/versioning, stale-snapshot
 replacement, and zero request-path I/O. Record the currently empty `Class:`
-completion result as the failing baseline.
+completion result as the failing baseline. Include bare theme construction
+without `Styles.Add` and prove that it contributes no active-theme entries.
 
-Define the immutable compiler-owned entry/catalog contract and expose only the
-small query surface the LSP needs. Preserve source spans for future navigation,
-but do not implement navigation here.
+Reuse Plan 008a's immutable entry/catalog contract and expose only its existing
+small query surface to completion. Preserve source identities for future
+navigation, but do not implement navigation here.
 
 **Verify**: tests fail because `EditorIntelligence` still excludes class values;
-the proposed API does not expose parser, Roslyn, or mutable cache internals.
+the implementation adds no theme-specific entry type, manifest reader, runtime
+registry, or mutable cache surface.
 
 ### 2. Build the color and theme foundation
 
@@ -181,9 +191,10 @@ evidence covers every promised control, variant, and state in both modes.
 ### 3. Add adjacent and active-theme class completion
 
 Extract classes through the tolerant shared CSS syntax frontend. Build reviewed
-exact-version Fluent/Simple manifests with the out-of-process developer tool and
-publish authoritative Shadcn metadata with the theme. Detect direct App.axaml
-and C# theme activation from the existing project snapshot.
+exact-version Fluent/Simple immutable catalog source with the out-of-process
+developer tool and publish authoritative Shadcn entries through the package's
+Plan 008a manifest. Detect direct App.axaml and C# theme activation from the
+existing project snapshot.
 
 Add context-aware completion, ranking, replacement ranges, duplicate filtering,
 origin details, string quick-suggestion defaults, background refresh, and the
@@ -192,8 +203,11 @@ bounded “No indexed style definition found” information diagnostic.
 **Verify**: edits to an unsaved adjacent CSS file update completion; incomplete
 CSS still contributes recognizable classes; `Button` offers documented active
 theme variants; an incompatible control ranks them after applicable entries;
-missing/mismatched manifests produce no native result or diagnostic; benchmark
-instrumentation proves no completion-path I/O and preserves Plan 008 budgets.
+missing manifests produce no native result or diagnostic; malformed,
+unsupported-version, duplicate, or identity-mismatched Lucent manifests follow
+Plan 008a's one-generation-scoped project diagnostic and contribute no entries;
+benchmark instrumentation proves no completion-path I/O and preserves Plan 008
+budgets.
 
 ### 4. Publish evidence and hand off follow-ups
 
@@ -216,7 +230,8 @@ claiming arbitrary theme or AXAML discovery.
 - [ ] Fluent plus `ShadcnTheme` supplies complete reviewed light/dark treatment
       for the promised gallery surface without compiler/runtime coupling.
 - [ ] `Class:` completion handles live adjacent CSS and exact active first-party
-      theme manifests in ordinary and interpolated literal segments.
+      theme metadata in ordinary and interpolated literal segments through Plan
+      008a's catalog.
 - [ ] Completion performs no request-path I/O and remains inside Plan 008's
       accepted correctness, cancellation, latency, allocation, and cache bounds.
 - [ ] No arbitrary assembly execution, runtime CSS parser, Actipro dependency,
@@ -243,7 +258,10 @@ claiming arbitrary theme or AXAML discovery.
 Theme manifests are completion metadata, not runtime truth. Runtime selector
 matching remains Avalonia-owned, and class strings remain open for handwritten
 or future style sources. Keep first-party metadata beside the style package and
-test it against the package so completion cannot silently drift from the theme.
+test its Plan 008a manifest entries against the package so completion cannot
+silently drift from the theme. Checked-in catalogs for non-Lucent official
+themes use the same entry contract but remain explicitly pinned external
+evidence compiled into tooling, not a second package-manifest format.
 
 Plan 008's deliberate `Class:` exclusion remains correct for its accepted scope;
 this plan supersedes that boundary only after its own protocol and performance

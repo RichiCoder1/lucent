@@ -1,5 +1,9 @@
 # Plan 009 / 009a review record
 
+> **Historical scope**: this PASS applies to the pre-008a plan text. The current
+> manifest, activation, precedence, and dependency amendments are reviewed in
+> [`REVIEW-008A-010-CROSSCHECK.md`](REVIEW-008A-010-CROSSCHECK.md).
+
 Plan 009 and its separately gated global-style follow-up are **PASS** after a
 fresh final review.
 

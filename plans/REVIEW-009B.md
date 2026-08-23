@@ -1,5 +1,9 @@
 # Plan 009b review record
 
+> **Historical scope**: this PASS applies to the pre-008a plan text. The current
+> manifest, precedence, restoration, and dependency amendments are reviewed in
+> [`REVIEW-008A-010-CROSSCHECK.md`](REVIEW-008A-010-CROSSCHECK.md).
+
 Plan 009b is **PASS** after addressing the first adversarial findings and a
 fresh final read-only review.
 

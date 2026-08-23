@@ -1,8 +1,9 @@
 # Plan 009a: Add explicit global Lucent styles
 
 > **Executor instructions**: Add one visible application-style seam. Reuse Plan
-> 009's CSS parser, typed catalog, class metadata, and LSP cache; do not add a
-> second style language, hidden startup hook, or assembly execution.
+> 009's CSS parser and LSP cache plus Plan 008a's module manifest and class
+> metadata; do not add a second style language, metadata reader, hidden startup
+> hook, or assembly execution.
 >
 > **Drift check**: `git diff --stat e2a9a5f..HEAD -- build src editors tests docs plans`
 
@@ -11,7 +12,7 @@
 - **Priority**: P1
 - **Effort**: L
 - **Risk**: HIGH
-- **Depends on**: plan 009
+- **Depends on**: plans 008a, 009
 - **Category**: styling / build / runtime / tooling
 - **Planned at**: commit `e2a9a5f`, 2026-08-23
 
@@ -34,15 +35,23 @@ Styles.Add(new MyApp.LucentStyles());
 Styles.Add(new SharedLibrary.LucentStyles());
 ```
 
+Application-level catalog installation order is host-controlled. Two installed
+catalogs that write the same native property may resolve differently when the
+host reverses their `Application.Styles.Add` order; Lucent does not promise a
+portable package-over-package winner. Test both orders and document the observed
+public Avalonia behavior. Adjacent component CSS winning over application-level
+global styles is a separate required guarantee.
+
 Installed rules enter `Application.Styles` and may style handwritten and
 Lucent-generated Avalonia controls. Adjacent component CSS must win over global
 CSS for the same property; prove this against public Avalonia behavior rather
 than assuming source order.
 
-The generated type exposes safely inspectable compile-time class metadata so
-Roslyn can read explicitly installed referenced-library catalogs without loading
-their assemblies. Treat a catalog as installed only when the project semantics
-contain a direct `Application.Styles.Add(new SomeProject.LucentStyles())`
+The build records each generated catalog type and its class entries in Plan
+008a's embedded module manifest. The LSP reads that manifest through the shared
+non-executing reference seam, then treats a catalog as installed only when the
+project semantics contain a direct
+`Application.Styles.Add(new SomeProject.LucentStyles())`
 invocation (including the equivalent direct `this.Styles.Add(...)` inside the
 `Application` subclass). Unknown factories, aliases, fields, or indirect flows
 do not activate completion metadata. An executable project that declares its own
@@ -56,7 +65,8 @@ host.
 
 - Evaluate ordered `LucentStyle` items through the existing MSBuild project seam.
 - Compile them through Plan 009's typed CSS frontend and diagnostics.
-- Generate public installable style types for apps and libraries.
+- Generate public installable style types for apps and libraries plus Plan
+  008a-compatible manifest entries.
 - Add metadata-only completion for local and explicitly installed library
   catalogs using Plan 009's immutable cache and ranking.
 - Add the executable-project missing-install warning.
@@ -74,10 +84,12 @@ host.
 ### 1. Lock build/runtime contracts
 
 Add temporary app and library fixtures for ordered items, generated type shape,
-explicit installation, missing installation, and adjacent/global conflicts.
+explicit installation, missing installation, both cross-catalog installation
+orders, and adjacent/global conflicts.
 
 **Verify**: tests fail before `LucentStyle` exists and record Avalonia's actual
-style-priority result for the conflict case.
+style-priority result for adjacent/global and both package-catalog orders without
+claiming one host order is portable precedence.
 
 ### 2. Generate and install global styles
 
@@ -88,24 +100,31 @@ quiet.
 
 **Verify**: installed rules style handwritten and Lucent controls; MSBuild order
 is deterministic; app omission warns with the exact call; library compilation
-does not warn.
+does not warn; generated catalog types and runtime classes match the embedded
+manifest exactly.
 
 ### 3. Merge completion metadata
 
 Detect the bounded direct `Application.Styles.Add(new ...LucentStyles())`
 installation forms above semantically; construction alone is insufficient.
-Merge local and installed-library entries into Plan 009's cached completion
+Match the installed type against Plan 008a's validated referenced manifest and
+merge local and installed-library entries into Plan 009's cached completion
 catalog without request-path I/O or assembly loading. Adjacent applicable entries
 rank before global applicable entries, followed by theme and discovery fallbacks.
 
 **Verify**: library classes appear only after a recognized direct installation,
 not after bare construction or an unknown indirect flow; stale project
-generations cannot publish entries; Plan 008/009 performance bounds pass.
+generations cannot publish entries; a missing manifest is silent, while an
+invalid/mismatched Lucent manifest contributes no entries and emits Plan 008a's
+one generation-scoped project diagnostic; Plan 008/009 performance bounds pass.
 
 ### 4. Publish evidence
 
 Document project items, generated API, app/library ownership, ordering,
-precedence, warning behavior, completion origin, and package requirements.
+precedence, warning behavior, completion origin, manifest ownership, and package
+requirements. Extend Plan 008a's native-compatibility matrix with measured
+global/adjacent/theme priority, host-controlled cross-catalog order, and
+value-restoration rows.
 
 **Verify**: package-consumer fixtures required by Plan 010 can install app and
 library global catalogs without repository paths.
@@ -115,7 +134,11 @@ library global catalogs without repository paths.
 - [ ] Ordered `LucentStyle` inputs generate installable app/library style types.
 - [ ] Installation is explicit and applies across the Avalonia application.
 - [ ] Adjacent CSS demonstrably wins over global CSS through public APIs.
+- [ ] Cross-catalog conflicts are tested in both host installation orders and
+      documented as host-controlled rather than portable precedence.
 - [ ] Completion reads local/installed-library metadata without I/O or execution.
+- [ ] Generated catalog types/classes and Plan 008a manifest entries have one
+      parity test and no second metadata shape.
 - [ ] Missing app installation warns; libraries remain host-owned and quiet.
 - [ ] No hidden startup, runtime parser, transitive install, or duplicate catalog
       implementation is introduced.
@@ -131,4 +154,6 @@ library global catalogs without repository paths.
 ## Maintenance notes
 
 Global CSS is an opt-in application resource, not a change to adjacent component
-scope. Plan 010 packages only the generated API and behavior proven here.
+scope. Its package metadata is a Plan 008a manifest section, not a generated
+reflection interface or runtime registry. Plan 010 packages only the generated
+API and behavior proven here.

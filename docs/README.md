@@ -9,6 +9,7 @@ These documents split the original project handoff into maintained topics. They 
 | [Language](LANGUAGE.md) | Components, render methods, UI syntax, state members, slots, context, and construction |
 | [Architecture](ARCHITECTURE.md) | Compiler pipeline, runtime responsibilities, reactivity, identity, and interop |
 | [Styling](STYLING.md) | CSS authoring, tokens, layout, and component strategy |
+| [Shadcn-style theme](SHADCN_THEME.md) | Proposed reusable Avalonia theme, OKLCH support, and example migration |
 | [Tooling](TOOLING.md) | Diagnostics, language server scope, source mapping, and hot reload |
 | [Roadmap](ROADMAP.md) | Proof-of-concept success criteria, implementation order, and dogfood scope |
 | [Decisions](DECISIONS.md) | Accepted direction, working choices, and explicitly deferred questions |

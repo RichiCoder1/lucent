@@ -1,7 +1,8 @@
 # Plan 010: Package Lucent and finish the Workbench release gate
 
 > **Executor instructions**: Package only interfaces exercised by Workbench and
-> proven by tests. Do not declare a stable public API merely because it compiles.
+> proven by tests. Reuse Plan 008a's module manifest and non-executing reader;
+> do not declare a stable public API merely because it compiles.
 >
 > **Drift check**: `git diff --stat 3b27cfe..HEAD -- .github build src editors examples tests docs README.md`
 
@@ -10,7 +11,7 @@
 - **Priority**: P1
 - **Effort**: XL
 - **Risk**: HIGH
-- **Depends on**: plans 001–009b
+- **Depends on**: plans 001–009b, including 008a
 - **Category**: direction / DX / distribution
 - **Planned at**: commit `3b27cfe`, 2026-08-16
 
@@ -35,9 +36,9 @@ checkout using the language tooling proven by Plan 008.
 **In scope**:
 
 - Produce NuGet packages for the runtime, compiler/MSBuild integration,
-  `Lucent.Themes.Shadcn`, Plan 009's theme manifests, Plan 009a's global-style
-  build assets, and Plan 009b's opt-in utility catalog, with reproducible package
-  tests.
+  Plan 008a's manifest build/reader assets, `Lucent.Themes.Shadcn`, Plan 009's
+  theme metadata, Plan 009a's global-style build assets, and Plan 009b's opt-in
+  utility catalog, with reproducible package tests.
 - Add a minimal `dotnet new` template containing a Lucent/Avalonia desktop app
   with explicit Fluent plus Shadcn theme installation.
 - Build/package the VSIX reproducibly.
@@ -48,6 +49,8 @@ checkout using the language tooling proven by Plan 008.
   Plan 007's adaptive and accessibility gates, not its superseded visual tokens.
 - Publish the existing Markdown through Blume, including its generated
   `llms.txt`, `llms-full.txt`, and raw Markdown routes.
+- Publish Plan 008a's native-compatibility matrix as the bounded interop contract
+  for the preview package.
 
 **Out of scope**:
 
@@ -67,16 +70,22 @@ checkout using the language tooling proven by Plan 008.
 Create temporary sample projects that install local `.nupkg` files, compile
 `.lui`, adjacent CSS, and ordered `LucentStyle` items, install the generated
 global style type, Shadcn theme, and opt-in utility catalog, run generated code,
-and report source diagnostics. These tests must not reference repository `bin`
+and report source diagnostics. Inspect each Lucent-produced package assembly's
+Plan 008a manifest through the compiler/LSP query surface backed by the shared
+internal reader and public PE APIs, then verify style catalog/runtime parity.
+Include Plan 008a's referenced custom-control `[TemplateContent]` fixture or its
+accepted explicit-C# fallback. These tests must not reference repository `bin`
 paths.
 
 **Verify**: tests fail against the current local-path build assets.
 
 ### 2. Produce build/runtime packages
 
-Pack runtime, compiler, Shadcn theme, manifest, global-style assets, and the
-opt-in utility catalog using standard NuGet `build`/`buildTransitive` layout.
-Pin package versions centrally and include license/credits metadata.
+Pack runtime, compiler, the one Plan 008a manifest contract, Shadcn theme,
+global-style assets, and the opt-in utility catalog using standard NuGet
+`build`/`buildTransitive` layout. Pin package versions centrally and include
+license/credits metadata. Do not package separate theme/global/utility manifest
+readers or schemas.
 
 **Verify**: a clean temporary consumer restores, builds, tests, and cleans.
 
@@ -130,9 +139,9 @@ one accepted application visual authority with no compatibility alias layer.
 ### 5. Publish preview documentation, not compatibility promises
 
 Document install, template use, supported syntax, interop boundaries, debugging,
-known limits, package versioning, Plan 008's tooling-performance evidence, and
-the Workbench evidence. Mark the release experimental and list unsupported
-behavior explicitly.
+known limits, package versioning, Plan 008's tooling-performance evidence, Plan
+008a's native-compatibility matrix, and the Workbench evidence. Mark the release
+experimental and list unsupported behavior explicitly.
 
 Use the repository's Blume site as the publication surface so the same source
 serves people and AI clients. Keep MCP deferred until server deployment is
@@ -154,6 +163,9 @@ generation budgets.
 
 - [ ] A clean consumer uses NuGet packages, not repository-relative binaries.
 - [ ] Shadcn theme/manifests and global-style build assets work from packages.
+- [ ] Every Lucent-produced style package exposes one valid Plan 008a manifest;
+      clean compiler/LSP consumers inspect it without target assembly loading,
+      execution, or a public application-facing manifest reader.
 - [ ] The optional utility catalog installs explicitly and its runtime styles
       match packaged completion metadata without entering the default template.
 - [ ] Every example uses the accepted Shadcn visual authority without old
@@ -173,6 +185,8 @@ generation budgets.
 - CI is green only because Workbench or headless interaction tests are skipped.
 - Packaging regresses Plan 008's accepted LSP correctness or performance
   contracts.
+- A package requires a metadata schema/reader outside Plan 008a's contract or
+  embeds private application source by default.
 - Publication or marketplace credentials are required; stop for user approval.
 
 ## Maintenance notes

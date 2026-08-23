@@ -27,10 +27,11 @@ recent workspaces. It is not a full IDE.
 | [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
 | [007a](007a-native-compiled-bindings.md) | Use Avalonia compiled bindings at native seams | P1 | M | 005–007 | DONE |
 | [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007a | IN PROGRESS |
-| [009](009-shadcn-theme-css-completion.md) | Add the Shadcn theme and theme-aware CSS completion | P1 | XL | 007, 008 | TODO |
-| [009a](009a-global-lucent-styles.md) | Add explicit global Lucent styles | P1 | L | 009 | TODO |
-| [009b](009b-avalonia-utility-styles.md) | Add a finite Avalonia utility-style catalog | P2 | M | 009, 009a | TODO |
-| [010](010-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | XL | 001–009b | TODO |
+| [008a](008a-package-semantics-native-compatibility.md) | Lock package semantics and native compatibility | P1 | L | 007a, 008 | TODO |
+| [009](009-shadcn-theme-css-completion.md) | Add the Shadcn theme and theme-aware CSS completion | P1 | XL | 007, 008a | TODO |
+| [009a](009a-global-lucent-styles.md) | Add explicit global Lucent styles | P1 | L | 008a, 009 | TODO |
+| [009b](009b-avalonia-utility-styles.md) | Add a finite Avalonia utility-style catalog | P2 | M | 008a, 009, 009a | TODO |
+| [010](010-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | XL | 001–009b (incl. 008a) | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED` with a
 one-line reason.
@@ -40,7 +41,9 @@ Review records: [001–002](REVIEW-001-002.md),
 [004](REVIEW-004.md), [005](REVIEW-005.md), [006](REVIEW-006.md), and
 [001–006 Sol/high cross-check](REVIEW-001-006-CROSSCHECK.md). Plan review:
 [006a](REVIEW-006A.md), [007](REVIEW-007.md), [007a](REVIEW-007A.md),
-[009/009a](REVIEW-009.md), and [009b](REVIEW-009B.md).
+[008](REVIEW-008.md), [009/009a](REVIEW-009.md), and
+[009b](REVIEW-009B.md). The current manifest/style/package amendments are
+covered by the [008a–010 cross-check](REVIEW-008A-010-CROSSCHECK.md).
 
 ## Dependency notes
 
@@ -65,8 +68,13 @@ Review records: [001–002](REVIEW-001-002.md),
 - 008 makes the shared compiler/LSP seam correct, bounded, and fast before its
   artifacts are packaged. It must not depend on another language server's
   in-memory workspace.
+- 008a adds one non-executing package metadata seam, closes release-used native
+  compatibility gaps (including bounded public `TemplateContent` or its tested
+  C# fallback), and makes that contract executable before style packages depend
+  on it.
 - 009 adds the concrete Shadcn theme need and theme-aware `Class:` completion
-  without weakening 008's cache or latency contracts.
+  through 008a's manifest/catalog without weakening 008's cache or latency
+  contracts.
 - 009a separately adds honest project-global CSS runtime/build semantics and
   reuses 009's class catalog.
 - 009b optionally generates a finite Avalonia-native utility catalog from those
@@ -90,9 +98,10 @@ Workbench. Plan 006 replaces manual-only smoke coverage with Avalonia headless
 interaction tests; Plan 006a extends that flow with first-load/stale-refresh
 boundary evidence; Plan 007 adds bounded visual evidence without pixel-golden
 tests; Plan 008 owns protocol and performance gates for language tooling; Plan
-009 owns a deterministic theme-gallery gate; and Plan 009a owns app/library
-global-style fixtures. Plan 009b owns a separate utility gallery and catalog
-parity gate before Plan 010 packages the opt-in result or migrates the examples.
+008a owns package-manifest and native-compatibility fixtures; Plan 009 owns a
+deterministic theme-gallery gate; and Plan 009a owns app/library global-style
+fixtures. Plan 009b owns a separate utility gallery and manifest/runtime parity
+gate before Plan 010 packages the opt-in result or migrates the examples.
 
 ## Explicit non-goals
 
@@ -141,6 +150,10 @@ The sequence follows patterns exposed by mature desktop frameworks:
   Shadcn workflow; Plan 009a separately gates global styles. Plan 009b adds only
   a finite opt-in Avalonia utility vocabulary and explicitly declines browser
   Tailwind compatibility.
+- **Copy Akbura's surface wholesale:** rejected. Plan 008a borrows the narrow
+  package-manifest and compatibility-matrix lessons without XML syntax,
+  component-as-control wrappers, ordered hooks, DI/command vocabulary, embedded
+  private source, or a reactive style runtime.
 
 ## Audit scope
 

@@ -2,9 +2,10 @@
 
 > **Executor instructions**: Adapt familiar Tailwind utility names only where
 > they map cleanly to public Avalonia properties and pseudo-classes. Generate
-> ordinary Avalonia styles plus Plan 009 metadata from one checked-in finite
-> specification. Do not run Tailwind, scan application source, or add a second
-> CSS/runtime styling engine.
+> ordinary Avalonia styles plus Plan 008a manifest entries from one checked-in
+> finite specification. Do not run Tailwind, scan application source, or add a
+> second CSS/runtime styling engine. Publish metadata only through Plan 008a's
+> module manifest and Plan 009's existing catalog.
 >
 > **Drift check**: `git diff --stat e2a9a5f..HEAD -- build src examples tests docs plans`
 
@@ -13,7 +14,7 @@
 - **Priority**: P2
 - **Effort**: M
 - **Risk**: MEDIUM
-- **Depends on**: plans 009, 009a
+- **Depends on**: plans 008a, 009, 009a
 - **Category**: styling / utilities / tooling / DX
 - **Planned at**: commit `e2a9a5f`, 2026-08-23
 - **Research**: [`docs/research/AVALONIA_TAILWIND.md`](../docs/research/AVALONIA_TAILWIND.md)
@@ -37,20 +38,22 @@ semantics are honest.
 Add an internal checked-in utility specification as the only source of truth.
 Each entry contains the class name, native target/property/value, applicable
 control type, optional supported Avalonia pseudo-class, canonical emission
-order, documentation, and Plan 009 completion metadata.
+order, documentation, and Plan 008a manifest class-entry fields consumed through
+Plan 009's catalog/cache.
 
 Generate:
 
 1. `global::Lucent.Styles.Utilities.LucentStyles`, an ordinary Avalonia style
    catalog installable through Plan 009a's direct `Application.Styles.Add(new
    ...LucentStyles())` seam; and
-2. immutable class metadata consumed through Plan 009's existing catalog/cache.
+2. Plan 008a manifest class entries consumed through Plan 009's existing
+   catalog/cache.
 
-The style type and metadata ship in the same exact-versioned assembly. Reuse
-Plan 009a's safely inspectable `LucentStyles` metadata shape and bounded semantic
-installation detection; a package reference or bare construction does not
-activate completion. Do not introduce an interface, registry, second manifest,
-or utility-specific activation rule.
+The style type and manifest ship in the same exact-versioned assembly. Reuse
+Plan 008a's manifest schema/reader and Plan 009a's bounded semantic installation
+detection; a package reference or bare construction does not activate
+completion. Do not introduce an interface, registry, second manifest, generated
+reflection metadata, or utility-specific activation rule.
 
 Keep the generator internal. Do not expose a plugin interface, Tailwind config,
 arbitrary-value parser, runtime source scanner, or separate metadata model.
@@ -97,13 +100,13 @@ escaped literal colon in a class selector, for example
 pseudo-class.
 
 The same decoded name must flow through CSS parsing, generated/native selector
-construction, `CssProjectTokenIndex` tokenization/source spans, class metadata,
-completion replacement, and static `Class:` literals. Share the decoded class
-tokenizer with the compiler frontend rather than teaching the project index a
-second escape grammar. Do not add general CSS escapes, arbitrary selector
-variants, or runtime parsing under this work. If public Avalonia selector APIs
-cannot match a literal colon safely, stop and use unprefixed utilities only
-rather than inventing a private matcher.
+construction, `CssProjectTokenIndex` tokenization/source spans, Plan 008a
+manifest class entries, completion replacement, and static `Class:` literals.
+Share the decoded class tokenizer with the compiler frontend rather than
+teaching the project index a second escape grammar. Do not add general CSS
+escapes, arbitrary selector variants, or runtime parsing under this work. If
+public Avalonia selector APIs cannot match a literal colon safely, stop and use
+unprefixed utilities only rather than inventing a private matcher.
 
 ### Deterministic conflicts, not class-order semantics
 
@@ -112,6 +115,12 @@ Generate styles in one canonical order and document that conflicting utilities
 for the same native property have deterministic catalog order, independent of
 their order in `Class:`. Tests must prove the chosen order for representative
 spacing, size, color, and state conflicts.
+
+That deterministic order applies only inside the utility catalog. When utility,
+theme, or application catalogs overlap, host `Application.Styles` installation
+order and native priority remain authoritative as defined by Plan 009a. Test
+both representative host orders and do not claim a universal
+utility-over-global or global-over-utility winner.
 
 Do not add a runtime conflict-resolution engine or claim that reordering class
 tokens changes the winner. The gallery and docs should avoid conflicting
@@ -122,7 +131,8 @@ utilities except where conflict behavior is being demonstrated.
 **In scope**:
 
 - Add the finite utility specification and deterministic generator.
-- Generate ordinary Avalonia styles and Plan 009-compatible completion metadata.
+- Generate ordinary Avalonia styles and Plan 008a manifest class entries,
+  consumed through Plan 009's existing catalog/cache.
 - Install utilities explicitly through the Plan 009a application-style seam.
 - Add the bounded escaped-colon support required by the named state variants.
 - Add a light/dark utility gallery covering every utility family, applicable
@@ -168,9 +178,9 @@ and metadata/runtime drift.
 ### 2. Generate the unprefixed whole-property catalog
 
 Implement the smallest generator that emits installable Avalonia styles and
-Plan 009 metadata from the specification. Start with whole-value spacing,
-dimensions, typography, semantic colors, borders/radii, opacity/visibility,
-clipping, gap, and alignment.
+Plan 008a manifest class entries from the specification. Start with whole-value
+spacing, dimensions, typography, semantic colors, borders/radii,
+opacity/visibility, clipping, gap, and alignment.
 
 Keep values finite and token-backed where practical. Do not parse application
 source or synthesize utilities on demand.
@@ -204,9 +214,15 @@ control applicability, state, and representative same-property conflict. Review
 layout at minimum supported window sizes and confirm that utility use does not
 weaken Plan 007/009 accessibility gates.
 
+For every state variant, prove that deactivation removes only that style
+contribution and reveals the correct lower-priority value. Record representative
+theme/global/utility/local-value behavior for both tested host installation
+orders in Plan 008a's native-compatibility matrix; do not add a runtime conflict
+arbiter to force token- or package-order semantics.
+
 **Verify**: gallery review records the exact catalog version, both theme modes,
 keyboard traversal, focus visibility, disabled/selected/checked treatment, and
-canonical conflict outcomes without pixel-golden tests.
+canonical conflict/restoration outcomes without pixel-golden tests.
 
 ### 5. Publish evidence and hand off packaging
 
@@ -223,7 +239,7 @@ repository paths, assembly execution, or runtime scanning.
 ## Done criteria
 
 - [ ] One finite checked-in specification generates runtime styles and exactly
-      matching Plan 009 completion metadata.
+      matching Plan 008a manifest/Plan 009 completion metadata.
 - [ ] The documented utility inventory maps only to public, tested Avalonia
       properties, resources, and pseudo-classes.
 - [ ] Exact supported state tokens work through CSS parsing, native matching,
@@ -255,6 +271,10 @@ The utility catalog is an optional authoring vocabulary over native Avalonia
 styles, not a new styling runtime. Keep the specification finite and reviewed;
 adding one utility requires a native mapping, applicability, docs, metadata, and
 gallery/test evidence in the same change.
+
+Lucent keeps one `Class:` channel for native/theme/global/utility selectors.
+Do not copy AKCSS's separate `class`/`Classes` surface; make origin and precedence
+visible through metadata, completion detail, native priority, and tests instead.
 
 Prefer deletion or an ordinary adjacent/global style when a proposed utility
 needs special runtime machinery. Reconsider per-side spacing only with a real
