@@ -10,7 +10,8 @@ public sealed record LucentProjectContext(
     string? LanguageVersion = null,
     string? Nullable = null,
     string? DefineConstants = null,
-    IReadOnlyList<string>? ProjectReferencePaths = null)
+    IReadOnlyList<string>? ProjectReferencePaths = null,
+    string? TargetPath = null)
 {
     public IReadOnlyList<string> References => ReferencePaths ?? [];
 

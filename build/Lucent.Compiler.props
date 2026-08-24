@@ -1,8 +1,11 @@
 <Project>
   <PropertyGroup>
     <LucentCompilerEnabled Condition="'$(LucentCompilerEnabled)' == ''">true</LucentCompilerEnabled>
-    <LucentCompilerOutputDirectory Condition="'$(LucentCompilerOutputDirectory)' == ''">$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/Lucent/</LucentCompilerOutputDirectory>
+    <LucentCompilerOutputDirectory Condition="'$(LucentCompilerOutputDirectory)' == ''">$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/$(RuntimeIdentifier)/Lucent/</LucentCompilerOutputDirectory>
     <LucentCompilerManifestPath Condition="'$(LucentCompilerManifestPath)' == ''">$(LucentCompilerOutputDirectory)Lucent.GeneratedFiles.props</LucentCompilerManifestPath>
+    <LucentModuleManifestPath Condition="'$(LucentModuleManifestPath)' == ''">$(LucentCompilerOutputDirectory)Lucent.ModuleManifest.v1.json</LucentModuleManifestPath>
+    <LucentModuleManifestLastSuccessfulPath Condition="'$(LucentModuleManifestLastSuccessfulPath)' == ''">$(LucentCompilerOutputDirectory)Lucent.ModuleManifest.v1.last-successful.json</LucentModuleManifestLastSuccessfulPath>
+    <LucentGenerationInputsPath Condition="'$(LucentGenerationInputsPath)' == ''">$(LucentCompilerOutputDirectory)Lucent.GenerationInputs.txt</LucentGenerationInputsPath>
     <LucentCompilerTaskAssembly Condition="'$(LucentCompilerTaskAssembly)' == ''">$(MSBuildThisFileDirectory)../src/Lucent.Compiler.MSBuild/bin/$(Configuration)/net9.0/Lucent.Compiler.MSBuild.dll</LucentCompilerTaskAssembly>
     <LucentCompilerCoreAssembly Condition="'$(LucentCompilerCoreAssembly)' == ''">$(MSBuildThisFileDirectory)../src/Lucent.Compiler/bin/$(Configuration)/net9.0/Lucent.Compiler.dll</LucentCompilerCoreAssembly>
     <LucentRuntimeProject Condition="'$(LucentRuntimeProject)' == ''">$(MSBuildThisFileDirectory)../src/Lucent.Runtime/Lucent.Runtime.csproj</LucentRuntimeProject>

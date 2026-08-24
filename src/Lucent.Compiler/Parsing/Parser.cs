@@ -638,10 +638,10 @@ internal sealed partial class Parser
                 diagnostic.GetMessage());
         }
 
-        if (list.Parameters.Count != 1)
+        if (list.Parameters.Count is not 0 and not 1)
         {
             AddSyntax(parameters.Span,
-                "A template declaration requires exactly one typed item parameter.");
+                "A template declaration requires either no parameters or exactly one typed item parameter.");
         }
 
         var parameter = list.Parameters.FirstOrDefault();
@@ -675,6 +675,7 @@ internal sealed partial class Parser
             name.Text,
             itemType,
             itemName,
+            list.Parameters.Count == 0,
             body,
             SpanFrom(start, body.Span.End),
             name.Span,

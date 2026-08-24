@@ -72,12 +72,17 @@ Create temporary sample projects that install local `.nupkg` files, compile
 global style type, Shadcn theme, and opt-in utility catalog, run generated code,
 and report source diagnostics. Inspect each Lucent-produced package assembly's
 Plan 008a manifest through the compiler/LSP query surface backed by the shared
-internal reader and public PE APIs, then verify style catalog/runtime parity.
+internal reader and public PE APIs after pack and restore: verify the one
+embedded resource, actual PE identity, manifest identity, public generated
+catalog type, and catalog/runtime parity. These checks must not load or execute
+the target assembly.
 Include Plan 008a's referenced custom-control `[TemplateContent]` fixture or its
 accepted explicit-C# fallback. These tests must not reference repository `bin`
 paths.
 
-**Verify**: tests fail against the current local-path build assets.
+**Verify**: a clean restored consumer verifies the embedded manifest/resource/
+identity/catalog seam after pack without target assembly execution; tests fail
+against the current local-path build assets.
 
 ### 2. Produce build/runtime packages
 
@@ -166,6 +171,9 @@ generation budgets.
 - [ ] Every Lucent-produced style package exposes one valid Plan 008a manifest;
       clean compiler/LSP consumers inspect it without target assembly loading,
       execution, or a public application-facing manifest reader.
+- [ ] After pack and restore, the clean consumer verifies the embedded manifest
+      resource, PE/manifest identity, and public generated catalog type against
+      the packaged runtime catalog through Plan 008a's one reader/cache seam.
 - [ ] The optional utility catalog installs explicitly and its runtime styles
       match packaged completion metadata without entering the default template.
 - [ ] Every example uses the accepted Shadcn visual authority without old

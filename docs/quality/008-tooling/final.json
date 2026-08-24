@@ -1,48 +1,11 @@
 {
   "runner": "1",
   "sourceIdentity": {
-    "head": "ca114cd23f6f96e13df6042edf2536b199d1d238",
-    "worktreeSha256": "6951F81DEF34059531F998DD6D68229F5B5F131907E844E8308DFA846E36A515",
-    "trackedDiffSha256": "53A9D19EB5066CE66746B6BBB96A596A2A289D52EFB8091E490BF07A1715B196",
-    "trackedDiffBytes": 184402,
-    "relevantUntracked": [
-      {
-        "Path": "src/Lucent.Compiler/CssProjectTokenIndex.cs",
-        "Sha256": "0C2AE2EEA58F248E4E302D4A9441119E71510A5DDD19E2E09A38AA89AAA41FF0"
-      },
-      {
-        "Path": "src/Lucent.Compiler/LucentSourceMap.cs",
-        "Sha256": "6CFD27875939DC151F4E323AAA587A11F74F99002260C9FACB5C2166D3A7478C"
-      },
-      {
-        "Path": "src/Lucent.Compiler/Properties/AssemblyInfo.cs",
-        "Sha256": "D2542C2B08CE871476B8E3FFA4D5300DAA0D355B12EF03C496C0CB532F712111"
-      },
-      {
-        "Path": "src/Lucent.LanguageServer/LanguageServerBenchmarking.cs",
-        "Sha256": "FFE8AA17AEB57D8437515D1429461080F44C4BDC55DC4448A658AAC97CC48A02"
-      },
-      {
-        "Path": "tests/Lucent.LanguageServer.Tests/NativeCSharpQualityMatrixTests.cs",
-        "Sha256": "5C3D078E826A59E82EF8D469D81AC2BBA815F2BFC31BAC5855BBC244B2A69770"
-      },
-      {
-        "Path": "tools/Lucent.LanguageServer.Benchmarks/Lucent.LanguageServer.Benchmarks.csproj",
-        "Sha256": "85ABB74B5BE453AB4FCE1625E1D7DA1536505098F55EF15B230B424EA0379EDC"
-      },
-      {
-        "Path": "tools/Lucent.LanguageServer.Benchmarks/Program.cs",
-        "Sha256": "CB0D387BD50D4E4AFF89C76AB42CF165FF20E78C315B86E52C0F3DFE99C0DF7F"
-      },
-      {
-        "Path": "tools/Lucent.LanguageServer.Benchmarks/fixture.lui",
-        "Sha256": "EDE46C223187C8F4BB8A8C1CE6FAFEEB75E21E79234CEA5011A5E630AF0FB445"
-      },
-      {
-        "Path": "tools/Lucent.LanguageServer.Benchmarks/workload.json",
-        "Sha256": "45D82B264204FF5F2D6985F0DA5D9337683E014F242F2712978566B29F373352"
-      }
-    ],
+    "head": "894c2fddbd22a0aaeae4293599a6cd76d816c40b",
+    "worktreeSha256": "26F52FAB74EC9F560EB406148B15C9BD1B3C6770A2953FC45501ADF99928C455",
+    "trackedDiffSha256": "7E42B07F3DDFF4D94F2AE853D03A1BA1BC8EA413F715C74D37E272A8A8E52083",
+    "trackedDiffBytes": 199692,
+    "relevantUntracked": [],
     "algorithm": "SHA-256(HEAD UTF-8, NUL, SHA-256(git diff --binary HEAD -- measured paths), NUL, each sorted relevant untracked path UTF-8, NUL, SHA-256(file bytes), NUL). Measured paths are compiler, MSBuild, language-server, compiler/LSP tests, build props/targets, and this benchmark; docs, plans, research, subagent artifacts, and other concurrent work are excluded."
   },
   "environment": {
@@ -74,22 +37,22 @@
   },
   "warmCompletion": {
     "count": 500,
-    "medianMilliseconds": 0.1217,
-    "p95Milliseconds": 0.1805,
-    "p99Milliseconds": 0.2552,
+    "medianMilliseconds": 0.1192,
+    "p95Milliseconds": 0.2039,
+    "p99Milliseconds": 0.3349,
     "medianAllocatedBytes": 17056,
     "p95AllocatedBytes": 17056
   },
   "editCompletion": {
     "count": 500,
-    "medianMilliseconds": 34.8328,
-    "p95Milliseconds": 51.9855,
-    "p99Milliseconds": 67.6283,
-    "medianAllocatedBytes": 8273288,
-    "p95AllocatedBytes": 8441112
+    "medianMilliseconds": 35.491,
+    "p95Milliseconds": 52.3567,
+    "p99Milliseconds": 67.7991,
+    "medianAllocatedBytes": 8918064,
+    "p95AllocatedBytes": 9110688
   },
-  "postWarmManagedBytes": 33740296,
-  "peakLiveManagedBytes": 84887336,
-  "retainedManagedBytes": 41960920,
+  "postWarmManagedBytes": 34031664,
+  "peakLiveManagedBytes": 91242712,
+  "retainedManagedBytes": 42524936,
   "maxActiveProjectGenerations": 1
 }

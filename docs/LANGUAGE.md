@@ -103,6 +103,10 @@ rejected. `Mount`, `UpdateInputs`, `Dispose`, and names beginning with
 
 Controls and components share composition syntax but not an implementation model. A native control resolves to its real Avalonia type and members, while a component may produce zero, one, or many controls without becoming a heavyweight control itself. Nested content on a native control follows Avalonia's content metadata; trailing content supplied to a Lucent component remains a Lucent slot.
 
+The executable [native compatibility matrix](NATIVE_COMPATIBILITY.md) defines
+the supported native seams and the intentional Avalonia C# escapes. It is not
+XAML compatibility.
+
 For host interop, a component whose output is statically exactly one direct
 native control also gets a generated `MountRoot()` method returning that exact
 Avalonia type. `Mount()` remains the composition contract and returns
@@ -146,6 +150,34 @@ templates because Avalonia owns realization and no per-realization
 `FuncDataTemplate<T>` with no Lucent component owner or hidden wrapper. Use
 native controls and ordinary item expressions for virtualized rows. Existing
 raw `ItemTemplate: new FuncDataTemplate<T>(...)` expressions remain supported.
+
+### Deferred native template content
+
+A public writable native property marked Avalonia's `[TemplateContent]` and
+accepting `IDeferredContent` can use the zero-parameter template form:
+
+```csharp
+ThirdPartyControl {
+    template DeferredBody() {
+        Border { Width: 8; }
+    }
+}
+```
+
+This is a deliberately bounded native interop seam, not general XAML template
+support. The body produces exactly one fresh native control root for each
+`IDeferredContent.Build(IServiceProvider)` call. It has no `ComponentOwner` and
+cannot capture component parameters, fields, state, or computations; Avalonia
+and the receiving control own each realized root. Values are limited to direct
+literals, `const` fields, and enum members with standard conversions. The sole
+binding form is exact `new Avalonia.Data.Binding("Path")` on a public Avalonia
+property identifier; Avalonia 12.1.1 validates that path when the binding is
+attached because it exposes no public eager path parser.
+
+Components, events, slots, structural regions, nested templates, resources,
+markup extensions, richer expressions, and multi-root content use an explicit
+native C# `IDeferredContent` implementation instead. `TemplateResultType`, when
+declared by the attribute, is checked against the generated native root.
 
 Use `binding(...)` when a native property should follow Avalonia's binding
 contract instead of Lucent's direct assignment contract:

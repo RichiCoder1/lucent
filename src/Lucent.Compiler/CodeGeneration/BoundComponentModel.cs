@@ -120,7 +120,8 @@ internal sealed record BoundPropertyMember(
     SourceSpan Span,
     BoundNativeValueKind NativeValueKind = BoundNativeValueKind.None,
     string? TargetTypeName = null,
-    BoundNativeBinding? NativeBinding = null)
+    BoundNativeBinding? NativeBinding = null,
+    BoundDeferredBinding? DeferredBinding = null)
     : BoundControlMember(Span)
 {
     public string ExpressionText => Expression.LoweredText;
@@ -142,6 +143,17 @@ internal sealed record BoundItemTemplateMember(
     string Name,
     string ItemTypeName,
     string ItemName,
+    BoundControlModel Root,
+    SourceSpan Span) : BoundControlMember(Span);
+
+internal sealed record BoundDeferredBinding(
+    string TargetPropertyOwnerTypeName,
+    string TargetPropertyFieldName,
+    string BindingExpression);
+
+internal sealed record BoundTemplateContentMember(
+    int Id,
+    string Name,
     BoundControlModel Root,
     SourceSpan Span) : BoundControlMember(Span);
 

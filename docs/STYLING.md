@@ -15,6 +15,22 @@ CSS authoring does not imply a browser layout engine or runtime string-based CSS
 
 Static styles should be parsed and validated during the build. The runtime may still resolve values that are inherently dynamic, but it should not repeatedly parse known strings or rediscover known property mappings.
 
+## Package catalog metadata
+
+Style producers share one internal Plan 008a manifest schema and immutable,
+producer-neutral `StyleClassCatalog` entries: name, optional applicable native
+type, origin, optional source identity, and detail. The deterministic UTF-8 JSON
+manifest is embedded before `CoreCompile` and retained as an isolated
+intermediate artifact; it is not a public stable format, runtime style registry,
+or component invocation mechanism.
+
+Tooling consumes references through the shared non-executing
+`PEReader`/`MetadataReader` reader and bounded project-generation cache. Local
+and open CSS remains authoritative. Theme, global-style, and utility plans may
+use this one seam and its public installable catalog-type verification, but they
+own installation, precedence, and runtime evidence. Metadata alone never
+activates styles.
+
 ## Avalonia CSS surface (Plan 007)
 
 The executable subset is one compile-time catalog shared by parsing, semantic

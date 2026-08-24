@@ -513,6 +513,8 @@ public static class LanguageServer
 
             var analysis = await AnalyzeAsync(uri, text, cancellationToken);
             _documents[uri] = new DocumentState(text, version, analysis, null);
+            if (uri.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+                await RefreshOpenLucentAnalysesAsync(cancellationToken);
             await RefreshCssIndexesAsync(cancellationToken);
             await PublishAllDiagnosticsAsync(cancellationToken);
         }
@@ -557,6 +559,8 @@ public static class LanguageServer
                 : document?.Version;
             var analysis = await AnalyzeAsync(uri, current, cancellationToken);
             _documents[uri] = new DocumentState(current, version, analysis, document?.CssTokens);
+            if (uri.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+                await RefreshOpenLucentAnalysesAsync(cancellationToken);
             await RefreshCssIndexesAsync(cancellationToken);
             await PublishAllDiagnosticsAsync(cancellationToken);
         }
@@ -638,8 +642,10 @@ public static class LanguageServer
         {
             foreach (var document in _documents)
             {
+                var project = _projectAnalyses.Values.FirstOrDefault(analysis => PathsEqual(
+                    analysis.DiagnosticSourcePath, GetSourcePath(document.Key)));
                 await PublishDiagnosticsAsync(document.Key, document.Value.Text,
-                    document.Value.Analysis, cancellationToken);
+                    document.Value.Analysis, project?.ManifestDiagnostics ?? [], cancellationToken);
             }
         }
 
@@ -647,6 +653,7 @@ public static class LanguageServer
             string uri,
             string text,
             CompilationResult result,
+            IReadOnlyList<string> manifestDiagnostics,
             CancellationToken cancellationToken)
         {
             var diagnostics = result.Diagnostics
@@ -656,7 +663,9 @@ public static class LanguageServer
                     diagnostic.Code,
                     diagnostic.Message,
                     "lucent"))
-                .ToArray();
+                .ToList();
+            diagnostics.AddRange(manifestDiagnostics.Select(message => new PublishedDiagnostic(
+                ToRange(text, new SourceSpan(0, 0)), 2, "LUC9007", message, "lucent")));
 
             await _connection.WriteNotificationAsync(
                 "textDocument/publishDiagnostics",
@@ -701,16 +710,42 @@ public static class LanguageServer
                 inputs[path] = new LucentSourceInput(path, open.Value.Text);
             }
             inputs[sourcePath] = new LucentSourceInput(sourcePath, text);
+            foreach (var path in inputs.Keys.ToArray())
+            {
+                var cssPath = Path.ChangeExtension(path, ".css");
+                string? styleText = null;
+                if (_documents.TryGetValue(new Uri(cssPath).AbsoluteUri, out var openStyle))
+                    styleText = openStyle.Text;
+                else if (File.Exists(cssPath))
+                    styleText = await File.ReadAllTextAsync(cssPath, cancellationToken);
+                if (styleText is not null)
+                    inputs[path] = inputs[path] with { StylePath = cssPath, StyleText = styleText };
+            }
             var projectKey = projectContext?.ProjectPath ?? sourcePath;
             var generation = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
                 string.Join("\n", inputs.OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
                     .Select(item => item.Key + "\0" +
                         (_documents.Where(document => PathsEqual(GetSourcePath(document.Key), item.Key))
                             .Select(document => document.Value.Version).FirstOrDefault()?.ToString() ?? "0") +
-                        "\0" + item.Value.SourceText)))));
+                        "\0" + item.Value.SourceText + "\0" + item.Value.StyleText)))));
             if (!_projectAnalyses.TryGetValue(projectKey, out var cached) ||
                 !string.Equals(cached.Generation, generation, StringComparison.Ordinal))
             {
+                // Source-only generations reuse the immutable reference snapshot.
+                // Watched project/reference changes clear _projectAnalyses first.
+                var manifests = cached?.ReferencedManifests ??
+                    LucentCompiler.LoadReferencedManifestSnapshot(projectContext, cancellationToken);
+                var sourceTexts = inputs.ToDictionary(item => item.Key, item => item.Value.SourceText,
+                    OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+                foreach (var input in inputs.Values.Where(input => input.StylePath is not null && input.StyleText is not null))
+                    sourceTexts[input.StylePath!] = input.StyleText!;
+                foreach (var path in projectContext?.Sources ?? [])
+                    if (File.Exists(path)) sourceTexts[path] = File.ReadAllText(path);
+                var localDiagnostics = new List<string>();
+                if (projectContext is not null &&
+                    !LucentModuleManifest.TryReadLocalSnapshot(projectContext, sourceTexts, cancellationToken,
+                        out _, out var localError) && !string.IsNullOrWhiteSpace(localError))
+                    localDiagnostics.Add(localError);
                 var previous = cached?.Results.FirstOrDefault(source =>
                     PathsEqual(source.SourcePath, sourcePath));
                 if (!string.Equals(Environment.GetEnvironmentVariable("LUCENT_DISABLE_INCREMENTAL_REBIND"), "1", StringComparison.Ordinal) &&
@@ -721,12 +756,16 @@ public static class LanguageServer
                         .Select(source => PathsEqual(source.SourcePath, sourcePath)
                             ? new LucentSourceCompilation(sourcePath, updated)
                             : source)
-                        .ToArray());
+                        .ToArray(), sourcePath,
+                        manifests,
+                        manifests.Diagnostics.Concat(localDiagnostics).ToArray(),
+                        sourceTexts);
                 }
                 else
                 {
                     var projectResult = LucentCompiler.CompileProject(inputs.Values.ToArray(), projectContext);
-                    cached = new ProjectAnalysis(generation, projectResult.Sources.ToArray());
+                    cached = new ProjectAnalysis(generation, projectResult.Sources.ToArray(), sourcePath,
+                        manifests, manifests.Diagnostics.Concat(localDiagnostics).ToArray(), sourceTexts);
                 }
                 _projectAnalyses[projectKey] = cached;
                 while (_projectAnalyses.Count > MaxProjectAnalyses)
@@ -763,6 +802,17 @@ public static class LanguageServer
             return projectContext?.LucentSources.Any(source => PathsEqual(source, path)) == true;
         }
 
+        private static IReadOnlyDictionary<string, string> WithSourceText(
+            IReadOnlyDictionary<string, string> sourceTexts, string sourcePath, string text)
+        {
+            var result = new Dictionary<string, string>(sourceTexts,
+                OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            {
+                [sourcePath] = text,
+            };
+            return result;
+        }
+
         private static bool PathsEqual(string left, string right) =>
             string.Equals(
                 Path.GetFullPath(left),
@@ -780,10 +830,6 @@ public static class LanguageServer
                 .GetProperty("textDocument")
                 .GetProperty("uri")
                 .GetString();
-            if (uri is not null)
-            {
-                await RefreshDocumentAnalysisAsync(uri, cancellationToken);
-            }
             if (uri is null || !_documents.TryGetValue(uri, out var document))
             {
                 await _connection.WriteResponseAsync(id, null, cancellationToken);
@@ -889,10 +935,6 @@ public static class LanguageServer
             CancellationToken cancellationToken)
         {
             var uri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
-            if (uri is not null)
-            {
-                await RefreshDocumentAnalysisAsync(uri, cancellationToken);
-            }
             if (uri is null || !_documents.TryGetValue(uri, out var document))
             {
                 await _connection.WriteResponseAsync(id, Array.Empty<object>(), cancellationToken);
@@ -1011,10 +1053,6 @@ public static class LanguageServer
             CancellationToken cancellationToken)
         {
             var requestUri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
-            if (requestUri is not null)
-            {
-                await RefreshDocumentAnalysisAsync(requestUri, cancellationToken);
-            }
             if (requestUri is not null && requestUri.EndsWith(".css", StringComparison.OrdinalIgnoreCase) &&
                 _documents.TryGetValue(requestUri, out var cssDocument) &&
                 FileUri.TryGetPath(requestUri, out var cssPath) &&
@@ -1050,19 +1088,22 @@ public static class LanguageServer
                     document.Analysis);
             }
 
-            if (symbol?.Definition is not { } definition ||
-                !File.Exists(definition.SourcePath))
+            if (symbol?.Definition is not { } definition)
             {
                 await _connection.WriteResponseAsync(id, null, cancellationToken);
                 return;
             }
 
             var definitionUri = new Uri(definition.SourcePath).AbsoluteUri;
+            var project = _projectAnalyses.Values.FirstOrDefault(analysis => analysis.SourceTexts.ContainsKey(definition.SourcePath));
             var definitionText = _documents.TryGetValue(definitionUri, out var openDocument)
                 ? openDocument.Text
-                : await File.ReadAllTextAsync(
-                    definition.SourcePath,
-                    cancellationToken);
+                : project?.SourceTexts.GetValueOrDefault(definition.SourcePath);
+            if (definitionText is null)
+            {
+                await _connection.WriteResponseAsync(id, null, cancellationToken);
+                return;
+            }
             await _connection.WriteResponseAsync(
                 id,
                 new
@@ -1103,7 +1144,12 @@ public static class LanguageServer
                         await File.ReadAllTextAsync(path, cancellationToken)));
                 }
             }
-            return CssProjectTokenIndex.Create(documents);
+            // Manifest I/O belongs to this generation/index construction, never CompletionAsync.
+            var manifests = context?.ProjectPath is { } projectPath &&
+                _projectAnalyses.TryGetValue(projectPath, out var analysis)
+                    ? analysis.ReferencedManifests
+                    : LucentCompiler.LoadReferencedManifestSnapshot(context, cancellationToken);
+            return CssProjectTokenIndex.Create(documents, manifests.Catalog.Entries.Select(entry => entry.Name));
         }
 
         private async Task RefreshCssIndexesAsync(CancellationToken cancellationToken)
@@ -1115,6 +1161,17 @@ public static class LanguageServer
 
                 var index = await BuildCssTokenIndexAsync(GetSourcePath(uri), cancellationToken);
                 _documents[uri] = document with { CssTokens = index };
+            }
+        }
+
+        private async Task RefreshOpenLucentAnalysesAsync(CancellationToken cancellationToken)
+        {
+            foreach (var (uri, document) in _documents.ToArray())
+            {
+                if (uri.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var analysis = await AnalyzeAsync(uri, document.Text, cancellationToken);
+                _documents[uri] = document with { Analysis = analysis };
             }
         }
 
@@ -1166,53 +1223,40 @@ public static class LanguageServer
             await _connection.WriteResponseAsync(id, new { changes }, cancellationToken);
         }
 
-        private async Task<IReadOnlyList<ComponentReference>?> FindComponentReferencesAsync(
+        private Task<IReadOnlyList<ComponentReference>?> FindComponentReferencesAsync(
             JsonElement parameters,
             CancellationToken cancellationToken)
         {
             var uri = parameters.GetProperty("textDocument").GetProperty("uri").GetString();
             if (uri is null)
-                return null;
-            await RefreshDocumentAnalysisAsync(uri, cancellationToken);
+                return Task.FromResult<IReadOnlyList<ComponentReference>?>(null);
             if (!_documents.TryGetValue(uri, out var document))
-                return null;
+                return Task.FromResult<IReadOnlyList<ComponentReference>?>(null);
             var offset = GetOffset(document.Text, parameters.GetProperty("position"));
             var selected = document.Analysis.Symbols.Where(symbol =>
                     symbol.Kind == LucentSemanticSymbolKind.Component &&
                     offset >= symbol.ReferenceSpan.Start && offset <= symbol.ReferenceSpan.End)
                 .OrderBy(symbol => symbol.ReferenceSpan.Length).FirstOrDefault();
             if (selected?.Definition is null)
-                return null;
+                return Task.FromResult<IReadOnlyList<ComponentReference>?>(null);
 
             var project = _projectAnalyses.Values.FirstOrDefault(analysis => analysis.Results.Any(result =>
                 PathsEqual(result.SourcePath, GetSourcePath(uri))));
             if (project is null)
-                return null;
-            return project.Results.SelectMany(result => result.Result.Symbols
+                return Task.FromResult<IReadOnlyList<ComponentReference>?>(null);
+            return Task.FromResult<IReadOnlyList<ComponentReference>?>(project.Results.SelectMany(result => result.Result.Symbols
                     .Where(symbol => symbol.Kind == LucentSemanticSymbolKind.Component &&
                         SameDefinition(symbol.Definition, selected.Definition))
                     .Select(symbol => new ComponentReference(result.SourcePath,
-                        _documents.FirstOrDefault(open => PathsEqual(GetSourcePath(open.Key), result.SourcePath)).Value?.Text
-                            ?? File.ReadAllText(result.SourcePath), symbol)))
+                        project.SourceTexts[result.SourcePath], symbol)))
                 .OrderBy(reference => reference.SourcePath, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(reference => reference.Symbol.ReferenceSpan.Start)
-                .ToArray();
+                .ToArray());
         }
 
         private static bool SameDefinition(LucentDefinition? left, LucentDefinition? right) =>
             left is not null && right is not null && PathsEqual(left.SourcePath, right.SourcePath) &&
             left.Span == right.Span;
-
-        private async Task RefreshDocumentAnalysisAsync(
-            string uri,
-            CancellationToken cancellationToken)
-        {
-            if (_documents.TryGetValue(uri, out var document))
-            {
-                var analysis = await AnalyzeAsync(uri, document.Text, cancellationToken);
-                _documents[uri] = document with { Analysis = analysis };
-            }
-        }
 
         private (DocumentState? Document, LucentSemanticSymbol? Symbol) FindSymbol(
             JsonElement parameters)
@@ -1312,7 +1356,11 @@ public static class LanguageServer
 
         private sealed record ProjectAnalysis(
             string Generation,
-            IReadOnlyList<LucentSourceCompilation> Results);
+            IReadOnlyList<LucentSourceCompilation> Results,
+            string DiagnosticSourcePath,
+            ReferencedManifestSnapshot ReferencedManifests,
+            IReadOnlyList<string> ManifestDiagnostics,
+            IReadOnlyDictionary<string, string> SourceTexts);
 
         private sealed record InboundMessage(
             JsonDocument? Message,

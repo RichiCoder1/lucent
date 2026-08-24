@@ -1,4 +1,7 @@
 using System.Text;
+using System.Security.Cryptography;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
 
@@ -29,6 +32,19 @@ public sealed class CompileLucent : Task
 
     /// <summary>Deterministic list of generated files consumed by design-time builds.</summary>
     public string ManifestPath { get; set; } = string.Empty;
+
+    /// <summary>Staged non-executable metadata embedded by the normal C# compiler.</summary>
+    public string ModuleManifestPath { get; set; } = string.Empty;
+    public string AssemblyName { get; set; } = string.Empty;
+    public string AssemblyVersion { get; set; } = "0.0.0.0";
+    public string AssemblyCulture { get; set; } = string.Empty;
+    public string SignAssembly { get; set; } = string.Empty;
+    public string AssemblyOriginatorKeyFile { get; set; } = string.Empty;
+    public string PublicSign { get; set; } = string.Empty;
+    public string DelaySign { get; set; } = string.Empty;
+
+    /// <summary>Non-executable public type metadata names exported as style catalogs.</summary>
+    public ITaskItem[] StyleCatalogTypes { get; set; } = [];
 
     /// <summary>
     /// The consuming project's resolved metadata references.
@@ -64,8 +80,15 @@ public sealed class CompileLucent : Task
     [Output]
     public ITaskItem[] GeneratedFiles { get; private set; } = [];
 
+    [Output]
+    public ITaskItem[] ModuleManifestFiles { get; private set; } = [];
+
     public override bool Execute()
     {
+        // MSBuild can reuse this task instance within one node.
+        GeneratedFiles = [];
+        ModuleManifestFiles = [];
+
         if (Sources.Length == 0)
         {
             if (string.IsNullOrWhiteSpace(OutputDirectory))
@@ -83,6 +106,10 @@ public sealed class CompileLucent : Task
                 // This is intentionally an atomic empty replacement, rather than a
                 // skipped task: the last .lui may have been deleted or renamed.
                 WriteIfChanged(ManifestPath, "<Project>\n  <ItemGroup />\n</Project>\n");
+                ModuleManifestPath = string.IsNullOrWhiteSpace(ModuleManifestPath)
+                    ? Path.Combine(OutputDirectory, "Lucent.ModuleManifest.v1.json")
+                    : ModuleManifestPath;
+                if (File.Exists(ModuleManifestPath)) File.Delete(ModuleManifestPath);
             }
             catch (IOException exception)
             {
@@ -97,6 +124,7 @@ public sealed class CompileLucent : Task
                 return false;
             }
             GeneratedFiles = [];
+            ModuleManifestFiles = [];
             return true;
         }
 
@@ -190,6 +218,7 @@ public sealed class CompileLucent : Task
             // Do not partially update generated output when any source has
             // diagnostics. This preserves the last successful build result.
             GeneratedFiles = [];
+            ModuleManifestFiles = [];
             return false;
         }
         ManifestPath = string.IsNullOrWhiteSpace(ManifestPath)
@@ -211,25 +240,69 @@ public sealed class CompileLucent : Task
         if (!succeeded)
         {
             GeneratedFiles = [];
+            ModuleManifestFiles = [];
             return false;
         }
 
         try
         {
+            if (!TryGetStyleCatalogTypes(out var styleCatalogTypes))
+            {
+                GeneratedFiles = [];
+                ModuleManifestFiles = [];
+                return false;
+            }
             foreach (var pendingOutput in pendingOutputs)
             {
                 WriteIfChanged(pendingOutput.Path, pendingOutput.Content);
             }
-            var manifestItems = string.Join(Environment.NewLine, pendingOutputs
+            ModuleManifestPath = string.IsNullOrWhiteSpace(ModuleManifestPath)
+                ? Path.Combine(OutputDirectory, "Lucent.ModuleManifest.v1.json")
+                : ModuleManifestPath;
+            var manifestItems = pendingOutputs
                 .Select(output => Path.GetFullPath(output.Path))
                 .OrderBy(path => path, GetPathComparer())
                 .Select(path => "    <Compile Include=\"" +
                     System.Security.SecurityElement.Escape(path) +
-                    "\" AutoGen=\"true\" DesignTime=\"true\" Visible=\"false\" />"));
+                    "\" AutoGen=\"true\" Visible=\"false\" LucentGenerated=\"true\" Condition=\"'$(DesignTimeBuild)' == 'true'\" />")
+                .Concat(pendingOutputs.Select(output => Path.GetFullPath(output.Path))
+                    .OrderBy(path => path, GetPathComparer())
+                    .Select(path => "    <_LucentGeneratedCompile Include=\"" +
+                        System.Security.SecurityElement.Escape(path) + "\" />"))
+                .Concat(pendingOutputs.Select(output => Path.GetFullPath(output.Path))
+                    .OrderBy(path => path, GetPathComparer())
+                    .Select(path => "    <FileWrites Include=\"" +
+                        System.Security.SecurityElement.Escape(path) + "\" />"))
+                .Concat(inputs.Select(input => Path.GetFullPath(input.SourcePath))
+                    .Distinct(GetPathComparer())
+                    .OrderBy(path => path, GetPathComparer())
+                    .Select(path => "    <_LucentTrackedSource Include=\"" +
+                        System.Security.SecurityElement.Escape(path) + "\" />"))
+                .Concat(inputs.Where(input => input.StylePath is not null)
+                    .Select(input => Path.GetFullPath(input.StylePath!))
+                    .Distinct(GetPathComparer())
+                    .OrderBy(path => path, GetPathComparer())
+                    .Select(path => "    <_LucentTrackedStyle Include=\"" +
+                        System.Security.SecurityElement.Escape(path) + "\" />"))
+                .Concat([
+                    "    <FileWrites Include=\"" + System.Security.SecurityElement.Escape(Path.GetFullPath(ManifestPath)) + "\" />",
+                    "    <FileWrites Include=\"" + System.Security.SecurityElement.Escape(Path.GetFullPath(ModuleManifestPath)) + "\" />",
+                ]);
             WriteIfChanged(ManifestPath,
                 "<Project>" + Environment.NewLine + "  <ItemGroup>" + Environment.NewLine +
-                manifestItems + Environment.NewLine + "  </ItemGroup>" + Environment.NewLine +
+                string.Join(Environment.NewLine, manifestItems) + Environment.NewLine + "  </ItemGroup>" + Environment.NewLine +
                 "</Project>" + Environment.NewLine);
+            if (!TryGetAssemblyIdentity(out var identity))
+            {
+                GeneratedFiles = [];
+                ModuleManifestFiles = [];
+                return false;
+            }
+            WriteBytesIfChanged(ModuleManifestPath, LucentModuleManifest.Create(
+                projectContext,
+                inputs,
+                identity,
+                styleCatalogTypes));
         }
         catch (IOException exception)
         {
@@ -240,6 +313,7 @@ public sealed class CompileLucent : Task
                 column: 0,
                 message: $"Unable to write Lucent generated output: {exception.Message}");
             GeneratedFiles = [];
+            ModuleManifestFiles = [];
             return false;
         }
         catch (UnauthorizedAccessException exception)
@@ -251,12 +325,14 @@ public sealed class CompileLucent : Task
                 column: 0,
                 message: $"Unable to write Lucent generated output: {exception.Message}");
             GeneratedFiles = [];
+            ModuleManifestFiles = [];
             return false;
         }
 
         GeneratedFiles = pendingOutputs
             .Select(output => new TaskItem(output.Path))
             .ToArray();
+        ModuleManifestFiles = [new TaskItem(ModuleManifestPath)];
 
         return true;
     }
@@ -328,6 +404,19 @@ public sealed class CompileLucent : Task
         .Distinct(StringComparer.Ordinal)
         .ToArray();
 
+    private bool TryGetStyleCatalogTypes(out string[] types)
+    {
+        types = StyleCatalogTypes.Select(item => item.ItemSpec.Trim()).ToArray();
+        if (types.Any(string.IsNullOrWhiteSpace) || types.Distinct(StringComparer.Ordinal).Count() != types.Length)
+        {
+            LogError("LUC9008", null, 0, 0,
+                "Lucent style catalog metadata names must be non-empty and unique.");
+            return false;
+        }
+        Array.Sort(types, StringComparer.Ordinal);
+        return true;
+    }
+
     private void LogDiagnostics(
         string sourcePath,
         IReadOnlyList<LucentDiagnostic> diagnostics)
@@ -397,7 +486,55 @@ public sealed class CompileLucent : Task
 
     private static void WriteIfChanged(string outputPath, string content)
     {
-        var expected = Utf8NoBom.GetBytes(content);
+        WriteBytesIfChanged(outputPath, Utf8NoBom.GetBytes(content));
+    }
+
+    private bool TryGetAssemblyIdentity(out LucentAssemblyIdentity identity)
+    {
+        identity = default!;
+        try
+        {
+            var signAssembly = bool.TryParse(SignAssembly, out var signed) && signed;
+            var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                .WithCryptoKeyFile(!signAssembly || string.IsNullOrWhiteSpace(AssemblyOriginatorKeyFile) ? null :
+                    Path.GetFullPath(AssemblyOriginatorKeyFile, Path.GetDirectoryName(ProjectPath) ?? Environment.CurrentDirectory))
+                .WithPublicSign(signAssembly && bool.TryParse(PublicSign, out var publicSign) && publicSign)
+                .WithDelaySign(signAssembly && bool.TryParse(DelaySign, out var delaySign) && delaySign);
+            var compilation = CSharpCompilation.Create(
+                string.IsNullOrWhiteSpace(AssemblyName) ? Path.GetFileNameWithoutExtension(ProjectPath ?? "Lucent") : AssemblyName,
+                options: options);
+            var assembly = compilation.Assembly.Identity;
+            // The SDK properties are the evaluated compiler inputs. A hand-written
+            // attribute that disagrees is rejected against the actual PE below.
+            var token = assembly.PublicKeyToken.ToArray();
+            if (signAssembly)
+            {
+                using var key = new RSACryptoServiceProvider();
+                key.ImportCspBlob(File.ReadAllBytes(options.CryptoKeyFile!));
+                var publicKey = key.ExportCspBlob(false);
+                publicKey[5] = 0x24; // CALG_RSA_SIGN; ExportCspBlob uses CALG_RSA_KEYX.
+                var strongNameKey = new byte[12 + publicKey.Length];
+                BitConverter.GetBytes(0x00002400).CopyTo(strongNameKey, 0);
+                BitConverter.GetBytes(0x00008004).CopyTo(strongNameKey, 4);
+                BitConverter.GetBytes(publicKey.Length).CopyTo(strongNameKey, 8);
+                publicKey.CopyTo(strongNameKey, 12);
+                token = SHA1.HashData(strongNameKey)[^8..].Reverse().ToArray();
+            }
+            identity = new LucentAssemblyIdentity(assembly.Name,
+                string.IsNullOrWhiteSpace(AssemblyVersion) ? assembly.Version.ToString() : AssemblyVersion,
+                AssemblyCulture, Convert.ToHexString(token));
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or CryptographicException)
+        {
+            LogError("LUC9005", null, 0, 0,
+                $"Unable to derive the Lucent manifest assembly identity from CoreCompile inputs: {exception.Message}");
+            return false;
+        }
+    }
+
+    private static void WriteBytesIfChanged(string outputPath, byte[] expected)
+    {
         if (File.Exists(outputPath) &&
             File.ReadAllBytes(outputPath).AsSpan().SequenceEqual(expected))
         {
@@ -427,4 +564,47 @@ public sealed class CompileLucent : Task
     }
 
     private sealed record PendingOutput(string Path, string Content);
+}
+
+/// <summary>Verifies the compiler-embedded manifest and atomically records the last successful PE.</summary>
+public sealed class VerifyLucentModuleManifest : Task
+{
+    [Required] public string AssemblyPath { get; set; } = string.Empty;
+    [Required] public string ManifestPath { get; set; } = string.Empty;
+    [Required] public string LastSuccessfulPath { get; set; } = string.Empty;
+
+    public override bool Execute()
+    {
+        try
+        {
+            var staged = File.ReadAllBytes(ManifestPath);
+            if (!LucentModuleManifest.TryReadFromPe(AssemblyPath, out var embedded, out var error) ||
+                embedded is null || !LucentModuleManifest.TryRead(staged, embedded.Assembly, out _, out error) ||
+                !staged.AsSpan().SequenceEqual(LucentModuleManifest.Serialize(embedded)) ||
+                !LucentModuleManifest.HasPublicCatalogTypes(AssemblyPath, embedded.StyleCatalogTypes, out error))
+            {
+                Log.LogError("LUC9006", null, null, AssemblyPath, 0, 0, 0, 0,
+                    $"The compiled assembly does not contain the expected Lucent module manifest: {error}");
+                return false;
+            }
+            var record = Encoding.UTF8.GetBytes($"{{\"fingerprint\":\"{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(AssemblyPath)))}\",\"manifest\":{Encoding.UTF8.GetString(staged)}}}");
+            WriteAtomically(LastSuccessfulPath, record);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or BadImageFormatException or System.Text.Json.JsonException)
+        {
+            Log.LogError("LUC9006", null, null, AssemblyPath, 0, 0, 0, 0,
+                $"Unable to verify the Lucent module manifest: {exception.Message}");
+            return false;
+        }
+    }
+
+    private static void WriteAtomically(string path, byte[] bytes)
+    {
+        if (File.Exists(path) && File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes)) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try { File.WriteAllBytes(temporary, bytes); File.Move(temporary, path, true); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
 }

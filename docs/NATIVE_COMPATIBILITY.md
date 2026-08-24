@@ -1,0 +1,36 @@
+# Native compatibility matrix
+
+Lucent projects use public Avalonia APIs; they do not attempt XAML parity.
+
+| Seam | Status | Evidence / escape hatch |
+| --- | --- | --- |
+| Styled and attached properties | supported | GeneralCompilerTests.Native_controls_properties_content_and_events_are_lowered_directly; ComponentCompositionTests.Attached_properties_lower_to_static_setters |
+| Routed and CLR events | supported | GeneralCompilerTests.Native_click_event_is_hooked_by_exact_event_name; NativeCompatibilityMatrixTests.Generated_clr_event_invokes_and_unsubscribes_on_dispose |
+| Direct expressions and compiled bindings | supported | CompilerTests.Compiled_binding_generation_matches_checked_in_snapshot; GeneralCompilerTests.Native_compiled_item_binding_uses_inherited_data_context |
+| Static and dynamic resources | supported | NativeCompatibilityMatrixTests.Lucent_css_resource_compiles_and_tracks_native_resource_changes; NativeCompatibilityMatrixTests.Explicit_csharp_static_resource_uses_resource_dictionary |
+| Native child/content metadata and ItemTemplate | bounded subset | GeneralCompilerTests.Typed_item_template_lowers_native_fragment_and_item_scope; GeneralCompilerTests.Item_template_requires_exactly_one_native_root |
+| Referenced custom and third-party controls | supported | NativeCompatibilityMatrixTests.Referenced_assembly_control_resolves_property_and_event_metadata |
+| Exact root mounting, fragments, lifetime, and automation | supported | NativeCompatibilityMatrixTests.Generated_clr_event_invokes_and_unsubscribes_on_dispose; GeneralCompilerTests.Indirect_and_structural_roots_do_not_emit_approximate_mount_root; AccessibilityTests.Shown_shell_palette_and_settings_have_exact_accessibility_contract |
+| TemplateContent and IDeferredContent | bounded subset | GeneralCompilerTests.Template_content_emits_fresh_public_deferred_content_without_component_capture; NativeCompatibilityMatrixTests.Explicit_csharp_template_escape_builds_richer_content |
+| Adjacent, global, and theme precedence/value restoration | escape through explicit Avalonia C# | NativeCompatibilityMatrixTests.Native_style_order_restores_previous_and_local_values (native Style only; Lucent sources are deferred to Plans 009, 009a, and 009b) |
+
+`resource("key")` is the supported Lucent CSS dynamic-resource form. Static
+resource lookup and richer native resource composition remain explicit Avalonia
+C# (`ResourceDictionary`/`Style` APIs); no XAML syntax is implied.
+
+`ItemTemplate` is one typed native root and excludes component invocation,
+events, and structural regions. `TemplateContent` is one native root with
+literals, `const`/enum values, and the documented `new Binding("Path")`
+exception. The executable C# escape fixture supplies a richer two-child
+`IDeferredContent`; use that public Avalonia contract for resources, markup
+extensions, name scopes, or other richer templates.
+
+Avalonia 12.1.1 exposes no public eager binding-path parser. The bounded
+`new Binding("Path")` form therefore leaves path validation to Avalonia when the
+binding attaches.
+
+Adjacent/global/theme precedence and value restoration have no Lucent contract
+yet. Plans 009, 009a, and 009b own those sources and their restoration tests;
+until then authors use native Avalonia `Style` APIs explicitly. This is not a
+claim of general XAML, `ControlTemplate`, markup-extension, or runtime wrapper
+support.

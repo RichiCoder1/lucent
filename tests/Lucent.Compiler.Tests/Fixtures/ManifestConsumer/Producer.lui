@@ -1,0 +1,2 @@
+namespace Fixture;
+component Producer() => Border {};

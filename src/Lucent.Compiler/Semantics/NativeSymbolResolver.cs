@@ -250,6 +250,85 @@ internal sealed class NativeSymbolResolver
         return target is not null && _compilation.ClassifyConversion(source, target).IsImplicit;
     }
 
+    public bool IsAssignableTo(ITypeSymbol source, ITypeSymbol target) =>
+        _compilation.ClassifyConversion(source, target).IsImplicit;
+
+    public bool TryResolveTemplateContent(
+        ResolvedNativeProperty property,
+        out ITypeSymbol? resultType,
+        out string? error)
+    {
+        resultType = null;
+        error = null;
+        if (property.Symbol.SetMethod is not { DeclaredAccessibility: Accessibility.Public })
+        {
+            error = $"Property '{property.Name}' is read-only.";
+            return false;
+        }
+        if (property.Symbol.SetMethod.IsInitOnly || property.Symbol.IsRequired)
+        {
+            error = $"Property '{property.Name}' must not be init-only or required for bounded TemplateContent.";
+            return false;
+        }
+
+        var attribute = property.Symbol.GetAttributes().FirstOrDefault(candidate =>
+            candidate.AttributeClass?.ToDisplayString() == "Avalonia.Metadata.TemplateContentAttribute");
+        if (attribute is null)
+        {
+            error = $"Property '{property.Name}' is not marked with Avalonia.Metadata.TemplateContentAttribute.";
+            return false;
+        }
+
+        var deferred = _compilation.GetTypeByMetadataName("Avalonia.Controls.IDeferredContent");
+        if (deferred is null || !_compilation.ClassifyConversion(deferred, property.Symbol.Type).IsImplicit)
+        {
+            error = $"Property '{property.Name}' cannot accept Avalonia.Controls.IDeferredContent.";
+            return false;
+        }
+
+        resultType = attribute.NamedArguments.FirstOrDefault(argument =>
+            argument.Key == "TemplateResultType").Value.Value as ITypeSymbol;
+        if (resultType is not null && !IsControlType(resultType))
+        {
+            error = "TemplateContentAttribute.TemplateResultType must be an Avalonia control for Lucent template content.";
+            return false;
+        }
+        return true;
+    }
+
+    public bool IsDeferredContentValue(
+        string expressionText,
+        ITypeSymbol targetType,
+        IReadOnlyList<string> ordinaryMembers)
+    {
+        var source = string.Join(Environment.NewLine, _imports.Select(@namespace => $"using {@namespace};")) +
+            Environment.NewLine + "internal sealed class __LucentTemplateProbe {" +
+            string.Join(Environment.NewLine, ordinaryMembers) + Environment.NewLine +
+            $"private {targetType.ToDisplayString(FullyQualifiedFormat)} __value = {expressionText};" + "}";
+        var tree = CSharpSyntaxTree.ParseText(source, _parseOptions);
+        var compilation = _compilation.AddSyntaxTrees(tree);
+        if (compilation.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error &&
+                                                diagnostic.Location.SourceTree == tree))
+        {
+            return false;
+        }
+        var expression = tree.GetRoot().DescendantNodes().OfType<VariableDeclaratorSyntax>()
+            .FirstOrDefault(node => node.Identifier.ValueText == "__value")?.Initializer?.Value;
+        if (expression is null) return false;
+        var model = compilation.GetSemanticModel(tree);
+        var conversion = model.GetConversion(expression);
+        if (!conversion.IsImplicit || conversion.IsUserDefined) return false;
+        return expression switch
+        {
+            LiteralExpressionSyntax => true,
+            PrefixUnaryExpressionSyntax { Operand: LiteralExpressionSyntax } => true,
+            IdentifierNameSyntax identifier => model.GetSymbolInfo(identifier).Symbol is IFieldSymbol { IsConst: true },
+            MemberAccessExpressionSyntax access => model.GetSymbolInfo(access).Symbol is IFieldSymbol
+                { IsConst: true } or IFieldSymbol { ContainingType.TypeKind: TypeKind.Enum },
+            _ => false,
+        };
+    }
+
     public ResolvedNativeAttachedProperty? ResolveAttachedProperty(
         ResolvedNativeControl control,
         string sourceName)
@@ -664,7 +743,7 @@ internal sealed class NativeSymbolResolver
 
     private bool IsControl(INamedTypeSymbol candidate)
     {
-        if (_controlType is null || candidate.IsAbstract || !IsAccessible(candidate))
+        if (!IsControlType(candidate) || candidate.IsAbstract || !IsAccessible(candidate))
         {
             return false;
         }
@@ -691,6 +770,11 @@ internal sealed class NativeSymbolResolver
             (SymbolEqualityComparer.Default.Equals(type, propertyType) ||
              type.BaseType is not null && IsAvaloniaProperty(type.BaseType));
     }
+
+    private bool IsControlType(ITypeSymbol candidate) =>
+        _controlType is not null && candidate is INamedTypeSymbol named &&
+        EnumerateTypeHierarchy(named)
+            .Any(type => SymbolEqualityComparer.Default.Equals(type, _controlType));
 
     private static string CanonicalPropertyName(string controlName, string propertyName) =>
         (controlName, propertyName) switch

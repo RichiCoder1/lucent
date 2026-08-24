@@ -1,5 +1,10 @@
 using System.Collections;
 using System.Diagnostics;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Lucent.Compiler.MSBuild;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
@@ -144,6 +149,105 @@ public sealed class CompileLucentTests
     }
 
     [TestMethod]
+    public void Module_manifest_is_deterministic_and_contains_no_machine_source_path()
+    {
+        using var temporary = new TemporaryDirectory();
+        var source = Path.Combine(temporary.Path, "Card.lui");
+        var style = Path.Combine(temporary.Path, "Card.css");
+        File.WriteAllText(source, "namespace Demo; component Card() => Border {}; ");
+        File.WriteAllText(style, ".card { background: #112233; }");
+        var (task, engine) = CreateTask(temporary, source);
+        task.ProjectPath = Path.Combine(temporary.Path, "Demo.csproj");
+        task.AssemblyName = "Demo";
+        task.AssemblyVersion = "1.2.3.4";
+
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        Assert.HasCount(1, task.ModuleManifestFiles);
+        var path = task.ModuleManifestFiles.Single().ItemSpec;
+        var first = File.ReadAllBytes(path);
+        Assert.IsFalse(File.ReadAllText(path).Contains(temporary.Path, StringComparison.OrdinalIgnoreCase));
+        StringAssert.Contains(File.ReadAllText(path), "\"name\":\"card\"");
+
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        CollectionAssert.AreEqual(first, File.ReadAllBytes(path));
+    }
+
+    [TestMethod]
+    public void Module_manifest_canonicalizes_repeated_class_selectors_independent_of_rule_order()
+    {
+        using var temporary = new TemporaryDirectory();
+        var source = Path.Combine(temporary.Path, "Counter.lui");
+        var style = Path.ChangeExtension(source, ".css");
+        File.WriteAllText(source, "namespace Demo; component Counter() => Border {}; ");
+        File.WriteAllText(style, "Border.counter { width: 1; }\nBorder.counter { height: 1; }");
+        var (task, engine) = CreateTask(temporary, source);
+        task.ProjectPath = Path.Combine(temporary.Path, "Demo.csproj");
+        task.AssemblyName = "Demo";
+
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        var first = File.ReadAllBytes(task.ModuleManifestFiles.Single().ItemSpec);
+        using var firstJson = JsonDocument.Parse(first);
+        Assert.AreEqual(1, firstJson.RootElement.GetProperty("styleClasses").GetArrayLength());
+
+        File.WriteAllText(style, "Border.counter { height: 1; }\nBorder.counter { width: 1; }");
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        CollectionAssert.AreEqual(first, File.ReadAllBytes(task.ModuleManifestFiles.Single().ItemSpec));
+    }
+
+    [TestMethod]
+    public void Module_manifest_rejects_blank_or_duplicate_style_catalog_type_names()
+    {
+        using var temporary = new TemporaryDirectory();
+        var source = Path.Combine(temporary.Path, "Card.lui");
+        File.WriteAllText(source, "namespace Demo; component Card() => Border {}; ");
+        var (task, engine) = CreateTask(temporary, source);
+        task.StyleCatalogTypes = [new TaskItem("Demo.Catalog"), new TaskItem(" Demo.Catalog ")];
+
+        Assert.IsFalse(task.Execute());
+        Assert.IsTrue(engine.Errors.Any(error => error.Code == "LUC9008"));
+    }
+
+    [TestMethod]
+    public void SignAssembly_false_ignores_a_key_file_for_manifest_identity()
+    {
+        using var temporary = new TemporaryDirectory();
+        var source = Path.Combine(temporary.Path, "Card.lui");
+        File.WriteAllText(source, "namespace Demo; component Card() => Border {}; ");
+        var (task, engine) = CreateTask(temporary, source);
+        task.ProjectPath = Path.Combine(temporary.Path, "Demo.csproj");
+        task.SignAssembly = "false";
+        task.AssemblyOriginatorKeyFile = "key-that-CoreCompile-will-not-use.snk";
+        task.PublicSign = "true";
+        task.DelaySign = "true";
+
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        StringAssert.Contains(File.ReadAllText(task.ModuleManifestFiles.Single().ItemSpec),
+            "\"publicKeyToken\":\"\"");
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Manifest_paths_are_isolated_by_configuration_framework_and_rid()
+    {
+        using var temporary = new TemporaryDirectory();
+        var project = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(project, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <Import Project="{{Path.Combine(FindRepositoryRoot(), "build", "Lucent.Compiler.props")}}" />
+            </Project>
+            """);
+
+        var windows = await RunDotNetAsync(temporary.Path, "msbuild", project, "-getProperty:LucentCompilerOutputDirectory",
+            "-p:Configuration=Release", "-p:TargetFramework=net9.0", "-p:RuntimeIdentifier=win-x64", "-nologo");
+        var linux = await RunDotNetAsync(temporary.Path, "msbuild", project, "-getProperty:LucentCompilerOutputDirectory",
+            "-p:Configuration=Debug", "-p:TargetFramework=net8.0", "-p:RuntimeIdentifier=linux-x64", "-nologo");
+
+        Assert.AreEqual(0, windows.ExitCode, windows.Output);
+        Assert.AreEqual(0, linux.ExitCode, linux.Output);
+        StringAssert.Contains(windows.Output.Replace('\\', '/'), "obj/Release/net9.0/win-x64/Lucent/");
+        StringAssert.Contains(linux.Output.Replace('\\', '/'), "obj/Debug/net8.0/linux-x64/Lucent/");
+    }
+
+    [TestMethod]
     public void Removing_the_last_source_replaces_manifest_with_no_compile_items()
     {
         using var temporary = new TemporaryDirectory();
@@ -164,6 +268,8 @@ public sealed class CompileLucentTests
             "Lucent.GeneratedFiles.props"));
         Assert.IsFalse(manifest.Contains("Compile Include", StringComparison.Ordinal));
         Assert.HasCount(0, task.GeneratedFiles);
+        Assert.HasCount(0, task.ModuleManifestFiles);
+        Assert.IsFalse(File.Exists(Path.Combine(temporary.OutputDirectory, "Lucent.ModuleManifest.v1.json")));
     }
 
     [TestMethod]
@@ -333,6 +439,229 @@ public sealed class CompileLucentTests
                     SearchOption.AllDirectories)
                 .Any(),
             output);
+        var promoted = Directory.EnumerateFiles(
+                Path.Combine(temporary.Path, "artifacts", "obj"),
+                "Lucent.ModuleManifest.v1.last-successful.json",
+                SearchOption.AllDirectories)
+            .Single();
+        StringAssert.Contains(await File.ReadAllTextAsync(promoted), "\"fingerprint\"");
+        var assembly = Directory.EnumerateFiles(
+                Path.Combine(temporary.Path, "artifacts", "bin"), "Consumer.dll", SearchOption.AllDirectories)
+            .Single();
+        Assert.AreEqual(1, EmbeddedResourceCount(assembly, "Lucent.ModuleManifest.v1.json"));
+        var staged = Directory.EnumerateFiles(Path.Combine(temporary.Path, "artifacts", "obj"),
+                "Lucent.ModuleManifest.v1.json", SearchOption.AllDirectories)
+            .Single();
+        var embedded = EmbeddedResourceBytes(assembly, "Lucent.ModuleManifest.v1.json");
+        CollectionAssert.AreEqual(await File.ReadAllBytesAsync(staged), embedded);
+        StringAssert.Contains(Encoding.UTF8.GetString(embedded), "\"name\":\"Consumer\"");
+        StringAssert.Contains(Encoding.UTF8.GetString(embedded), "\"version\":\"1.0.0.0\"");
+        var lastSuccessful = await File.ReadAllBytesAsync(promoted);
+
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "Broken.cs"), "this is not C#;");
+        var failedCompile = await RunDotNetAsync(temporary.Path, "build", projectPath, "--nologo", "-nodeReuse:false",
+            "-p:UseArtifactsOutput=true", $"-p:ArtifactsPath={Path.Combine(temporary.Path, "artifacts")}");
+        Assert.AreNotEqual(0, failedCompile.ExitCode, failedCompile.Output);
+        CollectionAssert.AreEqual(lastSuccessful, await File.ReadAllBytesAsync(promoted));
+
+        File.Delete(Path.Combine(temporary.Path, "Broken.cs"));
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "AssemblyInfo.cs"),
+            "[assembly: System.Reflection.AssemblyVersion(\"9.9.9.9\")]");
+        var projectText = await File.ReadAllTextAsync(projectPath);
+        await File.WriteAllTextAsync(projectPath, projectText.Replace("<Nullable>enable</Nullable>",
+            "<Nullable>enable</Nullable><GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>"));
+        var failedIdentity = await RunDotNetAsync(temporary.Path, "build", projectPath, "--nologo", "-nodeReuse:false",
+            "-p:UseArtifactsOutput=true", $"-p:ArtifactsPath={Path.Combine(temporary.Path, "artifacts")}");
+        Assert.AreNotEqual(0, failedIdentity.ExitCode, failedIdentity.Output);
+        StringAssert.Contains(failedIdentity.Output, "LUC9006");
+        CollectionAssert.AreEqual(lastSuccessful, await File.ReadAllBytesAsync(promoted));
+
+        var clean = await RunDotNetAsync(temporary.Path, "clean", projectPath, "--nologo", "-nodeReuse:false",
+            "-p:UseArtifactsOutput=true", $"-p:ArtifactsPath={Path.Combine(temporary.Path, "artifacts")}");
+        Assert.AreEqual(0, clean.ExitCode, clean.Output);
+        Assert.IsFalse(File.Exists(promoted));
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Targets_embed_and_promote_manifests_for_each_signing_mode()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        var keyFile = Path.Combine(temporary.Path, "test.snk");
+        using (var rsa = new RSACryptoServiceProvider())
+            await File.WriteAllBytesAsync(keyFile, rsa.ExportCspBlob(true));
+
+        foreach (var (name, properties, signed, signatureFilled) in new (string, string, bool, bool?)[]
+        {
+            ("Unsigned", "<SignAssembly>false</SignAssembly>", false, false),
+            ("Signed", "<SignAssembly>true</SignAssembly>", true, true),
+            ("PublicSigned", "<SignAssembly>true</SignAssembly><PublicSign>true</PublicSign>", true, null),
+            ("DelaySigned", "<SignAssembly>true</SignAssembly><DelaySign>true</DelaySign>", true, false),
+        })
+        {
+            var directory = Path.Combine(temporary.Path, name);
+            Directory.CreateDirectory(directory);
+            await File.WriteAllTextAsync(Path.Combine(directory, "Main.lui"),
+                "namespace Demo; component Main() => Border {}; ");
+            var project = Path.Combine(directory, "Consumer.csproj");
+            await File.WriteAllTextAsync(project, $$"""
+                <Project Sdk="Microsoft.NET.Sdk">
+                  <PropertyGroup>
+                    <TargetFramework>net9.0</TargetFramework>
+                    <AssemblyName>{{name}}Consumer</AssemblyName>
+                    <Version>2.3.4.5</Version>
+                    <AssemblyOriginatorKeyFile>{{keyFile}}</AssemblyOriginatorKeyFile>
+                    {{properties}}
+                  </PropertyGroup>
+                  <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+                  <ItemGroup>
+                    <PackageReference Include="Avalonia" Version="12.1.1" />
+                    <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                    <LucentSource Include="Main.lui" />
+                  </ItemGroup>
+                  <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+                  <Target Name="RepeatLucentGeneration" BeforeTargets="CoreCompile" DependsOnTargets="GenerateLucent">
+                    <CallTarget Targets="GenerateLucent" />
+                  </Target>
+                </Project>
+                """);
+
+            var build = await RunDotNetAsync(directory, "build", project, "--nologo", "-nodeReuse:false");
+            Assert.AreEqual(0, build.ExitCode, $"{name}:{Environment.NewLine}{build.Output}");
+
+            var assembly = Path.Combine(directory, "bin", "Debug", "net9.0", $"{name}Consumer.dll");
+            var staged = Path.Combine(directory, "obj", "Debug", "net9.0", "Lucent", "Lucent.ModuleManifest.v1.json");
+            var promoted = Path.Combine(directory, "obj", "Debug", "net9.0", "Lucent", "Lucent.ModuleManifest.v1.last-successful.json");
+            Assert.AreEqual(1, EmbeddedResourceCount(assembly, "Lucent.ModuleManifest.v1.json"), name);
+            var manifest = await File.ReadAllBytesAsync(staged);
+            CollectionAssert.AreEqual(manifest, EmbeddedResourceBytes(assembly, "Lucent.ModuleManifest.v1.json"), name);
+            AssertManifestMatchesAssembly(manifest, assembly, name);
+            using var record = JsonDocument.Parse(await File.ReadAllBytesAsync(promoted));
+            Assert.AreEqual(Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(assembly))),
+                record.RootElement.GetProperty("fingerprint").GetString(), name);
+            Assert.AreEqual(signed, HasStrongNameSignature(assembly), name);
+            if (signatureFilled is not null)
+                Assert.AreEqual(signatureFilled, StrongNameSignatureIsFilled(assembly), name);
+        }
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Targets_fail_for_a_consumer_owned_reserved_manifest_resource()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "Main.lui"), "namespace Demo; component Main() => Border {}; ");
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "consumer.json"), "{}");
+        var project = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(project, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <LucentSource Include="Main.lui" />
+                <EmbeddedResource Include="consumer.json" LogicalName="Lucent.ModuleManifest.v1.json" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+        var build = await RunDotNetAsync(temporary.Path, "build", project, "--nologo", "-nodeReuse:false");
+        Assert.AreNotEqual(0, build.ExitCode, build.Output);
+        StringAssert.Contains(build.Output, "cannot embed its module manifest");
+        StringAssert.Contains(build.Output, "consumer.json");
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Incremental_build_restores_generated_items_and_tracks_deleted_css()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "Main.lui"),
+            "namespace Demo; component Main() => Border { Class: \"card\"; }; ");
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "Host.cs"),
+            "namespace Demo; internal static class Host { internal static void Use(MainComponent component) { } }");
+        var css = Path.Combine(temporary.Path, "Main.css");
+        await File.WriteAllTextAsync(css, ".card { width: 8; }");
+        var project = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(project, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="Main.lui" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var first = await RunDotNetAsync(temporary.Path, "build", project, "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, first.ExitCode, first.Output);
+        var second = await RunDotNetAsync(temporary.Path, "build", project, "--no-restore", "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, second.ExitCode, second.Output);
+        var assembly = Path.Combine(temporary.Path, "bin", "Debug", "net9.0", "Consumer.dll");
+        Assert.AreEqual(1, EmbeddedResourceCount(assembly, "Lucent.ModuleManifest.v1.json"));
+
+        var identityChange = await RunDotNetAsync(temporary.Path, "build", project, "--no-restore", "--nologo", "-nodeReuse:false", "-p:AssemblyVersion=2.0.0.0");
+        Assert.AreEqual(0, identityChange.ExitCode, identityChange.Output);
+        using (var changedIdentity = JsonDocument.Parse(EmbeddedResourceBytes(assembly, "Lucent.ModuleManifest.v1.json")))
+            Assert.AreEqual("2.0.0.0", changedIdentity.RootElement.GetProperty("assembly").GetProperty("version").GetString());
+
+        File.Delete(css);
+        var afterDelete = await RunDotNetAsync(temporary.Path, "build", project, "--no-restore", "--nologo", "-nodeReuse:false", "-p:AssemblyVersion=2.0.0.0");
+        Assert.AreEqual(0, afterDelete.ExitCode, afterDelete.Output);
+        using var manifest = JsonDocument.Parse(EmbeddedResourceBytes(assembly, "Lucent.ModuleManifest.v1.json"));
+        Assert.AreEqual(0, manifest.RootElement.GetProperty("styleClasses").GetArrayLength());
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Multi_target_manifests_are_isolated_embedded_promoted_and_culture_matched()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "Main.lui"),
+            "namespace Demo; component Main() => Border {}; ");
+        await File.WriteAllTextAsync(Path.Combine(temporary.Path, "Culture.cs"),
+            "[assembly: System.Reflection.AssemblyCulture(\"fr-FR\")]");
+        var project = Path.Combine(temporary.Path, "Consumer.csproj");
+        await File.WriteAllTextAsync(project, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <TargetFrameworks>net9.0;net9.0-windows</TargetFrameworks>
+                <EnableWindowsTargeting>true</EnableWindowsTargeting>
+                <AssemblyName>CultureConsumer</AssemblyName>
+                <AssemblyCulture>fr-FR</AssemblyCulture>
+                <GenerateAssemblyCultureAttribute>false</GenerateAssemblyCultureAttribute>
+              </PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="Main.lui" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var build = await RunDotNetAsync(temporary.Path, "build", project, "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, build.ExitCode, build.Output);
+        foreach (var framework in new[] { "net9.0", "net9.0-windows" })
+        {
+            var assembly = Path.Combine(temporary.Path, "bin", "Debug", framework, "CultureConsumer.dll");
+            var manifestDirectory = Path.Combine(temporary.Path, "obj", "Debug", framework, "Lucent");
+            var staged = Path.Combine(manifestDirectory, "Lucent.ModuleManifest.v1.json");
+            var promoted = Path.Combine(manifestDirectory, "Lucent.ModuleManifest.v1.last-successful.json");
+            Assert.AreEqual(1, EmbeddedResourceCount(assembly, "Lucent.ModuleManifest.v1.json"), framework);
+            var manifest = await File.ReadAllBytesAsync(staged);
+            CollectionAssert.AreEqual(manifest, EmbeddedResourceBytes(assembly, "Lucent.ModuleManifest.v1.json"), framework);
+            AssertManifestMatchesAssembly(manifest, assembly, framework);
+            using var record = JsonDocument.Parse(await File.ReadAllBytesAsync(promoted));
+            Assert.AreEqual(Convert.ToHexString(SHA256.HashData(await File.ReadAllBytesAsync(assembly))),
+                record.RootElement.GetProperty("fingerprint").GetString(), framework);
+            Assert.AreEqual("fr-FR", record.RootElement.GetProperty("manifest").GetProperty("assembly")
+                .GetProperty("culture").GetString(), framework);
+        }
     }
 
     [TestMethod]
@@ -478,6 +807,10 @@ public sealed class CompileLucentTests
         await WriteProjectAsync(string.Empty);
         var deleted = await RunDotNetAsync(temporary.Path, "build", project, "--nologo", "-nodeReuse:false");
         Assert.AreEqual(0, deleted.ExitCode, deleted.Output);
+        var manifestDirectory = Path.Combine(temporary.Path, "obj", "Debug", "net9.0", "Lucent");
+        Assert.IsFalse(File.Exists(Path.Combine(manifestDirectory, "Lucent.ModuleManifest.v1.json")));
+        Assert.IsFalse(File.Exists(Path.Combine(manifestDirectory, "Lucent.ModuleManifest.v1.last-successful.json")));
+        Assert.IsFalse(File.Exists(Path.Combine(manifestDirectory, "Lucent.GeneratedFiles.props")));
         designTime = await RunDotNetAsync(temporary.Path, "msbuild", project, "-getItem:Compile", "-p:DesignTimeBuild=true", "-nologo");
         Assert.AreEqual(0, designTime.ExitCode, designTime.Output);
         Assert.IsFalse(designTime.Output.Contains("SecondComponent.g.cs", StringComparison.Ordinal));
@@ -561,6 +894,68 @@ public sealed class CompileLucentTests
         var stderr = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         return (process.ExitCode, await stdout + await stderr);
+    }
+
+    private static int EmbeddedResourceCount(string assemblyPath, string name)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        var metadata = pe.GetMetadataReader();
+        return metadata.ManifestResources.Count(handle =>
+            metadata.GetManifestResource(handle).Implementation.IsNil &&
+            string.Equals(metadata.GetString(metadata.GetManifestResource(handle).Name), name,
+                StringComparison.Ordinal));
+    }
+
+    private static byte[] EmbeddedResourceBytes(string assemblyPath, string name)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        var metadata = pe.GetMetadataReader();
+        var resource = metadata.ManifestResources.Single(handle =>
+        {
+            var candidate = metadata.GetManifestResource(handle);
+            return candidate.Implementation.IsNil &&
+                string.Equals(metadata.GetString(candidate.Name), name, StringComparison.Ordinal);
+        });
+        var entry = metadata.GetManifestResource(resource);
+        var directory = pe.PEHeaders.CorHeader!.ResourcesDirectory;
+        var content = pe.GetSectionData(directory.RelativeVirtualAddress + (int)entry.Offset).GetContent();
+        var length = BitConverter.ToInt32(content.AsSpan(0, sizeof(int)));
+        return content.Slice(sizeof(int), length).ToArray();
+    }
+
+    private static void AssertManifestMatchesAssembly(byte[] manifest, string assemblyPath, string mode)
+    {
+        using var document = JsonDocument.Parse(manifest);
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        var reader = pe.GetMetadataReader();
+        var assembly = reader.GetAssemblyDefinition();
+        var identity = document.RootElement.GetProperty("assembly");
+        Assert.AreEqual(reader.GetString(assembly.Name), identity.GetProperty("name").GetString(), mode);
+        Assert.AreEqual(assembly.Version.ToString(), identity.GetProperty("version").GetString(), mode);
+        Assert.AreEqual(assembly.Culture.IsNil ? string.Empty : reader.GetString(assembly.Culture),
+            identity.GetProperty("culture").GetString(), mode);
+        var publicKey = reader.GetBlobBytes(assembly.PublicKey);
+        var token = publicKey.Length == 0 ? string.Empty : Convert.ToHexString(SHA1.HashData(publicKey)[^8..].Reverse().ToArray());
+        Assert.AreEqual(token, identity.GetProperty("publicKeyToken").GetString(), mode);
+    }
+
+    private static bool HasStrongNameSignature(string assemblyPath)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        return pe.PEHeaders.CorHeader!.StrongNameSignatureDirectory.Size > 0;
+    }
+
+    private static bool StrongNameSignatureIsFilled(string assemblyPath)
+    {
+        using var stream = File.OpenRead(assemblyPath);
+        using var pe = new PEReader(stream);
+        var signature = pe.PEHeaders.CorHeader!.StrongNameSignatureDirectory;
+        return signature.Size > 0 && pe.GetSectionData(signature.RelativeVirtualAddress)
+            .GetContent(0, signature.Size).Any(value => value != 0);
     }
 
     private static string CounterSourcePath() =>

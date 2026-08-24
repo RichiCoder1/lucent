@@ -10,6 +10,259 @@ namespace Lucent.Compiler.Tests;
 public sealed class GeneralCompilerTests
 {
     [TestMethod]
+    public void Template_content_emits_fresh_public_deferred_content_without_component_capture()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-content-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "TemplateHost.cs");
+            File.WriteAllText(sourcePath, """
+                namespace Demo;
+                public sealed class TemplateHost : Avalonia.Controls.Control
+                {
+                    [Avalonia.Metadata.TemplateContent(TemplateResultType = typeof(Avalonia.Controls.TextBlock))]
+                    public Avalonia.Controls.IDeferredContent? DeferredBody { get; set; }
+                }
+                """);
+            var result = LucentCompiler.Compile(
+                "namespace Demo; using Avalonia.Controls; component App() => TemplateHost { template DeferredBody() { TextBlock { Width: 8; Text: new Avalonia.Data.Binding(\"Name\"); } } };",
+                "App.lui", new LucentProjectContext(SourcePaths: [sourcePath]));
+
+            Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+            StringAssert.Contains(result.GeneratedSource!, "class __LucentDeferredContent1 : global::Avalonia.Controls.IDeferredContent");
+            StringAssert.Contains(result.GeneratedSource!, "Build(global::System.IServiceProvider? serviceProvider)");
+            StringAssert.Contains(result.GeneratedSource!, "DeferredBody = new __LucentDeferredContent1()");
+            StringAssert.Contains(result.GeneratedSource!, "control1.Bind(global::Avalonia.Controls.TextBlock.TextProperty, new Avalonia.Data.Binding(\"Name\"));");
+            var deferredSource = result.GeneratedSource![result.GeneratedSource.IndexOf("class __LucentDeferredContent", StringComparison.Ordinal)..
+                result.GeneratedSource.IndexOf("public Fragment Mount", StringComparison.Ordinal)];
+            Assert.IsFalse(deferredSource.Contains("__lucent_owner", StringComparison.Ordinal));
+            var harness = """
+                namespace Demo;
+                public static class TemplateProbe
+                {
+                    public static string Run()
+                    {
+                        using var app = new AppComponent();
+                        var host = (TemplateHost)app.MountRoot();
+                        var first = host.DeferredBody!.Build(null!);
+                        var second = host.DeferredBody.Build(null!);
+                        var parent = new Avalonia.Controls.StackPanel { DataContext = new { Name = "inherited" } };
+                        parent.Children.Add((Avalonia.Controls.Control)first!);
+                        return $"{ReferenceEquals(first, second)}:{((Avalonia.Controls.TextBlock)first).Width}:{((Avalonia.Controls.TextBlock)second!).Width}:{((Avalonia.Controls.TextBlock)first).Text}";
+                    }
+                }
+                """;
+            var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+                .Append(typeof(Avalonia.Controls.Border).Assembly.Location)
+                .Append(typeof(ComponentOwner).Assembly.Location)
+                .Distinct(StringComparer.OrdinalIgnoreCase).Select(path => MetadataReference.CreateFromFile(path));
+            var compilation = CSharpCompilation.Create($"TemplateProbe{Guid.NewGuid():N}",
+                [CSharpSyntaxTree.ParseText(File.ReadAllText(sourcePath)), CSharpSyntaxTree.ParseText(result.GeneratedSource!),
+                    CSharpSyntaxTree.ParseText(harness)], references,
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            using var bytes = new MemoryStream();
+            var emit = compilation.Emit(bytes);
+            Assert.IsTrue(emit.Success, string.Join(Environment.NewLine, emit.Diagnostics));
+            var observed = Assembly.Load(bytes.ToArray()).GetType("Demo.TemplateProbe")!.GetMethod("Run")!.Invoke(null, null);
+            Assert.AreEqual("False:8:8:inherited", observed);
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Template_content_rejects_capture_and_nonliteral_values()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-content-negative-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "TemplateHost.cs");
+            File.WriteAllText(sourcePath, """
+                namespace Demo;
+                public sealed class TemplateHost : Avalonia.Controls.Control
+                {
+                    [Avalonia.Metadata.TemplateContent]
+                    public Avalonia.Controls.IDeferredContent? DeferredBody { get; set; }
+                }
+                """);
+            var result = LucentCompiler.Compile(
+                "namespace Demo; using Avalonia.Controls; component App(string text) => TemplateHost { template DeferredBody() { TextBlock { Text: text; } } };",
+                "App.lui", new LucentProjectContext(SourcePaths: [sourcePath]));
+
+            Assert.IsFalse(result.Succeeded);
+            Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Message.Contains("literals, const fields, or enum members", StringComparison.Ordinal)));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Template_content_negative_contract_is_table_driven()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-matrix-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var host = Path.Combine(directory, "Hosts.cs");
+            File.WriteAllText(host, """
+                namespace Demo;
+                public sealed class ValidHost : Avalonia.Controls.Control { [Avalonia.Metadata.TemplateContent] public Avalonia.Controls.IDeferredContent? Body { get; set; } }
+                public sealed class UnmarkedHost : Avalonia.Controls.Control { public Avalonia.Controls.IDeferredContent? Body { get; set; } }
+                public sealed class ReadOnlyHost : Avalonia.Controls.Control { [Avalonia.Metadata.TemplateContent] public Avalonia.Controls.IDeferredContent? Body { get; } }
+                public sealed class IncompatibleHost : Avalonia.Controls.Control { [Avalonia.Metadata.TemplateContent] public string? Body { get; set; } }
+                public sealed class BadResultHost : Avalonia.Controls.Control { [Avalonia.Metadata.TemplateContent(TemplateResultType = typeof(string))] public Avalonia.Controls.IDeferredContent? Body { get; set; } }
+                """);
+            var cases = new[]
+            {
+                ("UnmarkedHost", "Border {}", "not marked"),
+                ("ReadOnlyHost", "Border {}", "read-only"),
+                ("IncompatibleHost", "Border {}", "cannot accept"),
+                ("BadResultHost", "Border {}", "TemplateResultType"),
+                ("ValidHost", "Border {} TextBlock {}", "exactly one native control root"),
+                ("ValidHost", "TextBlock { Text: new Avalonia.Data.Binding(\"Name\") { Mode = Avalonia.Data.BindingMode.TwoWay }; }", "literals, const fields, or enum members"),
+                ("ValidHost", "TextBlock { Text: binding(Name); }", "binding(...) supports"),
+                ("ValidHost", "Button { onClick: (sender, e) => {}; }", "native control properties and child controls only"),
+            };
+            foreach (var (type, body, diagnostic) in cases)
+            {
+                var result = LucentCompiler.Compile($"namespace Demo; using Avalonia.Controls; component App() => {type} {{ template Body() {{ {body} }} }};",
+                    "App.lui", new LucentProjectContext(SourcePaths: [host]));
+                Assert.IsFalse(result.Succeeded, type + ": " + string.Join(Environment.NewLine, result.Diagnostics));
+                Assert.IsTrue(result.Diagnostics.Any(item => item.Message.Contains(diagnostic, StringComparison.Ordinal)),
+                    type + ": " + string.Join(Environment.NewLine, result.Diagnostics));
+            }
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Template_content_accepts_const_and_enum_values()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-content-values-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "TemplateHost.cs");
+            File.WriteAllText(sourcePath, """
+                namespace Demo;
+                public enum Marker { Value }
+                public sealed class TemplateHost : Avalonia.Controls.Control
+                {
+                    [Avalonia.Metadata.TemplateContent]
+                    public Avalonia.Controls.IDeferredContent? DeferredBody { get; set; }
+                }
+                """);
+            var result = LucentCompiler.Compile(
+                "namespace Demo; using Avalonia.Controls; component App() { private const double width = 8; Fragment Render() => TemplateHost { template DeferredBody() { TextBlock { Width: width; Tag: Marker.Value; } } }; }",
+                "App.lui", new LucentProjectContext(SourcePaths: [sourcePath]));
+
+            Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+            StringAssert.Contains(result.GeneratedSource!, "control1.Width = width;");
+            StringAssert.Contains(result.GeneratedSource!, "control1.Tag = Marker.Value;");
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Template_content_accepts_an_abstract_control_template_result_type()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-content-abstract-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "TemplateHost.cs");
+            File.WriteAllText(sourcePath, """
+                namespace Demo;
+                public sealed class TemplateHost : Avalonia.Controls.Control
+                {
+                    [Avalonia.Metadata.TemplateContent(TemplateResultType = typeof(Avalonia.Controls.Control))]
+                    public Avalonia.Controls.IDeferredContent? DeferredBody { get; set; }
+                }
+                """);
+            var result = LucentCompiler.Compile(
+                "namespace Demo; using Avalonia.Controls; component App() => TemplateHost { template DeferredBody() { Border { Width: 8; } } };",
+                "App.lui", new LucentProjectContext(SourcePaths: [sourcePath]));
+            Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Template_content_rejects_init_only_and_required_properties()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-content-property-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "TemplateHost.cs");
+            File.WriteAllText(sourcePath, """
+                namespace Demo;
+                public sealed class InitHost : Avalonia.Controls.Control
+                {
+                    [Avalonia.Metadata.TemplateContent]
+                    public Avalonia.Controls.IDeferredContent? DeferredBody { get; init; }
+                }
+                public sealed class RequiredHost : Avalonia.Controls.Control
+                {
+                    [Avalonia.Metadata.TemplateContent]
+                    public required Avalonia.Controls.IDeferredContent DeferredBody { get; set; }
+                }
+                """);
+            foreach (var host in new[] { "InitHost", "RequiredHost" })
+            {
+                var result = LucentCompiler.Compile(
+                    $"namespace Demo; using Avalonia.Controls; component App() => {host} {{ template DeferredBody() {{ Border {{}} }} }};",
+                    "App.lui", new LucentProjectContext(SourcePaths: [sourcePath]));
+                Assert.IsFalse(result.Succeeded);
+                Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Message.Contains("init-only or required", StringComparison.Ordinal)));
+            }
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Template_content_is_rejected_from_alternate_emitters()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-content-structural-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var sourcePath = Path.Combine(directory, "TemplateHost.cs");
+            File.WriteAllText(sourcePath, """
+                namespace Demo;
+                public sealed class TemplateHost : Avalonia.Controls.Control
+                {
+                    [Avalonia.Metadata.TemplateContent]
+                    public Avalonia.Controls.IDeferredContent? DeferredBody { get; set; }
+                }
+                """);
+            var sources = new[]
+            {
+                "namespace Demo; using Avalonia.Controls; component App() { private readonly State<bool> visible = new(true); Fragment Render() => StackPanel { if (visible.Value) { TemplateHost { template DeferredBody() { Border {} } } } }; }",
+                "namespace Demo; using Avalonia.Controls; component App() { private readonly int[] items = [1]; Fragment Render() => StackPanel { foreach (var item in items) keyed by item { TemplateHost { template DeferredBody() { Border {} } } } }; }",
+                "namespace Demo; using Avalonia.Controls; component App() => ListBox { template ItemTemplate(string item) { TemplateHost { template DeferredBody() { Border {} } } } };",
+            };
+            foreach (var source in sources)
+            {
+                var result = LucentCompiler.Compile(source, "App.lui", new LucentProjectContext(SourcePaths: [sourcePath]));
+                Assert.IsFalse(result.Succeeded);
+                Assert.IsTrue(result.Diagnostics.Any(diagnostic =>
+                        diagnostic.Message.Contains("statically emitted native control tree", StringComparison.Ordinal) ||
+                        diagnostic.Message.Contains("nested templates", StringComparison.Ordinal)),
+                    string.Join(Environment.NewLine, result.Diagnostics));
+            }
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public void Avalonia_binding_constructor_does_not_eagerly_validate_paths()
+    {
+        var binding = new Avalonia.Data.Binding("Name[");
+        Assert.AreEqual("Name[", binding.Path);
+    }
+
+    [TestMethod]
     public void Native_compiled_item_binding_uses_inherited_data_context()
     {
         var result = LucentCompiler.Compile(

@@ -11,6 +11,7 @@ These documents split the original project handoff into maintained topics. They 
 | [Styling](STYLING.md) | CSS authoring, tokens, layout, and component strategy |
 | [Shadcn-style theme](SHADCN_THEME.md) | Proposed reusable Avalonia theme, OKLCH support, and example migration |
 | [Tooling](TOOLING.md) | Diagnostics, language server scope, source mapping, and hot reload |
+| [Native compatibility matrix](NATIVE_COMPATIBILITY.md) | Executable Lucent-to-Avalonia seam classifications and escapes |
 | [Roadmap](ROADMAP.md) | Proof-of-concept success criteria, implementation order, and dogfood scope |
 | [Decisions](DECISIONS.md) | Accepted direction, working choices, and explicitly deferred questions |
 

@@ -3,12 +3,92 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Lucent.Compiler;
 using Lucent.LanguageServer;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Lucent.LanguageServer.Tests;
 
 [TestClass]
 public sealed class LanguageServerProtocolTests
 {
+    [TestMethod]
+    public async Task Open_adjacent_css_revalidates_the_local_manifest_generation()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-local-css-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var project = Path.Combine(directory, "App.csproj");
+            var lui = Path.Combine(directory, "App.lui");
+            var css = Path.Combine(directory, "App.css");
+            const string luiText = "namespace Demo; component App() => Border {};";
+            const string cssText = "Border { width: 1; }";
+            await File.WriteAllTextAsync(project,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(lui, luiText);
+            await File.WriteAllTextAsync(css, cssText);
+            var target = Path.Combine(directory, "bin", "Debug", "net9.0", "App.dll");
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            WriteLocalManifestAssembly(target, project, lui, luiText, css, cssText);
+
+            var luiUri = new Uri(lui).AbsoluteUri;
+            var cssUri = new Uri(css).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = luiUri, languageId = "lucent", version = 1, text = luiText } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = cssUri, languageId = "css", version = 1, text = "Border { width: 2; }" } }),
+                Notification("textDocument/didClose", new { textDocument = new { uri = cssUri } }),
+                Request(2, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var diagnostics = PublishedDiagnostics(ReadMessages(output.ToArray()), luiUri).ToArray();
+            Assert.IsTrue(diagnostics.Length > 0);
+            Assert.IsTrue(diagnostics.Any(items => items.EnumerateArray().Any(item =>
+                item.GetProperty("code").GetString() == "LUC9007" &&
+                item.GetProperty("message").GetString()!.Contains("stale", StringComparison.Ordinal))));
+            Assert.IsFalse(diagnostics[^1].EnumerateArray().Any(item =>
+                item.GetProperty("code").GetString() == "LUC9007"));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task Referenced_manifest_classes_complete_only_in_css_selectors_from_the_generation_snapshot()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-referenced-css-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var reference = Path.Combine(directory, "Package.dll");
+            WriteReferencedManifestAssembly(reference, "package-button");
+            var project = Path.Combine(directory, "App.csproj");
+            var css = Path.Combine(directory, "App.css");
+            var lui = Path.Combine(directory, "App.lui");
+            const string cssText = ".package-";
+            const string luiText = "namespace Demo; component App() => Border { Class: \"package-\"; };";
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><Reference Include=\"Package\"><HintPath>Package.dll</HintPath></Reference><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(css, cssText);
+            await File.WriteAllTextAsync(lui, luiText);
+            var cssUri = new Uri(css).AbsoluteUri;
+            var luiUri = new Uri(lui).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = cssUri, languageId = "css", version = 1, text = cssText } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = luiUri, languageId = "lucent", version = 1, text = luiText } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri = cssUri }, position = PositionAtOffset(cssText, cssText.Length) }),
+                Request(3, "textDocument/completion", new { textDocument = new { uri = luiUri }, position = PositionAtOffset(luiText, luiText.IndexOf("package-", StringComparison.Ordinal) + "package-".Length) }),
+                Request(4, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var messages = ReadMessages(output.ToArray());
+            Assert.IsTrue(Response(messages, 2).GetProperty("result").EnumerateArray().Any(item => item.GetProperty("label").GetString() == "package-button"));
+            Assert.IsFalse(Response(messages, 3).GetProperty("result").EnumerateArray().Any(item => item.GetProperty("label").GetString() == "package-button"));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
     [TestMethod]
     public async Task Native_binding_protocol_completes_paths_and_explains_inherited_context()
     {
@@ -1939,6 +2019,44 @@ public sealed class LanguageServerProtocolTests
             .GetProperty("contents")
             .GetProperty("value")
             .GetString()!;
+
+    private static void WriteReferencedManifestAssembly(string path, string className)
+    {
+        var identity = new LucentAssemblyIdentity("Package", "0.0.0.0", "", "");
+        var manifest = LucentModuleManifest.Serialize(new LucentModuleManifestModel(1, 0, 0, "1.0",
+            identity, [], [new StyleClassEntry(className, null, StyleClassOrigin.LocalCss, null, "." + className)], []));
+        var compilation = CSharpCompilation.Create("Package",
+            [CSharpSyntaxTree.ParseText("public sealed class PackageMarker { }")],
+            [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = File.Create(path);
+        var emitted = compilation.Emit(stream, manifestResources: [new ResourceDescription(
+            LucentModuleManifest.ResourceName, () => new MemoryStream(manifest), isPublic: true)]);
+        Assert.IsTrue(emitted.Success, string.Join(Environment.NewLine, emitted.Diagnostics));
+    }
+
+    private static void WriteLocalManifestAssembly(
+        string path,
+        string projectPath,
+        string luiPath,
+        string luiText,
+        string cssPath,
+        string cssText)
+    {
+        var identity = new LucentAssemblyIdentity("App", "0.0.0.0", "", "");
+        var manifest = LucentModuleManifest.Create(
+            new LucentProjectContext(ProjectPath: projectPath),
+            [new LucentSourceInput(luiPath, luiText, cssPath, cssText)],
+            identity);
+        var compilation = CSharpCompilation.Create("App",
+            [CSharpSyntaxTree.ParseText("public sealed class AppMarker { }")],
+            [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = File.Create(path);
+        var emitted = compilation.Emit(stream, manifestResources: [new ResourceDescription(
+            LucentModuleManifest.ResourceName, () => new MemoryStream(manifest), isPublic: true)]);
+        Assert.IsTrue(emitted.Success, string.Join(Environment.NewLine, emitted.Diagnostics));
+    }
 
     private static object PositionOf(string text, string value)
     {

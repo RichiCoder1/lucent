@@ -70,14 +70,16 @@ Use deterministic UTF-8 JSON with a small version envelope:
 - `producerVersion` records the Lucent compiler version for diagnostics but does
   not replace format negotiation.
 
-A reader accepts its supported major, ignores unknown optional fields, and
-normalizes accepted older minors into the current immutable result model. It
-rejects a newer major or a `minimumReaderMinor` above its supported minor with
-one bounded incompatible-format diagnostic. Required fields for one major stay
-required. Every format change adds golden current/previous fixtures plus
-old-writer/new-reader and, for additive changes, new-writer/old-reader coverage.
-Do not add arbitrary extension dictionaries; new top-level sections need an
-implemented producer and consumer plus a minor/major decision in the same change.
+Before Lucent declares a released compatibility baseline, a reader accepts only
+its exact supported major/minor and does not carry old-writer normalization or
+legacy fixtures. Unknown JSON fields remain harmlessly ignored as ordinary
+serializer behavior, not as a compatibility promise. It rejects any other
+major/minor or a `minimumReaderMinor` above its supported minor with one bounded
+incompatible-format diagnostic. Required fields stay required. Once Lucent
+explicitly declares a stable versioning contract, minor additive compatibility
+may be introduced only when the bridge is trivial and reviewed. Do not add
+arbitrary extension dictionaries; new top-level sections need an implemented
+producer and consumer plus a format decision in the same change.
 
 Version one contains only metadata consumed by accepted plans:
 
@@ -114,10 +116,11 @@ their current content hashes with the last successful manifest.
 Integrate the resource without post-processing the assembly:
 
 1. After successful Lucent generation and before `CoreCompile`, compute the
-   expected assembly identity from the exact Roslyn/MSBuild compiler inputs,
-   including source/generated assembly attributes, signing/public-sign/delay-sign
-   options, and the selected target framework. If identity parity cannot be
-   established, emit no manifest and fail with one actionable build diagnostic.
+   expected assembly identity from the exact evaluated SDK/MSBuild compiler inputs,
+   including `SignAssembly`, key, public-sign/delay-sign options and the selected target
+   framework. Source- or generator-owned identity attributes are accepted only
+   when post-`CoreCompile` PE verification proves they agree; disagreement fails
+   the build with one actionable diagnostic and emits no promoted manifest.
 2. Atomically replace one deterministic staging path under the configuration,
    target-framework, and runtime-identifier-specific intermediate directory.
    Before `CoreCompile`, remove any prior generated manifest resource item and
@@ -248,13 +251,16 @@ getter. Values such as brushes, thicknesses, or custom objects that need
 construction use the explicit-C# fallback.
 
 The one construction exception is exactly `new Avalonia.Data.Binding("Path")`,
-where `Path` is a non-empty, non-interpolated string literal accepted by
-Avalonia's public binding-path parser. No object initializer or derived/custom
-`BindingBase` type is accepted. The compiler semantically recognizes this form
-only when the receiving assignment resolves to a public Avalonia styled/direct
-property with an accessible static `AvaloniaProperty` identifier. It emits a
-dedicated public `AvaloniaObject.Bind(targetProperty, binding)` call on the
-realized root, so inherited `DataContext` owns observation. A CLR-only property,
+where `Path` is a non-empty, non-interpolated string literal. Avalonia 12.1.1
+does not expose a public eager binding-path parser, and its public `Binding`
+constructor stores malformed paths without validating them, so Lucent does not
+claim compile-time path validation; Avalonia validates the path when the binding
+is attached. No object initializer or derived/custom `BindingBase` type is
+accepted. The compiler semantically recognizes this form only when the receiving
+assignment resolves to a public Avalonia styled/direct property with an
+accessible static `AvaloniaProperty` identifier. It emits a dedicated public
+`AvaloniaObject.Bind(targetProperty, binding)` call on the realized root, so
+inherited `DataContext` owns observation. A CLR-only property,
 missing/inaccessible Avalonia property identifier, or incompatible binding target
 uses a diagnostic and the explicit-C# fallback. This exception does not route
 through Lucent `binding(...)` or the ordinary property-value lowerer.
@@ -332,7 +338,7 @@ Add temporary producer/consumer fixtures before implementation. The producer
 declares one installable style catalog and representative class entries. The
 consumer references it as a project and as a local package, then inspects
 metadata without loading the output assembly. Add malformed, duplicate,
-identity-mismatch, newer-major, newer-required-minor, accepted additive-minor,
+identity-mismatch, unsupported-major/minor, newer-required-minor, unknown-field,
 invalid-hash-encoding, PE-fingerprint, cancellation, and missing-manifest cases.
 Add local/open-source stale-hash cases separately; referenced packages do not
 claim unverifiable source freshness. Add source-owned assembly version/culture,
@@ -446,32 +452,32 @@ runtime registry, assembly activation rule, or completion cache.
 
 ## Done criteria
 
-- [ ] One versioned deterministic manifest is embedded in successful Lucent
+- [x] One versioned deterministic manifest is embedded in successful Lucent
       outputs and available as an intermediate build artifact.
-- [ ] Project/package consumers inspect referenced metadata through public
+- [x] Project/package consumers inspect referenced metadata through public
       PE/resource APIs without loading or executing the target assembly.
-- [ ] Major/minor/minimum-reader compatibility, manifest identity,
+- [x] Major/minor/minimum-reader compatibility, manifest identity,
       malformed/newer formats, duplicates, local stale hashes, PE fingerprints,
       cancellation, failed Lucent/`CoreCompile` generation, signing modes,
       repeated/multi-target staging, promotion, and cache eviction have
       executable tests.
-- [ ] A fixture producer/consumer proves the immutable style-class contract and
+- [x] A fixture producer/consumer proves the immutable style-class contract and
       referenced-manifest reader, and Plans 009–009b are amended to use them
       when those dependent plans execute.
-- [ ] The native-compatibility matrix gives executable evidence or an explicit
+- [x] The native-compatibility matrix gives executable evidence or an explicit
       bounded/escape classification for every listed seam.
-- [ ] Every release-used matrix gap is closed directly or through a tested
+- [x] Every release-used matrix gap is closed directly or through a tested
       explicit Avalonia C# escape; any required broad module is split into a
       separate reviewed dependency.
-- [ ] Public `[TemplateContent]` properties either support the bounded one-native-
+- [x] Public `[TemplateContent]` properties either support the bounded one-native-
       root/no-capture lowering through `IDeferredContent`, including
       `TemplateResultType` validation and the bounded raw-binding rule, or have a
       documented, tested explicit-C# fallback with no XamlIl/private API
       dependency.
-- [ ] No source embedding, speculative public component schema, runtime registry,
+- [x] No source embedding, speculative public component schema, runtime registry,
       XAML syntax, wrapper-control model, hooks, or reactive style runtime is
       introduced.
-- [ ] Plan 008's accepted semantic, latency, allocation, memory, cancellation,
+- [x] Plan 008's accepted semantic, latency, allocation, memory, cancellation,
       and generation contracts remain green.
 
 ## STOP conditions

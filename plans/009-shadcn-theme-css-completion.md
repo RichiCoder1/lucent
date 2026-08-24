@@ -53,6 +53,18 @@ the gallery is accepted.
   `design/tokens.css`, and Plan 007 remain current visual authority until the
   later example migration is reviewed and accepted.
 
+## Plan 008a handoff
+
+Reuse exactly one internal manifest schema, immutable `StyleClassCatalog` entry
+contract, non-executing `PEReader`/`MetadataReader` reader, and bounded
+generation-owned identity/fingerprint cache. Its once-per-generation diagnostics
+remain authoritative. Do not add a theme schema, reader, cache, runtime
+registry, or assembly activation path. Current live project CSS remains
+authoritative; manifest entries are package metadata only. A publicly
+installable theme catalog type must use Plan 008a's verified public generated
+catalog-type seam; this plan still owns installation and Avalonia
+precedence/runtime proof.
+
 ## Decisions
 
 ### One class-catalog contract, separate producers

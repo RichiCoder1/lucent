@@ -23,6 +23,17 @@ would be dishonest unless those styles also have real runtime semantics. This
 plan adds that separate contract after Plan 009 proves the theme and class
 catalog, without expanding the Shadcn foundation delivery.
 
+## Plan 008a handoff
+
+`LucentStyles` uses Plan 008a's sole internal manifest schema, immutable
+`StyleClassCatalog` entries, non-executing `PEReader`/`MetadataReader` reader,
+and bounded generation-owned identity/fingerprint cache with once-per-generation
+diagnostics. Do not add a global-style reader, cache, schema, runtime registry,
+or assembly activation mechanism. Live project sources remain authoritative.
+The generated public catalog type is the existing installability seam; manifest
+metadata neither installs it nor invokes a component. This plan alone proves
+installation and precedence/runtime behavior.
+
 ## Decisions
 
 `<LucentStyle Include="..." />` is a build/runtime input, not editor-only

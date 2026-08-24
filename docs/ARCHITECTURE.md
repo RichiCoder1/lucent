@@ -33,6 +33,28 @@ The compiler and language server must share the parser, syntax tree, semantic mo
 
 The first intermediate representation should model only what the initial renderer needs: components, controls, properties, events, children, slots, context, conditionals, loops, expressions, and reactive dependencies. It should not be generalized around hypothetical alternate renderers.
 
+## Module/package metadata boundary
+
+Successful Lucent builds produce one internal, versioned, deterministic UTF-8
+JSON module manifest. The file is retained under the isolated `obj`
+configuration/target-framework/runtime-identifier path and embedded once as
+`Lucent.ModuleManifest.v1.json`. It is not a public stability promise, source
+archive, runtime registry, or component-invocation mechanism.
+
+Generation stages evaluated assembly identity and the resource before normal
+`CoreCompile`, preserving unsigned, full-, public-, and delay-signing without
+PE postprocessing. Postcompile non-executing PE verification checks identity and
+resource bytes, then atomically promotes a last-successful manifest/fingerprint.
+Failed builds do not promote; clean and no-source builds remove these records.
+Lucent fails rather than replacing a consumer resource that claims the reserved
+manifest logical name.
+
+Referenced metadata uses `PEReader`/`MetadataReader`, never `Assembly.Load`,
+source embedding, linked-resource/network access, or target-code execution. A
+generation-owned cache is keyed by resolved identity and PE fingerprint, reports
+invalid manifests once per project generation, and is discarded with it. Open
+and local project sources remain authoritative.
+
 ## Rendering model
 
 Lucent does not use a generic runtime virtual DOM by default. Given:
@@ -113,6 +135,10 @@ Lucent component
 ```
 
 Controls and components share composition syntax, but components should not be forced into heavyweight Avalonia control instances. The projection layer must map Lucent properties, events, children, styles, and lifetimes onto Avalonia without hiding the underlying control when an application needs it.
+
+The bounded public `TemplateContent`/`IDeferredContent` seam is documented in
+the [native compatibility matrix](NATIVE_COMPATIBILITY.md); it is not general
+XAML, template, or component-as-control support.
 
 ## Existing .NET observable types
 

@@ -28,7 +28,11 @@ internal sealed class GeneralBinder
     private ComponentSymbol? _currentComponent;
     private IReadOnlyDictionary<string, string> _parameterTypes = new Dictionary<string, string>();
     private IReadOnlyDictionary<string, string> _ordinaryMemberTypes = new Dictionary<string, string>();
+    private IReadOnlyList<string> _ordinaryMemberTexts = [];
     private string? _itemTemplateName;
+    private bool _insideTemplateContent;
+    private int _templateContentDelayedDepth;
+    private int _nextTemplateContentId;
 
     public GeneralBinder(
         DiagnosticBag diagnostics,
@@ -71,6 +75,7 @@ internal sealed class GeneralBinder
             .Select(member => (member.Name, Type: GetOrdinaryMemberType(member.Text)))
             .Where(member => member.Type is not null)
             .ToDictionary(member => member.Name, member => member.Type!, StringComparer.Ordinal);
+        _ordinaryMemberTexts = component.AllOrdinaryMembers.Select(member => member.Text).ToArray();
         _componentHasAsyncBoundary = ContainsAsyncBoundary(component.RenderMethod.RenderedFragment.Roots);
         _currentComponent = _componentIndex?.Symbols.FirstOrDefault(symbol =>
             string.Equals(symbol.SourcePath, _sourcePath, OperatingSystem.IsWindows()
@@ -553,9 +558,15 @@ internal sealed class GeneralBinder
             {
                 ValidateSlotStructure(child.Element, child.Span);
             }
-            var boundRoots = children.Select(child => BindRenderable(
-                    child.Element, locals: locals, insideLoop: insideLoop))
-                .Where(item => item is not null).Cast<BoundRenderableModel>().ToArray();
+            _templateContentDelayedDepth++;
+            BoundRenderableModel[] boundRoots;
+            try
+            {
+                boundRoots = children.Select(child => BindRenderable(
+                        child.Element, locals: locals, insideLoop: insideLoop))
+                    .Where(item => item is not null).Cast<BoundRenderableModel>().ToArray();
+            }
+            finally { _templateContentDelayedDepth--; }
             if (insideLoop && boundRoots.Any(HasNestedNativeSlotRoot))
             {
                 AddUnsupported(element.Span,
@@ -585,9 +596,15 @@ internal sealed class GeneralBinder
             {
                 ValidateSlotStructure(root, supply.Span);
             }
-            var boundRoots = supply.Fragment.Roots.Select(root => BindRenderable(
-                    root, locals: locals, insideLoop: insideLoop))
-                .Where(item => item is not null).Cast<BoundRenderableModel>().ToArray();
+            _templateContentDelayedDepth++;
+            BoundRenderableModel[] boundRoots;
+            try
+            {
+                boundRoots = supply.Fragment.Roots.Select(root => BindRenderable(
+                        root, locals: locals, insideLoop: insideLoop))
+                    .Where(item => item is not null).Cast<BoundRenderableModel>().ToArray();
+            }
+            finally { _templateContentDelayedDepth--; }
             if (insideLoop && boundRoots.Any(HasNestedNativeSlotRoot))
             {
                 AddUnsupported(supply.Span,
@@ -699,12 +716,14 @@ internal sealed class GeneralBinder
                     break;
 
                 case UiTemplateSyntax template:
-                    BindItemTemplate(
+                    BindTemplate(
                         element,
                         template,
                         resolvedControl,
                         seenMembers,
-                        members);
+                        members,
+                        insideLoop,
+                        insideConditional);
                     break;
 
                 case UiChildSyntax child:
@@ -985,13 +1004,21 @@ internal sealed class GeneralBinder
             contentRoute);
     }
 
-    private void BindItemTemplate(
+    private void BindTemplate(
         UiElementSyntax element,
         UiTemplateSyntax template,
         ResolvedNativeControl control,
         HashSet<string> seenMembers,
-        List<BoundControlMember> members)
+        List<BoundControlMember> members,
+        bool insideLoop,
+        bool insideConditional)
     {
+        if (template.IsParameterless)
+        {
+            BindTemplateContent(element, template, control, seenMembers, members,
+                insideLoop, insideConditional);
+            return;
+        }
         if (!string.Equals(template.Name, "ItemTemplate", StringComparison.Ordinal))
         {
             AddUnsupported(template.NameSpan,
@@ -1154,6 +1181,94 @@ internal sealed class GeneralBinder
             expression.LoweredText.Contains("__lucent_state", StringComparison.Ordinal) ||
             expression.LoweredText.Contains("__lucent_input", StringComparison.Ordinal) ||
             expression.LoweredText.Contains("__lucent_computed", StringComparison.Ordinal);
+    }
+
+    private void BindTemplateContent(
+        UiElementSyntax element,
+        UiTemplateSyntax template,
+        ResolvedNativeControl control,
+        HashSet<string> seenMembers,
+        List<BoundControlMember> members,
+        bool insideLoop,
+        bool insideConditional)
+    {
+        if (insideLoop || insideConditional || _itemTemplateName is not null ||
+            _templateContentDelayedDepth > 0)
+        {
+            AddUnsupported(template.Span,
+                "TemplateContent is supported only in a statically emitted native control tree.");
+            return;
+        }
+        var property = _resolver!.ResolveProperty(control, template.Name);
+        string? error = null;
+        if (property is null || !_resolver.TryResolveTemplateContent(property, out var resultType, out error))
+        {
+            AddUnsupported(template.NameSpan, error ??
+                $"Property '{template.Name}' does not support parameterless TemplateContent syntax.");
+            return;
+        }
+        if (!seenMembers.Add(property.Name))
+        {
+            AddUnsupported(template.NameSpan, $"{element.Name} may contain only one '{template.Name}' member.");
+            return;
+        }
+        if (HasTemplateStructure(template.Body.Roots))
+        {
+            AddUnsupported(template.Span,
+                "TemplateContent supports one native control tree only; components, events, structural regions, slots, and nested templates are not supported.");
+            return;
+        }
+        BoundRenderableModel[] roots;
+        _insideTemplateContent = true;
+        try
+        {
+            roots = template.Body.Roots.Select(root => BindRenderable(root))
+                .Where(root => root is not null).Cast<BoundRenderableModel>().ToArray();
+        }
+        finally { _insideTemplateContent = false; }
+        if (roots.Length != 1 || roots[0] is not BoundControlModel root)
+        {
+            AddUnsupported(template.Body.Span, "A TemplateContent fragment must produce exactly one native control root.");
+            return;
+        }
+        if (resultType is not null && (_resolver.ResolveTypeName(root.TypeName) is not { } rootType ||
+            !_resolver.IsAssignableTo(rootType, resultType)))
+        {
+            AddUnsupported(template.Body.Span,
+                "The TemplateContent root must be assignable to TemplateResultType.");
+            return;
+        }
+        if (!ValidateTemplateContent(root)) return;
+        members.Add(new BoundTemplateContentMember(++_nextTemplateContentId, property.Name, root, template.Span));
+        _symbols.Add(_resolver.ToSemanticSymbol(control, property, template.NameSpan));
+
+        bool ValidateTemplateContent(BoundControlModel candidate)
+        {
+            foreach (var member in candidate.Members)
+            {
+                if (member is BoundPropertyMember value && value.DeferredBinding is null &&
+                    (value.TargetTypeName is null || !_resolver.IsDeferredContentValue(
+                        value.Expression.SourceText, _resolver.ResolveTypeName(value.TargetTypeName)!,
+                        _ordinaryMemberTexts)))
+                {
+                    AddUnsupported(value.ExpressionSpan,
+                        "TemplateContent property values must be literals, const fields, or enum members with standard conversions.");
+                    return false;
+                }
+                if (member is BoundChildMember child && !ValidateTemplateContent(child.Child)) return false;
+                if (member is not BoundPropertyMember and not BoundChildMember)
+                {
+                    AddUnsupported(member.Span, "TemplateContent supports native control properties and child controls only.");
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        static bool HasTemplateStructure(IEnumerable<UiElementSyntax> roots) => roots.Any(HasStructure);
+        static bool HasStructure(UiElementSyntax root) => root.Members.Any(member => member is UiIfSyntax or UiForEachSyntax or
+            UiAsyncBoundarySyntax or UiYieldSyntax or UiSlotSupplySyntax or UiTemplateSyntax or UiContentSyntax) ||
+            root.Members.OfType<UiChildSyntax>().Any(child => HasStructure(child.Element));
     }
 
     private void BindImplicitContent(
@@ -1369,7 +1484,13 @@ internal sealed class GeneralBinder
         var expressionText = property.Value.Text;
         var expressionSpan = property.Value.Span;
         BoundNativeBinding? nativeBinding = null;
-        if (SyntaxFactory.ParseExpression(expressionText) is InvocationExpressionSyntax
+        BoundDeferredBinding? deferredBinding = null;
+        if (_insideTemplateContent && TryCreateDeferredBinding(
+                property.Value, control, resolvedProperty, out deferredBinding))
+        {
+            expressionText = deferredBinding!.BindingExpression;
+        }
+        else if (SyntaxFactory.ParseExpression(expressionText) is InvocationExpressionSyntax
             {
                 Expression: IdentifierNameSyntax { Identifier.ValueText: "binding" },
             } bindingInvocation)
@@ -1400,12 +1521,12 @@ internal sealed class GeneralBinder
             expressionText = path.ToFullString().Trim();
             expressionSpan = pathSpan;
         }
-        if (property.Value is StringValueSyntax &&
+        if (!_insideTemplateContent && property.Value is StringValueSyntax &&
             resolver.RequiresStringConstructor(resolvedProperty.Symbol.Type))
         {
             expressionText = $"new {resolvedProperty.TypeName}({expressionText})";
         }
-        else if (property.Value is StringValueSyntax &&
+        else if (!_insideTemplateContent && property.Value is StringValueSyntax &&
             resolver.RequiresStringParse(resolvedProperty.Symbol.Type))
         {
             expressionText = $"{resolvedProperty.TypeName}.Parse({expressionText})";
@@ -1414,18 +1535,22 @@ internal sealed class GeneralBinder
         members.Add(
             new BoundPropertyMember(
                 resolvedProperty.Name,
-                Request(expressionText, expressionSpan,
-                    CSharpIslandKind.Expression, CSharpIslandRole.Property,
-                    resolvedProperty.NativeValueKind == BoundNativeValueKind.None
-                        ? resolvedProperty.Symbol.Type
-                        : null,
-                    locals),
+                deferredBinding is null
+                    ? Request(expressionText, expressionSpan,
+                        CSharpIslandKind.Expression, CSharpIslandRole.Property,
+                        resolvedProperty.NativeValueKind == BoundNativeValueKind.None
+                            ? resolvedProperty.Symbol.Type
+                            : null,
+                        locals)
+                    : new BoundCSharpIsland(expressionText, expressionText, expressionSpan,
+                        CSharpIslandKind.Expression, [], []),
                 property.Value is StringValueSyntax,
                 property.Value is StringValueSyntax { IsInterpolated: true },
                 property.Span,
                 resolvedProperty.NativeValueKind,
                 resolvedProperty.TypeName,
-                nativeBinding));
+                nativeBinding,
+                deferredBinding));
         _symbols.Add(
             resolver.ToSemanticSymbol(
                 control,
@@ -1569,6 +1694,35 @@ internal sealed class GeneralBinder
         return false;
     }
 
+    private bool TryCreateDeferredBinding(
+        UiValueSyntax value,
+        ResolvedNativeControl control,
+        ResolvedNativeProperty property,
+        out BoundDeferredBinding? binding)
+    {
+        binding = null;
+        if (SyntaxFactory.ParseExpression(value.Text) is not ObjectCreationExpressionSyntax
+            {
+                Type: NameSyntax { } type,
+                ArgumentList.Arguments: [{ Expression: LiteralExpressionSyntax literal }],
+                Initializer: null,
+            } || type.ToString() != "Avalonia.Data.Binding" ||
+            !literal.IsKind(SyntaxKind.StringLiteralExpression) || string.IsNullOrEmpty(literal.Token.ValueText))
+        {
+            return false;
+        }
+        var avaloniaProperty = _resolver!.ResolveAvaloniaProperty(control, property);
+        if (avaloniaProperty is null)
+        {
+            AddUnsupported(value.Span,
+                $"Property '{property.Name}' has no public Avalonia property identifier and cannot use TemplateContent Binding.");
+            return false;
+        }
+        binding = new BoundDeferredBinding(avaloniaProperty.OwnerTypeName,
+            avaloniaProperty.FieldName, value.Text);
+        return true;
+    }
+
     private BoundCSharpIsland Request(
         string text,
         SourceSpan span,
@@ -1652,6 +1806,10 @@ internal sealed class GeneralBinder
                     Invocation = (BoundComponentInvocationModel)FinalizeRenderable(child.Invocation, islands),
                 },
                 BoundItemTemplateMember template => template with
+                {
+                    Root = FinalizeControl(template.Root, islands),
+                },
+                BoundTemplateContentMember template => template with
                 {
                     Root = FinalizeControl(template.Root, islands),
                 },

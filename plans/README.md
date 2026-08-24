@@ -27,7 +27,7 @@ recent workspaces. It is not a full IDE.
 | [007](007-example-ux-css-quality.md) | Make every example a polished Lucent showcase | P1 | L | 001–006 | DONE |
 | [007a](007a-native-compiled-bindings.md) | Use Avalonia compiled bindings at native seams | P1 | M | 005–007 | DONE |
 | [008](008-language-tooling-quality.md) | Make language tooling release-ready | P1 | M | 003, 004a, 006a, 007a | DONE |
-| [008a](008a-package-semantics-native-compatibility.md) | Lock package semantics and native compatibility | P1 | L | 007a, 008 | TODO |
+| [008a](008a-package-semantics-native-compatibility.md) | Lock package semantics and native compatibility | P1 | L | 007a, 008 | DONE |
 | [009](009-shadcn-theme-css-completion.md) | Add the Shadcn theme and theme-aware CSS completion | P1 | XL | 007, 008a | TODO |
 | [009a](009a-global-lucent-styles.md) | Add explicit global Lucent styles | P1 | L | 008a, 009 | TODO |
 | [009b](009b-avalonia-utility-styles.md) | Add a finite Avalonia utility-style catalog | P2 | M | 008a, 009, 009a | TODO |

@@ -338,7 +338,7 @@ internal sealed class ProjectContextLoader
         startInfo.ArgumentList.Add("-getItem:LucentSource");
         startInfo.ArgumentList.Add("-getItem:Using");
         startInfo.ArgumentList.Add("-getItem:ProjectReference");
-        startInfo.ArgumentList.Add("-getProperty:TargetFramework,LangVersion,Nullable,DefineConstants,ImplicitUsings");
+        startInfo.ArgumentList.Add("-getProperty:TargetFramework,LangVersion,Nullable,DefineConstants,ImplicitUsings,TargetPath");
         startInfo.ArgumentList.Add("-p:DesignTimeBuild=true");
         startInfo.ArgumentList.Add("-p:BuildingProject=false");
         startInfo.ArgumentList.Add("-nologo");
@@ -431,7 +431,7 @@ internal sealed class ProjectContextLoader
         return new LucentProjectContext(
             projectPath, references, sources, lucentSources, globalUsings,
             Property("TargetFramework"), Property("LangVersion"), Property("Nullable"),
-            Property("DefineConstants"), projectReferences);
+            Property("DefineConstants"), projectReferences, Property("TargetPath"));
     }
 
     private static bool IsManifestGenerated(JsonElement compileItems, string path) =>

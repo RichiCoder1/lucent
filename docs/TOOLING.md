@@ -117,6 +117,24 @@ dotnet run --project tools/Lucent.LanguageServer.Benchmarks -c Release -- docs/q
 The environment switch exists only to capture a comparable pre-cache baseline;
 normal server execution always uses the bounded cache.
 
+## Referenced module metadata
+
+During project-generation construction, the shared compiler reads Lucent
+reference manifests from embedded PE resources with `PEReader` and
+`MetadataReader`. It validates PE/manifest identity, keys immutable results by
+identity and PE fingerprint, bounds them to that generation, and reports an
+invalid manifest at most once per project generation. CSS selector completion
+consumes published referenced class entries (with no package-source definition);
+`Class:` values remain excluded. Completion does not open files, load or execute assemblies, use a
+network, or read a second theme/global/utility manifest format. Missing
+manifests are silent.
+
+This internal package/tooling seam does not replace live project sources and
+open buffers. A local PE manifest is checked against independently available
+live source text during generation and stale metadata is not merged into live indexes.
+Metadata is neither a runtime style registry nor component
+activation or invocation.
+
 ## Native-C# quality matrix
 
 `NativeCSharpQualityMatrixTests.Supported_native_csharp_quality_cells_execute_protocol_assertions`

@@ -310,6 +310,12 @@ internal static class GeneralCSharpEmitter
         writer.Unindent();
         writer.Line("}");
         writer.Line();
+        foreach (var template in fields.SelectMany(field => field.control.Members
+                     .OfType<BoundTemplateContentMember>()))
+        {
+            EmitTemplateContentClass(writer, template, source);
+            writer.Line();
+        }
         writer.Line("public Fragment Mount()");
         writer.Line("{");
         writer.Indent();
@@ -1208,6 +1214,10 @@ internal static class GeneralCSharpEmitter
         foreach (var template in control.Members.OfType<BoundItemTemplateMember>())
         {
             EmitItemTemplate(writer, template, source, $"__lucent_control{index}!");
+        }
+        foreach (var template in control.Members.OfType<BoundTemplateContentMember>())
+        {
+            writer.Line($"__lucent_control{index}!.{template.Name} = new __LucentDeferredContent{template.Id}();");
         }
 
         foreach (var content in control.Members.OfType<BoundContentMember>())
@@ -2400,6 +2410,56 @@ internal static class GeneralCSharpEmitter
         writer.Line("return control1;");
         writer.Unindent();
         writer.Line("}, false);");
+    }
+
+    private static void EmitTemplateContentClass(
+        CodeWriter writer,
+        BoundTemplateContentMember template,
+        SourceDocument source)
+    {
+        var controls = Flatten(template.Root).Select((control, index) => (control, index + 1)).ToArray();
+        writer.Line($"private sealed class __LucentDeferredContent{template.Id} : global::Avalonia.Controls.IDeferredContent");
+        writer.Line("{");
+        writer.Indent();
+        writer.Line("public object? Build(global::System.IServiceProvider? serviceProvider)");
+        writer.Line("{");
+        writer.Indent();
+        foreach (var (control, index) in controls)
+        {
+            writer.Line($"var control{index} = new {control.TypeName}();");
+        }
+        foreach (var (control, index) in controls)
+        {
+            foreach (var property in control.Members.OfType<BoundPropertyMember>())
+            {
+                EmitLineMapping(writer, source, property.ExpressionSpan);
+                if (property.DeferredBinding is { } binding)
+                {
+                    writer.Line($"control{index}.Bind({binding.TargetPropertyOwnerTypeName}.{binding.TargetPropertyFieldName}, {binding.BindingExpression});");
+                }
+                else
+                {
+                    writer.Line($"control{index}.{property.Name} = {property.ExpressionText};");
+                }
+                writer.Line("#line default");
+            }
+        }
+        foreach (var (control, index) in controls)
+        {
+            foreach (var child in control.Members.OfType<BoundChildMember>())
+            {
+                var childIndex = controls.First(candidate => ReferenceEquals(candidate.control, child.Child)).Item2;
+                var route = control.ContentRoute!;
+                writer.Line(route.IsCollection
+                    ? $"control{index}.{route.PropertyName}.Add(control{childIndex});"
+                    : $"control{index}.{route.PropertyName} = control{childIndex};");
+            }
+        }
+        writer.Line("return control1;");
+        writer.Unindent();
+        writer.Line("}");
+        writer.Unindent();
+        writer.Line("}");
     }
 
     private static void EmitNativeBindingUpdater(

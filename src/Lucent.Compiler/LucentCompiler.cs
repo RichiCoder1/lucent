@@ -1,4 +1,5 @@
 using Lucent.Compiler.CodeGeneration;
+using System.Collections.Immutable;
 using Lucent.Compiler.Parsing;
 using Lucent.Compiler.Semantics;
 using Lucent.Compiler.Styling;
@@ -10,6 +11,16 @@ namespace Lucent.Compiler;
 
 public static class LucentCompiler
 {
+    // The LSP consumes this project-generation snapshot; it never reads PE files itself.
+    internal static ReferencedManifestSnapshot LoadReferencedManifestSnapshot(
+        LucentProjectContext? projectContext,
+        CancellationToken cancellationToken)
+    {
+        var cache = new ReferencedManifestCache(projectContext?.References ?? []);
+        cache.Load(cancellationToken);
+        return new ReferencedManifestSnapshot(cache.Catalog, cache.Diagnostics.ToImmutableArray());
+    }
+
     /// <summary>
     /// Rebinds one open source against its existing project snapshot when its
     /// exported component signatures have not changed. Callers must rebuild the

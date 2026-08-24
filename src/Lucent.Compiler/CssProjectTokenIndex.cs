@@ -12,18 +12,22 @@ public sealed class CssProjectTokenIndex
     private readonly IReadOnlyDictionary<string, string> _documents;
     private readonly IReadOnlyList<CssNavigation> _classes;
     private readonly IReadOnlyList<CssNavigation> _resources;
+    private readonly IReadOnlyList<string> _catalogClasses;
 
     private CssProjectTokenIndex(
         IReadOnlyDictionary<string, string> documents,
         IReadOnlyList<CssNavigation> classes,
-        IReadOnlyList<CssNavigation> resources)
+        IReadOnlyList<CssNavigation> resources,
+        IReadOnlyList<string> catalogClasses)
     {
         _documents = documents;
         _classes = classes;
         _resources = resources;
+        _catalogClasses = catalogClasses;
     }
 
-    public static CssProjectTokenIndex Create(IEnumerable<CssProjectDocument> documents)
+    public static CssProjectTokenIndex Create(IEnumerable<CssProjectDocument> documents,
+        IEnumerable<string>? catalogClasses = null)
     {
         ArgumentNullException.ThrowIfNull(documents);
         var source = documents
@@ -38,7 +42,9 @@ public sealed class CssProjectTokenIndex
             else if (path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
                 AddLucentClasses(path, text, classes);
         }
-        return new CssProjectTokenIndex(source, Distinct(classes), Distinct(resources));
+        return new CssProjectTokenIndex(source, Distinct(classes), Distinct(resources),
+            (catalogClasses ?? []).Where(name => !string.IsNullOrWhiteSpace(name))
+                .Distinct(StringComparer.Ordinal).OrderBy(name => name, StringComparer.Ordinal).ToArray());
     }
 
     public IReadOnlyList<LucentCompletionItem> GetCompletions(string sourcePath, int offset)
@@ -50,9 +56,11 @@ public sealed class CssProjectTokenIndex
                     "Avalonia resource", token.Name, "Known resource() key"))
                 .OrderBy(item => item.Label, StringComparer.Ordinal).ToArray();
         if (FindClass(text, offset) is { } @class && IsSelectorPosition(text, offset))
-            return _classes.Where(token => token.Name.StartsWith(@class.Name, StringComparison.OrdinalIgnoreCase))
-                .Select(token => new LucentCompletionItem(token.Name, LucentCompletionItemKind.Value,
-                    "Lucent CSS class", token.Name, "Class selector"))
+            return _classes.Select(token => token.Name).Concat(_catalogClasses)
+                .Distinct(StringComparer.Ordinal)
+                .Where(name => name.StartsWith(@class.Name, StringComparison.OrdinalIgnoreCase))
+                .Select(name => new LucentCompletionItem(name, LucentCompletionItemKind.Value,
+                    "Lucent CSS class", name, "Class selector"))
                 .OrderBy(item => item.Label, StringComparer.Ordinal).ToArray();
         return [];
     }

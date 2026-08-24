@@ -31,6 +31,17 @@ layout, inheritance, selector, template, and responsive behavior. The useful
 product is an optional finite Avalonia catalog with familiar names where the
 semantics are honest.
 
+## Plan 008a handoff
+
+The utility producer reuses exactly Plan 008a's internal manifest schema,
+immutable `StyleClassCatalog` entries, non-executing `PEReader`/`MetadataReader`
+reader, and bounded generation-owned identity/fingerprint cache with
+once-per-generation diagnostics. It must not define a utility schema, reader,
+cache, runtime registry, or assembly activation mechanism. The existing public
+generated catalog-type seam is installable only through Plan 009a's direct call;
+manifest metadata does not install styles or invoke components. This plan owns
+its Avalonia precedence/runtime evidence.
+
 ## Decisions
 
 ### One finite specification, two generated artifacts

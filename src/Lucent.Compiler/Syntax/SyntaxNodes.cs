@@ -139,6 +139,7 @@ public sealed record UiTemplateSyntax(
     string Name,
     string ItemTypeName,
     string ItemName,
+    bool IsParameterless,
     UiConditionalBranchSyntax Body,
     SourceSpan Span,
     SourceSpan NameSpan,
