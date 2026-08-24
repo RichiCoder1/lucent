@@ -1,6 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Headless;
+using Avalonia.Controls.Primitives;
 using Avalonia.Media;
 using Avalonia.Metadata;
 using Avalonia.Styling;
@@ -14,7 +14,6 @@ using System.Reflection;
 namespace Lucent.Compiler.Tests;
 
 [TestClass]
-[DoNotParallelize]
 public sealed class NativeCompatibilityMatrixTests
 {
     private const string Supported = "supported";
@@ -32,6 +31,7 @@ public sealed class NativeCompatibilityMatrixTests
         new("Exact root mounting, fragments, lifetime, and automation", Supported, [Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Generated_clr_event_invokes_and_unsubscribes_on_dispose"), Evidence("tests/Lucent.Compiler.Tests/GeneralCompilerTests.cs", "GeneralCompilerTests", "Indirect_and_structural_roots_do_not_emit_approximate_mount_root"), Evidence("tests/Lucent.Workbench.Tests/AccessibilityTests.cs", "AccessibilityTests", "Shown_shell_palette_and_settings_have_exact_accessibility_contract")]),
         new("TemplateContent and IDeferredContent", Bounded, [Evidence("tests/Lucent.Compiler.Tests/GeneralCompilerTests.cs", "GeneralCompilerTests", "Template_content_emits_fresh_public_deferred_content_without_component_capture"), Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Explicit_csharp_template_escape_builds_richer_content")]),
         new("Adjacent, global, and theme precedence/value restoration", Supported, [Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Native_style_order_restores_previous_and_local_values"), Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Global_catalog_order_is_host_controlled_and_adjacent_wins")]),
+        new("Optional finite utility catalog", Supported, [Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Utility_catalog_uses_canonical_order_not_class_token_order"), Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Utility_catalog_host_order_is_observable_and_local_values_win"), Evidence("tests/Lucent.Compiler.Tests/GeneralCompilerTests.cs", "GeneralCompilerTests", "Escaped_state_class_selectors_preserve_decoded_names_and_exact_source_spans")]),
     ];
 
     [TestMethod]
@@ -39,7 +39,7 @@ public sealed class NativeCompatibilityMatrixTests
     {
         var documentation = File.ReadAllText(Path.Combine(RepositoryPaths.Root, "docs", "NATIVE_COMPATIBILITY.md"));
 
-        Assert.HasCount(9, Rows);
+        Assert.HasCount(10, Rows);
         foreach (var row in Rows)
         {
             CollectionAssert.Contains(new[] { Supported, Bounded, Escape }, row.Status);
@@ -130,7 +130,8 @@ public sealed class NativeCompatibilityMatrixTests
     [TestMethod]
     public void Lucent_css_resource_compiles_and_tracks_native_resource_changes()
     {
-        EnsureHeadless();
+        HeadlessTestHarness.Run(() =>
+        {
         var result = LucentCompiler.Compile(
             "namespace Demo; using Avalonia.Controls; component App() => Border { Class: \"surface\"; };",
             "App.lui", projectContext: null, ".surface { background: resource(\"Lucent.Canvas\"); }", "App.css");
@@ -152,6 +153,7 @@ public sealed class NativeCompatibilityMatrixTests
         Dispatcher.UIThread.RunJobs();
         Assert.AreEqual(Colors.Blue, ((SolidColorBrush)border.Background!).Color);
         window.Close();
+        });
     }
 
     [TestMethod]
@@ -166,7 +168,8 @@ public sealed class NativeCompatibilityMatrixTests
     [TestMethod]
     public void Native_style_order_restores_previous_and_local_values()
     {
-        EnsureHeadless();
+        HeadlessTestHarness.Run(() =>
+        {
         var window = new Window { Width = 100, Height = 100 };
         var border = new Border();
         var first = new Style(selector => selector.OfType<Border>())
@@ -193,16 +196,18 @@ public sealed class NativeCompatibilityMatrixTests
         window.UpdateLayout();
         Assert.AreEqual(Colors.Green, ((SolidColorBrush)border.Background!).Color);
         window.Close();
+        });
     }
 
     [TestMethod]
     public void Global_catalog_order_is_host_controlled_and_adjacent_wins()
     {
-        EnsureHeadless();
+        HeadlessTestHarness.Run(() =>
+        {
         var app = Application.Current!;
         app.Styles.Clear();
-        var first = new Styles { new Style(x => x.OfType<Border>()) { Setters = { new Setter(Border.BackgroundProperty, new SolidColorBrush(Colors.Red)) } } };
-        var second = new Styles { new Style(x => x.OfType<Border>()) { Setters = { new Setter(Border.BackgroundProperty, new SolidColorBrush(Colors.Blue)) } } };
+        var first = new global::Avalonia.Styling.Styles { new Style(x => x.OfType<Border>()) { Setters = { new Setter(Border.BackgroundProperty, new SolidColorBrush(Colors.Red)) } } };
+        var second = new global::Avalonia.Styling.Styles { new Style(x => x.OfType<Border>()) { Setters = { new Setter(Border.BackgroundProperty, new SolidColorBrush(Colors.Blue)) } } };
         var window = new Window { Width = 100, Height = 100, Content = new Border() };
         app.Styles.Add(first); app.Styles.Add(second); window.Show(); window.UpdateLayout();
         Assert.AreEqual(Colors.Blue, ((SolidColorBrush)((Border)window.Content!).Background!).Color);
@@ -212,6 +217,133 @@ public sealed class NativeCompatibilityMatrixTests
         window.UpdateLayout();
         Assert.AreEqual(Colors.Green, ((SolidColorBrush)((Border)window.Content!).Background!).Color);
         window.Close(); app.Styles.Clear();
+        });
+    }
+
+    [TestMethod]
+    public void Utility_catalog_uses_canonical_order_not_class_token_order()
+    {
+        HeadlessTestHarness.Run(() =>
+        {
+        var app = Application.Current!;
+        app.Styles.Clear();
+        app.Styles.Add(new global::Lucent.Themes.Shadcn.ShadcnTheme());
+        app.Styles.Add(new global::Lucent.Styles.Utilities.LucentStyles());
+        var first = new Border { Classes = { "p-2", "p-4", "bg-primary", "bg-muted" } };
+        var second = new Border { Classes = { "bg-muted", "bg-primary", "p-4", "p-2" } };
+        var firstSize = new Control { Classes = { "w-24", "w-48" } };
+        var secondSize = new Control { Classes = { "w-48", "w-24" } };
+        var window = new Window { Content = new StackPanel { Children = { first, second, firstSize, secondSize } } };
+        window.Show(); window.UpdateLayout();
+        Assert.AreEqual(new Thickness(16), first.Padding);
+        Assert.AreEqual(new Thickness(16), second.Padding);
+        Assert.AreEqual(192d, firstSize.Width); Assert.AreEqual(192d, secondSize.Width);
+        var muted = ((SolidColorBrush)first.Background!).Color;
+        Assert.AreEqual(muted, ((SolidColorBrush)first.Background!).Color);
+        Assert.AreEqual(muted, ((SolidColorBrush)second.Background!).Color);
+        foreach (var border in new[] { first, second })
+        {
+            border.Classes.Remove("p-4"); border.Classes.Remove("bg-muted");
+        }
+        firstSize.Classes.Remove("w-48"); secondSize.Classes.Remove("w-48");
+        window.UpdateLayout();
+        var primary = ((SolidColorBrush)first.Background!).Color;
+        Assert.AreEqual(new Thickness(8), first.Padding); Assert.AreEqual(new Thickness(8), second.Padding);
+        Assert.AreEqual(96d, firstSize.Width); Assert.AreEqual(96d, secondSize.Width);
+        Assert.AreEqual(primary, ((SolidColorBrush)first.Background!).Color);
+        Assert.AreEqual(primary, ((SolidColorBrush)second.Background!).Color);
+        Assert.AreNotEqual(muted, primary);
+        window.Close(); app.Styles.Clear();
+        });
+    }
+
+    [TestMethod]
+    public void Utility_states_restore_the_lower_value_and_preserve_non_color_state_evidence()
+    {
+        HeadlessTestHarness.Run(() =>
+        {
+        var app = Application.Current!;
+        app.Styles.Clear();
+        var lower = new global::Avalonia.Styling.Styles
+        {
+            new Style(x => x.OfType<Button>()) { Setters =
+            {
+                new Setter(TemplatedControl.BackgroundProperty, new SolidColorBrush(Colors.Red)),
+                new Setter(TemplatedControl.BorderBrushProperty, new SolidColorBrush(Colors.Red)),
+            } },
+            new Style(x => x.OfType<TextBox>()) { Setters = { new Setter(TemplatedControl.BorderBrushProperty, new SolidColorBrush(Colors.Red)) } },
+            new Style(x => x.OfType<ToggleButton>()) { Setters = { new Setter(TemplatedControl.BackgroundProperty, new SolidColorBrush(Colors.Red)) } },
+            new Style(x => x.OfType<ListBoxItem>()) { Setters = { new Setter(TemplatedControl.BackgroundProperty, new SolidColorBrush(Colors.Red)) } },
+        };
+        app.Styles.Add(new global::Lucent.Themes.Shadcn.ShadcnTheme());
+        app.Styles.Add(lower);
+        app.Styles.Add(new global::Lucent.Styles.Utilities.LucentStyles());
+        var hover = new Button { Classes = { "hover:bg-primary", "focus-visible:border-ring", "disabled:opacity-50" } };
+        var focus = new TextBox { Classes = { "focus:border-ring" } };
+        var checkedControl = new ToggleButton { Classes = { "checked:bg-primary" } };
+        var selected = new ListBoxItem { Classes = { "selected:bg-muted" } };
+        var window = new Window { Content = new StackPanel { Children = { hover, focus, checkedControl, selected } } };
+        window.Show(); window.UpdateLayout();
+
+        var hoverStates = (IPseudoClasses)hover.Classes;
+        hoverStates.Add(":pointerover"); window.UpdateLayout();
+        Assert.AreNotEqual(Colors.Red, ((SolidColorBrush)hover.Background!).Color);
+        hoverStates.Remove(":pointerover"); window.UpdateLayout();
+        Assert.AreEqual(Colors.Red, ((SolidColorBrush)hover.Background!).Color);
+
+        var focusStates = (IPseudoClasses)focus.Classes;
+        focusStates.Add(":focus"); window.UpdateLayout();
+        Assert.AreNotEqual(Colors.Red, ((SolidColorBrush)focus.BorderBrush!).Color);
+        focusStates.Remove(":focus"); window.UpdateLayout();
+        Assert.AreEqual(Colors.Red, ((SolidColorBrush)focus.BorderBrush!).Color);
+
+        ((IPseudoClasses)hover.Classes).Add(":focus-visible"); window.UpdateLayout();
+        Assert.AreNotEqual(Colors.Red, ((SolidColorBrush)hover.BorderBrush!).Color);
+        ((IPseudoClasses)hover.Classes).Remove(":focus-visible"); window.UpdateLayout();
+        Assert.AreEqual(Colors.Red, ((SolidColorBrush)hover.BorderBrush!).Color);
+        hover.IsEnabled = false; window.UpdateLayout();
+        Assert.AreEqual(.5d, hover.Opacity);
+        hover.IsEnabled = true; window.UpdateLayout();
+        Assert.AreEqual(1d, hover.Opacity);
+
+        var checkedStates = (IPseudoClasses)checkedControl.Classes;
+        checkedStates.Add(":checked"); window.UpdateLayout();
+        Assert.AreNotEqual(Colors.Red, ((SolidColorBrush)checkedControl.Background!).Color);
+        checkedStates.Remove(":checked"); window.UpdateLayout();
+        Assert.AreEqual(Colors.Red, ((SolidColorBrush)checkedControl.Background!).Color);
+
+        var selectedStates = (IPseudoClasses)selected.Classes;
+        selectedStates.Add(":selected"); window.UpdateLayout();
+        Assert.AreNotEqual(Colors.Red, ((SolidColorBrush)selected.Background!).Color);
+        selectedStates.Remove(":selected"); window.UpdateLayout();
+        Assert.AreEqual(Colors.Red, ((SolidColorBrush)selected.Background!).Color);
+        window.Close(); app.Styles.Clear();
+        });
+    }
+
+    [TestMethod]
+    public void Utility_catalog_host_order_is_observable_and_local_values_win()
+    {
+        HeadlessTestHarness.Run(() =>
+        {
+        var app = Application.Current!;
+        var host = new global::Avalonia.Styling.Styles { new Style(x => x.OfType<Border>().Class("border")) { Setters = { new Setter(Border.BorderThicknessProperty, new Thickness(3)) } } };
+        foreach (var utilityLast in new[] { false, true })
+        {
+            app.Styles.Clear();
+            var utilities = new global::Lucent.Styles.Utilities.LucentStyles();
+            if (utilityLast) { app.Styles.Add(host); app.Styles.Add(utilities); }
+            else { app.Styles.Add(utilities); app.Styles.Add(host); }
+            var border = new Border { Classes = { "border" } };
+            var window = new Window { Content = border };
+            window.Show(); window.UpdateLayout();
+            Assert.AreEqual(new Thickness(utilityLast ? 1 : 3), border.BorderThickness, "Equally specific catalogs follow their host installation order.");
+            border.BorderThickness = new Thickness(5); window.UpdateLayout();
+            Assert.AreEqual(new Thickness(5), border.BorderThickness);
+            window.Close();
+        }
+        app.Styles.Clear();
+        });
     }
 
     private static EvidenceReference Evidence(string path, string type, string method) => new(path, type, method);
@@ -247,12 +379,6 @@ public sealed class NativeCompatibilityMatrixTests
         var constructor = componentType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Single(candidate => candidate.GetParameters().All(parameter => parameter.IsOptional));
         return (IDisposable)constructor.Invoke(constructor.GetParameters().Select(_ => Type.Missing).ToArray())!;
-    }
-
-    private static void EnsureHeadless()
-    {
-        if (Application.Current is not null) return;
-        AppBuilder.Configure<CompatibilityApp>().UseHeadless(new AvaloniaHeadlessPlatformOptions()).SetupWithoutStarting();
     }
 
     private static void EmitReferenceAssembly(string path, string source)
@@ -305,5 +431,4 @@ public sealed class NativeCompatibilityMatrixTests
         };
     }
 
-    private sealed class CompatibilityApp : Application { }
 }

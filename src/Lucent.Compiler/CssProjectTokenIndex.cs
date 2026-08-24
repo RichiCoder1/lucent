@@ -173,11 +173,11 @@ public sealed class CssProjectTokenIndex
         var end = Math.Min(text.Length, start + length);
         for (var index = start; index < end; index++)
         {
-            if (text[index] != '.' || index + 1 >= end || !IsIdentifierStart(text[index + 1])) continue;
-            var nameStart = ++index;
-            while (index < end && IsIdentifierPart(text[index])) index++;
-            classes.Add(new CssNavigation(text[nameStart..index], path, new SourceSpan(nameStart, index - nameStart)));
-            index--;
+            if (text[index] != '.') continue;
+            var cursor = index + 1;
+            if (!CssClassName.TryRead(text, ref cursor, end, out var name, out var nameStart, out var nameLength)) continue;
+            classes.Add(new CssNavigation(name, path, new SourceSpan(nameStart, nameLength)));
+            index = cursor - 1;
         }
     }
 
@@ -275,18 +275,24 @@ public sealed class CssProjectTokenIndex
     private static CssNavigation? FindClass(string text, int offset)
     {
         var index = Math.Clamp(offset, 0, text.Length);
-        var start = index;
-        while (start > 0 && IsIdentifierPart(text[start - 1])) start--;
-        if (start == 0 || text[start - 1] != '.') return null;
-        var end = index;
-        while (end < text.Length && IsIdentifierPart(text[end])) end++;
-        return new CssNavigation(text[start..end], string.Empty, new SourceSpan(start, end - start));
+        for (var marker = index - 1; marker >= 0; marker--)
+        {
+            if (text[marker] is '{' or '}' || char.IsWhiteSpace(text[marker])) break;
+            if (text[marker] != '.') continue;
+            var cursor = marker + 1;
+            if (cursor == index) return new CssNavigation(string.Empty, string.Empty, new SourceSpan(cursor, 0));
+            if (!CssClassName.TryRead(text, ref cursor, text.Length, out var name, out var start, out var length)) return null;
+            if (index >= start && index <= start + length)
+                return new CssNavigation(name, string.Empty, new SourceSpan(start, length));
+            break;
+        }
+        return null;
     }
 
     private static bool IsSelectorPosition(string text, int offset) =>
         text.LastIndexOf('{', Math.Max(0, offset - 1)) <= text.LastIndexOf('}', Math.Max(0, offset - 1));
-    private static bool IsIdentifierStart(char value) => char.IsLetter(value) || value == '_';
-    private static bool IsIdentifierPart(char value) => IsIdentifierStart(value) || char.IsDigit(value) || value == '-';
+    private static bool IsIdentifierStart(char value) => CssClassName.IsStart(value);
+    private static bool IsIdentifierPart(char value) => CssClassName.IsPart(value);
     private static IReadOnlyList<CssNavigation> Distinct(IEnumerable<CssNavigation> tokens) => tokens
         .OrderBy(token => token.SourcePath, PathComparer).ThenBy(token => token.Span.Start)
         .GroupBy(token => (token.Name, token.SourcePath, token.Span))

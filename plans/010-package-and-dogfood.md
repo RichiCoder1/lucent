@@ -38,7 +38,8 @@ checkout using the language tooling proven by Plan 008.
 - Produce NuGet packages for the runtime, compiler/MSBuild integration,
   Plan 008a's manifest build/reader assets, `Lucent.Themes.Shadcn`, Plan 009's
   theme metadata, Plan 009a's global-style build assets, and Plan 009b's opt-in
-  utility catalog, with reproducible package tests.
+  utility catalog, with reproducible package tests; its clean consumer installs
+  only `new global::Lucent.Styles.Utilities.LucentStyles()`.
 - Add a minimal `dotnet new` template containing a Lucent/Avalonia desktop app
   with explicit Fluent plus Shadcn theme installation.
 - Build/package the VSIX reproducibly.

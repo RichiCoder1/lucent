@@ -13,6 +13,7 @@ Lucent projects use public Avalonia APIs; they do not attempt XAML parity.
 | Exact root mounting, fragments, lifetime, and automation | supported | NativeCompatibilityMatrixTests.Generated_clr_event_invokes_and_unsubscribes_on_dispose; GeneralCompilerTests.Indirect_and_structural_roots_do_not_emit_approximate_mount_root; AccessibilityTests.Shown_shell_palette_and_settings_have_exact_accessibility_contract |
 | TemplateContent and IDeferredContent | bounded subset | GeneralCompilerTests.Template_content_emits_fresh_public_deferred_content_without_component_capture; NativeCompatibilityMatrixTests.Explicit_csharp_template_escape_builds_richer_content |
 | Adjacent, global, and theme precedence/value restoration | supported | NativeCompatibilityMatrixTests.Native_style_order_restores_previous_and_local_values; NativeCompatibilityMatrixTests.Global_catalog_order_is_host_controlled_and_adjacent_wins |
+| Optional finite utility catalog | supported | NativeCompatibilityMatrixTests.Utility_catalog_uses_canonical_order_not_class_token_order; NativeCompatibilityMatrixTests.Utility_catalog_host_order_is_observable_and_local_values_win; GeneralCompilerTests.Escaped_state_class_selectors_preserve_decoded_names_and_exact_source_spans |
 
 `resource("key")` is the supported Lucent CSS dynamic-resource form. Static
 resource lookup and richer native resource composition remain explicit Avalonia

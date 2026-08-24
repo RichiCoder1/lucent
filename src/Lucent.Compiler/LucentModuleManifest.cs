@@ -515,7 +515,7 @@ internal sealed class ReferencedManifestCache
                 if (add.Expression is not MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Add", Expression: var styles } ||
                     add.ArgumentList.Arguments.Count != 1 ||
                     add.ArgumentList.Arguments[0].Expression is not ObjectCreationExpressionSyntax theme ||
-                    UsesAlias(theme.Type, model) ||
+                    UsesUserAlias(theme.Type, model) ||
                     model.GetSymbolInfo(styles).Symbol is not IPropertySymbol { Name: "Styles" } property ||
                     !IsApplicationStyles(property))
                     continue;
@@ -551,10 +551,9 @@ internal sealed class ReferencedManifestCache
 
         return new StyleClassCatalog(_manifests.Values.SelectMany(item =>
             item.Manifest.StyleClasses.Entries.Where(entry =>
-                (entry.Origin != StyleClassOrigin.NativeTheme && entry.Origin != StyleClassOrigin.GlobalStyle) ||
-                (entry.Origin == StyleClassOrigin.GlobalStyle
-                    ? activeTypes.Contains(entry.CatalogType!)
-                    : item.Manifest.StyleCatalogTypes.Any(activeTypes.Contains)))));
+                entry.CatalogType is null
+                    ? entry.Origin == StyleClassOrigin.LocalCss
+                    : activeTypes.Contains(entry.CatalogType))));
     }
 
     private static bool IsStyles(ITypeSymbol? type)
@@ -598,9 +597,10 @@ internal sealed class ReferencedManifestCache
             .ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
             "Avalonia.Application", StringComparison.Ordinal);
 
-    private static bool UsesAlias(TypeSyntax type, SemanticModel model) =>
+    private static bool UsesUserAlias(TypeSyntax type, SemanticModel model) =>
         type.DescendantNodesAndSelf().OfType<NameSyntax>()
-            .Any(name => name is AliasQualifiedNameSyntax || model.GetAliasInfo(name) is not null);
+            .Any(name => name is AliasQualifiedNameSyntax alias && alias.Alias.Identifier.ValueText != "global" ||
+                         model.GetAliasInfo(name) is { Name: not "global" });
 
     private sealed record ManifestKey(LucentAssemblyIdentity Identity, string Fingerprint);
 }

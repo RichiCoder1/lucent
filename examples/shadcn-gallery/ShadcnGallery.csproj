@@ -4,5 +4,6 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Headless" Version="12.1.1" />
     <ProjectReference Include="../../src/Lucent.Themes.Shadcn/Lucent.Themes.Shadcn.csproj" />
+    <ProjectReference Include="../../src/Lucent.Styles.Utilities/Lucent.Styles.Utilities.csproj" />
   </ItemGroup>
 </Project>

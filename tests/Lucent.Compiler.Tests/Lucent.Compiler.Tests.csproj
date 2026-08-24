@@ -12,5 +12,7 @@
     <ProjectReference Include="..\..\src\Lucent.Compiler.MSBuild\Lucent.Compiler.MSBuild.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Lucent.Runtime\Lucent.Runtime.csproj" />
     <ProjectReference Include="..\..\src\Lucent.Themes.Shadcn\Lucent.Themes.Shadcn.csproj" />
+    <ProjectReference Include="..\..\src\Lucent.Styles.Utilities\Lucent.Styles.Utilities.csproj" />
   </ItemGroup>
+  <ItemGroup><Compile Remove="Fixtures\**\*.cs" /></ItemGroup>
 </Project>

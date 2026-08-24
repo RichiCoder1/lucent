@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net9.0</TargetFramework><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><AssemblyVersion>1.0.0.0</AssemblyVersion></PropertyGroup>
+  <ItemGroup><PackageReference Include="Avalonia" Version="12.1.1" /></ItemGroup>
+  <ItemGroup><AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute"><_Parameter1>Lucent.Compiler.Tests</_Parameter1></AssemblyAttribute></ItemGroup>
+  <Target Name="GenerateUtilityManifest" BeforeTargets="PrepareResources;CreateManifestResourceNames;CoreCompile">
+    <PropertyGroup><_UtilityManifestPath>$(IntermediateOutputPath)Lucent.ModuleManifest.v1.json</_UtilityManifestPath></PropertyGroup>
+    <Exec Command="dotnet run --project &quot;$(MSBuildThisFileDirectory)..\..\build\UtilityManifestGenerator\UtilityManifestGenerator.csproj&quot; -- &quot;$(_UtilityManifestPath)&quot; &quot;$(AssemblyName)&quot; &quot;$(AssemblyVersion)&quot;" />
+    <ItemGroup><EmbeddedResource Include="$(_UtilityManifestPath)" LogicalName="Lucent.ModuleManifest.v1.json" Type="Non-Resx" WithCulture="false" /></ItemGroup>
+  </Target>
+</Project>

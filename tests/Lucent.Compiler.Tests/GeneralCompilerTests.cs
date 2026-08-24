@@ -1,6 +1,8 @@
 using Lucent.Compiler.Syntax;
 using Lucent.Compiler.Styling;
 using Lucent.Themes.Shadcn;
+using UtilityStyles = Lucent.Styles.Utilities.LucentStyles;
+using UtilitySpecification = Lucent.Styles.Utilities.UtilitySpecification;
 using Lucent.Runtime;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -14,6 +16,8 @@ public sealed class GeneralCompilerTests
     [TestMethod]
     public void Template_content_emits_fresh_public_deferred_content_without_component_capture()
     {
+        HeadlessTestHarness.Run(() =>
+        {
         var directory = Path.Combine(Path.GetTempPath(), $"lucent-template-content-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
@@ -51,6 +55,7 @@ public sealed class GeneralCompilerTests
                         var second = host.DeferredBody.Build(null!);
                         var parent = new Avalonia.Controls.StackPanel { DataContext = new { Name = "inherited" } };
                         parent.Children.Add((Avalonia.Controls.Control)first!);
+                        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
                         return $"{ReferenceEquals(first, second)}:{((Avalonia.Controls.TextBlock)first).Width}:{((Avalonia.Controls.TextBlock)second!).Width}:{((Avalonia.Controls.TextBlock)first).Text}";
                     }
                 }
@@ -70,6 +75,7 @@ public sealed class GeneralCompilerTests
             Assert.AreEqual("False:8:8:inherited", observed);
         }
         finally { Directory.Delete(directory, recursive: true); }
+        });
     }
 
     [TestMethod]
@@ -1858,6 +1864,60 @@ public sealed class GeneralCompilerTests
             out var manifest, out var error), error);
         CollectionAssert.Contains(manifest!.StyleClasses.Select(entry => entry.Name).ToArray(), "secondary");
         CollectionAssert.Contains(manifest.StyleCatalogTypes.ToArray(), "Lucent.Themes.Shadcn.ShadcnTheme");
+    }
+
+    [TestMethod]
+    public void Utility_catalog_is_finite_manifest_backed_and_uses_only_escaped_state_names()
+    {
+        Assert.IsTrue(LucentModuleManifest.TryReadFromPe(typeof(UtilityStyles).Assembly.Location,
+            out var manifest, out var error), error);
+        var names = UtilitySpecification.Entries.OrderBy(entry => entry.Order).Select(entry => entry.Name).ToArray();
+        Assert.AreEqual(names.Length, names.Distinct(StringComparer.Ordinal).Count());
+        using var stream = typeof(UtilityStyles).Assembly.GetManifestResourceStream(LucentModuleManifest.ResourceName);
+        using var document = System.Text.Json.JsonDocument.Parse(stream!);
+        var metadata = document.RootElement.GetProperty("styleClasses").EnumerateArray().ToArray();
+        Assert.AreEqual(names.Length, metadata.Length);
+        foreach (var (entry, actual) in UtilitySpecification.Entries.OrderBy(entry => entry.Order).Zip(metadata))
+        {
+            Assert.AreEqual(entry.Name, actual.GetProperty("name").GetString());
+            Assert.AreEqual("Avalonia.Controls." + (entry.Type is "TemplatedControl" or "ToggleButton" ? "Primitives." : "") + entry.Type, actual.GetProperty("applicableType").GetString());
+            Assert.AreEqual((int)StyleClassOrigin.Utility, actual.GetProperty("origin").GetInt32());
+            Assert.AreEqual(System.Text.Json.JsonValueKind.Null, actual.GetProperty("definition").ValueKind);
+            Assert.AreEqual(entry.Detail, actual.GetProperty("detail").GetString());
+            Assert.AreEqual("Lucent.Styles.Utilities.LucentStyles", actual.GetProperty("catalogType").GetString());
+        }
+        CollectionAssert.AreEqual(names.OrderBy(name => name, StringComparer.Ordinal).ToArray(), manifest!.StyleClasses.Select(entry => entry.Name).ToArray());
+        Assert.AreEqual(names.Length, new UtilityStyles().Count);
+        Assert.IsTrue(UtilitySpecification.Entries.Where(entry => entry.Pseudo is not null)
+            .All(entry => entry.Name.Contains(':') && entry.Pseudo is ":pointerover" or ":focus" or ":focus-visible" or ":disabled" or ":checked" or ":selected"));
+    }
+
+    [TestMethod]
+    public void Escaped_state_class_selectors_preserve_decoded_names_and_exact_source_spans()
+    {
+        const string css = ".hover\\:bg-primary:pointerover { background: resource(\"Shadcn.Primary\"); }";
+        var (sheet, diagnostics) = StyleSheetParser.Parse(css, "State.css");
+        Assert.HasCount(0, diagnostics);
+        Assert.AreEqual("hover:bg-primary", sheet.Rules.Single().ClassName);
+        var index = CssProjectTokenIndex.Create([new CssProjectDocument("State.css", css)]);
+        var definition = index.GetDefinition("State.css", css.IndexOf("bg-primary", StringComparison.Ordinal));
+        Assert.IsNotNull(definition);
+        Assert.AreEqual("hover:bg-primary", definition.Name);
+        Assert.AreEqual("hover\\:bg-primary".Length, definition.Span.Length);
+    }
+
+    [TestMethod]
+    public void Escaped_state_class_literals_complete_the_decoded_token()
+    {
+        Assert.IsTrue(LucentModuleManifest.TryReadFromPe(typeof(UtilityStyles).Assembly.Location,
+            out var manifest, out var error), error);
+        const string source = "namespace Demo; component Main() => Button { Class: \"hover:bg\"; };";
+        var index = CssProjectTokenIndex.Create([], manifest!.StyleClasses);
+        var items = index.GetClassValueCompletions(source, source.IndexOf("bg\"", StringComparison.Ordinal) + 2,
+            "Avalonia.Controls.Button");
+        var item = items.Single(candidate => candidate.Label == "hover:bg-primary");
+        Assert.AreEqual(source.IndexOf("hover:bg", StringComparison.Ordinal), item.ReplacementSpan!.Value.Start);
+        Assert.AreEqual("hover:bg".Length, item.ReplacementSpan!.Value.Length);
     }
 
     [TestMethod]

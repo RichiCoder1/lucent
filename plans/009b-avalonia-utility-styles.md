@@ -11,6 +11,8 @@
 
 ## Status
 
+**IN PROGRESS**
+
 - **Priority**: P2
 - **Effort**: M
 - **Risk**: MEDIUM
@@ -249,19 +251,19 @@ repository paths, assembly execution, or runtime scanning.
 
 ## Done criteria
 
-- [ ] One finite checked-in specification generates runtime styles and exactly
+- [x] One finite checked-in specification generates runtime styles and exactly
       matching Plan 008a manifest/Plan 009 completion metadata.
-- [ ] The documented utility inventory maps only to public, tested Avalonia
+- [x] The documented utility inventory maps only to public, tested Avalonia
       properties, resources, and pseudo-classes.
-- [ ] Exact supported state tokens work through CSS parsing, native matching,
+- [x] Exact supported state tokens work through CSS parsing, native matching,
       `Class:` completion, and source ranges without generalizing the grammar.
-- [ ] Canonical conflict behavior is deterministic and does not pretend class
+- [x] Canonical conflict behavior is deterministic and does not pretend class
       token order controls priority.
-- [ ] Light/dark gallery evidence covers every family, state, applicability rule,
+- [x] Light/dark gallery evidence covers every family, state, applicability rule,
       and representative conflict while preserving accessibility gates.
-- [ ] Installation is explicit, completion performs no request-path I/O, and no
+- [x] Installation is explicit, completion performs no request-path I/O, and no
       runtime parser, source scan, Tailwind dependency, or plugin system exists.
-- [ ] Plan 010 can package the catalog as opt-in without adding it to the default
+- [x] Plan 010 can package the catalog as opt-in without adding it to the default
       template or migrating examples.
 
 ## STOP conditions

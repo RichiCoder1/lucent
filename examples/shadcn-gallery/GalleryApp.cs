@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
 using Lucent.Themes.Shadcn;
+using Lucent.Styles.Utilities;
 
 namespace ShadcnGallery;
 
@@ -12,6 +13,7 @@ internal sealed class GalleryApp(bool dark) : Application
         RequestedThemeVariant = dark ? Avalonia.Styling.ThemeVariant.Dark : Avalonia.Styling.ThemeVariant.Light;
         Styles.Add(new FluentTheme());
         Styles.Add(new ShadcnTheme());
+        Styles.Add(new LucentStyles());
     }
 
     public override void OnFrameworkInitializationCompleted()

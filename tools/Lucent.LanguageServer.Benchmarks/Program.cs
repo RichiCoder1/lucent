@@ -45,7 +45,7 @@ var result = new
         trackedDiffSha256 = identity.TrackedDiffSha256,
         trackedDiffBytes = identity.TrackedDiffBytes,
         relevantUntracked = identity.RelevantUntracked,
-        algorithm = "SHA-256(HEAD UTF-8, NUL, SHA-256(git diff --binary HEAD -- measured paths), NUL, each sorted relevant untracked path UTF-8, NUL, SHA-256(file bytes), NUL). Measured paths are compiler, MSBuild, language-server, compiler/LSP tests, build props/targets, and this benchmark; docs, plans, research, subagent artifacts, and other concurrent work are excluded.",
+            algorithm = "SHA-256(HEAD UTF-8, NUL, SHA-256(git diff --binary HEAD -- measured paths), NUL, each sorted relevant untracked path UTF-8, NUL, SHA-256(file bytes), NUL). Measured paths are compiler, MSBuild, language-server, utility catalog/generator, compiler/LSP tests, build props/targets, and this benchmark; docs, plans, research, subagent artifacts, and other concurrent work are excluded.",
     },
     environment = new { os = RuntimeInformation.OSDescription, framework = RuntimeInformation.FrameworkDescription, processArchitecture = RuntimeInformation.ProcessArchitecture.ToString(), processorCount = Environment.ProcessorCount, configuration = "Release" },
     workload = new { manifest.samples, fixture = Path.GetFileName(fixturePath), fixtureHash, manifest.completionOffset, completionPosition = new { manifest.completionLine, manifest.completionCharacter }, manifest.documentVersionStart, manifest.editSchedule, manifest.requiredCompletionItems, manifest.completionItemSetFingerprint },
@@ -257,8 +257,8 @@ static SourceIdentity MeasureSourceIdentity(string repository)
     var head = GitText(repository, "rev-parse", "HEAD");
     var paths = new[]
     {
-        "build/Lucent.Compiler.props", "build/Lucent.Compiler.targets",
-        "src/Lucent.Compiler", "src/Lucent.Compiler.MSBuild", "src/Lucent.LanguageServer",
+        "build/Lucent.Compiler.props", "build/Lucent.Compiler.targets", "build/UtilityManifestGenerator",
+        "src/Lucent.Compiler", "src/Lucent.Compiler.MSBuild", "src/Lucent.LanguageServer", "src/Lucent.Styles.Utilities",
         "tests/Lucent.Compiler.Tests", "tests/Lucent.Compiler.MSBuild.Tests", "tests/Lucent.LanguageServer.Tests",
         "tools/Lucent.LanguageServer.Benchmarks",
     };
@@ -282,9 +282,11 @@ static SourceIdentity MeasureSourceIdentity(string repository)
 }
 
 static bool IsMeasuredUntrackedPath(string path) =>
+    path.StartsWith("build/UtilityManifestGenerator/", StringComparison.Ordinal) ||
     path.StartsWith("src/Lucent.Compiler/", StringComparison.Ordinal) ||
     path.StartsWith("src/Lucent.Compiler.MSBuild/", StringComparison.Ordinal) ||
     path.StartsWith("src/Lucent.LanguageServer/", StringComparison.Ordinal) ||
+    path.StartsWith("src/Lucent.Styles.Utilities/", StringComparison.Ordinal) ||
     path.StartsWith("tests/Lucent.Compiler.Tests/", StringComparison.Ordinal) ||
     path.StartsWith("tests/Lucent.Compiler.MSBuild.Tests/", StringComparison.Ordinal) ||
     path.StartsWith("tests/Lucent.LanguageServer.Tests/", StringComparison.Ordinal) ||

@@ -238,7 +238,7 @@ internal sealed partial class StyleSheetParser(string text, string path)
     {
         var text = selector.Trim();
         string? pseudo = null;
-        var pseudoIndex = text.LastIndexOf(':');
+        var pseudoIndex = LastUnescapedColon(text);
         if (pseudoIndex >= 0)
         {
             pseudo = text[pseudoIndex..];
@@ -275,17 +275,33 @@ internal sealed partial class StyleSheetParser(string text, string path)
         var selectors = new List<BoundStyleSelectorPart>();
         foreach (var part in parts)
         {
-            var match = Regex.Match(part,
-                @"^(?<type>[A-Za-z_][A-Za-z0-9_]*)?(?<name>#[A-Za-z_][A-Za-z0-9_-]*)?(?<classes>(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)$");
-            if (!match.Success || match.Value != part) return null;
-            var type = match.Groups["type"].Value;
-            var nameMatch = Regex.Match(part, @"#[A-Za-z_][A-Za-z0-9_-]*");
-            var classes = Regex.Matches(part, @"\.[A-Za-z_][A-Za-z0-9_-]*")
-                .Select(item => item.Value[1..]).ToArray();
-            if (type.Length == 0 && nameMatch.Length == 0 && classes.Length == 0) return null;
+            var cursor = 0;
+            string? type = null;
+            string? name = null;
+            if (cursor < part.Length && CssClassName.IsStart(part[cursor]))
+            {
+                var typeStart = cursor++;
+                while (cursor < part.Length && CssClassName.IsPart(part[cursor])) cursor++;
+                type = part[typeStart..cursor];
+            }
+            if (cursor < part.Length && part[cursor] == '#')
+            {
+                var nameStart = ++cursor;
+                if (cursor >= part.Length || !CssClassName.IsStart(part[cursor])) return null;
+                while (cursor < part.Length && CssClassName.IsPart(part[cursor])) cursor++;
+                name = part[nameStart..cursor];
+            }
+            var classes = new List<string>();
+            while (cursor < part.Length && part[cursor] == '.')
+            {
+                cursor++;
+                if (!CssClassName.TryRead(part, ref cursor, part.Length, out var @class, out _, out _)) return null;
+                classes.Add(@class);
+            }
+            if (cursor != part.Length || type is null && name is null && classes.Count == 0) return null;
             selectors.Add(new BoundStyleSelectorPart(
-                type.Length == 0 ? null : type,
-                nameMatch.Success ? nameMatch.Value[1..] : null,
+                type,
+                name,
                 classes));
         }
 
@@ -306,4 +322,11 @@ internal sealed partial class StyleSheetParser(string text, string path)
         string? PseudoClass,
         IReadOnlyList<BoundStyleSelectorPart> Parts,
         IReadOnlyList<BoundStyleCombinator> Combinators);
+
+    private static int LastUnescapedColon(string value)
+    {
+        for (var index = value.Length - 1; index >= 0; index--)
+            if (value[index] == ':' && (index == 0 || value[index - 1] != '\\')) return index;
+        return -1;
+    }
 }

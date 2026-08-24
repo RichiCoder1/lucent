@@ -16,7 +16,8 @@ public sealed class GalleryWindow : Window
         Height = 700;
         Content = new ScrollViewer { Content = new StackPanel { Margin = new Avalonia.Thickness(24), Spacing = 12, Children =
         {
-            new TextBlock { Text = "Shadcn New York / neutral", FontSize = 20 },
+            new TextBlock { Text = "Shadcn utilities (finite Avalonia catalog)", FontSize = 20 },
+            UtilityEvidence(),
             new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children =
             {
                 Swatch("Primary", "Shadcn.Primary"), Swatch("Muted", "Shadcn.Muted"), Swatch("Accent", "Shadcn.Accent"),
@@ -45,6 +46,29 @@ public sealed class GalleryWindow : Window
                 new ToolTip { Content = "Visible tooltip treatment" }
             }}}
         }}};
+    }
+
+    private static Control UtilityEvidence()
+    {
+        var selected = new ListBoxItem { Classes = { "selected:bg-muted" }, Content = "Selected utility", IsSelected = true };
+        var hover = StateButton("Hover utility", ":pointerover");
+        hover.Classes.Add("hover:bg-primary");
+        var focus = new TextBox { Text = "Focus utility", Classes = { "focus:border-ring" } };
+        ((IPseudoClasses)focus.Classes).Add(":focus");
+        var visibleFocus = new Button { Content = "Focus-visible utility", Classes = { "focus-visible:border-ring" } };
+        ((IPseudoClasses)visibleFocus.Classes).Add(":focus-visible");
+        var disabled = new Button { Content = "Disabled utility", IsEnabled = false, Classes = { "disabled:opacity-50" } };
+        return new Border { Name = "UtilityCatalogEvidence", Classes = { "m-2", "m-4", "p-2", "p-4", "bg-muted", "border-border", "border", "border-2", "rounded", "rounded-lg", "overflow-hidden", "text-center-self", "items-center" }, Child = new StackPanel { Classes = { "gap-2", "gap-4" }, Children =
+        {
+            new TextBlock { Name = "UtilityTypographyEvidence", Classes = { "text-sm", "text-lg", "font-medium", "font-bold", "italic", "text-left", "text-center", "text-wrap", "text-nowrap", "leading-6" }, Text = "Typography: bold italic centered line-height" },
+            new Border { Name = "UtilityConflictEvidence", Classes = { "p-2", "p-4", "w-24", "w-48", "h-8", "h-12", "bg-primary" }, Child = new TextBlock { Text = "Canonical conflict: p-4 / w-48 / h-12 win" } },
+            hover, focus, visibleFocus, disabled,
+            new CheckBox { Classes = { "checked:bg-primary" }, Content = "Checked utility", IsChecked = true },
+            new ListBox { Height = 45, ItemsSource = new[] { selected } },
+            new Button { Name = "UtilityForegroundEvidence", Classes = { "text-foreground" }, Content = "Templated foreground utility" },
+            new Border { Name = "UtilityOpacityEvidence", Classes = { "opacity-50", "opacity-100" }, Child = new TextBlock { Text = "Opacity-100 wins" } },
+            new Border { Name = "UtilityHiddenEvidence", Classes = { "hidden" }, Child = new TextBlock { Text = "Hidden utility remains captured structurally" } }
+        } } };
     }
 
     private static Border Swatch(string name, string resource)

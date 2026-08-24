@@ -3,12 +3,56 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Diagnostics;
 using System.Text;
+using Lucent.Styles.Utilities;
 
 namespace Lucent.Compiler.Tests;
 
 [TestClass]
 public sealed class CompilerTests
 {
+    [TestMethod]
+    public async Task Utility_package_consumer_installs_the_exact_manifest_catalog_without_repository_paths()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "lucent-utility-package-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var root = FindRepositoryRoot();
+            var packages = Path.Combine(directory, "packages");
+            var consumer = Path.Combine(directory, "consumer");
+            Directory.CreateDirectory(packages); Directory.CreateDirectory(consumer);
+            var pack = await DotNetAsync(root, "pack", Path.Combine(root, "src", "Lucent.Styles.Utilities", "Lucent.Styles.Utilities.csproj"),
+                "--no-restore", "-o", packages, "--nologo", "-nodeReuse:false");
+            Assert.AreEqual(0, pack.ExitCode, pack.Output);
+            var fixture = Path.Combine(root, "tests", "Lucent.Compiler.Tests", "Fixtures", "UtilityPackageConsumer");
+            foreach (var file in Directory.EnumerateFiles(fixture)) File.Copy(file, Path.Combine(consumer, Path.GetFileName(file)));
+            await File.WriteAllTextAsync(Path.Combine(consumer, "NuGet.Config"),
+                $"<configuration><packageSources><add key=\"utility-local\" value=\"{packages.Replace("\\", "/")}\" /></packageSources></configuration>");
+            var restore = await DotNetAsync(consumer, "restore", "Consumer.csproj", "--nologo", "-nodeReuse:false");
+            Assert.AreEqual(0, restore.ExitCode, restore.Output);
+            var build = await DotNetAsync(consumer, "build", "Consumer.csproj", "--no-restore", "--nologo", "-nodeReuse:false");
+            Assert.AreEqual(0, build.ExitCode, build.Output);
+            var run = await DotNetAsync(consumer, "run", "--project", "Consumer.csproj", "--no-build", "--no-restore", "--nologo");
+            Assert.AreEqual(0, run.ExitCode, run.Output);
+            var assembly = Path.Combine(consumer, "bin", "Debug", "net9.0", "Lucent.Styles.Utilities.dll");
+            Assert.IsTrue(LucentModuleManifest.TryReadFromPe(assembly, out var manifest, out var error), error);
+            var expected = UtilitySpecification.Entries.OrderBy(entry => entry.Name, StringComparer.Ordinal).ToArray();
+            Assert.AreEqual(expected.Length, new LucentStyles().Count);
+            Assert.AreEqual(expected.Length, manifest!.StyleClasses.Count);
+            foreach (var (entry, metadata) in expected.Zip(manifest.StyleClasses))
+            {
+                Assert.AreEqual(entry.Name, metadata.Name);
+                Assert.AreEqual("Avalonia.Controls." + (entry.Type is "TemplatedControl" or "ToggleButton" ? "Primitives." : "") + entry.Type, metadata.ApplicableType);
+                Assert.AreEqual(StyleClassOrigin.Utility, metadata.Origin);
+                Assert.IsNull(metadata.Definition);
+                Assert.AreEqual(entry.Detail, metadata.Detail);
+                Assert.AreEqual("Lucent.Styles.Utilities.LucentStyles", metadata.CatalogType);
+            }
+            Assert.IsFalse(File.ReadAllText(Path.Combine(consumer, "Consumer.csproj")).Contains(root, StringComparison.OrdinalIgnoreCase));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     [TestMethod]
     public void Source_map_preserves_exact_unicode_ranges_and_real_multi_origin_provenance()
     {

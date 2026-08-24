@@ -123,6 +123,75 @@ after the direct semantic installation; construction, aliases, and indirect
 flows do not activate it. No runtime CSS parser, startup hook, or transitive
 library installation exists.
 
+## Optional utility catalog
+
+`Lucent.Styles.Utilities` is a finite, opt-in catalog of ordinary Avalonia styles:
+
+```csharp
+Styles.Add(new Lucent.Themes.Shadcn.ShadcnTheme());
+Styles.Add(new Lucent.Styles.Utilities.LucentStyles());
+```
+
+It supplies whole-value `m-2`/`m-4` (all `Control`), `p-2`/`p-4` (`Border`),
+fixed dimensions and `StackPanel` gaps, `TextBlock` typography, semantic Shadcn
+foreground/background/border values, `Border` widths/radii, opacity, visibility,
+clipping, and alignment. Semantic colors are Shadcn dynamic resources.
+
+State names are finite: `hover:bg-primary` (`Button:pointerover`),
+`focus:border-ring` (`TextBox:focus`), `focus-visible:border-ring` (`Button`),
+`disabled:opacity-50` (`Button`), `checked:bg-primary` (`ToggleButton`), and
+`selected:bg-muted` (`ListBoxItem`). CSS writes `.hover\:bg-primary:pointerover`.
+
+Catalog order is canonical, not `Class:` token order (`p-4` wins over `p-2`).
+For equally specific host and utility selectors such as `Border.border`, the
+observed winner follows `Application.Styles` installation order; local values
+still win. This is host-controlled evidence, not a universal precedence claim.
+This is not Tailwind CSS: no per-side spacing, arbitrary values, responsive
+variants, plugins, browser layout, preflight, transforms, or runtime scanning.
+
+| name | value/resource | target type | pseudo-state |
+| --- | --- | --- | --- |
+| `m-2` | Control.Margin = 8 | `Control` | — |
+| `m-4` | Control.Margin = 16 | `Control` | — |
+| `p-2` | Border.Padding = 8 | `Border` | — |
+| `p-4` | Border.Padding = 16 | `Border` | — |
+| `w-24` | Control.Width = 96 | `Control` | — |
+| `w-48` | Control.Width = 192 | `Control` | — |
+| `h-8` | Control.Height = 32 | `Control` | — |
+| `h-12` | Control.Height = 48 | `Control` | — |
+| `gap-2` | StackPanel.Spacing = 8 | `StackPanel` | — |
+| `gap-4` | StackPanel.Spacing = 16 | `StackPanel` | — |
+| `text-sm` | TextBlock.FontSize = 14 | `TextBlock` | — |
+| `text-lg` | TextBlock.FontSize = 18 | `TextBlock` | — |
+| `font-medium` | TextBlock.FontWeight = Medium | `TextBlock` | — |
+| `font-bold` | TextBlock.FontWeight = Bold | `TextBlock` | — |
+| `italic` | TextBlock.FontStyle = Italic | `TextBlock` | — |
+| `text-left` | TextBlock.TextAlignment = Left | `TextBlock` | — |
+| `text-center` | TextBlock.TextAlignment = Center | `TextBlock` | — |
+| `text-wrap` | TextBlock.TextWrapping = Wrap | `TextBlock` | — |
+| `text-nowrap` | TextBlock.TextWrapping = NoWrap | `TextBlock` | — |
+| `leading-6` | TextBlock.LineHeight = 24 | `TextBlock` | — |
+| `bg-primary` | Border.Background = Shadcn.Primary | `Border` | — |
+| `bg-muted` | Border.Background = Shadcn.Muted | `Border` | — |
+| `text-foreground` | TemplatedControl.Foreground = Shadcn.Foreground | `Primitives.TemplatedControl` | — |
+| `border-border` | Border.BorderBrush = Shadcn.Border | `Border` | — |
+| `border` | Border.BorderThickness = 1 | `Border` | — |
+| `border-2` | Border.BorderThickness = 2 | `Border` | — |
+| `rounded` | Border.CornerRadius = 4 | `Border` | — |
+| `rounded-lg` | Border.CornerRadius = 8 | `Border` | — |
+| `opacity-50` | Control.Opacity = 0.5 | `Control` | — |
+| `opacity-100` | Control.Opacity = 1 | `Control` | — |
+| `hidden` | Control.IsVisible = false | `Control` | — |
+| `overflow-hidden` | Control.ClipToBounds = true | `Control` | — |
+| `text-center-self` | Control.HorizontalAlignment = Center | `Control` | — |
+| `items-center` | Control.VerticalAlignment = Center | `Control` | — |
+| `hover:bg-primary` | Button:pointerover Background = Shadcn.Primary | `Button` | `:pointerover` |
+| `focus:border-ring` | TextBox:focus BorderBrush = Shadcn.Ring | `TextBox` | `:focus` |
+| `focus-visible:border-ring` | Button:focus-visible BorderBrush = Shadcn.Ring | `Button` | `:focus-visible` |
+| `disabled:opacity-50` | Button:disabled Opacity = 0.5 | `Button` | `:disabled` |
+| `checked:bg-primary` | ToggleButton:checked Background = Shadcn.Primary | `Primitives.ToggleButton` | `:checked` |
+| `selected:bg-muted` | ListBoxItem:selected Background = Shadcn.Muted | `ListBoxItem` | `:selected` |
+
 ## Design tokens
 
 CSS custom properties are the preferred authoring model for design tokens:
