@@ -24,4 +24,5 @@ public sealed record LucentCompletionItem(
     bool IsSnippet = false,
     string? SortText = null,
     string? FilterText = null,
-    bool IsDeprecated = false);
+    bool IsDeprecated = false,
+    SourceSpan? ReplacementSpan = null);

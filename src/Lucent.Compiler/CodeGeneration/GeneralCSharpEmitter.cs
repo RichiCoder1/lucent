@@ -1038,6 +1038,9 @@ internal static class GeneralCSharpEmitter
             return $"new global::Avalonia.Markup.Xaml.MarkupExtensions.DynamicResourceExtension({Quote(resourceKey)})";
         if (!value.StartsWith('#'))
         {
+            if (CssPropertyCatalog.TryParseOklch(value, out var oklch))
+                return "new global::Avalonia.Media.SolidColorBrush(" +
+                    $"global::Avalonia.Media.Color.FromArgb(0x{oklch.Alpha:X2}, 0x{oklch.Red:X2}, 0x{oklch.Green:X2}, 0x{oklch.Blue:X2}))";
             return value switch
             {
                 "transparent" => "global::Avalonia.Media.Brushes.Transparent",

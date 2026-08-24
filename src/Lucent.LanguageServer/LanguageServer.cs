@@ -734,7 +734,7 @@ public static class LanguageServer
                 // Source-only generations reuse the immutable reference snapshot.
                 // Watched project/reference changes clear _projectAnalyses first.
                 var manifests = cached?.ReferencedManifests ??
-                    LucentCompiler.LoadReferencedManifestSnapshot(projectContext, cancellationToken);
+                    LucentCompiler.LoadActiveThemeManifestSnapshot(projectContext, cancellationToken);
                 var sourceTexts = inputs.ToDictionary(item => item.Key, item => item.Value.SourceText,
                     OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
                 foreach (var input in inputs.Values.Where(input => input.StylePath is not null && input.StyleText is not null))
@@ -893,7 +893,9 @@ public static class LanguageServer
                     ? LucentCompiler.GetCssCompletions(document.Text, offset, GetSourcePath(uri),
                         document.CssTokens ?? CssProjectTokenIndex.Create(
                             [new CssProjectDocument(GetSourcePath(uri), document.Text)]))
-                    : LucentCompiler.GetCompletions(document.Text, offset, document.Analysis))
+                    : document.CssTokens is { } cssTokens
+                        ? LucentCompiler.GetCompletions(document.Text, offset, document.Analysis, cssTokens)
+                        : LucentCompiler.GetCompletions(document.Text, offset, document.Analysis))
                 .GroupBy(item => item.Label, StringComparer.Ordinal)
                 .Select(group => group.First())
                 .OrderBy(item => item.SortText ?? item.Label, StringComparer.Ordinal)
@@ -925,6 +927,7 @@ public static class LanguageServer
                     sortText = item.SortText ?? item.Label,
                     filterText = item.FilterText ?? item.Label,
                     tags = item.IsDeprecated ? new[] { 1 } : null,
+                    textEdit = item.ReplacementSpan is { } span ? new { range = ToRange(document.Text, span), newText = item.InsertText } : null,
                 }).ToArray(),
                 cancellationToken);
         }
@@ -1124,6 +1127,8 @@ public static class LanguageServer
             {
                 Path.GetFullPath(cssPath),
             };
+            if (cssPath.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
+                paths.Add(Path.ChangeExtension(Path.GetFullPath(cssPath), ".css"));
             foreach (var lui in context?.LucentSources ?? [])
             {
                 paths.Add(Path.GetFullPath(lui));
@@ -1148,17 +1153,14 @@ public static class LanguageServer
             var manifests = context?.ProjectPath is { } projectPath &&
                 _projectAnalyses.TryGetValue(projectPath, out var analysis)
                     ? analysis.ReferencedManifests
-                    : LucentCompiler.LoadReferencedManifestSnapshot(context, cancellationToken);
-            return CssProjectTokenIndex.Create(documents, manifests.Catalog.Entries.Select(entry => entry.Name));
+                    : LucentCompiler.LoadActiveThemeManifestSnapshot(context, cancellationToken);
+            return CssProjectTokenIndex.Create(documents, manifests.Catalog.Entries);
         }
 
         private async Task RefreshCssIndexesAsync(CancellationToken cancellationToken)
         {
             foreach (var (uri, document) in _documents.ToArray())
             {
-                if (!uri.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
                 var index = await BuildCssTokenIndexAsync(GetSourcePath(uri), cancellationToken);
                 _documents[uri] = document with { CssTokens = index };
             }

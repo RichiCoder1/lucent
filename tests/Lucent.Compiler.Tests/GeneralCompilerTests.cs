@@ -1,4 +1,6 @@
 using Lucent.Compiler.Syntax;
+using Lucent.Compiler.Styling;
+using Lucent.Themes.Shadcn;
 using Lucent.Runtime;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -1832,6 +1834,42 @@ public sealed class GeneralCompilerTests
         Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
         StringAssert.Contains(result.GeneratedSource!,
             "global::Avalonia.Media.Color.FromArgb(0x44, 0x11, 0x22, 0x33)");
+    }
+
+    [TestMethod]
+    public void Css_oklch_colors_validate_lower_and_clip_deterministically()
+    {
+        var source = "namespace Demo; component Main() => Border { Class: \"card\"; };";
+        var result = LucentCompiler.Compile(source, "Main.lui", projectContext: null,
+            ".card { background: oklch(0.145 0 0 / 80%); border-color: oklch(0.8 0.5 30); }", "Main.css");
+
+        Assert.IsTrue(result.Succeeded, string.Join(Environment.NewLine, result.Diagnostics));
+        StringAssert.Contains(result.GeneratedSource!, "Color.FromArgb(0xCC, 0x0A, 0x0A, 0x0A)");
+        Assert.IsTrue(CssPropertyCatalog.TryParseOklch("oklch(0.8 0.5 30)", out var clipped));
+        Assert.AreEqual((byte)255, clipped.Red, "Out-of-gamut channels clip to sRGB.");
+        Assert.IsFalse(CssPropertyCatalog.TryParseOklch("oklch(1.1 0 0)", out _));
+        Assert.IsFalse(CssPropertyCatalog.TryParseOklch("oklch(.5 .1)", out _));
+    }
+
+    [TestMethod]
+    public void Shadcn_theme_embeds_the_active_theme_catalog()
+    {
+        Assert.IsTrue(LucentModuleManifest.TryReadFromPe(typeof(ShadcnTheme).Assembly.Location,
+            out var manifest, out var error), error);
+        CollectionAssert.Contains(manifest!.StyleClasses.Select(entry => entry.Name).ToArray(), "secondary");
+        CollectionAssert.Contains(manifest.StyleCatalogTypes.ToArray(), "Lucent.Themes.Shadcn.ShadcnTheme");
+    }
+
+    [TestMethod]
+    public void Class_completion_handles_interpolated_literal_segments()
+    {
+        const string source = "namespace Demo; component Main() => Button { Class: $\"se\"; };";
+        var result = LucentCompiler.Compile(source, "Main.lui", projectContext: null);
+        var index = CssProjectTokenIndex.Create([new CssProjectDocument("Main.css", "Button.secondary { background: #fff; }")]);
+        var items = LucentCompiler.GetCompletions(source, source.IndexOf("se\"", StringComparison.Ordinal) + 2, result, index);
+
+        CollectionAssert.Contains(items.Select(item => item.Label).ToArray(), "secondary");
+        Assert.AreEqual(source.IndexOf("se\"", StringComparison.Ordinal), items.Single(item => item.Label == "secondary").ReplacementSpan!.Value.Start);
     }
 
     [TestMethod]

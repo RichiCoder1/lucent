@@ -11,5 +11,6 @@
     <ProjectReference Include="..\..\src\Lucent.Compiler.Cli\Lucent.Compiler.Cli.csproj" />
     <ProjectReference Include="..\..\src\Lucent.Compiler.MSBuild\Lucent.Compiler.MSBuild.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\src\Lucent.Runtime\Lucent.Runtime.csproj" />
+    <ProjectReference Include="..\..\src\Lucent.Themes.Shadcn\Lucent.Themes.Shadcn.csproj" />
   </ItemGroup>
 </Project>

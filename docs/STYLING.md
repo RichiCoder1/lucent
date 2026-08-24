@@ -57,6 +57,10 @@ Adjacent `.lui` and `.css` files are compiled together. The compiler emits
 native Avalonia `Style`, `Setter`, and typed `Transition` objects; it does not
 ship CSS strings or a runtime CSS parser.
 
+`oklch(L C H / A)` is accepted anywhere this subset accepts a brush. Lucent
+converts it to clipped sRGB at compile time; theme packages commit their own
+reviewed hex resources and never depend on the compiler at runtime.
+
 ```css
 :root {
     --surface: resource("Lucent.Surface");

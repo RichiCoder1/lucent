@@ -41,6 +41,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Analyzers", "src\Luc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Analyzers.Tests", "tests\Lucent.Analyzers.Tests\Lucent.Analyzers.Tests.csproj", "{C842BFC9-46E7-4C46-9F6E-12A35EEACB87}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lucent.Themes.Shadcn", "src\Lucent.Themes.Shadcn\Lucent.Themes.Shadcn.csproj", "{C6C240B4-F7AE-44BA-A150-E762F5F0E34C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ShadcnGallery", "examples\shadcn-gallery\ShadcnGallery.csproj", "{C1212C5F-D620-4F4B-8872-8A24FE57CFD7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -115,6 +119,14 @@ Global
 		{C842BFC9-46E7-4C46-9F6E-12A35EEACB87}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C842BFC9-46E7-4C46-9F6E-12A35EEACB87}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C842BFC9-46E7-4C46-9F6E-12A35EEACB87}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C6C240B4-F7AE-44BA-A150-E762F5F0E34C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6C240B4-F7AE-44BA-A150-E762F5F0E34C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6C240B4-F7AE-44BA-A150-E762F5F0E34C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6C240B4-F7AE-44BA-A150-E762F5F0E34C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C1212C5F-D620-4F4B-8872-8A24FE57CFD7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C1212C5F-D620-4F4B-8872-8A24FE57CFD7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C1212C5F-D620-4F4B-8872-8A24FE57CFD7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C1212C5F-D620-4F4B-8872-8A24FE57CFD7}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

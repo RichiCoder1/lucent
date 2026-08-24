@@ -34,6 +34,8 @@ internal sealed record CssPropertyDefinition(
     bool SupportsResource = true,
     IReadOnlyList<string>? ProjectedTargetTypes = null);
 
+internal readonly record struct CssColor(byte Red, byte Green, byte Blue, byte Alpha);
+
 internal static class CssPropertyCatalog
 {
     private static readonly IReadOnlyDictionary<string, CssPropertyDefinition> Definitions =
@@ -191,7 +193,8 @@ internal static class CssPropertyCatalog
         switch (definition.ValueKind)
         {
             case CssValueKind.Brush:
-                if (!Regex.IsMatch(value, "^(#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|transparent|black|white)$"))
+                if (!Regex.IsMatch(value, "^(#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|transparent|black|white)$") &&
+                    !TryParseOklch(value, out _))
                     error = $"CSS value '{value}' is not a supported brush.";
                 break;
             case CssValueKind.Double:
@@ -255,6 +258,49 @@ internal static class CssPropertyCatalog
                 break;
         }
         return error is null;
+    }
+
+    /// <summary>Converts CSS Color 4 OKLCH to clipped sRGB at compile time.</summary>
+    internal static bool TryParseOklch(string value, out CssColor color)
+    {
+        color = default;
+        var match = Regex.Match(value, @"^oklch\(\s*(?<l>[+-]?(?:\d+\.?\d*|\.\d+))\s+(?<c>[+-]?(?:\d+\.?\d*|\.\d+))\s+(?<h>[+-]?(?:\d+\.?\d*|\.\d+))(?:\s*/\s*(?<a>[+-]?(?:\d+\.?\d*|\.\d+)%?))?\s*\)$", RegexOptions.CultureInvariant);
+        if (!match.Success ||
+            !double.TryParse(match.Groups["l"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var l) ||
+            !double.TryParse(match.Groups["c"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var c) ||
+            !double.TryParse(match.Groups["h"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var h) ||
+            !double.IsFinite(l) || !double.IsFinite(c) || !double.IsFinite(h) || l is < 0 or > 1 || c < 0)
+            return false;
+
+        var alphaText = match.Groups["a"].Value;
+        var alpha = 1d;
+        if (alphaText.Length > 0 && (!double.TryParse(alphaText.TrimEnd('%'), NumberStyles.Float,
+                CultureInfo.InvariantCulture, out alpha) || !double.IsFinite(alpha))) return false;
+        if (alphaText.EndsWith('%')) alpha /= 100d;
+        if (alpha is < 0 or > 1) return false;
+
+        var radians = h * Math.PI / 180d;
+        var a = c * Math.Cos(radians);
+        var b = c * Math.Sin(radians);
+        var lPrime = l + 0.3963377774d * a + 0.2158037573d * b;
+        var mPrime = l - 0.1055613458d * a - 0.0638541728d * b;
+        var sPrime = l - 0.0894841775d * a - 1.2914855480d * b;
+        var l3 = lPrime * lPrime * lPrime;
+        var m3 = mPrime * mPrime * mPrime;
+        var s3 = sPrime * sPrime * sPrime;
+        var red = 4.0767416621d * l3 - 3.3077115913d * m3 + 0.2309699292d * s3;
+        var green = -1.2684380046d * l3 + 2.6097574011d * m3 - 0.3413193965d * s3;
+        var blue = -0.0041960863d * l3 - 0.7034186147d * m3 + 1.7076147010d * s3;
+        color = new CssColor(ToByte(red), ToByte(green), ToByte(blue),
+            (byte)Math.Round(alpha * 255d, MidpointRounding.AwayFromZero));
+        return true;
+    }
+
+    private static byte ToByte(double linear)
+    {
+        linear = Math.Clamp(linear, 0d, 1d);
+        var srgb = linear <= 0.0031308d ? 12.92d * linear : 1.055d * Math.Pow(linear, 1d / 2.4d) - 0.055d;
+        return (byte)Math.Round(Math.Clamp(srgb, 0d, 1d) * 255d, MidpointRounding.AwayFromZero);
     }
 
     public static bool TryValidateTransitions(string value, out string? error)

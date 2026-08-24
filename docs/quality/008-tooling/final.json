@@ -1,10 +1,10 @@
 {
   "runner": "1",
   "sourceIdentity": {
-    "head": "894c2fddbd22a0aaeae4293599a6cd76d816c40b",
-    "worktreeSha256": "26F52FAB74EC9F560EB406148B15C9BD1B3C6770A2953FC45501ADF99928C455",
-    "trackedDiffSha256": "7E42B07F3DDFF4D94F2AE853D03A1BA1BC8EA413F715C74D37E272A8A8E52083",
-    "trackedDiffBytes": 199692,
+    "head": "f365f2a511bca30b09db78e5cf37d4ac161972a1",
+    "worktreeSha256": "21B11063000FD6333A6FE44B04107D62C0927E7300270CBD1C452BD6EDC7E33F",
+    "trackedDiffSha256": "32D9F57CB91795E80C6079CF5E10416E562BE80069EC891B6CAF6C9D6C2C7F18",
+    "trackedDiffBytes": 40946,
     "relevantUntracked": [],
     "algorithm": "SHA-256(HEAD UTF-8, NUL, SHA-256(git diff --binary HEAD -- measured paths), NUL, each sorted relevant untracked path UTF-8, NUL, SHA-256(file bytes), NUL). Measured paths are compiler, MSBuild, language-server, compiler/LSP tests, build props/targets, and this benchmark; docs, plans, research, subagent artifacts, and other concurrent work are excluded."
   },
@@ -37,22 +37,22 @@
   },
   "warmCompletion": {
     "count": 500,
-    "medianMilliseconds": 0.1192,
-    "p95Milliseconds": 0.2039,
-    "p99Milliseconds": 0.3349,
-    "medianAllocatedBytes": 17056,
-    "p95AllocatedBytes": 17056
+    "medianMilliseconds": 0.1243,
+    "p95Milliseconds": 0.1912,
+    "p99Milliseconds": 0.3662,
+    "medianAllocatedBytes": 17792,
+    "p95AllocatedBytes": 17792
   },
   "editCompletion": {
     "count": 500,
-    "medianMilliseconds": 35.491,
-    "p95Milliseconds": 52.3567,
-    "p99Milliseconds": 67.7991,
-    "medianAllocatedBytes": 8918064,
-    "p95AllocatedBytes": 9110688
+    "medianMilliseconds": 42.8658,
+    "p95Milliseconds": 60.6137,
+    "p99Milliseconds": 74.2833,
+    "medianAllocatedBytes": 10782864,
+    "p95AllocatedBytes": 11005456
   },
-  "postWarmManagedBytes": 34031664,
-  "peakLiveManagedBytes": 91242712,
-  "retainedManagedBytes": 42524936,
+  "postWarmManagedBytes": 34228248,
+  "peakLiveManagedBytes": 100167384,
+  "retainedManagedBytes": 47014072,
   "maxActiveProjectGenerations": 1
 }

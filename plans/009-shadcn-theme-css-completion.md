@@ -19,6 +19,16 @@
 - **Planned at**: commit `e2a9a5f`, 2026-08-23
 - **Design authority**: [`docs/SHADCN_THEME.md`](../docs/SHADCN_THEME.md)
 
+## Implementation evidence
+
+- Focused compiler tests cover OKLCH lowering, alpha, gamut clipping, and the
+  embedded Shadcn catalog manifest.
+- Focused language-server protocol tests cover adjacent class literals and
+  direct `Application.Styles.Add(new Theme())` activation from the generation
+  snapshot.
+- `examples/shadcn-gallery` builds as the deterministic light/default and
+  `--dark` review surface. No existing example was redesigned.
+
 ## Why this matters
 
 Plan 007 proved adjacent, statically typed CSS, but each example still owns
@@ -238,18 +248,18 @@ claiming arbitrary theme or AXAML discovery.
 
 ## Done criteria
 
-- [ ] Lucent CSS accepts and deterministically lowers the required OKLCH forms.
-- [ ] Fluent plus `ShadcnTheme` supplies complete reviewed light/dark treatment
+- [x] Lucent CSS accepts and deterministically lowers the required OKLCH forms.
+- [x] Fluent plus `ShadcnTheme` supplies complete reviewed light/dark treatment
       for the promised gallery surface without compiler/runtime coupling.
-- [ ] `Class:` completion handles live adjacent CSS and exact active first-party
+- [x] `Class:` completion handles live adjacent CSS and exact active first-party
       theme metadata in ordinary and interpolated literal segments through Plan
       008a's catalog.
-- [ ] Completion performs no request-path I/O and remains inside Plan 008's
+- [x] Completion performs no request-path I/O and remains inside Plan 008's
       accepted correctness, cancellation, latency, allocation, and cache bounds.
-- [ ] No arbitrary assembly execution, runtime CSS parser, Actipro dependency,
+- [x] No arbitrary assembly execution, runtime CSS parser, Actipro dependency,
       template framework, compatibility token layer, or false invalid-class
       diagnostic is introduced.
-- [ ] Theme, gallery, manifest, and tooling evidence is reviewed before Plan 009a
+- [x] Theme, gallery, manifest, and tooling evidence is reviewed before Plan 009a
       adds global styles or Plan 010 starts the example migration.
 
 ## STOP conditions

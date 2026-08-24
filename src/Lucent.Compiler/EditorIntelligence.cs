@@ -45,7 +45,8 @@ internal static class EditorIntelligence
     public static IReadOnlyList<LucentCompletionItem> GetCompletions(
         string sourceText,
         int offset,
-        ComponentSemanticAnalysis analysis)
+        ComponentSemanticAnalysis analysis,
+        CssProjectTokenIndex? cssTokens = null)
     {
         var syntax = analysis.Syntax;
         var resolver = analysis.Resolver;
@@ -122,7 +123,7 @@ internal static class EditorIntelligence
         {
             if (valueMember == "Class")
             {
-                return [];
+                return cssTokens?.GetClassValueCompletions(sourceText, offset, control.TypeName) ?? [];
             }
 
             var property = resolver.ResolveProperty(control, valueMember);

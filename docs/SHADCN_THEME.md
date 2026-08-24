@@ -113,6 +113,35 @@ source URL, retrieval date, Shadcn style, base color, and original OKLCH values
 next to the committed theme values. Future upstream changes are normal reviewed
 theme changes, not automatic upgrades.
 
+## Committed palette provenance
+
+Snapshot: New York / neutral from <https://ui.shadcn.com/docs/theming>, retrieved
+2026-08-23. `ShadcnTheme.axaml` commits the following reviewed sRGB conversions.
+The light disabled foreground is an accessibility override, not an upstream
+value: `#666666` retains AA contrast on `#F5F5F5`.
+
+| variant | token | original OKLCH | committed hex |
+| --- | --- | --- | --- |
+| light | Background | `1 0 0` | `#FFFFFF` |
+| light | PrimaryForeground | `0.985 0 0` | `#FAFAFA` |
+| light | Foreground, CardForeground, PopoverForeground, SecondaryForeground, AccentForeground | `0.145 0 0` | `#171717` |
+| light | Card, Popover, DestructiveForeground | `1 0 0` | `#FFFFFF` |
+| light | Primary | `0.205 0 0` | `#343434` |
+| light | Secondary, Muted, Accent | `0.970 0 0` | `#F5F5F5` |
+| light | MutedForeground (disabled AA adjustment) | `0.510 0 0` | `#666666` |
+| light | Destructive | `0.577 0.245 27.325` | `#E7000B` |
+| light | Border, Input | `0.922 0 0` | `#E5E5E5` |
+| light | Ring | `0.708 0 0` | `#ABABAB` |
+| dark | Background, DestructiveForeground | `0.145 0 0` | `#171717` |
+| dark | Foreground, SecondaryForeground, AccentForeground | `0.985 0 0` | `#FAFAFA` |
+| dark | Card, Popover, PrimaryForeground | `0.205 0 0` | `#262626` |
+| dark | Primary | `0.922 0 0` | `#E5E5E5` |
+| dark | Secondary, Muted, Accent | `0.269 0 0` | `#404040` |
+| dark | MutedForeground | `0.708 0 0` | `#ABABAB` |
+| dark | Border, Input | `1 0 0 / 10%` | `#1AFFFFFF` |
+| dark | Ring | `0.556 0 0` | `#737373` |
+| dark | Destructive | `0.704 0.191 22.216` | `#FF6467` |
+
 ## Typography, geometry, and elevation
 
 - Use the platform UI font family. Do not bundle Inter.
@@ -236,6 +265,10 @@ The gallery should make these comparisons easy:
 
 Keep deterministic light and dark launch modes so reviewers can capture the
 same surface. Pixel-golden testing is not required for the first version.
+
+The checked-in gallery is `examples/shadcn-gallery`. Launch it with `--dark`
+for the deterministic dark review surface; without that argument it uses light.
+Its build is the current smoke gate for the Fluent-plus-Shadcn installation.
 
 ## Example migration
 

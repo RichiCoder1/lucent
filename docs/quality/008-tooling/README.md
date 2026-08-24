@@ -26,9 +26,9 @@ other concurrent work are deliberately excluded; the measured paths are listed
 in the embedded algorithm text. Artifacts are written before budget enforcement
 so the intentionally failing baseline is still inspectable.
 
-On the recorded Windows/.NET 9 reference machine, the final p95 was 0.2039 ms
-for warm completion and 52.3567 ms for edit-plus-completion. The corresponding
-p95 allocations were 17,056 and 9,110,688 bytes. These are below the Plan 008
+On the recorded Windows/.NET 9 reference machine, the final p95 was 0.1912 ms
+for warm completion and 60.6137 ms for edit-plus-completion. The corresponding
+p95 allocations were 17,792 and 11,005,456 bytes. These are below the Plan 008
 100/150 ms and 2/32 MiB budgets; one active project generation is below the
 two-generation bound. Re-run both files whenever the measured source identity
 changes.

@@ -20,6 +20,9 @@ test('manifest registers .lui and the Lucent grammar', () => {
     assert.deepEqual(language.extensions, ['.lui']);
     assert.equal(grammar.scopeName, 'source.lucent');
     assert.equal(grammar.path, './syntaxes/lucent.tmLanguage.json');
+    assert.equal(
+        manifest.contributes.configurationDefaults['[lucent]']['editor.quickSuggestions'].strings,
+        'on');
 });
 
 test('manifest packages the language client runtime', () => {

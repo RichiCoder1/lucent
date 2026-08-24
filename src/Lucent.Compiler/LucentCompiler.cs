@@ -21,6 +21,18 @@ public static class LucentCompiler
         return new ReferencedManifestSnapshot(cache.Catalog, cache.Diagnostics.ToImmutableArray());
     }
 
+    // Build this once per project generation. Completion only reads the published snapshot.
+    internal static ReferencedManifestSnapshot LoadActiveThemeManifestSnapshot(
+        LucentProjectContext? projectContext,
+        CancellationToken cancellationToken)
+    {
+        var cache = new ReferencedManifestCache(projectContext?.References ?? []);
+        cache.Load(cancellationToken);
+        return new ReferencedManifestSnapshot(
+            cache.CatalogForActiveThemes(ProjectSemanticCompilation.CreateBaseCompilation(projectContext), projectContext?.ProjectPath),
+            cache.Diagnostics.ToImmutableArray());
+    }
+
     /// <summary>
     /// Rebinds one open source against its existing project snapshot when its
     /// exported component signatures have not changed. Callers must rebuild the
@@ -172,6 +184,12 @@ public static class LucentCompiler
             ? EditorIntelligence.GetCompletions(sourceText, offset, analysis)
             : [];
     }
+
+    internal static IReadOnlyList<LucentCompletionItem> GetCompletions(
+        string sourceText, int offset, CompilationResult compilation, CssProjectTokenIndex cssTokens) =>
+        compilation.Analysis is { } analysis
+            ? EditorIntelligence.GetCompletions(sourceText, offset, analysis, cssTokens)
+            : [];
 
     public static LucentSemanticSymbol? GetExpressionSymbol(
         string sourceText,

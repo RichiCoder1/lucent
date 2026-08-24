@@ -1,10 +1,14 @@
 using System.Collections.Immutable;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using Lucent.Compiler.Styling;
 
 namespace Lucent.Compiler;
@@ -449,6 +453,58 @@ internal sealed class ReferencedManifestCache
     internal IReadOnlyList<string> Diagnostics => _diagnostics;
     internal StyleClassCatalog Catalog => new(_manifests.Values.SelectMany(item => item.Manifest.StyleClasses.Entries));
 
+    internal StyleClassCatalog CatalogForActiveThemes(Compilation compilation, string? projectPath)
+    {
+        var activeTypes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var add in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>())
+            {
+                if (add.Expression is not MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Add", Expression: var styles } ||
+                    add.ArgumentList.Arguments.Count != 1 ||
+                    add.ArgumentList.Arguments[0].Expression is not ObjectCreationExpressionSyntax theme ||
+                    model.GetSymbolInfo(add).Symbol is not IMethodSymbol { Parameters.Length: 1 } method ||
+                    model.GetSymbolInfo(styles).Symbol is not IPropertySymbol { Name: "Styles" } property ||
+                    !IsApplication(property.ContainingType))
+                    continue;
+                var type = model.GetTypeInfo(theme).Type;
+                if (type is null ||
+                    !((CSharpCompilation)compilation).ClassifyConversion(type, method.Parameters[0].Type).IsImplicit)
+                    continue;
+                activeTypes.Add(type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectPath))
+        {
+            var appAxaml = Path.Combine(Path.GetDirectoryName(projectPath)!, "App.axaml");
+            if (File.Exists(appAxaml))
+            {
+                try
+                {
+                    var root = XElement.Load(appAxaml, LoadOptions.None);
+                    foreach (var catalogType in _manifests.Values.SelectMany(item => item.Manifest.StyleCatalogTypes))
+                    {
+                        var split = catalogType.LastIndexOf('.');
+                        if (split > 0 && root.Name.LocalName == "Application" &&
+                            root.Elements().Where(element => element.Name.LocalName == "Application.Styles")
+                                .SelectMany(element => element.Elements()).Any(element =>
+                            element.Name.LocalName == catalogType[(split + 1)..] &&
+                            element.Name.NamespaceName == "using:" + catalogType[..split]))
+                            activeTypes.Add(catalogType);
+                    }
+                }
+                catch (System.Xml.XmlException) { }
+            }
+        }
+
+        return new StyleClassCatalog(_manifests.Values.SelectMany(item =>
+            item.Manifest.StyleClasses.Entries.Where(entry =>
+                entry.Origin != StyleClassOrigin.NativeTheme ||
+                item.Manifest.StyleCatalogTypes.Any(activeTypes.Contains))));
+    }
+
     // This is invoked while building a generation, never by a completion request.
     internal void Load(CancellationToken cancellationToken)
     {
@@ -476,6 +532,14 @@ internal sealed class ReferencedManifestCache
     private void Report(string path, string error)
     {
         if (_reported.Add(path)) _diagnostics.Add(error);
+    }
+
+    private static bool IsApplication(ITypeSymbol? type)
+    {
+        for (; type is not null; type = type.BaseType)
+            if (string.Equals(type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                "Avalonia.Application", StringComparison.Ordinal)) return true;
+        return false;
     }
 
     private sealed record ManifestKey(LucentAssemblyIdentity Identity, string Fingerprint);

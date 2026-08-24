@@ -89,6 +89,80 @@ public sealed class LanguageServerProtocolTests
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
+
+    [TestMethod]
+    public async Task Native_theme_classes_require_direct_application_style_installation()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-native-theme-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var reference = Path.Combine(directory, "Package.dll");
+            WriteReferencedThemeAssembly(reference);
+            var project = Path.Combine(directory, "App.csproj");
+            var code = Path.Combine(directory, "App.cs");
+            var lui = Path.Combine(directory, "App.lui");
+            const string source = "namespace Demo; component App() => Button { Class: \"se\"; };";
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include=\"Avalonia\" Version=\"12.1.1\" /><Reference Include=\"Package\"><HintPath>Package.dll</HintPath></Reference><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(code, "using Avalonia; using Package; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new Theme()); }");
+            await File.WriteAllTextAsync(lui, source);
+            var uri = new Uri(lui).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(source, source.IndexOf("se\"", StringComparison.Ordinal) + 2) }),
+                Request(3, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var items = Response(ReadMessages(output.ToArray()), 2).GetProperty("result").EnumerateArray().ToArray();
+            Assert.IsTrue(items.Any(item => item.GetProperty("label").GetString() == "secondary"),
+                string.Join(", ", items.Select(item => item.GetProperty("label").GetString())));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task Native_theme_classes_require_direct_app_axaml_installation()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-native-theme-axaml-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            WriteReferencedThemeAssembly(Path.Combine(directory, "Package.dll"));
+            var project = Path.Combine(directory, "App.csproj");
+            var lui = Path.Combine(directory, "App.lui");
+            const string source = "namespace Demo; component App() => Button { Class: \"se\"; };";
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include=\"Avalonia\" Version=\"12.1.1\" /><Reference Include=\"Package\"><HintPath>Package.dll</HintPath></Reference><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(Path.Combine(directory, "App.axaml"), "<Application xmlns=\"https://github.com/avaloniaui\" xmlns:theme=\"using:Package\"><Application.Styles><theme:Theme /></Application.Styles></Application>");
+            await File.WriteAllTextAsync(lui, source);
+            var uri = new Uri(lui).AbsoluteUri;
+            using var input = BuildInput(Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }), Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(source, source.IndexOf("se\"", StringComparison.Ordinal) + 2) }),
+                Request(3, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            Assert.IsTrue(Response(ReadMessages(output.ToArray()), 2).GetProperty("result").EnumerateArray()
+                .Any(item => item.GetProperty("label").GetString() == "secondary"));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task Native_theme_activation_rejects_bare_invalid_and_wrong_namespace_evidence()
+    {
+        foreach (var (code, axaml) in new[]
+        {
+            ("using Avalonia; using Package; namespace Demo; sealed class App : Application { void Install() { var theme = new Theme(); } }", (string?)null),
+            ("using Avalonia; using Package; namespace Demo; sealed class NotApp { public Styles Styles { get; } = new(); void Install() => Styles.Add(new Theme()); }", (string?)null),
+            ("", "<Application xmlns=\"https://github.com/avaloniaui\" xmlns:theme=\"using:Package.Wrong\"><Application.Styles><theme:Theme /></Application.Styles></Application>"),
+            ("", "<Application xmlns=\"https://github.com/avaloniaui\" xmlns:theme=\"using:Package\"><Application.Resources><theme:Theme /></Application.Resources></Application>"),
+            ("", "<Application xmlns=\"https://github.com/avaloniaui\" xmlns:theme=\"using:Package\"><Application.Styles><ResourceDictionary><theme:Theme /></ResourceDictionary></Application.Styles></Application>")
+        })
+            Assert.IsFalse((await ThemeCompletionLabelsAsync(code, axaml)).Contains("secondary"));
+    }
     [TestMethod]
     public async Task Native_binding_protocol_completes_paths_and_explains_inherited_context()
     {
@@ -1743,6 +1817,46 @@ public sealed class LanguageServerProtocolTests
     }
 
     [TestMethod]
+    public async Task Class_values_complete_live_adjacent_css_tokens_without_request_path_io()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-class-values-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var lui = Path.Combine(directory, "App.lui");
+            var css = Path.Combine(directory, "App.css");
+            var project = Path.Combine(directory, "App.csproj");
+            const string source = "namespace Demo; component App() => Button { Class: \"existing se\"; };";
+            const string style = "Button.secondary { background: #fff; }\nButton.existing { background: #fff; }\n.surface { background: #000; }";
+            await File.WriteAllTextAsync(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include=\"Avalonia\" Version=\"12.1.1\" /><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(lui, source);
+            await File.WriteAllTextAsync(css, style);
+            var luiUri = new Uri(lui).AbsoluteUri;
+            var cssUri = new Uri(css).AbsoluteUri;
+            using var input = BuildInput(
+                Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = cssUri, languageId = "css", version = 1, text = style } }),
+                Notification("textDocument/didOpen", new { textDocument = new { uri = luiUri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri = luiUri }, position = PositionAtOffset(source, source.IndexOf("se\"", StringComparison.Ordinal) + 2) }),
+                Request(3, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            var items = Response(ReadMessages(output.ToArray()), 2).GetProperty("result").EnumerateArray().ToArray();
+            Assert.IsTrue(items.Any(item => item.GetProperty("label").GetString() == "secondary"));
+            Assert.IsFalse(items.Any(item => item.GetProperty("label").GetString() == "existing"));
+            Assert.IsTrue(items.All(item => item.GetProperty("label").GetString() != "surface"));
+            var secondary = items.Single(item => item.GetProperty("label").GetString() == "secondary");
+            var edit = secondary.GetProperty("textEdit");
+            Assert.AreEqual(source.IndexOf("se\"", StringComparison.Ordinal), edit.GetProperty("range").GetProperty("start").GetProperty("character").GetInt32());
+            Assert.AreEqual(source.IndexOf("se\"", StringComparison.Ordinal) + 2, edit.GetProperty("range").GetProperty("end").GetProperty("character").GetInt32());
+            Assert.AreEqual("secondary", edit.GetProperty("newText").GetString());
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task Css_token_index_is_project_scoped_overlay_aware_and_maps_each_class_literal_token()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"lucent-css-project-index-{Guid.NewGuid():N}");
@@ -1810,7 +1924,7 @@ public sealed class LanguageServerProtocolTests
                 .ToArray();
             CollectionAssert.DoesNotContain(lucentClassValueLabels, "first");
             CollectionAssert.DoesNotContain(lucentClassValueLabels, "second");
-            CollectionAssert.DoesNotContain(lucentClassValueLabels, "overlay-second");
+            CollectionAssert.Contains(lucentClassValueLabels, "overlay-second");
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
@@ -2028,6 +2142,50 @@ public sealed class LanguageServerProtocolTests
         var compilation = CSharpCompilation.Create("Package",
             [CSharpSyntaxTree.ParseText("public sealed class PackageMarker { }")],
             [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)],
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = File.Create(path);
+        var emitted = compilation.Emit(stream, manifestResources: [new ResourceDescription(
+            LucentModuleManifest.ResourceName, () => new MemoryStream(manifest), isPublic: true)]);
+        Assert.IsTrue(emitted.Success, string.Join(Environment.NewLine, emitted.Diagnostics));
+    }
+
+    private static async Task<string[]> ThemeCompletionLabelsAsync(string code, string? axaml)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-theme-negative-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            WriteReferencedThemeAssembly(Path.Combine(directory, "Package.dll"));
+            const string source = "namespace Demo; component App() => Button { Class: \"se\"; };";
+            await File.WriteAllTextAsync(Path.Combine(directory, "App.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include=\"Avalonia\" Version=\"12.1.1\" /><Reference Include=\"Package\"><HintPath>Package.dll</HintPath></Reference><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(Path.Combine(directory, "App.cs"), code);
+            await File.WriteAllTextAsync(Path.Combine(directory, "App.lui"), source);
+            if (axaml is not null) await File.WriteAllTextAsync(Path.Combine(directory, "App.axaml"), axaml);
+            var uri = new Uri(Path.Combine(directory, "App.lui")).AbsoluteUri;
+            using var input = BuildInput(Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }), Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(source, source.IndexOf("se\"", StringComparison.Ordinal) + 2) }),
+                Request(3, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            return Response(ReadMessages(output.ToArray()), 2).GetProperty("result").EnumerateArray()
+                .Select(item => item.GetProperty("label").GetString()!).ToArray();
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    private static void WriteReferencedThemeAssembly(string path)
+    {
+        var identity = new LucentAssemblyIdentity("Package", "0.0.0.0", "", "");
+        var manifest = LucentModuleManifest.Serialize(new LucentModuleManifestModel(1, 0, 0, "1.0",
+            identity, ["Package.Theme"], [new StyleClassEntry("secondary", "Avalonia.Controls.Button",
+                StyleClassOrigin.NativeTheme, null, "theme button")], []));
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+            .Select(reference => MetadataReference.CreateFromFile(reference))
+            .Append(MetadataReference.CreateFromFile(typeof(Avalonia.Styling.Styles).Assembly.Location));
+        var compilation = CSharpCompilation.Create("Package",
+            [CSharpSyntaxTree.ParseText("namespace Package; public sealed class Theme : Avalonia.Styling.Styles { }")],
+            references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         using var stream = File.Create(path);
         var emitted = compilation.Emit(stream, manifestResources: [new ResourceDescription(

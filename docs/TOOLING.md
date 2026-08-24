@@ -125,7 +125,13 @@ reference manifests from embedded PE resources with `PEReader` and
 identity and PE fingerprint, bounds them to that generation, and reports an
 invalid manifest at most once per project generation. CSS selector completion
 consumes published referenced class entries (with no package-source definition);
-`Class:` values remain excluded. Completion does not open files, load or execute assemblies, use a
+`Class:` literal segments complete whitespace-delimited adjacent CSS classes and
+classes from an exactly activated native-theme manifest. The completion edits
+only the active token, excludes duplicate tokens, and ranks compatible native
+types first. Activation requires a semantically resolved direct
+`Application.Styles.Add(new Theme())` or an `App.axaml` element whose `using:`
+namespace exactly matches the catalog type; construction alone is not evidence.
+Completion does not open files, load or execute assemblies, use a
 network, or read a second theme/global/utility manifest format. Missing
 manifests are silent.
 
@@ -161,9 +167,8 @@ generation before the next completion request; completion itself performs no
 filesystem or project-loading work.
 
 CSS selector/resource/token completion and navigation use the shared compiler
-catalog. Deliberately, CSS class *values* in `Class:` have no completion: a
-class name is authored in Lucent, while selector semantics are provided in its
-adjacent CSS file.
+catalog. `Class:` completion is limited to literal tokens; arbitrary C# class
+expressions and interpolation expressions remain ordinary C#.
 
 ## Hot reload
 

@@ -18,9 +18,10 @@ different build.
 
 The current language server discovers the owning SDK project through its
 `LucentSource` items and uses design-time MSBuild for project-aware Avalonia
-symbols. Component-parameter and CSS class/token completion, document symbols,
-metadata-as-source navigation, formatting, and semantic tokens remain future
-work.
+symbols. `Class:` values complete indexed adjacent and explicitly installed
+theme classes, including inside string literals. Component-parameter
+completion, document symbols, metadata-as-source navigation, formatting, and
+semantic tokens remain future work.
 
 ## Troubleshooting
 

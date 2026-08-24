@@ -49,6 +49,13 @@
         "title": "Lucent: Show Language Server Output"
       }
     ],
+    "configurationDefaults": {
+      "[lucent]": {
+        "editor.quickSuggestions": {
+          "strings": "on"
+        }
+      }
+    },
     "configuration": {
       "title": "Lucent",
       "properties": {

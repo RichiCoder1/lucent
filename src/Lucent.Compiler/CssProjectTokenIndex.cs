@@ -12,13 +12,13 @@ public sealed class CssProjectTokenIndex
     private readonly IReadOnlyDictionary<string, string> _documents;
     private readonly IReadOnlyList<CssNavigation> _classes;
     private readonly IReadOnlyList<CssNavigation> _resources;
-    private readonly IReadOnlyList<string> _catalogClasses;
+    private readonly IReadOnlyList<StyleClassEntry> _catalogClasses;
 
     private CssProjectTokenIndex(
         IReadOnlyDictionary<string, string> documents,
         IReadOnlyList<CssNavigation> classes,
         IReadOnlyList<CssNavigation> resources,
-        IReadOnlyList<string> catalogClasses)
+        IReadOnlyList<StyleClassEntry> catalogClasses)
     {
         _documents = documents;
         _classes = classes;
@@ -26,8 +26,8 @@ public sealed class CssProjectTokenIndex
         _catalogClasses = catalogClasses;
     }
 
-    public static CssProjectTokenIndex Create(IEnumerable<CssProjectDocument> documents,
-        IEnumerable<string>? catalogClasses = null)
+    internal static CssProjectTokenIndex Create(IEnumerable<CssProjectDocument> documents,
+        IEnumerable<StyleClassEntry>? catalogClasses = null)
     {
         ArgumentNullException.ThrowIfNull(documents);
         var source = documents
@@ -42,9 +42,10 @@ public sealed class CssProjectTokenIndex
             else if (path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
                 AddLucentClasses(path, text, classes);
         }
-        return new CssProjectTokenIndex(source, Distinct(classes), Distinct(resources),
-            (catalogClasses ?? []).Where(name => !string.IsNullOrWhiteSpace(name))
-                .Distinct(StringComparer.Ordinal).OrderBy(name => name, StringComparer.Ordinal).ToArray());
+        var entries = new List<StyleClassEntry>(catalogClasses ?? []);
+        foreach (var (path, text) in source.Where(item => item.Key.EndsWith(".css", StringComparison.OrdinalIgnoreCase)))
+            entries.AddRange(LiveClasses(path, text));
+        return new CssProjectTokenIndex(source, Distinct(classes), Distinct(resources), new StyleClassCatalog(entries).Entries);
     }
 
     public IReadOnlyList<LucentCompletionItem> GetCompletions(string sourcePath, int offset)
@@ -56,7 +57,7 @@ public sealed class CssProjectTokenIndex
                     "Avalonia resource", token.Name, "Known resource() key"))
                 .OrderBy(item => item.Label, StringComparer.Ordinal).ToArray();
         if (FindClass(text, offset) is { } @class && IsSelectorPosition(text, offset))
-            return _classes.Select(token => token.Name).Concat(_catalogClasses)
+            return _classes.Select(token => token.Name).Concat(_catalogClasses.Select(entry => entry.Name))
                 .Distinct(StringComparer.Ordinal)
                 .Where(name => name.StartsWith(@class.Name, StringComparison.OrdinalIgnoreCase))
                 .Select(name => new LucentCompletionItem(name, LucentCompletionItemKind.Value,
@@ -64,6 +65,59 @@ public sealed class CssProjectTokenIndex
                 .OrderBy(item => item.Label, StringComparer.Ordinal).ToArray();
         return [];
     }
+
+    internal IReadOnlyList<LucentCompletionItem> GetClassValueCompletions(
+        string sourceText, int offset, string? receivingType)
+    {
+        if (!TryFindClassLiteralSegment(sourceText, offset, out var token)) return [];
+        var used = token.Value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Where(name => !string.Equals(name, token.Active, StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+        return _catalogClasses
+            .Where(entry => entry.Origin != StyleClassOrigin.LocalCss || entry.Definition is not null)
+            .Where(entry => entry.Name.StartsWith(token.Active, StringComparison.OrdinalIgnoreCase) && !used.Contains(entry.Name))
+            .OrderBy(entry => Rank(entry, receivingType))
+            .ThenBy(entry => entry.Name, StringComparer.Ordinal)
+            .Select(entry => new LucentCompletionItem(entry.Name, LucentCompletionItemKind.Value,
+                entry.Origin == StyleClassOrigin.LocalCss ? "Adjacent CSS" : "Active theme",
+                entry.Name, entry.Detail, SortText: $"{Rank(entry, receivingType):D1}-{entry.Name}",
+                ReplacementSpan: token.ActiveSpan))
+            .ToArray();
+    }
+
+    private static int Rank(StyleClassEntry entry, string? receivingType) =>
+        entry.ApplicableType is null ? 2 : string.Equals(entry.ApplicableType, receivingType, StringComparison.Ordinal) ? 0 : 1;
+
+    private static IEnumerable<StyleClassEntry> LiveClasses(string path, string text)
+    {
+        var (sheet, _) = StyleSheetParser.Parse(text, path);
+        foreach (var rule in sheet.Rules)
+        foreach (var name in rule.ClassNames.Distinct(StringComparer.Ordinal))
+            yield return new StyleClassEntry(name, rule.TypeName, StyleClassOrigin.LocalCss,
+                new SourceIdentity(path, string.Empty, rule.SelectorOffset, rule.SelectorText.Length), rule.SelectorText);
+    }
+
+    private static bool TryFindClassLiteralSegment(string text, int offset, out (string Value, string Active, SourceSpan ActiveSpan) token)
+    {
+        token = default;
+        var cursor = Math.Clamp(offset, 0, text.Length);
+        var quote = cursor > 0 ? text.LastIndexOfAny(['"', '\''], cursor - 1) : -1;
+        if (quote < 0 || (quote > 0 && text[quote - 1] == '\\')) return false;
+        var end = text.IndexOf(text[quote], quote + 1);
+        if (end < cursor || end < 0 || !IsClassValue(text, quote)) return false;
+        // Interpolation expressions are C#, not literal class text.
+        var interpolationOpen = text.LastIndexOf('{', cursor - 1);
+        if (interpolationOpen > quote && interpolationOpen > text.LastIndexOf('}', cursor - 1)) return false;
+        var start = cursor;
+        while (start > quote + 1 && !char.IsWhiteSpace(text[start - 1])) start--;
+        var finish = cursor;
+        while (finish < end && !char.IsWhiteSpace(text[finish])) finish++;
+        token = (text[(quote + 1)..end], text[start..finish], new SourceSpan(start, finish - start));
+        return true;
+    }
+
+    private static bool IsClassValue(string text, int quote) =>
+        text[..quote].TrimEnd().TrimEnd('$', '@').TrimEnd().EndsWith("Class:", StringComparison.Ordinal);
 
     public CssNavigation? GetDefinition(string sourcePath, int offset)
     {
