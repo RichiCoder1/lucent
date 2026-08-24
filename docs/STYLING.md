@@ -98,6 +98,31 @@ conditions, imports, keyframes, transforms, and CSS runtime parsing remain
 unsupported. Reduced motion is an application/theme concern; zero-duration
 native resources preserve final state.
 
+## Global styles
+
+Project-wide rules are opt-in build inputs:
+
+```xml
+<ItemGroup>
+  <LucentStyle Include="Styles/app.css" />
+</ItemGroup>
+```
+
+Evaluated item order is preserved (later files win at equal native priority).
+The build emits one public `<RootNamespace>.LucentStyles` for apps and
+libraries. Hosts install it explicitly; libraries never install themselves:
+
+```csharp
+Styles.Add(new MyApp.LucentStyles());
+Styles.Add(new SharedLibrary.LucentStyles());
+```
+
+An executable project with `LucentStyle` items and no direct call emits a
+warning with that call. Completion reads the same embedded module manifest only
+after the direct semantic installation; construction, aliases, and indirect
+flows do not activate it. No runtime CSS parser, startup hook, or transitive
+library installation exists.
+
 ## Design tokens
 
 CSS custom properties are the preferred authoring model for design tokens:

@@ -4,6 +4,8 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
+using Lucent.Compiler.CodeGeneration;
+using Lucent.Compiler.Styling;
 
 namespace Lucent.Compiler.MSBuild;
 
@@ -24,6 +26,14 @@ public sealed class CompileLucent : Task
     [Required]
     public ITaskItem[] Sources { get; set; } = [];
 
+    /// <summary>Ordered project-wide CSS inputs compiled into LucentStyles.</summary>
+    public ITaskItem[] Styles { get; set; } = [];
+    public string RootNamespace { get; set; } = string.Empty;
+    public string OutputType { get; set; } = string.Empty;
+
+    // Kept for direct task callers from the Plan 008a seam; LucentStyle now owns generated catalogs.
+    public ITaskItem[] StyleCatalogTypes { get; set; } = [];
+
     /// <summary>
     /// The intermediate directory for generated C#.
     /// </summary>
@@ -42,9 +52,6 @@ public sealed class CompileLucent : Task
     public string AssemblyOriginatorKeyFile { get; set; } = string.Empty;
     public string PublicSign { get; set; } = string.Empty;
     public string DelaySign { get; set; } = string.Empty;
-
-    /// <summary>Non-executable public type metadata names exported as style catalogs.</summary>
-    public ITaskItem[] StyleCatalogTypes { get; set; } = [];
 
     /// <summary>
     /// The consuming project's resolved metadata references.
@@ -89,7 +96,7 @@ public sealed class CompileLucent : Task
         GeneratedFiles = [];
         ModuleManifestFiles = [];
 
-        if (Sources.Length == 0)
+        if (Sources.Length == 0 && Styles.Length == 0)
         {
             if (string.IsNullOrWhiteSpace(OutputDirectory))
             {
@@ -154,7 +161,8 @@ public sealed class CompileLucent : Task
             LanguageVersion,
             Nullable,
             DefineConstants,
-            GetExistingPaths(ProjectReferences));
+            GetExistingPaths(ProjectReferences),
+            RootNamespace: EffectiveRootNamespace());
 
         foreach (var sourceItem in Sources)
         {
@@ -246,11 +254,28 @@ public sealed class CompileLucent : Task
 
         try
         {
-            if (!TryGetStyleCatalogTypes(out var styleCatalogTypes))
+            if (!TryGetStyleCatalogTypes(out var explicitCatalogs)) return false;
+            var generatedCatalog = $"{EffectiveRootNamespace()}.LucentStyles";
+            var globalStyles = ReadGlobalStyles(generatedCatalog);
+            if (globalStyles is null) return false;
+            string[] styleCatalogTypes = explicitCatalogs.Concat(globalStyles.Count == 0 ? [] : [generatedCatalog])
+                .Distinct(StringComparer.Ordinal).OrderBy(type => type, StringComparer.Ordinal).ToArray();
+            if (globalStyles.Count > 0)
             {
-                GeneratedFiles = [];
-                ModuleManifestFiles = [];
-                return false;
+                var parsed = new List<BoundStyleRule>();
+                foreach (var style in globalStyles)
+                {
+                    var result = StyleSheetParser.Parse(style.Text, style.Path);
+                    LogDiagnostics(style.Path, result.Diagnostics);
+                    if (result.Diagnostics.Any(diagnostic => diagnostic.Severity == LucentDiagnosticSeverity.Error)) return false;
+                    parsed.AddRange(result.Sheet.Rules);
+                }
+                var output = Path.Combine(OutputDirectory, "LucentStyles.g.cs");
+                pendingOutputs.Add(new PendingOutput(output,
+                    GeneralCSharpEmitter.EmitGlobalStyles(EffectiveRootNamespace(), new BoundStyleSheet(parsed))));
+                if (IsExecutableProject() && !LucentCompiler.HasDirectStyleInstall(projectContext, generatedCatalog))
+                    Log.LogWarning(null, "LUC9009", null, ProjectPath, 0, 0, 0, 0,
+                        $"LucentStyle items require explicit installation: Styles.Add(new {generatedCatalog}());");
             }
             foreach (var pendingOutput in pendingOutputs)
             {
@@ -280,6 +305,7 @@ public sealed class CompileLucent : Task
                         System.Security.SecurityElement.Escape(path) + "\" />"))
                 .Concat(inputs.Where(input => input.StylePath is not null)
                     .Select(input => Path.GetFullPath(input.StylePath!))
+                    .Concat(globalStyles.Select(style => Path.GetFullPath(style.Path)))
                     .Distinct(GetPathComparer())
                     .OrderBy(path => path, GetPathComparer())
                     .Select(path => "    <_LucentTrackedStyle Include=\"" +
@@ -302,7 +328,8 @@ public sealed class CompileLucent : Task
                 projectContext,
                 inputs,
                 identity,
-                styleCatalogTypes));
+                styleCatalogTypes,
+                globalStyles));
         }
         catch (IOException exception)
         {
@@ -404,18 +431,40 @@ public sealed class CompileLucent : Task
         .Distinct(StringComparer.Ordinal)
         .ToArray();
 
+    private List<LucentGlobalStyleInput>? ReadGlobalStyles(string catalogType)
+    {
+        var styles = new List<LucentGlobalStyleInput>();
+        foreach (var item in Styles)
+        {
+            var path = GetFullPath(item);
+            if (path is null) return null;
+            try { styles.Add(new LucentGlobalStyleInput(path, File.ReadAllText(path), catalogType)); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                LogError("LUC9002", path, 1, 1, $"Unable to read Lucent style: {exception.Message}");
+                return null;
+            }
+        }
+        return styles;
+    }
+
     private bool TryGetStyleCatalogTypes(out string[] types)
     {
         types = StyleCatalogTypes.Select(item => item.ItemSpec.Trim()).ToArray();
         if (types.Any(string.IsNullOrWhiteSpace) || types.Distinct(StringComparer.Ordinal).Count() != types.Length)
         {
-            LogError("LUC9008", null, 0, 0,
-                "Lucent style catalog metadata names must be non-empty and unique.");
+            LogError("LUC9008", null, 0, 0, "Lucent style catalog metadata names must be non-empty and unique.");
             return false;
         }
         Array.Sort(types, StringComparer.Ordinal);
         return true;
     }
+
+    private string EffectiveRootNamespace() => string.IsNullOrWhiteSpace(RootNamespace)
+        ? (string.IsNullOrWhiteSpace(AssemblyName) ? "Lucent" : AssemblyName) : RootNamespace;
+
+    private bool IsExecutableProject() => string.Equals(OutputType, "Exe", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(OutputType, "WinExe", StringComparison.OrdinalIgnoreCase);
 
     private void LogDiagnostics(
         string sourcePath,

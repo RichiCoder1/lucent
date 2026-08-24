@@ -126,10 +126,10 @@ identity and PE fingerprint, bounds them to that generation, and reports an
 invalid manifest at most once per project generation. CSS selector completion
 consumes published referenced class entries (with no package-source definition);
 `Class:` literal segments complete whitespace-delimited adjacent CSS classes and
-classes from an exactly activated native-theme manifest. The completion edits
+classes from an exactly activated native-theme or global-style manifest. The completion edits
 only the active token, excludes duplicate tokens, and ranks compatible native
 types first. Activation requires a semantically resolved direct
-`Application.Styles.Add(new Theme())` or an `App.axaml` element whose `using:`
+`Application.Styles.Add(new Theme())`, `Application.Styles.Add(new LucentStyles())`, or an `App.axaml` element whose `using:`
 namespace exactly matches the catalog type; construction alone is not evidence.
 Completion does not open files, load or execute assemblies, use a
 network, or read a second theme/global/utility manifest format. Missing

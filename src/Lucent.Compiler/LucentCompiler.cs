@@ -33,6 +33,48 @@ public static class LucentCompiler
             cache.Diagnostics.ToImmutableArray());
     }
 
+    internal static bool HasDirectStyleInstall(LucentProjectContext context, string catalogType)
+    {
+        var compilation = ProjectSemanticCompilation.CreateBaseCompilation(context);
+        var parseOptions = compilation.SyntaxTrees.FirstOrDefault()?.Options as CSharpParseOptions
+            ?? CSharpParseOptions.Default;
+        compilation = compilation.AddSyntaxTrees(
+            CSharpSyntaxTree.ParseText(StyleCatalogStub(catalogType), parseOptions));
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var add in tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>())
+            {
+                if (add.Expression is not Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Add", Expression: var styles } ||
+                    add.ArgumentList.Arguments.Count != 1 ||
+                    add.ArgumentList.Arguments[0].Expression is not Microsoft.CodeAnalysis.CSharp.Syntax.ObjectCreationExpressionSyntax created ||
+                    UsesAlias(created.Type, model) ||
+                    model.GetSymbolInfo(styles).Symbol is not IPropertySymbol { Name: "Styles" } property ||
+                    !IsApplicationStyles(property)) continue;
+                var resolved = model.GetTypeInfo(created).Type?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+                if (string.Equals(resolved, catalogType, StringComparison.Ordinal)) return true;
+            }
+        }
+        return false;
+    }
+
+    private static string StyleCatalogStub(string catalogType)
+    {
+        var separator = catalogType.LastIndexOf('.');
+        return separator < 0
+            ? $"public sealed class {catalogType} : global::Avalonia.Styling.Styles {{ }}"
+            : $"namespace {catalogType[..separator]}; public sealed class {catalogType[(separator + 1)..]} : global::Avalonia.Styling.Styles {{ }}";
+    }
+
+    private static bool IsApplicationStyles(IPropertySymbol property) =>
+        property.OriginalDefinition.ContainingType
+            .ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == "Avalonia.Application";
+
+    private static bool UsesAlias(Microsoft.CodeAnalysis.CSharp.Syntax.TypeSyntax type, SemanticModel model) =>
+        type.DescendantNodesAndSelf().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.NameSyntax>()
+            .Any(name => name is Microsoft.CodeAnalysis.CSharp.Syntax.AliasQualifiedNameSyntax ||
+                         model.GetAliasInfo(name) is not null);
+
     /// <summary>
     /// Rebinds one open source against its existing project snapshot when its
     /// exported component signatures have not changed. Callers must rebuild the

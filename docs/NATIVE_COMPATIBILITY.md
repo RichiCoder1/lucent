@@ -12,7 +12,7 @@ Lucent projects use public Avalonia APIs; they do not attempt XAML parity.
 | Referenced custom and third-party controls | supported | NativeCompatibilityMatrixTests.Referenced_assembly_control_resolves_property_and_event_metadata |
 | Exact root mounting, fragments, lifetime, and automation | supported | NativeCompatibilityMatrixTests.Generated_clr_event_invokes_and_unsubscribes_on_dispose; GeneralCompilerTests.Indirect_and_structural_roots_do_not_emit_approximate_mount_root; AccessibilityTests.Shown_shell_palette_and_settings_have_exact_accessibility_contract |
 | TemplateContent and IDeferredContent | bounded subset | GeneralCompilerTests.Template_content_emits_fresh_public_deferred_content_without_component_capture; NativeCompatibilityMatrixTests.Explicit_csharp_template_escape_builds_richer_content |
-| Adjacent, global, and theme precedence/value restoration | escape through explicit Avalonia C# | NativeCompatibilityMatrixTests.Native_style_order_restores_previous_and_local_values (native Style only; Lucent sources are deferred to Plans 009, 009a, and 009b) |
+| Adjacent, global, and theme precedence/value restoration | supported | NativeCompatibilityMatrixTests.Native_style_order_restores_previous_and_local_values; NativeCompatibilityMatrixTests.Global_catalog_order_is_host_controlled_and_adjacent_wins |
 
 `resource("key")` is the supported Lucent CSS dynamic-resource form. Static
 resource lookup and richer native resource composition remain explicit Avalonia
@@ -29,8 +29,9 @@ Avalonia 12.1.1 exposes no public eager binding-path parser. The bounded
 `new Binding("Path")` form therefore leaves path validation to Avalonia when the
 binding attaches.
 
-Adjacent/global/theme precedence and value restoration have no Lucent contract
-yet. Plans 009, 009a, and 009b own those sources and their restoration tests;
-until then authors use native Avalonia `Style` APIs explicitly. This is not a
-claim of general XAML, `ControlTemplate`, markup-extension, or runtime wrapper
-support.
+`LucentStyle` catalogs are explicit `Application.Styles` entries. An adjacent
+component style wins over a global catalog for the same property. Between two
+global catalogs, the observed winner follows host `Styles.Add` order; packages
+must not claim a portable cross-catalog precedence. Removing a later style
+restores the earlier style, and a local value still wins. This is not a claim of
+general XAML, `ControlTemplate`, markup-extension, or runtime wrapper support.

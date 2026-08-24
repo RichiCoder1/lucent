@@ -11,12 +11,15 @@ public sealed record LucentProjectContext(
     string? Nullable = null,
     string? DefineConstants = null,
     IReadOnlyList<string>? ProjectReferencePaths = null,
-    string? TargetPath = null)
+    string? TargetPath = null,
+    IReadOnlyList<string>? GlobalStylePaths = null,
+    string? RootNamespace = null)
 {
     public IReadOnlyList<string> References => ReferencePaths ?? [];
 
     public IReadOnlyList<string> Sources => SourcePaths ?? [];
     public IReadOnlyList<string> LucentSources => LucentSourcePaths ?? [];
+    public IReadOnlyList<string> GlobalStyles => GlobalStylePaths ?? [];
     public IReadOnlyList<string> GlobalUsings => GlobalUsingDirectives ?? [];
     public IReadOnlyList<string> ProjectReferences => ProjectReferencePaths ?? [];
     public IReadOnlyList<string> PreprocessorSymbols => (DefineConstants ?? string.Empty)

@@ -10,7 +10,7 @@
     <ProjectReference Include="$(LucentRuntimeProject)" />
   </ItemGroup>
 
-  <Target Name="CollectLucentGenerationInputs" Condition="'@(LucentSource)' != ''">
+  <Target Name="CollectLucentGenerationInputs" Condition="'@(LucentSource)' != '' or '@(LucentStyle)' != ''">
     <ItemGroup>
       <_LucentAdjacentStyleCandidate Include="@(LucentSource->'%(RootDir)%(Directory)%(Filename).css')" />
       <_LucentAdjacentStyle Include="@(_LucentAdjacentStyleCandidate)"
@@ -37,7 +37,7 @@
   <Target Name="WriteLucentGenerationInputs" Condition="'$(LucentCompilerEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'">
     <MakeDir Directories="$(LucentCompilerOutputDirectory)" />
     <PropertyGroup>
-      <_LucentGenerationIdentity>AssemblyName=$(AssemblyName)|AssemblyVersion=$(AssemblyVersion)|AssemblyCulture=$(AssemblyCulture)|SignAssembly=$(SignAssembly)|AssemblyOriginatorKeyFile=$(AssemblyOriginatorKeyFile)|PublicSign=$(PublicSign)|DelaySign=$(DelaySign)|TargetFramework=$(TargetFramework)|LangVersion=$(LangVersion)|Nullable=$(Nullable)|DefineConstants=$(DefineConstants)|GlobalUsings=@(Using, '|')|StyleCatalogs=@(LucentStyleCatalog, '|')|ProjectReferences=@(ProjectReference, '|')</_LucentGenerationIdentity>
+      <_LucentGenerationIdentity>AssemblyName=$(AssemblyName)|AssemblyVersion=$(AssemblyVersion)|AssemblyCulture=$(AssemblyCulture)|SignAssembly=$(SignAssembly)|AssemblyOriginatorKeyFile=$(AssemblyOriginatorKeyFile)|PublicSign=$(PublicSign)|DelaySign=$(DelaySign)|TargetFramework=$(TargetFramework)|LangVersion=$(LangVersion)|Nullable=$(Nullable)|DefineConstants=$(DefineConstants)|GlobalUsings=@(Using, '|')|LucentStyles=@(LucentStyle, '|')|ProjectReferences=@(ProjectReference, '|')</_LucentGenerationIdentity>
     </PropertyGroup>
     <WriteLinesToFile File="$(_LucentGenerationInputsFullPath)"
                       Lines="$(_LucentGenerationIdentity)"
@@ -54,7 +54,7 @@
     Name="GenerateLucent"
     BeforeTargets="PrepareResources;CreateManifestResourceNames;CoreCompile"
     DependsOnTargets="CollectLucentGenerationInputs;ResolveReferences;GenerateGlobalUsings;GenerateAssemblyInfo;WriteLucentGenerationInputs"
-    Inputs="$(MSBuildProjectFullPath);$(_LucentGenerationInputsFullPath);@(LucentSource);@(_LucentTrackedSource);@(_LucentAdjacentStyle);@(_LucentTrackedStyle);@(_LucentSigningKey);@(Compile);@(ReferencePathWithRefAssemblies);@(ReferencePath)"
+    Inputs="$(MSBuildProjectFullPath);$(_LucentGenerationInputsFullPath);@(LucentSource);@(LucentStyle);@(_LucentTrackedSource);@(_LucentAdjacentStyle);@(_LucentTrackedStyle);@(_LucentSigningKey);@(Compile);@(ReferencePathWithRefAssemblies);@(ReferencePath)"
     Outputs="$(_LucentCompilerManifestFullPath);$(_LucentModuleManifestFullPath)"
     Condition="'$(LucentCompilerEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true'">
     <MakeDir Directories="$(LucentCompilerOutputDirectory)" />
@@ -68,6 +68,7 @@
 
     <CompileLucent
       Sources="@(LucentSource)"
+      Styles="@(LucentStyle)"
       OutputDirectory="$(LucentCompilerOutputDirectory)"
       ManifestPath="$(LucentCompilerManifestPath)"
       ModuleManifestPath="$(_LucentModuleManifestFullPath)"
@@ -78,6 +79,8 @@
       AssemblyOriginatorKeyFile="$(AssemblyOriginatorKeyFile)"
       PublicSign="$(PublicSign)"
       DelaySign="$(DelaySign)"
+      RootNamespace="$(RootNamespace)"
+      OutputType="$(OutputType)"
       StyleCatalogTypes="@(LucentStyleCatalog)"
       References="@(ReferencePathWithRefAssemblies);@(ReferencePath)"
       CSharpSources="@(Compile);$(MSBuildProjectDirectory)\$(GeneratedAssemblyInfoFile);$(MSBuildProjectDirectory)\$(TargetFrameworkMonikerAssemblyAttributesPath)"
@@ -112,7 +115,7 @@
   <Target Name="IncludeLucentModuleManifest"
           BeforeTargets="PrepareResources;CreateManifestResourceNames;CoreCompile"
           DependsOnTargets="GenerateLucent"
-          Condition="'$(LucentCompilerEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '@(LucentSource)' != '' and Exists('$(_LucentModuleManifestFullPath)')">
+          Condition="'$(LucentCompilerEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and ('@(LucentSource)' != '' or '@(LucentStyle)' != '') and Exists('$(_LucentModuleManifestFullPath)')">
     <ItemGroup>
       <!-- A consumer-owned resource is never silently replaced by Lucent. -->
       <_LucentModuleManifestCollisions Include="@(EmbeddedResource)"
@@ -143,7 +146,7 @@
   <!-- Reached only after CoreCompile's successful timestamp path. -->
   <Target Name="RemoveLucentModuleManifestWithoutSources"
           BeforeTargets="_TimeStampAfterCompile"
-          Condition="'$(LucentCompilerEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '@(LucentSource)' == ''">
+          Condition="'$(LucentCompilerEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '@(LucentSource)' == '' and '@(LucentStyle)' == ''">
     <Delete Files="$(_LucentCompilerManifestFullPath);$(_LucentModuleManifestFullPath);$(_LucentModuleManifestLastSuccessfulFullPath)" />
   </Target>
 

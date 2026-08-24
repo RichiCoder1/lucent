@@ -1,10 +1,18 @@
 using System.Collections;
 using System.Diagnostics;
+using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
+using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Headless;
+using Avalonia.Media;
+using Avalonia.Styling;
+using Avalonia.Threading;
 using Lucent.Compiler.MSBuild;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Utilities;
@@ -205,6 +213,72 @@ public sealed class CompileLucentTests
 
         Assert.IsFalse(task.Execute());
         Assert.IsTrue(engine.Errors.Any(error => error.Code == "LUC9008"));
+    }
+
+    [TestMethod]
+    public void Ordered_global_styles_generate_the_public_catalog_and_manifest_entries()
+    {
+        using var temporary = new TemporaryDirectory();
+        var first = Path.Combine(temporary.Path, "first.css");
+        var second = Path.Combine(temporary.Path, "second.css");
+        File.WriteAllText(first, "Border.shared { background: #ff0000; }");
+        File.WriteAllText(second, "Border.shared { background: #0000ff; }");
+        var engine = new CapturingBuildEngine();
+        var task = new CompileLucent
+        {
+            BuildEngine = engine, OutputDirectory = temporary.OutputDirectory,
+            Styles = [new TaskItem(first), new TaskItem(second)], RootNamespace = "Demo", AssemblyName = "Demo",
+        };
+
+        Assert.IsTrue(task.Execute(), string.Join(Environment.NewLine, engine.Errors));
+        var generated = File.ReadAllText(Path.Combine(temporary.OutputDirectory, "LucentStyles.g.cs"));
+        StringAssert.Contains(generated, "public sealed class LucentStyles");
+        Assert.IsTrue(generated.IndexOf("0xFF", StringComparison.Ordinal) < generated.LastIndexOf("0x00", StringComparison.Ordinal));
+        var manifest = File.ReadAllText(task.ModuleManifestFiles.Single().ItemSpec);
+        StringAssert.Contains(manifest, "Demo.LucentStyles");
+        StringAssert.Contains(manifest, "\"origin\":2");
+        Assert.IsEmpty(engine.Errors);
+    }
+
+    [TestMethod]
+    public void Global_styles_warn_only_for_an_executable_app_without_direct_installation()
+    {
+        using var temporary = new TemporaryDirectory();
+        var style = Path.Combine(temporary.Path, "app.css");
+        var app = Path.Combine(temporary.Path, "App.cs");
+        File.WriteAllText(style, "Border.card { background: #ff0000; }");
+        File.WriteAllText(app, "using Avalonia; namespace Demo; sealed class App : Application { }");
+        var (task, engine) = CreateTask(temporary, app);
+        task.Sources = [];
+        task.Styles = [new TaskItem(style)]; task.RootNamespace = "Demo"; task.OutputType = "Exe";
+        task.CSharpSources = [new TaskItem(app)];
+        task.References = [new TaskItem(typeof(Avalonia.Application).Assembly.Location)];
+        Assert.IsTrue(task.Execute());
+        Assert.IsTrue(engine.Warnings.Any(warning => warning.Code == "LUC9009" &&
+            warning.Message?.Contains("Styles.Add(new Demo.LucentStyles());", StringComparison.Ordinal) == true));
+
+        engine.Warnings.Clear();
+        File.WriteAllText(app, "using Avalonia; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new LucentStyles()); }");
+        Assert.IsTrue(task.Execute());
+        Assert.IsFalse(engine.Warnings.Any(warning => warning.Code == "LUC9009"));
+
+        foreach (var invalidInstall in new[]
+        {
+            "using Avalonia; using Catalog = Demo.LucentStyles; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new Catalog()); }",
+            "using Avalonia; using D = Demo; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new D.LucentStyles()); }",
+            "using Avalonia; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new global::Demo.LucentStyles()); }",
+            "using Avalonia; using Avalonia.Styling; namespace Demo; sealed class App : Application { public new Styles Styles { get; } = new(); void Install() => Styles.Add(new LucentStyles()); }",
+        })
+        {
+            engine.Warnings.Clear();
+            File.WriteAllText(app, invalidInstall);
+            Assert.IsTrue(task.Execute());
+            Assert.IsTrue(engine.Warnings.Any(warning => warning.Code == "LUC9009"), invalidInstall);
+        }
+
+        engine.Warnings.Clear(); task.OutputType = "Library";
+        Assert.IsTrue(task.Execute());
+        Assert.IsFalse(engine.Warnings.Any(warning => warning.Code == "LUC9009"));
     }
 
     [TestMethod]
@@ -480,6 +554,140 @@ public sealed class CompileLucentTests
             "-p:UseArtifactsOutput=true", $"-p:ArtifactsPath={Path.Combine(temporary.Path, "artifacts")}");
         Assert.AreEqual(0, clean.ExitCode, clean.Output);
         Assert.IsFalse(File.Exists(promoted));
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Generated_app_and_library_global_catalogs_run_through_public_Avalonia_apis()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        var library = Path.Combine(temporary.Path, "Library");
+        var app = Path.Combine(temporary.Path, "App");
+        Directory.CreateDirectory(library);
+        Directory.CreateDirectory(app);
+        await File.WriteAllTextAsync(Path.Combine(library, "library.css"), "Border.shared { background: #ff0000; }\nBorder.library-global { background: #ff0000; }");
+        await File.WriteAllTextAsync(Path.Combine(library, "Library.csproj"), $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework><RootNamespace>Fixture.Library</RootNamespace></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentStyle Include="library.css" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+        await File.WriteAllTextAsync(Path.Combine(app, "Generated.lui"),
+            "namespace Fixture.App; component Generated() => Border { Class: \"shared\"; }; ");
+        await File.WriteAllTextAsync(Path.Combine(app, "Generated.css"), "Border.shared { background: #00ff00; }");
+        await File.WriteAllTextAsync(Path.Combine(app, "app.css"), "Border.shared { background: #0000ff; }\nBorder.app-global { background: #0000ff; }\n.untyped-global { background: #0000ff; }");
+        await File.WriteAllTextAsync(Path.Combine(app, "Program.cs"),
+            "using Avalonia; namespace Fixture.App; sealed class App : Application { public App() => Styles.Add(new LucentStyles()); } static class Program { static void Main() { } }");
+        var appProject = Path.Combine(app, "App.csproj");
+        await File.WriteAllTextAsync(appProject, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><RootNamespace>Fixture.App</RootNamespace></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <PackageReference Include="Avalonia.Headless" Version="12.1.1" />
+                <ProjectReference Include="..{{Path.DirectorySeparatorChar}}Library{{Path.DirectorySeparatorChar}}Library.csproj" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentSource Include="Generated.lui" />
+                <LucentStyle Include="app.css" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+
+        var build = await RunDotNetAsync(app, "build", appProject, "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, build.ExitCode, build.Output);
+        Assert.IsFalse(build.Output.Contains("LUC9009", StringComparison.Ordinal), build.Output);
+        await RunGeneratedCatalogRuntimeAsync(
+            Path.Combine(app, "bin", "Debug", "net9.0", "App.dll"),
+            Path.Combine(library, "bin", "Debug", "net9.0", "Library.dll"));
+    }
+
+    [TestMethod]
+    public async System.Threading.Tasks.Task Packed_library_global_catalog_restores_from_an_isolated_local_feed()
+    {
+        using var temporary = new TemporaryDirectory();
+        var repository = FindRepositoryRoot();
+        var producer = Path.Combine(temporary.Path, "producer");
+        var packages = Path.Combine(temporary.Path, "packages");
+        var consumer = Path.Combine(temporary.Path, "consumer");
+        var cache = Path.Combine(temporary.Path, "package-cache");
+        Directory.CreateDirectory(producer);
+        Directory.CreateDirectory(packages);
+        Directory.CreateDirectory(consumer);
+        await File.WriteAllTextAsync(Path.Combine(producer, "library.css"),
+            "Border.package-first { background: #ff0000; }\nBorder.package-second { background: #0000ff; }");
+        var producerProject = Path.Combine(producer, "Producer.csproj");
+        await File.WriteAllTextAsync(producerProject, $$"""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup><TargetFramework>net9.0</TargetFramework><RootNamespace>Fixture.Packaged.Library</RootNamespace><AssemblyName>Fixture.Packaged.Library</AssemblyName><PackageId>Fixture.Packaged.Library</PackageId><Version>1.0.0</Version></PropertyGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.props")}}" />
+              <ItemGroup>
+                <PackageReference Include="Avalonia" Version="12.1.1" />
+                <ProjectReference Include="{{Path.Combine(repository, "src", "Lucent.Compiler.MSBuild", "Lucent.Compiler.MSBuild.csproj")}}" ReferenceOutputAssembly="false" PrivateAssets="all" />
+                <LucentStyle Include="library.css" />
+              </ItemGroup>
+              <Import Project="{{Path.Combine(repository, "build", "Lucent.Compiler.targets")}}" />
+            </Project>
+            """);
+        var build = await RunDotNetAsync(producer, "build", producerProject, "--nologo", "-nodeReuse:false");
+        Assert.AreEqual(0, build.ExitCode, build.Output);
+        var pack = await RunDotNetAsync(producer, "pack", producerProject, "--no-build", "--no-restore",
+            "--configuration", "Debug", "-o", packages, "--nologo", "-nodeReuse:false", "-p:BuildProjectReferences=false");
+        Assert.AreEqual(0, pack.ExitCode, pack.Output);
+
+        using (var assets = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(producer, "obj", "project.assets.json"))))
+        {
+            var globalPackages = Environment.GetEnvironmentVariable("NUGET_PACKAGES") ??
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+            foreach (var library in assets.RootElement.GetProperty("libraries").EnumerateObject())
+            {
+                var separator = library.Name.LastIndexOf('/');
+                var id = library.Name[..separator].ToLowerInvariant();
+                var version = library.Name[(separator + 1)..].ToLowerInvariant();
+                var source = Path.Combine(globalPackages, id, version, $"{id}.{version}.nupkg");
+                if (File.Exists(source)) File.Copy(source, Path.Combine(packages, Path.GetFileName(source)), overwrite: true);
+            }
+        }
+
+        await File.WriteAllTextAsync(Path.Combine(consumer, "NuGet.Config"),
+            $"<configuration><packageSources><clear /><add key=\"local\" value=\"{packages.Replace("\\", "/")}\" /></packageSources></configuration>");
+        var consumerProject = Path.Combine(consumer, "Consumer.csproj");
+        await File.WriteAllTextAsync(consumerProject, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include=\"Fixture.Packaged.Library\" Version=\"1.0.0\" /></ItemGroup></Project>");
+        await File.WriteAllTextAsync(Path.Combine(consumer, "Program.cs"), """
+            using System;
+            using System.Linq;
+            using System.Text.Json;
+            using Avalonia;
+            using Avalonia.Styling;
+            using Fixture.Packaged.Library;
+            var catalog = new LucentStyles();
+            var app = new ConsumerApp();
+            app.Styles.Add(catalog);
+            var selectors = catalog.OfType<Style>().Select(style => style.Selector!.ToString()).Order().ToArray();
+            using var stream = typeof(LucentStyles).Assembly.GetManifestResourceStream("Lucent.ModuleManifest.v1.json") ?? throw new Exception("missing manifest");
+            using var manifest = JsonDocument.Parse(stream);
+            var entries = manifest.RootElement.GetProperty("styleClasses").EnumerateArray()
+                .Where(entry => entry.GetProperty("origin").GetInt32() == 2 && entry.GetProperty("catalogType").GetString() == "Fixture.Packaged.Library.LucentStyles")
+                .Select(entry => entry.GetProperty("detail").GetString()).Order().ToArray();
+            if (!selectors.SequenceEqual(entries) || selectors.Length != 2) throw new Exception("catalog and manifest differ");
+            Console.WriteLine("packaged catalog ok");
+            sealed class ConsumerApp : Application { }
+            """);
+        var environment = new Dictionary<string, string> { ["NUGET_PACKAGES"] = cache };
+        var restore = await RunDotNetAsync(consumer, ["restore", consumerProject, "--nologo", "-nodeReuse:false"], environment);
+        Assert.AreEqual(0, restore.ExitCode, restore.Output);
+        var consumerBuild = await RunDotNetAsync(consumer, ["build", consumerProject, "--no-restore", "--nologo", "-nodeReuse:false"], environment);
+        Assert.AreEqual(0, consumerBuild.ExitCode, consumerBuild.Output);
+        var run = await RunDotNetAsync(consumer, ["run", consumerProject, "--no-build", "--no-restore", "--nologo"], environment);
+        Assert.AreEqual(0, run.ExitCode, run.Output);
+        StringAssert.Contains(run.Output, "packaged catalog ok");
     }
 
     [TestMethod]
@@ -877,9 +1085,11 @@ public sealed class CompileLucentTests
         return (task, buildEngine);
     }
 
-    private static async Task<(int ExitCode, string Output)> RunDotNetAsync(
-        string workingDirectory,
-        params string[] arguments)
+    private static Task<(int ExitCode, string Output)> RunDotNetAsync(string workingDirectory,
+        params string[] arguments) => RunDotNetAsync(workingDirectory, arguments, null);
+
+    private static async Task<(int ExitCode, string Output)> RunDotNetAsync(string workingDirectory,
+        string[] arguments, IReadOnlyDictionary<string, string>? environment)
     {
         var startInfo = new ProcessStartInfo("dotnet")
         {
@@ -889,11 +1099,126 @@ public sealed class CompileLucentTests
         };
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
+        if (environment is not null)
+            foreach (var (name, value) in environment) startInfo.Environment[name] = value;
         using var process = Process.Start(startInfo)!;
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         return (process.ExitCode, await stdout + await stderr);
+    }
+
+    private static System.Threading.Tasks.Task RunGeneratedCatalogRuntimeAsync(string appPath, string libraryPath)
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                AppBuilder.Configure<GeneratedCatalogTestApp>()
+                    .UseHeadless(new AvaloniaHeadlessPlatformOptions()).SetupWithoutStarting();
+                using var stop = new CancellationTokenSource();
+                Dispatcher.UIThread.Post(() =>
+                {
+                    try
+                    {
+                        var loadContext = new AssemblyLoadContext("generated-catalog-test", isCollectible: true);
+                        loadContext.Resolving += (_, name) =>
+                        {
+                            var path = Path.Combine(Path.GetDirectoryName(appPath)!, name.Name + ".dll");
+                            return File.Exists(path) ? loadContext.LoadFromStream(new MemoryStream(File.ReadAllBytes(path))) : null;
+                        };
+                        var library = loadContext.LoadFromStream(new MemoryStream(File.ReadAllBytes(libraryPath)));
+                        var app = loadContext.LoadFromStream(new MemoryStream(File.ReadAllBytes(appPath)));
+                        var appCatalog = CreateCatalog(app, "Fixture.App.LucentStyles");
+                        var libraryCatalog = CreateCatalog(library, "Fixture.Library.LucentStyles");
+                        AssertCatalog(appCatalog, app, "Fixture.App.LucentStyles");
+                        AssertCatalog(libraryCatalog, library, "Fixture.Library.LucentStyles");
+
+                        Application.Current!.Styles.Add(CreateCatalog(library, "Fixture.Library.LucentStyles"));
+                        Application.Current.Styles.Add(CreateCatalog(app, "Fixture.App.LucentStyles"));
+                        Assert.AreEqual(Colors.Blue, ColorOf("shared"));
+
+                        Application.Current.Styles.Clear();
+                        Application.Current.Styles.Add(CreateCatalog(app, "Fixture.App.LucentStyles"));
+                        Application.Current.Styles.Add(CreateCatalog(library, "Fixture.Library.LucentStyles"));
+                        Assert.AreEqual(Colors.Red, ColorOf("shared"));
+
+                        Application.Current.Styles.Clear();
+                        Application.Current.Styles.Add(CreateCatalog(library, "Fixture.Library.LucentStyles"));
+                        Application.Current.Styles.Add(CreateCatalog(app, "Fixture.App.LucentStyles"));
+                        var component = app.GetType("Fixture.App.GeneratedComponent", true)!
+                            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+                            .Single(constructor => constructor.GetParameters() is var parameters && parameters.Length == 2 &&
+                                parameters[0].ParameterType.Name == "IUiDispatcher").Invoke([null, null]);
+                        var generated = (Border)component.GetType().GetMethod("MountRoot")!.Invoke(component, null)!;
+                        Assert.AreEqual(Colors.Lime, ColorOf(generated));
+                        generated.Styles.Clear();
+                        Assert.AreEqual(Colors.Blue, ColorOf(generated));
+                        ((IDisposable)component).Dispose();
+                        Application.Current.Styles.Clear();
+                        loadContext.Unload();
+                    }
+                    catch (Exception error) { completion.TrySetException(error); }
+                    finally { stop.Cancel(); }
+                });
+                Dispatcher.UIThread.MainLoop(stop.Token);
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                completion.TrySetResult();
+            }
+            catch (Exception error)
+            {
+                completion.TrySetException(error);
+            }
+        }) { IsBackground = true };
+        if (OperatingSystem.IsWindows()) thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private static Styles CreateCatalog(Assembly assembly, string typeName) =>
+        (Styles)Activator.CreateInstance(assembly.GetType(typeName, true)!)!;
+
+    private static void AssertCatalog(Styles catalog, Assembly assembly, string typeName)
+    {
+        Assert.IsTrue(catalog.GetType().IsPublic);
+        Assert.AreEqual(typeName, catalog.GetType().FullName);
+        using var stream = assembly.GetManifestResourceStream("Lucent.ModuleManifest.v1.json")!;
+        using var manifest = JsonDocument.Parse(stream);
+        var generated = catalog.OfType<Style>().Select(style => style.Selector!.ToString()).Order().ToArray();
+        var entries = manifest.RootElement.GetProperty("styleClasses").EnumerateArray()
+            .Where(item => item.GetProperty("origin").GetInt32() == 2 &&
+                           item.GetProperty("catalogType").GetString() == typeName)
+            .Select(item => item.GetProperty("detail").GetString()).Order().ToArray();
+        CollectionAssert.AreEqual(entries, generated);
+        Assert.AreEqual(entries.Length, generated.Length);
+    }
+
+    private static Color ColorOf(string @class)
+    {
+        var border = new Border();
+        border.Classes.Add(@class);
+        return ColorOf(border);
+    }
+
+    private static Color ColorOf(Border border)
+    {
+        var window = new Window { Content = border };
+        try
+        {
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            return ((SolidColorBrush)border.Background!).Color;
+        }
+        finally
+        {
+            window.Close();
+            window.Content = null;
+            Dispatcher.UIThread.RunJobs();
+        }
     }
 
     private static int EmbeddedResourceCount(string assemblyPath, string name)
@@ -976,6 +1301,10 @@ public sealed class CompileLucentTests
 
         throw new DirectoryNotFoundException(
             "Could not locate the repository root from the test output directory.");
+    }
+
+    public sealed class GeneratedCatalogTestApp : Application
+    {
     }
 
     private sealed class TemporaryDirectory : IDisposable

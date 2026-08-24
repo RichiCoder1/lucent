@@ -31,7 +31,7 @@ public sealed class NativeCompatibilityMatrixTests
         new("Referenced custom and third-party controls", Supported, [Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Referenced_assembly_control_resolves_property_and_event_metadata")]),
         new("Exact root mounting, fragments, lifetime, and automation", Supported, [Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Generated_clr_event_invokes_and_unsubscribes_on_dispose"), Evidence("tests/Lucent.Compiler.Tests/GeneralCompilerTests.cs", "GeneralCompilerTests", "Indirect_and_structural_roots_do_not_emit_approximate_mount_root"), Evidence("tests/Lucent.Workbench.Tests/AccessibilityTests.cs", "AccessibilityTests", "Shown_shell_palette_and_settings_have_exact_accessibility_contract")]),
         new("TemplateContent and IDeferredContent", Bounded, [Evidence("tests/Lucent.Compiler.Tests/GeneralCompilerTests.cs", "GeneralCompilerTests", "Template_content_emits_fresh_public_deferred_content_without_component_capture"), Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Explicit_csharp_template_escape_builds_richer_content")]),
-        new("Adjacent, global, and theme precedence/value restoration", Escape, [Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Native_style_order_restores_previous_and_local_values")], " (native Style only; Lucent sources are deferred to Plans 009, 009a, and 009b)"),
+        new("Adjacent, global, and theme precedence/value restoration", Supported, [Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Native_style_order_restores_previous_and_local_values"), Evidence("tests/Lucent.Compiler.Tests/NativeCompatibilityMatrixTests.cs", "NativeCompatibilityMatrixTests", "Global_catalog_order_is_host_controlled_and_adjacent_wins")]),
     ];
 
     [TestMethod]
@@ -193,6 +193,25 @@ public sealed class NativeCompatibilityMatrixTests
         window.UpdateLayout();
         Assert.AreEqual(Colors.Green, ((SolidColorBrush)border.Background!).Color);
         window.Close();
+    }
+
+    [TestMethod]
+    public void Global_catalog_order_is_host_controlled_and_adjacent_wins()
+    {
+        EnsureHeadless();
+        var app = Application.Current!;
+        app.Styles.Clear();
+        var first = new Styles { new Style(x => x.OfType<Border>()) { Setters = { new Setter(Border.BackgroundProperty, new SolidColorBrush(Colors.Red)) } } };
+        var second = new Styles { new Style(x => x.OfType<Border>()) { Setters = { new Setter(Border.BackgroundProperty, new SolidColorBrush(Colors.Blue)) } } };
+        var window = new Window { Width = 100, Height = 100, Content = new Border() };
+        app.Styles.Add(first); app.Styles.Add(second); window.Show(); window.UpdateLayout();
+        Assert.AreEqual(Colors.Blue, ((SolidColorBrush)((Border)window.Content!).Background!).Color);
+        app.Styles.Remove(second); app.Styles.Insert(0, second); window.UpdateLayout();
+        Assert.AreEqual(Colors.Red, ((SolidColorBrush)((Border)window.Content!).Background!).Color);
+        ((Border)window.Content!).Styles.Add(new Style(x => x.OfType<Border>()) { Setters = { new Setter(Border.BackgroundProperty, new SolidColorBrush(Colors.Green)) } });
+        window.UpdateLayout();
+        Assert.AreEqual(Colors.Green, ((SolidColorBrush)((Border)window.Content!).Background!).Color);
+        window.Close(); app.Styles.Clear();
     }
 
     private static EvidenceReference Evidence(string path, string type, string method) => new(path, type, method);

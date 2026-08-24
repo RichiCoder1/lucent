@@ -26,7 +26,8 @@ internal static class LucentModuleManifest
         LucentProjectContext? context,
         IReadOnlyList<LucentSourceInput> sources,
         LucentAssemblyIdentity identity,
-        IReadOnlyList<string>? styleCatalogTypes = null)
+        IReadOnlyList<string>? styleCatalogTypes = null,
+        IReadOnlyList<LucentGlobalStyleInput>? globalStyles = null)
     {
         var classes = new List<StyleClassEntry>();
         var sourceEntries = new List<SourceIdentity>();
@@ -53,6 +54,22 @@ internal static class LucentModuleManifest
                     rule.SelectorText));
             }
         }
+        foreach (var style in globalStyles ?? [])
+        {
+            var logicalPath = LogicalPath(context, style.Path);
+            sourceEntries.Add(new SourceIdentity(logicalPath, Hash(style.Path, style.Text), 0, style.Text.Length));
+            foreach (var rule in StyleSheetParser.Parse(style.Text, style.Path).Sheet.Rules)
+            {
+            var targets = rule.TypeName is not null
+                ? [rule.TypeName]
+                : CssPropertyCatalog.InferProjectedTargetTypes(rule.Declarations);
+            foreach (var target in targets)
+            foreach (var name in rule.ClassNames.Distinct(StringComparer.Ordinal))
+                classes.Add(new StyleClassEntry(name, ManifestTypeName(target), StyleClassOrigin.GlobalStyle,
+                    new SourceIdentity(logicalPath, Hash(style.Path, style.Text), rule.SelectorOffset, rule.SelectorText.Length),
+                    ManifestSelector(rule, target), style.CatalogType));
+            }
+        }
 
         var model = new LucentModuleManifestModel(
             FormatMajor, FormatMinor, 0,
@@ -62,6 +79,31 @@ internal static class LucentModuleManifest
             CanonicalizeClasses(classes).ToArray(),
             sourceEntries.OrderBy(source => source.LogicalPath, StringComparer.Ordinal).ToArray());
         return Serialize(model);
+    }
+
+    private static string ManifestTypeName(string typeName) =>
+        typeName.StartsWith("global::", StringComparison.Ordinal) ? typeName[8..] :
+        typeName.Contains('.', StringComparison.Ordinal) ? typeName : "Avalonia.Controls." + typeName;
+
+    private static string ManifestSelector(BoundStyleRule rule, string targetType)
+    {
+        var parts = new List<string>();
+        for (var index = 0; index < rule.Selector.Parts.Count; index++)
+        {
+            var part = rule.Selector.Parts[index];
+            var type = part.TypeName ?? (index == rule.Selector.Parts.Count - 1 ? targetType : null);
+            var text = type is null ? string.Empty : ManifestTypeName(type).Split('.').Last();
+            text += string.Concat(part.Classes.Select(name => "." + name));
+            if (part.Name is not null) text += "#" + part.Name;
+            if (index == rule.Selector.Parts.Count - 1 && rule.PseudoClass is not null)
+                text += ":" + rule.PseudoClass;
+            parts.Add(text);
+        }
+        var result = parts[0];
+        for (var index = 1; index < parts.Count; index++)
+            result += rule.Selector.Combinators[index - 1] == BoundStyleCombinator.Child
+                ? " > " + parts[index] : " " + parts[index];
+        return result;
     }
 
     internal static byte[] Serialize(LucentModuleManifestModel model) =>
@@ -147,7 +189,8 @@ internal static class LucentModuleManifest
                 candidate.StyleCatalogTypes.Distinct(StringComparer.Ordinal).Count() != candidate.StyleCatalogTypes.Count ||
                 candidate.Sources.Any(source => !ValidSource(source)) ||
                 candidate.StyleClasses.Any(entry => !ValidEntry(entry)) ||
-                candidate.StyleClasses.GroupBy(entry => (entry.Name, entry.ApplicableType), StringTupleComparer.Instance)
+                candidate.StyleClasses.Any(entry => entry.CatalogType is not null && !candidate.StyleCatalogTypes.Contains(entry.CatalogType, StringComparer.Ordinal)) ||
+                candidate.StyleClasses.GroupBy(entry => (entry.Name, entry.ApplicableType, entry.CatalogType), StringTupleComparer.Instance)
                     .Any(group => group.Count() > 1))
             {
                 error = "The Lucent module manifest is invalid for its containing assembly.";
@@ -352,6 +395,8 @@ internal static class LucentModuleManifest
         !string.IsNullOrWhiteSpace(source.LogicalPath) && source.Start >= 0 && source.Length >= 0 && IsHash(source.ContentHash);
     private static bool ValidEntry(StyleClassEntry? entry) => entry is not null &&
         !string.IsNullOrWhiteSpace(entry.Name) && entry.Detail is not null && Enum.IsDefined(entry.Origin) &&
+        (entry.Origin != StyleClassOrigin.GlobalStyle ||
+         !string.IsNullOrWhiteSpace(entry.CatalogType)) &&
         (entry.Definition is null || ValidSource(entry.Definition));
     private static bool IsHash(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
@@ -366,8 +411,9 @@ internal static class LucentModuleManifest
             return false;
         return sources.EnumerateArray().All(HasRequiredSourceFields) &&
             classes.EnumerateArray().All(entry => entry.ValueKind == JsonValueKind.Object &&
-                entry.TryGetProperty("name", out _) && entry.TryGetProperty("origin", out _) &&
+                entry.TryGetProperty("name", out _) && entry.TryGetProperty("origin", out var origin) &&
                 entry.TryGetProperty("detail", out _) &&
+                (origin.GetInt32() != (int)StyleClassOrigin.GlobalStyle || entry.TryGetProperty("catalogType", out _)) &&
                 (!entry.TryGetProperty("definition", out var definition) ||
                  definition.ValueKind == JsonValueKind.Null || HasRequiredSourceFields(definition)));
     }
@@ -380,10 +426,11 @@ internal static class LucentModuleManifest
     private static IEnumerable<StyleClassEntry> CanonicalizeClasses(IEnumerable<StyleClassEntry> entries) => entries
         .OrderBy(entry => entry.Name, StringComparer.Ordinal)
         .ThenBy(entry => entry.ApplicableType, StringComparer.Ordinal)
+        .ThenBy(entry => entry.CatalogType, StringComparer.Ordinal)
         .ThenBy(entry => entry.Definition?.LogicalPath, StringComparer.Ordinal)
         .ThenBy(entry => entry.Definition?.Start ?? -1)
         .ThenBy(entry => entry.Detail, StringComparer.Ordinal)
-        .GroupBy(entry => (entry.Name, entry.ApplicableType))
+        .GroupBy(entry => (entry.Name, entry.ApplicableType, entry.CatalogType))
         .Select(group => group.First());
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -392,15 +439,17 @@ internal static class LucentModuleManifest
         WriteIndented = false,
     };
 
-    private sealed class StringTupleComparer : IEqualityComparer<(string, string?)>
+    private sealed class StringTupleComparer : IEqualityComparer<(string, string?, string?)>
     {
         internal static readonly StringTupleComparer Instance = new();
-        public bool Equals((string, string?) x, (string, string?) y) =>
+        public bool Equals((string, string?, string?) x, (string, string?, string?) y) =>
             string.Equals(x.Item1, y.Item1, StringComparison.Ordinal) &&
-            string.Equals(x.Item2, y.Item2, StringComparison.Ordinal);
-        public int GetHashCode((string, string?) value) =>
+            string.Equals(x.Item2, y.Item2, StringComparison.Ordinal) &&
+            string.Equals(x.Item3, y.Item3, StringComparison.Ordinal);
+        public int GetHashCode((string, string?, string?) value) =>
             HashCode.Combine(StringComparer.Ordinal.GetHashCode(value.Item1),
-                value.Item2 is null ? 0 : StringComparer.Ordinal.GetHashCode(value.Item2));
+                value.Item2 is null ? 0 : StringComparer.Ordinal.GetHashCode(value.Item2),
+                value.Item3 is null ? 0 : StringComparer.Ordinal.GetHashCode(value.Item3));
     }
 }
 
@@ -409,17 +458,19 @@ internal enum StyleClassOrigin { LocalCss, NativeTheme, GlobalStyle, Utility }
 internal sealed record LucentAssemblyIdentity(string Name, string Version, string Culture, string PublicKeyToken);
 internal sealed record SourceIdentity(string LogicalPath, string ContentHash, int Start, int Length);
 internal sealed record StyleClassEntry(string Name, string? ApplicableType, StyleClassOrigin Origin,
-    SourceIdentity? Definition, string Detail);
+    SourceIdentity? Definition, string Detail, string? CatalogType = null);
+internal sealed record LucentGlobalStyleInput(string Path, string Text, string CatalogType);
 /// <summary>Producer-neutral immutable style metadata for project generations.</summary>
 internal sealed class StyleClassCatalog
 {
     internal StyleClassCatalog(IEnumerable<StyleClassEntry> entries) => Entries = entries
         .OrderBy(entry => entry.Name, StringComparer.Ordinal)
         .ThenBy(entry => entry.ApplicableType, StringComparer.Ordinal)
+        .ThenBy(entry => entry.CatalogType, StringComparer.Ordinal)
         .ThenBy(entry => entry.Definition?.LogicalPath, StringComparer.Ordinal)
         .ThenBy(entry => entry.Definition?.Start ?? -1)
         .ThenBy(entry => entry.Detail, StringComparer.Ordinal)
-        .GroupBy(entry => (entry.Name, entry.ApplicableType))
+        .GroupBy(entry => (entry.Name, entry.ApplicableType, entry.CatalogType))
         .Select(group => group.First()).ToImmutableArray();
     internal ImmutableArray<StyleClassEntry> Entries { get; }
 }
@@ -464,13 +515,12 @@ internal sealed class ReferencedManifestCache
                 if (add.Expression is not MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Add", Expression: var styles } ||
                     add.ArgumentList.Arguments.Count != 1 ||
                     add.ArgumentList.Arguments[0].Expression is not ObjectCreationExpressionSyntax theme ||
-                    model.GetSymbolInfo(add).Symbol is not IMethodSymbol { Parameters.Length: 1 } method ||
+                    UsesAlias(theme.Type, model) ||
                     model.GetSymbolInfo(styles).Symbol is not IPropertySymbol { Name: "Styles" } property ||
-                    !IsApplication(property.ContainingType))
+                    !IsApplicationStyles(property))
                     continue;
                 var type = model.GetTypeInfo(theme).Type;
-                if (type is null ||
-                    !((CSharpCompilation)compilation).ClassifyConversion(type, method.Parameters[0].Type).IsImplicit)
+                if (type is null || !IsStyles(type))
                     continue;
                 activeTypes.Add(type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
             }
@@ -501,8 +551,17 @@ internal sealed class ReferencedManifestCache
 
         return new StyleClassCatalog(_manifests.Values.SelectMany(item =>
             item.Manifest.StyleClasses.Entries.Where(entry =>
-                entry.Origin != StyleClassOrigin.NativeTheme ||
-                item.Manifest.StyleCatalogTypes.Any(activeTypes.Contains))));
+                (entry.Origin != StyleClassOrigin.NativeTheme && entry.Origin != StyleClassOrigin.GlobalStyle) ||
+                (entry.Origin == StyleClassOrigin.GlobalStyle
+                    ? activeTypes.Contains(entry.CatalogType!)
+                    : item.Manifest.StyleCatalogTypes.Any(activeTypes.Contains)))));
+    }
+
+    private static bool IsStyles(ITypeSymbol? type)
+    {
+        for (; type is not null; type = type.BaseType)
+            if (type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == "Avalonia.Styling.Styles") return true;
+        return false;
     }
 
     // This is invoked while building a generation, never by a completion request.
@@ -534,13 +593,14 @@ internal sealed class ReferencedManifestCache
         if (_reported.Add(path)) _diagnostics.Add(error);
     }
 
-    private static bool IsApplication(ITypeSymbol? type)
-    {
-        for (; type is not null; type = type.BaseType)
-            if (string.Equals(type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-                "Avalonia.Application", StringComparison.Ordinal)) return true;
-        return false;
-    }
+    private static bool IsApplicationStyles(IPropertySymbol property) =>
+        string.Equals(property.OriginalDefinition.ContainingType
+            .ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+            "Avalonia.Application", StringComparison.Ordinal);
+
+    private static bool UsesAlias(TypeSyntax type, SemanticModel model) =>
+        type.DescendantNodesAndSelf().OfType<NameSyntax>()
+            .Any(name => name is AliasQualifiedNameSyntax || model.GetAliasInfo(name) is not null);
 
     private sealed record ManifestKey(LucentAssemblyIdentity Identity, string Fingerprint);
 }

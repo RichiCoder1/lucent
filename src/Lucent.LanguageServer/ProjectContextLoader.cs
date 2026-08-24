@@ -336,9 +336,10 @@ internal sealed class ProjectContextLoader
         startInfo.ArgumentList.Add("-getTargetResult:ResolveReferences");
         startInfo.ArgumentList.Add("-getItem:Compile");
         startInfo.ArgumentList.Add("-getItem:LucentSource");
+        startInfo.ArgumentList.Add("-getItem:LucentStyle");
         startInfo.ArgumentList.Add("-getItem:Using");
         startInfo.ArgumentList.Add("-getItem:ProjectReference");
-        startInfo.ArgumentList.Add("-getProperty:TargetFramework,LangVersion,Nullable,DefineConstants,ImplicitUsings,TargetPath");
+        startInfo.ArgumentList.Add("-getProperty:TargetFramework,LangVersion,Nullable,DefineConstants,ImplicitUsings,TargetPath,RootNamespace");
         startInfo.ArgumentList.Add("-p:DesignTimeBuild=true");
         startInfo.ArgumentList.Add("-p:BuildingProject=false");
         startInfo.ArgumentList.Add("-nologo");
@@ -419,6 +420,10 @@ internal sealed class ProjectContextLoader
             items.TryGetProperty("Using", out var usingItems)
                 ? ReadUsingItems(usingItems).ToArray()
                 : [];
+        var globalStyles = root.TryGetProperty("Items", out items) &&
+            items.TryGetProperty("LucentStyle", out var styleItems)
+                ? ReadItems(styleItems).Where(path => path.EndsWith(".css", StringComparison.OrdinalIgnoreCase)).ToArray()
+                : [];
         var projectReferences = root.TryGetProperty("Items", out items) &&
             items.TryGetProperty("ProjectReference", out var projectReferenceItems)
                 ? ReadItems(projectReferenceItems).ToArray()
@@ -431,7 +436,7 @@ internal sealed class ProjectContextLoader
         return new LucentProjectContext(
             projectPath, references, sources, lucentSources, globalUsings,
             Property("TargetFramework"), Property("LangVersion"), Property("Nullable"),
-            Property("DefineConstants"), projectReferences, Property("TargetPath"));
+            Property("DefineConstants"), projectReferences, Property("TargetPath"), globalStyles, Property("RootNamespace"));
     }
 
     private static bool IsManifestGenerated(JsonElement compileItems, string path) =>

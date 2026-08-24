@@ -895,7 +895,7 @@ public static class LanguageServer
                             [new CssProjectDocument(GetSourcePath(uri), document.Text)]))
                     : document.CssTokens is { } cssTokens
                         ? LucentCompiler.GetCompletions(document.Text, offset, document.Analysis, cssTokens)
-                        : LucentCompiler.GetCompletions(document.Text, offset, document.Analysis))
+                : LucentCompiler.GetCompletions(document.Text, offset, document.Analysis))
                 .GroupBy(item => item.Label, StringComparer.Ordinal)
                 .Select(group => group.First())
                 .OrderBy(item => item.SortText ?? item.Label, StringComparer.Ordinal)
@@ -1134,6 +1134,10 @@ public static class LanguageServer
                 paths.Add(Path.GetFullPath(lui));
                 paths.Add(Path.ChangeExtension(Path.GetFullPath(lui), ".css"));
             }
+            var hasLocalInstall = context is not null && LucentCompiler.HasDirectStyleInstall(context,
+                $"{context.RootNamespace ?? Path.GetFileNameWithoutExtension(context.ProjectPath)}.LucentStyles");
+            if (hasLocalInstall)
+                foreach (var style in context!.GlobalStyles) paths.Add(Path.GetFullPath(style));
 
             var documents = new List<CssProjectDocument>();
             foreach (var path in paths.OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
@@ -1141,12 +1145,16 @@ public static class LanguageServer
                 var uri = new Uri(path).AbsoluteUri;
                 if (_documents.TryGetValue(uri, out var open))
                 {
-                    documents.Add(new CssProjectDocument(path, open.Text));
+                    documents.Add(new CssProjectDocument(path, open.Text,
+                        context?.GlobalStyles.Contains(path, StringComparer.OrdinalIgnoreCase) == true
+                            ? StyleClassOrigin.GlobalStyle : StyleClassOrigin.LocalCss));
                 }
                 else if (File.Exists(path))
                 {
                     documents.Add(new CssProjectDocument(path,
-                        await File.ReadAllTextAsync(path, cancellationToken)));
+                        await File.ReadAllTextAsync(path, cancellationToken),
+                        context?.GlobalStyles.Contains(path, StringComparer.OrdinalIgnoreCase) == true
+                            ? StyleClassOrigin.GlobalStyle : StyleClassOrigin.LocalCss));
                 }
             }
             // Manifest I/O belongs to this generation/index construction, never CompletionAsync.

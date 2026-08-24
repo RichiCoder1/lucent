@@ -118,7 +118,7 @@ public sealed class LanguageServerProtocolTests
             Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
             var items = Response(ReadMessages(output.ToArray()), 2).GetProperty("result").EnumerateArray().ToArray();
             Assert.IsTrue(items.Any(item => item.GetProperty("label").GetString() == "secondary"),
-                string.Join(", ", items.Select(item => item.GetProperty("label").GetString())));
+                string.Join(", ", items.Select(item => item.GetProperty("label").GetString() + ":" + item.GetProperty("detail").GetString())));
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
@@ -162,6 +162,26 @@ public sealed class LanguageServerProtocolTests
             ("", "<Application xmlns=\"https://github.com/avaloniaui\" xmlns:theme=\"using:Package\"><Application.Styles><ResourceDictionary><theme:Theme /></ResourceDictionary></Application.Styles></Application>")
         })
             Assert.IsFalse((await ThemeCompletionLabelsAsync(code, axaml)).Contains("secondary"));
+    }
+
+    [TestMethod]
+    public async Task Global_style_classes_require_their_exact_direct_catalog_installation()
+    {
+        var installed = await GlobalStyleCompletionItemsAsync("using Avalonia; using Package; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new FirstLucentStyles()); }");
+        Assert.IsTrue(installed.Any(item => item.Label == "first-global" && item.Detail == "Global CSS"));
+        Assert.IsFalse(installed.Any(item => item.Label == "second-global"));
+
+        foreach (var code in new[]
+        {
+            "using Avalonia; using Package; namespace Demo; sealed class App : Application { void Install() { var catalog = new FirstLucentStyles(); } }",
+            "using Avalonia; using Package; using Catalog = Package.FirstLucentStyles; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new Catalog()); }",
+            "using Avalonia; using P = Package; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new P.FirstLucentStyles()); }",
+            "using Avalonia; using Package; namespace Demo; sealed class App : Application { void Install() { var styles = Styles; styles.Add(new FirstLucentStyles()); } }",
+            "using Avalonia; using Package; namespace Demo; sealed class App : Application { public new Styles Styles { get; } = new(); void Install() => Styles.Add(new FirstLucentStyles()); }",
+            "using Avalonia; namespace Demo; sealed class App : Application { void Install() => Styles.Add(new global::Package.FirstLucentStyles()); }",
+            "using Avalonia; using Package; namespace Demo; sealed class App : Application { }",
+        })
+            Assert.IsFalse((await GlobalStyleCompletionItemsAsync(code)).Any(item => item.Label == "first-global"), code);
     }
     [TestMethod]
     public async Task Native_binding_protocol_completes_paths_and_explains_inherited_context()
@@ -2174,12 +2194,37 @@ public sealed class LanguageServerProtocolTests
         finally { Directory.Delete(directory, recursive: true); }
     }
 
+    private static async Task<(string Label, string Detail)[]> GlobalStyleCompletionItemsAsync(string code)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"lucent-global-style-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            WriteReferencedGlobalStyleAssembly(Path.Combine(directory, "Package.dll"));
+            const string source = "namespace Demo; component App() => Border { Class: \"first-\"; };";
+            await File.WriteAllTextAsync(Path.Combine(directory, "App.csproj"), "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><PackageReference Include=\"Avalonia\" Version=\"12.1.1\" /><Reference Include=\"Package\"><HintPath>Package.dll</HintPath></Reference><LucentSource Include=\"App.lui\" /></ItemGroup></Project>");
+            await File.WriteAllTextAsync(Path.Combine(directory, "App.cs"), code);
+            await File.WriteAllTextAsync(Path.Combine(directory, "App.lui"), source);
+            var uri = new Uri(Path.Combine(directory, "App.lui")).AbsoluteUri;
+            using var input = BuildInput(Request(1, "initialize", new { rootUri = new Uri(directory).AbsoluteUri, capabilities = new { } }),
+                Notification("initialized", new { }), Notification("textDocument/didOpen", new { textDocument = new { uri, languageId = "lucent", version = 1, text = source } }),
+                Request(2, "textDocument/completion", new { textDocument = new { uri }, position = PositionAtOffset(source, source.IndexOf("first-", StringComparison.Ordinal) + "first-".Length) }),
+                Request(3, "shutdown", null), Notification("exit", null));
+            using var output = new MemoryStream();
+            Assert.AreEqual(0, await LanguageServer.RunAsync(input, output));
+            return Response(ReadMessages(output.ToArray()), 2).GetProperty("result").EnumerateArray()
+                .Select(item => (item.GetProperty("label").GetString()!, item.GetProperty("detail").GetString()!)).ToArray();
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     private static void WriteReferencedThemeAssembly(string path)
     {
         var identity = new LucentAssemblyIdentity("Package", "0.0.0.0", "", "");
         var manifest = LucentModuleManifest.Serialize(new LucentModuleManifestModel(1, 0, 0, "1.0",
             identity, ["Package.Theme"], [new StyleClassEntry("secondary", "Avalonia.Controls.Button",
                 StyleClassOrigin.NativeTheme, null, "theme button")], []));
+        Assert.IsTrue(LucentModuleManifest.TryReadNormalized(manifest, identity, out _, out var error), error);
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Select(reference => MetadataReference.CreateFromFile(reference))
             .Append(MetadataReference.CreateFromFile(typeof(Avalonia.Styling.Styles).Assembly.Location));
@@ -2187,6 +2232,26 @@ public sealed class LanguageServerProtocolTests
             [CSharpSyntaxTree.ParseText("namespace Package; public sealed class Theme : Avalonia.Styling.Styles { }")],
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        using var stream = File.Create(path);
+        var emitted = compilation.Emit(stream, manifestResources: [new ResourceDescription(
+            LucentModuleManifest.ResourceName, () => new MemoryStream(manifest), isPublic: true)]);
+        Assert.IsTrue(emitted.Success, string.Join(Environment.NewLine, emitted.Diagnostics));
+    }
+
+    private static void WriteReferencedGlobalStyleAssembly(string path)
+    {
+        var identity = new LucentAssemblyIdentity("Package", "0.0.0.0", "", "");
+        var manifest = LucentModuleManifest.Serialize(new LucentModuleManifestModel(1, 0, 0, "1.0", identity,
+            ["Package.FirstLucentStyles", "Package.SecondLucentStyles"],
+            [new StyleClassEntry("first-global", "Avalonia.Controls.Border", StyleClassOrigin.GlobalStyle, null, "Border.first-global", "Package.FirstLucentStyles"),
+             new StyleClassEntry("second-global", "Avalonia.Controls.Border", StyleClassOrigin.GlobalStyle, null, "Border.second-global", "Package.SecondLucentStyles")], []));
+        Assert.IsTrue(LucentModuleManifest.TryReadNormalized(manifest, identity, out _, out var error), error);
+        var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+            .Select(reference => MetadataReference.CreateFromFile(reference))
+            .Append(MetadataReference.CreateFromFile(typeof(Avalonia.Styling.Styles).Assembly.Location));
+        var compilation = CSharpCompilation.Create("Package",
+            [CSharpSyntaxTree.ParseText("namespace Package; public sealed class FirstLucentStyles : Avalonia.Styling.Styles { } public sealed class SecondLucentStyles : Avalonia.Styling.Styles { }")],
+            references, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         using var stream = File.Create(path);
         var emitted = compilation.Emit(stream, manifestResources: [new ResourceDescription(
             LucentModuleManifest.ResourceName, () => new MemoryStream(manifest), isPublic: true)]);

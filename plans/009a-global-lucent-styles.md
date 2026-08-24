@@ -9,6 +9,7 @@
 
 ## Status
 
+- **Status**: IN PROGRESS
 - **Priority**: P1
 - **Effort**: L
 - **Risk**: HIGH
@@ -142,16 +143,16 @@ library global catalogs without repository paths.
 
 ## Done criteria
 
-- [ ] Ordered `LucentStyle` inputs generate installable app/library style types.
-- [ ] Installation is explicit and applies across the Avalonia application.
-- [ ] Adjacent CSS demonstrably wins over global CSS through public APIs.
-- [ ] Cross-catalog conflicts are tested in both host installation orders and
+- [x] Ordered `LucentStyle` inputs generate installable app/library style types.
+- [x] Installation is explicit and applies across the Avalonia application.
+- [x] Adjacent CSS demonstrably wins over global CSS through public APIs.
+- [x] Cross-catalog conflicts are tested in both host installation orders and
       documented as host-controlled rather than portable precedence.
-- [ ] Completion reads local/installed-library metadata without I/O or execution.
-- [ ] Generated catalog types/classes and Plan 008a manifest entries have one
+- [x] Completion reads local/installed-library metadata without I/O or execution.
+- [x] Generated catalog types/classes and Plan 008a manifest entries have one
       parity test and no second metadata shape.
-- [ ] Missing app installation warns; libraries remain host-owned and quiet.
-- [ ] No hidden startup, runtime parser, transitive install, or duplicate catalog
+- [x] Missing app installation warns; libraries remain host-owned and quiet.
+- [x] No hidden startup, runtime parser, transitive install, or duplicate catalog
       implementation is introduced.
 
 ## STOP conditions

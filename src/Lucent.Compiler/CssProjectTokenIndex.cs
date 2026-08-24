@@ -32,20 +32,21 @@ public sealed class CssProjectTokenIndex
         ArgumentNullException.ThrowIfNull(documents);
         var source = documents
             .GroupBy(document => Path.GetFullPath(document.SourcePath), PathComparer)
-            .ToDictionary(group => group.Key, group => group.Last().Text, PathComparer);
+            .ToDictionary(group => group.Key, group => group.Last(), PathComparer);
         var classes = new List<CssNavigation>();
         var resources = new List<CssNavigation>();
-        foreach (var (path, text) in source)
+        foreach (var (path, document) in source)
         {
+            var text = document.Text;
             if (path.EndsWith(".css", StringComparison.OrdinalIgnoreCase))
                 AddCssTokens(path, text, classes, resources);
             else if (path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
                 AddLucentClasses(path, text, classes);
         }
         var entries = new List<StyleClassEntry>(catalogClasses ?? []);
-        foreach (var (path, text) in source.Where(item => item.Key.EndsWith(".css", StringComparison.OrdinalIgnoreCase)))
-            entries.AddRange(LiveClasses(path, text));
-        return new CssProjectTokenIndex(source, Distinct(classes), Distinct(resources), new StyleClassCatalog(entries).Entries);
+        foreach (var (path, document) in source.Where(item => item.Key.EndsWith(".css", StringComparison.OrdinalIgnoreCase)))
+            entries.AddRange(LiveClasses(path, document.Text, document.Origin));
+        return new CssProjectTokenIndex(source.ToDictionary(item => item.Key, item => item.Value.Text, PathComparer), Distinct(classes), Distinct(resources), new StyleClassCatalog(entries).Entries);
     }
 
     public IReadOnlyList<LucentCompletionItem> GetCompletions(string sourcePath, int offset)
@@ -78,22 +79,35 @@ public sealed class CssProjectTokenIndex
             .Where(entry => entry.Name.StartsWith(token.Active, StringComparison.OrdinalIgnoreCase) && !used.Contains(entry.Name))
             .OrderBy(entry => Rank(entry, receivingType))
             .ThenBy(entry => entry.Name, StringComparer.Ordinal)
+            .GroupBy(entry => entry.Name, StringComparer.Ordinal)
+            .Select(group => group.OrderBy(entry => Rank(entry, receivingType)).ThenBy(entry => entry.Detail, StringComparer.Ordinal).First())
             .Select(entry => new LucentCompletionItem(entry.Name, LucentCompletionItemKind.Value,
-                entry.Origin == StyleClassOrigin.LocalCss ? "Adjacent CSS" : "Active theme",
+                entry.Origin == StyleClassOrigin.LocalCss ? "Adjacent CSS" : entry.Origin == StyleClassOrigin.GlobalStyle ? "Global CSS" : "Active theme",
                 entry.Name, entry.Detail, SortText: $"{Rank(entry, receivingType):D1}-{entry.Name}",
                 ReplacementSpan: token.ActiveSpan))
             .ToArray();
     }
 
-    private static int Rank(StyleClassEntry entry, string? receivingType) =>
-        entry.ApplicableType is null ? 2 : string.Equals(entry.ApplicableType, receivingType, StringComparison.Ordinal) ? 0 : 1;
+    private static int Rank(StyleClassEntry entry, string? receivingType)
+    {
+        var applicability = entry.ApplicableType is null ? 2 :
+            string.Equals(entry.ApplicableType, receivingType, StringComparison.Ordinal) ? 0 : 1;
+        var origin = entry.Origin switch
+        {
+            StyleClassOrigin.LocalCss => 0,
+            StyleClassOrigin.GlobalStyle => 3,
+            StyleClassOrigin.NativeTheme => 6,
+            _ => 9,
+        };
+        return origin + applicability;
+    }
 
-    private static IEnumerable<StyleClassEntry> LiveClasses(string path, string text)
+    private static IEnumerable<StyleClassEntry> LiveClasses(string path, string text, StyleClassOrigin origin)
     {
         var (sheet, _) = StyleSheetParser.Parse(text, path);
         foreach (var rule in sheet.Rules)
         foreach (var name in rule.ClassNames.Distinct(StringComparer.Ordinal))
-            yield return new StyleClassEntry(name, rule.TypeName, StyleClassOrigin.LocalCss,
+            yield return new StyleClassEntry(name, rule.TypeName, origin,
                 new SourceIdentity(path, string.Empty, rule.SelectorOffset, rule.SelectorText.Length), rule.SelectorText);
     }
 
@@ -280,4 +294,5 @@ public sealed class CssProjectTokenIndex
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 }
 
-public sealed record CssProjectDocument(string SourcePath, string Text);
+internal sealed record CssProjectDocument(string SourcePath, string Text,
+    StyleClassOrigin Origin = StyleClassOrigin.LocalCss);
