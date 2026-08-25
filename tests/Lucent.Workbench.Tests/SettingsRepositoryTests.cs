@@ -24,11 +24,12 @@ public sealed class SettingsRepositoryTests
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         var path = Path.Combine(directory, "settings.json");
         using var repository = new JsonFileSettingsRepository(path, _ => { });
-        await repository.SaveAsync(new WorkbenchSettings("repo", 9999, false), CancellationToken.None);
+        await repository.SaveAsync(new WorkbenchSettings("repo", 9999, false, "Dark"), CancellationToken.None);
         var loaded = await repository.LoadAsync(CancellationToken.None);
         Assert.AreEqual("repo", loaded.RecentWorkspace);
         Assert.AreEqual(640, loaded.SidebarWidth);
         Assert.IsFalse(loaded.ProblemsVisible);
+        Assert.AreEqual("Dark", loaded.Theme);
         Assert.IsEmpty(Directory.GetFiles(directory, "*.tmp", SearchOption.TopDirectoryOnly));
     }
 

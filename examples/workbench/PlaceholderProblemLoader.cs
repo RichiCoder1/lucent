@@ -1,11 +1,7 @@
 namespace Lucent.Examples.Workbench;
 
-internal sealed class PlaceholderProblemLoader : IProblemLoader
+internal sealed class ProjectProblemLoader(WorkspaceService workspace) : IProblemLoader
 {
-    public Task<IReadOnlyList<ProblemItem>> LoadAsync(string? workspace, CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<ProblemItem>>([
-            new ProblemItem("problem-1", "WorkbenchApp.lui", 1, "Example diagnostic", ProblemSeverity.Warning),
-            new ProblemItem("problem-2", "DocumentPane.lui", 1, "Example diagnostic", ProblemSeverity.Info),
-            new ProblemItem("problem-3", "WorkspaceSidebar.lui", 1, "Example diagnostic", ProblemSeverity.Error),
-        ]);
+    public Task<IReadOnlyList<ProblemItem>> LoadAsync(string? workspacePath, CancellationToken cancellationToken) =>
+        workspace.LoadProblemsAsync(workspacePath, cancellationToken);
 }

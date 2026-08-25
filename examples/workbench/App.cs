@@ -42,13 +42,16 @@ internal sealed class App : Application
                 "Lucent", "Workbench", "settings.json");
             var settingsRepository = new JsonFileSettingsRepository(settingsPath, ReportUnhandled);
             var settings = settingsRepository.LoadAsync(CancellationToken.None).GetAwaiter().GetResult();
+            RequestedThemeVariant = settings.Theme switch { "Light" => ThemeVariant.Light, "Dark" => ThemeVariant.Dark, _ => ThemeVariant.Default };
             var saveCoordinator = new SettingsSaveCoordinator(settingsRepository, CancellationToken.None);
-            var documentSession = new DocumentSession(new OpenDocument("Program.cs", "// Workbench document\n"), () => { });
-            var problemLoader = new PlaceholderProblemLoader();
+            var workspace = new WorkspaceService();
+            RestoreWorkspaceAsync(workspace, settings, CancellationToken.None, ReportUnhandled).GetAwaiter().GetResult();
+            var documentSession = CreateSession(workspace);
+            var problemLoader = new ProjectProblemLoader(workspace);
 #pragma warning disable LUC004A003 // event-owned modeless component is disposed by the native Closed handler below
             var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token,
                 initialSettings: settings, saveCoordinator: saveCoordinator,
-                errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession,
+                errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession, workspace: workspace,
                 __lucent_reportUnhandled: ReportUnhandled);
             var window = component.MountRoot();
             ApplyWindowIcon(window);
@@ -85,12 +88,13 @@ internal sealed class App : Application
         var settingsRepository = new JsonFileSettingsRepository(settingsPath, ReportUnhandled);
         var settings = settingsRepository.LoadAsync(CancellationToken.None).GetAwaiter().GetResult();
         var saveCoordinator = new SettingsSaveCoordinator(settingsRepository, CancellationToken.None);
-        var documentSession = new DocumentSession(new OpenDocument("Program.cs", "// Workbench document\n"), () => { });
-        var problemLoader = new PlaceholderProblemLoader();
+        var workspace = new WorkspaceService();
+        var documentSession = CreateSession(workspace);
+        var problemLoader = new ProjectProblemLoader(workspace);
 #pragma warning disable LUC004A003 // event-owned smoke component is disposed by the native Closed handler below
         var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token,
             initialSettings: settings, saveCoordinator: saveCoordinator,
-            errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession,
+            errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession, workspace: workspace,
             __lucent_reportUnhandled: ReportUnhandled);
         var window = component.MountRoot();
         lifetime.MainWindow = window;
@@ -102,24 +106,22 @@ internal sealed class App : Application
             Dispatcher.UIThread.RunJobs();
             window.UpdateLayout();
             var buttons = Descendants(window).OfType<Button>().ToArray();
-            var before = Descendants(window).OfType<TextBlock>().Any(text => text.Text == "3 problems");
+            var before = Descendants(window).OfType<TextBlock>().Any(text => text.Text == "0 problems");
             var openBinding = window.KeyBindings.First(binding =>
                 binding.Gesture is KeyGesture gesture && gesture.Key == Key.O);
             var paletteBinding = window.KeyBindings.First(binding =>
                 binding.Gesture is KeyGesture gesture && gesture.Key == Key.K);
             var toggleBinding = window.KeyBindings.First(binding =>
                 binding.Gesture is KeyGesture gesture && gesture.Key == Key.T);
-            var editor = Descendants(window).OfType<TextEditor>().First(textEditor =>
-                textEditor.Text == "// Workbench document\n");
+            var editor = Descendants(window).OfType<TextEditor>().First();
             var workspaceList = Descendants(window).OfType<ListBox>().First(list =>
                 list.ItemsSource is IEnumerable<WorkspaceRow>);
             var problemsList = Descendants(window).OfType<ListBox>().First(list =>
                 list.ItemsSource is IEnumerable<ProblemItem>);
             workspaceList.SelectedItem = workspaceList.Items.Cast<WorkspaceRow>().First(row => row.Node.Id == "readme");
             var workspaceSelected = workspaceList.SelectedItem is WorkspaceRow { Node.Id: "readme" };
-            problemsList.SelectedIndex = 0;
-            var problemSelected = problemsList.SelectedItem is ProblemItem;
-            var dataVisible = workspaceList.Items.Count > 0 && problemsList.Items.Count == 3;
+            var problemSelected = problemsList.Items.Count == 0;
+            var dataVisible = workspaceList.Items.Count > 0 && problemsList.Items.Count == 0;
             window.UpdateLayout();
             var workspaceOpened = editor.Text == "// README.md\n" &&
                 Descendants(window).OfType<TextBlock>().Any(text => text.Text == "README.md");
@@ -166,6 +168,33 @@ internal sealed class App : Application
         using var stream = AssetLoader.Open(new Uri(
             $"avares://{typeof(App).Assembly.GetName().Name}/Assets/lucent-icon-32.png"));
         window.Icon = new WindowIcon(stream);
+    }
+
+    private static DocumentSession CreateSession(WorkspaceService workspace)
+    {
+        var document = new OpenDocument("Program.cs", "// Open a Lucent workspace.\n");
+        if (workspace.QuickOpenItems.FirstOrDefault() is { } item)
+            document = new OpenDocument(item.Path, workspace.ReadAsync(item.Path, CancellationToken.None).GetAwaiter().GetResult());
+        return new DocumentSession(document, () => { });
+    }
+
+    internal static async Task RestoreWorkspaceAsync(
+        WorkspaceService workspace,
+        WorkbenchSettings settings,
+        CancellationToken cancellationToken,
+        Action<Exception>? errorReporter = null)
+    {
+        if (string.IsNullOrWhiteSpace(settings.RecentWorkspace) || !Directory.Exists(settings.RecentWorkspace))
+            return;
+        try
+        {
+            await workspace.OpenAsync(settings.RecentWorkspace, cancellationToken);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            errorReporter?.Invoke(exception);
+            workspace.Close();
+        }
     }
 
     private static IEnumerable<Control> Descendants(Control root)

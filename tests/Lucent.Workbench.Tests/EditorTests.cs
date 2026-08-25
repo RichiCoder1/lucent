@@ -105,4 +105,21 @@ public sealed class EditorTests
             return Task.CompletedTask;
         });
     }
+
+    [TestMethod]
+    public async Task Document_session_navigates_to_the_diagnostic_column()
+    {
+        await HeadlessTestHarness.RunWindowAsync(window =>
+        {
+            using var session = new DocumentSession(new OpenDocument("Program.lui", "first\n  target"), () => { });
+            var editor = new TextEditor { Focusable = true, Width = 300, Height = 300 };
+            window.Content = editor;
+            window.Show();
+            session.Attach(editor);
+            session.GoToLine(2, 3);
+            Assert.AreEqual(2, editor.Document.GetLocation(editor.CaretOffset).Line);
+            Assert.AreEqual(3, editor.Document.GetLocation(editor.CaretOffset).Column);
+            return Task.CompletedTask;
+        });
+    }
 }

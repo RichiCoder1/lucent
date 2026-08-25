@@ -20,6 +20,12 @@ component SettingsPane(WorkbenchSettings settings, Action<WorkbenchSettings> onC
             IsChecked: settings.ProblemsVisible;
             IsCheckedChanged: (sender, e) => onChanged(settings with { ProblemsVisible = sender.IsChecked == true });
         }
+        StackPanel {
+            Orientation: Avalonia.Layout.Orientation.Horizontal;
+            Button { Content: "_System theme"; Click: () => onChanged(settings with { Theme = "System" }); }
+            Button { Content: "_Light theme"; Click: () => onChanged(settings with { Theme = "Light" }); }
+            Button { Content: "_Dark theme"; Click: () => onChanged(settings with { Theme = "Dark" }); }
+        }
     }
     };
 }

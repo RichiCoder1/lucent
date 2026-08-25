@@ -1,14 +1,15 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Xml.Linq;
-using Lucent.Compiler;
 
-namespace Lucent.LanguageServer;
+namespace Lucent.Compiler;
 
-internal sealed class ProjectContextLoader
+public sealed class ProjectContextLoader
 {
     private const int MaxContexts = 8;
     private const int MaxSourceProjects = 256;
+    private const int MaxTraversalDepth = 16;
+    private const int MaxTraversalEntries = 10_000;
     private readonly StringComparer _pathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase
         : StringComparer.Ordinal;
@@ -48,9 +49,6 @@ internal sealed class ProjectContextLoader
         _workspaceRoots = roots.Distinct(_pathComparer).ToArray();
         _contexts.Clear();
         _sourceProjects.Clear();
-        LanguageServerLog.WorkspaceConfigured(
-            LanguageServerLog.Logger,
-            string.Join(Path.PathSeparator, _workspaceRoots));
     }
 
     public async Task<LucentProjectContext?> LoadAsync(
@@ -65,14 +63,8 @@ internal sealed class ProjectContextLoader
         var projectPath = FindProject(sourcePath);
         if (projectPath is null)
         {
-            LanguageServerLog.ProjectNotFound(LanguageServerLog.Logger, sourcePath);
             return null;
         }
-
-        LanguageServerLog.ProjectSelected(
-            LanguageServerLog.Logger,
-            projectPath,
-            sourcePath);
 
         var stamp = _contexts.TryGetValue(projectPath, out var cachedForStamp)
             ? GetProjectStamp(projectPath, cachedForStamp.Context)
@@ -80,7 +72,6 @@ internal sealed class ProjectContextLoader
         if (_contexts.TryGetValue(projectPath, out var cached) &&
             cached.Stamp == stamp)
         {
-            LanguageServerLog.ProjectCacheHit(LanguageServerLog.Logger, projectPath);
             return cached.Context;
         }
 
@@ -94,10 +85,6 @@ internal sealed class ProjectContextLoader
             InvalidOperationException or JsonException or
             System.ComponentModel.Win32Exception)
         {
-            LanguageServerLog.ProjectLoadFailed(
-                LanguageServerLog.Logger,
-                projectPath,
-                exception);
             context = CreateFallbackContext(projectPath);
         }
 
@@ -111,11 +98,6 @@ internal sealed class ProjectContextLoader
                 GetProjectStamp(projectPath, context));
             while (_contexts.Count > MaxContexts)
                 _contexts.Remove(_contexts.Keys.First());
-            LanguageServerLog.ProjectLoaded(
-                LanguageServerLog.Logger,
-                projectPath,
-                context.Sources.Count,
-                context.References.Count);
         }
 
         return context;
@@ -248,40 +230,8 @@ internal sealed class ProjectContextLoader
         return null;
     }
 
-    private static IEnumerable<string> EnumerateProjects(string root)
-    {
-        var pending = new Stack<string>();
-        pending.Push(root);
-        while (pending.TryPop(out var directory))
-        {
-            string[] projects;
-            string[] children;
-            try
-            {
-                projects = Directory.GetFiles(directory, "*.csproj");
-                children = Directory.GetDirectories(directory);
-            }
-            catch (Exception exception) when (
-                exception is IOException or UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            foreach (var project in projects)
-            {
-                yield return project;
-            }
-
-            foreach (var child in children)
-            {
-                var name = Path.GetFileName(child);
-                if (!IgnoredDirectoryNames.Contains(name))
-                {
-                    pending.Push(child);
-                }
-            }
-        }
-    }
+    private static IEnumerable<string> EnumerateProjects(string root) =>
+        EnumerateFilesSafely(root, ".csproj");
 
     private static readonly IReadOnlySet<string> IgnoredDirectoryNames =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -322,7 +272,6 @@ internal sealed class ProjectContextLoader
         string projectPath,
         CancellationToken cancellationToken)
     {
-        LanguageServerLog.MsBuildStarted(LanguageServerLog.Logger, projectPath);
         var startInfo = new ProcessStartInfo("dotnet")
         {
             RedirectStandardOutput = true,
@@ -366,11 +315,6 @@ internal sealed class ProjectContextLoader
         var error = await standardError;
         if (process.ExitCode != 0)
         {
-            LanguageServerLog.MsBuildFailed(
-                LanguageServerLog.Logger,
-                projectPath,
-                process.ExitCode,
-                error.Trim());
             return CreateFallbackContext(projectPath);
         }
 
@@ -378,9 +322,6 @@ internal sealed class ProjectContextLoader
         var jsonEnd = output.LastIndexOf('}');
         if (jsonStart < 0 || jsonEnd < jsonStart)
         {
-            LanguageServerLog.MsBuildInvalidOutput(
-                LanguageServerLog.Logger,
-                projectPath);
             return CreateFallbackContext(projectPath);
         }
 
@@ -457,10 +398,7 @@ internal sealed class ProjectContextLoader
     private static LucentProjectContext CreateFallbackContext(string projectPath)
     {
         var projectDirectory = Path.GetDirectoryName(projectPath)!;
-        var sources = Directory.EnumerateFiles(
-                projectDirectory,
-                "*.cs",
-                SearchOption.AllDirectories)
+        var sources = EnumerateFilesSafely(projectDirectory, ".cs")
             .Where(path => !IsBuildOutput(path))
             .ToList();
 
@@ -492,13 +430,80 @@ internal sealed class ProjectContextLoader
         var context = new LucentProjectContext(
             projectPath,
             SourcePaths: sources.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-            LucentSourcePaths: Directory.EnumerateFiles(projectDirectory, "*.lui", SearchOption.AllDirectories)
+            LucentSourcePaths: EnumerateFilesSafely(projectDirectory, ".lui")
                 .Where(path => !IsBuildOutput(path)).ToArray());
-        LanguageServerLog.ProjectFallback(
-            LanguageServerLog.Logger,
-            projectPath,
-            context.Sources.Count);
         return context;
+    }
+
+    private static IEnumerable<string> EnumerateFilesSafely(string root, string extension)
+    {
+        var pending = new Stack<(string Path, int Depth)>();
+        pending.Push((root, 0));
+        var entries = 0;
+        while (pending.TryPop(out var current) && entries < MaxTraversalEntries)
+        {
+            if (current.Depth > MaxTraversalDepth || IsReparsePoint(current.Path))
+                continue;
+
+            using var enumerator = TryEnumerateEntries(current.Path);
+            if (enumerator is null)
+                continue;
+            while (entries < MaxTraversalEntries && TryMoveNext(enumerator, out var entry))
+            {
+                entries++;
+                if (Directory.Exists(entry))
+                {
+                    if (!IgnoredDirectoryNames.Contains(Path.GetFileName(entry)) && !IsReparsePoint(entry))
+                        pending.Push((entry, current.Depth + 1));
+                }
+                else if (entry.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    yield return entry;
+                }
+            }
+        }
+    }
+
+    private static IEnumerator<string>? TryEnumerateEntries(string directory)
+    {
+        try
+        {
+            return Directory.EnumerateFileSystemEntries(directory).GetEnumerator();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryMoveNext(IEnumerator<string> enumerator, out string entry)
+    {
+        try
+        {
+            if (enumerator.MoveNext())
+            {
+                entry = enumerator.Current;
+                return true;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        entry = string.Empty;
+        return false;
+    }
+
+    private static bool IsReparsePoint(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
     private static IEnumerable<string> ReadItems(JsonElement items)
@@ -572,9 +577,7 @@ internal sealed class ProjectContextLoader
 
     private static void AddFileUri(ICollection<string> roots, string? uri)
     {
-        if (FileUri.TryGetPath(uri, out var path))
-        {
-            roots.Add(path);
-        }
+        if (Uri.TryCreate(uri, UriKind.Absolute, out var value) && value.IsFile)
+            roots.Add(Path.GetFullPath(value.LocalPath));
     }
 }

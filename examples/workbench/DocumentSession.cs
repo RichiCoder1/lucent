@@ -4,7 +4,7 @@ namespace Lucent.Examples.Workbench;
 
 internal sealed class DocumentSession : IDisposable
 {
-    private readonly OpenDocument _document;
+    private OpenDocument _document;
     private readonly Action _notifyCommands;
     private TextEditor? _editor;
     private bool _applyingModelText;
@@ -17,6 +17,9 @@ internal sealed class DocumentSession : IDisposable
     }
 
     public TextEditor? Editor => _editor;
+    public OpenDocument Document => _document;
+
+    public event Action<OpenDocument>? Changed;
 
     public bool CanCopy => _editor?.CanCopy == true;
     public bool CanUndo => _editor?.CanUndo == true;
@@ -49,6 +52,21 @@ internal sealed class DocumentSession : IDisposable
         _document.Text = text;
         _document.IsDirty = false;
         ReplaceModelText();
+    }
+
+    public void Open(string path, string text)
+    {
+        _document = new OpenDocument(Path.GetFullPath(path), text);
+        ReplaceModelText();
+    }
+
+    public void GoToLine(int line, int column = 1)
+    {
+        if (_editor is null || line < 1) return;
+        var target = _editor.Document.GetLineByNumber(Math.Min(line, _editor.Document.LineCount));
+        _editor.CaretOffset = Math.Min(target.EndOffset, target.Offset + Math.Max(0, column - 1));
+        _editor.ScrollTo(target.LineNumber, Math.Max(0, column - 1));
+        _editor.Focus();
     }
 
     public void Copy()
@@ -94,6 +112,7 @@ internal sealed class DocumentSession : IDisposable
         if (_editor is null || _applyingModelText) return;
         _document.Text = _editor.Text;
         _document.IsDirty = true;
+        Changed?.Invoke(_document);
         _notifyCommands();
     }
 

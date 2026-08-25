@@ -12,13 +12,15 @@ internal static class WorkbenchTestFactory
         IProblemLoader? loader = null,
         DocumentSession? session = null,
         Action<Exception>? reporter = null,
-        SettingsSaveCoordinator? saveCoordinator = null)
+        SettingsSaveCoordinator? saveCoordinator = null,
+        WorkspaceService? workspace = null)
     {
         reporter ??= _ => { };
         session ??= new DocumentSession(new OpenDocument("Program.cs", "// Workbench document\n"), () => { });
         saveCoordinator ??= new SettingsSaveCoordinator(new TestSettingsRepository(), lifetime);
+        workspace ??= new WorkspaceService();
         return new WorkbenchAppComponent(host, lifetime, reporter, settings ?? WorkbenchSettings.Defaults,
-            saveCoordinator, loader ?? new PlaceholderProblemLoader(), session,
+            saveCoordinator, loader ?? new TestProblemLoader(), session, workspace,
             __lucent_reportUnhandled: reporter);
     }
 
@@ -28,5 +30,14 @@ internal static class WorkbenchTestFactory
             Task.FromResult(WorkbenchSettings.Defaults);
 
         public Task SaveAsync(WorkbenchSettings value, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class TestProblemLoader : IProblemLoader
+    {
+        public Task<IReadOnlyList<ProblemItem>> LoadAsync(string? workspace, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<ProblemItem>>([
+                new ProblemItem("one", "WorkbenchApp.lui", 1, "first", ProblemSeverity.Warning),
+                new ProblemItem("two", "DocumentPane.lui", 2, "second", ProblemSeverity.Warning),
+                new ProblemItem("three", "WorkspaceSidebar.lui", 3, "third", ProblemSeverity.Error)]);
     }
 }

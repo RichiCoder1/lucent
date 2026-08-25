@@ -1,6 +1,16 @@
 namespace Lucent.Examples.Workbench;
 
-component GeneratedPreviewPane() => Border {
+using Avalonia.Controls;
+using System;
+
+component GeneratedPreviewPane(string source, Action<int> navigate) {
+    private TextBox? preview = null;
+    Fragment Render() => Border {
     Class: "preview-pane";
-    TextBlock { Class: "pane-title"; Text: "Generated preview"; }
-};
+    KeyDown: (sender, e) => { if (e.Key == Avalonia.Input.Key.L && e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control) && preview is not null) { e.Handled = true; navigate(preview.CaretIndex); } };
+    Grid { RowDefinitions: "Auto * Auto";
+        TextBlock { Class: "pane-title"; Text: "Generated preview"; }
+        TextBox { Grid.Row: 1; IsReadOnly: true; AcceptsReturn: true; Text: source; Loaded: (sender, e) => preview = sender; }
+        Button { Grid.Row: 2; Content: "Go to Lucent source"; Click: () => { if (preview is not null) navigate(preview.CaretIndex); }; }
+    }
+}; }

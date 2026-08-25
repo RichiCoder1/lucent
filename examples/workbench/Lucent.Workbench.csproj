@@ -12,6 +12,7 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
     <ProjectReference Include="..\..\src\Lucent.Themes.Shadcn\Lucent.Themes.Shadcn.csproj" />
+    <ProjectReference Include="..\..\src\Lucent.Compiler\Lucent.Compiler.csproj" />
     <ProjectReference Include="..\..\src\Lucent.Compiler.MSBuild\Lucent.Compiler.MSBuild.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <ProjectReference Include="..\..\src\Lucent.Analyzers\Lucent.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <LucentSource Include="WorkbenchApp.lui" />

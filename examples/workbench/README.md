@@ -1,12 +1,20 @@
 # Lucent Workbench
 
-Static multi-file dogfood shell for component inputs, optional slots, conditional
-composition, retained child state, native virtualized ListBoxes, and AvaloniaEdit.
+Project-backed dogfood shell for .NET/Lucent workspaces, compiler diagnostics,
+generated-C# inspection, native virtualized ListBoxes, and AvaloniaEdit.
 
 ```powershell
 dotnet run --project examples/workbench/Lucent.Workbench.csproj -- --smoke-test data
 dotnet run --project examples/workbench/Lucent.Workbench.csproj -- --smoke-test reliability
 ```
+
+Open a folder containing a `.csproj` and `LucentSource` files. Workbench uses the
+shared evaluated project context and `LucentCompiler.CompileProject` path also
+used by tooling; unsaved AvaloniaEdit text overlays the project generation.
+Problem selection opens its mapped source file and generated preview captures
+one immutable source-map generation; navigation is rejected after that workspace
+generation changes. Native folder picker behavior remains manual; the rest is
+covered by the headless walkthrough.
 
 The workspace tree is a flattened visible-node projection owned by the app;
 ListBox owns row containers, selection, focus, scrolling, and recycling.

@@ -97,18 +97,18 @@ navigation, and generated-source mapping.
 
 ## Done criteria
 
-- [ ] Workbench opens and restores a real .NET/Lucent workspace.
-- [ ] The existing `IProblemLoader` reports real compiler/project diagnostics
+- [x] Workbench opens and restores a real .NET/Lucent workspace.
+- [x] The existing `IProblemLoader` reports real compiler/project diagnostics
       while preserving Plan 006 lifecycle behavior.
-- [ ] Editing, diagnostics, source navigation, and generated-C# preview share the
+- [x] Editing, diagnostics, source navigation, and generated-C# preview share the
       accepted compiler/LSP project-generation seams.
-- [ ] Settings, themes, shutdown, and recent-workspace restoration remain
+- [x] Settings, themes, shutdown, and recent-workspace restoration remain
       deterministic and failure-safe.
-- [ ] The complete keyboard-first walkthrough passes headlessly except for
+- [x] The complete keyboard-first walkthrough passes headlessly except for
       explicitly recorded native platform behavior.
-- [ ] Workbench uses no private hook that would be unavailable to a clean package
+- [x] Workbench uses no private hook that would be unavailable to a clean package
       consumer.
-- [ ] The interfaces exercised here are recorded as Plan 012's maximum
+- [x] The interfaces exercised here are recorded as Plan 012's maximum
       application-facing package surface; separately gated package features
       remain bounded by their own accepted contracts.
 

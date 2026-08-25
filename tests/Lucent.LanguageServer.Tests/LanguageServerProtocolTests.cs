@@ -564,7 +564,9 @@ public sealed class LanguageServerProtocolTests
             Path.GetTempPath(),
             "lucent-context-fallback-tests",
             Guid.NewGuid().ToString("N"));
+        var externalDirectory = temporaryDirectory + "-external";
         Directory.CreateDirectory(temporaryDirectory);
+        Directory.CreateDirectory(externalDirectory);
 
         try
         {
@@ -582,6 +584,9 @@ public sealed class LanguageServerProtocolTests
             await File.WriteAllTextAsync(
                 counterPath,
                 "namespace Demo; internal sealed class Counter { }");
+            var externalSource = Path.Combine(externalDirectory, "External.cs");
+            await File.WriteAllTextAsync(externalSource, "namespace Demo; internal sealed class External { }");
+            Directory.CreateSymbolicLink(Path.Combine(temporaryDirectory, "linked"), externalDirectory);
             var loader = new ProjectContextLoader();
             using var initialize = JsonDocument.Parse("{}");
             loader.Configure(initialize.RootElement);
@@ -590,11 +595,42 @@ public sealed class LanguageServerProtocolTests
 
             Assert.IsNotNull(context);
             Assert.IsTrue(context.Sources.Contains(counterPath));
+            Assert.IsFalse(context.Sources.Contains(externalSource));
             Assert.AreEqual(0, context.References.Count);
         }
         finally
         {
             Directory.Delete(temporaryDirectory, recursive: true);
+            Directory.Delete(externalDirectory, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task Project_discovery_does_not_follow_reparse_directories()
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "lucent-context-link-tests", Guid.NewGuid().ToString("N"));
+        var workspace = Path.Combine(parent, "workspace");
+        var external = Path.Combine(parent, "external");
+        Directory.CreateDirectory(workspace);
+        Directory.CreateDirectory(Path.Combine(workspace, ".git"));
+        Directory.CreateDirectory(external);
+        var source = Path.Combine(workspace, "Main.lui");
+        await File.WriteAllTextAsync(source, "namespace Demo;");
+        await File.WriteAllTextAsync(Path.Combine(external, "External.csproj"),
+            $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net9.0</TargetFramework></PropertyGroup><ItemGroup><LucentSource Include=\"{source}\" /></ItemGroup></Project>");
+        Directory.CreateSymbolicLink(Path.Combine(workspace, "linked"), external);
+
+        try
+        {
+            var loader = new ProjectContextLoader();
+            using var initialize = JsonDocument.Parse($"{{\"workspaceFolders\":[{{\"uri\":{JsonSerializer.Serialize(new Uri(workspace).AbsoluteUri)}}}]}}");
+            loader.Configure(initialize.RootElement);
+
+            Assert.IsNull(await loader.LoadAsync(source, CancellationToken.None));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
         }
     }
 

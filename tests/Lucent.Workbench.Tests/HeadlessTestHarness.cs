@@ -89,9 +89,9 @@ public sealed class HeadlessTestHarness
         await operation.WaitAsync(Timeout);
     }
 
-    public static async Task RunUiAsync(Func<Task> action)
+    public static async Task RunUiAsync(Func<Task> action, TimeSpan? timeout = null)
     {
         var operation = Dispatcher.UIThread.InvokeAsync(action);
-        await operation.WaitAsync(Timeout);
+        await operation.WaitAsync(timeout ?? Timeout);
     }
 }

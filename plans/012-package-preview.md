@@ -26,6 +26,12 @@ verification, reproducible editor packaging, and honest documentation.
 
 ## Scope
 
+Plan 011 exercised the maximum application-facing package surface: the shared
+`ProjectContextLoader`/`LucentProjectContext` evaluation seam,
+`LucentCompiler.CompileProject`, compiler diagnostics, generated C#, and
+`LucentSourceMap`. Packaging may expose that bounded surface; broader compiler
+internals require a separate accepted gate.
+
 **In scope**:
 
 - Produce NuGet packages for runtime, compiler/MSBuild integration, Plan 008a's

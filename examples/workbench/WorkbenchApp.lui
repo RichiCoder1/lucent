@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Styling;
 using Avalonia.VisualTree;
 using AvaloniaEdit;
 using System.Collections.ObjectModel;
@@ -17,54 +18,47 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 
-component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken lifetime, Action<Exception> errorReporter, WorkbenchSettings initialSettings, SettingsSaveCoordinator saveCoordinator, IProblemLoader problemLoader, DocumentSession session)
+component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken lifetime, Action<Exception> errorReporter, WorkbenchSettings initialSettings, SettingsSaveCoordinator saveCoordinator, IProblemLoader problemLoader, DocumentSession session, WorkspaceService workspace)
 {
     private readonly State<bool> showProblems = new(initialSettings.ProblemsVisible);
     private readonly State<bool> showPalette = new(System.Environment.GetEnvironmentVariable("LUCENT_QUALITY_CAPTURE") == "workbench-dark-palette");
-    private readonly State<string> workspaceName = new(initialSettings.RecentWorkspace ?? "Lucent");
+    private readonly State<string> workspaceName = new(workspace.RootPath is null ? "Lucent" : Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace.RootPath)));
+    private readonly State<string?> workspacePath = new(workspace.RootPath);
     private readonly State<string> documentTitle = new("Program.cs");
     private readonly State<string> lastDiagnostic = new("No diagnostics copied");
-    private readonly ObservableCollection<WorkspaceNode> workspaceRoots = new([new WorkspaceNode("root", "Lucent", new ObservableCollection<WorkspaceNode>([
+    private readonly ObservableCollection<WorkspaceNode> workspaceRoots = new(workspace.Roots.Count == 0 ? [new WorkspaceNode("root", "Lucent", new ObservableCollection<WorkspaceNode>([
         new WorkspaceNode("src", "src", new ObservableCollection<WorkspaceNode>([
-            new WorkspaceNode("compiler", "Lucent.Compiler", []),
-            new WorkspaceNode("runtime", "Lucent.Runtime", []),
-        ])),
-        new WorkspaceNode("readme", "README.md", []),
-    ]))]);
+            new WorkspaceNode("compiler", "Lucent.Compiler", []), new WorkspaceNode("runtime", "Lucent.Runtime", [])])),
+        new WorkspaceNode("readme", "README.md", [])]))] : workspace.Roots);
     private readonly WorkspaceSelectionController workspaceSelection = new WorkspaceSelectionController(workspaceRoots);
-    private readonly ObservableCollection<QuickOpenItem> quickOpenItems = new([
+    private readonly ObservableCollection<QuickOpenItem> quickOpenItems = new(workspace.QuickOpenItems.Count == 0 ? [
         new QuickOpenItem("quick-workbench", "WorkbenchApp.lui", "WorkbenchApp.lui"),
-        new QuickOpenItem("quick-document", "DocumentPane.lui", "DocumentPane.lui"),
-    ]);
-    private readonly State<bool> workspaceOpened = new(false);
-    private readonly IReadOnlyList<ProblemItem> placeholderProblems = [
-        new ProblemItem("problem-1", "WorkbenchApp.lui", 1, "Example diagnostic", ProblemSeverity.Warning),
-        new ProblemItem("problem-2", "DocumentPane.lui", 1, "Example diagnostic", ProblemSeverity.Info),
-        new ProblemItem("problem-3", "WorkspaceSidebar.lui", 1, "Example diagnostic", ProblemSeverity.Error),
-    ];
+        new QuickOpenItem("quick-document", "DocumentPane.lui", "DocumentPane.lui")] : workspace.QuickOpenItems);
     private DocumentSession GetSession() => session;
     private readonly Computed<IReadOnlyList<ProblemItem>> loadedProblems = new(
-        ct => problemLoader.LoadAsync(workspaceName.Value, ct),
-        placeholderProblems);
+        ct => problemLoader.LoadAsync(workspacePath.Value, ct), []);
     private Window? window = null;
     private Border? sidebar = null;
     private Border? palette = null;
     private ListBox? quickOpenList = null;
     private IInputElement? previousFocus = null;
+    private bool sessionListening = false;
+    private int workspaceRequest = 0;
+    private int documentRequest = 0;
 
     private WorkbenchSettings currentSettings = initialSettings;
     private WorkbenchSettings Settings() => currentSettings;
     private void ApplySettings(WorkbenchSettings value)
     {
         currentSettings = value;
-        if (value.RecentWorkspace is not null) workspaceName.Update(value.RecentWorkspace);
         showProblems.Update(value.ProblemsVisible);
+        Application.Current!.RequestedThemeVariant = value.Theme switch { "Light" => ThemeVariant.Light, "Dark" => ThemeVariant.Dark, _ => ThemeVariant.Default };
         SaveSettings();
         NotifyCommandState();
     }
     private void SaveSettings()
     {
-        saveCoordinator.Save(currentSettings with { RecentWorkspace = workspaceName.Value, ProblemsVisible = showProblems.Value });
+        saveCoordinator.Save(currentSettings with { RecentWorkspace = workspacePath.Value ?? currentSettings.RecentWorkspace, ProblemsVisible = showProblems.Value });
     }
 
     private readonly DelegateCommand openWorkspace = new DelegateCommand(OpenWorkspace, CanOpenWorkspace, errorReporter);
@@ -88,7 +82,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
 
 
     private bool CanOpenWorkspace() => !lifetime.IsCancellationRequested;
-    private bool CanCloseWorkspace() => CanOpenWorkspace() && workspaceName.Value != "No workspace";
+    private bool CanCloseWorkspace() => CanOpenWorkspace() && workspacePath.Value is not null;
     private bool CanOpenPalette() => CanOpenWorkspace() && !showPalette.Value;
     private bool CanFocusSidebar() => sidebar is not null;
     private bool CanFocusEditor() => GetSession().Editor is not null;
@@ -103,9 +97,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     {
         var item = quickOpenList?.SelectedItem as QuickOpenItem ?? quickOpenItems.FirstOrDefault();
         if (item is null) return;
-        documentTitle.Update(item.DisplayName);
-        GetSession().ReplaceText($"// {item.Path}\n");
-        ClosePalette();
+        _ = OpenDocumentAsync(item.Path, item.DisplayName, closePalette: true);
     }
 
     private void NotifyCommandState()
@@ -131,14 +123,24 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     private async Task OpenWorkspaceAsync()
     {
         if (!CanOpenWorkspace() || window is null) return;
+        var request = ++workspaceRequest;
         try
         {
             var folders = await desktopHost.PickWorkspaceAsync(window);
-            if (lifetime.IsCancellationRequested) return;
+            if (lifetime.IsCancellationRequested || request != workspaceRequest) return;
             var folder = folders.FirstOrDefault();
             if (folder is null) return;
+            await workspace.OpenAsync(folder.Path.LocalPath, lifetime);
+            if (lifetime.IsCancellationRequested || request != workspaceRequest) return;
+            workspaceSelection.ReplaceRoots(workspace.Roots);
+            quickOpenItems.Clear();
+            foreach (var item in workspace.QuickOpenItems) quickOpenItems.Add(item);
+            workspacePath.Update(_ => workspace.RootPath);
             workspaceName.Update(folder.Name);
-            workspaceOpened.Update(true);
+            currentSettings = currentSettings with { RecentWorkspace = workspace.RootPath };
+            if (workspace.QuickOpenItems.FirstOrDefault() is { } first)
+                await OpenDocumentAsync(first.Path, first.DisplayName, closePalette: false);
+            loadedProblems.Refresh();
             SaveSettings();
             closeWorkspace.NotifyCanExecuteChanged();
         }
@@ -146,13 +148,20 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         {
             if (lifetime.IsCancellationRequested) return;
             lastDiagnostic.Update(error.Message);
+            loadedProblems.Refresh();
         }
     }
 
     private void CloseWorkspace()
     {
         if (!CanCloseWorkspace()) return;
+        workspaceRequest++; documentRequest++;
+        workspace.Close();
+        workspacePath.Update(_ => null);
         workspaceName.Update("No workspace");
+        workspaceSelection.ReplaceRoots([]);
+        quickOpenItems.Clear();
+        loadedProblems.Refresh();
         SaveSettings();
         closeWorkspace.NotifyCanExecuteChanged();
     }
@@ -209,15 +218,58 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
 
     private void OpenWorkspaceNode(WorkspaceNode node)
     {
-        if (node.Children.Count != 0) return;
-        documentTitle.Update(node.Name);
-        GetSession().ReplaceText($"// {node.Name}\n");
+        if (node.Children.Count != 0 || node.Path is not null && Directory.Exists(node.Path)) return;
+        _ = OpenDocumentAsync(node.Path ?? node.Name, node.Name, closePalette: false);
+    }
+
+    private async Task OpenDocumentAsync(string path, string title, bool closePalette, int line = 0, int column = 1)
+    {
+        var request = ++documentRequest;
+        if (workspace.RootPath is null)
+        {
+            if (request != documentRequest) return;
+            documentTitle.Update(title);
+            GetSession().Open(path, $"// {path}\n");
+            GetSession().GoToLine(line, column);
+            if (closePalette) ClosePalette();
+            return;
+        }
+        try
+        {
+            var text = await workspace.ReadAsync(path, lifetime);
+            if (lifetime.IsCancellationRequested || request != documentRequest) return;
+            documentTitle.Update(title);
+            GetSession().Open(path, text);
+            workspace.ActivateDocument(GetSession().Document);
+            GetSession().GoToLine(line, column);
+            if (path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)) loadedProblems.Refresh();
+            if (closePalette) ClosePalette();
+        }
+        catch (Exception error) when (!lifetime.IsCancellationRequested) { lastDiagnostic.Update(error.Message); }
+    }
+
+    private void OnDocumentChanged(OpenDocument document)
+    {
+        workspace.UpdateDocument(document);
+        if (document.Path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)) loadedProblems.Refresh();
+    }
+
+    private void OpenProblem(ProblemItem problem)
+    {
+        if (problem.Path is not null) _ = OpenDocumentAsync(problem.Path, problem.File, closePalette: false, line: problem.Line, column: problem.Column);
+    }
+
+    private void OpenGeneratedSource(GeneratedPreviewSnapshot snapshot, int offset)
+    {
+        if (workspace.TryMapGeneratedOffset(snapshot, offset, out var path, out var line, out var column))
+            _ = OpenDocumentAsync(path, Path.GetFileName(path), closePalette: false, line, column);
+        else lastDiagnostic.Update("No Lucent source mapping at generated caret");
     }
 
     private void SwitchDocument()
     {
-        documentTitle.Update("README.md");
-        GetSession().ReplaceText("# Lucent Workbench\n");
+        if (workspace.QuickOpenItems.FirstOrDefault() is { } item)
+            _ = OpenDocumentAsync(item.Path, item.DisplayName, closePalette: false);
     }
 
     private void ToggleProblems()
@@ -270,8 +322,10 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
 
     private void ShowGeneratedPreview()
     {
-        if (!CanOpenWorkspace() || window is null) return;
-        var component = new GeneratedPreviewWindowComponent(errorReporter);
+        if (!CanOpenWorkspace() || workspace.RootPath is null || window is null) return;
+        var snapshot = workspace.CaptureGeneratedPreview();
+        var component = new GeneratedPreviewWindowComponent(snapshot.Source,
+            offset => OpenGeneratedSource(snapshot, offset), errorReporter);
         var preview = component.MountRoot();
         EventHandler? closed = null;
         closed = (_, _) => { preview.Closed -= closed; component.Dispose(); };
@@ -292,8 +346,8 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         MinWidth: 920;
         MinHeight: 600;
         Class: "workbench-window";
-        Loaded: (sender, e) => window = sender;
-        Unloaded: (sender, e) => { if (ReferenceEquals(window, sender)) window = null; GetSession().Dispose(); };
+        Loaded: (sender, e) => { window = sender; if (!sessionListening) { GetSession().Changed += OnDocumentChanged; sessionListening = true; } };
+        Unloaded: (sender, e) => { if (ReferenceEquals(window, sender)) window = null; if (sessionListening) { GetSession().Changed -= OnDocumentChanged; sessionListening = false; } GetSession().Dispose(); };
         KeyBindings: [
             new KeyBinding { Gesture = new KeyGesture(Key.O, KeyModifiers.Control), Command = openWorkspace },
             new KeyBinding { Gesture = new KeyGesture(Key.W, KeyModifiers.Control), Command = closeWorkspace },
@@ -303,6 +357,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
             new KeyBinding { Gesture = new KeyGesture(Key.E, KeyModifiers.Control), Command = focusEditor },
             new KeyBinding { Gesture = new KeyGesture(Key.T, KeyModifiers.Control), Command = toggleProblems },
             new KeyBinding { Gesture = new KeyGesture(Key.S, KeyModifiers.Control), Command = settings },
+            new KeyBinding { Gesture = new KeyGesture(Key.G, KeyModifiers.Control), Command = generatedPreview },
             new KeyBinding { Gesture = new KeyGesture(Key.C, KeyModifiers.Control), Command = copyDiagnostic },
             new KeyBinding { Gesture = new KeyGesture(Key.Z, KeyModifiers.Control), Command = undoDocument },
             new KeyBinding { Gesture = new KeyGesture(Key.Y, KeyModifiers.Control), Command = redoDocument },
@@ -350,7 +405,7 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                     Grid.Column: 2;
                     IsVisible: showProblems.Value;
                     try (loadedProblems) {
-                        ProblemsPane(loadedProblems.Value, loadedProblems.IsPending, copyCommand: copyDiagnostic) {}
+                        ProblemsPane(loadedProblems.Value, loadedProblems.IsPending, copyCommand: copyDiagnostic, navigate: OpenProblem) {}
                     }
                     loading {
                         Border { Class: "problems-loading";

@@ -143,7 +143,7 @@ public sealed class ProjectSemanticBindingTests
             var evaluation = await DotNetAsync(directory, "msbuild", project,
                 "-getTargetResult:ResolveReferences", "-getItem:Compile", "-getItem:Using", "-getItem:ProjectReference",
                 "-getProperty:TargetFramework,LangVersion,Nullable,DefineConstants,ImplicitUsings",
-                "-p:DesignTimeBuild=true", "-p:BuildingProject=false", "-nologo");
+                "-p:DesignTimeBuild=true", "-p:BuildingProject=false", "-nologo", "-nodeReuse:false");
             Assert.AreEqual(0, evaluation.ExitCode, evaluation.Output);
             using var document = JsonDocument.Parse(evaluation.Json);
             var root = document.RootElement;

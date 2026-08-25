@@ -14,6 +14,14 @@ namespace Lucent.Workbench.Tests;
 [TestClass]
 public sealed class DesktopHostTests
 {
+    private static readonly List<string> TemporaryWorkspaces = [];
+
+    [ClassCleanup]
+    public static void CleanTemporaryWorkspaces()
+    {
+        foreach (var path in TemporaryWorkspaces) if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        TemporaryWorkspaces.Clear();
+    }
     [TestMethod]
     public async Task Fake_host_records_owner_explicit_operations()
     {
@@ -57,7 +65,8 @@ public sealed class DesktopHostTests
         host.FolderGate.SetResult([]);
         host.DialogGate.SetResult(true);
         using var lifetime = new CancellationTokenSource();
-        var component = RunOnUiThread(() => WorkbenchTestFactory.Create(host, lifetime.Token));
+        var workspace = await OpenWorkspaceAsync();
+        var component = RunOnUiThread(() => WorkbenchTestFactory.Create(host, lifetime.Token, workspace: workspace));
         var window = RunOnUiThread(() =>
         {
             var mounted = (Window)component.Mount().Roots.Single();
@@ -141,7 +150,8 @@ public sealed class DesktopHostTests
     {
         using var lifetime = new CancellationTokenSource();
         var modalHost = new FakeHost();
-        var modalComponent = RunOnUiThread(() => WorkbenchTestFactory.Create(modalHost, lifetime.Token));
+        var modalWorkspace = await OpenWorkspaceAsync();
+        var modalComponent = RunOnUiThread(() => WorkbenchTestFactory.Create(modalHost, lifetime.Token, workspace: modalWorkspace));
         var modalOwner = MountWorkbench(modalComponent);
         Execute(modalOwner, control => control is MenuItem { Header: "Settings" });
         await Task.Delay(50);
@@ -152,8 +162,9 @@ public sealed class DesktopHostTests
         RunOnUiThread(modalComponent.Dispose);
 
         var failedModalHost = new FakeHost();
+        var failedModalWorkspace = await OpenWorkspaceAsync();
         var failedModalComponent = RunOnUiThread(() =>
-            WorkbenchTestFactory.Create(failedModalHost, lifetime.Token));
+            WorkbenchTestFactory.Create(failedModalHost, lifetime.Token, workspace: failedModalWorkspace));
         var failedModalOwner = MountWorkbench(failedModalComponent);
         Execute(failedModalOwner, control => control is MenuItem { Header: "Settings" });
         await Task.Delay(50);
@@ -163,8 +174,9 @@ public sealed class DesktopHostTests
         RunOnUiThread(failedModalComponent.Dispose);
 
         var modelessHost = new FakeHost { ShowWindows = true };
+        var modelessWorkspace = await OpenWorkspaceAsync();
         var modelessComponent = RunOnUiThread(() =>
-            WorkbenchTestFactory.Create(modelessHost, lifetime.Token));
+            WorkbenchTestFactory.Create(modelessHost, lifetime.Token, workspace: modelessWorkspace));
         var modelessOwner = MountWorkbench(modelessComponent);
         Execute(modelessOwner, control => control is Button { Content: "Generated preview" });
         var preview = modelessHost.LastChild!;
@@ -182,8 +194,9 @@ public sealed class DesktopHostTests
         {
             ShowWindowFault = new InvalidOperationException("show failed"),
         };
+        var failedModelessWorkspace = await OpenWorkspaceAsync();
         var failedModelessComponent = RunOnUiThread(() =>
-            WorkbenchTestFactory.Create(failedModelessHost, lifetime.Token));
+            WorkbenchTestFactory.Create(failedModelessHost, lifetime.Token, workspace: failedModelessWorkspace));
         var failedModelessOwner = MountWorkbench(failedModelessComponent);
         Execute(failedModelessOwner, control => control is Button { Content: "Generated preview" });
         AssertGeneratedHandler(failedModelessHost.LastChild!, "Generated C# preview", attached: false);
@@ -196,6 +209,17 @@ public sealed class DesktopHostTests
         window.RaiseEvent(new RoutedEventArgs(Control.LoadedEvent));
         return window;
     });
+
+    private static async Task<WorkspaceService> OpenWorkspaceAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lucent-workbench-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        TemporaryWorkspaces.Add(root);
+        await File.WriteAllTextAsync(Path.Combine(root, "App.lui"), "namespace Demo; component App() => TextBlock { Text: \"test\"; };");
+        var workspace = new WorkspaceService();
+        await workspace.OpenAsync(root, CancellationToken.None);
+        return workspace;
+    }
 
     private static void Execute(Window owner, Func<Control, bool> predicate) =>
         RunOnUiThread(() =>

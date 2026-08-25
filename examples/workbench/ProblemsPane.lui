@@ -5,7 +5,7 @@ using Avalonia;
 using System.Windows.Input;
 using Avalonia.Automation;
 
-component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand copyCommand) => Border {
+component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand copyCommand, Action<ProblemItem> navigate) => Border {
     Class: "problems-pane";
     Grid {
         RowDefinitions: [
@@ -28,8 +28,9 @@ component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand 
             AutomationProperties.Name: "Problems";
             AutomationProperties.AutomationId: "Problems.List";
             ItemsSource: items;
+            SelectionChanged: (sender, e) => { if (sender.SelectedItem is ProblemItem item) navigate(item); };
             template ItemTemplate(ProblemItem item) {
-                TextBlock { Text: $"{item.File}:{item.Line} {item.Message}"; }
+                TextBlock { Text: $"{item.File}:{item.Line}:{item.Column} {item.Message}"; }
             }
             KeyDown: (sender, e) => {
                 if (e.Key == Avalonia.Input.Key.Down) {
