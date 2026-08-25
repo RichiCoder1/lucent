@@ -23,7 +23,7 @@ performed an independent feasibility/minimality sanity pass.
   disposes the component immediately during intercepted close, and observes late
   save faults through its retained reporter.
 - Plans 003/006 update `UiDispatcherContractTests` for Fragment/OwnedComputed.
-- Plan 010 consumes the established loader/settings/lifecycle/headless seams
+- Plan 011 consumes the established loader/settings/lifecycle/headless seams
   rather than replacing them.
 
 ## Final verdict

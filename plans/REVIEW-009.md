@@ -25,8 +25,8 @@ It also found four roadmap/detail issues:
 - The roadmap marked in-progress Plan 008 as TODO.
 - The roadmap incorrectly assigned Plan 009 a Workbench gate instead of its
   dedicated gallery gate.
-- Plan 007 still named Plan 009, rather than Plan 010, as the Workbench release
-  oracle.
+- Plan 007 still named Plan 009, rather than the post-theme migration/dogfood
+  plans, as the Workbench release oracle.
 
 Residual advice required theme manifests to match complete assembly identity,
 not version alone.

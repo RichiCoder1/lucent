@@ -1,5 +1,10 @@
 # Plan 008a–010 cross-check review
 
+> **Roadmap split note**: This review predates the split of the former combined
+> Plan 010 into Plan 010 (example migration), Plan 011 (Workbench dogfood), and
+> Plan 012 (packaging). Its technical findings still apply to their inherited
+> seams, but it is not acceptance of the rewritten plan contracts.
+
 Plans 008a, 009, 009a, 009b, and 010 are **PASS** after repeated fresh read-only
 adversarial reviews, including a new review cycle after the user grilling changed
 Plan 008a's native-compatibility scope. This record covers the Plan 008a addition

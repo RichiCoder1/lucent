@@ -317,7 +317,7 @@ app-specific resources are allowed when they do not reuse the `Lucent.*` prefix.
   window constraints, keyboard-visible focus, empty workspace/document/problems
   states, long paths/messages, and 200% Windows scaling without clipped primary
   actions.
-- Keep placeholder project/problem content until Plan 010. This plan changes its
+- Keep placeholder project/problem content until Plan 011. This plan changes its
   presentation, not the loader, filesystem, compiler, or release behavior.
 
 ## Visual evidence contract
@@ -381,7 +381,7 @@ Do not add automated screenshot diffs, per-platform golden images, or subjective
 pixel thresholds. Separately run every profile at both 100% and 200% Windows
 scaling and record pass/fail for clipping, focus, and primary-action reachability;
 only the eight matrix combinations above are committed as images. Run the
-existing supported cross-platform build/headless gates; Plan 010 owns full
+  existing supported cross-platform build/headless gates; Plan 012 owns full
 release CI.
 
 ## Scope
@@ -406,7 +406,7 @@ release CI.
   transforms, filters, gradients, template replacement, or `/template/` styling.
 - New example products, Workbench filesystem/compiler integration, packaging,
   marketplace work, hot reload, or language-server performance work.
-- Applying the reading-mode identity to the Blume documentation site; Plan 010
+- Applying the reading-mode identity to the Blume documentation site; Plan 012
   owns that publication surface using the same committed design authority.
 - Pixel-perfect platform uniformity. Native text rendering and Fluent behavior
   may differ while hierarchy and usability remain equivalent.
@@ -538,6 +538,6 @@ The examples are release evidence, not a permanent gallery application. Add a
 new CSS capability after this plan only when a real application needs it and the
 typed catalog can represent its native Avalonia property/value semantics. Plan
 008 consumes the catalog for CSS intelligence, Plan 009 adds the accepted
-Shadcn theme and class completion, Plan 009a adds global styles, and Plan 010
-packages only reviewed behavior while translating the updated visual authority
-to documentation.
+  Shadcn theme and class completion, Plan 009a adds global styles, Plan 010
+  migrates examples, and Plan 012 packages only reviewed behavior while
+  translating the updated visual authority to documentation.

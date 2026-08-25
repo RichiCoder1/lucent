@@ -154,7 +154,7 @@ browser CSS, or Tailwind IntelliSense is compatible with Avalonia.
 The compiler owns parsing, validation, lowering, diagnostics, and catalog
 creation. LSP consumes immutable snapshots only; completion performs no file
 I/O, MSBuild evaluation, assembly loading, or network access. Plan 009a's
-`LucentStyle` install is explicit through `Application.Styles`; Plan 010
+`LucentStyle` install is explicit through `Application.Styles`; Plan 012
 packages only the generated/proven surfaces. This preserves the requested
 seams and avoids a second parser or executable theme discovery.
 
@@ -176,8 +176,8 @@ gallery/accessibility/package review.
    pseudo-class variants, Shadcn dynamic resources, Plan 009 metadata, Plan 009a
    explicit library installation, and no request-path I/O.
 4. **Evidence and package hardening (5--8 days):** utility gallery,
-   accessibility/applicability/precedence tests, package-consumer fixture,
-   documentation, and Plan 010 packaging. Existing Plan 009/009a tests support
+accessibility/applicability/precedence tests, package-consumer fixture,
+documentation, and Plan 012 packaging. Existing Plan 009/009a tests support
    the lower bound; a runtime side composer or template exceptions push toward
    25 days.
 
@@ -281,7 +281,7 @@ v0 gallery proves useful, add a bounded Plan 009b after 009a:
    metadata-only completion.
 3. Plan 009b generates and tests the finite utility package, including any
    accepted escaped-name or side-composition primitive.
-4. Plan 010 packages it only after the utility gallery and consumer fixture
+4. Plan 012 packages it only after the utility gallery and consumer fixture
    pass; the default template should not install it unless utility-first styling
    becomes an accepted product default.
 

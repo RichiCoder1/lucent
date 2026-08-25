@@ -73,7 +73,7 @@ arbitrary-value parser, runtime source scanner, or separate metadata model.
 Generated runtime styles and completion entries must be tested against the same
 specification so they cannot drift.
 
-The provisional package surface is `Lucent.Styles.Utilities`. Plan 010 owns
+The provisional package surface is `Lucent.Styles.Utilities`. Plan 012 owns
 packing and release naming. Do not use Tailwind branding in the package name or
 claim compatibility without a separate naming/trademark review.
 
@@ -164,7 +164,7 @@ utilities except where conflict behavior is being demonstrated.
   preflight, transforms/filters, pseudo-elements, animations, or template-part
   styling.
 - Migrating existing examples to utility-first styling or installing utilities
-  in the default template; Plan 010 may package the opt-in catalog but must not
+  in the default template; Plan 012 may package the opt-in catalog but must not
   make it the product default without a separate accepted design decision.
 - General CSS escape support, class navigation/refactoring, or a new completion
   cache/protocol.
@@ -241,10 +241,10 @@ canonical conflict/restoration outcomes without pixel-golden tests.
 
 Document the supported inventory and native mappings, explicit install call,
 Shadcn dependency, conflict order, unsupported Tailwind features, and extension
-rules. Update Plan 010 to pack and test the opt-in catalog, but keep it out of
+rules. Update Plan 012 to pack and test the opt-in catalog, but keep it out of
 the default template and example migration.
 
-**Verify**: Plan 010's clean consumer fixture can install the generated style
+**Verify**: Plan 012's clean consumer fixture can install the generated style
 catalog through `new global::Lucent.Styles.Utilities.LucentStyles()` and receive
 matching exact-assembly metadata only after that direct installation, without
 repository paths, assembly execution, or runtime scanning.
@@ -263,7 +263,7 @@ repository paths, assembly execution, or runtime scanning.
       and representative conflict while preserving accessibility gates.
 - [x] Installation is explicit, completion performs no request-path I/O, and no
       runtime parser, source scan, Tailwind dependency, or plugin system exists.
-- [x] Plan 010 can package the catalog as opt-in without adding it to the default
+- [x] Plan 012 can package the catalog as opt-in without adding it to the default
       template or migrating examples.
 
 ## STOP conditions

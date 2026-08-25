@@ -191,7 +191,7 @@ tested Avalonia C# expression counts as supported compatibility; Lucent syntax i
 required only when the escape is materially unclear or cannot preserve the
 native behavior. Unsupported XAML syntax is not a failure.
 
-Close gaps exercised by the examples, Workbench, Plans 009–009b, or Plan 010's
+Close gaps exercised by the examples, Workbench, Plans 009–009b, or Plan 012's
 clean package consumer. Other gaps remain honestly classified. If a release-used
 gap requires a broad new syntax/runtime module, stop, design it as a separate
 plan, and add that dependency only when the release cannot use the explicit C#
@@ -444,7 +444,7 @@ wrapper control.
 
 Update Plan 009 to publish Shadcn and reviewed native-theme entries through this
 manifest/catalog contract. Update Plan 009a's generated global-style type and
-Plan 009b's utility package to emit the same manifest section. Update Plan 010
+Plan 009b's utility package to emit the same manifest section. Update Plan 012
 to verify the embedded manifest from clean packaged consumers.
 
 **Verify**: the amended plans define no second style metadata schema, reader,

@@ -138,7 +138,7 @@ requirements. Extend Plan 008a's native-compatibility matrix with measured
 global/adjacent/theme priority, host-controlled cross-catalog order, and
 value-restoration rows.
 
-**Verify**: package-consumer fixtures required by Plan 010 can install app and
+**Verify**: package-consumer fixtures required by Plan 012 can install app and
 library global catalogs without repository paths.
 
 ## Done criteria
@@ -167,5 +167,5 @@ library global catalogs without repository paths.
 
 Global CSS is an opt-in application resource, not a change to adjacent component
 scope. Its package metadata is a Plan 008a manifest section, not a generated
-reflection interface or runtime registry. Plan 010 packages only the generated
+reflection interface or runtime registry. Plan 012 packages only the generated
 API and behavior proven here.

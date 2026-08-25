@@ -50,7 +50,7 @@ stale and Plan 007 was reviewed again.
 - **Marks and mock:** 24/32 px use color; 16/20 px prefer grayscale unless exact
   rendered evidence supports color. The approved mock governs composition, not
   fictional live-preview/dependency features.
-- **Documentation:** Plan 010 consumes the updated authority for Blume's reading-mode
+- **Documentation:** Plan 012 consumes the updated authority for Blume's reading-mode
   visual translation.
 
 The final fresh review passed with no blocker or high finding.
@@ -60,8 +60,8 @@ The final fresh review passed with no blocker or high finding.
 - Plan 006 remains the behavior/accessibility/lifecycle prerequisite.
 - Plan 008 consumes Plan 007's typed CSS catalog and forbids an LSP-only schema.
 - Plan 009 preserves Plan 007's adaptive and accessibility gates while proving
-  the replacement theme; Plan 010 migrates the shell and replaces Workbench
-  placeholders with real project/compiler data.
+  the replacement theme; Plan 010 migrates the shell, and Plan 011 replaces
+  Workbench placeholders with real project/compiler data.
 - Repository search found no stale numbered tooling/package-plan filenames after
   roadmap insertions.
 

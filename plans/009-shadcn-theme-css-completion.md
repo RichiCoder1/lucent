@@ -162,7 +162,7 @@ publish a stale document/project generation.
 **Out of scope**:
 
 - Redesigning Counter, Todo, Package Pulse, Workbench, or documentation visuals;
-  Plan 010 owns the separately gated migration and release packaging.
+  Plan 010 owns the separately gated migration and Plan 012 owns packaging.
 - Executing arbitrary project/third-party assemblies, automatic transitive
   library-style installation, runtime CSS parsing, or downloading manifests.
 - Project AXAML selector indexing, third-party native-theme completion, or
@@ -288,4 +288,5 @@ evidence compiled into tooling, not a second package-manifest format.
 Plan 008's deliberate `Class:` exclusion remains correct for its accepted scope;
 this plan supersedes that boundary only after its own protocol and performance
 gates pass. Plan 009a may then reuse the catalog for explicit global styles;
-Plan 010 packages the result and performs the separately reviewed migration.
+Plan 010 performs the separately reviewed migration and Plan 012 packages the
+result.

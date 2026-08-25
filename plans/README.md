@@ -31,7 +31,9 @@ recent workspaces. It is not a full IDE.
 | [009](009-shadcn-theme-css-completion.md) | Add the Shadcn theme and theme-aware CSS completion | P1 | XL | 007, 008a | DONE |
 | [009a](009a-global-lucent-styles.md) | Add explicit global Lucent styles | P1 | L | 008a, 009 | DONE |
 | [009b](009b-avalonia-utility-styles.md) | Add a finite Avalonia utility-style catalog | P2 | M | 008a, 009, 009a | DONE |
-| [010](010-package-and-dogfood.md) | Package Lucent and finish the Workbench release gate | P1 | XL | 001–009b (incl. 008a) | TODO |
+| [010](010-example-shadcn-migration.md) | Migrate every example to the Shadcn visual authority | P1 | L | 007, 009, 009a | TODO |
+| [011](011-workbench-dogfood.md) | Complete the Workbench dogfood application | P1 | L | 005, 006, 008, 008a, 010 | TODO |
+| [012](012-package-preview.md) | Package and publish the experimental preview | P1 | L | 009b, 011 | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED` with a
 one-line reason.
@@ -42,8 +44,9 @@ Review records: [001–002](REVIEW-001-002.md),
 [001–006 Sol/high cross-check](REVIEW-001-006-CROSSCHECK.md). Plan review:
 [006a](REVIEW-006A.md), [007](REVIEW-007.md), [007a](REVIEW-007A.md),
 [008](REVIEW-008.md), [009/009a](REVIEW-009.md), and
-[009b](REVIEW-009B.md). The current manifest/style/package amendments are
-covered by the [008a–010 cross-check](REVIEW-008A-010-CROSSCHECK.md).
+[009b](REVIEW-009B.md). The manifest/style/package seams were previously covered
+by the [008a–010 cross-check](REVIEW-008A-010-CROSSCHECK.md); the rewritten
+Plans 010–012 require fresh plan review before implementation.
 
 ## Dependency notes
 
@@ -79,8 +82,12 @@ covered by the [008a–010 cross-check](REVIEW-008A-010-CROSSCHECK.md).
   reuses 009's class catalog.
 - 009b optionally generates a finite Avalonia-native utility catalog from those
   seams without importing Tailwind or adding runtime source scanning.
-- 010 packages only the system proven by Workbench. It must not stabilize APIs
-  that Workbench has not exercised.
+- 010 migrates every example to the accepted Shadcn visual authority without
+  mixing presentation work with Workbench's real project integration.
+- 011 completes the Workbench dogfood flow through existing compiler, project,
+  ownership, settings, and test seams before any package interface is frozen.
+- 012 packages only the system proven by Workbench. It must not stabilize
+  interfaces that Workbench has not exercised.
 
 ## Release gates
 
@@ -93,15 +100,17 @@ npm test
 Pop-Location
 ```
 
-Plans 004–007a, including 006a, and 010 must also add a user-flow gate to Lucent
-Workbench. Plan 006 replaces manual-only smoke coverage with Avalonia headless
-interaction tests; Plan 006a extends that flow with first-load/stale-refresh
+Plans 004–007a, including 006a, and Plans 010–012 must also preserve or add a
+user-flow gate to Lucent Workbench. Plan 006 replaces manual-only smoke coverage
+with Avalonia headless interaction tests; Plan 006a extends that flow with
+first-load/stale-refresh
 boundary evidence; Plan 007 adds bounded visual evidence without pixel-golden
 tests; Plan 008 owns protocol and performance gates for language tooling; Plan
 008a owns package-manifest and native-compatibility fixtures; Plan 009 owns a
 deterministic theme-gallery gate; and Plan 009a owns app/library global-style
 fixtures. Plan 009b owns a separate utility gallery and manifest/runtime parity
-gate before Plan 010 packages the opt-in result or migrates the examples.
+gate before Plan 012 packages the opt-in result; it does not block Plan 010's
+non-utility example migration.
 
 ## Explicit non-goals
 
