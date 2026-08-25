@@ -1,98 +1,97 @@
 Window {
-    background: resource("Lucent.Canvas");
+    background: resource("Shadcn.Background");
 }
 
 Grid.shell {
-    background: resource("Lucent.Canvas");
+    background: resource("Shadcn.Background");
 }
 
 Menu.topbar {
-    background: resource("Lucent.Surface");
+    background: resource("Shadcn.Card");
     padding: 4px 8px;
-    border-color: resource("Lucent.Border");
+    border-color: resource("Shadcn.Border");
     border-width: 1px;
 }
 
 Grid.work-area {
-    background: resource("Lucent.Canvas");
+    background: resource("Shadcn.Background");
     padding: 8px;
 }
 
 Border.sidebar-host {
-    background: resource("Lucent.Surface");
-    border-color: resource("Lucent.Border");
+    background: resource("Shadcn.Card");
+    border-color: resource("Shadcn.Border");
     border-width: 1px;
     padding: 8px;
 }
 
 Border.editor-host {
-    background: resource("Lucent.Surface");
-    border-color: resource("Lucent.Border");
+    background: resource("Shadcn.Card");
+    border-color: resource("Shadcn.Border");
     border-width: 1px;
     padding: 8px;
 }
 
 ContentControl.problems-host {
-    background: resource("Lucent.Surface");
-    border-color: resource("Lucent.Border");
+    background: resource("Shadcn.Card");
+    border-color: resource("Shadcn.Border");
     border-width: 1px;
     padding: 8px;
 }
 
 TextBlock {
-    foreground: resource("Lucent.Text");
+    foreground: resource("Shadcn.Foreground");
 }
 
 TextBlock.status-line {
-    foreground: resource("Lucent.TextMuted");
+    foreground: resource("Shadcn.MutedForeground");
     padding: 4px 8px;
 }
 
 TextBlock.problems-hidden {
-    foreground: resource("Lucent.TextMuted");
+    foreground: resource("Shadcn.MutedForeground");
     padding: 4px 8px;
 }
 
 StackPanel.action-bar {
-    background: resource("Lucent.Surface");
+    background: resource("Shadcn.Card");
     padding: 4px 8px;
     gap: 8px;
 }
 
 Button:pointerover {
-    background: resource("Lucent.Surface");
+    background: resource("Shadcn.Card");
 }
 
 Button:focus-visible {
-    border-color: resource("Lucent.Focus");
+    border-color: resource("Shadcn.Ring");
     border-width: 2px;
 }
 
 TextBox:focus-visible {
-    border-color: resource("Lucent.Focus");
+    border-color: resource("Shadcn.Ring");
     border-width: 2px;
 }
 
 ListBox:focus-visible {
-    border-color: resource("Lucent.Focus");
+    border-color: resource("Shadcn.Ring");
     border-width: 2px;
 }
 
 Border.command-palette {
-    background: resource("Lucent.SurfaceRaised");
-    border-color: resource("Lucent.Accent");
+    background: resource("Shadcn.Popover");
+    border-color: resource("Shadcn.Primary");
     border-width: 1px;
     padding: 16px;
-    box-shadow: 0 8px 24px #101821;
     width: 420px;
 }
 
 TextBlock.error-title {
-    foreground: resource("Lucent.Danger");
+    foreground: resource("Shadcn.Destructive");
     font-weight: bold;
 }
 
 TextBlock.error-message {
-    foreground: resource("Lucent.TextMuted");
+    foreground: resource("Shadcn.MutedForeground");
     text-wrap: wrap;
 }

@@ -27,7 +27,7 @@ component PackagePulse()
                         StackPanel {
                             TextBlock { Class: "error-title"; Text: "Search failed"; }
                             TextBlock { Class: "status"; Text: error.Message; }
-                            Button { Class: "retry-action"; Content: "Retry"; Click: () => RetryPackages(); }
+                            Button { Class: "retry-action destructive"; Content: "Retry"; Click: () => RetryPackages(); }
                         }
                     }
                 }

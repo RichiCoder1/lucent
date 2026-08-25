@@ -45,18 +45,15 @@ authorities win and the plan must be corrected before implementation.
 All four surfaces are **Operate** experiences: the primary task must be obvious,
 keyboard use must remain first-class, and native behavior outranks decoration.
 
-- Apply the **Registration Overlay** language: graphite/paper working fields,
-  teal for source/focus/selection, coral for dependency/change/misalignment, and
-  dedicated success/warning/danger roles. Color remains semantic, not decoration.
-- Use the committed native system font stacks, 4-unit spacing scale, 2/4/8 px
-  radius hierarchy, hairline pane structure, limited raised-surface shadows, and
-  120/180 ms motion timings. Each app may vary density and emphasis.
+- Apply the accepted **Shadcn New York / neutral** semantic resources through
+  Fluent plus `ShadcnTheme`. Color remains semantic, not decoration.
+- Use compact native spacing, modest radii, hairline pane structure, and limited
+  raised-surface shadows. Each app may vary density and emphasis.
 - Hover shifts surface tone without lift; shadows are limited to menus, popovers,
   and dialogs. Disabled state never relies on opacity alone, and warning/error
   state pairs its semantic color with an icon or label.
-- Keyboard focus targets a 2 px teal outline separated from content by at least
-  2 px. Reduced motion removes translation/folding while preserving final state
-  and the 120/180 ms timing hierarchy for non-spatial feedback.
+- Keyboard focus uses the shared Shadcn ring and native focus behavior. Reduced
+  motion preserves final state without hiding content.
 - Counter is the smallest confidence-building sample: one dominant value, one
   unmistakable action, and no incidental chrome.
 - Todo is a calm daily-work surface: fast entry, scannable rows, obvious filters,
@@ -68,14 +65,10 @@ keyboard use must remain first-class, and native behavior outranks decoration.
   bounded project sidebar, editor workspace, problems panel, status line,
   command palette, settings, and generated preview have clear hierarchy.
 
-The family is source-owned by the examples. `design/tokens.css` is the canonical
-source for role names and values. Adjacent CSS and Avalonia resource dictionaries
-may repeat the small vocabulary because Lucent has no import pipeline, but they
-must keep the exact `--lucent-*` names and corresponding `Lucent.*` resource roles;
-one focused consistency check prevents palette/timing/spacing drift. Do not add
-CSS imports, a shared theme package, or generic Lucent components merely to
-remove four-file duplication. Use the committed Lucent marks; add no icon or font
-dependency.
+`ShadcnTheme` is the shared application authority. Adjacent CSS uses its
+`Shadcn.*` semantic resources; examples do not repeat application resource
+dictionaries or retain a compatibility vocabulary. Use the committed Lucent mark
+as an icon only; add no icon or font dependency.
 
 The approved Workbench mock is a hierarchy/composition north star, not a feature
 specification. Preserve its aligned source/output work surface, compact rails,
@@ -96,12 +89,10 @@ illustrative live native preview, dependency graph, or unsupported commands.
   and common text behavior are missing from the authored CSS surface.
 - FluentTheme and AvaloniaEdit's Fluent styles already exist. Preserve those
   templates and focus behavior instead of recreating them.
-- Fluent's native focus rendering has not yet been proven to satisfy the committed
-  2 px teal/2 px separation geometry without template replacement. Step 2 owns
-  that public-API decision gate.
-- The committed design tokens are not currently an executable Lucent theme.
-  Native light/dark `Lucent.*` resources and adjacent `--lucent-*` declarations
-  can drift unless Plan 007 verifies them against `design/tokens.css`.
+- ShadcnTheme's native focus rendering must preserve keyboard-visible focus
+  without template replacement.
+- `ShadcnTheme` is the executable application theme. Native light/dark
+  `Shadcn.*` resources and `design/tokens.css` must remain aligned.
 
 ## CSS-to-Avalonia contract
 
@@ -244,31 +235,12 @@ for approval: either retain native dynamic resources in `.lui`/application setup
 and remove `resource()` from this plan's contract, or defer the whole theme bridge.
 Never cache a one-time resource lookup and describe it as dynamic.
 
-### Canonical token bridge
+### Current visual authority
 
-`design/tokens.css` remains the only value manifest. Derive Avalonia keys
-mechanically: remove `--lucent-`, Pascal-case each hyphenated segment, and prefix
-`Lucent.`. Examples: `--lucent-canvas` → `Lucent.Canvas`,
-`--lucent-text-muted` → `Lucent.TextMuted`, and
-`--lucent-duration-align` → `Lucent.DurationAlign`. `:root` supplies light/default
-values; `.theme-dark` supplies dark overrides; tokens without an override retain
-the default value. `--lucent-mark-*` tokens are asset-only and are excluded from
-control resource dictionaries.
-
-The consistency gate covers exactly:
-
-- `examples/counter/App.cs` and `examples/counter/*.css`;
-- `examples/todo/App.cs` and `examples/todo/*.css`;
-- `examples/package-pulse/App.cs` and `examples/package-pulse/*.css`;
-- `examples/workbench/App.cs` and `examples/workbench/*.css`.
-
-One focused test parses only `:root` and `.theme-dark` from `design/tokens.css`,
-derives the keys above, initializes each app's light/dark resource dictionaries,
-and compares every brush, spacing, radius, and duration value. It also rejects a
-redeclared `--lucent-*` value in adjacent CSS when it differs from the canonical
-token and rejects canonical palette hex literals used directly in example `.lui`
-or CSS declarations. Missing roles fail with the app and resource key; extra
-app-specific resources are allowed when they do not reuse the `Lucent.*` prefix.
+Plan 010 supersedes this plan's former per-example resource dictionaries. The
+theme owns the reviewed light/dark values in `Shadcn.*`; `design/tokens.css`
+records that same vocabulary. The focused migration test verifies that all four
+examples install `ShadcnTheme`, reference it, and contain no legacy visual keys.
 
 ## Example quality contracts
 
@@ -278,9 +250,8 @@ app-specific resources are allowed when they do not reuse the `Lucent.*` prefix.
 - Give the count dominant hierarchy, clarify the action, and show pointer,
   pressed, disabled, and keyboard-focus treatment without replacing Button's
   Fluent template.
-- Demonstrate the canonical Lucent roles, dynamic theme resources, and one
-  restrained 120 ms
-  transition. No reset/history/settings feature is added.
+- Demonstrate shared Shadcn semantic resources and native theme switching. No
+  reset/history/settings feature is added.
 
 ### Todo
 
@@ -288,8 +259,8 @@ app-specific resources are allowed when they do not reuse the `Lucent.*` prefix.
   layout and authored classes/resources that work at the declared minimum size.
 - Make entry, completion, deletion, filtering, remaining count, progress, empty
   state, and completed state visually distinct without color-only meaning.
-- Use teal for active selection/focus and reserve coral for changed/dependent or
-  destructive meaning; completed rows use semantic success treatment.
+- Use Shadcn focus, primary, and destructive semantics; completed rows retain
+  their explicit status label.
 - Preserve keyed row identity, direct native controls, editing behavior, and the
   accepted TodoMVC scope. Add no persistence, drag/reorder, due dates, or routing.
 
@@ -298,9 +269,8 @@ app-specific resources are allowed when they do not reuse the `Lucent.*` prefix.
 - Preserve its dark-forward personality while supporting both theme variants.
 - Distinguish initial loading, stale refresh, error, empty, and populated states;
   retain content stability while async work is pending.
-- Use teal to connect query/source with results and coral only for changed or
-  failed dependency state. Transitions use the committed 120/180 ms timings only
-  for continuity; every operation remains understandable at zero duration.
+- Use Shadcn primary and destructive semantics for query/results and failure.
+  Every operation remains understandable without motion.
 
 ### Workbench
 
@@ -315,29 +285,29 @@ app-specific resources are allowed when they do not reuse the `Lucent.*` prefix.
   preview/dependency features. Record every deliberate compositional deviation.
 - Support the saved sidebar width and problems visibility from Plan 006, minimum
   window constraints, keyboard-visible focus, empty workspace/document/problems
-  states, long paths/messages, and 200% Windows scaling without clipped primary
-  actions.
+  states, and long paths/messages without clipped primary actions. Physical 200%
+  Windows scaling is an approved manual follow-up.
 - Keep placeholder project/problem content until Plan 011. This plan changes its
   presentation, not the loader, filesystem, compiler, or release behavior.
 
 ## Visual evidence contract
 
 Commit a short review record under `docs/quality/007-example-ux/` and exactly
-eight **final** Windows reference captures—two per app. Captures are review
-evidence, not pixel-golden tests. Primary captures use 100% Windows scaling;
-alternate captures use 200% scaling so every app has explicit scaling evidence.
-Dimensions are logical Avalonia units:
+eight **final** reference captures—two per app. Captures are review evidence,
+not pixel-golden tests. The executable gate is their declared logical Avalonia
+size; physical Windows display scaling is not controlled by this runner. The user
+approved 200% Windows scaling as a manual follow-up, so no 200% pass is claimed:
 
-| Profile | Theme/state | Window size | Windows scale |
+| Profile | Theme/state | Window size | Evidence |
 | --- | --- | --- | --- |
-| `counter-light` | light, incremented | 420×300 | 100% |
-| `counter-dark-focus` | dark, keyboard focus visible | 420×300 minimum | 200% |
-| `todo-light-populated` | light, populated | 900×760 | 100% |
-| `todo-dark-empty` | dark, empty/completed | 700×560 minimum | 200% |
-| `pulse-dark-results` | dark, populated | 820×760 | 100% |
-| `pulse-light-error` | light, error after stale content | 600×560 minimum | 200% |
-| `workbench-light-shell` | light, full shell | 1280×800 | 100% |
-| `workbench-dark-palette` | dark, palette and problems visible | 960×680 minimum | 200% |
+| `counter-light` | light, incremented | 420×300 | logical capture |
+| `counter-dark-focus` | dark, keyboard focus visible | 420×300 minimum | logical capture |
+| `todo-light-populated` | light, populated | 900×760 | logical capture |
+| `todo-dark-empty` | dark, empty/completed | 700×560 minimum | logical capture |
+| `pulse-dark-results` | dark, populated | 820×760 | logical capture |
+| `pulse-light-error` | light, error after stale content | 600×560 minimum | logical capture |
+| `workbench-light-shell` | light, full shell | 1280×800 | logical capture |
+| `workbench-dark-palette` | dark, palette and problems visible | 960×680 minimum | logical capture |
 
 Each app accepts only its internal deterministic `--quality-capture <profile>`
 profiles. The profile sets the theme, data/state, focus target, and logical window
@@ -378,11 +348,10 @@ superseded files; the committed final set remains exactly eight:
   unsupported content or turning fold geometry into ordinary control chrome.
 
 Do not add automated screenshot diffs, per-platform golden images, or subjective
-pixel thresholds. Separately run every profile at both 100% and 200% Windows
-scaling and record pass/fail for clipping, focus, and primary-action reachability;
-only the eight matrix combinations above are committed as images. Run the
-  existing supported cross-platform build/headless gates; Plan 012 owns full
-release CI.
+pixel thresholds. The eight logical captures above are the executable evidence.
+Physical 200% Windows scaling remains an approved manual follow-up for clipping,
+focus, and primary-action reachability. Run the existing supported cross-platform
+build/headless gates; Plan 012 owns full release CI.
 
 ## Scope
 
@@ -392,8 +361,8 @@ release CI.
   focused editor metadata needed for the contract above.
 - Adjacent CSS and minimal native resources/layout changes for Counter, Todo,
   Package Pulse, and Workbench.
-- Consumption of the committed Lucent token roles, marks, and approved Workbench
-  composition, plus one focused token/resource consistency check.
+- Consumption of the shared Shadcn semantic resources, committed marks, and
+  approved Workbench composition, plus one focused token/resource consistency check.
 - Light/dark variants, common interaction states, adaptive minimum-size behavior,
   accessibility preservation, reference captures, and review evidence.
 - Documentation of the expanded supported CSS subset and Avalonia boundaries.
@@ -432,8 +401,8 @@ eight-file final set.
 Against Avalonia 12.1.1, prove public C# construction for child/descendant/name/
 pseudo selectors, typed setters, theme-following dynamic resources, and the five
 transition families. Also prove whether supported Fluent palette/resources,
-focus-adorners, or ordinary styles can produce the committed 2 px teal focus
-outline with at least 2 px content separation on Button, TextBox, ListBox, and
+focus-adorners, or ordinary styles can produce the shared Shadcn keyboard focus
+ring on Button, TextBox, ListBox, and
 AvaloniaEdit without replacing templates or suppressing native accessibility.
 Record exact APIs in one focused compiler/native fixture.
 
@@ -461,7 +430,7 @@ structure in `.lui`, visual treatment in adjacent CSS, and native theme resource
 in the application setup where runtime theme switching requires them.
 
 Use `design/tokens.css` as the source of truth for every repeated CSS variable and
-native `Lucent.*` resource value. Add one focused check that fails when the light/
+native `Shadcn.*` resource value. Add one focused check that fails when the light/
 dark role values, spacing/radii, or motion timings drift. Apply the committed mark
 as the application/window identity where Avalonia packaging permits it and verify
 the documented choice at 16, 20, 24, and 32 px: use the color mark at 24/32; use
@@ -473,14 +442,15 @@ minimum sizes; no example adds a private framework hook for styling.
 
 ### 5. Harden states, scaling, accessibility, and motion
 
-Exercise keyboard-only use, 200% Windows scaling, long content, empty/loading/error
-states, theme switching, zero-duration motion resources, and Plan 006's
+Exercise keyboard-only use, long content, empty/loading/error states, theme
+switching, zero-duration motion resources, and Plan 006's
 automation/focus contracts. Fix the shared CSS/compiler cause before adding
 one-off native assignments.
 
 **Verify**: headless functional/accessibility tests and native smoke checks pass;
-all eight deterministic profiles pass at both 100% and 200% Windows scaling;
-all workflows remain understandable with color removed and motion disabled.
+all eight deterministic profiles pass at their declared logical sizes; all
+workflows remain understandable with color removed and motion disabled. Physical
+200% Windows scaling is an approved manual follow-up, not an executable gate.
 
 ### 6. Record the bounded visual review
 
@@ -499,8 +469,8 @@ departures from the approved mock; all solution and VS Code gates remain green.
 - [x] `PRODUCT.md` and `DESIGN.md` remain authoritative; example CSS/native
       resources match `design/tokens.css`, and approved mark usage passes its
       documented small-size checks.
-- [x] Native focus-visible treatment meets the committed 2 px teal/2 px separation
-      geometry without replacing Fluent/AvaloniaEdit templates or weakening
+- [x] Native focus-visible treatment uses the shared Shadcn ring without replacing
+      Fluent/AvaloniaEdit templates or weakening
       Plan 006 accessibility behavior.
 - [x] Every example is usable in light/dark themes, at its minimum size, with
       keyboard focus, long content, and its material empty/error/loading states.

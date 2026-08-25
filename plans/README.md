@@ -31,7 +31,7 @@ recent workspaces. It is not a full IDE.
 | [009](009-shadcn-theme-css-completion.md) | Add the Shadcn theme and theme-aware CSS completion | P1 | XL | 007, 008a | DONE |
 | [009a](009a-global-lucent-styles.md) | Add explicit global Lucent styles | P1 | L | 008a, 009 | DONE |
 | [009b](009b-avalonia-utility-styles.md) | Add a finite Avalonia utility-style catalog | P2 | M | 008a, 009, 009a | DONE |
-| [010](010-example-shadcn-migration.md) | Migrate every example to the Shadcn visual authority | P1 | L | 007, 009, 009a | TODO |
+| [010](010-example-shadcn-migration.md) | Migrate every example to the Shadcn visual authority | P1 | L | 007, 009, 009a | DONE |
 | [011](011-workbench-dogfood.md) | Complete the Workbench dogfood application | P1 | L | 005, 006, 008, 008a, 010 | TODO |
 | [012](012-package-preview.md) | Package and publish the experimental preview | P1 | L | 009b, 011 | TODO |
 

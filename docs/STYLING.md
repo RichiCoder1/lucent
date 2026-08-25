@@ -63,7 +63,7 @@ reviewed hex resources and never depend on the compiler at runtime.
 
 ```css
 :root {
-    --surface: resource("Lucent.Surface");
+    --surface: resource("Shadcn.Card");
     --surface-hover: #f5f5f5;
     --accent: #7357e6;
     --space-3: 12px;

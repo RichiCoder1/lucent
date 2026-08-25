@@ -290,7 +290,7 @@ Delete duplicated `Lucent.*` theme dictionaries and do not retain temporary
 aliases. App-specific resources remain valid only for semantics the shared
 theme does not own.
 
-Because this supersedes the Registration Overlay treatment for application UI,
+Because this is the application visual authority,
 the migration must update `DESIGN.md`, `design/tokens.css`, Plan 007's visual
 authority, and Plan 010's instruction to preserve that authority. The Lucent
 mark and product identity can remain unless the redesign proves they conflict;

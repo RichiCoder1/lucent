@@ -101,16 +101,16 @@ instruction presented as current.
 
 ## Done criteria
 
-- [ ] Counter, Todo, Package Pulse, and Workbench install Fluent plus
+- [x] Counter, Todo, Package Pulse, and Workbench install Fluent plus
       `ShadcnTheme` and use the accepted semantic resources.
-- [ ] Existing behavior, keyboard, accessibility, adaptive-layout, and smoke
+- [x] Existing behavior, keyboard, accessibility, adaptive-layout, and smoke
       gates remain green.
-- [ ] Every superseded application visual token is removed rather than aliased.
-- [ ] `DESIGN.md`, `design/tokens.css`, Plan 007, and example documentation name
+- [x] Every superseded application visual token is removed rather than aliased.
+- [x] `DESIGN.md`, `design/tokens.css`, Plan 007, and example documentation name
       one current visual authority.
-- [ ] Reviewed bounded evidence covers every migrated example in light and dark
+- [x] Reviewed bounded evidence covers every migrated example in light and dark
       modes and at required minimum sizes.
-- [ ] The utility catalog remains optional and is not installed merely to
+- [x] The utility catalog remains optional and is not installed merely to
       complete the migration.
 
 ## STOP conditions

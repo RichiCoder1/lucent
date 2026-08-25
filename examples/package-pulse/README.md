@@ -22,3 +22,6 @@ action are visible together with the actual failure.
 dotnet run --project examples/package-pulse/PackagePulse.csproj -- --quality-capture pulse-dark-results
 dotnet run --project examples/package-pulse/PackagePulse.csproj -- --quality-capture pulse-light-error
 ```
+
+The application installs Fluent plus `ShadcnTheme`; adjacent CSS uses only
+`Shadcn.*` semantic resources.

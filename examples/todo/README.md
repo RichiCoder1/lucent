@@ -13,9 +13,12 @@ dotnet run --project examples/todo/Todo.csproj
 covers state, events, keyed rows, retained controls, filtering, editing, and
 bounded native value conveniences. Completed rows expose an explicit
 Completed/Active label as well as semantic success styling; `Todo.css` consumes
-the same Lucent role resources in light and dark theme dictionaries.
+the shared Shadcn semantic resources in light and dark theme dictionaries.
 
 ```powershell
 dotnet run --project examples/todo/Todo.csproj -- --quality-capture todo-light-populated
 dotnet run --project examples/todo/Todo.csproj -- --quality-capture todo-dark-empty
 ```
+
+The application installs Fluent plus `ShadcnTheme`; adjacent CSS uses only
+`Shadcn.*` semantic resources.

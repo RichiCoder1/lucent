@@ -1,5 +1,5 @@
 Border.editor-pane {
-    background: resource("Lucent.Surface");
+    background: resource("Shadcn.Card");
     padding: 12px;
 }
 
@@ -8,18 +8,18 @@ Grid.document-header {
 }
 
 TextBlock.document-title {
-    foreground: resource("Lucent.Text");
+    foreground: resource("Shadcn.Foreground");
     font-size: 16px;
     font-weight: 600;
 }
 
 TextBlock.document-language {
-    foreground: resource("Lucent.TextMuted");
+    foreground: resource("Shadcn.MutedForeground");
     font-size: 12px;
 }
 
 TextBlock.document-edits {
-    foreground: resource("Lucent.TextMuted");
+    foreground: resource("Shadcn.MutedForeground");
     font-size: 12px;
 }
 
@@ -34,8 +34,8 @@ StackPanel.document-toolbar {
 }
 
 TextEditor.source-editor {
-    background: resource("Lucent.SurfaceRaised");
-    foreground: resource("Lucent.Text");
-    border-color: resource("Lucent.Border");
+    background: resource("Shadcn.Popover");
+    foreground: resource("Shadcn.Foreground");
+    border-color: resource("Shadcn.Border");
     border-width: 1px;
 }

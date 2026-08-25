@@ -18,3 +18,6 @@ adapter or component wrapper is involved. Its compact surface enforces a
 dotnet run --project examples/counter/Counter.csproj -- --quality-capture counter-light
 dotnet run --project examples/counter/Counter.csproj -- --quality-capture counter-dark-focus
 ```
+
+The application installs Fluent plus `ShadcnTheme`; adjacent CSS uses only
+`Shadcn.*` semantic resources.

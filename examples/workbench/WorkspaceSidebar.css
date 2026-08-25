@@ -1,14 +1,14 @@
 Border.workspace-sidebar {
-    background: resource("Lucent.Surface");
+    background: resource("Shadcn.Card");
     padding: 12px;
 }
 
 TextBlock {
-    foreground: resource("Lucent.Text");
+    foreground: resource("Shadcn.Foreground");
 }
 
 TextBlock.pane-title {
-    foreground: resource("Lucent.Text");
+    foreground: resource("Shadcn.Foreground");
     font-size: 14px;
     font-weight: 600;
 }
@@ -18,8 +18,8 @@ Button.pane-action {
 }
 
 ListBox.workspace-tree {
-    background: resource("Lucent.Surface");
-    foreground: resource("Lucent.Text");
-    border-color: resource("Lucent.Border");
+    background: resource("Shadcn.Card");
+    foreground: resource("Shadcn.Foreground");
+    border-color: resource("Shadcn.Border");
     border-width: 1px;
 }

@@ -12,6 +12,7 @@
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+    <ProjectReference Include="..\..\src\Lucent.Themes.Shadcn\Lucent.Themes.Shadcn.csproj" />
     <ProjectReference
       Include="..\..\src\Lucent.Compiler.MSBuild\Lucent.Compiler.MSBuild.csproj"
       ReferenceOutputAssembly="false"

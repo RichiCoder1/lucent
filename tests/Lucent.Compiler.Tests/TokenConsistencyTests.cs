@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Lucent.Compiler.Tests;
@@ -48,110 +47,90 @@ public sealed class TokenConsistencyTests
         foreach (var (app, profiles) in expected)
         {
             var source = File.ReadAllText(Path.Combine(root, "examples", app, "App.cs"));
-            StringAssert.Contains(source,
-                $"return profile is \"{profiles[0]}\" or \"{profiles[1]}\";",
-                $"{app} must reject undocumented quality-capture profile names.");
+            StringAssert.Contains(source, $"return profile is \"{profiles[0]}\" or \"{profiles[1]}\";");
         }
     }
 
     [TestMethod]
-    public void Canonical_tokens_match_every_example_theme_dictionary_and_adjacent_stylesheet()
+    public void Examples_install_the_shared_shadcn_theme_without_legacy_visual_tokens()
     {
         var root = FindRoot();
-        var tokens = ParseTokenBlocks(File.ReadAllText(Path.Combine(root, "design", "tokens.css")));
+        var theme = ReadThemeResources(root);
+        var tokens = ReadTokens(Path.Combine(root, "design", "tokens.css"));
+        CollectionAssert.AreEquivalent(theme.Light.Keys.ToArray(), tokens.Light.Keys.ToArray());
+        CollectionAssert.AreEquivalent(theme.Dark.Keys.ToArray(), tokens.Dark.Keys.ToArray());
+        foreach (var (key, value) in tokens.Light)
+            Assert.AreEqual(value, theme.Light[key], $"light {key}");
+        foreach (var (key, value) in tokens.Dark)
+            Assert.AreEqual(value, theme.Dark[key], $"dark {key}");
+
         foreach (var app in new[] { "counter", "todo", "package-pulse", "workbench" })
         {
-            var source = File.ReadAllText(Path.Combine(root, "examples", app, "App.cs"));
-            foreach (var pair in tokens.Light)
-            {
-                var key = ToResourceKey(pair.Key);
-                Assert.IsTrue(TryReadResource(source, "Light", key, out var actual), $"{app} missing light {key}");
-                Assert.AreEqual(Normalize(pair.Value), Normalize(actual), $"{app} light {key}");
-            }
-            foreach (var pair in tokens.Dark)
-            {
-                var key = ToResourceKey(pair.Key);
-                Assert.IsTrue(TryReadResource(source, "Dark", key, out var actual), $"{app} missing dark {key}");
-                Assert.AreEqual(Normalize(pair.Value), Normalize(actual), $"{app} dark {key}");
-            }
-        }
+            var directory = Path.Combine(root, "examples", app);
+            var source = File.ReadAllText(Path.Combine(directory, "App.cs"));
+            var fluent = source.IndexOf("new FluentTheme()", StringComparison.Ordinal);
+            var shadcn = source.IndexOf("new Lucent.Themes.Shadcn.ShadcnTheme()", StringComparison.Ordinal);
+            Assert.IsTrue(fluent >= 0 && shadcn > fluent, $"{app} must install Fluent before ShadcnTheme.");
+            Assert.IsFalse(source.Contains("[\"Lucent.", StringComparison.Ordinal));
 
-        foreach (var css in Directory.EnumerateFiles(Path.Combine(root, "examples"), "*.css", SearchOption.AllDirectories))
-        {
-            var text = File.ReadAllText(css);
-            foreach (var block in new[] { tokens.Light, tokens.Dark })
-                foreach (var pair in block)
-                    Assert.IsFalse(Regex.IsMatch(text, $"--{Regex.Escape(pair.Key)}\\s*:", RegexOptions.IgnoreCase),
-                        $"{css} redeclares canonical token --{pair.Key}");
-        }
+            var project = File.ReadAllText(Directory.EnumerateFiles(directory, "*.csproj").Single());
+            StringAssert.Contains(project, "Lucent.Themes.Shadcn");
+            Assert.IsFalse(project.Contains("Lucent.Styles.Utilities", StringComparison.Ordinal));
+            Assert.IsFalse(source.Contains("LucentStyles", StringComparison.Ordinal));
 
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "examples"), "*.*", SearchOption.AllDirectories)
-                     .Where(file => Path.GetExtension(file) is ".lui" or ".css"))
-        {
-            var text = File.ReadAllText(file);
-            foreach (var pair in tokens.Light.Values.Concat(tokens.Dark.Values).Where(value => value.StartsWith('#')))
-                Assert.IsFalse(text.Contains(pair, StringComparison.OrdinalIgnoreCase),
-                    $"{file} contains a canonical palette literal {pair}");
+            foreach (var css in Directory.EnumerateFiles(directory, "*.css"))
+            {
+                var text = File.ReadAllText(css);
+                Assert.IsFalse(text.Contains("Lucent.", StringComparison.Ordinal), $"{css} retains a legacy visual resource.");
+                var keys = Regex.Matches(text, "resource\\(\\\"(?<key>Shadcn\\.[^\"]+)\\\"\\)")
+                    .Select(match => match.Groups["key"].Value)
+                    .Distinct(StringComparer.Ordinal);
+                Assert.IsTrue(keys.Any(), $"{css} must use Shadcn semantic resources.");
+                foreach (var key in keys)
+                    Assert.IsTrue(theme.Light.ContainsKey(key) && theme.Dark.ContainsKey(key),
+                        $"{css} references missing Shadcn resource {key}.");
+            }
         }
     }
 
-    private static (Dictionary<string, string> Light, Dictionary<string, string> Dark) ParseTokenBlocks(string text)
+    private static (Dictionary<string, string> Light, Dictionary<string, string> Dark) ReadTokens(string path)
     {
-        var light = ParseBlock(Extract(text, ":root"));
-        var dark = ParseBlock(Extract(text, ".theme-dark"));
-        foreach (var pair in light) dark.TryAdd(pair.Key, pair.Value);
-        return (light, dark);
+        var text = File.ReadAllText(path);
+        return (ReadTokenBlock(text, ":root"), ReadTokenBlock(text, ".theme-dark"));
     }
 
-    private static string Extract(string text, string selector)
+    private static Dictionary<string, string> ReadTokenBlock(string text, string selector)
     {
         var start = text.IndexOf(selector, StringComparison.Ordinal);
         var open = text.IndexOf('{', start);
         var close = text.IndexOf('}', open);
-        return text[open..close];
+        return Regex.Matches(text[open..close], "--(?<name>shadcn-[a-z-]+):\\s*(?<value>#[0-9a-f]+)", RegexOptions.IgnoreCase)
+            .ToDictionary(match => "Shadcn." + string.Concat(match.Groups["name"].Value[7..]
+                    .Split('-').Select(part => char.ToUpperInvariant(part[0]) + part[1..])),
+                match => NormalizeCssColor(match.Groups["value"].Value), StringComparer.Ordinal);
     }
 
-    private static Dictionary<string, string> ParseBlock(string text) =>
-        Regex.Matches(text, @"--(?<name>[a-z0-9-]+)\s*:\s*(?<value>[^;]+)", RegexOptions.IgnoreCase)
-            .Cast<Match>()
-            .Where(match => !match.Groups["name"].Value.StartsWith("lucent-mark-", StringComparison.Ordinal))
-            .ToDictionary(match => match.Groups["name"].Value,
-                match => match.Groups["value"].Value.Trim(), StringComparer.Ordinal);
-
-    private static string ToResourceKey(string token) =>
-        "Lucent." + string.Concat(token.Replace("lucent-", "", StringComparison.Ordinal).Split('-').Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
-
-    private static bool TryReadResource(string source, string variant, string key, out string value)
+    private static (Dictionary<string, string> Light, Dictionary<string, string> Dark) ReadThemeResources(string root)
     {
-        var marker = $"ThemeVariant.{variant}";
-        var start = source.IndexOf(marker, StringComparison.Ordinal);
-        var end = variant == "Light"
-            ? source.IndexOf("ThemeVariant.Dark", start + marker.Length, StringComparison.Ordinal)
-            : source.IndexOf("};", start + marker.Length, StringComparison.Ordinal);
-        if (start < 0) { value = string.Empty; return false; }
-        if (end < 0) end = source.Length;
-        var match = Regex.Match(source[start..end], $@"\[""{Regex.Escape(key)}""\]\s*=\s*(?<value>[^,}}]+)");
-        value = match.Success ? match.Groups["value"].Value.Trim() : string.Empty;
-        return match.Success;
+        var text = File.ReadAllText(Path.Combine(root, "src", "Lucent.Themes.Shadcn", "ShadcnTheme.axaml"));
+        return (ReadThemeBlock(text, "Light"), ReadThemeBlock(text, "Dark"));
     }
 
-    private static string Normalize(string value)
+    private static Dictionary<string, string> ReadThemeBlock(string text, string variant)
     {
-        value = value.Trim().ToLowerInvariant();
-        if (value.StartsWith('#')) return value;
-        if (value.StartsWith("color.parse(\"#") || value.StartsWith("new solidcolorbrush(color.parse(\"#"))
-        {
-            var hash = value.IndexOf('#');
-            return value[hash..].TrimEnd('\"', ')');
-        }
-        if (value == "colors.white") return "#ffffff";
-        if (value.StartsWith("new solidcolorbrush(colors.white")) return "#ffffff";
-        var milliseconds = Regex.Match(value, @"frommilliseconds\((?<n>[0-9.]+)");
-        if (milliseconds.Success) return milliseconds.Groups["n"].Value + "ms";
-        var corner = Regex.Match(value, @"cornerradius\s*\(\s*(?<n>[0-9.]+)");
-        if (corner.Success) return corner.Groups["n"].Value + "px";
-        var number = Regex.Match(value, @"(?<n>[0-9.]+)d?$");
-        return number.Success ? number.Groups["n"].Value + (value.Contains("px") ? "px" : "px") : value;
+        var start = text.IndexOf($"x:Key=\"{variant}\"", StringComparison.Ordinal);
+        var end = text.IndexOf("</ResourceDictionary>", start, StringComparison.Ordinal);
+        return Regex.Matches(text[start..end], "x:Key=\"(?<key>Shadcn\\.[^\"]+)\" Color=\"(?<value>#[0-9A-F]+)\"", RegexOptions.IgnoreCase)
+            .ToDictionary(match => match.Groups["key"].Value,
+                match => match.Groups["value"].Value.ToUpperInvariant(), StringComparer.Ordinal);
+    }
+
+    private static string NormalizeCssColor(string value)
+    {
+        value = value.ToUpperInvariant();
+        return value.Length == 9
+            ? $"#{value[7..9]}{value[1..7]}"
+            : value;
     }
 
     private static (int Width, int Height) ReadPngDimensions(string path)
