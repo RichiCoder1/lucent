@@ -2,7 +2,7 @@
 
 ## Status
 
-**Planning.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
+**Issue #2 package/AOT proof complete; Milestone 1 remains open.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 
@@ -86,6 +86,12 @@ Framework internals may be substantial if they remain coherent and testable. Raw
 - [Milestones and gates](MILESTONES.md)
 - [References and credits](REFERENCES.md)
 - [Adversarial plan review](REVIEW.md)
+
+## Issue #2 acceptance evidence
+
+`NativeStack.sln` contains only `NativeStackProbe`, a `net9.0-windows` NativeAOT executable. `run-probe.ps1` publishes `win-x64` and runs the published executable. A successful JSON record proves a hidden SDL window and nonzero HWND, generated `GetDpiForWindow`, a Skia raster/PNG, HarfBuzz shaping of `office` and Arabic, an available fallback font, and loaded SDL/Skia/HarfBuzz native modules. It exits nonzero if any probe fails.
+
+This is dependency and NativeAOT evidence for issue #2 only. It does **not** pass the Milestone 1 UIA, IME, presentation, retained-scene, resize, DPI, or parity gates.
 
 ## Explicit exclusions
 
