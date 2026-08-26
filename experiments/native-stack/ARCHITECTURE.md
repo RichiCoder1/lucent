@@ -1,0 +1,133 @@
+# Lucent Native architecture
+
+## Frame pipeline
+
+```text
+application state
+    -> reactive graph
+    -> stable element tree
+       -> layout tree
+       -> focus/input behaviors
+       -> semantic accessibility tree
+    -> retained scene
+    -> renderer abstraction
+    -> Skia
+    -> SDL3/Windows presentation
+```
+
+Each arrow is an explicit boundary. Platform or renderer details must not appear in application elements, layout, reactivity, or semantics.
+
+## Reactive graph
+
+The scheduler follows the useful semantics of alien-signals rather than copying its optimized JavaScript representation:
+
+- writes push pending/dirty state to subscribers;
+- computed values pull lazily and memoize their value;
+- changed branches replace their tracked dependency links;
+- batches flush observable effects once;
+- scopes own effects, structural regions, async cancellation, and cleanup;
+- cycles fail with named dependency paths;
+- the graph is confined to the UI thread.
+
+Straight C# uses bounded read tracking inside explicit reactive callbacks. Future `.lui` output may register compiler-derived edges directly. Both paths use the same graph and scheduling rules.
+
+Async computed values preserve Lucent's proven behavior: cancellation, stale-value retention, latest-generation wins, pending/error facets, and UI-scheduler commits.
+
+## Elements and structural regions
+
+Elements are stable identities with optional facets for layout, paint, input, focus, and semantics. Reactive properties update those facets in place.
+
+Structural changes are explicit:
+
+- `Show` owns one conditional region;
+- keyed `For` owns ordered retained child regions;
+- scopes dispose effects, captures, semantics providers, and scene nodes together.
+
+There is no general description reconciliation or virtual DOM.
+
+## Controls and events
+
+Controls compose elements and reusable behaviors. A button combines press, focus, keyboard activation, semantics, and themed style behavior rather than subclassing a base control.
+
+Pointer events target the deepest hit element and bubble through ancestors until handled. Pointer capture and focus scopes are explicit. A general tunneling phase is out of scope.
+
+Interactive behaviors must provide valid accessibility semantics. Debug and test builds fail when required role, name, value, or action contracts are absent. An emergency suppression requires a written reason and remains visible in semantic dumps.
+
+## Layout
+
+The spike owns a bounded flex system:
+
+- row and column direction;
+- grow and shrink;
+- gap and padding;
+- start, center, end, stretch, and space distribution;
+- fixed, minimum, maximum, and available sizing;
+- intrinsic text measurement;
+- scroll viewport and virtualized list placement;
+- device-scale rounding.
+
+Grid, wrapping, and absolute-layout generalization are deferred.
+
+## Styling and themes
+
+The style core is typed and immutable. Styles compose in explicit order; the later value wins for the same property.
+
+```csharp
+Styles.Compose(
+    Theme.Button,
+    Theme.Destructive,
+    Style.Px(4),
+    Style.MinWidth(120));
+```
+
+Fluent utilities are authoring sugar over the same typed values. Theme tokens are typed semantic keys with layered scopes. Light/dark switching updates resolved token dependencies without rebuilding application state.
+
+State variants cover hover, pressed, focus-visible, selected, disabled, and validation state. Basic animation is limited to opacity, color, transform, and focus/hover transitions. One scheduler-owned clock respects the Windows reduced-motion preference.
+
+There is no selector matching, specificity, implicit inheritance beyond documented token/text properties, or runtime CSS parser.
+
+## Retained scene and rendering
+
+Element changes mark layout, paint, or semantics facets dirty. Layout changes propagate only as far as required by constraints. Paint changes rebuild affected scene subtrees. Idle performs no rendering work.
+
+Skia is hidden behind a renderer interface so headless raster tests and a future renderer can share the same scene contract. The spike does not own shaders, glyph atlases, or a custom GPU backend.
+
+## Platform boundary
+
+SDL3-CS is the provisional host. The Windows adapter owns:
+
+- window lifecycle and event translation;
+- native HWND retrieval and safe message subclassing;
+- IME/text composition and clipboard integration;
+- DPI, cursor, reduced-motion, and timing services;
+- UIA provider transport, including `WM_GETOBJECT`.
+
+If SDL ownership prevents correct UIA or text integration, replace only this adapter with direct Win32.
+
+## Text
+
+The spike supports a practical single-line field:
+
+- Unicode and IME composition;
+- caret, selection, arrows, home/end, deletion, and clipboard;
+- focus and visible focus state;
+- UIA Value behavior.
+
+Rich text, multiline layout, text ranges, and editor-grade undo are excluded.
+
+## Test architecture
+
+The portable core must run without a window. Headless tests exercise signals, layout, hit testing, focus, semantics, virtualization, and Skia raster captures. Deterministic dumps include:
+
+- element identity and hierarchy;
+- computed bounds;
+- resolved styles, composition order, and tokens;
+- pseudo/focus state;
+- accessibility semantics;
+- reactive dependency edges.
+
+A smaller Windows-native suite validates HWND lifecycle, DPI, IME, UIA/Narrator integration, and NativeAOT behavior.
+
+## NativeAOT
+
+NativeAOT is a gate, not an aspiration. Avoid reflection-based control discovery, runtime code generation, and unbounded metadata scanning. Prefer explicit or generated registration tables.

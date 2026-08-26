@@ -15,6 +15,10 @@ These documents split the original project handoff into maintained topics. They 
 | [Roadmap](ROADMAP.md) | Proof-of-concept success criteria, implementation order, and dogfood scope |
 | [Decisions](DECISIONS.md) | Accepted direction, working choices, and explicitly deferred questions |
 
+Architecture experiments:
+
+- [Lucent Native](../experiments/native-stack/README.md) — isolated Windows-first validation of a Lucent-owned UI stack above platform, text, and rendering services
+
 Supporting research:
 
 - [Avalonia feasibility review](research/AVALONIA_FEASIBILITY.md)
