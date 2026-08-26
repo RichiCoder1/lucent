@@ -18,10 +18,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 
-component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken lifetime, Action<Exception> errorReporter, WorkbenchSettings initialSettings, SettingsSaveCoordinator saveCoordinator, IProblemLoader problemLoader, DocumentSession session, WorkspaceService workspace)
+component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken lifetime, Action<Exception> errorReporter, WorkbenchSettings initialSettings, SettingsSaveCoordinator saveCoordinator, IProblemLoader problemLoader, DocumentSession session, WorkspaceService workspace, bool initialShowPalette = false)
 {
     private readonly State<bool> showProblems = new(initialSettings.ProblemsVisible);
-    private readonly State<bool> showPalette = new(System.Environment.GetEnvironmentVariable("LUCENT_QUALITY_CAPTURE") == "workbench-dark-palette");
+    private readonly State<bool> showPalette = new(initialShowPalette);
     private readonly State<string> workspaceName = new(workspace.RootPath is null ? "Lucent" : Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace.RootPath)));
     private readonly State<string?> workspacePath = new(workspace.RootPath);
     private readonly State<string> documentTitle = new("Program.cs");
@@ -45,6 +45,12 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
     private bool sessionListening = false;
     private int workspaceRequest = 0;
     private int documentRequest = 0;
+    private Avalonia.Media.IBrush Brush(string key)
+    {
+        var app = Application.Current ?? throw new InvalidOperationException("Avalonia is not initialized.");
+        return app.TryFindResource(key, app.RequestedThemeVariant, out var value) &&
+            value is Avalonia.Media.IBrush brush ? brush : Avalonia.Media.Brushes.Transparent;
+    }
 
     private WorkbenchSettings currentSettings = initialSettings;
     private WorkbenchSettings Settings() => currentSettings;
@@ -266,12 +272,6 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         else lastDiagnostic.Update("No Lucent source mapping at generated caret");
     }
 
-    private void SwitchDocument()
-    {
-        if (workspace.QuickOpenItems.FirstOrDefault() is { } item)
-            _ = OpenDocumentAsync(item.Path, item.DisplayName, closePalette: false);
-    }
-
     private void ToggleProblems()
     {
         showProblems.Update(value => !value);
@@ -368,10 +368,17 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
         AutomationProperties.AutomationId: "Workbench.Window";
         Grid {
             Class: "shell";
-            RowDefinitions: "Auto * Auto Auto Auto";
-            Menu {
-                Class: "topbar";
+            RowDefinitions: "Auto * Auto Auto";
+            Border { Class: "command-header"; Padding: (16, 8); Height: 52;
+            Grid { ColumnDefinitions: "Auto Auto Auto *";
+                TextBlock { Class: "app-name"; Text: "Lucent"; VerticalAlignment: VerticalAlignment.Center; }
+                Border { Class: "command-divider"; Grid.Column: 1; Width: 1; Height: 24; Margin: (16, 0); VerticalAlignment: VerticalAlignment.Center; }
+                TextBlock { Class: "workspace-name"; Grid.Column: 2; Text: $"Workspace: {workspaceName.Value}"; VerticalAlignment: VerticalAlignment.Center; }
+                Menu {
+                Class: "topbar"; Grid.Column: 3;
                 Grid.Row: 0;
+                HorizontalAlignment: HorizontalAlignment.Right;
+                VerticalAlignment: VerticalAlignment.Center;
                 MenuItem { Header: "Open workspace"; Command: openWorkspace; }
                 MenuItem { Header: "Close workspace"; Command: closeWorkspace; }
                 MenuItem { Header: "Quick open"; Command: quickOpen; }
@@ -379,26 +386,24 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                 MenuItem { Header: "Settings"; Command: settings; }
                 MenuItem { Header: "Copy diagnostic"; Command: copyDiagnostic; }
             }
+            }
+            }
             Grid {
                 Class: "work-area";
                 Grid.Row: 1;
-                ColumnDefinitions: $"{currentSettings.SidebarWidth:0} * 320";
+                ColumnDefinitions: $"{currentSettings.SidebarWidth:0} * 280";
                 Border {
                     Class: "sidebar-host";
                     Grid.Column: 0;
                     Focusable: true;
                     Loaded: (sender, e) => { sidebar = sender; focusSidebar.NotifyCanExecuteChanged(); };
                     Unloaded: (sender, e) => { if (ReferenceEquals(sidebar, sender)) sidebar = null; focusSidebar.NotifyCanExecuteChanged(); };
-                    WorkspaceSidebar(workspaceName.Value, workspaceSelection, OpenWorkspaceNode, focusCommand: focusSidebar, compact: false) {}
+                    WorkspaceSidebar(workspaceName.Value, workspaceSelection, OpenWorkspaceNode, compact: false) {}
                 }
                 Border {
                     Class: "editor-host";
                     Grid.Column: 1;
-                    DocumentPane(documentTitle.Value, GetSession(), focusCommand: focusEditor, copyCommand: copyDocument, undoCommand: undoDocument, redoCommand: redoDocument, selectAllCommand: selectAllDocument) {
-                        slot toolbar {
-                            Button { Content: "Switch document"; Click: () => SwitchDocument(); }
-                        }
-                    }
+                    DocumentPane(documentTitle.Value, GetSession(), focusCommand: focusEditor, copyCommand: copyDocument, undoCommand: undoDocument, redoCommand: redoDocument, selectAllCommand: selectAllDocument) {}
                 }
                 ContentControl {
                     Class: "problems-host";
@@ -427,13 +432,12 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                 }
             }
             TextBlock { Class: "problems-hidden"; Grid.Row: 2; IsVisible: !showProblems.Value; Text: "Problems hidden"; }
-            TextBlock { Class: "status-line"; Grid.Row: 3; Text: lastDiagnostic.Value; AutomationProperties.Name: "Diagnostic status"; }
-            StackPanel {
-                Class: "action-bar";
-                Grid.Row: 4;
-                Orientation: Avalonia.Layout.Orientation.Horizontal;
-                Button { Content: "Toggle problems"; Command: toggleProblems; }
-                Button { Content: "Generated preview"; Command: generatedPreview; }
+            Grid { Class: "status-strip"; Grid.Row: 3; ColumnDefinitions: "* Auto";
+                TextBlock { Class: "status-line"; Text: lastDiagnostic.Value; AutomationProperties.Name: "Diagnostic status"; }
+                StackPanel { Grid.Column: 1; Orientation: Avalonia.Layout.Orientation.Horizontal; Spacing: 6;
+                    Button { Class: "ghost"; Content: "Toggle problems"; Command: toggleProblems; }
+                    Button { Class: "ghost"; Content: "Generated preview"; Command: generatedPreview; }
+                }
             }
             Border {
                 Grid.Row: 1;
@@ -443,6 +447,12 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                 if (showPalette.Value) {
                     Border { Class: "command-palette";
                     Width: 420;
+                    Padding: 16;
+                    CornerRadius: 8;
+                    BorderThickness: 1;
+                    Background: Brush("Shadcn.Popover");
+                    BorderBrush: Brush("Shadcn.Border");
+                    Margin: (0, 48, 0, 0);
                     Focusable: true;
                     KeyboardNavigation.TabNavigation: KeyboardNavigationMode.Cycle;
                     AutomationProperties.Name: "Command palette";
@@ -455,9 +465,13 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                         else if (e.Key == Key.Enter) { e.Handled = true; OpenSelectedQuickOpen(); }
                         else if (e.Key == Key.Tab) { e.Handled = true; quickOpenList?.Focus(); }
                     };
-                    StackPanel {
-                        TextBlock { Text: "Command palette"; }
+                    StackPanel { Spacing: 10;
+                        StackPanel { Spacing: 2;
+                            TextBlock { Class: "palette-title"; Text: "Command palette"; }
+                            TextBlock { Class: "palette-subtitle"; Text: "Open a file or run a workspace command."; }
+                        }
                         ListBox {
+                            Class: "palette-results";
                             Height: 160;
                             Focusable: true;
                             ItemsSource: quickOpenItems;
@@ -477,19 +491,22 @@ component WorkbenchApp(IWorkbenchDesktopHost desktopHost, CancellationToken life
                             };
                             KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Enter), Command = acceptQuickOpen }];
                         }
-                        Button { Content: "Open workspace"; Command: openWorkspace; }
-                        Button {
-                            Content: "Toggle problems";
-                            Click: () => ToggleProblemsAndClosePalette();
-                            KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = togglePaletteProblems }];
-                            KeyDown: (sender, e) => {
-                                if (e.Key is Key.Space or Key.Enter) {
-                                    e.Handled = true;
-                                    ToggleProblemsAndClosePalette();
-                                }
-                            };
+                        StackPanel { Class: "palette-actions"; Orientation: Avalonia.Layout.Orientation.Horizontal; Spacing: 6;
+                            Button { Class: "outline"; Content: "Open workspace"; Command: openWorkspace; }
+                            Button {
+                                Class: "outline";
+                                Content: "Toggle problems";
+                                Click: () => ToggleProblemsAndClosePalette();
+                                KeyBindings: [new KeyBinding { Gesture = new KeyGesture(Key.Space), Command = togglePaletteProblems }];
+                                KeyDown: (sender, e) => {
+                                    if (e.Key is Key.Space or Key.Enter) {
+                                        e.Handled = true;
+                                        ToggleProblemsAndClosePalette();
+                                    }
+                                };
+                            }
+                            Button { Class: "ghost"; Content: "Close palette"; Click: () => ClosePalette(); }
                         }
-                        Button { Content: "Close palette"; Click: () => ClosePalette(); }
                     }
                     }
                 }

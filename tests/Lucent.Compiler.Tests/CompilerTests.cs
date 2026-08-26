@@ -136,19 +136,21 @@ public sealed class CompilerTests
         Assert.AreEqual(0, state.InitialValue);
 
         var root = result.Syntax.Component.RenderMethod.Root;
-        Assert.AreEqual("StackPanel", root.Name);
+        Assert.AreEqual("Grid", root.Name);
+        var content = root.Children.Single().Children.Single();
+        Assert.AreEqual("StackPanel", content.Name);
         CollectionAssert.AreEqual(
-            new[] { "TextBlock", "Button" },
-            root.Children.Select(child => child.Name).ToArray());
+            new[] { "TextBlock", "TextBlock", "TextBlock", "Button" },
+            content.Children.Select(child => child.Name).ToArray());
 
-        var text = root.Children.First();
+        var text = content.Children.ElementAt(2);
         var textProperty = text.Properties.Single(property =>
             property.Name == "Text");
         Assert.IsInstanceOfType<StringValueSyntax>(textProperty.Value);
         Assert.IsTrue(
             ((StringValueSyntax)textProperty.Value).IsInterpolated);
 
-        var button = root.Children.Last();
+        var button = content.Children.Last();
         var clickProperty = button.Properties.Single(property =>
             property.Name == "Click");
         Assert.IsInstanceOfType<CSharpExpressionValueSyntax>(clickProperty.Value);
@@ -171,7 +173,7 @@ public sealed class CompilerTests
         StringAssert.Contains(first.GeneratedSource, "public Fragment Mount()");
         StringAssert.Contains(first.GeneratedSource, "return Fragment.From(__lucent_control1!);");
         StringAssert.Contains(first.GeneratedSource!, "FontSize");
-        Assert.IsFalse(first.GeneratedSource.Contains("Padding", StringComparison.Ordinal));
+        StringAssert.Contains(first.GeneratedSource, "Padding");
         Assert.IsFalse(first.GeneratedSource.Contains(
             "Text = \"Lucent\"",
             StringComparison.Ordinal));
@@ -186,8 +188,9 @@ public sealed class CompilerTests
 
         Assert.IsTrue(result.Succeeded);
         var root = result.Syntax!.Component.RenderMethod.Root;
-        Assert.HasCount(2, root.Children);
-        Assert.AreEqual("Button", root.Children.Last().Name);
+        var content = root.Children.Single().Children.Single();
+        Assert.HasCount(4, content.Children);
+        Assert.AreEqual("Button", content.Children.Last().Name);
     }
 
     [TestMethod]
@@ -195,8 +198,8 @@ public sealed class CompilerTests
     {
         var source = File.ReadAllText(RepositoryPaths.CounterSource)
             .Replace(
-                "Text: $\"Count: {count.Value}\";",
-                "Text: $\"Count: {count.Value}\"",
+                "Text: $\"{count.Value}\";",
+                "Text: $\"{count.Value}\"",
                 StringComparison.Ordinal);
 
         var result = LucentCompiler.Compile(source, "MissingSemicolon.lui");
@@ -212,7 +215,7 @@ public sealed class CompilerTests
         Assert.IsNotNull(result.Syntax);
         Assert.AreEqual(
             "Button",
-            result.Syntax.Component.RenderMethod.Root.Children.Last().Name);
+            result.Syntax.Component.RenderMethod.Root.Children.Single().Children.Single().Children.Last().Name);
     }
 
     [TestMethod]

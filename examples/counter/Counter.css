@@ -1,18 +1,31 @@
-.counter {
+.counter-page {
     background: resource("Shadcn.Background");
-    margin: 24px;
-    gap: 12px;
 }
 
-.count {
+Border.counter {
+    background: resource("Shadcn.Muted");
+    border-color: resource("Shadcn.Border");
+    border-width: 1px;
+    border-radius: 8px;
+    padding: 24px;
+}
+
+.counter-title {
     foreground: resource("Shadcn.Foreground");
-    font-size: 40px;
+    font-size: 20px;
     font-weight: bold;
     text-align: center;
 }
 
-.label {
+.counter-subtitle {
     foreground: resource("Shadcn.MutedForeground");
+    text-align: center;
+}
+
+.count {
+    foreground: resource("Shadcn.Foreground");
+    font-size: 56px;
+    font-weight: bold;
     text-align: center;
 }
 

@@ -2,7 +2,7 @@ namespace Lucent.Examples.Todo;
 
 using Lucent.Examples.Todo;
 
-component MainWindow()
+component MainWindow(TodoItem[]? initialTodos = null)
 {
     Fragment Render()
     {
@@ -14,7 +14,7 @@ component MainWindow()
             MinHeight: 560;
             WindowStartupLocation: Avalonia.Controls.WindowStartupLocation.CenterScreen;
 
-            Todo {}
+            Todo(initialTodos) {}
         };
     }
 }

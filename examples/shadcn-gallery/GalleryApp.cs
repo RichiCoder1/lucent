@@ -19,7 +19,12 @@ internal sealed class GalleryApp(bool dark) : Application
     public override void OnFrameworkInitializationCompleted()
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            desktop.MainWindow = new GalleryWindow();
+        {
+            var component = new GalleryWindowComponent();
+            var window = component.MountRoot();
+            window.Closed += (_, _) => component.Dispose();
+            desktop.MainWindow = window;
+        }
         base.OnFrameworkInitializationCompleted();
     }
 }

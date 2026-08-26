@@ -1,7 +1,9 @@
 Border.workspace-sidebar {
     background: resource("Shadcn.Card");
-    padding: 12px;
+    padding: 0;
 }
+
+Border.pane-header { background: resource("Shadcn.Muted"); border-color: resource("Shadcn.Border"); border-width: 0 0 1px 0; }
 
 TextBlock {
     foreground: resource("Shadcn.Foreground");
@@ -13,13 +15,16 @@ TextBlock.pane-title {
     font-weight: 600;
 }
 
+TextBlock.pane-subtitle { foreground: resource("Shadcn.MutedForeground"); font-size: 11px; }
+
 Button.pane-action {
-    margin: 4px 0;
+    background: transparent;
+    foreground: resource("Shadcn.MutedForeground");
+    padding: 6px 8px;
 }
 
 ListBox.workspace-tree {
     background: resource("Shadcn.Card");
     foreground: resource("Shadcn.Foreground");
-    border-color: resource("Shadcn.Border");
-    border-width: 1px;
+    border-width: 0;
 }

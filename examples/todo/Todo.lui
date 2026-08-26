@@ -2,12 +2,10 @@ namespace Lucent.Examples.Todo;
 using System.Linq;
 using Avalonia.Layout;
 
-component Todo()
+component Todo(TodoItem[]? initialTodos = null)
 {
     private readonly State<string> draft = new("");
-    private readonly State<TodoItem[]> todos = new(System.Environment.GetEnvironmentVariable("LUCENT_QUALITY_CAPTURE") == "todo-dark-empty" ? [
-        new TodoItem(4, "Review the completed Lucent proof", true)
-    ] : [
+    private readonly State<TodoItem[]> todos = new(initialTodos ?? [
         new TodoItem(1, "Surface native Avalonia controls", true),
         new TodoItem(2, "Add keyed Lucent regions", false),
         new TodoItem(3, "Ship the TodoMVC proof of concept", false)
@@ -17,19 +15,20 @@ component Todo()
     Fragment Render()
     {
         return Border {
+            Class: "todo-page";
             Padding: 32;
-            MaxWidth: 760;
-            HorizontalAlignment: HorizontalAlignment.Center;
-            VerticalAlignment: VerticalAlignment.Center;
 
-            StackPanel {
-                Class: "todo-content";
-                Spacing: 14;
+            Border {
+                Class: "todo-content card";
+                MaxWidth: 680;
+                HorizontalAlignment: HorizontalAlignment.Center;
+                VerticalAlignment: VerticalAlignment.Center;
+                StackPanel {
+                    Spacing: 14;
 
-                TextBlock {
-                    Text: "Todos";
-                    FontSize: 30;
-                    FontWeight: Avalonia.Media.FontWeight.Bold;
+                Grid { ColumnDefinitions: "* Auto";
+                    TextBlock { Text: "Todos"; FontSize: 30; FontWeight: Avalonia.Media.FontWeight.Bold; }
+                    TextBlock { Class: "todo-status"; Grid.Column: 1; Text: todos.Value.Length == 0 ? "No tasks yet" : $"{todos.Value.Count(item => !item.Completed)} left"; }
                 }
 
                 TextBlock {
@@ -37,13 +36,12 @@ component Todo()
                     Text: "A TodoMVC-style app composed directly from Avalonia controls.";
                 }
 
-                StackPanel {
+                Grid {
                     Class: "todo-entry";
-                    Orientation: Orientation.Horizontal;
-                    Spacing: 8;
+                    ColumnDefinitions: "* Auto";
 
                     TextBox {
-                        MinWidth: 180;
+                        HorizontalAlignment: HorizontalAlignment.Stretch;
                         Text: draft.Value;
                         PlaceholderText: "What needs doing?";
                         TextChanged: (sender, e) => {
@@ -52,6 +50,7 @@ component Todo()
                     }
 
                     Button {
+                        Grid.Column: 1;
                         Content: "Add task";
                         IsEnabled: !string.IsNullOrWhiteSpace(draft.Value);
                         Click: (sender, e) => {
@@ -85,8 +84,9 @@ component Todo()
                     };
                 }
 
-                StackPanel {
-                    Spacing: 8;
+                Border {
+                    Class: "todo-list";
+                    StackPanel {
 
                     foreach (var todo in todos.Value.Where(item =>
                         filter.Value == TodoFilter.All ||
@@ -97,10 +97,11 @@ component Todo()
                             Class: todo.Completed ? "todo-row completed" : "todo-row active";
                             Padding: (12, 8);
                             CornerRadius: 8;
+                            Height: 48;
 
-                            StackPanel {
-                                Orientation: Orientation.Horizontal;
-                                Spacing: 10;
+                            Grid {
+                                ColumnDefinitions: "Auto * 80 56";
+                                ColumnSpacing: 8;
 
                                 CheckBox {
                                     Class: "todo-check";
@@ -117,12 +118,18 @@ component Todo()
 
                                 TextBlock {
                                     Class: "completion-state";
+                                    Grid.Column: 2;
+                                    HorizontalAlignment: HorizontalAlignment.Right;
+                                    VerticalAlignment: VerticalAlignment.Center;
                                     Text: todo.Completed ? "Completed" : "Active";
                                 }
 
                                 TextBox {
                                     Class: "todo-editor";
+                                    Grid.Column: 1;
+                                    MinWidth: 0;
                                     HorizontalAlignment: HorizontalAlignment.Stretch;
+                                    VerticalAlignment: VerticalAlignment.Center;
                                     Text: todo.Title;
                                     TextChanged: (sender, e) => {
                                         var title = sender.Text ?? "";
@@ -136,6 +143,8 @@ component Todo()
 
                                 Button {
                                     Class: "delete-task";
+                                    Grid.Column: 3;
+                                    HorizontalAlignment: HorizontalAlignment.Right;
                                     Content: "Delete";
                                     Click: (sender, e) => {
                                         todos.Update(todos.Value
@@ -146,17 +155,12 @@ component Todo()
                             }
                         }
                     }
+                    }
                 }
 
-                TextBlock {
-                    Class: "todo-status";
-                    Text: todos.Value.Length == 0
-                        ? "No tasks yet."
-                        : $"{todos.Value.Count(item => !item.Completed)} item(s) left";
-                }
-
+                Grid { Class: "todo-footer"; ColumnDefinitions: "* Auto";
                 StackPanel {
-                    Class: "filter-bar";
+                    Grid.Column: 1;
                     Orientation: Orientation.Horizontal;
                     Spacing: 8;
 
@@ -188,6 +192,7 @@ component Todo()
                         };
                     }
                 }
+                }
 
                 ProgressBar {
                     Class: "todo-progress";
@@ -195,6 +200,7 @@ component Todo()
                     Maximum: todos.Value.Length == 0 ? 1 : todos.Value.Length;
                     Value: todos.Value.Count(item => item.Completed);
                     Height: 6;
+                }
                 }
             }
         };

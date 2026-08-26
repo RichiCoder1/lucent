@@ -1,9 +1,9 @@
 namespace Lucent.Examples.PackagePulse;
 
 
-component PackagePulse()
+component PackagePulse(string initialQuery = "lucent")
 {
-    private readonly State<string> query = new("lucent");
+    private readonly State<string> query = new(initialQuery);
     private readonly Computed<PackageInfo[]> packages = new(
         cancellationToken => PackageCatalog.SearchAsync(query.Value, cancellationToken),
         PackageCatalog.Placeholders);
@@ -14,7 +14,7 @@ component PackagePulse()
         UpdateQuery("lucent");
         packages.Refresh();
     }
-    Fragment Render() => StackPanel {
+    Fragment Render() => Grid { Class: "pulse-page";
         ContentControl {
             try (packages) {
                 PackagePulseResults(query.Value, UpdateQuery, packages.Value, packages.IsPending) {}

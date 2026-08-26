@@ -8,11 +8,11 @@ component PackagePulseRows(IReadOnlyList<PackageInfo> items) => StackPanel {
     keyed by package.Id {
         Border {
             Class: "package-row";
-            StackPanel {
+            Grid { ColumnDefinitions: "* Auto"; RowDefinitions: "Auto Auto";
                 Class: "package-copy";
                 TextBlock { Class: "package-name"; Text: package.Name; }
-                TextBlock { Class: "package-version"; Text: package.Version; }
-                TextBlock { Class: "package-description"; Text: package.Description; }
+                TextBlock { Class: "package-version"; Grid.Column: 1; Text: package.Version; }
+                TextBlock { Class: "package-description"; Grid.Row: 1; Text: package.Description; }
             }
         }
     }

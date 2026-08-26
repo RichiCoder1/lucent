@@ -9,6 +9,9 @@ public sealed class TokenConsistencyTests
     public void Example_windows_embed_and_apply_the_reviewed_lucent_mark()
     {
         var root = FindRoot();
+        var qualityHelper = File.ReadAllText(Path.Combine(root, "examples", "ExampleQualityCapture.cs"));
+        StringAssert.Contains(qualityHelper, "AssetLoader.Open");
+        StringAssert.Contains(qualityHelper, "new WindowIcon(stream)");
         foreach (var app in new[] { "counter", "todo", "package-pulse", "workbench" })
         {
             var project = Directory.EnumerateFiles(Path.Combine(root, "examples", app), "*.csproj").Single();
@@ -17,9 +20,7 @@ public sealed class TokenConsistencyTests
             StringAssert.Contains(projectText, "AvaloniaResource");
 
             var appSource = File.ReadAllText(Path.Combine(root, "examples", app, "App.cs"));
-            StringAssert.Contains(appSource, "ApplyWindowIcon(window)");
-            StringAssert.Contains(appSource, "AssetLoader.Open");
-            StringAssert.Contains(appSource, "new WindowIcon(stream)");
+            StringAssert.Contains(appSource, "ExampleQualityCapture.ApplyIcon<App>(window)");
         }
 
         foreach (var size in new[] { 16, 20, 24, 32 })
@@ -47,7 +48,9 @@ public sealed class TokenConsistencyTests
         foreach (var (app, profiles) in expected)
         {
             var source = File.ReadAllText(Path.Combine(root, "examples", app, "App.cs"));
-            StringAssert.Contains(source, $"return profile is \"{profiles[0]}\" or \"{profiles[1]}\";");
+            StringAssert.Contains(source, "ExampleQualityCapture.Profile");
+            StringAssert.Contains(source, $"\"{profiles[0]}\"");
+            StringAssert.Contains(source, $"\"{profiles[1]}\"");
         }
     }
 

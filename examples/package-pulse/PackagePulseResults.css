@@ -1,7 +1,7 @@
-Border.app-shell {
-    background: resource("Shadcn.Background");
-    padding: 24px;
-}
+Border.app-shell { padding: 24px; }
+
+Grid.pulse-page { background: resource("Shadcn.Background"); }
+Grid.pulse-page Border.app-shell { background: resource("Shadcn.Background"); }
 
 Border.app-shell TextBox.search:focus-visible {
     border-color: resource("Shadcn.Ring");
@@ -16,16 +16,14 @@ TextBlock {
     foreground: resource("Shadcn.Foreground");
 }
 
-TextBlock.eyebrow {
-    foreground: resource("Shadcn.Primary");
-    font-size: 12px;
-    font-weight: 600;
-}
-
 TextBlock.title {
     font-size: 34px;
     font-weight: 700;
 }
+
+Border.result-badge { background: resource("Shadcn.Muted"); padding: 4px 8px; border-radius: 12px; }
+TextBlock.results-heading { font-size: 16px; font-weight: 600; }
+TextBlock.result-count { foreground: resource("Shadcn.MutedForeground"); }
 
 TextBlock.subtitle {
     foreground: resource("Shadcn.MutedForeground");
@@ -50,23 +48,22 @@ TextBlock.status {
 }
 
 StackPanel.results {
-    gap: 8px;
+    gap: 0;
     transition: opacity 180ms ease-out;
 }
+
+Border.package-list { border-color: resource("Shadcn.Border"); border-width: 1px; border-radius: 6px; }
 
 Border.package-row {
     background: resource("Shadcn.Card");
     padding: 16px;
-    border-radius: 8px;
+    border-color: resource("Shadcn.Border");
+    border-width: 0 0 1px 0;
     transition: background 120ms ease-out, opacity 120ms ease-out;
 }
 
 Border.package-row:pointerover {
     background: resource("Shadcn.Popover");
-}
-
-StackPanel.package-copy {
-    gap: 4px;
 }
 
 TextBlock.package-name {
