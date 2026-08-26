@@ -8,14 +8,14 @@ shared `ShadcnTheme`; adjacent CSS uses only `Shadcn.*` semantic resources.
 
 | Profile | Theme/state | Logical size | File | SHA-256 |
 | --- | --- | --- | --- | --- |
-| counter-light | light, incremented | 420×300 | `captures/counter-light.png` | `207c67927051d19a51a7140ae23a2f79090dc8df98afc56c003a3b927bfbc05f` |
-| counter-dark-focus | dark, focus | 420×300 | `captures/counter-dark-focus.png` | `e630dd6e1ac06b3577df9842769effa84e7dfeeeaf9660a3f01c20b94ef05d3d` |
-| todo-light-populated | light, populated | 900×760 | `captures/todo-light-populated.png` | `b9319238ea4c6fcdc2022dc6409258d4f92f7a94d50223dfd8b1337c510413ad` |
-| todo-dark-empty | dark, completed/empty state | 700×560 | `captures/todo-dark-empty.png` | `df05833edc2b948a314c6ce2c9e429a1ad7689c87a03e6a00c47e5504302c817` |
-| pulse-dark-results | dark, results | 820×760 | `captures/pulse-dark-results.png` | `f9b130a0c324ec10f4719e1d55fd4cc1b08ccb0c8fe3e9d147121c650a189c73` |
-| pulse-light-error | light, stale results and error | 600×560 | `captures/pulse-light-error.png` | `e1a3a3c44a9ab3fab9b034515296f0d0808ca3d72b0ef2f1cabe7e1235fe2ac5` |
-| workbench-light-shell | light, shell | 1280×800 | `captures/workbench-light-shell.png` | `d284d1ccd77a75f283643e1580179a2ad636e35cfb9e64d2efd25027bfdc9734` |
-| workbench-dark-palette | dark, palette | 960×680 | `captures/workbench-dark-palette.png` | `2481c47a9109ec69aa8109e478b2981253584b9f4eca946e4ea59be667f28f2c` |
+| counter-light | light, incremented | 420×300 | `captures/counter-light.png` | `a1e8ed16b4efc764ced23afdb463c3834973e9b7799f2b28bcaf17d8cc373d53` |
+| counter-dark-focus | dark, focus | 420×300 | `captures/counter-dark-focus.png` | `6388d15e5d4d7be623901b4d893071aae29f583427cfa7bc5a001191ac316f33` |
+| todo-light-populated | light, populated | 900×760 | `captures/todo-light-populated.png` | `1e01811b269d3a59cf5d9f9f776e239d87ef90973a7413ec2e03039bc15895a3` |
+| todo-dark-empty | dark, completed/empty state | 700×560 | `captures/todo-dark-empty.png` | `bc5b0ad90d462f8f309ed9e5d4f550cd0ef18738f2ceac9c2c77bf3ab54338e2` |
+| pulse-dark-results | dark, results | 820×760 | `captures/pulse-dark-results.png` | `e405355ac31c2dea1c1b1230e7f33bccc23d56b48e8b59c46ba67159efea9774` |
+| pulse-light-error | light, stale results and error | 600×560 | `captures/pulse-light-error.png` | `ccd78fb30632348bb834544a87b5cc984ac16cc2aa9537ea8ef3065defe3b594` |
+| workbench-light-shell | light, shell | 1280×800 | `captures/workbench-light-shell.png` | `a7220353dbd38223c18eb0ebfe89fe629f32ecbdabce8ab72df998129f3a799e` |
+| workbench-dark-palette | dark, palette | 960×680 | `captures/workbench-dark-palette.png` | `309fc3044f9b8e37ad996d7289f6dae7dd4e321189e18558d35db429ba10315b` |
 
 All commands use `--quality-capture <profile>` from the example README. The
 profiles still exercise normal application rendering and existing minimum-size,

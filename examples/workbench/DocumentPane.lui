@@ -8,44 +8,26 @@ using Avalonia.Layout;
 
 component DocumentPane(string title, DocumentSession session, ICommand focusCommand, ICommand copyCommand, ICommand undoCommand, ICommand redoCommand, ICommand selectAllCommand, string language = "C#")
 {
-    slot toolbar;
-    private readonly State<int> edits = new(0);
-    private void Increment() => edits.Update(value => value + 1);
-
     Fragment Render() => Border {
         Class: "editor-pane";
         Grid {
             Class: "editor-content";
-            RowDefinitions: "Auto Auto Auto * Auto";
-            Grid {
-                Class: "document-header";
-                Grid.Row: 0;
+            RowDefinitions: "Auto *";
+            Border { Class: "document-header-frame"; Grid.Row: 0; Padding: (12, 8); Height: 48;
+            Grid { Class: "document-header";
                 ColumnDefinitions: "* Auto";
-                StackPanel {
-                    TextBlock { Class: "document-title"; Text: title; AutomationProperties.Name: "Document title"; }
-                    TextBlock { Class: "document-language"; Text: language; }
+                StackPanel { Orientation: Orientation.Horizontal; Spacing: 8; VerticalAlignment: VerticalAlignment.Center;
+                    TextBlock { Class: "document-title"; Text: title; AutomationProperties.Name: "Document title"; VerticalAlignment: VerticalAlignment.Center; }
+                    Border { Class: "language-badge"; Padding: (6, 2);
+                        TextBlock { Class: "document-language"; Text: language; }
+                    }
                 }
-                TextBlock { Class: "document-edits"; Grid.Column: 1; Text: $"Edits: {edits.Value}"; }
+                Button { Class: "editor-action"; Grid.Column: 1; Content: "Focus editor"; Command: focusCommand; }
             }
-            StackPanel {
-                Class: "editor-actions";
-                Grid.Row: 1;
-                Orientation: Avalonia.Layout.Orientation.Horizontal;
-                Button { Class: "editor-action"; Content: "Increment edits"; Click: () => Increment(); }
-                Button { Class: "editor-action"; Content: "Focus editor"; Command: focusCommand; }
-            }
-            StackPanel {
-                Class: "editor-actions secondary";
-                Grid.Row: 2;
-                Orientation: Avalonia.Layout.Orientation.Horizontal;
-                Button { Content: "Copy"; Command: copyCommand; }
-                Button { Content: "Undo"; Command: undoCommand; }
-                Button { Content: "Redo"; Command: redoCommand; }
-                Button { Content: "Select all"; Command: selectAllCommand; }
             }
             AccessibleTextEditor {
                 Class: "source-editor";
-                Grid.Row: 3;
+                Grid.Row: 1;
                 HorizontalAlignment: HorizontalAlignment.Stretch;
                 VerticalAlignment: VerticalAlignment.Stretch;
                 Text: "";
@@ -56,7 +38,6 @@ component DocumentPane(string title, DocumentSession session, ICommand focusComm
                 Loaded: (sender, e) => session.Attach(sender);
                 Unloaded: (sender, e) => session.Detach(sender);
             }
-            StackPanel { Class: "document-toolbar"; Grid.Row: 4; Orientation: Orientation.Horizontal; yield children; yield toolbar; }
         }
     };
 }

@@ -1,12 +1,15 @@
 Border.problems-pane {
     background: resource("Shadcn.Card");
-    padding: 8px;
+    padding: 0;
 }
+
+Border.pane-header { background: resource("Shadcn.Muted"); border-color: resource("Shadcn.Border"); border-width: 0 0 1px 0; }
+Border.count-badge { background: resource("Shadcn.Muted"); border-radius: 8px; }
+TextBlock.pane-title { font-size: 14px; font-weight: 600; }
 
 ListBox.problems-list {
     background: resource("Shadcn.Popover");
-    border-color: resource("Shadcn.Border");
-    border-width: 1px;
+    border-width: 0;
 }
 
 TextBlock.loading-state {

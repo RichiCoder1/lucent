@@ -12,8 +12,10 @@ component PackagePulseResults(string query, Action<string> updateQuery, IReadOnl
 
         StackPanel {
             Class: "content";
-            TextBlock { Class: "eyebrow"; Text: "LUCENT ASYNC + MOTION PROOF"; }
-            TextBlock { Class: "title"; Text: "Package Pulse"; }
+            Grid { ColumnDefinitions: "* Auto";
+                TextBlock { Class: "title"; Text: "Package Pulse"; }
+                Border { Class: "result-badge"; Grid.Column: 1; TextBlock { Text: pending ? "Updating" : "Live"; } }
+            }
             TextBlock { Class: "subtitle"; Text: "Search a simulated package feed. Results stay in place while newer data loads."; }
             TextBox {
                 Class: "search";
@@ -31,7 +33,11 @@ component PackagePulseResults(string query, Action<string> updateQuery, IReadOnl
                     TextBlock { Class: "status"; Text: "No packages match this query."; }
                 }
             }
-            Border {
+            Grid { ColumnDefinitions: "* Auto";
+                TextBlock { Class: "results-heading"; Text: "Results"; }
+                TextBlock { Class: "result-count"; Grid.Column: 1; Text: $"{items.Count} packages"; }
+            }
+            Border { Class: "package-list";
                 if (items.Count > 0) {
                     PackagePulseRows(items) {}
                 }

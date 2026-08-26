@@ -27,7 +27,7 @@ uses public native control states rather than template copies.
 
 | capture | SHA-256 | review |
 | --- | --- | --- |
-| `utility-gallery-light.png` | `e05ef674152f9201f04f007c5e9d40c9ae8557e018d57bef029506a393601ef3` | complete light utility section in viewport; computed mappings validated before capture |
-| `utility-gallery-dark.png` | `4e8db080fa3814d925409f5ea0aaf439c8b90cdd3bcd6f773d903177e5053f82` | complete dark utility section in viewport; computed mappings validated before capture |
-| `shadcn-gallery-light.png` | `0226e85fa2387d32e881bbd053a6f36fd4d436fa8327213697cd4bec3eea2008` | light native controls, keyboard focus and state evidence visible |
-| `shadcn-gallery-dark.png` | `784c8c4136d25e9182319f4f0de5cdd33adacae55b23b641ef08f75ac7f8005f` | dark native controls, semantic resources and state evidence visible |
+| `utility-gallery-light.png` | `12f4bd2ff969570f64930213bf687383e1e0036f09a081c331838f64d6ea4fe6` | complete light utility section in viewport; computed mappings validated before capture |
+| `utility-gallery-dark.png` | `a48a4e5a24af94d3d34227299a0991eee174f4d2ed1a2dd38e74b282008822be` | complete dark utility section in viewport; computed mappings validated before capture |
+| `shadcn-gallery-light.png` | `9ad7a2cb0c1d79cb8dfa15cb3b7d0e5f1578b8d61663b10a6a5ff5a45aa939a6` | light native controls, keyboard focus and state evidence visible |
+| `shadcn-gallery-dark.png` | `09ac16c0c4a9266ece4fd24212304e33c95b5a4e5034b7dae8f578d7bbfa86cc` | dark native controls, semantic resources and state evidence visible |

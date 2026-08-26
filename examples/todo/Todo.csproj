@@ -9,6 +9,7 @@
   <Import Project="..\..\build\Lucent.Compiler.props" />
 
   <ItemGroup>
+    <Compile Include="..\ExampleQualityCapture.cs" Link="ExampleQualityCapture.cs" />
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />

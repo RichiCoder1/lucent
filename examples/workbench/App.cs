@@ -13,6 +13,7 @@ using Avalonia.VisualTree;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Platform;
 using AvaloniaEdit;
+using Lucent.Examples;
 using System.Threading;
 
 namespace Lucent.Examples.Workbench;
@@ -32,9 +33,8 @@ internal sealed class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var qualityProfile = TryQualityProfile(desktop.Args ?? [], out var requestedProfile)
-                ? requestedProfile : null;
-            Environment.SetEnvironmentVariable("LUCENT_QUALITY_CAPTURE", qualityProfile);
+            var qualityProfile = ExampleQualityCapture.Profile(
+                desktop.Args ?? [], "workbench-light-shell", "workbench-dark-palette");
             var lifetimeToken = new CancellationTokenSource();
             void ReportUnhandled(Exception error) => Console.Error.WriteLine($"Workbench error: {error}");
             var settingsPath = Path.Combine(
@@ -42,7 +42,12 @@ internal sealed class App : Application
                 "Lucent", "Workbench", "settings.json");
             var settingsRepository = new JsonFileSettingsRepository(settingsPath, ReportUnhandled);
             var settings = settingsRepository.LoadAsync(CancellationToken.None).GetAwaiter().GetResult();
+            if (qualityProfile is not null) settings = settings with { SidebarWidth = 220 };
             RequestedThemeVariant = settings.Theme switch { "Light" => ThemeVariant.Light, "Dark" => ThemeVariant.Dark, _ => ThemeVariant.Default };
+            if (qualityProfile is not null)
+                RequestedThemeVariant = qualityProfile.Contains("dark", StringComparison.OrdinalIgnoreCase)
+                    ? ThemeVariant.Dark
+                    : ThemeVariant.Light;
             var saveCoordinator = new SettingsSaveCoordinator(settingsRepository, CancellationToken.None);
             var workspace = new WorkspaceService();
             RestoreWorkspaceAsync(workspace, settings, CancellationToken.None, ReportUnhandled).GetAwaiter().GetResult();
@@ -52,20 +57,23 @@ internal sealed class App : Application
             var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token,
                 initialSettings: settings, saveCoordinator: saveCoordinator,
                 errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession, workspace: workspace,
+                initialShowPalette: qualityProfile == "workbench-dark-palette",
                 __lucent_reportUnhandled: ReportUnhandled);
             var window = component.MountRoot();
-            ApplyWindowIcon(window);
+            ExampleQualityCapture.ApplyIcon<App>(window);
             AttachShutdown(window, lifetimeToken, component, documentSession, saveCoordinator, settingsRepository, ReportUnhandled);
             if (qualityProfile is not null)
             {
-                SetQualitySize(window, qualityProfile);
-                RequestedThemeVariant = qualityProfile.Contains("dark", StringComparison.OrdinalIgnoreCase) ? ThemeVariant.Dark : ThemeVariant.Light;
-                window.Opened += (_, _) => DispatcherTimer.RunOnce(() =>
-                {
-                    window.UpdateLayout();
-                    SaveCapture(window, qualityProfile);
-                    desktop.Shutdown(0);
-                }, TimeSpan.FromMilliseconds(600), DispatcherPriority.Render);
+                var size = qualityProfile.Contains("light-shell", StringComparison.OrdinalIgnoreCase)
+                    ? new PixelSize(1280, 800)
+                    : new PixelSize(960, 680);
+                ExampleQualityCapture.Configure(this, desktop, window, qualityProfile, size,
+                    TimeSpan.FromMilliseconds(600), candidate =>
+                    {
+                        var tree = ExampleQualityCapture.Descendants(candidate).OfType<ListBox>()
+                            .FirstOrDefault(list => list.ItemsSource is IEnumerable<WorkspaceRow>);
+                        if (tree is not null && tree.Items.Count > 0) tree.SelectedIndex = 0;
+                    });
             }
             desktop.MainWindow = window;
 #pragma warning restore LUC004A003
@@ -73,104 +81,7 @@ internal sealed class App : Application
         base.OnFrameworkInitializationCompleted();
     }
 
-    internal static int RunSmoke(string[] args)
-    {
-        var lifetime = new ClassicDesktopStyleApplicationLifetime
-        {
-            Args = args,
-            ShutdownMode = ShutdownMode.OnExplicitShutdown,
-        };
-        Program.BuildAvaloniaApp().SetupWithLifetime(lifetime);
-        var lifetimeToken = new CancellationTokenSource();
-        void ReportUnhandled(Exception error) => Console.Error.WriteLine($"Workbench error: {error}");
-        var settingsPath = Path.Combine(Path.GetTempPath(), "lucent-workbench-settings.json");
-        File.Delete(settingsPath);
-        var settingsRepository = new JsonFileSettingsRepository(settingsPath, ReportUnhandled);
-        var settings = settingsRepository.LoadAsync(CancellationToken.None).GetAwaiter().GetResult();
-        var saveCoordinator = new SettingsSaveCoordinator(settingsRepository, CancellationToken.None);
-        var workspace = new WorkspaceService();
-        var documentSession = CreateSession(workspace);
-        var problemLoader = new ProjectProblemLoader(workspace);
-#pragma warning disable LUC004A003 // event-owned smoke component is disposed by the native Closed handler below
-        var component = new WorkbenchAppComponent(new AvaloniaWorkbenchDesktopHost(), lifetimeToken.Token,
-            initialSettings: settings, saveCoordinator: saveCoordinator,
-            errorReporter: ReportUnhandled, problemLoader: problemLoader, session: documentSession, workspace: workspace,
-            __lucent_reportUnhandled: ReportUnhandled);
-        var window = component.MountRoot();
-        lifetime.MainWindow = window;
-        var passed = false;
-        AttachShutdown(window, lifetimeToken, component, documentSession, saveCoordinator, settingsRepository, ReportUnhandled,
-            () => lifetime.Shutdown(passed ? 0 : 1));
-        window.Opened += (_, _) => Dispatcher.UIThread.Post(() =>
-        {
-            Dispatcher.UIThread.RunJobs();
-            window.UpdateLayout();
-            var buttons = Descendants(window).OfType<Button>().ToArray();
-            var before = Descendants(window).OfType<TextBlock>().Any(text => text.Text == "0 problems");
-            var openBinding = window.KeyBindings.First(binding =>
-                binding.Gesture is KeyGesture gesture && gesture.Key == Key.O);
-            var paletteBinding = window.KeyBindings.First(binding =>
-                binding.Gesture is KeyGesture gesture && gesture.Key == Key.K);
-            var toggleBinding = window.KeyBindings.First(binding =>
-                binding.Gesture is KeyGesture gesture && gesture.Key == Key.T);
-            var editor = Descendants(window).OfType<TextEditor>().First();
-            var workspaceList = Descendants(window).OfType<ListBox>().First(list =>
-                list.ItemsSource is IEnumerable<WorkspaceRow>);
-            var problemsList = Descendants(window).OfType<ListBox>().First(list =>
-                list.ItemsSource is IEnumerable<ProblemItem>);
-            workspaceList.SelectedItem = workspaceList.Items.Cast<WorkspaceRow>().First(row => row.Node.Id == "readme");
-            var workspaceSelected = workspaceList.SelectedItem is WorkspaceRow { Node.Id: "readme" };
-            var problemSelected = problemsList.Items.Count == 0;
-            var dataVisible = workspaceList.Items.Count > 0 && problemsList.Items.Count == 0;
-            window.UpdateLayout();
-            var workspaceOpened = editor.Text == "// README.md\n" &&
-                Descendants(window).OfType<TextBlock>().Any(text => text.Text == "README.md");
-            editor.Focus();
-            editor.AppendText("// smoke edit\n");
-            var editorChanged = editor.Text.Contains("// smoke edit", StringComparison.Ordinal);
-            paletteBinding.Command!.Execute(null);
-            var quickOpenList = Descendants(window).OfType<ListBox>().First(list =>
-                list.ItemsSource is IEnumerable<QuickOpenItem>);
-            quickOpenList.SelectedIndex = 0;
-            var quickOpenSelected = quickOpenList.SelectedItem is QuickOpenItem;
-            var openMenu = Descendants(window).OfType<MenuItem>().First(item =>
-                item.Header?.ToString() == "Open workspace");
-            var sameCommand = ReferenceEquals(openBinding.Command, openMenu.Command);
-            Descendants(window).OfType<Button>().First(button =>
-                button.Content?.ToString() == "Close palette")
-                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            window.KeyBindings.First(binding =>
-                binding.Gesture is KeyGesture gesture && gesture.Key == Key.E).Command!.Execute(null);
-            window.UpdateLayout();
-            var focused = window.FocusManager?.GetFocusedElement();
-            var focusRestored = focused is Visual visual &&
-                (ReferenceEquals(visual, editor) || visual.GetVisualAncestors().Contains(editor));
-            buttons.First(button => button.Content?.ToString() == "Increment edits")
-                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            buttons.First(button => button.Content?.ToString() == "Switch document")
-                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            toggleBinding.Command!.Execute(null);
-            window.UpdateLayout();
-            passed = before && Descendants(window).OfType<TextBlock>().Any(text => text.Text == "Edits: 1") &&
-                Descendants(window).OfType<TextBlock>().Any(text => text.Text == "README.md") &&
-                Descendants(window).OfType<TextBlock>().Any(text => text.Text == "Problems hidden" && text.IsVisible) &&
-                sameCommand && focusRestored && workspaceSelected && problemSelected && quickOpenSelected &&
-                editorChanged && workspaceOpened && dataVisible && quickOpenList.Items.Count > 0;
-            window.Close();
-            File.AppendAllText(Path.Combine(Path.GetTempPath(), "lucent-workbench-main.txt"), $"|passed:{passed}");
-        }, DispatcherPriority.Loaded);
-#pragma warning restore LUC004A003
-        return lifetime.Start(Array.Empty<string>());
-    }
-
-    private static void ApplyWindowIcon(Window window)
-    {
-        using var stream = AssetLoader.Open(new Uri(
-            $"avares://{typeof(App).Assembly.GetName().Name}/Assets/lucent-icon-32.png"));
-        window.Icon = new WindowIcon(stream);
-    }
-
-    private static DocumentSession CreateSession(WorkspaceService workspace)
+    internal static DocumentSession CreateSession(WorkspaceService workspace)
     {
         var document = new OpenDocument("Program.cs", "// Open a Lucent workspace.\n");
         if (workspace.QuickOpenItems.FirstOrDefault() is { } item)
@@ -197,44 +108,7 @@ internal sealed class App : Application
         }
     }
 
-    private static IEnumerable<Control> Descendants(Control root)
-    {
-        yield return root;
-        foreach (var child in root.GetVisualChildren().OfType<Control>())
-            foreach (var nested in Descendants(child)) yield return nested;
-    }
-
-    private static bool TryQualityProfile(string[] args, out string profile)
-    {
-        var index = Array.IndexOf(args, "--quality-capture");
-        profile = index >= 0 && index + 1 < args.Length ? args[index + 1] : string.Empty;
-        return profile is "workbench-light-shell" or "workbench-dark-palette";
-    }
-
-    private static void SaveCapture(Window window, string profile)
-    {
-        var path = Path.Combine("docs", "quality", "007-example-ux", "captures", profile + ".png");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        using var bitmap = new RenderTargetBitmap(new PixelSize(Math.Max(1, (int)window.Bounds.Width), Math.Max(1, (int)window.Bounds.Height)));
-        bitmap.Render(window);
-        bitmap.Save(path, new PngBitmapEncoderOptions());
-    }
-
-    private static void SetQualitySize(Window window, string profile)
-    {
-        if (profile.Contains("light-shell", StringComparison.OrdinalIgnoreCase))
-        {
-            window.Width = 1280;
-            window.Height = 800;
-        }
-        else
-        {
-            window.Width = 960;
-            window.Height = 680;
-        }
-    }
-
-    private static void AttachShutdown(
+    internal static void AttachShutdown(
         Window window,
         CancellationTokenSource lifetime,
         WorkbenchAppComponent component,

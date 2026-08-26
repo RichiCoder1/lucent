@@ -1,22 +1,33 @@
 namespace Lucent.Examples.Counter;
 
-component Counter()
+component Counter(int initialCount = 0)
 {
-    private readonly State<int> count = new(
-        System.Environment.GetEnvironmentVariable("LUCENT_QUALITY_CAPTURE") == "counter-light" ? 3 : 0);
+    private readonly State<int> count = new(initialCount);
 
     Fragment Render()
     {
-        return StackPanel {
-            Class: "counter";
-            TextBlock {
-                Class: "count";
-                Text: $"Count: {count.Value}";
-            }
-            Button {
-                Class: "primary";
-                Content: "Increment";
-                Click: (sender, e) => count.Update(count.Value + 1);
+        return Grid {
+            Class: "counter-page";
+            Border {
+                Class: "counter card";
+                BorderThickness: 1;
+                CornerRadius: 8;
+                Padding: 24;
+                HorizontalAlignment: Avalonia.Layout.HorizontalAlignment.Center;
+                VerticalAlignment: Avalonia.Layout.VerticalAlignment.Center;
+                Width: 340;
+                StackPanel {
+                    Spacing: 12;
+                    TextBlock { Class: "counter-title"; Text: "Counter"; }
+                    TextBlock { Class: "counter-subtitle"; Text: "A small reactive state sample."; }
+                    TextBlock { Class: "count"; Text: $"{count.Value}"; }
+                    Button {
+                        Class: "primary";
+                        HorizontalAlignment: Avalonia.Layout.HorizontalAlignment.Stretch;
+                        Content: "Increment";
+                        Click: (sender, e) => count.Update(count.Value + 1);
+                    }
+                }
             }
         };
     }

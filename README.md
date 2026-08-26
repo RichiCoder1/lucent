@@ -7,6 +7,8 @@ Lucent is an experimental C#-superset language and UI framework for building cro
 > [!IMPORTANT]
 > Lucent is in the design and proof-of-concept stage. The repository contains a narrow compiler and a direct-native Avalonia control experiment; there is no general-purpose compiler, stable runtime, package, or compatibility promise yet.
 
+The repository also contains an isolated [Lucent Native validation spike](experiments/native-stack/README.md). It tests whether Lucent should replace Avalonia with a framework-owned UI stack. The experiment does not change the current runtime direction unless its explicit gates pass.
+
 ```csharp
 component Counter()
 {
@@ -78,6 +80,7 @@ dependency audit reports high-severity advisories.
 - [Design decisions and open questions](docs/DECISIONS.md)
 - [Documentation index](docs/README.md)
 - [Credits and research sources](CREDITS.md)
+- [Lucent Native validation spike](experiments/native-stack/README.md)
 
 ## Repository status
 

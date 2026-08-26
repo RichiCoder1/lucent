@@ -39,7 +39,7 @@ public sealed class CompileLucentTests
         var mappedSourcePath = CounterSourcePath()
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
-        StringAssert.Contains(generated, $"#line 11 \"{mappedSourcePath}\"");
+        StringAssert.Contains(generated, $"#line 10 \"{mappedSourcePath}\"");
         StringAssert.Contains(generated, "internal sealed class CounterComponent");
         StringAssert.Contains(generated, "Styles.Add(new global::Avalonia.Styling.Style");
         StringAssert.Contains(generated, "global::Avalonia.Animation.DoubleTransition");

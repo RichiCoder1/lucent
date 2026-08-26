@@ -2,7 +2,7 @@ namespace Lucent.Examples.Counter;
 
 using Lucent.Examples.Counter;
 
-component MainWindow()
+component MainWindow(int initialCount = 0)
 {
     Fragment Render()
     {
@@ -14,7 +14,7 @@ component MainWindow()
             MinHeight: 300;
             WindowStartupLocation: Avalonia.Controls.WindowStartupLocation.CenterScreen;
 
-            Counter {}
+            Counter(initialCount) {}
         };
     }
 }

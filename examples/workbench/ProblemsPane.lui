@@ -8,13 +8,15 @@ using Avalonia.Automation;
 component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand copyCommand, Action<ProblemItem> navigate) => Border {
     Class: "problems-pane";
     Grid {
-        RowDefinitions: [
-            new (GridLength.Auto),
-            new (GridLength.Auto),
-            new (new GridLength(1, GridUnitType.Star)),
-            new (GridLength.Auto)
-        ];
-        TextBlock { Class: "pane-title"; Grid.Row: 0; Text: $"{items.Count} problems"; AutomationProperties.Name: "Problems"; }
+        RowDefinitions: "Auto Auto *";
+        Border { Class: "pane-header"; Grid.Row: 0; Padding: (12, 8); Height: 44;
+        Grid { ColumnDefinitions: "* Auto";
+            TextBlock { Class: "pane-title"; Text: $"{items.Count} problems"; AutomationProperties.Name: "Problems"; VerticalAlignment: Avalonia.Layout.VerticalAlignment.Center; }
+            Border { Class: "count-badge"; Grid.Column: 1; Padding: (6, 2); VerticalAlignment: Avalonia.Layout.VerticalAlignment.Center;
+                TextBlock { Text: items.Count.ToString(); }
+            }
+        }
+        }
         ContentControl {
             Grid.Row: 1;
             if (loading) {
@@ -43,6 +45,5 @@ component ProblemsPane(IReadOnlyList<ProblemItem> items, bool loading, ICommand 
                 }
             };
         }
-        Button { Class: "pane-action"; Grid.Row: 3; Content: "Copy diagnostic"; Command: copyCommand; }
     }
 };

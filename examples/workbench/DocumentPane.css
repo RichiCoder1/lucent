@@ -1,11 +1,10 @@
 Border.editor-pane {
     background: resource("Shadcn.Card");
-    padding: 12px;
+    padding: 0;
 }
 
-Grid.document-header {
-    margin: 0 0 8px 0;
-}
+Border.document-header-frame { background: resource("Shadcn.Muted"); border-color: resource("Shadcn.Border"); border-width: 0 0 1px 0; }
+Grid.document-header { margin: 0; }
 
 TextBlock.document-title {
     foreground: resource("Shadcn.Foreground");
@@ -13,29 +12,16 @@ TextBlock.document-title {
     font-weight: 600;
 }
 
+Border.language-badge { background: resource("Shadcn.Muted"); border-radius: 4px; }
 TextBlock.document-language {
     foreground: resource("Shadcn.MutedForeground");
     font-size: 12px;
 }
 
-TextBlock.document-edits {
-    foreground: resource("Shadcn.MutedForeground");
-    font-size: 12px;
-}
-
-StackPanel.editor-actions {
-    gap: 4px;
-    margin: 0 0 8px 0;
-}
-
-StackPanel.document-toolbar {
-    gap: 8px;
-    margin: 8px 0 0 0;
-}
+Button.editor-action { background: transparent; foreground: resource("Shadcn.MutedForeground"); padding: 6px 8px; }
 
 TextEditor.source-editor {
     background: resource("Shadcn.Popover");
     foreground: resource("Shadcn.Foreground");
-    border-color: resource("Shadcn.Border");
-    border-width: 1px;
+    border-width: 0;
 }

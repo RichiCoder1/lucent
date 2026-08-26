@@ -1,4 +1,4 @@
-Border {
+.todo-page {
     background: resource("Shadcn.Background");
 }
 
@@ -22,12 +22,18 @@ StackPanel.todo-entry {
     gap: 8px;
 }
 
-StackPanel.filter-bar {
+Border.todo-list {
+    border-width: 1px;
+    border-color: resource("Shadcn.Border");
+    border-radius: 6px;
+}
+
+Grid.todo-footer StackPanel {
     gap: 8px;
 }
 
 .todo-row {
-    border-width: 1px;
+    border-width: 0 0 1px 0;
     border-color: resource("Shadcn.Border");
     transition: background 120ms ease-out;
 }
@@ -41,13 +47,23 @@ StackPanel.filter-bar {
     border-color: resource("Shadcn.Primary");
 }
 
+.todo-row.completed TextBox.todo-editor { opacity: 0.55; }
+
+Button.delete-task {
+    background: transparent;
+    foreground: resource("Shadcn.Destructive");
+}
+
 TextBlock.completion-state {
     foreground: resource("Shadcn.Primary");
     font-weight: 600;
 }
 
-.todo-row.completed TextBox {
-    text-wrap: nowrap;
+TextBox.todo-editor {
+    background: transparent;
+    foreground: resource("Shadcn.Foreground");
+    border-width: 0;
+    padding: 0;
 }
 
 .todo-row:pointerover {

@@ -5,25 +5,31 @@ using Avalonia.Controls;
 using System.Windows.Input;
 using Avalonia.Automation;
 
-component WorkspaceSidebar(string workspace, WorkspaceSelectionController selection, Action<WorkspaceNode> openNode, ICommand focusCommand, bool compact = false) => Border {
+component WorkspaceSidebar(string workspace, WorkspaceSelectionController selection, Action<WorkspaceNode> openNode, bool compact = false) => Border {
     Class: "workspace-sidebar";
-    Padding: new Avalonia.Thickness(compact ? 4 : 12);
+    Padding: 0;
     AutomationProperties.Name: "Workspace sidebar";
     AutomationProperties.AutomationId: "Workspace.Sidebar";
     Grid {
-        RowDefinitions: "Auto Auto *";
-        TextBlock { Class: "pane-title"; Grid.Row: 0; Text: $"Workspace: {workspace}"; }
-        Button { Class: "pane-action"; Grid.Row: 1; Content: "Focus sidebar"; Command: focusCommand; }
+        RowDefinitions: "Auto *";
+        Border { Class: "pane-header"; Grid.Row: 0; Padding: (12, 8); Height: 48;
+        Grid {
+            StackPanel { Spacing: 1;
+                TextBlock { Class: "pane-title"; Text: "Explorer"; }
+                TextBlock { Class: "pane-subtitle"; Text: $"Workspace: {workspace}"; }
+            }
+        }
+        }
         AccessibleWorkspaceListBox {
             Class: "workspace-tree";
-            Grid.Row: 2;
+            Grid.Row: 1;
             Focusable: true;
             AutomationProperties.Name: "Workspace";
             AutomationProperties.AutomationId: "Workspace.Tree";
             ItemsSource: selection.VisibleRows;
             template ItemTemplate(WorkspaceRow row) {
                 Border {
-                    Padding: new Thickness(row.Depth * 16, 2, 2, 2);
+                    Padding: new Thickness(12 + row.Depth * 16, 6, 8, 6);
             TextBlock { Text: binding(row.Node.Name); }
                 }
             }
