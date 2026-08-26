@@ -78,13 +78,14 @@ Stop the experiment if:
 2. issue-browser application code is not materially clearer than an equivalent Avalonia implementation;
 3. it misses the agreed interaction, idle, resize, virtualization, or memory evidence.
 
-Framework internals may be substantial if they remain coherent and testable. Raw line count is not itself a failure.
+Framework internals may be substantial if they remain coherent and testable. Raw line count or elapsed time is not itself a failure. For this spike, "disproportionate machinery" means the bounded platform proof cannot satisfy UIA, real IME, or NativeAOT without delegating controls to another UI framework or introducing a second general UI stack.
 
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [Milestones and gates](MILESTONES.md)
 - [References and credits](REFERENCES.md)
+- [Adversarial plan review](REVIEW.md)
 
 ## Explicit exclusions
 

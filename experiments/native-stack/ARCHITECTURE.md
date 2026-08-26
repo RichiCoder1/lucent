@@ -31,7 +31,7 @@ The scheduler follows the useful semantics of alien-signals rather than copying 
 
 Straight C# uses bounded read tracking inside explicit reactive callbacks. Future `.lui` output may register compiler-derived edges directly. Both paths use the same graph and scheduling rules.
 
-Async computed values preserve Lucent's proven behavior: cancellation, stale-value retention, latest-generation wins, pending/error facets, and UI-scheduler commits.
+Async computed values reuse behaviors validated in the current Lucent experiment: cancellation, stale-value retention, latest-generation wins, pending/error facets, and UI-scheduler commits. This is design evidence, not a compatibility promise.
 
 ## Elements and structural regions
 
@@ -90,7 +90,7 @@ There is no selector matching, specificity, implicit inheritance beyond document
 
 Element changes mark layout, paint, or semantics facets dirty. Layout changes propagate only as far as required by constraints. Paint changes rebuild affected scene subtrees. Idle performs no rendering work.
 
-Skia is hidden behind a renderer interface so headless raster tests and a future renderer can share the same scene contract. The spike does not own shaders, glyph atlases, or a custom GPU backend.
+Skia is hidden behind one deliberately narrow renderer interface so native presentation and headless raster tests share the same scene contract. This is a sanctioned test seam, not a commitment to multiple production renderers. The spike does not own shaders, glyph atlases, or a custom GPU backend.
 
 ## Platform boundary
 
@@ -103,6 +103,8 @@ SDL3-CS is the provisional host. The Windows adapter owns:
 - UIA provider transport, including `WM_GETOBJECT`.
 
 If SDL ownership prevents correct UIA or text integration, replace only this adapter with direct Win32.
+
+Milestone 1 must exercise the selected SDL or Win32 host, Skia present path, text shaper, IME path, and UIA provider together from a NativeAOT-published build. A minimal unrelated AOT executable is not evidence. UIA COM interop must use an AOT-compatible generated COM or `ComWrappers` path; built-in runtime COM marshalling is not assumed.
 
 ## Text
 
@@ -127,6 +129,8 @@ The portable core must run without a window. Headless tests exercise signals, la
 - reactive dependency edges.
 
 A smaller Windows-native suite validates HWND lifecycle, DPI, IME, UIA/Narrator integration, and NativeAOT behavior.
+
+The same seeded scenes must produce equivalent element, layout, style, and semantic dumps in headless and native paths. Raster comparisons use an explicitly recorded tolerance where exact pixel equality is inappropriate.
 
 ## NativeAOT
 
