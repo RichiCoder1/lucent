@@ -726,7 +726,7 @@ internal sealed record AutomatedResult(bool Ok, string Hwnd, bool HwndStable, ui
 }
 internal sealed record ManualResult(bool Ok, string LogPath, int EventCount, string Committed);
 internal sealed record TextCheckResult(bool Ok, string Committed);
-internal sealed record ControlsCheckResult(bool Ok, bool ButtonActivation, bool ButtonSemantics, bool TextEditing, bool UnicodeSafe, bool ImeComposition, bool Clipboard, bool FocusVisible, bool ValueSemantics, bool NegativeCases, bool Disposal);
+internal sealed record ControlsCheckResult(bool Ok, bool ButtonActivation, bool ButtonSemantics, bool TextEditing, bool UnicodeSafe, bool ImeComposition, bool Clipboard, bool FocusVisible, bool ValueSemantics, bool NegativeCases, bool Disposal, string SemanticDump);
 internal sealed record TextLog(string Kind, string? Text, string Committed, string Preedit, int Start, int Length);
 internal sealed record UiaSnapshot(string Name, string AutomationId, int ControlType);
 internal enum CcwPhase { Wrappers = 1, Create, QueryInterface, Options, Disconnect, Release }

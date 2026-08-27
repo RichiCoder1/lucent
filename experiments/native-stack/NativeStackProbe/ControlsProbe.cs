@@ -14,43 +14,60 @@ internal sealed class MemoryClipboard : IClipboard
 }
 
 /// <summary>Composes an existing element with pointer, focus, semantic, and style facets; it is not a control base class.</summary>
-internal sealed class Button : IDisposable
+internal interface IElementBehavior : IDisposable
+{
+    StableElement Element { get; }
+    StyleState State { get; }
+    void Focus(bool visible);
+}
+
+internal sealed class Button : IElementBehavior
 {
     private readonly InputRouter _input;
     private readonly FocusScopes _focus;
     private readonly StableElement _root;
     private readonly Action _activate;
+    private readonly Action? _invalidated;
+    private readonly bool _attached;
     private bool _pressed;
     private bool _focusVisible;
     public StableElement Element { get; }
     public StyleState State => (_focus.Focused == Element.Id && _focusVisible ? StyleState.FocusVisible : StyleState.None) | (_pressed ? StyleState.Pressed : StyleState.None);
 
     public Button(StableElement root, InputRouter input, FocusScopes focus, string id, string name, Action activate)
+        : this(root, new(new(id), new(0, 0, 20, 10), new("#18181b", "#fafafa", 4), new("button", name, Actions: ["press"])), input, focus, activate, false) { }
+    public Button(StableElement root, StableElement element, InputRouter input, FocusScopes focus, Action activate)
+        : this(root, element, input, focus, activate, true, null) { }
+    public Button(StableElement root, StableElement element, InputRouter input, FocusScopes focus, Action activate, Action invalidated)
+        : this(root, element, input, focus, activate, true, invalidated) { }
+    private Button(StableElement root, StableElement element, InputRouter input, FocusScopes focus, Action activate, bool attached, Action? invalidated = null)
     {
-        _root = root; _input = input; _focus = focus; _activate = activate;
-        Element = new(new(id), new(0, 0, 20, 10), new("#18181b", "#fafafa", 4), new("button", name, Actions: ["press"]));
-        root.Children.Add(Element);
+        _root = root; _input = input; _focus = focus; _activate = activate; _attached = attached; _invalidated = invalidated; Element = element;
+        if (!attached) root.Children.Add(Element);
         input.Set(Element, new("press", true, true, Pointer: Pointer));
     }
-    public void Focus(bool visible) { _focusVisible = visible; _focus.Focus(_root, Element); }
+    public void Focus(bool visible) { _focusVisible = visible; _focus.Focus(_root, Element); _invalidated?.Invoke(); }
     public void Key(string key) { if (_focus.Focused == Element.Id && key is "Enter" or "Space") _activate(); }
     public void InvokeSemanticAction(string action) { if (action != "press") throw new ArgumentException("Button supports only press.", nameof(action)); _activate(); }
     private void Pointer(RoutedPointer pointer)
     {
         if (pointer.Kind == PointerKind.Down) { _pressed = true; Focus(false); }
-        if (pointer.Kind == PointerKind.Up && _pressed) { _pressed = false; if (Contains(pointer.X, pointer.Y)) _activate(); }
+        if (pointer.Kind == PointerKind.Up && _pressed) { _pressed = false; _invalidated?.Invoke(); if (Contains(pointer.X, pointer.Y)) _activate(); }
     }
     private bool Contains(int x, int y) => x >= Element.Bounds.X && y >= Element.Bounds.Y && x < Element.Bounds.X + Element.Bounds.Width && y < Element.Bounds.Y + Element.Bounds.Height;
-    public void Dispose() { _input.Release([Element]); _focus.Release([Element]); _root.Children.Remove(Element); }
+    public void Dispose() { _input.Release([Element]); _focus.Release([Element]); if (!_attached) _root.Children.Remove(Element); }
 }
 
 /// <summary>Single-line scalar-indexed editing composed at the portable semantic Value seam.</summary>
-internal sealed class TextField : IDisposable
+internal sealed class TextField : IElementBehavior
 {
     private readonly InputRouter _input;
     private readonly FocusScopes _focus;
     private readonly StableElement _root;
     private readonly IClipboard _clipboard;
+    private readonly Action<string>? _changed;
+    private readonly bool _attached;
+    private readonly Action? _invalidated;
     private readonly TextState _text = new();
     private int _anchor;
     private bool _focusVisible;
@@ -61,13 +78,18 @@ internal sealed class TextField : IDisposable
     public string Preedit => _text.Preedit;
 
     public TextField(StableElement root, InputRouter input, FocusScopes focus, string id, string name, IClipboard clipboard)
+        : this(root, new(new(id), new(0, 12, 80, 10), new("#ffffff", "#09090b", 2), new("edit", name, "", ["set-value"])), input, focus, clipboard, null, false) { }
+    public TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed)
+        : this(root, element, input, focus, clipboard, changed, true, null) { }
+    public TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed, Action invalidated)
+        : this(root, element, input, focus, clipboard, changed, true, invalidated) { }
+    private TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed, bool attached, Action? invalidated = null)
     {
-        _root = root; _input = input; _focus = focus; _clipboard = clipboard;
-        Element = new(new(id), new(0, 12, 80, 10), new("#ffffff", "#09090b", 2), new("edit", name, "", ["set-value"]));
-        root.Children.Add(Element);
+        _root = root; _input = input; _focus = focus; _clipboard = clipboard; _changed = changed; _attached = attached; _invalidated = invalidated; Element = element;
+        if (!attached) root.Children.Add(Element);
         input.Set(Element, new("set-value", true, true, Pointer: Pointer));
     }
-    public void Focus(bool visible) { _focusVisible = visible; _focus.Focus(_root, Element); }
+    public void Focus(bool visible) { _focusVisible = visible; _focus.Focus(_root, Element); _invalidated?.Invoke(); }
     public void SetPreedit(string text, int start, int length) { if (!Focused) return; ValidateSingleLine(text); _text.SetPreedit(text, start, length); }
     public void CommitPreedit(string text) { if (Focused) ReplaceSelection(text); }
     public void Input(string text) { if (Focused) ReplaceSelection(text); }
@@ -103,8 +125,7 @@ internal sealed class TextField : IDisposable
         var replacement = string.Concat(text.EnumerateRunes());
         _text.ReplaceCommitted(Prefix(Text, start) + replacement + Prefix(Text, Count(Text)).Substring(Prefix(Text, end).Length));
         _anchor = Caret = start + Count(replacement);
-        Element.Semantics = Element.Semantics with { Value = Text };
-        Element.Mark(DirtyFacet.Semantics);
+        Element.Semantics = Element.Semantics with { Value = Text }; Element.Text = Text; Element.Mark(DirtyFacet.Paint | DirtyFacet.Semantics); _changed?.Invoke(Text);
     }
     private bool DeleteSelection()
     {
@@ -115,7 +136,39 @@ internal sealed class TextField : IDisposable
     private static int Count(string text) => text.EnumerateRunes().Count();
     private static string Prefix(string text, int count) => TextState.RunePrefix(text, count);
     private static void ValidateSingleLine(string text) { if (text.Contains('\r') || text.Contains('\n')) throw new ArgumentException("TextField accepts one line only.", nameof(text)); }
-    public void Dispose() { _input.Release([Element]); _focus.Release([Element]); _root.Children.Remove(Element); }
+    public void Dispose() { _input.Release([Element]); _focus.Release([Element]); if (!_attached) _root.Children.Remove(Element); }
+}
+
+/// <summary>Reusable selection behavior owns its portable selected semantic, pointer registration, focus, and cleanup.</summary>
+internal sealed class Selectable : IElementBehavior
+{
+    private readonly StableElement _root;
+    private readonly InputRouter _input;
+    private readonly FocusScopes _focus;
+    private readonly Action _select;
+    private bool _focusVisible;
+    private readonly bool _attached;
+    private readonly Action? _invalidated;
+    public StableElement Element { get; }
+    public StyleState State => (Element.Semantics.Selected ? StyleState.Selected : StyleState.None) | (_focus.Focused == Element.Id && _focusVisible ? StyleState.FocusVisible : StyleState.None);
+    public Selectable(StableElement root, InputRouter input, FocusScopes focus, string id, string name, Action select)
+        : this(root, new(new(id), new(0, 24, 80, 10), new("#fff", "#09090b", 2), new("option", name, Actions: ["select"])), input, focus, select, false) { }
+    public Selectable(StableElement root, StableElement element, InputRouter input, FocusScopes focus, Action select)
+        : this(root, element, input, focus, select, true, null) { }
+    public Selectable(StableElement root, StableElement element, InputRouter input, FocusScopes focus, Action select, Action invalidated)
+        : this(root, element, input, focus, select, true, invalidated) { }
+    private Selectable(StableElement root, StableElement element, InputRouter input, FocusScopes focus, Action select, bool attached, Action? invalidated = null)
+    {
+        _root = root; _input = input; _focus = focus; _select = select; _attached = attached; _invalidated = invalidated; Element = element;
+        if (!attached) root.Children.Add(Element); input.Set(Element, new("select", true, true, Pointer: Pointer));
+    }
+    public void Focus(bool visible) { _focusVisible = visible; _focus.Focus(_root, Element); _invalidated?.Invoke(); }
+    private void Pointer(RoutedPointer pointer)
+    {
+        if (pointer.Kind != PointerKind.Up) return;
+        Element.Semantics = Element.Semantics with { Selected = true }; Element.Mark(DirtyFacet.Semantics); _invalidated?.Invoke(); _select();
+    }
+    public void Dispose() { _input.Release([Element]); _focus.Release([Element]); if (!_attached) _root.Children.Remove(Element); }
 }
 
 internal static class ControlsProbe
@@ -125,7 +178,8 @@ internal static class ControlsProbe
         var root = new StableElement(new("controls.root"), new(0, 0, 100, 40), new("#000", "#fff", 0), new("window", "Controls"));
         var input = new InputRouter(); var focus = new FocusScopes(input); var clipboard = new MemoryClipboard(); var presses = 0;
         using var button = new Button(root, input, focus, "controls.button", "Save", () => presses++);
-        using var field = new TextField(root, input, focus, "controls.field", "Title", clipboard);
+        using var field = new TextField(root, input, focus, "controls.field", "Title", clipboard); var selections = 0;
+        using var selectable = new Selectable(root, input, focus, "controls.selection", "Issue 22", () => selections++);
         button.Key("Enter");
         input.Dispatch(root, PointerKind.Down, 1, 1); input.Dispatch(root, PointerKind.Up, 30, 30);
         input.Dispatch(root, PointerKind.Down, 1, 1); input.Dispatch(root, PointerKind.Up, 1, 1); var pointerFocusHidden = !button.State.HasFlag(StyleState.FocusVisible);
@@ -150,8 +204,12 @@ internal static class ControlsProbe
         var preeditNewlineRejected = false; try { field.SetPreedit("bad\rline", 0, 0); } catch (ArgumentException) { preeditNewlineRejected = true; }
         var negative = field.Text == "value😀" && field.Caret == 0 && newlineRejected && preeditNewlineRejected;
         var fieldElement = field.Element; field.Dispose(); var disposal = !root.Children.Contains(fieldElement) && input.Get(fieldElement) is null && focus.Focused != fieldElement.Id;
+        input.Dispatch(root, PointerKind.Down, 1, 25); input.Dispatch(root, PointerKind.Up, 1, 25);
+        var selectionSemantics = selections == 1 && selectable.State.HasFlag(StyleState.Selected) && selectable.Element.Semantics is { Role: "option", Name: "Issue 22", Selected: true, Actions: ["select"] };
+        var semanticDump = SemanticContracts.Dump([button.Element, field.Element, selectable.Element]);
+        var selectionElement = selectable.Element; selectable.Dispose(); disposal &= !root.Children.Contains(selectionElement) && input.Get(selectionElement) is null;
         input.Dispatch(root, PointerKind.Down, 1, 1); var buttonElement = button.Element; button.Dispose(); disposal &= input.Capture is null && !root.Children.Contains(buttonElement) && input.Get(buttonElement) is null;
-        var result = new ControlsCheckResult(buttonActivation && buttonSemantics && editing && unicodeSafe && ime && clipboardWorks && focusVisible && valueSemantics && negative && disposal, buttonActivation, buttonSemantics, editing, unicodeSafe, ime, clipboardWorks, focusVisible, valueSemantics, negative, disposal);
+        var result = new ControlsCheckResult(buttonActivation && buttonSemantics && editing && unicodeSafe && ime && clipboardWorks && focusVisible && valueSemantics && selectionSemantics && negative && disposal, buttonActivation, buttonSemantics, editing, unicodeSafe, ime, clipboardWorks, focusVisible, valueSemantics && selectionSemantics, negative, disposal, semanticDump);
         if (!result.Ok) throw new InvalidOperationException($"Controls self-check failed: {result}.");
         return result;
     }

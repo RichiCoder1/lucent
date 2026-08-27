@@ -3,14 +3,17 @@ using System.Security.Cryptography;
 using System.Text;
 using SDL3;
 using SkiaSharp;
+using SkiaSharp.HarfBuzz;
+using HarfBuzzSharp;
+using HbBuffer = HarfBuzzSharp.Buffer;
 
 [Flags]
 internal enum DirtyFacet { None = 0, Layout = 1, Paint = 2, Semantics = 4 }
 
 internal readonly record struct ElementId(string Value);
 internal readonly record struct Bounds(int X, int Y, int Width, int Height);
-internal sealed record ResolvedStyle(string Background, string Foreground, int CornerRadius, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1);
-internal sealed record Semantics(string Role, string Name, string? Value = null, string[]? Actions = null, bool Enabled = true, bool Focused = false, string? SuppressionReason = null);
+internal sealed record ResolvedStyle(string Background, string Foreground, int CornerRadius, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1, UiLength? Width = null, UiLength? Height = null, UiLength? Padding = null, UiLength? Gap = null, UiAlignment? Alignment = null, UiTypography? Typography = null, UiColor? Border = null, UiLength? BorderWidth = null, UiShadow? Shadow = null, UiLength? FocusRing = null);
+internal sealed record Semantics(string Role, string Name, string? Value = null, string[]? Actions = null, bool Enabled = true, bool Focused = false, string? SuppressionReason = null, bool Selected = false);
 
 internal sealed class StableElement(ElementId id, Bounds bounds, ResolvedStyle style, Semantics semantics)
 {
@@ -18,19 +21,21 @@ internal sealed class StableElement(ElementId id, Bounds bounds, ResolvedStyle s
     public Bounds Bounds { get; set; } = bounds;
     public ResolvedStyle Style { get; set; } = style;
     public Semantics Semantics { get; set; } = semantics;
+    public string? Text { get; set; }
     public List<StableElement> Children { get; } = [];
     public DirtyFacet Dirty { get; private set; } = DirtyFacet.Layout | DirtyFacet.Paint | DirtyFacet.Semantics;
     public void Mark(DirtyFacet facets) => Dirty |= facets;
     public void Clear(DirtyFacet facets) => Dirty &= ~facets;
 }
 
-internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius, ShapedRun? Text = null, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1);
+internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius, ShapedRun? Text = null, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1, string? Label = null, ResolvedStyle? Style = null);
 internal sealed class RetainedScene
 {
     private readonly Dictionary<ElementId, SceneCommand> _commands = [];
     public IEnumerable<SceneCommand> Commands => _commands.Values.OrderBy(command => command.Id.Value, StringComparer.Ordinal);
     public int Count => _commands.Count;
-    public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale);
+    public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale, null, style);
+    public void UpsertLabel(ElementId id, Bounds bounds, ResolvedStyle style, string label) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale, label, style);
     public void UpsertText(ElementId id, Bounds bounds, string color, ShapedRun text) => _commands[id] = new(id, bounds, color, 0, text);
     public void Remove(ElementId id) => _commands.Remove(id);
 }
@@ -53,11 +58,45 @@ internal sealed class SkiaSceneRenderer : ISkiaSceneRenderer
         canvas.Clear(new SKColor(9, 12, 20));
         foreach (var command in scene.Commands)
         {
-            using var paint = new SKPaint { Color = SKColor.Parse(command.Color).WithAlpha((byte)Math.Round(255 * Math.Clamp(command.Opacity, 0, 1))), IsAntialias = false };
+            var style = command.Style;
+            var baseColor = SKColor.Parse(command.Color);
+            using var paint = new SKPaint { Color = baseColor.WithAlpha((byte)Math.Round(baseColor.Alpha * Math.Clamp(command.Opacity, 0, 1))), IsAntialias = false };
             var left = command.Bounds.X + command.TranslateX; var top = command.Bounds.Y + command.TranslateY;
             var width = command.Bounds.Width * command.Scale; var height = command.Bounds.Height * command.Scale;
             if (command.Text is not null) command.Text.Draw(canvas, left, top + height - 8, paint);
-            else canvas.DrawRoundRect(new SKRect(left, top, left + width, top + height), command.CornerRadius, command.CornerRadius, paint);
+            else
+            {
+                var rect = new SKRect(left, top, left + width, top + height);
+                if (style?.Shadow is { } shadow)
+                {
+                    using var shadowPaint = new SKPaint { Color = SKColor.Parse((shadow.Color ?? new UiColor("#000000")).Value).WithAlpha(80), IsAntialias = true };
+                    var shadowRect = rect; shadowRect.Offset(shadow.X, shadow.Y);
+                    canvas.DrawRoundRect(shadowRect, command.CornerRadius + shadow.Blur / 2, command.CornerRadius + shadow.Blur / 2, shadowPaint);
+                }
+                canvas.DrawRoundRect(rect, command.CornerRadius, command.CornerRadius, paint);
+                if (style?.Border is { } border)
+                {
+                    using var borderPaint = new SKPaint { Color = SKColor.Parse(border.Value), Style = SKPaintStyle.Stroke, StrokeWidth = style.BorderWidth?.Value ?? 1, IsAntialias = true };
+                    canvas.DrawRoundRect(rect, command.CornerRadius, command.CornerRadius, borderPaint);
+                }
+                if (style?.FocusRing is { } ring)
+                {
+                    using var ringPaint = new SKPaint { Color = SKColor.Parse(style.Foreground), Style = SKPaintStyle.Stroke, StrokeWidth = ring.Value, IsAntialias = true };
+                    var ringRect = rect; ringRect.Inflate(ring.Value / 2f, ring.Value / 2f);
+                    canvas.DrawRoundRect(ringRect, command.CornerRadius + ring.Value, command.CornerRadius + ring.Value, ringPaint);
+                }
+                if (command.Label is { Length: > 0 } label)
+                {
+                    using var textPaint = new SKPaint { Color = SKColor.Parse(style?.Foreground ?? "#ffffff"), IsAntialias = true };
+                    using var face = SKTypeface.FromFamilyName(null, style?.Typography?.Weight ?? 400, (int)SKFontStyleWidth.Normal, (int)SKFontStyleSlant.Upright) ?? throw new InvalidOperationException("Default label typeface unavailable.");
+                    using var font = new SKFont(face, style?.Typography?.Size ?? 12);
+                    using var shaper = new SKShaper(face); using var buffer = new HbBuffer(); buffer.AddUtf16(label); buffer.GuessSegmentProperties();
+                    var shaped = shaper.Shape(buffer, font);
+                    using var builder = new SKTextBlobBuilder(); builder.AddPositionedRun(shaped.Codepoints.Select(id => checked((ushort)id)).ToArray(), font, shaped.Points);
+                    using var blob = builder.Build() ?? throw new InvalidOperationException("Label shaping produced no blob.");
+                    canvas.DrawText(blob, left + (style?.Padding?.Value ?? 0), top + Math.Min(height - 2, (style?.Typography?.Size ?? 12) + (style?.Padding?.Value ?? 0)), textPaint);
+                }
+            }
         }
     }
 }
@@ -84,7 +123,8 @@ internal sealed class SceneProjection(RetainedScene scene, ProjectedSnapshots sn
             if ((element.Dirty & DirtyFacet.Paint) != 0)
             {
                 snapshots.Style[element.Id] = element.Style;
-                scene.Upsert(element.Id, snapshots.Layout[element.Id], snapshots.Style[element.Id]);
+                if (element.Text is { } text) scene.UpsertLabel(element.Id, snapshots.Layout[element.Id], snapshots.Style[element.Id], text);
+                else scene.Upsert(element.Id, snapshots.Layout[element.Id], snapshots.Style[element.Id]);
                 paint++;
                 element.Clear(DirtyFacet.Paint);
             }

@@ -2,9 +2,12 @@ internal readonly record struct UiColor(string Value);
 internal readonly record struct UiLength(int Value);
 internal readonly record struct UiOpacity(float Value);
 internal readonly record struct UiTransform(float X, float Y, float Scale = 1);
+internal readonly record struct UiTypography(int Size, int Weight = 400);
+internal readonly record struct UiShadow(int Blur, int X = 0, int Y = 0, UiColor? Color = null);
+internal enum UiAlignment { Start, Center, End, Stretch }
 
 /// <summary>Immutable typed paint/layout values; composition is always explicit and ordered.</summary>
-internal sealed record Style(UiColor? Background = null, UiColor? Foreground = null, UiLength? PaddingX = null, UiLength? Radius = null, UiOpacity? Opacity = null, UiTransform? Transform = null, UiLength? FocusRing = null, UiColor? Border = null, SemanticToken? BackgroundToken = null, SemanticToken? ForegroundToken = null)
+internal sealed record Style(UiColor? Background = null, UiColor? Foreground = null, UiLength? PaddingX = null, UiLength? Radius = null, UiOpacity? Opacity = null, UiTransform? Transform = null, UiLength? FocusRing = null, UiColor? Border = null, SemanticToken? BackgroundToken = null, SemanticToken? ForegroundToken = null, UiLength? Width = null, UiLength? Height = null, UiLength? Gap = null, UiAlignment? Alignment = null, UiTypography? Typography = null, UiShadow? Shadow = null, UiLength? BorderWidth = null)
 {
     public Style Resolve(ThemeLayer theme) => this with { Background = Background ?? (BackgroundToken is { } background ? theme.Get(background) : null), Foreground = Foreground ?? (ForegroundToken is { } foreground ? theme.Get(foreground) : null), BackgroundToken = null, ForegroundToken = null };
 }
@@ -16,7 +19,8 @@ internal static class Styles
         next.ForegroundToken is not null ? null : next.Foreground ?? current.Foreground,
         next.PaddingX ?? current.PaddingX, next.Radius ?? current.Radius, next.Opacity ?? current.Opacity, next.Transform ?? current.Transform, next.FocusRing ?? current.FocusRing, next.Border ?? current.Border,
         next.BackgroundToken ?? (next.Background is not null ? null : current.BackgroundToken),
-        next.ForegroundToken ?? (next.Foreground is not null ? null : current.ForegroundToken)));
+        next.ForegroundToken ?? (next.Foreground is not null ? null : current.ForegroundToken),
+        next.Width ?? current.Width, next.Height ?? current.Height, next.Gap ?? current.Gap, next.Alignment ?? current.Alignment, next.Typography ?? current.Typography, next.Shadow ?? current.Shadow, next.BorderWidth ?? current.BorderWidth));
 }
 
 /// <summary>Finite authoring sugar over <see cref="Style"/>; there is no selector language.</summary>
@@ -27,8 +31,16 @@ internal static class StyleUtilities
     public static Style Fg(this Style style, UiColor color) => style with { Foreground = color, ForegroundToken = null };
     public static Style Fg(this Style style, SemanticToken token) => style with { Foreground = null, ForegroundToken = token };
     public static Style Px(this Style style, int value) => style with { PaddingX = new(value) };
+    public static Style Padding(this Style style, int value) => style.Px(value);
+    public static Style Gap(this Style style, int value) => style with { Gap = new(value) };
+    public static Style Size(this Style style, int width, int height) => style with { Width = new(width), Height = new(height) };
+    public static Style Align(this Style style, UiAlignment value) => style with { Alignment = value };
+    public static Style Type(this Style style, int size, int weight = 400) => style with { Typography = new(size, weight) };
     public static Style Rounded(this Style style, int value) => style with { Radius = new(value) };
+    public static Style Border(this Style style, UiColor color, int width = 1) => style with { Border = color, BorderWidth = new(width) };
+    public static Style Shadow(this Style style, int blur, int x = 0, int y = 0, UiColor? color = null) => style with { Shadow = new(blur, x, y, color) };
     public static Style Opacity(this Style style, float value) => style with { Opacity = new(value) };
+    public static Style Transform(this Style style, float x, float y, float scale = 1) => style with { Transform = new(x, y, scale) };
     public static Style Ring(this Style style, int value) => style with { FocusRing = new(value) };
 }
 
@@ -98,16 +110,17 @@ internal sealed class PaintTransition(FrameScheduler scheduler, TimeSpan duratio
     public void Dispose() { _subscription?.Dispose(); _subscription = null; }
 }
 
-internal sealed record StyleCheckResult(bool Ok, bool ImmutableComposition, bool StatePrecedence, bool ThemeRetainsState, bool TokenDependenciesUpdate, bool ReducedAtStartup, bool ReducedMidAnimation, bool OneSchedulerClock, bool ClockDisposed, bool PaintOnlyAnimation, int IdleFrames);
+internal sealed record StyleCheckResult(bool Ok, bool ImmutableComposition, bool FiniteSurface, bool StatePrecedence, bool ThemeRetainsState, bool TokenDependenciesUpdate, bool ReducedAtStartup, bool ReducedMidAnimation, bool OneSchedulerClock, bool ClockDisposed, bool PaintOnlyAnimation, int IdleFrames);
 
 internal static class StyleProbe
 {
     public static StyleCheckResult Run()
     {
-        var baseStyle = new Style().Bg(SemanticToken.Card).Fg(SemanticToken.CardForeground).Px(2).Rounded(4);
+        var baseStyle = new Style().Bg(SemanticToken.Card).Fg(SemanticToken.CardForeground).Padding(2).Gap(1).Size(40, 20).Align(UiAlignment.Center).Type(14, 600).Border(new("#111111")).Rounded(4).Shadow(2, 1, 1).Opacity(.9f).Transform(1, 2).Ring(1);
         var later = new Style().Px(4).Rounded(6);
         var composed = Styles.Compose(baseStyle, later);
         var immutable = baseStyle.PaddingX == new UiLength(2) && composed.PaddingX == new UiLength(4) && composed.Radius == new UiLength(6);
+        var finiteSurface = composed.Width == new UiLength(40) && composed.Height == new UiLength(20) && composed.Gap == new UiLength(1) && composed.Alignment == UiAlignment.Center && composed.Typography == new UiTypography(14, 600) && composed.Border == new UiColor("#111111") && composed.Shadow == new UiShadow(2, 1, 1) && composed.Opacity == new UiOpacity(.9f) && composed.Transform == new UiTransform(1, 2) && composed.FocusRing == new UiLength(1);
 
         var variants = new VariantStyle(baseStyle, new Style().Bg(SemanticToken.Muted), new Style().Bg(new UiColor("#111111")), new Style().Ring(2), new Style().Fg(SemanticToken.PrimaryForeground), new Style().Opacity(.5f), new Style(Border: new("#ef4444")));
         var state = StyleState.Selected | StyleState.FocusVisible | StyleState.Hover | StyleState.Pressed | StyleState.Invalid | StyleState.Disabled;
@@ -162,8 +175,8 @@ internal static class StyleProbe
         var clockDisposed = scheduler.Clock.Disposed && activeTransitionDisposed;
         var command = scene.Commands.Single();
         var paintOnly = animationPaints == 4 && command.Opacity == 1 && command.TranslateX == 4 && command.Scale == 1 && element.Dirty == DirtyFacet.None && scene.Count == 1;
-        Check(immutable && precedence && themeRetainsState && tokenUpdates && reducedAtStartup && reducedMidAnimation && oneClock && clockDisposed && invalidDurationRejected && paintOnly && idleFrames == 0, "Style self-check failed.");
-        return new(true, immutable, precedence, themeRetainsState, tokenUpdates, reducedAtStartup, reducedMidAnimation, oneClock, clockDisposed, paintOnly, idleFrames);
+        Check(immutable && finiteSurface && precedence && themeRetainsState && tokenUpdates && reducedAtStartup && reducedMidAnimation && oneClock && clockDisposed && invalidDurationRejected && paintOnly && idleFrames == 0, "Style self-check failed.");
+        return new(true, immutable, finiteSurface, precedence, themeRetainsState, tokenUpdates, reducedAtStartup, reducedMidAnimation, oneClock, clockDisposed, paintOnly, idleFrames);
     }
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
 }

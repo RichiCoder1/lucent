@@ -99,6 +99,12 @@ clipboard/focus/disposal behavior, and portable `edit`/`set-value` semantics;
 text, structural, and style checks are rerun as regressions. It does not claim
 a native child UIA provider, multiline/rich text, or undo.
 
+## Issue #22 finite styles and behaviors evidence
+
+`../run-issue-22-proof.ps1` locked-restores and warning-free NativeAOT-publishes
+the probe, then writes [`issue-22/proof.json`](issue-22/proof.json). It combines
+the NativeUi reactive style dump with finite style and reusable behavior checks.
+
 ## Issue #11 scroll and virtualization evidence
 
 `../run-virtualization-proof.ps1` locked-restores and warning-free

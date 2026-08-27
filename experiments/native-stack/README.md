@@ -82,6 +82,17 @@ the composed control once, retains keyed entries through explicit `For` refresh
 churn, checks `Show` while visible, and releases scene/semantic state. Reactive
 collection binding remains issue #21.
 
+## Issue #22 finite styles and behaviors proof
+
+```powershell
+./run-issue-22-proof.ps1
+```
+
+NativeUi stays ordinary typed C#: `NativeUi.Control("Save").OnPress(Save)` and
+`NativeUi.Control("Theme-aware").Style(new Style().Size(80, 20).Padding(2).Gap(1).Align(UiAlignment.Center).Type(14, 600).Bg(SemanticToken.Card).Fg(SemanticToken.CardForeground).Border(new("#333")).Rounded(4).Shadow(2).Opacity(.8f).Transform(1, 2).Ring(2)).Variants(buttonStates).Theme(() => theme.Value).State(() => state.Value)`.
+The proof records source-ordered immutable facets, variant precedence, reactive
+light/dark state retention, bounded motion, and behavior-owned press/edit/focus/selection/disposal semantics. It excludes selectors, inheritance, property bags, arbitrary animation, and the issue-browser rewrite.
+
 ## Validation application
 
 The gauntlet is a coherent Shadcn/Linear-inspired issue browser, not a control gallery. It must exercise:

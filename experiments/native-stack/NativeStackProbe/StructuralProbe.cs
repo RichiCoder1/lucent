@@ -100,11 +100,11 @@ internal static class SemanticContracts
             if (interaction.Focusable && semantic.Focused != (focus.Focused == element.Id)) throw new InvalidOperationException($"Focused state is not projected for {element.Id.Value}.");
         }
     }
-    public static string Dump(IEnumerable<StableElement> elements) => JsonSerializer.Serialize(elements.OrderBy(element => element.Id.Value, StringComparer.Ordinal).Select(element => new SemanticDumpItem(element.Id.Value, element.Semantics.Role, element.Semantics.Name, element.Semantics.Value, element.Semantics.Actions ?? [], element.Semantics.Enabled, element.Semantics.Focused, element.Semantics.SuppressionReason)).ToArray(), ProbeJsonContext.Default.SemanticDumpItemArray);
-    public static string Dump(IReadOnlyDictionary<ElementId, Semantics> semantics) => JsonSerializer.Serialize(semantics.OrderBy(pair => pair.Key.Value, StringComparer.Ordinal).Select(pair => new SemanticDumpItem(pair.Key.Value, pair.Value.Role, pair.Value.Name, pair.Value.Value, pair.Value.Actions ?? [], pair.Value.Enabled, pair.Value.Focused, pair.Value.SuppressionReason)).ToArray(), ProbeJsonContext.Default.SemanticDumpItemArray);
+    public static string Dump(IEnumerable<StableElement> elements) => JsonSerializer.Serialize(elements.OrderBy(element => element.Id.Value, StringComparer.Ordinal).Select(element => new SemanticDumpItem(element.Id.Value, element.Semantics.Role, element.Semantics.Name, element.Semantics.Value, element.Semantics.Actions ?? [], element.Semantics.Enabled, element.Semantics.Focused, element.Semantics.SuppressionReason, element.Semantics.Selected)).ToArray(), ProbeJsonContext.Default.SemanticDumpItemArray);
+    public static string Dump(IReadOnlyDictionary<ElementId, Semantics> semantics) => JsonSerializer.Serialize(semantics.OrderBy(pair => pair.Key.Value, StringComparer.Ordinal).Select(pair => new SemanticDumpItem(pair.Key.Value, pair.Value.Role, pair.Value.Name, pair.Value.Value, pair.Value.Actions ?? [], pair.Value.Enabled, pair.Value.Focused, pair.Value.SuppressionReason, pair.Value.Selected)).ToArray(), ProbeJsonContext.Default.SemanticDumpItemArray);
 }
 
-internal sealed record SemanticDumpItem(string Id, string Role, string Name, string? Value, string[] Actions, bool Enabled, bool Focused, string? SuppressionReason);
+internal sealed record SemanticDumpItem(string Id, string Role, string Name, string? Value, string[] Actions, bool Enabled, bool Focused, string? SuppressionReason, bool Selected);
 
 /// <summary>Owns only its created branches. Show and keyed For retain stable elements; they never reconcile arbitrary trees.</summary>
 internal sealed class StructuralRegion(StableElement parent, ReactiveGraph graph, SceneProjection projection, InputRouter input, FocusScopes focus) : IDisposable
