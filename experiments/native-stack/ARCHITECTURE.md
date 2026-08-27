@@ -43,6 +43,12 @@ general observer layer.
 
 Elements are stable identities with optional facets for layout, paint, input, focus, and semantics. Reactive properties update those facets in place.
 
+`NativeUi` is the composition boundary used by straight C#: finite row, column,
+text, control, `Show`, and keyed `For` constructors plus typed modifiers. Its
+generic retained projection allocates stable elements and scopes, computes
+bounds, projects scene/semantic snapshots, and disposes departing branches.
+Authoring code cannot assign bounds, IDs, dirty facets, or scene commands.
+
 Structural changes are explicit:
 
 - `Show` owns one conditional region;

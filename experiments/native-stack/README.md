@@ -45,16 +45,16 @@ SDL3-CS is provisional. Milestone 1 must prove safe HWND/UIA integration, practi
 The runtime-first spike uses straight C#. `.lui` lowering is deliberately deferred until the runtime model passes.
 
 ```csharp
-var count = Signal(0);
-
-Column(
-    Text(() => $"Count: {count.Value}"),
-    Button("Increment", () => count.Value++)
-        .Style(Styles.Compose(
-            Theme.Button,
-            Theme.Primary,
-            Style.Px(4),
-            Style.Hover(x => x.Bg(Tokens.AccentHover)))));
+var details = graph.Signal(true, "details");
+var issues = new List<string> { "a", "b" };
+using var app = NativeUi.Mount(graph,
+    NativeUi.Column(
+        NativeUi.Text("Issues").Fg(SemanticToken.Primary),
+        NativeUi.Row(
+            NativeUi.Control("Save").OnPress(Save),
+            NativeUi.Show(() => details.Value, () => NativeUi.Text("Details"))),
+        NativeUi.For(issues, issue => issue, issue => NativeUi.Text(issue)))
+    .Gap(3).Padding(2).Bg(SemanticToken.Background).Fg(SemanticToken.Foreground));
 ```
 
 Reactive reads are tracked only inside explicit reactive callbacks. A later compiler may provide static dependency tables to the same scheduler. Stable nodes update directly; `Show` and keyed `For` own structural regions. There is no general virtual DOM or runtime selector engine.
@@ -64,6 +64,23 @@ and colors directly and manually synchronized computed rows into
 virtualization. [The authoring reframe](AUTHORING-REFRAME.md) now makes the
 missing composition, reactive-property, typed-style, behavior, and generic
 projection modules explicit before another comparison is allowed.
+
+## Issue #20 typed composition proof
+
+```powershell
+./run-composition-proof.ps1
+```
+
+`NativeUi` is the bounded straight-C# surface: `Row`, `Column`, `Text`,
+`Control`, `Show`, and keyed `For`, with typed paint/layout/control modifiers.
+Mounting owns stable IDs, scopes, bounds, retained commands, semantics, and
+disposal; application code supplies none of them. The NativeAOT proof builds a
+representative tree, renders its retained scene both headlessly and through the
+hidden SDL `SdlSkiaPresenter`, requires a zero-pixel raster difference and a
+native capture, compares independent tree/layout/style/semantic dumps, invokes
+the composed control once, retains keyed entries through explicit `For` refresh
+churn, checks `Show` while visible, and releases scene/semantic state. Reactive
+collection binding remains issue #21.
 
 ## Validation application
 

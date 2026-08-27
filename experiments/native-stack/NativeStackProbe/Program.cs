@@ -25,6 +25,7 @@ internal static class Program
                 "--style-self-check" => JsonSerializer.Serialize(StyleProbe.Run(), ProbeJsonContext.Default.StyleCheckResult),
                 "--structural-self-check" => JsonSerializer.Serialize(StructuralProbe.Run(), ProbeJsonContext.Default.StructuralCheckResult),
                 "--controls-self-check" => JsonSerializer.Serialize(ControlsProbe.Run(), ProbeJsonContext.Default.ControlsCheckResult),
+                "--composition-self-check" => JsonSerializer.Serialize(CompositionProbe.Run(), ProbeJsonContext.Default.CompositionCheckResult),
                 "--virtualization-self-check" => JsonSerializer.Serialize(VirtualizationProbe.Run(), ProbeJsonContext.Default.VirtualizationCheckResult),
                 "--scene-self-check" when args.Length == 2 => JsonSerializer.Serialize(SceneProbe.Run(args[1]), ProbeJsonContext.Default.SceneCheckResult),
                 "--layout-self-check" when args.Length == 2 => JsonSerializer.Serialize(LayoutProbe.Run(args[1]), ProbeJsonContext.Default.LayoutCheckResult),
@@ -34,7 +35,7 @@ internal static class Program
                 "--issue-browser-walkthrough" => IssueBrowser.RunWalkthrough(args.Skip(1).FirstOrDefault()),
                 "--issue-browser" => IssueBrowser.RunVisible(),
                 null => JsonSerializer.Serialize(RunDependencyProbe(), ProbeJsonContext.Default.ProbeResult),
-                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --controls-self-check, --virtualization-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
+                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --controls-self-check, --composition-self-check, --virtualization-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
             };
             Console.WriteLine(json);
             return 0;
@@ -746,6 +747,7 @@ internal sealed record FailureResult(bool Ok, string Error);
 [JsonSerializable(typeof(StyleCheckResult))]
 [JsonSerializable(typeof(StructuralCheckResult))]
 [JsonSerializable(typeof(ControlsCheckResult))]
+[JsonSerializable(typeof(CompositionCheckResult))]
 [JsonSerializable(typeof(VirtualizationCheckResult))]
 [JsonSerializable(typeof(SemanticDumpItem[]))]
 [JsonSerializable(typeof(SceneCheckResult))]
