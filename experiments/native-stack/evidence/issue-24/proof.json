@@ -2,8 +2,11 @@
     "ok":  true,
     "issue":  24,
     "source":  {
-                   "head":  "c2ca09281c9af09d42a38531cc96b2114ed2a91c",
-                   "clean":  true,
+                   "head":  "49742bb42952ce222257e2f812569c1543dfb739",
+                   "scope":  "experiments/native-stack",
+                   "experimentCleanAtStart":  true,
+                   "repositoryCleanAtStart":  false,
+                   "outOfScopeChangesAtStart":  1,
                    "contractBlob":  "b539904c73504772bf8f3d586ec1793a25b3907b",
                    "contractCommit":  "4546d79",
                    "implementationCommit":  "7f9fce4"
