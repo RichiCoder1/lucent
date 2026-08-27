@@ -225,6 +225,23 @@ edits, and focus/input disposal. It also reruns text, structural, and style
 regressions. Native child UIA transport remains deferred; the semantic Value
 facet is its portable seam.
 
+## Issue #11 scroll and virtualization proof
+
+```powershell
+./run-virtualization-proof.ps1
+```
+
+`ScrollViewport` is bounded and supports wheel plus Arrow/Page/Home/End
+scrolling. Its keyed `VirtualizedList` realizes only fixed-height viewport rows
+plus two rows of overscan on each side (14 rows for the 100px/10px proof), while
+exercising 10,000 keys. Realized rows retain stable elements and scopes;
+departing rows release scopes, input, focus/capture, scene commands, and
+semantic snapshots. Selection and focus use keys across reorders, and removed
+selected/focused rows deterministically choose the row at the prior index
+(clamped). The NativeAOT proof also records coarse post-collection managed
+memory growth; issue #15 owns the final quantitative budget. Variable-height
+virtualization is explicitly excluded.
+
 ## Milestone 1 combined gate
 
 ```powershell

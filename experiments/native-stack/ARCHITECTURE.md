@@ -84,6 +84,16 @@ baseline generalization, or CSS box model.
 
 Grid, wrapping, and absolute-layout generalization are deferred.
 
+## Virtualization
+
+`ScrollViewport` clamps a pixel offset to bounded content and owns wheel and
+keyboard scrolling. `VirtualizedList` uses keyed structural branches for only
+fixed-height rows intersecting the viewport plus two rows of overscan on each
+side; its proof uses 10,000 rows. Realized keys retain their elements and scopes
+across moves and reorders. Departing branches use normal structural disposal for
+reactive scopes, input/capture, focus, scene, and semantics. Variable-height
+measurement, anchoring, and general list APIs are excluded.
+
 ## Styling and themes
 
 The style core is typed and immutable. Styles compose in explicit order; the later value wins for the same property.

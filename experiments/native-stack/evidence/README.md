@@ -98,3 +98,13 @@ composed button activation, single-line scalar editing and IME preedit,
 clipboard/focus/disposal behavior, and portable `edit`/`set-value` semantics;
 text, structural, and style checks are rerun as regressions. It does not claim
 a native child UIA provider, multiline/rich text, or undo.
+
+## Issue #11 scroll and virtualization evidence
+
+`../run-virtualization-proof.ps1` locked-restores and warning-free
+NativeAOT-publishes the probe, then writes [`issue-11/proof.json`](issue-11/proof.json).
+It covers wheel and keyboard movement, keyed selection/focus scrolling,
+reorder/removal behavior, 10,000 rows with a 14-row fixed-height realized
+ceiling, disposal of offscreen scopes/input/focus/capture/scene/semantics, and
+coarse managed-memory measurements. The final managed-memory budget remains
+issue #15; variable-height virtualization is not claimed.
