@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-15")
+param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-15", [switch]$NoPublish)
 
 $ErrorActionPreference = 'Stop'
 $repository = (Resolve-Path "$PSScriptRoot/../..").Path
@@ -32,12 +32,14 @@ $manifest = [ordered]@{
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutputDirectory 'input-manifest.json') -NoNewline -Encoding UTF8
 
-dotnet restore $solution --locked-mode
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-dotnet build $solution --no-restore -warnaserror
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $NoPublish) {
+    dotnet restore $solution --locked-mode
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    dotnet build $solution --no-restore -warnaserror
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 $benchmark = & $exe --issue-15-benchmark | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $benchmark.Ok -or -not $benchmark.RuntimeNativeAot -or $benchmark.SampleCount -ne $budgets.sampleCount -or $benchmark.SemanticInputToPresentSamples.Count -ne $budgets.sampleCount -or $benchmark.ResizeSamples.Count -ne $budgets.sampleCount -or $benchmark.ScrollCycleEvidence.Count -ne $budgets.scrollCycles -or @($benchmark.ScrollCycleEvidence | Where-Object { -not $_.ReachedListEnd -or -not $_.ResetToStart }).Count -ne 0 -or $benchmark.SemanticInputToPresentP95Milliseconds -gt $budgets.p95Milliseconds -or $benchmark.SemanticInputToPresentP99Milliseconds -gt $budgets.p99Milliseconds -or $benchmark.ResizeP95Milliseconds -gt $budgets.p95Milliseconds -or $benchmark.IdleElapsedMilliseconds -lt ($budgets.idleSeconds * 1000) -or $benchmark.IdleFrames -ne 0 -or $benchmark.IdleFrameRequests -ne 0 -or $benchmark.IdleNativePresentCalls -ne 0 -or $benchmark.RealizedRows -gt $benchmark.RealizedRowLimit -or $benchmark.LiveGrowthBytes -gt $budgets.liveGrowthBytes -or $benchmark.PostCollectionBytes -gt $benchmark.ReturnLimitBytes) { throw 'Issue #15 benchmark budget failed.' }

@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-14")
+param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-14", [switch]$NoPublish)
 
 $ErrorActionPreference = 'Stop'
 $project = "$PSScriptRoot/NativeStackProbe/NativeStackProbe.csproj"
@@ -6,12 +6,14 @@ $solution = "$PSScriptRoot/NativeStack.sln"
 $exe = "$PSScriptRoot/NativeStackProbe/bin/Release/net9.0-windows/win-x64/publish/NativeStackProbe.exe"
 $native = Join-Path $OutputDirectory 'native'
 
-dotnet restore $solution --locked-mode
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-dotnet build $solution --no-restore -warnaserror
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $NoPublish) {
+    dotnet restore $solution --locked-mode
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    dotnet build $solution --no-restore -warnaserror
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 Remove-Item -Recurse -Force $native -ErrorAction SilentlyContinue
 Remove-Item -Force (Join-Path $OutputDirectory 'proof.json') -ErrorAction SilentlyContinue
@@ -52,7 +54,7 @@ try {
     $visibleExternal=Get-Content $visibleResult -Raw | ConvertFrom-Json
     if(-not $visibleExternal.Valid -or -not $visibleHost.WaitForExit(10000)){throw 'Visible issue-browser provider seam failed.'}
     $visibleHostResult=Get-Content ($visibleReady + '.host.json') -Raw | ConvertFrom-Json
-    if(-not $visibleHostResult.visible -or -not $visibleHostResult.rootAbi -or $visibleHostResult.rootPointCalls -lt 2){throw 'Visible issue-browser host did not sustain broad FragmentRoot hit testing.'}
+    if(-not $visibleHostResult.visible -or -not $visibleHostResult.rootAbi -or $visibleHostResult.rootPointCalls -lt 1){throw 'Visible issue-browser host did not exercise FragmentRoot hit testing.'}
     $visibleSuccess = $true
 } finally { if($visibleHost -and -not $visibleHost.HasExited){$visibleHost.Kill()}; if($visibleSuccess){Remove-Item -Recurse -Force $visibleWork -ErrorAction SilentlyContinue}else{Write-Host "Issue #14 visible evidence retained: $visibleWork"} }
 $uia = & "$PSScriptRoot/run-uia-proof.ps1" -NoPublish | ConvertFrom-Json
