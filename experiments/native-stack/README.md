@@ -2,7 +2,7 @@
 
 ## Status
 
-**Issue #2 package/AOT proof complete; Milestone 1 remains open.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
+**Issue #3 Windows platform proof complete; Milestone 1 remains open.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 
@@ -89,9 +89,47 @@ Framework internals may be substantial if they remain coherent and testable. Raw
 
 ## Issue #2 acceptance evidence
 
-`NativeStack.sln` contains only `NativeStackProbe`, a `net9.0-windows` NativeAOT executable. `run-probe.ps1` publishes `win-x64` and runs the published executable. A successful JSON record proves a hidden SDL window and nonzero HWND, generated `GetDpiForWindow`, a Skia raster/PNG, HarfBuzz shaping of `office` and Arabic, an available fallback font, and loaded SDL/Skia/HarfBuzz native modules. It exits nonzero if any probe fails.
+`NativeStack.sln` contains `NativeStackProbe`, a `net9.0-windows` NativeAOT executable, and the separate non-AOT `UiaExternalHelper`. `run-probe.ps1` publishes `win-x64` and runs the published probe. A successful JSON record proves a hidden SDL window and nonzero HWND, generated `GetDpiForWindow`, a Skia raster/PNG, HarfBuzz shaping of `office` and Arabic, an available fallback font, and loaded SDL/Skia/HarfBuzz native modules. It exits nonzero if any probe fails.
 
 This is dependency and NativeAOT evidence for issue #2 only. It does **not** pass the Milestone 1 UIA, IME, presentation, retained-scene, resize, DPI, or parity gates.
+
+## Issue #3 slice A host proof
+
+The default `run-probe.ps1` behavior remains the issue #2 dependency probe. The same published executable has explicit bounded host modes:
+
+```powershell
+# visible create/show/resize/pump/subclass/remove/destroy proof; exits after about a second
+./run-probe.ps1 --automated
+
+# visible IME target; type with a real Windows IME, then close the window
+./run-probe.ps1 --manual .\ime-events.jsonl
+```
+
+Automated JSON exits nonzero unless stable/nonzero HWND and DPI, positive current scale, exact `SDL_SyncWindow` resize, shown/resized events, forced focus-loss (`SDL_HideWindow`), a real `WM_CLOSE`-driven SDL close-request event, duplicate `SetWindowSubclass` installation, exactly one callback for one `SendMessage`, removal with zero post-removal callbacks, and destruction all pass. It reports but does not require a display-scale-changed event because the host cannot force a monitor scale transition. It uses SDL's event pump only.
+
+Manual mode sets `SDL_IME_IMPLEMENTED_UI=composition` before SDL initialization and calls `SDL_StartTextInput`, `SDL_SetTextInputArea`, and `SDL_StopTextInput`. Keep the native OS candidate UI enabled, select Japanese **あ** mode, compose, commit, cancel with an empty preedit, switch focus away/back, then close. The owned surface shows muted instructions, committed text, accent underlined preedit, and a moving caret; it does not render candidates. The requested JSONL path is AutoFlush-written for `editing`, `input`, focus, and one close record with committed and preedit text separated. Completed transcripts and visual review are recorded under [`evidence/`](evidence/README.md).
+
+## Issue #3 slice B UIA proof
+
+```powershell
+./run-uia-proof.ps1
+
+# lifecycle-only hand-written COM diagnostic; phase may be wrappers, create,
+# qi, options, disconnect, or release
+./run-probe.ps1 --uia-ccw-self-check release
+```
+
+For parent Accessibility Insights review, start the visible manual host, attach to the HWND recorded in `uia-ready.json`, then close its window (or create the close-signal file). It has the same Simple-only provider and lifecycle checks as the automated host; it adds no UIA tree or patterns.
+
+```powershell
+./NativeStackProbe/bin/Release/net9.0-windows/win-x64/publish/NativeStackProbe.exe --uia-manual .\uia-ready.json .\uia-close.signal
+```
+
+The script performs a locked restore, warning-free isolated build, NativeAOT publish, then starts the published SDL host and a separate non-AOT UIAutomation client process. It fails closed unless the external Name/AutomationId assertion and provider property-call count pass. The isolated published hand-written CCW lifecycle check reaches wrapper construction, CCW creation, Simple QI, a native-vtable `ProviderOptions` call, disconnect, and release. The real external proof passes with exact Name/AutomationId across repeated and worker-thread reads, genuine `WM_GETOBJECT` delivery, property calls, Simple interface creation, successful disconnect, subclass removal, provider release, and HWND destruction.
+
+The provider is Simple-only: server-side, immutable Name/AutomationId/ControlType snapshot, null pattern providers, and a native host provider. A dedicated hand-written `ComWrappers` vtable exposes exactly the SDK IUnknown and four `IRawElementProviderSimple` HRESULT slots. Its raw `VARIANT` writes BSTR/I4 values directly. COM callbacks do not call SDL or Skia.
+
+Issue #19’s direct-Win32 discriminator is conditional and superseded by the passing SDL UIA proof. Do not begin Win32 IME or adapter work.
 
 ## Explicit exclusions
 
@@ -102,5 +140,7 @@ This is dependency and NativeAOT evidence for issue #2 only. It does **not** pas
 - multiple windows, dialogs, and drag/drop;
 - an interactive developer-tools inspector;
 - macOS and Linux adapters before the Windows decision.
+
+Issue #3's real-IME and Accessibility Insights evidence is recorded under [`evidence/`](evidence/README.md). The broader Narrator walkthrough remains a later Milestone 3 gate.
 
 Headless tree, layout, style, semantic, and reactive dumps are included because they enable deterministic tests. They are not an interactive inspector.

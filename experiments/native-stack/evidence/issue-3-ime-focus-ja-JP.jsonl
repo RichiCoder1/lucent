@@ -1,0 +1,11 @@
+{"Kind":"started","Text":null,"Committed":"","Preedit":"","Start":0,"Length":0}
+{"Kind":"editing","Text":"\uFF54","Committed":"","Preedit":"\uFF54","Start":1,"Length":0}
+{"Kind":"editing","Text":"\u3066","Committed":"","Preedit":"\u3066","Start":1,"Length":0}
+{"Kind":"editing","Text":"\u3066\uFF53","Committed":"","Preedit":"\u3066\uFF53","Start":2,"Length":0}
+{"Kind":"editing","Text":"\u3066\u3059","Committed":"","Preedit":"\u3066\u3059","Start":2,"Length":0}
+{"Kind":"editing","Text":"\u3066\u3059\uFF54","Committed":"","Preedit":"\u3066\u3059\uFF54","Start":3,"Length":0}
+{"Kind":"editing","Text":"\u3066\u3059\u3068","Committed":"","Preedit":"\u3066\u3059\u3068","Start":3,"Length":0}
+{"Kind":"focus-lost","Text":null,"Committed":"","Preedit":"","Start":0,"Length":0}
+{"Kind":"editing","Text":"","Committed":"","Preedit":"","Start":0,"Length":0}
+{"Kind":"focus-gained","Text":null,"Committed":"","Preedit":"","Start":0,"Length":0}
+{"Kind":"close","Text":null,"Committed":"","Preedit":"","Start":0,"Length":0}
