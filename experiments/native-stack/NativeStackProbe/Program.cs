@@ -31,6 +31,8 @@ internal static class Program
                 "--uia-host" when args.Length == 3 => JsonSerializer.Serialize(RunUiaHost(args[1], args[2], manual: false), ProbeJsonContext.Default.UiaHostResult),
                 "--uia-manual" when args.Length == 3 => JsonSerializer.Serialize(RunUiaHost(args[1], args[2], manual: true), ProbeJsonContext.Default.UiaHostResult),
                 "--uia-ccw-self-check" when args.Length is 1 or 2 => JsonSerializer.Serialize(RunUiaCcwSelfCheck(args.Skip(1).FirstOrDefault()), ProbeJsonContext.Default.CcwSelfCheckResult),
+                "--issue-browser-walkthrough" => IssueBrowser.RunWalkthrough(args.Skip(1).FirstOrDefault()),
+                "--issue-browser" => IssueBrowser.RunVisible(),
                 null => JsonSerializer.Serialize(RunDependencyProbe(), ProbeJsonContext.Default.ProbeResult),
                 _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --controls-self-check, --virtualization-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
             };
@@ -754,4 +756,8 @@ internal sealed record FailureResult(bool Ok, string Error);
 [JsonSerializable(typeof(UiaReadyResult))]
 [JsonSerializable(typeof(UiaHostResult))]
 [JsonSerializable(typeof(FailureResult))]
+[JsonSerializable(typeof(IssueBrowserStep))]
+[JsonSerializable(typeof(IssueBrowserIdentity))]
+[JsonSerializable(typeof(IssueBrowserSemantic[]))]
+[JsonSerializable(typeof(IssueBrowserSeed))]
 internal sealed partial class ProbeJsonContext : JsonSerializerContext;

@@ -1,0 +1,28 @@
+Window { background: resource("Shadcn.Background"); }
+Grid.issue-browser { background: resource("Shadcn.Background"); }
+TextBlock { foreground: resource("Shadcn.Foreground"); }
+Border.filter-rail { background: resource("Shadcn.Card"); border-color: resource("Shadcn.Border"); border-width: 0 1px 0 0; }
+TextBlock.brand { foreground: resource("Shadcn.MutedForeground"); font-size: 11px; font-weight: 600; }
+TextBlock.section-label { foreground: resource("Shadcn.MutedForeground"); font-size: 11px; font-weight: 600; }
+TextBlock.rail-title { font-size: 20px; font-weight: 600; }
+TextBlock.panel-title { font-size: 16px; font-weight: 600; }
+TextBlock.detail-title { font-size: 24px; font-weight: 600; }
+TextBlock.muted { foreground: resource("Shadcn.MutedForeground"); }
+TextBlock.issue-id { foreground: resource("Shadcn.MutedForeground"); }
+TextBlock.field-label { foreground: resource("Shadcn.MutedForeground"); }
+TextBlock.field-label { font-size: 12px; font-weight: 600; }
+TextBlock.description { foreground: resource("Shadcn.MutedForeground"); }
+TextBox.search { background: resource("Shadcn.Muted"); border-color: resource("Shadcn.Border"); border-width: 1px; }
+TextBox.title { background: resource("Shadcn.Muted"); border-color: resource("Shadcn.Border"); border-width: 1px; }
+Border.list-panel { background: resource("Shadcn.Card"); border-color: resource("Shadcn.Border"); border-width: 0 1px 0 0; }
+ListBox.issue-list { background: resource("Shadcn.Card"); border-width: 0; padding: 8px; }
+Border.status-dot.open { background: #22c55e; }
+Border.status-dot.closed { background: resource("Shadcn.MutedForeground"); }
+Border.detail-pane { background: resource("Shadcn.Background"); }
+Border.status-badge { background: resource("Shadcn.Muted"); border-radius: 12px; }
+Border.priority-badge { background: resource("Shadcn.Muted"); border-radius: 12px; }
+Button.primary { background: resource("Shadcn.Primary"); foreground: resource("Shadcn.PrimaryForeground"); }
+Button.secondary { background: resource("Shadcn.Muted"); }
+Button:focus-visible { border-color: resource("Shadcn.Ring"); border-width: 2px; }
+TextBox:focus-visible { border-color: resource("Shadcn.Ring"); border-width: 2px; }
+ListBox:focus-visible { border-color: resource("Shadcn.Ring"); border-width: 2px; }
