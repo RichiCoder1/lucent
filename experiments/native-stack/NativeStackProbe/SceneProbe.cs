@@ -22,22 +22,27 @@ internal sealed class StableElement(ElementId id, Bounds bounds, ResolvedStyle s
     public ResolvedStyle Style { get; set; } = style;
     public Semantics Semantics { get; set; } = semantics;
     public string? Text { get; set; }
+    /// <summary>Optional ancestor viewport clip, applied by the generic renderer.</summary>
+    public Bounds? Clip { get; set; }
     public List<StableElement> Children { get; } = [];
     public DirtyFacet Dirty { get; private set; } = DirtyFacet.Layout | DirtyFacet.Paint | DirtyFacet.Semantics;
     public void Mark(DirtyFacet facets) => Dirty |= facets;
     public void Clear(DirtyFacet facets) => Dirty &= ~facets;
 }
 
-internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius, ShapedRun? Text = null, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1, string? Label = null, ResolvedStyle? Style = null);
+internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius, ShapedRun? Text = null, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1, string? Label = null, ResolvedStyle? Style = null, Bounds? Clip = null);
 internal sealed class RetainedScene
 {
     private readonly Dictionary<ElementId, SceneCommand> _commands = [];
-    public IEnumerable<SceneCommand> Commands => _commands.Values.OrderBy(command => command.Id.Value, StringComparer.Ordinal);
+    private readonly List<ElementId> _order = [];
+    public IEnumerable<SceneCommand> Commands => _order.Where(_commands.ContainsKey).Select(id => _commands[id]);
     public int Count => _commands.Count;
-    public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale, null, style);
-    public void UpsertLabel(ElementId id, Bounds bounds, ResolvedStyle style, string label) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale, label, style);
-    public void UpsertText(ElementId id, Bounds bounds, string color, ShapedRun text) => _commands[id] = new(id, bounds, color, 0, text);
-    public void Remove(ElementId id) => _commands.Remove(id);
+    public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style, Bounds? clip = null) { Add(id); _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale, null, style, clip); }
+    public void UpsertLabel(ElementId id, Bounds bounds, ResolvedStyle style, string label, Bounds? clip = null) { Add(id); _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale, label, style, clip); }
+    public void UpsertText(ElementId id, Bounds bounds, string color, ShapedRun text) { Add(id); _commands[id] = new(id, bounds, color, 0, text); }
+    public void Order(IEnumerable<ElementId> ids) { _order.Clear(); _order.AddRange(ids.Where(_commands.ContainsKey)); foreach (var id in _commands.Keys) Add(id); }
+    public void Remove(ElementId id) { _commands.Remove(id); _order.Remove(id); }
+    private void Add(ElementId id) { if (!_order.Contains(id)) _order.Add(id); }
 }
 
 internal sealed class ProjectedSnapshots
@@ -58,6 +63,8 @@ internal sealed class SkiaSceneRenderer : ISkiaSceneRenderer
         canvas.Clear(new SKColor(9, 12, 20));
         foreach (var command in scene.Commands)
         {
+            canvas.Save();
+            if (command.Clip is { } clip) canvas.ClipRect(new SKRect(clip.X, clip.Y, clip.X + clip.Width, clip.Y + clip.Height));
             var style = command.Style;
             var baseColor = SKColor.Parse(command.Color);
             using var paint = new SKPaint { Color = baseColor.WithAlpha((byte)Math.Round(baseColor.Alpha * Math.Clamp(command.Opacity, 0, 1))), IsAntialias = false };
@@ -97,6 +104,7 @@ internal sealed class SkiaSceneRenderer : ISkiaSceneRenderer
                     canvas.DrawText(blob, left + (style?.Padding?.Value ?? 0), top + Math.Min(height - 2, (style?.Typography?.Size ?? 12) + (style?.Padding?.Value ?? 0)), textPaint);
                 }
             }
+            canvas.Restore();
         }
     }
 }
@@ -123,8 +131,8 @@ internal sealed class SceneProjection(RetainedScene scene, ProjectedSnapshots sn
             if ((element.Dirty & DirtyFacet.Paint) != 0)
             {
                 snapshots.Style[element.Id] = element.Style;
-                if (element.Text is { } text) scene.UpsertLabel(element.Id, snapshots.Layout[element.Id], snapshots.Style[element.Id], text);
-                else scene.Upsert(element.Id, snapshots.Layout[element.Id], snapshots.Style[element.Id]);
+                if (element.Text is { } text) scene.UpsertLabel(element.Id, snapshots.Layout[element.Id], snapshots.Style[element.Id], text, element.Clip);
+                else scene.Upsert(element.Id, snapshots.Layout[element.Id], snapshots.Style[element.Id], element.Clip);
                 paint++;
                 element.Clear(DirtyFacet.Paint);
             }

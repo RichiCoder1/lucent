@@ -15,6 +15,8 @@ internal sealed class ReactiveGraph
     public ReactiveSignal<T> Signal<T>(T value, string name) { CheckThread(); return new(this, value, name); }
     public ReactiveComputed<T> Computed<T>(Func<T> compute, string name) { CheckThread(); return new(this, compute, name); }
     public ReactiveAsyncComputed<T> AsyncComputed<T>(Func<CancellationToken, Task<T>> compute, string name) { CheckThread(); return new(this, compute, name); }
+    /// <summary>Starts with a usable stale value until the first asynchronous generation completes.</summary>
+    public ReactiveAsyncComputed<T> AsyncComputed<T>(Func<CancellationToken, Task<T>> compute, T initialValue, string name) { CheckThread(); return new(this, compute, name, initialValue); }
     public ReactiveEffect Effect(Action run, string name) { CheckThread(); return new(this, run, name); }
 
     /// <summary>Compiler seam: declare stable edges without running a callback's runtime read tracker.</summary>
@@ -189,7 +191,7 @@ internal sealed class ReactiveAsyncComputed<T> : ReactiveComputedBase
     private bool _started;
     private T? _value;
     private Exception? _error;
-    public ReactiveAsyncComputed(ReactiveGraph graph, Func<CancellationToken, Task<T>> compute, string name) : base(graph, name) => _compute = compute;
+    public ReactiveAsyncComputed(ReactiveGraph graph, Func<CancellationToken, Task<T>> compute, string name, T? initialValue = default) : base(graph, name) { _compute = compute; _value = initialValue; }
     public T? Value { get { Graph.CheckThread(); Read(); EnsureStarted(); return _value; } }
     public bool Pending { get { Graph.CheckThread(); Read(); EnsureStarted(); return _cancellation is not null; } }
     public Exception? Error { get { Graph.CheckThread(); Read(); EnsureStarted(); return _error; } }
@@ -228,6 +230,7 @@ internal sealed class ReactiveScope(ReactiveGraph graph) : IDisposable
     public ReactiveSignal<T> Signal<T>(T value, string name) => Own(graph.Signal(value, name));
     public ReactiveComputed<T> Computed<T>(Func<T> compute, string name) => Own(graph.Computed(compute, name));
     public ReactiveAsyncComputed<T> AsyncComputed<T>(Func<CancellationToken, Task<T>> compute, string name) => Own(graph.AsyncComputed(compute, name));
+    public ReactiveAsyncComputed<T> AsyncComputed<T>(Func<CancellationToken, Task<T>> compute, T initialValue, string name) => Own(graph.AsyncComputed(compute, initialValue, name));
     public ReactiveEffect Effect(Action run, string name) => Own(graph.Effect(run, name));
     public T Own<T>(T value) where T : IDisposable { _owned.Add(value); return value; }
     public void Dispose() { foreach (var value in _owned.AsEnumerable().Reverse()) value.Dispose(); _owned.Clear(); }

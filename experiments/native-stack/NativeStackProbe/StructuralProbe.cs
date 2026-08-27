@@ -69,7 +69,8 @@ internal sealed class FocusScopes(InputRouter input)
     {
         var current = _focused is { } id ? Find(root, id) : null;
         var scope = current is null ? root : Path(root, current).LastOrDefault(element => input.Get(element)?.FocusScope == true) ?? root;
-        var items = Flatten(scope).Where(element => input.Get(element)?.Focusable == true).ToArray();
+        // Options use roving selection owned by their listbox; the listbox is the single tab stop.
+        var items = Flatten(scope).Where(element => input.Get(element)?.Focusable == true && element.Semantics.Role != "option").ToArray();
         if (items.Length == 0) return null;
         var index = current is null ? -1 : Array.FindIndex(items, element => element.Id == current.Id);
         index = (index + (reverse ? items.Length - 1 : 1)) % items.Length;

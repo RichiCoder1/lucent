@@ -65,6 +65,22 @@ virtualization. [The authoring reframe](AUTHORING-REFRAME.md) now makes the
 missing composition, reactive-property, typed-style, behavior, and generic
 projection modules explicit before another comparison is allowed.
 
+## Issue #23 Milestone 2A application gate
+
+```powershell
+./run-issue-23-proof.ps1
+```
+
+The issue browser is now authored entirely through `NativeUi`: a three-region
+typed composition, reactive TextFields and styles, a composition-owned
+fixed-height virtual list, mounted behaviors, and generic retained projection.
+Its authored file contains no Skia/canvas renderer, direct bounds or scene
+commands, manual semantic mirror, `Sync`, or `SetItems`. The proof publishes
+NativeAOT, executes W1–W12, enforces the 21-row realization ceiling, captures
+light/dark 1200×760 output, records deterministic dumps, scans forbidden seams,
+and reruns issues #20–#22 regressions. The 2A decision remains pending parent
+and Sol xhigh review.
+
 ## Issue #20 typed composition proof
 
 ```powershell

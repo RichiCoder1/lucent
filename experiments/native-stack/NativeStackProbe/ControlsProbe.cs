@@ -94,9 +94,18 @@ internal sealed class TextField : IElementBehavior
     public void CommitPreedit(string text) { if (Focused) ReplaceSelection(text); }
     public void Input(string text) { if (Focused) ReplaceSelection(text); }
     public void InvokeSemanticSetValue(string text) { _anchor = 0; Caret = Count(Text); ReplaceSelection(text); }
+    /// <summary>Reactive model synchronization follows the same text path, but is not user input.</summary>
+    public void SetValue(string text)
+    {
+        ValidateSingleLine(text);
+        if (Text == text) return;
+        _text.ReplaceCommitted(text); _anchor = Caret = Count(text);
+        Element.Semantics = Element.Semantics with { Value = text }; Element.Text = text; Element.Mark(DirtyFacet.Paint | DirtyFacet.Semantics);
+    }
     public void Key(string key, bool shift = false, bool control = false)
     {
         if (!Focused) return;
+        if (control && key == "A") { _anchor = 0; Caret = Count(Text); return; }
         if (control && key is "C" or "X" or "V") { Clipboard(key); return; }
         var count = Count(Text);
         switch (key)

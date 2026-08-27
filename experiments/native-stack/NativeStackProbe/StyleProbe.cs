@@ -7,9 +7,9 @@ internal readonly record struct UiShadow(int Blur, int X = 0, int Y = 0, UiColor
 internal enum UiAlignment { Start, Center, End, Stretch }
 
 /// <summary>Immutable typed paint/layout values; composition is always explicit and ordered.</summary>
-internal sealed record Style(UiColor? Background = null, UiColor? Foreground = null, UiLength? PaddingX = null, UiLength? Radius = null, UiOpacity? Opacity = null, UiTransform? Transform = null, UiLength? FocusRing = null, UiColor? Border = null, SemanticToken? BackgroundToken = null, SemanticToken? ForegroundToken = null, UiLength? Width = null, UiLength? Height = null, UiLength? Gap = null, UiAlignment? Alignment = null, UiTypography? Typography = null, UiShadow? Shadow = null, UiLength? BorderWidth = null)
+internal sealed record Style(UiColor? Background = null, UiColor? Foreground = null, UiLength? PaddingX = null, UiLength? Radius = null, UiOpacity? Opacity = null, UiTransform? Transform = null, UiLength? FocusRing = null, UiColor? Border = null, SemanticToken? BackgroundToken = null, SemanticToken? ForegroundToken = null, UiLength? Width = null, UiLength? Height = null, UiLength? Gap = null, UiAlignment? Alignment = null, UiTypography? Typography = null, UiShadow? Shadow = null, UiLength? BorderWidth = null, SemanticToken? BorderToken = null)
 {
-    public Style Resolve(ThemeLayer theme) => this with { Background = Background ?? (BackgroundToken is { } background ? theme.Get(background) : null), Foreground = Foreground ?? (ForegroundToken is { } foreground ? theme.Get(foreground) : null), BackgroundToken = null, ForegroundToken = null };
+    public Style Resolve(ThemeLayer theme) => this with { Background = Background ?? (BackgroundToken is { } background ? theme.Get(background) : null), Foreground = Foreground ?? (ForegroundToken is { } foreground ? theme.Get(foreground) : null), Border = Border ?? (BorderToken is { } border ? theme.Get(border) : null), BackgroundToken = null, ForegroundToken = null, BorderToken = null };
 }
 
 internal static class Styles
@@ -17,10 +17,11 @@ internal static class Styles
     public static Style Compose(params Style[] styles) => styles.Aggregate(new Style(), (current, next) => new(
         next.BackgroundToken is not null ? null : next.Background ?? current.Background,
         next.ForegroundToken is not null ? null : next.Foreground ?? current.Foreground,
-        next.PaddingX ?? current.PaddingX, next.Radius ?? current.Radius, next.Opacity ?? current.Opacity, next.Transform ?? current.Transform, next.FocusRing ?? current.FocusRing, next.Border ?? current.Border,
+        next.PaddingX ?? current.PaddingX, next.Radius ?? current.Radius, next.Opacity ?? current.Opacity, next.Transform ?? current.Transform, next.FocusRing ?? current.FocusRing, next.BorderToken is not null ? null : next.Border ?? current.Border,
         next.BackgroundToken ?? (next.Background is not null ? null : current.BackgroundToken),
         next.ForegroundToken ?? (next.Foreground is not null ? null : current.ForegroundToken),
-        next.Width ?? current.Width, next.Height ?? current.Height, next.Gap ?? current.Gap, next.Alignment ?? current.Alignment, next.Typography ?? current.Typography, next.Shadow ?? current.Shadow, next.BorderWidth ?? current.BorderWidth));
+        next.Width ?? current.Width, next.Height ?? current.Height, next.Gap ?? current.Gap, next.Alignment ?? current.Alignment, next.Typography ?? current.Typography, next.Shadow ?? current.Shadow, next.BorderWidth ?? current.BorderWidth,
+        next.BorderToken ?? (next.Border is not null ? null : current.BorderToken)));
 }
 
 /// <summary>Finite authoring sugar over <see cref="Style"/>; there is no selector language.</summary>
@@ -37,7 +38,8 @@ internal static class StyleUtilities
     public static Style Align(this Style style, UiAlignment value) => style with { Alignment = value };
     public static Style Type(this Style style, int size, int weight = 400) => style with { Typography = new(size, weight) };
     public static Style Rounded(this Style style, int value) => style with { Radius = new(value) };
-    public static Style Border(this Style style, UiColor color, int width = 1) => style with { Border = color, BorderWidth = new(width) };
+    public static Style Border(this Style style, UiColor color, int width = 1) => style with { Border = color, BorderToken = null, BorderWidth = new(width) };
+    public static Style Border(this Style style, SemanticToken token, int width = 1) => style with { Border = null, BorderToken = token, BorderWidth = new(width) };
     public static Style Shadow(this Style style, int blur, int x = 0, int y = 0, UiColor? color = null) => style with { Shadow = new(blur, x, y, color) };
     public static Style Opacity(this Style style, float value) => style with { Opacity = new(value) };
     public static Style Transform(this Style style, float x, float y, float scale = 1) => style with { Transform = new(x, y, scale) };
@@ -116,7 +118,7 @@ internal static class StyleProbe
 {
     public static StyleCheckResult Run()
     {
-        var baseStyle = new Style().Bg(SemanticToken.Card).Fg(SemanticToken.CardForeground).Padding(2).Gap(1).Size(40, 20).Align(UiAlignment.Center).Type(14, 600).Border(new("#111111")).Rounded(4).Shadow(2, 1, 1).Opacity(.9f).Transform(1, 2).Ring(1);
+        var baseStyle = new Style().Bg(SemanticToken.Card).Fg(SemanticToken.CardForeground).Padding(2).Gap(1).Size(40, 20).Align(UiAlignment.Center).Type(14, 600).Border(new UiColor("#111111")).Rounded(4).Shadow(2, 1, 1).Opacity(.9f).Transform(1, 2).Ring(1);
         var later = new Style().Px(4).Rounded(6);
         var composed = Styles.Compose(baseStyle, later);
         var immutable = baseStyle.PaddingX == new UiLength(2) && composed.PaddingX == new UiLength(4) && composed.Radius == new UiLength(6);
