@@ -209,6 +209,22 @@ startup and while active, and idle clocks schedule zero frames. CSS, selector
 matching, implicit inheritance, layout animation, and a general animation
 framework remain excluded.
 
+## Issue #10 composed controls proof
+
+```powershell
+./run-controls-proof.ps1
+```
+
+`Button` and the practical single-line `TextField` compose stable elements with
+the existing input, focus, semantic, and typed-style facets; neither introduces
+a control hierarchy. The published NativeAOT proof covers pointer/Enter/Space
+button activation, scalar-safe caret and selection edits, IME committed versus
+preedit state, copy/cut/paste through an injected clipboard seam, focus-visible
+state, portable `edit`/`set-value` semantic Value updates, invalid boundary
+edits, and focus/input disposal. It also reruns text, structural, and style
+regressions. Native child UIA transport remains deferred; the semantic Value
+facet is its portable seam.
+
 ## Milestone 1 combined gate
 
 ```powershell

@@ -89,3 +89,12 @@ explicit last-write-wins composition, token dependency updates on a live
 light/dark switch without losing selected state, every overlapping state layer,
 reduced motion at startup and mid-transition, scheduler-owned clock disposal,
 and zero idle frames.
+
+## Issue #10 composed controls evidence
+
+`../run-controls-proof.ps1` locked-restores and warning-free NativeAOT-publishes
+the probe, then writes [`issue-10/proof.json`](issue-10/proof.json). It proves
+composed button activation, single-line scalar editing and IME preedit,
+clipboard/focus/disposal behavior, and portable `edit`/`set-value` semantics;
+text, structural, and style checks are rerun as regressions. It does not claim
+a native child UIA provider, multiline/rich text, or undo.
