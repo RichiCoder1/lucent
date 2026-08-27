@@ -131,6 +131,18 @@ The provider is Simple-only: server-side, immutable Name/AutomationId/ControlTyp
 
 Issue #19’s direct-Win32 discriminator is conditional and superseded by the passing SDL UIA proof. Do not begin Win32 IME or adapter work.
 
+## Issue #4 retained-scene proof
+
+```powershell
+./run-scene-proof.ps1
+```
+
+The seeded fixed-bounds scene has explicit value IDs (`app.root`, `app.panel`, and `app.badge`), not traversal IDs. Layout, style, and semantic snapshots are keyed by those IDs and update only from their respective dirty projection paths; canonical dumps read snapshots rather than mutable elements. Separate seeded element/scene instances run in headless and native paths before their independently projected hierarchy, layout, style, and semantic dumps are compared.
+
+The selected present path is CPU Skia raster (`SKBitmap`/`SKCanvas`) uploaded as an `ABGR8888` SDL streaming texture and presented with `SDL_RenderPresent` on the existing SDL HWND window. `SDL_RenderReadPixels` captures the SDL renderer framebuffer after `SDL_RenderTexture` and before present; it is converted to RGBA for comparison with the headless input raster. Each native present reads the current SDL logical size; the proof resizes from 128×96 to 256×192 through `SDL_SetWindowSize` + `SDL_SyncWindow`, recreates the upload texture, and requires positive display scale and nonzero `GetDpiForWindow` DPI.
+
+`run-scene-proof.ps1` publishes the locked NativeAOT executable, requires exactly six capture artifacts in each run before comparing names and SHA-256 values, and fails on identity/facet/dump/raster/frame/present/resize failure. Idle and semantic-only writes cause zero scheduled native presents; the changed panel bounds cause one layout-driven present and the changed badge style causes one further paint-driven present. Its JSON records a zero-pixel tolerance.
+
 ## Explicit exclusions
 
 - `.lui` syntax and compiler lowering;

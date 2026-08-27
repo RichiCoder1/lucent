@@ -40,3 +40,18 @@ jq -e '.[-1].Kind == "close" and .[-1].Committed == "" and any(.Kind == "editing
 ```
 
 This evidence passes issue #3's bounded platform proof. It does not claim the later Narrator walkthrough, full semantic tree, or Milestone 1 rendering/layout gates.
+
+## Issue #4 retained-scene evidence
+
+`../run-scene-proof.ps1` performs the locked NativeAOT publish and two independent seeded captures. It exits nonzero on stable-ID, dirty-facet isolation, structural parity, raster, frame scheduling, native present, resize, or artifact-hash failure. The captured machine-readable result is [`issue-4/proof.json`](issue-4/proof.json); its canonical dumps and PNGs are alongside it.
+
+The recorded tolerance is **0 RGBA pixels**. `native-framebuffer.png` is read from SDL with `SDL_RenderReadPixels` after texture composition and before present; it matched the independently rendered `headless-input.png` at zero differing pixels. The native path recorded 96 DPI, SDL scale 1, and a 128×96 → 256×192 resize. The same proof records zero idle/semantic-only present calls, one changed-bounds layout present, and one changed-style paint present. The canonical snapshots include panel bounds `[10,8,108,80]` and semantic name `Ready semantic`.
+
+```text
+3f000af4e00f5b398927ead432928128e17797616e772e6466f786a2904e834a  elements.json
+22d9b8c1181584bf34bb2cf5aa8510f1c1ba326e5f31e4ec44c6a3390b2ab1c1  headless-input.png
+86a8e994c976fe0748d1291c4ca52f7b7eb0afd1fb5a68eadcf2f5dfd3ef4e3e  layout.json
+22d9b8c1181584bf34bb2cf5aa8510f1c1ba326e5f31e4ec44c6a3390b2ab1c1  native-framebuffer.png
+4ba8996b03db4792eaaff208d6e821836e73720714d4ad950e96946fdc081315  semantics.json
+7e118e21b2f36cf20b00b30934526a3b9952c78b00eefb18111230f25d510c9f  style.json
+```

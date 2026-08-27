@@ -92,6 +92,8 @@ Element changes mark layout, paint, or semantics facets dirty. Layout changes pr
 
 Skia is hidden behind one deliberately narrow renderer interface so native presentation and headless raster tests share the same scene contract. This is a sanctioned test seam, not a commitment to multiple production renderers. The spike does not own shaders, glyph atlases, or a custom GPU backend.
 
+For the current Windows proof, that contract targets a CPU `SKCanvas`: a Skia bitmap is uploaded to an SDL `ABGR8888` streaming texture and `SDL_RenderPresent` presents it through the SDL-owned HWND. `SDL_RenderReadPixels` captures the composed SDL renderer framebuffer before present for the native raster comparison. Resize reads SDL's current logical window size and recreates that upload texture; DPI is recorded from `GetDpiForWindow` alongside SDL's display scale. This is the selected present path for the spike, not a second renderer or host.
+
 ## Platform boundary
 
 SDL3-CS is the provisional host. The Windows adapter owns:

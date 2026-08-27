@@ -21,11 +21,12 @@ internal static class Program
                 "--automated" => JsonSerializer.Serialize(RunAutomated(), ProbeJsonContext.Default.AutomatedResult),
                 "--manual" => JsonSerializer.Serialize(RunManual(args.Skip(1).FirstOrDefault() ?? "native-stack-ime.jsonl"), ProbeJsonContext.Default.ManualResult),
                 "--text-self-check" => JsonSerializer.Serialize(TextState.SelfCheck(), ProbeJsonContext.Default.TextCheckResult),
+                "--scene-self-check" when args.Length == 2 => JsonSerializer.Serialize(SceneProbe.Run(args[1]), ProbeJsonContext.Default.SceneCheckResult),
                 "--uia-host" when args.Length == 3 => JsonSerializer.Serialize(RunUiaHost(args[1], args[2], manual: false), ProbeJsonContext.Default.UiaHostResult),
                 "--uia-manual" when args.Length == 3 => JsonSerializer.Serialize(RunUiaHost(args[1], args[2], manual: true), ProbeJsonContext.Default.UiaHostResult),
                 "--uia-ccw-self-check" when args.Length is 1 or 2 => JsonSerializer.Serialize(RunUiaCcwSelfCheck(args.Skip(1).FirstOrDefault()), ProbeJsonContext.Default.CcwSelfCheckResult),
                 null => JsonSerializer.Serialize(RunDependencyProbe(), ProbeJsonContext.Default.ProbeResult),
-                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
+                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --scene-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
             };
             Console.WriteLine(json);
             return 0;
@@ -731,6 +732,7 @@ internal sealed record FailureResult(bool Ok, string Error);
 [JsonSerializable(typeof(AutomatedResult))]
 [JsonSerializable(typeof(ManualResult))]
 [JsonSerializable(typeof(TextCheckResult))]
+[JsonSerializable(typeof(SceneCheckResult))]
 [JsonSerializable(typeof(TextLog))]
 [JsonSerializable(typeof(CcwMarker))]
 [JsonSerializable(typeof(CcwSelfCheckResult))]
