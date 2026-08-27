@@ -7,6 +7,11 @@ $native = Join-Path $OutputDirectory native
 
 if ($NoPublish) { throw '-NoPublish cannot produce final issue-23 evidence.' }
 
+git -C "$PSScriptRoot/../.." diff --quiet -- experiments/native-stack
+if ($LASTEXITCODE -ne 0) { throw 'Final issue-23 evidence requires a clean tracked experiment tree.' }
+git -C "$PSScriptRoot/../.." diff --cached --quiet -- experiments/native-stack
+if ($LASTEXITCODE -ne 0) { throw 'Final issue-23 evidence requires an empty experiment index.' }
+
 dotnet restore $project --locked-mode
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror

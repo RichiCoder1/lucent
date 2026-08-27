@@ -1,4 +1,5 @@
 using System.Text;
+using System.Runtime.InteropServices;
 using SDL3;
 using SkiaSharp;
 
@@ -33,8 +34,25 @@ internal enum UiKind { Row, Column, Text, Control, Button, TextField, Selectable
 internal enum CompositionInputKind { Pointer, Text, Key, Wheel, Tab, Semantic }
 internal sealed record CompositionInput(CompositionInputKind Kind, string? Target = null, string? Value = null, int X = 0, int Y = 0, PointerKind Pointer = PointerKind.Down, bool Shift = false, bool Control = false);
 
+internal static class CompositionInputs
+{
+    public static bool TryFromSdl(SDL.Event e, out CompositionInput? input)
+    {
+        input = ((SDL.EventType)e.Type) switch
+        {
+            SDL.EventType.TextInput => new(CompositionInputKind.Text, Value: Marshal.PtrToStringUTF8(e.Text.Text) ?? ""),
+            SDL.EventType.KeyDown => new(CompositionInputKind.Key, Value: e.Key.Key switch { SDL.Keycode.Pagedown => "PageDown", SDL.Keycode.Pageup => "PageUp", SDL.Keycode.End => "End", SDL.Keycode.Home => "Home", SDL.Keycode.Down => "ArrowDown", SDL.Keycode.Up => "ArrowUp", SDL.Keycode.Left => "ArrowLeft", SDL.Keycode.Right => "ArrowRight", SDL.Keycode.Backspace => "Backspace", SDL.Keycode.Delete => "Delete", SDL.Keycode.Return => "Enter", SDL.Keycode.Space => "Space", SDL.Keycode.Escape => "Escape", SDL.Keycode.Tab => "Tab", SDL.Keycode.A => "A", SDL.Keycode.C => "C", SDL.Keycode.X => "X", SDL.Keycode.V => "V", _ => "" }, Shift: (e.Key.Mod & SDL.Keymod.Shift) != 0, Control: (e.Key.Mod & SDL.Keymod.Ctrl) != 0),
+            SDL.EventType.MouseWheel => new(CompositionInputKind.Wheel, Value: e.Wheel.Y < 0 ? "PageDown" : "PageUp", X: (int)e.Wheel.MouseX, Y: (int)e.Wheel.MouseY),
+            SDL.EventType.MouseButtonDown => new(CompositionInputKind.Pointer, X: (int)e.Button.X, Y: (int)e.Button.Y, Pointer: PointerKind.Down),
+            SDL.EventType.MouseButtonUp => new(CompositionInputKind.Pointer, X: (int)e.Button.X, Y: (int)e.Button.Y, Pointer: PointerKind.Up),
+            _ => null
+        };
+        return input is not null;
+    }
+}
+
 /// <summary>Immutable finite authoring node; modifiers only alter typed layout, paint, or control values.</summary>
-internal sealed record UiNode(UiKind Kind, UiNode[] Children, string? Text = null, Func<string>? TextValue = null, Func<bool>? Show = null, Func<UiNode>? Content = null, Func<IEnumerable<object>>? Items = null, Func<object, string>? Key = null, Func<object, UiNode>? Item = null, Style? StyleSpec = null, VariantStyle? VariantsSpec = null, Func<ThemeLayer>? ThemeValue = null, Func<StyleState>? StateValue = null, UiLength? LayoutGap = null, UiLength? LayoutPadding = null, Action? Press = null, Func<string>? Value = null, Action<string>? Changed = null, Action? Select = null, Func<bool>? IsSelected = null, Func<string?>? SemanticValue = null, TimeSpan? TransitionDuration = null, Func<bool>? ReducedMotion = null, bool ItemsChanged = false, int RowHeight = 0, int ViewportHeight = 0)
+internal sealed record UiNode(UiKind Kind, UiNode[] Children, string? Text = null, Func<string>? TextValue = null, Func<bool>? Show = null, Func<UiNode>? Content = null, Func<IEnumerable<object>>? Items = null, Func<object, string>? Key = null, Func<object, UiNode>? Item = null, Style? StyleSpec = null, VariantStyle? VariantsSpec = null, Func<ThemeLayer>? ThemeValue = null, Func<StyleState>? StateValue = null, UiLength? LayoutGap = null, UiLength? LayoutPadding = null, Action? Press = null, Func<string>? Value = null, Action<string>? Changed = null, Action? Cancelled = null, string? EscapeFocusTarget = null, Action? Select = null, Func<bool>? IsSelected = null, Func<string?>? SemanticValue = null, TimeSpan? TransitionDuration = null, Func<bool>? ReducedMotion = null, bool ItemsChanged = false, int RowHeight = 0, int ViewportHeight = 0)
 {
     public UiNode Bg(UiColor color) => this with { StyleSpec = (StyleSpec ?? new Style()).Bg(color) };
     public UiNode Bg(SemanticToken token) => this with { StyleSpec = (StyleSpec ?? new Style()).Bg(token) };
@@ -45,6 +63,7 @@ internal sealed record UiNode(UiKind Kind, UiNode[] Children, string? Text = nul
     public UiNode Theme(Func<ThemeLayer> theme) => this with { ThemeValue = theme };
     public UiNode State(Func<StyleState> state) => this with { StateValue = state };
     public UiNode Transition(TimeSpan duration, Func<bool> reducedMotion) => duration > TimeSpan.Zero ? this with { TransitionDuration = duration, ReducedMotion = reducedMotion } : throw new ArgumentOutOfRangeException(nameof(duration));
+    public UiNode OnCancel(Action cancelled, string? focusTarget = null) => Kind == UiKind.TextField ? this with { Cancelled = cancelled, EscapeFocusTarget = focusTarget } : throw new InvalidOperationException("OnCancel applies only to TextField.");
     public UiNode Gap(int value) => this with { LayoutGap = Length(value) };
     public UiNode Padding(int value) => this with { LayoutPadding = Length(value) };
     public UiNode OnPress(Action action) => Kind is UiKind.Control or UiKind.Button ? this with { Press = action } : throw new InvalidOperationException("OnPress applies only to Button.");
@@ -204,15 +223,15 @@ internal sealed class RetainedComposition : IDisposable
         if (node.Kind is UiKind.Control or UiKind.Button && node.Press is not null)
             mounted.Behavior = new Button(_rootElement!, element, _input, _focus, node.Press, InvalidateBehavior);
         if (node.Kind == UiKind.TextField)
-            mounted.Behavior = new TextField(_rootElement!, element, _input, _focus, new MemoryClipboard(), node.Changed, InvalidateBehavior);
+            mounted.Behavior = new TextField(_rootElement!, element, _input, _focus, new MemoryClipboard(), node.Changed, () => { node.Cancelled?.Invoke(); if (node.EscapeFocusTarget is not null) Focus(node.EscapeFocusTarget); }, InvalidateBehavior);
         if (node.Kind == UiKind.TextField && node.Value is not null)
             mounted.ValueEffect = mounted.Scope.Effect(() => mounted.SetTextFieldValue(node.Value()), "composition.text-field-value");
         if (node.SemanticValue is not null)
             mounted.SemanticEffect = mounted.Scope.Effect(mounted.SetSemanticValue, "composition.semantic-value");
         if (node.Kind == UiKind.Selectable)
-            mounted.Behavior = new Selectable(_rootElement!, element, _input, _focus, node.Select ?? (() => { }), InvalidateBehavior);
+            mounted.Behavior = new Selectable(_rootElement!, element, _input, _focus, () => mounted.Node.Select?.Invoke(), InvalidateBehavior);
         if (node.Kind == UiKind.Selectable && node.TextValue is not null)
-            mounted.TextEffect = mounted.Scope.Effect(() => mounted.SetText(node.TextValue()), "composition.selectable-text");
+            mounted.TextEffect = mounted.Scope.Effect(() => mounted.SetText(mounted.Node.TextValue!()), "composition.selectable-text");
         if (node.IsSelected is not null)
             mounted.SelectedEffect = mounted.Scope.Effect(mounted.SetSelected, "composition.selected");
         if (node.Kind == UiKind.Text && node.TextValue is not null)
@@ -325,7 +344,7 @@ internal sealed class RetainedComposition : IDisposable
     {
         private readonly Dictionary<string, MountedNode> _keyed = new(StringComparer.Ordinal);
         private MountedNode? _shown;
-        public UiNode Node { get; } = node;
+        public UiNode Node { get; private set; } = node;
         public StableElement Element { get; } = element;
         public ReactiveScope Scope { get; } = scope;
         public List<MountedNode> Children { get; } = [];
@@ -373,6 +392,15 @@ internal sealed class RetainedComposition : IDisposable
             Element.Mark(DirtyFacet.Paint); owner.Project([Element]);
         }
         private static float Lerp(float from, float to, float progress) => from + (to - from) * progress;
+        public void Update(UiNode next)
+        {
+            if (next.Kind != Node.Kind) throw new InvalidOperationException("A keyed row cannot change kind without changing its key.");
+            Node = next;
+            var label = next.TextValue?.Invoke() ?? next.Text;
+            if (label is not null) SetText(label);
+            if (next.IsSelected is not null) SetSelected();
+            SetStyle();
+        }
         public void SetTextFieldValue(string value)
         {
             if (Behavior is not TextField field) return;
@@ -423,7 +451,13 @@ internal sealed class RetainedComposition : IDisposable
             var keys = values.Select(Node.Key!).ToArray();
             if (keys.Distinct(StringComparer.Ordinal).Count() != keys.Length) throw new ArgumentException("For keys must be unique.");
             foreach (var key in _keyed.Keys.Except(keys, StringComparer.Ordinal).ToArray()) { _keyed[key].Dispose(); _keyed.Remove(key); }
-            foreach (var value in values) { var key = Node.Key!(value); if (!_keyed.ContainsKey(key)) _keyed.Add(key, owner.Mount(Node.Item!(value), inheritedTheme)); }
+            foreach (var value in values)
+            {
+                var key = Node.Key!(value);
+                var next = Node.Item!(value);
+                if (_keyed.TryGetValue(key, out var existing)) existing.Update(next);
+                else _keyed.Add(key, owner.Mount(next, inheritedTheme));
+            }
             Children.Clear(); Children.AddRange(keys.Select(key => _keyed[key])); Attach();
             if (Node.Kind == UiKind.VirtualList) owner.Render();
         }
@@ -515,9 +549,8 @@ internal static class CompositionProbe
         var graph = new ReactiveGraph();
         var items = graph.Signal(Enumerable.Range(0, 10_000).Select(index => (Id: $"item-{index:D5}", Title: $"Item {index}")).ToArray(), "composition.virtual-items");
         var selected = graph.Signal("", "composition.virtual-selected");
-        string Label(string id) => items.Value.First(item => item.Id == id).Title;
         using var app = NativeUi.Mount(graph, NativeUi.VirtualList("Virtual", () => items.Value, item => item.Id,
-            item => NativeUi.Selectable(() => Label(item.Id), () => selected.Value == item.Id, () => selected.Value = item.Id).Style(new Style().Size(100, 10)), 10, 100, () => selected.Value).Style(new Style().Size(100, 100)));
+            item => NativeUi.Selectable(item.Title, () => selected.Value == item.Id, () => selected.Value = item.Id).Style(new Style().Size(100, 10)), 10, 100, () => selected.Value).Style(new Style().Size(100, 100)));
         graph.Drain();
         var bounded = app.RealizedCount("Virtual") == 14;
         app.Input(new(CompositionInputKind.Semantic, "Virtual", "focus"));
@@ -527,7 +560,10 @@ internal static class CompositionProbe
         items.Value = items.Value.Select(item => item.Id == "item-00000" ? (item.Id, "Updated") : item).ToArray(); graph.Drain();
         var updated = before is not null && ReferenceEquals(before, app.FindText("Updated"));
         app.Scroll("Virtual", "End"); var end = app.RealizedWindow("Virtual"); var viewport = app.VirtualBounds("Virtual");
-        var clipped = end.Last == "item-09999" && end.LastBounds.Y < viewport.Y + viewport.Height && app.Scene.Commands.Where(command => command.Id != app.Scene.Commands.First().Id).All(command => command.Clip is null || command.Clip == viewport);
+        var rowCommands = app.Scene.Commands.Where(command => command.Label?.StartsWith("Item ", StringComparison.Ordinal) == true || command.Label == "Updated").ToArray();
+        var clipped = end.Last == "item-09999" && end.LastBounds.Y < viewport.Y + viewport.Height
+            && rowCommands.Length == app.RealizedCount("Virtual") && rowCommands.All(command => command.Clip == viewport)
+            && rowCommands.Any(command => command.Bounds.Y < viewport.Y || command.Bounds.Y + command.Bounds.Height > viewport.Y + viewport.Height);
         return bounded && keyboard && updated && clipped;
     }
 

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using SDL3;
 
@@ -51,15 +50,7 @@ internal static class IssueBrowser
         {
             var type = (SDL.EventType)e.Type;
             if (type is SDL.EventType.Quit or SDL.EventType.WindowCloseRequested) break;
-            var changed = type switch
-            {
-                SDL.EventType.TextInput => app.Route(new(CompositionInputKind.Text, Value: Marshal.PtrToStringUTF8(e.Text.Text) ?? "")),
-                SDL.EventType.KeyDown => app.Route(new(CompositionInputKind.Key, Value: e.Key.Key switch { SDL.Keycode.Pagedown => "PageDown", SDL.Keycode.Pageup => "PageUp", SDL.Keycode.End => "End", SDL.Keycode.Home => "Home", SDL.Keycode.Down => "ArrowDown", SDL.Keycode.Up => "ArrowUp", SDL.Keycode.Left => "ArrowLeft", SDL.Keycode.Right => "ArrowRight", SDL.Keycode.Backspace => "Backspace", SDL.Keycode.Delete => "Delete", SDL.Keycode.Return => "Enter", SDL.Keycode.Space => "Space", SDL.Keycode.Escape => "Escape", SDL.Keycode.Tab => "Tab", SDL.Keycode.A => "A", SDL.Keycode.C => "C", SDL.Keycode.X => "X", SDL.Keycode.V => "V", _ => "" }, Shift: (e.Key.Mod & SDL.Keymod.Shift) != 0, Control: (e.Key.Mod & SDL.Keymod.Ctrl) != 0)),
-                SDL.EventType.MouseWheel => app.Route(new(CompositionInputKind.Wheel, Value: e.Wheel.Y < 0 ? "PageDown" : "PageUp", X: (int)e.Wheel.MouseX, Y: (int)e.Wheel.MouseY)),
-                SDL.EventType.MouseButtonDown => app.Route(new(CompositionInputKind.Pointer, X: (int)e.Button.X, Y: (int)e.Button.Y, Pointer: PointerKind.Down)),
-                SDL.EventType.MouseButtonUp => app.Route(new(CompositionInputKind.Pointer, X: (int)e.Button.X, Y: (int)e.Button.Y, Pointer: PointerKind.Up)),
-                _ => false
-            };
+            var changed = CompositionInputs.TryFromSdl(e, out var input) && app.Route(input!);
             if (changed) app.Present(presenter);
             app.Advance(TimeSpan.FromMilliseconds(20));
         }
@@ -125,10 +116,12 @@ internal static class IssueBrowser
                 var priority = _priority.Value;
                 var assignee = _assignee.Value;
                 var removed = _removed.Value;
+                var result = Filter(source, query, status, priority, assignee, removed);
                 await Task.Delay(seed.AsyncDelayMilliseconds, cancellation);
                 if (query == seed.FailureQuery) throw new InvalidOperationException("Search failed");
-                return Filter(source, query, status, priority, assignee, removed);
+                return result;
             }, issues, "issues.latest");
+            _graph.RegisterDependencies(_latest, _source, _query, _status, _priority, _assignee, _removed);
             _ui = NativeUi.Mount(_graph, Author());
             _graph.Drain();
         }
@@ -148,8 +141,7 @@ internal static class IssueBrowser
                 .Style(new Style().Size(width, 30).Bg(SemanticToken.Muted).Fg(SemanticToken.Foreground).Rounded(15).Padding(8).Type(12, 500))
                 .Variants(new VariantStyle(new Style(), Selected: new Style().Bg(SemanticToken.Primary).Fg(SemanticToken.PrimaryForeground)))
                 .State(() => signal.Value == value ? StyleState.Selected : StyleState.None));
-            Issue? IssueFor(string id) => _source.Value.FirstOrDefault(issue => issue.Id == id);
-            UiNode RowFor(Issue issue) => (NativeUi.Selectable(() => RowLabel(IssueFor(issue.Id) ?? issue), () => _selected.Value == issue.Id, () => _selected.Value = issue.Id)
+            UiNode RowFor(Issue issue) => (NativeUi.Selectable(() => RowLabel(_source.Value.First(current => current.Id == issue.Id)), () => _selected.Value == issue.Id, () => _selected.Value = issue.Id)
                 .Style(new Style().Size(392, RowHeight).Bg(SemanticToken.Card).Fg(SemanticToken.Foreground).Rounded(6).Padding(10).Type(12).Opacity(.92f).Transform(0, 2))
                 .Variants(new VariantStyle(new Style(), Selected: new Style().Bg(SemanticToken.Muted).Opacity(1).Transform(0, 0), FocusVisible: new Style().Ring(2))).Transition(TimeSpan.FromMilliseconds(120), () => _reducedMotion.Value));
 
@@ -182,7 +174,8 @@ internal static class IssueBrowser
                     (NativeUi.Text("Title").Style(Label(520, 22, 11).Fg(SemanticToken.MutedForeground))),
                     (NativeUi.TextField("Title", () => _draft.Value.Length == 0 ? Current?.Title ?? "" : _draft.Value, value => _draft.Value = value)
                         .Style(new Style().Size(476, 42).Bg(SemanticToken.Muted).Fg(SemanticToken.Foreground).Rounded(7).Padding(10).Type(13))
-                        .Variants(new VariantStyle(new Style(), FocusVisible: new Style().Ring(2)))),
+                        .Variants(new VariantStyle(new Style(), FocusVisible: new Style().Ring(2)))
+                        .OnCancel(() => _draft.Value = Current?.Title ?? "", "Issue list")),
                     (NativeUi.Text("Description").Style(Label(520, 22, 11).Fg(SemanticToken.MutedForeground))),
                     (NativeUi.Text("Investigate the reported behavior and document the smallest safe fix.").Style(Label(520, 48, 13))),
                     NativeUi.Row(
@@ -218,7 +211,7 @@ internal static class IssueBrowser
                     _ui.Input(new(CompositionInputKind.Text, Value: text ?? ""));
                     break;
                 case InputCommand.CommitTitle: _ui.Input(new(CompositionInputKind.Semantic, "Save changes", "press")); break;
-                case InputCommand.RevertTitle: _draft.Value = Current?.Title ?? ""; break;
+                case InputCommand.RevertTitle: _ui.Input(new(CompositionInputKind.Key, Value: "Escape")); break;
                 case InputCommand.FailSearch: _ui.Input(new(CompositionInputKind.Semantic, "Search issues", "set-value:" + _seed.FailureQuery)); break;
                 case InputCommand.Retry: _ui.Input(new(CompositionInputKind.Semantic, "Retry", "press")); break;
                 case InputCommand.ToggleTheme: _theme.Value = ReferenceEquals(Theme, Themes.Light) ? Themes.Dark : Themes.Light; break;
@@ -231,11 +224,7 @@ internal static class IssueBrowser
             return true;
         }
 
-        public bool Route(CompositionInput input)
-        {
-            if (input is { Kind: CompositionInputKind.Key, Value: "Escape" }) { Send(InputCommand.EscapeToList); return true; }
-            var handled = _ui.Input(input); _graph.Drain(); return handled;
-        }
+        public bool Route(CompositionInput input) { var handled = _ui.Input(input); _graph.Drain(); return handled; }
         public void Advance(TimeSpan elapsed) => _ui.Advance(elapsed);
 
         private void ToggleFilter(ReactiveSignal<string?> signal, string value)
@@ -279,7 +268,6 @@ internal static class IssueBrowser
             if (Current is not { } current) return;
             if (_draft.Value.Length == 0 || _draft.Value == current.Title) { _draft.Value = ""; return; }
             _source.Value = _source.Value.Select(issue => issue.Id == current.Id ? issue with { Title = _draft.Value } : issue).ToArray();
-            _ = _latest.Value;
             _draft.Value = "";
         }
 
@@ -311,27 +299,31 @@ internal static class IssueBrowser
             Send(InputCommand.PageDown); var page = _ui.RealizedWindow("Issue list"); Send(InputCommand.End); var ended = _ui.RealizedWindow("Issue list"); var viewport = _ui.VirtualBounds("Issue list"); var end = _ui.ScrollOffset("Issue list") > 0 && ended.Last == Rows[^1].Id && ended.LastBounds.Y >= viewport.Y && ended.LastBounds.Y < viewport.Y + viewport.Height; Send(InputCommand.Home); var home = _ui.RealizedWindow("Issue list");
             output.Add(Step("W5 scroll", end && page.First != home.First && home.First == Rows[0].Id && home.FirstBounds.Y == viewport.Y && _ui.ScrollOffset("Issue list") == 0 && Realized <= 21, "PageDown End Home retain ceiling", $"page={page.First}-{page.Last}; end={ended.First}-{ended.Last}@{ended.FirstBounds.Y},{ended.LastBounds.Y}; home={home.First}-{home.Last}@{home.FirstBounds.Y},{home.LastBounds.Y}"));
             Send(InputCommand.SelectFirst); Send(InputCommand.Next);
-            output.Add(Step("W6 selection", _selected.Value == Rows[1].Id, "pointer and keyboard select details", _selected.Value));
+            var selectedSemantic = Semantics().Single(item => item.Name == RowLabel(Rows[1]));
+            output.Add(Step("W6 selection", _selected.Value == Rows[1].Id && Current?.Id == Rows[1].Id && selectedSemantic.Selected && Semantics().Any(item => item.Name == "Issue list" && item.Focused), "pointer and keyboard select details, semantics, and list focus", _selected.Value));
             var prior = Rows.FindIndex(issue => issue.Id == _selected.Value);
             var expected = Rows.Where(issue => issue.Id != _selected.Value).ElementAt(prior).Id;
             Send(InputCommand.RemoveSelected);
             output.Add(Step("W7 filtered-selection", _selected.Value == expected, "removed selection clamps to prior index", _selected.Value));
             var original = Current!.Title;
             Send(InputCommand.EditTitle, "uncommitted"); Send(InputCommand.RevertTitle); var reverted = _draft.Value == original;
-            Send(InputCommand.EditTitle, "Scalar 😀 title"); Send(InputCommand.CommitTitle); var committed = Current!.Title == "Scalar 😀 title" && _ui.FindText(RowLabel(Current!)) is not null;
+            Send(InputCommand.EditTitle, "Scalar 😀 title"); Send(InputCommand.CommitTitle); var modelCommitted = Current!.Title == "Scalar 😀 title"; var rowCommitted = _ui.FindText(RowLabel(Current!)) is not null; var committed = modelCommitted && rowCommitted;
             Send(InputCommand.EditTitle, original); Send(InputCommand.CommitTitle);
-            output.Add(Step("W8 title-edit", reverted && committed && Current!.Title == original, "scalar edit, Escape revert, then commit", Current!.Title));
+            output.Add(Step("W8 title-edit", reverted && committed && Current!.Title == original, "scalar edit, Escape revert, then commit", $"reverted={reverted}; model={modelCommitted}; row={rowCommitted}; final={Current!.Title}"));
             var staleKeys = Rows.Select(issue => issue.Id).ToArray(); Send(InputCommand.FailSearch); var staleWhilePending = staleKeys.SequenceEqual(Rows.Select(issue => issue.Id)); CompleteAsync(); var staleAfterFailure = staleKeys.SequenceEqual(Rows.Select(issue => issue.Id)); var failed = _latest.Error is not null && Semantics().Any(item => item.Name == "Search state" && item.Value == "Search failed") && Semantics().Any(item => item.Name == "Retry" && item.Actions.Contains("press"));
             Send(InputCommand.Retry); CompleteAsync();
             output.Add(Step("W9 failure-retry", staleWhilePending && staleAfterFailure && failed && _latest.Error is null, "error retains exact stale rows then retry clears", $"pending={staleWhilePending}; failed-stale={staleAfterFailure}; error={failed}; cleared={_latest.Error is null}"));
             Send(InputCommand.EditTitle, "draft"); var selected = _selected.Value; var queryState = Query; var status = _status.Value; var priority = _priority.Value; var scroll = _ui.ScrollOffset("Issue list");
-            var selectedRow = RowLabel(Current!); var motionActive = _ui.TransitionActive(selectedRow); Send(InputCommand.ReducedMotion); var motionSnapped = !_ui.TransitionActive(selectedRow); Send(InputCommand.ToggleTheme); var stayedSnapped = !_ui.TransitionActive(selectedRow);
+            var selectedRow = RowLabel(Current!); Send(InputCommand.Next); _ui.Input(new(CompositionInputKind.Semantic, selectedRow, "select")); _graph.Drain();
+            var motionActive = _ui.TransitionActive(selectedRow); Send(InputCommand.ReducedMotion); var motionSnapped = !_ui.TransitionActive(selectedRow); Send(InputCommand.ToggleTheme); var stayedSnapped = !_ui.TransitionActive(selectedRow);
             output.Add(Step("W10 theme", ReferenceEquals(Theme, Themes.Dark) && _selected.Value == selected && Query == queryState && _status.Value == status && _priority.Value == priority && _ui.ScrollOffset("Issue list") == scroll && _draft.Value == "draft" && _reducedMotion.Value && motionActive && motionSnapped && stayedSnapped, "theme preserves state and reduced motion snaps an active mounted transition", $"active={motionActive}; snapped={motionSnapped}; stayed={stayedSnapped}"));
-            Send(InputCommand.EscapeToList);
+            _ui.Input(new(CompositionInputKind.Semantic, "Search issues", "focus"));
             var focus = new List<string?> { _ui.FocusedName() };
-            Send(InputCommand.Tab); focus.Add(_ui.FocusedName()); Send(InputCommand.Tab); focus.Add(_ui.FocusedName()); Send(InputCommand.Tab); focus.Add(_ui.FocusedName()); Send(InputCommand.Tab); focus.Add(_ui.FocusedName()); Send(InputCommand.ShiftTab); focus.Add(_ui.FocusedName()); Send(InputCommand.EscapeToList); focus.Add(_ui.FocusedName());
-            var expectedFocus = new string?[] { "Issue list", "Title", "Save changes", "Retry", "Search issues", "Retry", "Issue list" };
-            output.Add(Step("W11 keyboard", focus.SequenceEqual(expectedFocus), "real Tab/ShiftTab traversal and Escape list focus", string.Join('>', focus)));
+            for (var index = 0; index != 7; index++) { Send(InputCommand.Tab); focus.Add(_ui.FocusedName()); }
+            Send(InputCommand.ShiftTab); focus.Add(_ui.FocusedName());
+            _ui.Input(new(CompositionInputKind.Semantic, "Title", "focus")); Send(InputCommand.RevertTitle); focus.Add(_ui.FocusedName());
+            var expectedFocus = new string?[] { "Search issues", "Ada", "Open", "High", "Issue list", "Title", "Save changes", "Retry", "Save changes", "Issue list" };
+            output.Add(Step("W11 keyboard", focus.SequenceEqual(expectedFocus), "real filter/list/detail Tab traversal and authored Escape focus", string.Join('>', focus)));
             var semantics = Semantics();
             output.Add(Step("W12 semantics", semantics.All(item => item.Role.Length > 0 && item.Name.Length > 0 && item.SuppressionReason is null) && semantics.Any(item => item.Name == "Title" && item.Actions.Contains("set-value")) && semantics.Any(item => item.Name == "Issue list" && item.Value == _selected.Value) && semantics.Any(item => item.Selected) && semantics.Any(item => item.Focused), "complete mounted semantics with zero suppressions", "projected semantic tree"));
             return output;

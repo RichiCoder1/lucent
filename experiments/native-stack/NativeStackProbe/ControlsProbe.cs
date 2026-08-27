@@ -66,6 +66,7 @@ internal sealed class TextField : IElementBehavior
     private readonly StableElement _root;
     private readonly IClipboard _clipboard;
     private readonly Action<string>? _changed;
+    private readonly Action? _cancelled;
     private readonly bool _attached;
     private readonly Action? _invalidated;
     private readonly TextState _text = new();
@@ -78,14 +79,14 @@ internal sealed class TextField : IElementBehavior
     public string Preedit => _text.Preedit;
 
     public TextField(StableElement root, InputRouter input, FocusScopes focus, string id, string name, IClipboard clipboard)
-        : this(root, new(new(id), new(0, 12, 80, 10), new("#ffffff", "#09090b", 2), new("edit", name, "", ["set-value"])), input, focus, clipboard, null, false) { }
+        : this(root, new(new(id), new(0, 12, 80, 10), new("#ffffff", "#09090b", 2), new("edit", name, "", ["set-value"])), input, focus, clipboard, null, null, false) { }
     public TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed)
-        : this(root, element, input, focus, clipboard, changed, true, null) { }
-    public TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed, Action invalidated)
-        : this(root, element, input, focus, clipboard, changed, true, invalidated) { }
-    private TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed, bool attached, Action? invalidated = null)
+        : this(root, element, input, focus, clipboard, changed, null, true, null) { }
+    public TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed, Action? cancelled, Action invalidated)
+        : this(root, element, input, focus, clipboard, changed, cancelled, true, invalidated) { }
+    private TextField(StableElement root, StableElement element, InputRouter input, FocusScopes focus, IClipboard clipboard, Action<string>? changed, Action? cancelled, bool attached, Action? invalidated = null)
     {
-        _root = root; _input = input; _focus = focus; _clipboard = clipboard; _changed = changed; _attached = attached; _invalidated = invalidated; Element = element;
+        _root = root; _input = input; _focus = focus; _clipboard = clipboard; _changed = changed; _cancelled = cancelled; _attached = attached; _invalidated = invalidated; Element = element;
         if (!attached) root.Children.Add(Element);
         input.Set(Element, new("set-value", true, true, Pointer: Pointer));
     }
@@ -105,6 +106,7 @@ internal sealed class TextField : IElementBehavior
     public void Key(string key, bool shift = false, bool control = false)
     {
         if (!Focused) return;
+        if (key == "Escape") { _cancelled?.Invoke(); return; }
         if (control && key == "A") { _anchor = 0; Caret = Count(Text); return; }
         if (control && key is "C" or "X" or "V") { Clipboard(key); return; }
         var count = Count(Text);
