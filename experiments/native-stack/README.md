@@ -161,6 +161,22 @@ Globalization is enabled so the NativeAOT proof can execute en-US/tr-TR; the
 recorded published `win-x64` directory is 156,895,896 bytes (the prior
 invariant-globalization output is not a comparable retained artifact).
 
+## Issue #7 reactive graph proof
+
+```powershell
+./run-reactive-proof.ps1
+```
+
+The UI-thread-only graph has named signals, lazy memoized computed values,
+batched effects, ownership disposal, and a 64-read cap for runtime dependency
+tracking. `RegisterDependencies(target, sources)` is the single direct edge
+registration seam for future compiler output; no compiler or `.lui` integration
+is included. Async computed values retain their last result while pending,
+cancel superseded owned work, and only commit the current generation through
+the UI-thread `Drain` queue. The proof records zero frames for unrelated writes
+and rejects stale/disposed completions. It does not provide cross-thread graph
+access, automatic UI-loop pumping, or a general observer API.
+
 ## Milestone 1 combined gate
 
 ```powershell

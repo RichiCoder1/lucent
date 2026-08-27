@@ -33,6 +33,12 @@ Straight C# uses bounded read tracking inside explicit reactive callbacks. Futur
 
 Async computed values reuse behaviors validated in the current Lucent experiment: cancellation, stale-value retention, latest-generation wins, pending/error facets, and UI-scheduler commits. This is design evidence, not a compatibility promise.
 
+The current bounded implementation caps one runtime callback at 64 distinct
+reads and requires the host UI loop to call `Drain` for queued async commits.
+`RegisterDependencies(target, sources)` is the only compiler-facing direct-edge
+API. It deliberately has no `.lui` lowering, cross-thread graph access, or
+general observer layer.
+
 ## Elements and structural regions
 
 Elements are stable identities with optional facets for layout, paint, input, focus, and semantics. Reactive properties update those facets in place.
