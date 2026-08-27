@@ -342,8 +342,11 @@ internal static class IssueBrowser
         {
             _selected.Value = "issue-00000";
             var selected = _selected.Value; var theme = Theme; var draft = _draft.Value; var reduced = _reducedMotion.Value;
-            _query.Value = "auth"; _status.Value = "Closed"; _priority.Value = null; _assignee.Value = null; _removed.Value = null; _ = _latest.Value; CompleteAsync();
-            return new(_status.Value == "Closed" && Rows.Count == 667 && _selected.Value == selected && ReferenceEquals(Theme, theme) && _draft.Value == draft && _reducedMotion.Value == reduced, 667, Rows.Count, "Closed");
+            _query.Value = "auth"; _status.Value = null; _priority.Value = null; _assignee.Value = null; _removed.Value = null; _ = _latest.Value; CompleteAsync();
+            _ui.Input(new(CompositionInputKind.Semantic, "Closed", "press")); _graph.Drain(); CompleteAsync(); var active = Rows.Count == 667;
+            _ui.Input(new(CompositionInputKind.Semantic, "Closed", "press")); _graph.Drain(); CompleteAsync(); var cleared = Rows.Count == 2000;
+            _ui.Input(new(CompositionInputKind.Semantic, "Closed", "press")); _graph.Drain(); CompleteAsync();
+            return new(active && cleared && _status.Value == "Closed" && Rows.Count == 667 && _selected.Value == selected && ReferenceEquals(Theme, theme) && _draft.Value == draft && _reducedMotion.Value == reduced, 667, Rows.Count, "Closed");
         }
 
         public IssueBrowserSemantic[] Semantics() => _ui.Semantics().Select(pair => new IssueBrowserSemantic(pair.Name, pair.Value.Role, pair.Value.Name, pair.Value.Value, pair.Value.Actions ?? [], pair.Value.Enabled, pair.Value.Focused, pair.Value.Selected, pair.Value.SuppressionReason)).ToArray();
