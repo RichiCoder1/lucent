@@ -1,3 +1,5 @@
+param([switch]$NoPublish)
+
 $ErrorActionPreference = 'Stop'
 
 function Wait-Path([string]$Path, [int]$Seconds) {
@@ -16,12 +18,14 @@ function Stop-Tree($Process) {
     $Process.WaitForExit(5000) | Out-Null
 }
 
-dotnet restore "$PSScriptRoot/NativeStack.sln" --locked-mode
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-dotnet build "$PSScriptRoot/NativeStack.sln" --no-restore -warnaserror
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-dotnet publish "$PSScriptRoot/NativeStackProbe/NativeStackProbe.csproj" -c Release -r win-x64 --self-contained true --no-restore -warnaserror
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if (-not $NoPublish) {
+    dotnet restore "$PSScriptRoot/NativeStack.sln" --locked-mode
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    dotnet build "$PSScriptRoot/NativeStack.sln" --no-restore -warnaserror
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    dotnet publish "$PSScriptRoot/NativeStackProbe/NativeStackProbe.csproj" -c Release -r win-x64 --self-contained true --no-restore -warnaserror
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 $work = Join-Path ([IO.Path]::GetTempPath()) ("native-stack-uia-" + [Guid]::NewGuid())
 $null = New-Item -ItemType Directory -Path $work

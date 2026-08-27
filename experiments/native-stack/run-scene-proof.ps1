@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-4")
+param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-4", [switch]$NoPublish)
 
 $ErrorActionPreference = 'Stop'
 $project = "$PSScriptRoot/NativeStackProbe/NativeStackProbe.csproj"
@@ -10,10 +10,12 @@ function Get-Sha256([string]$Path) {
     finally { $sha.Dispose() }
 }
 try {
-    dotnet restore $project --locked-mode
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (-not $NoPublish) {
+        dotnet restore $project --locked-mode
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
     $first = Join-Path $work 'first'
     $second = Join-Path $work 'second'
     $one = & $exe --scene-self-check $first | ConvertFrom-Json

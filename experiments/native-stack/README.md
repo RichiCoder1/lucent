@@ -2,7 +2,7 @@
 
 ## Status
 
-**Issue #3 Windows platform proof complete; Milestone 1 remains open.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
+**Milestone 1 SDL feasibility gate is reproducible.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 
@@ -160,6 +160,20 @@ counts, advances/bounds, direction, cultures, scales, and shared shape IDs.
 Globalization is enabled so the NativeAOT proof can execute en-US/tr-TR; the
 recorded published `win-x64` directory is 156,895,896 bytes (the prior
 invariant-globalization output is not a comparable retained artifact).
+
+## Milestone 1 combined gate
+
+```powershell
+./run-milestone-1-gate.ps1
+```
+
+The gate locked-restores, warning-free builds, and NativeAOT-publishes once,
+then runs the selected SDL host lifecycle, text-state, UIA, retained-scene, and
+layout/shaper checks from that published graph. It writes
+`evidence/milestone-1/proof.json` with source, lock-file, machine, artifact,
+and decision evidence. It validates the existing issue #3 real Japanese IME
+transcripts and issue #4/#5 artifact sets and hashes; those transcripts remain
+supplemental manual SDL/Windows evidence, not an automated OS IME claim.
 
 ## Explicit exclusions
 

@@ -32,6 +32,13 @@ If SDL blocks UIA, IME, or NativeAOT, run only the separately tracked bounded di
 
 Record reproducible commands, source/dependency identities, machine-readable test results, headless/native parity artifacts, and the selected platform decision. Screenshots or manual statements may supplement but cannot replace executable evidence.
 
+### Recorded SDL decision
+
+`run-milestone-1-gate.ps1` is the combined gate. A passing
+`evidence/milestone-1/proof.json` records **SDL3-CS / proceed** and validates
+the issue #3 IME evidence plus the issue #4/#5 parity artifacts. Direct Win32
+is not run when that SDL gate passes.
+
 ## Milestone 2 — interactive reactive application
 
 ### Work

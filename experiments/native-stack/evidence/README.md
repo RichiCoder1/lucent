@@ -41,6 +41,14 @@ jq -e '.[-1].Kind == "close" and .[-1].Committed == "" and any(.Kind == "editing
 
 This evidence passes issue #3's bounded platform proof. It does not claim the later Narrator walkthrough, full semantic tree, or Milestone 1 rendering/layout gates.
 
+## Milestone 1 combined evidence
+
+`../run-milestone-1-gate.ps1` writes `milestone-1/proof.json`. It executes the
+published NativeAOT SDL host, text-state, UIA, scene, and layout/shaper checks,
+then validates this issue's two JSONL IME transcripts and their SHA-256 values.
+The transcript validation is machine-readable supplemental evidence for real
+SDL/Windows IME delivery; only the text-state matrix is automated.
+
 ## Issue #4 retained-scene evidence
 
 `../run-scene-proof.ps1` performs the locked NativeAOT publish and two independent seeded captures. It exits nonzero on stable-ID, dirty-facet isolation, structural parity, raster, frame scheduling, native present, resize, or artifact-hash failure. The captured machine-readable result is [`issue-4/proof.json`](issue-4/proof.json); its canonical dumps and PNGs are alongside it.

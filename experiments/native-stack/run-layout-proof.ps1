@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-5")
+param([string]$OutputDirectory = "$PSScriptRoot/evidence/issue-5", [switch]$NoPublish)
 
 $ErrorActionPreference = 'Stop'
 $project = "$PSScriptRoot/NativeStackProbe/NativeStackProbe.csproj"
@@ -10,10 +10,12 @@ function Get-Sha256([string]$Path) {
     finally { $sha.Dispose() }
 }
 try {
-    dotnet restore $project --locked-mode
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if (-not $NoPublish) {
+        dotnet restore $project --locked-mode
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore -warnaserror
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
     $first = Join-Path $work first; $second = Join-Path $work second
     $one = & $exe --layout-self-check $first | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or -not $one.ok -or -not $one.flexChecks -or -not $one.shapeChecks -or -not $one.cultureChecks -or -not $one.glyphsRendered) { throw 'First layout self-check failed.' }
@@ -24,6 +26,7 @@ try {
     if ($firstFiles.Count -ne 2 -or $secondFiles.Count -ne 2 -or (Compare-Object $expected $firstFiles.Name) -or (Compare-Object $firstFiles.Name $secondFiles.Name)) { throw 'Unexpected or non-deterministic artifact filename set.' }
     $hashes = @($firstFiles | ForEach-Object { $hash = Get-Sha256 $_.FullName; if ($hash -ne (Get-Sha256 (Join-Path $second $_.Name))) { throw "Non-deterministic artifact: $($_.Name)" }; [ordered]@{ name = $_.Name; sha256 = $hash } })
     New-Item -ItemType Directory -Force $OutputDirectory | Out-Null; Get-ChildItem $OutputDirectory -File -ErrorAction SilentlyContinue | Remove-Item -Force; Copy-Item "$first/*" $OutputDirectory
+    $one.ArtifactDirectory = [IO.Path]::GetFullPath($OutputDirectory)
     $proof = [ordered]@{ ok = $true; deterministicRuns = 2; artifacts = $hashes; layout = $one }; $proof | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $OutputDirectory 'proof.json') -NoNewline; $proof | ConvertTo-Json -Depth 8 -Compress
 }
 finally { Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue }
