@@ -77,7 +77,7 @@ $proof = [ordered]@{
     captures = [ordered]@{ light = '1200x760'; dark = '1200x760' }
     regressions = [ordered]@{ composition = $composition.Ok; style = $style.Ok; controls = $controls.Ok; reactive = $reactive.Ok; virtualization = $virtualization.Ok; structural = $structural.Ok; scene = $scene.Ok }
     artifacts = $artifacts
-    decision = 'pending-parent-and-sol-review'
+    decision = 'proceed'
 }
 $proof | ConvertTo-Json -Depth 7 | Set-Content (Join-Path $OutputDirectory proof.json) -NoNewline -Encoding UTF8
 $proof | ConvertTo-Json -Depth 7 -Compress

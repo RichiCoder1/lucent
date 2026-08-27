@@ -55,3 +55,9 @@ The review deliberately rejects three shortcuts: crediting engine primitives
 that application code does not use, treating a declarative file format alone as
 good styling ergonomics, and adding a virtual DOM/CSS engine to manufacture
 parity. Issues #20–#24 track the bounded reframe. Milestone 3 remains blocked.
+
+Milestone 2A subsequently passed after three Sol xhigh review rounds. The final
+round verified real pointer/key/focus behavior, composition-owned same-key
+updates and clipping, reusable SDL translation, a clean source manifest,
+published NativeAOT identity, all twelve walkthrough steps, and zero forbidden
+application seams. This authorizes only the registered Milestone 2B comparison.

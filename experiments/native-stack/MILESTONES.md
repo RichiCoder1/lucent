@@ -116,6 +116,17 @@ The detailed contract and exclusions are in [AUTHORING-REFRAME.md](AUTHORING-REF
 Stop if satisfying this gate requires a virtual DOM, general reconciliation,
 runtime selectors, or application-specific framework hooks.
 
+### Recorded decision
+
+**PROCEED.** Issue #23 passes the absolute Milestone 2A gate. The Native issue
+browser now uses the bounded typed composition interface, stale-retaining async
+derived data, composition-owned keyed virtualization, mounted behaviors,
+inherited typed themes, reduced-motion-aware transitions, complete projected
+semantics, and generic SDL input translation. It contains no application
+renderer, direct bounds/scene commands, `Sync`, or `SetItems`. W1–W12 and the
+issues #20–#22 regressions pass from the recorded NativeAOT executable. Sol
+xhigh's final adversarial review found no blocker or major finding.
+
 ## Milestone 2B — registered authoring comparison
 
 ### Work

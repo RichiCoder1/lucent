@@ -2,7 +2,7 @@
 
 ## Status
 
-**Milestone 2 engine passed; its first authoring attempt recorded STOP and is now explicitly reframed.** The Windows platform/runtime foundations and reactive engine passed, but the frozen issue-browser comparison measured an integration probe that bypassed the intended retained composition and typed styling interface. That STOP remains valid for its source commit. Milestone 2A is authorized to build the missing bounded authoring interface; Milestone 3 remains blocked pending a new Milestone 2B comparison.
+**Milestone 2A passed; Milestone 2B comparison is next.** The Windows platform/runtime foundations and reactive engine passed. The frozen first issue-browser comparison remains a valid STOP for its source commit, but the approved reframe has now produced and validated the missing retained composition and typed styling interface. Milestone 3 remains blocked pending the new Milestone 2B comparison.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 
@@ -78,8 +78,8 @@ Its authored file contains no Skia/canvas renderer, direct bounds or scene
 commands, manual semantic mirror, `Sync`, or `SetItems`. The proof publishes
 NativeAOT, executes W1–W12, enforces the 21-row realization ceiling, captures
 light/dark 1200×760 output, records deterministic dumps, scans forbidden seams,
-and reruns issues #20–#22 regressions. The 2A decision remains pending parent
-and Sol xhigh review.
+and reruns issues #20–#22 regressions. Parent visual review and the final Sol
+xhigh adversarial gate both passed.
 
 ## Issue #20 typed composition proof
 
