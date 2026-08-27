@@ -174,6 +174,7 @@ internal sealed class Selectable : IElementBehavior
         if (!attached) root.Children.Add(Element); input.Set(Element, new("select", true, true, Pointer: Pointer));
     }
     public void Focus(bool visible) { _focusVisible = visible; _focus.Focus(_root, Element); _invalidated?.Invoke(); }
+    public void InvokeSemanticSelect() => Pointer(new(PointerKind.Up, Element.Bounds.X, Element.Bounds.Y));
     private void Pointer(RoutedPointer pointer)
     {
         if (pointer.Kind != PointerKind.Up) return;

@@ -33,9 +33,12 @@ internal static class Program
                 "--uia-manual" when args.Length == 3 => JsonSerializer.Serialize(RunUiaHost(args[1], args[2], manual: true), ProbeJsonContext.Default.UiaHostResult),
                 "--uia-ccw-self-check" when args.Length is 1 or 2 => JsonSerializer.Serialize(RunUiaCcwSelfCheck(args.Skip(1).FirstOrDefault()), ProbeJsonContext.Default.CcwSelfCheckResult),
                 "--issue-browser-walkthrough" => IssueBrowser.RunWalkthrough(args.Skip(1).FirstOrDefault()),
+                "--issue-browser-uia-host" when args.Length == 3 => IssueBrowser.RunUiaHost(args[1], args[2]),
+                "--issue-browser-visible-uia-host" when args.Length == 3 => IssueBrowser.RunUiaHost(args[1], args[2], visible: true),
+                "--issue-14-provider-contract" => IssueBrowser.RunIssue14Contract(args.Skip(1).FirstOrDefault()),
                 "--issue-browser" => IssueBrowser.RunVisible(),
                 null => JsonSerializer.Serialize(RunDependencyProbe(), ProbeJsonContext.Default.ProbeResult),
-                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --controls-self-check, --composition-self-check, --virtualization-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
+                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --controls-self-check, --composition-self-check, --virtualization-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release], --issue-browser-walkthrough [output], or --issue-14-provider-contract [output].")
             };
             Console.WriteLine(json);
             return 0;
@@ -390,9 +393,9 @@ internal sealed unsafe class WindowSubclass : IDisposable
     private const nuint Id = 3;
     private readonly GCHandle _self;
     private readonly IntPtr _hwnd;
-    private readonly UiaRootProvider? _provider;
+    private readonly IUiaProvider? _provider;
     private bool _installed;
-    public WindowSubclass(IntPtr hwnd, UiaRootProvider? provider = null) { _hwnd = hwnd; _provider = provider; _self = GCHandle.Alloc(this); }
+    public WindowSubclass(IntPtr hwnd, IUiaProvider? provider = null) { _hwnd = hwnd; _provider = provider; _self = GCHandle.Alloc(this); }
     public int MessageCount { get; private set; }
     public int UiaDeliveryCount { get; private set; }
     public int RootUiaDeliveryCount { get; private set; }
@@ -514,8 +517,25 @@ internal static unsafe partial class Native
     [LibraryImport("UIAutomationCore.dll")] internal static partial nint UiaReturnRawElementProvider(nint hwnd, nuint wParam, nint lParam, nint provider);
     [LibraryImport("UIAutomationCore.dll")] internal static partial int UiaDisconnectProvider(nint provider);
     [LibraryImport("UIAutomationCore.dll")] internal static partial int UiaHostProviderFromHwnd(nint hwnd, out nint provider);
+    [LibraryImport("UIAutomationCore.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static partial bool UiaClientsAreListening();
+    [LibraryImport("UIAutomationCore.dll")] internal static partial int UiaRaiseAutomationEvent(nint provider, int eventId);
+    [LibraryImport("UIAutomationCore.dll")] internal static partial int UiaRaiseAutomationPropertyChangedEvent(nint provider, int propertyId, RawVariant oldValue, RawVariant newValue);
+    [LibraryImport("UIAutomationCore.dll")] internal static partial int UiaRaiseStructureChangedEvent(nint provider, int changeType, int* runtimeId, int runtimeIdLength);
     [LibraryImport("oleaut32.dll", EntryPoint = "SysAllocString", StringMarshalling = StringMarshalling.Utf16)] internal static partial nint SysAllocString(string value);
+    [LibraryImport("oleaut32.dll")] internal static partial nint SafeArrayCreateVector(ushort type, int lowerBound, uint count);
+    [LibraryImport("oleaut32.dll")] internal static partial int SafeArrayPutElement(nint array, int* index, void* value);
+    [LibraryImport("oleaut32.dll")] internal static partial int SafeArrayDestroy(nint array);
+    [LibraryImport("oleaut32.dll")] internal static partial int VariantClear(ref RawVariant value);
+    [LibraryImport("user32.dll")] internal static partial int ClientToScreen(nint hwnd, ref NativePoint point);
+    [LibraryImport("user32.dll")] internal static partial int GetClientRect(nint hwnd, out NativeRect rectangle);
+    [LibraryImport("user32.dll")] internal static partial uint GetDpiForWindow(nint hwnd);
 }
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativePoint { public int X, Y; }
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeRect { public int Left, Top, Right, Bottom; }
 
 [StructLayout(LayoutKind.Explicit, Size = 24)]
 internal struct RawVariant
@@ -580,7 +600,8 @@ internal sealed unsafe class UiaComWrappers : ComWrappers
     }
 }
 
-internal sealed unsafe class UiaRootProvider : IDisposable
+internal interface IUiaProvider { nint InterfacePointer { get; } }
+internal sealed unsafe class UiaRootProvider : IDisposable, IUiaProvider
 {
     private const int S_OK = 0;
     private const int VtI4 = 3;
@@ -763,5 +784,7 @@ internal sealed record FailureResult(bool Ok, string Error);
 [JsonSerializable(typeof(IssueBrowserSemantic[]))]
 [JsonSerializable(typeof(IssueBrowserAssigneeFilterCheck))]
 [JsonSerializable(typeof(IssueBrowserClosedFilterCheck))]
+[JsonSerializable(typeof(Issue14RoleMapping[]))]
+[JsonSerializable(typeof(Issue14ProviderContract))]
 [JsonSerializable(typeof(IssueBrowserSeed))]
 internal sealed partial class ProbeJsonContext : JsonSerializerContext;

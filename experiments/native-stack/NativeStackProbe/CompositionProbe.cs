@@ -114,6 +114,27 @@ internal sealed class RetainedComposition : IDisposable
         return data.ToArray();
     }
     internal IEnumerable<(string Name, Semantics Value)> Semantics() => _snapshots.Semantics.Select(pair => (pair.Key.Value, pair.Value));
+    internal UiaSemanticNode[] UiaNodes() => Flatten(_root.Element).Select(element => new UiaSemanticNode(element.Id.Value, Parent(_root.Element, element.Id)?.Id.Value, element.Semantics, element.Bounds)).ToArray();
+    internal bool UiaAction(string id, string action, string? value = null)
+    {
+        var element = Flatten(_root.Element).FirstOrDefault(candidate => candidate.Id.Value == id);
+        if (element is null || !element.Semantics.Enabled) return false;
+        var mounted = MountedByElement(element.Id);
+        var handled = action switch
+        {
+            "set-value" when mounted?.Behavior is TextField field && value is not null => SetValue(field, value),
+            "press" => PressControlByElement(element),
+            "select" => SelectByElement(element),
+            "focus" => FocusByElement(element),
+            _ => false
+        };
+        return handled;
+    }
+    private bool SetValue(TextField field, string value) { field.InvokeSemanticSetValue(value); Project([field.Element]); return true; }
+    private bool PressControlByElement(StableElement element) { var x = element.Bounds.X + element.Bounds.Width / 2; var y = element.Bounds.Y + element.Bounds.Height / 2; return _input.Dispatch(_root.Element, PointerKind.Down, x, y) == element && _input.Dispatch(_root.Element, PointerKind.Up, x, y) == element; }
+    private bool SelectByElement(StableElement element) { if (MountedByElement(element.Id)?.Behavior is not Selectable selectable) return false; selectable.InvokeSemanticSelect(); Project([element]); return true; }
+    private bool FocusByElement(StableElement element) { if (_input.Get(element)?.Focusable != true) return false; if (MountedByElement(element.Id)?.Behavior is { } behavior) behavior.Focus(true); else _focus.Focus(_root.Element, element); Project([element]); return true; }
+    private static StableElement? Parent(StableElement root, ElementId child) => root.Children.Any(item => item.Id == child) ? root : root.Children.Select(item => Parent(item, child)).FirstOrDefault(item => item is not null);
     internal void Present(SdlSkiaPresenter presenter) => presenter.Present(_scene);
     internal void Advance(TimeSpan elapsed) { _scheduler.Clock.Tick(elapsed); _scheduler.Pump(); }
     internal bool TransitionActive(string name) => Mounted(name)?.TransitionActive == true;
@@ -525,6 +546,8 @@ internal sealed class RetainedComposition : IDisposable
     private static ResolvedStyle Resolved(Style style, bool transparent = false) => new(style.Background?.Value ?? (transparent ? "#00000000" : "#000000"), style.Foreground?.Value ?? "#ffffff", style.Radius?.Value ?? 0, style.Opacity?.Value ?? 1, style.Transform?.X ?? 0, style.Transform?.Y ?? 0, style.Transform?.Scale ?? 1,
         style.Width, style.Height, style.PaddingX, style.Gap, style.Alignment, style.Typography, style.Border, style.BorderWidth, style.Shadow, style.FocusRing);
 }
+
+internal sealed record UiaSemanticNode(string Id, string? ParentId, Semantics Semantics, Bounds Bounds);
 
 internal sealed record CompositionCheckResult(bool Ok, bool TypedAuthoring, bool ReactiveTextStable, bool ReactiveStyleFacets, bool MountedBehaviors, bool UnrelatedWriteIdle, bool DisposedAsyncCannotUpdate, bool ControlPressed, bool DumpsMatch, bool ShowStable, bool KeyedStable, bool Released, bool NativePresented, int RasterDifferencePixels, uint NativeDpi, string Tree, string Layout, string Style, string ReactiveStyle, string BehaviorSemantics, string Semantics);
 

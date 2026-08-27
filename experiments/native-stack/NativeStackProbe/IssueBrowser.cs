@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Runtime.CompilerServices;
 using SDL3;
 
 /// <summary>The issue browser owns state and intent only; NativeUi owns its tree, rendering, input, and semantics.</summary>
@@ -38,25 +39,120 @@ internal static class IssueBrowser
         return string.Join(Environment.NewLine, steps.Select(step => JsonSerializer.Serialize(step, ProbeJsonContext.Default.IssueBrowserStep)));
     }
 
+    /// <summary>Exercises the retained semantic/UIA seam without an app-owned accessibility tree.</summary>
+    public static string RunIssue14Contract(string? output)
+    {
+        var directory = Path.GetFullPath(output ?? Path.Combine("..", "evidence", "issue-14", "native"));
+        Directory.CreateDirectory(directory);
+        using var app = new State(LoadSeed());
+        var initial = app.Semantics();
+        var completeSemantics = initial.All(item => item.Role.Length > 0 && item.Name.Length > 0 && item.SuppressionReason is null);
+        var roleMappings = initial.Select(item => new Issue14RoleMapping(item.Name, item.Role, UiaControlType(item.Role), item.Actions, item.Enabled)).ToArray();
+
+        app.Send(InputCommand.EditTitle, "UIA Value 😀");
+        var valueSet = app.Semantics().Any(item => item.Name == "Title" && item.Value == "UIA Value 😀" && item.Actions.Contains("set-value"));
+        app.Send(InputCommand.CommitTitle);
+        var valueCommitted = app.CurrentTitle == "UIA Value 😀";
+        app.Send(InputCommand.OpenFilter); app.CompleteAsync();
+        var invoked = app.Rows.All(issue => issue.Status == "Open");
+        app.Send(InputCommand.SelectFirst); app.Send(InputCommand.Next);
+        var selectedAndFocused = app.Semantics().Any(item => item.Selected) && app.Semantics().Any(item => item.Name == "Issue list" && item.Focused);
+        app.Send(InputCommand.FailSearch); app.CompleteAsync();
+        var retryAvailable = app.Semantics().Any(item => item.Name == "Retry" && item.Enabled && item.Actions.Contains("press"));
+        app.Send(InputCommand.Retry); app.CompleteAsync();
+        var retried = app.Semantics().All(item => item.Name != "Search state" || item.Value is null);
+        var result = new Issue14ProviderContract(completeSemantics, valueSet, valueCommitted, invoked, selectedAndFocused, retryAvailable, retried,
+            roleMappings, app.Semantics().Count(item => item.SuppressionReason is not null));
+        if (!result.Ok) throw new InvalidOperationException("Issue #14 semantic provider contract failed.");
+        File.WriteAllText(Path.Combine(directory, "provider-contract.json"), JsonSerializer.Serialize(result, ProbeJsonContext.Default.Issue14ProviderContract));
+        File.WriteAllText(Path.Combine(directory, "semantic-dump.json"), JsonSerializer.Serialize(app.Semantics(), ProbeJsonContext.Default.IssueBrowserSemanticArray));
+        return JsonSerializer.Serialize(result, ProbeJsonContext.Default.Issue14ProviderContract);
+    }
+
+    private static int UiaControlType(string role) => role switch
+    {
+        "button" => 50000, "edit" => 50004, "text" => 50020, "listbox" => 50008,
+        "option" => 50007, "group" => 50026, "region" => 50033, _ => throw new InvalidOperationException($"No UIA control type for {role}.")
+    };
+
     public static string RunVisible()
     {
         using var app = new State(LoadSeed());
         using var host = new WindowHost("Lucent Native Issue Browser", Width, Height, SDL.WindowFlags.Resizable);
         using var presenter = new SdlSkiaPresenter(host.Window, new SkiaSceneRenderer());
+        var dispatcher = new UiaSourceDispatcher(app);
+        using var provider = new UiaIssueProvider(host.Hwnd, dispatcher); using var subclass = new WindowSubclass(host.Hwnd, provider);
+        dispatcher.Attach(provider.Reconcile, provider.ActionCompleted);
+        if (!subclass.Install()) throw new InvalidOperationException("SetWindowSubclass failed.");
         if (!SDL.ShowWindow(host.Window)) throw new InvalidOperationException(SDL.GetError());
         app.Route(new(CompositionInputKind.Semantic, "Search issues", "focus"));
         app.Present(presenter);
         SDL.StartTextInput(host.Window);
-        while (SDL.WaitEventTimeout(out var e, 20))
+        var running = true;
+        while (running)
         {
-            var type = (SDL.EventType)e.Type;
-            if (type is SDL.EventType.Quit or SDL.EventType.WindowCloseRequested) break;
-            var changed = CompositionInputs.TryFromSdl(e, out var input) && app.Route(input!);
-            if (changed) app.Present(presenter);
+            if (SDL.WaitEventTimeout(out var e, 20))
+            {
+                var type = (SDL.EventType)e.Type;
+                if (type is SDL.EventType.Quit or SDL.EventType.WindowCloseRequested) running = false;
+                else if (CompositionInputs.TryFromSdl(e, out var input) && app.Route(input!)) app.Present(presenter);
+            }
+            dispatcher.Pump();
             app.Advance(TimeSpan.FromMilliseconds(20));
         }
         SDL.StopTextInput(host.Window);
         return $"{{\"mode\":\"native-ui\",\"rows\":{app.Rows.Count},\"realized\":{app.Realized}}}";
+    }
+
+    public static string RunUiaHost(string readyPath, string closePath, bool visible = false)
+    {
+        using var app = new State(LoadSeed()); using var host = new WindowHost("Lucent Native Issue Browser", Width, Height, visible ? SDL.WindowFlags.Resizable : SDL.WindowFlags.Hidden);
+        var dispatcher = new UiaSourceDispatcher(app);
+        using var provider = new UiaIssueProvider(host.Hwnd, dispatcher); using var subclass = new WindowSubclass(host.Hwnd, provider);
+        dispatcher.Attach(provider.Reconcile, provider.ActionCompleted);
+        if (!subclass.Install()) throw new InvalidOperationException("SetWindowSubclass failed.");
+        if (!provider.ValidateRootAbi()) throw new InvalidOperationException("FragmentRoot SDK ABI check failed.");
+        if (visible && !SDL.ShowWindow(host.Window)) throw new InvalidOperationException(SDL.GetError());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(readyPath))!);
+        File.WriteAllText(readyPath, JsonSerializer.Serialize(new UiaReadyResult(true, host.HwndText, RuntimeFeature.IsDynamicCodeSupported), ProbeJsonContext.Default.UiaReadyResult));
+        var until = Environment.TickCount64 + 30_000;
+        while (!File.Exists(closePath) && Environment.TickCount64 < until)
+        {
+            while (SDL.PollEvent(out var e)) if ((SDL.EventType)e.Type is SDL.EventType.Quit or SDL.EventType.WindowCloseRequested) break;
+            dispatcher.Pump();
+            SDL.Delay(10);
+        }
+        if (!File.Exists(closePath)) throw new TimeoutException("UIA helper timed out.");
+        if (subclass.RootUiaDeliveryCount == 0) throw new InvalidOperationException("External UIA did not reach the issue-browser provider.");
+        var result = $"{{\"ok\":true,\"visible\":{visible.ToString().ToLowerInvariant()},\"rootAbi\":true,\"rootPointCalls\":{provider.RootPointCalls},\"rootFocusCalls\":{provider.RootFocusCalls},\"rootUiaDeliveryCount\":{subclass.RootUiaDeliveryCount},\"cacheCount\":{provider.CacheCount},\"maxCacheCount\":{provider.MaxCacheCount},\"staleDisconnected\":{provider.StaleDisconnected},\"focusEvents\":{provider.FocusEvents},\"propertyEvents\":{provider.PropertyEvents},\"structureEvents\":{provider.StructureEvents}}}";
+        File.WriteAllText(readyPath + ".host.json", result);
+        return result;
+    }
+
+    private sealed class UiaSourceDispatcher(IUiaSemanticSource source) : IUiaSemanticSource
+    {
+        private readonly int _ownerThread = Environment.CurrentManagedThreadId;
+        private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _pending = new();
+        private UiaSemanticNode[] _snapshot = source.UiaNodes;
+        private Action<UiaSemanticNode[], UiaSemanticNode[]>? _changed;
+        private Action<string, string>? _actionCompleted;
+        public UiaSemanticNode[] UiaNodes => Invoke(Read);
+        public bool UiaAction(string id, string action, string? value) => Invoke(() => { var result = source.UiaAction(id, action, value); Read(); if (result) _actionCompleted?.Invoke(id, action); return result; });
+        public void Attach(Action<UiaSemanticNode[], UiaSemanticNode[]> changed, Action<string, string> actionCompleted) { _changed = changed; _actionCompleted = actionCompleted; }
+        public void Pump() { while (_pending.TryDequeue(out var action)) action(); Read(); }
+        private UiaSemanticNode[] Read()
+        {
+            var next = source.UiaNodes; var previous = _snapshot; _snapshot = next;
+            if (!previous.SequenceEqual(next)) _changed?.Invoke(previous, next);
+            return next;
+        }
+        private T Invoke<T>(Func<T> action)
+        {
+            if (Environment.CurrentManagedThreadId == _ownerThread) return action();
+            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pending.Enqueue(() => { try { completion.SetResult(action()); } catch (Exception exception) { completion.SetException(exception); } });
+            return completion.Task.GetAwaiter().GetResult();
+        }
     }
 
     private static IssueBrowserSeed LoadSeed()
@@ -67,7 +163,7 @@ internal static class IssueBrowser
         return JsonSerializer.Deserialize(File.ReadAllText(path), ProbeJsonContext.Default.IssueBrowserSeed) ?? throw new InvalidOperationException("Invalid issue seed.");
     }
 
-    private sealed class State : IDisposable
+    private sealed class State : IDisposable, IUiaSemanticSource
     {
         private readonly IssueBrowserSeed _seed;
         private readonly ReactiveGraph _graph = new();
@@ -87,6 +183,9 @@ internal static class IssueBrowser
         public List<Issue> Rows => (_latest.Value ?? []).ToList();
         public int Realized => _ui.RealizedCount("Issue list");
         public string Query => _query.Value;
+        public string? CurrentTitle => Current?.Title;
+        public UiaSemanticNode[] UiaNodes { get { _graph.Drain(); return _ui.UiaNodes(); } }
+        public bool UiaAction(string id, string action, string? value) { var result = _ui.UiaAction(id, action, value); _graph.Drain(); return result; }
         private Issue? Current => _source.Value.FirstOrDefault(issue => issue.Id == _selected.Value);
         private ThemeLayer Theme => _theme.Value;
 
@@ -274,7 +373,7 @@ internal static class IssueBrowser
             _draft.Value = "";
         }
 
-        private void CompleteAsync()
+        internal void CompleteAsync()
         {
             for (var attempt = 0; attempt != 10 && _latest.Pending; attempt++)
             {
@@ -374,4 +473,9 @@ internal sealed record IssueBrowserIdentity(int Rows, int Realized, string Selec
 internal sealed record IssueBrowserSemantic(string Id, string Role, string Name, string? Value, string[] Actions, bool Enabled, bool Focused, bool Selected, string? SuppressionReason);
 internal sealed record IssueBrowserAssigneeFilterCheck(bool Pass, int Expected, int Observed, string Assignee);
 internal sealed record IssueBrowserClosedFilterCheck(bool Pass, int Expected, int Observed, string Status);
+internal sealed record Issue14RoleMapping(string Name, string Role, int ControlType, string[] Actions, bool Enabled);
+internal sealed record Issue14ProviderContract(bool CompleteSemantics, bool ValueSet, bool ValueCommitted, bool Invoked, bool SelectedAndFocused, bool RetryAvailable, bool Retried, Issue14RoleMapping[] Roles, int EmergencySuppressions)
+{
+    public bool Ok => CompleteSemantics && ValueSet && ValueCommitted && Invoked && SelectedAndFocused && RetryAvailable && Retried && EmergencySuppressions == 0;
+}
 internal sealed record IssueBrowserSeed([property: System.Text.Json.Serialization.JsonPropertyName("count")] int Count, [property: System.Text.Json.Serialization.JsonPropertyName("asyncDelayMilliseconds")] int AsyncDelayMilliseconds, [property: System.Text.Json.Serialization.JsonPropertyName("failureQuery")] string FailureQuery);
