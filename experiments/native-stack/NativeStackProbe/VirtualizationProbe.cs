@@ -43,6 +43,7 @@ internal sealed class VirtualizedList : IDisposable
     private readonly StableElement _content;
     private readonly Dictionary<string, StableElement> _elements = new(StringComparer.Ordinal);
     private readonly HashSet<string> _realized = new(StringComparer.Ordinal);
+    private readonly ReactiveEffect? _itemsEffect;
     private string[] _keys;
     private string? _focusedKey;
     private int _releasedScopes;
@@ -68,6 +69,13 @@ internal sealed class VirtualizedList : IDisposable
         Viewport.Element.Children.Add(_content);
         _region = new(_content, graph, projection, input, focus);
         Synchronize();
+    }
+
+    /// <summary>Collection reads stay in this explicit callback; applications never reconcile list rows.</summary>
+    public VirtualizedList(ReactiveGraph graph, StableElement root, InputRouter input, FocusScopes focus, SceneProjection projection, Func<IEnumerable<string>> items, int width, int height, int rowHeight = 10)
+        : this(graph, root, input, focus, projection, [], width, height, rowHeight)
+    {
+        _itemsEffect = graph.Effect(() => SetItems(items()), "issues.items");
     }
 
     public void Wheel(int delta) => Viewport.Wheel(delta);
@@ -104,6 +112,7 @@ internal sealed class VirtualizedList : IDisposable
     public void TickRows() { _lifetimeTick.Value++; _graph.Drain(); }
     public void Dispose()
     {
+        _itemsEffect?.Dispose();
         _region.Dispose();
         _input.Release([Viewport.Element]); _focus.Release(Flatten(Viewport.Element)); _projection.Release(Flatten(Viewport.Element));
         _root.Children.Remove(Viewport.Element); _lifetimeTick.Dispose(); _realized.Clear(); _elements.Clear();
@@ -181,7 +190,7 @@ internal sealed class VirtualizedList : IDisposable
     private sealed class ScopeMarker(Action released) : IDisposable { public void Dispose() => released(); }
 }
 
-internal sealed record VirtualizationCheckResult(bool Ok, bool TenThousandRows, bool WheelAndKeyboardScroll, bool StableRealizedIdentity, bool BoundedRealizedCount, bool SelectionAndFocusVisible, bool KeyedSelectionPreserved, bool DeterministicReorderRemoval, bool ScopeInputFocusCaptureSceneSemanticsReleased, int RealizedCount, int RealizedLimit, int ReleasedScopes, int ManagedGrowthBytes, int ManagedBeforeBytes, int ManagedAfterBytes);
+internal sealed record VirtualizationCheckResult(bool Ok, bool TenThousandRows, bool ComputedFiltering, bool WheelAndKeyboardScroll, bool StableRealizedIdentity, bool BoundedRealizedCount, bool SelectionAndFocusVisible, bool KeyedSelectionPreserved, bool DeterministicReorderRemoval, bool ScopeInputFocusCaptureSceneSemanticsReleased, int RealizedCount, int RealizedLimit, int ReleasedScopes, int ManagedGrowthBytes, int ManagedBeforeBytes, int ManagedAfterBytes);
 
 internal static class VirtualizationProbe
 {
@@ -190,7 +199,9 @@ internal static class VirtualizationProbe
         var graph = new ReactiveGraph(); var scene = new RetainedScene(); var snapshots = new ProjectedSnapshots(); var projection = new SceneProjection(scene, snapshots);
         var root = new StableElement(new("issues.root"), new(0, 0, 100, 100), new("#09090b", "#fafafa", 0), new("window", "Issues")); var input = new InputRouter(); var focus = new FocusScopes(input);
         var keys = Enumerable.Range(0, 10_000).Select(index => $"issue-{index:D5}").ToArray();
-        var list = new VirtualizedList(graph, root, input, focus, projection, keys, 100, 100);
+        var source = graph.Signal(keys, "issues.source"); var query = graph.Signal("", "issues.query");
+        var filtered = graph.Computed(() => source.Value.Where(key => key.Contains(query.Value, StringComparison.Ordinal)).ToArray(), "issues.filtered");
+        var list = new VirtualizedList(graph, root, input, focus, projection, () => filtered.Value, 100, 100);
         graph.Drain();
         var tenThousandRows = keys.Length == 10_000;
         var stable = list.Row("issue-00005")!; list.Wheel(-20); var stableIdentity = list.Row("issue-00005") == stable; var wheel = list.Viewport.Offset == 20 && stableIdentity;
@@ -199,9 +210,9 @@ internal static class VirtualizationProbe
         var selectedVisible = list.SelectedKey == "issue-05000" && focus.Focused == list.Row("issue-05000")!.Id && list.Row("issue-05000")!.Bounds.Y >= 0 && list.Row("issue-05000")!.Bounds.Y < 100;
         list.Key("ArrowDown"); selectedVisible &= list.SelectedKey == "issue-05001" && focus.Focused == list.Row("issue-05001")!.Id;
         var selected = list.Row("issue-05001")!;
-        list.SetItems(keys.OrderByDescending(key => key, StringComparer.Ordinal));
+        source.Value = keys.OrderByDescending(key => key, StringComparer.Ordinal).ToArray(); graph.Drain();
         var reordered = list.SelectedKey == "issue-05001" && list.Row("issue-05001") == selected;
-        var withoutSelected = keys.Where(key => key != "issue-05001").ToArray(); list.SetItems(withoutSelected);
+        var withoutSelected = keys.Where(key => key != "issue-05001").ToArray(); source.Value = withoutSelected; graph.Drain();
         var deterministic = list.SelectedKey == "issue-04998" && focus.Focused == list.Row("issue-04998")!.Id;
         var captured = list.Row("issue-05000")!; input.Dispatch(root, PointerKind.Down, 1, captured.Bounds.Y + 1); var captureEstablished = input.Capture == captured.Id;
         var sceneHadCaptured = scene.Commands.Any(command => command.Id == captured.Id) && snapshots.Semantics.ContainsKey(captured.Id);
@@ -211,10 +222,12 @@ internal static class VirtualizationProbe
         for (var cycle = 0; cycle < 20; cycle++) { list.Select(keys[(cycle * 499) % keys.Length]); }
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); var after = GC.GetTotalMemory(true);
         var realizedCount = list.RealizedCount; var realizedLimit = list.RealizedLimit; var bounded = realizedCount <= realizedLimit && realizedLimit == 14;
+        source.Value = keys; query.Value = "000"; graph.Drain(); list.Select("issue-00000");
+        var computedFiltering = list.Row("issue-00000") is not null && list.RealizedCount <= list.RealizedLimit;
         list.Dispose();
         static bool IsListOwned(ElementId id) => id.Value is "issues.viewport" or "issues.content" || id.Value.StartsWith("issues.row.", StringComparison.Ordinal);
         released &= !root.Children.Any(element => element.Id.Value == "issues.viewport") && input.Get(list.Viewport.Element) is null && !scene.Commands.Any(command => IsListOwned(command.Id)) && !snapshots.Semantics.Keys.Any(IsListOwned);
-        var result = new VirtualizationCheckResult(tenThousandRows && wheel && keyboard && stableIdentity && bounded && selectedVisible && reordered && deterministic && released, tenThousandRows, wheel && keyboard, stableIdentity, bounded, selectedVisible, reordered, deterministic, released, realizedCount, realizedLimit, list.ReleasedScopes, (int)Math.Clamp(after - before, int.MinValue, int.MaxValue), (int)Math.Min(before, int.MaxValue), (int)Math.Min(after, int.MaxValue));
+        var result = new VirtualizationCheckResult(tenThousandRows && computedFiltering && wheel && keyboard && stableIdentity && bounded && selectedVisible && reordered && deterministic && released, tenThousandRows, computedFiltering, wheel && keyboard, stableIdentity, bounded, selectedVisible, reordered, deterministic, released, realizedCount, realizedLimit, list.ReleasedScopes, (int)Math.Clamp(after - before, int.MinValue, int.MaxValue), (int)Math.Min(before, int.MaxValue), (int)Math.Min(after, int.MaxValue));
         if (!result.Ok) throw new InvalidOperationException($"Virtualization self-check failed: {result}.");
         return result;
     }

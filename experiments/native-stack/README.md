@@ -46,18 +46,18 @@ The runtime-first spike uses straight C#. `.lui` lowering is deliberately deferr
 
 ```csharp
 var details = graph.Signal(true, "details");
-var issues = new List<string> { "a", "b" };
+var issues = graph.Signal(new[] { "a", "b" }, "issues");
 using var app = NativeUi.Mount(graph,
     NativeUi.Column(
         NativeUi.Text("Issues").Fg(SemanticToken.Primary),
         NativeUi.Row(
             NativeUi.Control("Save").OnPress(Save),
             NativeUi.Show(() => details.Value, () => NativeUi.Text("Details"))),
-        NativeUi.For(issues, issue => issue, issue => NativeUi.Text(issue)))
+        NativeUi.For(() => issues.Value, issue => issue, issue => NativeUi.Text(issue)))
     .Gap(3).Padding(2).Bg(SemanticToken.Background).Fg(SemanticToken.Foreground));
 ```
 
-Reactive reads are tracked only inside explicit reactive callbacks. A later compiler may provide static dependency tables to the same scheduler. Stable nodes update directly; `Show` and keyed `For` own structural regions. There is no general virtual DOM or runtime selector engine.
+Reactive reads are tracked only inside explicit reactive callbacks: `Text(() => query.Value)` updates its stable semantic facet, `For(() => filtered.Value, ...)` owns keyed collection changes, and `VirtualizedList(..., () => filtered.Value, ...)` owns its realized window. A later compiler may provide static dependency tables to the same scheduler. There is no general virtual DOM or runtime selector engine.
 
 The first issue-browser did not meet this shape: it drew application geometry
 and colors directly and manually synchronized computed rows into

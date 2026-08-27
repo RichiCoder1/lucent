@@ -8,16 +8,18 @@ internal static class NativeUi
     public static UiNode Row(params UiNode[] children) => new(UiKind.Row, children);
     public static UiNode Column(params UiNode[] children) => new(UiKind.Column, children);
     public static UiNode Text(string value) => new(UiKind.Text, [], value);
+    public static UiNode Text(Func<string> value) => new(UiKind.Text, [], TextValue: value);
     public static UiNode Control(string name) => new(UiKind.Control, [], name);
     public static UiNode Show(Func<bool> visible, Func<UiNode> content) => new(UiKind.Show, [], Show: visible, Content: content);
     public static UiNode For<T>(IEnumerable<T> items, Func<T, string> key, Func<T, UiNode> item) => new(UiKind.For, [], Items: () => items.Cast<object>(), Key: value => key((T)value), Item: value => item((T)value));
+    public static UiNode For<T>(Func<IEnumerable<T>> items, Func<T, string> key, Func<T, UiNode> item) => new(UiKind.For, [], Items: () => items().Cast<object>(), Key: value => key((T)value), Item: value => item((T)value), ItemsChanged: true);
     public static RetainedComposition Mount(ReactiveGraph graph, UiNode root) => new(graph, root);
 }
 
 internal enum UiKind { Row, Column, Text, Control, Show, For }
 
 /// <summary>Immutable finite authoring node; modifiers only alter typed layout, paint, or control values.</summary>
-internal sealed record UiNode(UiKind Kind, UiNode[] Children, string? Text = null, Func<bool>? Show = null, Func<UiNode>? Content = null, Func<IEnumerable<object>>? Items = null, Func<object, string>? Key = null, Func<object, UiNode>? Item = null, Style? Style = null, UiLength? LayoutGap = null, UiLength? LayoutPadding = null, Action? Press = null)
+internal sealed record UiNode(UiKind Kind, UiNode[] Children, string? Text = null, Func<string>? TextValue = null, Func<bool>? Show = null, Func<UiNode>? Content = null, Func<IEnumerable<object>>? Items = null, Func<object, string>? Key = null, Func<object, UiNode>? Item = null, Style? Style = null, UiLength? LayoutGap = null, UiLength? LayoutPadding = null, Action? Press = null, bool ItemsChanged = false)
 {
     public UiNode Bg(UiColor color) => this with { Style = (Style ?? new Style()).Bg(color) };
     public UiNode Bg(SemanticToken token) => this with { Style = (Style ?? new Style()).Bg(token) };
@@ -52,7 +54,6 @@ internal sealed class RetainedComposition : IDisposable
         _graph.Drain(); // starts explicit Show callbacks after their owner exists.
     }
 
-    public void Refresh() { ThrowIfDisposed(); _root.Refresh(); Render(); }
     public string TreeDump() => Tree(_root.Element) + "\n";
     public string LayoutDump() => Dump(_snapshots.Layout.Select(pair => $"{pair.Key.Value}=[{pair.Value.X},{pair.Value.Y},{pair.Value.Width},{pair.Value.Height}]"));
     public string StyleDump() => Dump(_snapshots.Style.Select(pair => $"{pair.Key.Value}={pair.Value.Background}/{pair.Value.Foreground}/{pair.Value.CornerRadius}"));
@@ -60,6 +61,7 @@ internal sealed class RetainedComposition : IDisposable
     public StableElement? FindText(string text) => Flatten(_root.Element).FirstOrDefault(element => element.Semantics.Name == text);
     public int SceneCount => _scene.Count;
     public int SemanticCount => _snapshots.Semantics.Count;
+    public int ProjectionCalls { get; private set; }
     internal RetainedScene Scene => _scene;
     internal bool PressControl(string name)
     {
@@ -73,7 +75,7 @@ internal sealed class RetainedComposition : IDisposable
     private MountedNode Mount(UiNode node)
     {
         var role = node.Kind switch { UiKind.Text => "text", UiKind.Control => "button", UiKind.Show or UiKind.For => "region", _ => "group" };
-        var name = node.Text ?? node.Kind.ToString();
+        var name = node.Text ?? (node.TextValue is not null ? "" : node.Kind.ToString());
         var actions = node.Kind == UiKind.Control ? new[] { "press" } : null;
         var element = new StableElement(new($"native.{++_nextId}"), default, Resolve(node), new(role, name, Actions: actions));
         var mounted = new MountedNode(this, node, element, _graph.Scope());
@@ -81,10 +83,15 @@ internal sealed class RetainedComposition : IDisposable
             foreach (var child in node.Children) mounted.Children.Add(Mount(child));
         if (node.Kind == UiKind.Control && node.Press is not null)
             _input.Set(element, new("press", true, true, Pointer: pointer => { if (pointer.Kind == PointerKind.Up) node.Press(); }));
+        if (node.Kind == UiKind.Text && node.TextValue is not null)
+            mounted.TextEffect = mounted.Scope.Effect(() => mounted.SetText(node.TextValue()), "composition.text");
         if (node.Kind == UiKind.Show)
             mounted.ShowEffect = mounted.Scope.Effect(() => mounted.SetShown(node.Show!()), "composition.show");
         if (node.Kind == UiKind.For)
-            mounted.RefreshFor();
+        {
+            if (node.ItemsChanged) mounted.ForEffect = mounted.Scope.Effect(mounted.RefreshFor, "composition.for");
+            else mounted.RefreshFor();
+        }
         mounted.Attach();
         return mounted;
     }
@@ -93,7 +100,7 @@ internal sealed class RetainedComposition : IDisposable
     {
         if (_disposed) return;
         Layout(_root, 0, 0, 120, 80);
-        _projection.Project(Flatten(_root.Element));
+        Project(Flatten(_root.Element));
     }
 
     private static ResolvedStyle Resolve(UiNode node)
@@ -128,6 +135,7 @@ internal sealed class RetainedComposition : IDisposable
         var elements = Flatten(mounted.Element).ToArray();
         _input.Release(elements); _focus.Release(elements); _projection.Release(elements);
     }
+    private void Project(IEnumerable<StableElement> elements) { ProjectionCalls++; _projection.Project(elements); }
     private static IEnumerable<StableElement> Flatten(StableElement root) => [root, .. root.Children.SelectMany(Flatten)];
     private static string Dump(IEnumerable<string> lines) => string.Join('\n', lines.OrderBy(line => line, StringComparer.Ordinal)) + "\n";
     private static string Tree(StableElement element) => element.Id.Value + "(" + string.Join(',', element.Children.Select(Tree)) + ")";
@@ -149,18 +157,20 @@ internal sealed class RetainedComposition : IDisposable
         public List<MountedNode> Children { get; } = [];
         public IEnumerable<MountedNode> LayoutChildren => _shown is null ? Children : [_shown, .. Children];
         public ReactiveEffect? ShowEffect { get; set; }
+        public ReactiveEffect? ForEffect { get; set; }
+        public ReactiveEffect? TextEffect { get; set; }
+        public void SetText(string text)
+        {
+            if (Element.Semantics.Name == text) return;
+            Element.Semantics = Element.Semantics with { Name = text };
+            Element.Mark(DirtyFacet.Semantics);
+            owner.Project([Element]);
+        }
         public void SetShown(bool visible)
         {
             if (visible && _shown is null) _shown = owner.Mount(Node.Content!());
             if (!visible && _shown is not null) { _shown.Dispose(); _shown = null; }
             Attach(); owner.Render();
-        }
-        public void Refresh()
-        {
-            if (Node.Kind == UiKind.For) RefreshFor();
-            foreach (var child in Children.ToArray()) child.Refresh();
-            _shown?.Refresh();
-            Attach();
         }
         public void RefreshFor()
         {
@@ -180,6 +190,8 @@ internal sealed class RetainedComposition : IDisposable
         public void Dispose()
         {
             ShowEffect?.Dispose();
+            ForEffect?.Dispose();
+            TextEffect?.Dispose();
             _shown?.Dispose();
             foreach (var child in Children.Distinct().ToArray()) child.Dispose();
             Children.Clear(); _keyed.Clear(); owner.Release(this); Scope.Dispose();
@@ -187,7 +199,7 @@ internal sealed class RetainedComposition : IDisposable
     }
 }
 
-internal sealed record CompositionCheckResult(bool Ok, bool TypedAuthoring, bool ControlPressed, bool DumpsMatch, bool ShowStable, bool KeyedStable, bool Released, bool NativePresented, int RasterDifferencePixels, uint NativeDpi, string Tree, string Layout, string Style, string Semantics);
+internal sealed record CompositionCheckResult(bool Ok, bool TypedAuthoring, bool ReactiveTextStable, bool UnrelatedWriteIdle, bool DisposedAsyncCannotUpdate, bool ControlPressed, bool DumpsMatch, bool ShowStable, bool KeyedStable, bool Released, bool NativePresented, int RasterDifferencePixels, uint NativeDpi, string Tree, string Layout, string Style, string Semantics);
 
 internal static class CompositionProbe
 {
@@ -196,17 +208,42 @@ internal static class CompositionProbe
         var first = Scenario(presentNative: true);
         var second = Scenario();
         var dumpsMatch = first.Dumps == second.Dumps;
-        var result = new CompositionCheckResult(first.TypedAuthoring && first.ControlPressed && dumpsMatch && first.ShowStable && first.KeyedStable && first.Released && first.Native.Presented && first.Native.RasterDifferencePixels == 0,
-            first.TypedAuthoring, first.ControlPressed, dumpsMatch, first.ShowStable, first.KeyedStable, first.Released, first.Native.Presented, first.Native.RasterDifferencePixels, first.Native.Dpi, first.Dumps.Tree, first.Dumps.Layout, first.Dumps.Style, first.Dumps.Semantics);
+        var bindings = ReactiveBindings();
+        var result = new CompositionCheckResult(first.TypedAuthoring && bindings.TextStable && bindings.UnrelatedIdle && bindings.DisposedAsyncCannotUpdate && first.ControlPressed && dumpsMatch && first.ShowStable && first.KeyedStable && first.Released && first.Native.Presented && first.Native.RasterDifferencePixels == 0,
+            first.TypedAuthoring, bindings.TextStable, bindings.UnrelatedIdle, bindings.DisposedAsyncCannotUpdate, first.ControlPressed, dumpsMatch, first.ShowStable, first.KeyedStable, first.Released, first.Native.Presented, first.Native.RasterDifferencePixels, first.Native.Dpi, first.Dumps.Tree, first.Dumps.Layout, first.Dumps.Style, first.Dumps.Semantics);
         if (!result.Ok) throw new InvalidOperationException("Composition self-check failed.");
         return result;
+    }
+
+    private static BindingResult ReactiveBindings()
+    {
+        var graph = new ReactiveGraph();
+        var text = graph.Signal("one", "composition.text");
+        var unrelated = graph.Signal(0, "composition.unrelated");
+        var evaluations = 0;
+        using var app = NativeUi.Mount(graph, NativeUi.Column(NativeUi.Text(() => { evaluations++; return text.Value; }), NativeUi.Text("fixed")));
+        var bound = app.FindText("one")!;
+        var projections = app.ProjectionCalls;
+        unrelated.Value++; graph.Drain();
+        var unrelatedIdle = app.ProjectionCalls == projections;
+        text.Value = "two"; graph.Drain();
+        var textStable = ReferenceEquals(bound, app.FindText("two")) && app.ProjectionCalls == projections + 1 && evaluations == 2;
+
+        var pending = new TaskCompletionSource<string>();
+        var scope = graph.Scope();
+        var async = scope.AsyncComputed(_ => pending.Task, "composition.async");
+        var stale = NativeUi.Mount(graph, NativeUi.Text(() => async.Value ?? "pending"));
+        graph.Drain(); stale.Dispose(); scope.Dispose(); pending.SetResult("late"); graph.Drain();
+        var disposedAsyncCannotUpdate = stale.SceneCount == 0 && stale.SemanticCount == 0;
+        return new(textStable, unrelatedIdle, disposedAsyncCannotUpdate);
     }
 
     private static ScenarioResult Scenario(bool presentNative = false)
     {
         var graph = new ReactiveGraph();
         var details = graph.Signal(true, "composition.details");
-        var rows = new List<string> { "a", "b" };
+        var rows = graph.Signal(new[] { "a", "b" }, "composition.rows");
+        var rowEvaluations = 0;
         var presses = 0;
         using var app = NativeUi.Mount(graph,
             NativeUi.Column(
@@ -214,15 +251,15 @@ internal static class CompositionProbe
                 NativeUi.Row(
                     NativeUi.Control("Save").OnPress(() => presses++),
                     NativeUi.Show(() => details.Value, () => NativeUi.Text("Details"))),
-                NativeUi.For(rows, issue => issue, issue => NativeUi.Text(issue)))
+                NativeUi.For(() => { rowEvaluations++; return rows.Value; }, issue => issue, issue => NativeUi.Text(issue)))
             .Gap(3).Padding(2).Bg(SemanticToken.Background).Fg(SemanticToken.Foreground));
         var detailsBefore = app.FindText("Details");
         graph.Drain();
         var showStable = detailsBefore is not null && ReferenceEquals(detailsBefore, app.FindText("Details"));
         var controlPressed = app.PressControl("Save") && presses == 1;
         var b = app.FindText("b");
-        rows.Remove("a"); rows.Add("c"); app.Refresh();
-        var keyedStable = b is not null && ReferenceEquals(b, app.FindText("b")) && app.FindText("a") is null && app.FindText("c") is not null;
+        rows.Value = ["b", "c"]; graph.Drain();
+        var keyedStable = b is not null && ReferenceEquals(b, app.FindText("b")) && app.FindText("a") is null && app.FindText("c") is not null && rowEvaluations == 2;
         details.Value = false; graph.Drain();
         var hidden = app.FindText("Details") is null;
         details.Value = true; graph.Drain();
@@ -258,5 +295,6 @@ internal static class CompositionProbe
 
     private sealed record Dumps(string Tree, string Layout, string Style, string Semantics);
     private sealed record NativePresentation(bool Presented, int RasterDifferencePixels, uint Dpi);
+    private sealed record BindingResult(bool TextStable, bool UnrelatedIdle, bool DisposedAsyncCannotUpdate);
     private sealed record ScenarioResult(bool TypedAuthoring, bool ControlPressed, bool ShowStable, bool KeyedStable, bool Released, Dumps Dumps, NativePresentation Native);
 }
