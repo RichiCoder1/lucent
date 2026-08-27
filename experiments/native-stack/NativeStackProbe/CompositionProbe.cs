@@ -84,6 +84,8 @@ internal sealed class RetainedComposition : IDisposable
     private StableElement? _rootElement;
     private ElementId? _styledFocus;
     private int _nextId;
+    private int? _layoutWidth;
+    private int? _layoutHeight;
     private bool _disposed;
 
     internal RetainedComposition(ReactiveGraph graph, UiNode root)
@@ -136,6 +138,12 @@ internal sealed class RetainedComposition : IDisposable
     private bool FocusByElement(StableElement element) { if (_input.Get(element)?.Focusable != true) return false; if (MountedByElement(element.Id)?.Behavior is { } behavior) behavior.Focus(true); else _focus.Focus(_root.Element, element); Project([element]); return true; }
     private static StableElement? Parent(StableElement root, ElementId child) => root.Children.Any(item => item.Id == child) ? root : root.Children.Select(item => Parent(item, child)).FirstOrDefault(item => item is not null);
     internal void Present(SdlSkiaPresenter presenter) { presenter.Present(_scene); _scheduler.Presented(); }
+    internal void Resize(int width, int height)
+    {
+        if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException();
+        _layoutWidth = width; _layoutHeight = height;
+        Render();
+    }
     internal void Advance(TimeSpan elapsed) { _scheduler.Clock.Tick(elapsed); _scheduler.Pump(); }
     internal int RequestedFrames => _scheduler.RequestedFrames;
     internal int PresentedFrames => _scheduler.PresentCalls;
@@ -277,7 +285,7 @@ internal sealed class RetainedComposition : IDisposable
     private void Render()
     {
         if (_disposed) return;
-        Layout(_root, 0, 0, _root.Element.Style.Width?.Value ?? 120, _root.Element.Style.Height?.Value ?? 80);
+        Layout(_root, 0, 0, _layoutWidth ?? _root.Element.Style.Width?.Value ?? 120, _layoutHeight ?? _root.Element.Style.Height?.Value ?? 80, _layoutWidth is not null);
         var elements = Flatten(_root.Element).ToArray();
         Project(elements);
         _scene.Order(elements.Select(element => element.Id));
@@ -290,11 +298,11 @@ internal sealed class RetainedComposition : IDisposable
         return Resolved(style, node.Kind == UiKind.Text);
     }
 
-    private static void Layout(MountedNode mounted, int x, int y, int width, int height)
+    private static void Layout(MountedNode mounted, int x, int y, int width, int height, bool forceSize = false)
     {
         var element = mounted.Element;
         var node = mounted.Node;
-        width = mounted.Element.Style.Width?.Value ?? width; height = mounted.Element.Style.Height?.Value ?? height;
+        if (!forceSize) { width = mounted.Element.Style.Width?.Value ?? width; height = mounted.Element.Style.Height?.Value ?? height; }
         var bounds = new Bounds(x, y, Math.Max(0, width), Math.Max(0, height));
         if (element.Bounds != bounds) { element.Bounds = bounds; element.Mark(DirtyFacet.Layout); }
         var children = mounted.LayoutChildren.ToArray();

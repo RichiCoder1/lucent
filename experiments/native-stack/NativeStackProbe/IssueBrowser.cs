@@ -134,9 +134,11 @@ internal static class IssueBrowser
         ForceCollection();
         var postWarmBaseline = GC.GetTotalMemory(false);
         var scrollDispatches = 0;
+        var scrollCycles = new Issue15ScrollCycle[Issue15ScrollCycles];
         for (var cycle = 0; cycle < Issue15ScrollCycles; cycle++)
         {
-            scrollDispatches += app.Issue15FullScrollCycle();
+            scrollCycles[cycle] = app.Issue15FullScrollCycle();
+            scrollDispatches += scrollCycles[cycle].Dispatches;
             app.Present(presenter);
         }
         // GetTotalMemory(false) includes dead allocation churn; compact first so this is live managed state.
@@ -147,18 +149,27 @@ internal static class IssueBrowser
 
         var gcBefore = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
         var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
-        var samples = new double[Issue15Samples];
-        for (var index = 0; index < samples.Length; index++)
+        var semanticInputToPresentSamples = new double[Issue15Samples];
+        for (var index = 0; index < semanticInputToPresentSamples.Length; index++)
         {
             var started = Stopwatch.GetTimestamp();
             PresentInput(app, presenter, Issue15Corpus[index]);
-            samples[index] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            semanticInputToPresentSamples[index] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        }
+        for (var index = 0; index < Issue15Warmup; index++) ResizeAndPresent(app, presenter, host.Window, index);
+        var resizeSamples = new double[Issue15Samples];
+        for (var index = 0; index < resizeSamples.Length; index++)
+        {
+            var started = Stopwatch.GetTimestamp();
+            ResizeAndPresent(app, presenter, host.Window, index + Issue15Warmup);
+            resizeSamples[index] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         }
         var allocatedAfter = GC.GetTotalAllocatedBytes(precise: true);
         var gcAfter = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
 
         var framesBeforeIdle = app.PresentedFrames;
         var requestsBeforeIdle = app.RequestedFrames;
+        var nativePresentsBeforeIdle = presenter.PresentCalls;
         var idleStarted = Stopwatch.GetTimestamp();
         while (Stopwatch.GetElapsedTime(idleStarted) < TimeSpan.FromSeconds(Issue15IdleSeconds))
         {
@@ -168,23 +179,28 @@ internal static class IssueBrowser
         var idleElapsedMilliseconds = Stopwatch.GetElapsedTime(idleStarted).TotalMilliseconds;
         var idleFrames = app.PresentedFrames - framesBeforeIdle;
         var idleRequests = app.RequestedFrames - requestsBeforeIdle;
-        var ordered = samples.OrderBy(value => value).ToArray();
-        var p95 = Percentile(ordered, .95);
-        var p99 = Percentile(ordered, .99);
+        var idleNativePresentCalls = presenter.PresentCalls - nativePresentsBeforeIdle;
+        var inputOrdered = semanticInputToPresentSamples.OrderBy(value => value).ToArray();
+        var resizeOrdered = resizeSamples.OrderBy(value => value).ToArray();
+        var p95 = Percentile(inputOrdered, .95);
+        var p99 = Percentile(inputOrdered, .99);
+        var resizeP95 = Percentile(resizeOrdered, .95);
         var visibleRows = (ViewportHeight + RowHeight - 1) / RowHeight;
         var returnLimit = checked(postWarmBaseline + postWarmBaseline / 10 + Issue15ReturnAllowanceBytes);
         var result = new Issue15BenchmarkResult(
             p95 <= Issue15P95BudgetMilliseconds && p99 <= Issue15P99BudgetMilliseconds &&
-            idleElapsedMilliseconds >= Issue15IdleSeconds * 1000 && idleFrames == 0 && idleRequests == 0 && app.Realized <= visibleRows * 3 &&
+            resizeP95 <= Issue15P95BudgetMilliseconds &&
+            idleElapsedMilliseconds >= Issue15IdleSeconds * 1000 && idleFrames == 0 && idleRequests == 0 && idleNativePresentCalls == 0 && app.Realized <= visibleRows * 3 &&
             liveAfterScroll - postWarmBaseline <= Issue15LiveGrowthBudgetBytes && postCollection <= returnLimit &&
-            staleRetained && unrelatedInvalidation,
+            staleRetained && unrelatedInvalidation && scrollCycles.All(cycle => cycle.ReachedListEnd && cycle.ResetToStart) && !RuntimeFeature.IsDynamicCodeSupported,
             Issue15Samples, Issue15Warmup, Issue15IdleSeconds, Issue15ScrollCycles, Issue15Corpus,
             p95, p99, Issue15P95BudgetMilliseconds, Issue15P99BudgetMilliseconds,
-            idleElapsedMilliseconds, idleFrames, idleRequests, app.Realized, visibleRows, visibleRows * 3,
+            semanticInputToPresentSamples, resizeSamples, resizeP95, Issue15P95BudgetMilliseconds, scrollCycles,
+            idleElapsedMilliseconds, idleFrames, idleRequests, idleNativePresentCalls, app.Realized, visibleRows, visibleRows * 3,
             postWarmBaseline, liveAfterScroll, postCollection, liveAfterScroll - postWarmBaseline, Issue15LiveGrowthBudgetBytes, returnLimit,
             allocatedAfter - allocatedBefore, new(gcAfter[0] - gcBefore[0], gcAfter[1] - gcBefore[1], gcAfter[2] - gcBefore[2]),
             presenter.PresentCalls, app.PresentedFrames, app.RequestedFrames, app.ProjectionCalls, scrollDispatches,
-            staleRetained, unrelatedInvalidation, RuntimeInformation.FrameworkDescription, RuntimeInformation.ProcessArchitecture.ToString(), Environment.Version.ToString(), host.ReadDpi());
+            staleRetained, unrelatedInvalidation, !RuntimeFeature.IsDynamicCodeSupported, RuntimeInformation.FrameworkDescription, RuntimeInformation.ProcessArchitecture.ToString(), Environment.Version.ToString(), host.ReadDpi());
         if (!result.Ok) throw new InvalidOperationException($"Issue #15 budget failed: {JsonSerializer.Serialize(result, ProbeJsonContext.Default.Issue15BenchmarkResult)}");
         return JsonSerializer.Serialize(result, ProbeJsonContext.Default.Issue15BenchmarkResult);
     }
@@ -192,6 +208,16 @@ internal static class IssueBrowser
     private static void PresentInput(State app, SdlSkiaPresenter presenter, string command)
     {
         if (!app.Route(new(CompositionInputKind.Semantic, "Issue list", command))) throw new InvalidOperationException($"Issue #15 input was not handled: {command}.");
+        app.Present(presenter);
+    }
+
+    private static void ResizeAndPresent(State app, SdlSkiaPresenter presenter, nint window, int index)
+    {
+        var width = Width - (index & 1) * 16;
+        var height = Height - (index & 1) * 12;
+        if (!SDL.SetWindowSize(window, width, height) || !SDL.SyncWindow(window) || !SDL.GetWindowSize(window, out var actualWidth, out var actualHeight) || actualWidth != width || actualHeight != height)
+            throw new InvalidOperationException($"Issue #15 SDL resize failed: {SDL.GetError()}");
+        app.Resize(actualWidth, actualHeight);
         app.Present(presenter);
     }
 
@@ -444,18 +470,27 @@ internal static class IssueBrowser
             return _ui.ProjectionCalls == projections && _ui.RequestedFrames == requested;
         }
 
-        internal int Issue15FullScrollCycle()
+        internal Issue15ScrollCycle Issue15FullScrollCycle()
         {
-            var count = 0;
-            Route(new(CompositionInputKind.Semantic, "Issue list", "Home")); count++;
+            var dispatches = 0;
+            void RouteScroll(string command)
+            {
+                dispatches++;
+                if (!Route(new(CompositionInputKind.Semantic, "Issue list", command))) throw new InvalidOperationException($"Issue #15 scroll input was not handled: {command}.");
+            }
+            RouteScroll("Home");
             var lastOffset = -1;
             while (_ui.ScrollOffset("Issue list") != lastOffset)
             {
                 lastOffset = _ui.ScrollOffset("Issue list");
-                Route(new(CompositionInputKind.Semantic, "Issue list", "PageDown")); count++;
+                RouteScroll("PageDown");
             }
-            Route(new(CompositionInputKind.Semantic, "Issue list", "Home"));
-            return count + 1;
+            var reachedListEnd = Rows.Count > 0 && _ui.ScrollOffset("Issue list") > 0 && _ui.RealizedWindow("Issue list").Last == Rows[^1].Id;
+            if (!reachedListEnd) throw new InvalidOperationException("Issue #15 scroll cycle did not reach the list end.");
+            RouteScroll("Home");
+            var resetToStart = _ui.ScrollOffset("Issue list") == 0 && _ui.RealizedWindow("Issue list").First == Rows[0].Id;
+            if (!resetToStart) throw new InvalidOperationException("Issue #15 scroll cycle did not reset to the list start.");
+            return new(dispatches, reachedListEnd, resetToStart);
         }
 
         private void ToggleFilter(ReactiveSignal<string?> signal, string value)
@@ -582,6 +617,7 @@ internal static class IssueBrowser
         public IssueBrowserIdentity Identity() => new(Rows.Count, Realized, _selected.Value, ReferenceEquals(Theme, Themes.Dark) ? "dark" : "light", Query, _status.Value, _priority.Value, _assignee.Value, _ui.ScrollOffset("Issue list"), _draft.Value, _reducedMotion.Value, Width, Height);
         public byte[] Capture(bool dark) { _theme.Value = dark ? Themes.Dark : Themes.Light; _graph.Drain(); return _ui.CapturePng(Width, Height); }
         public void Present(SdlSkiaPresenter presenter) => _ui.Present(presenter);
+        public void Resize(int width, int height) => _ui.Resize(width, height);
         public string TreeDump() => _ui.TreeDump();
         public string LayoutDump() => _ui.LayoutDump();
         public string StyleDump() => _ui.StyleDump();
@@ -610,4 +646,5 @@ internal sealed record Issue14ProviderContract(bool CompleteSemantics, bool Valu
 }
 internal sealed record IssueBrowserSeed([property: System.Text.Json.Serialization.JsonPropertyName("count")] int Count, [property: System.Text.Json.Serialization.JsonPropertyName("asyncDelayMilliseconds")] int AsyncDelayMilliseconds, [property: System.Text.Json.Serialization.JsonPropertyName("failureQuery")] string FailureQuery);
 internal sealed record Issue15GcCounts(int Gen0, int Gen1, int Gen2);
-internal sealed record Issue15BenchmarkResult(bool Ok, int SampleCount, int WarmupCount, int IdleSeconds, int ScrollCycles, string[] Corpus, double P95Milliseconds, double P99Milliseconds, double P95BudgetMilliseconds, double P99BudgetMilliseconds, double IdleElapsedMilliseconds, int IdleFrames, int IdleFrameRequests, int RealizedRows, int VisibleRows, int RealizedRowLimit, long PostWarmBaselineBytes, long LiveAfterScrollBytes, long PostCollectionBytes, long LiveGrowthBytes, long LiveGrowthBudgetBytes, long ReturnLimitBytes, long ProcessAllocatedBytes, Issue15GcCounts GcCollections, int NativePresentCalls, int ScheduledPresentCalls, int FrameRequests, int ProjectionCalls, int ScrollDispatches, bool StaleRetention, bool UnrelatedWriteWithoutInvalidation, string FrameworkDescription, string ProcessArchitecture, string EnvironmentVersion, uint Dpi);
+internal sealed record Issue15ScrollCycle(int Dispatches, bool ReachedListEnd, bool ResetToStart);
+internal sealed record Issue15BenchmarkResult(bool Ok, int SampleCount, int WarmupCount, int IdleSeconds, int ScrollCycles, string[] Corpus, double SemanticInputToPresentP95Milliseconds, double SemanticInputToPresentP99Milliseconds, double SemanticInputToPresentP95BudgetMilliseconds, double SemanticInputToPresentP99BudgetMilliseconds, double[] SemanticInputToPresentSamples, double[] ResizeSamples, double ResizeP95Milliseconds, double ResizeP95BudgetMilliseconds, Issue15ScrollCycle[] ScrollCycleEvidence, double IdleElapsedMilliseconds, int IdleFrames, int IdleFrameRequests, int IdleNativePresentCalls, int RealizedRows, int VisibleRows, int RealizedRowLimit, long PostWarmBaselineBytes, long LiveAfterScrollBytes, long PostCollectionBytes, long LiveGrowthBytes, long LiveGrowthBudgetBytes, long ReturnLimitBytes, long ProcessAllocatedBytes, Issue15GcCounts GcCollections, int NativePresentCalls, int ScheduledPresentCalls, int FrameRequests, int ProjectionCalls, int ScrollDispatches, bool StaleRetention, bool UnrelatedWriteWithoutInvalidation, bool RuntimeNativeAot, string FrameworkDescription, string ProcessArchitecture, string EnvironmentVersion, uint Dpi);

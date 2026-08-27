@@ -1,13 +1,13 @@
 {
   "identityMode": "exact-input-manifest",
-  "commit": "b6c94d51bf70cdec4bd746c6ba275d754e6a3883",
+  "commit": "ec6ee269eb5ce95ab70bad489194a51adcd5ec4f",
   "dirtyPaths": [
     " M experiments/native-stack/NativeStackProbe/CompositionProbe.cs",
     " M experiments/native-stack/NativeStackProbe/IssueBrowser.cs",
-    " M experiments/native-stack/NativeStackProbe/Program.cs",
-    " M experiments/native-stack/NativeStackProbe/SceneProbe.cs",
-    "?? experiments/native-stack/evidence/issue-15/",
-    "?? experiments/native-stack/run-issue-15-proof.ps1"
+    " M experiments/native-stack/evidence/issue-15/README.md",
+    " D experiments/native-stack/evidence/issue-15/input-manifest.json",
+    " D experiments/native-stack/evidence/issue-15/proof.json",
+    " M experiments/native-stack/run-issue-15-proof.ps1"
   ],
   "files": [
     {
@@ -24,7 +24,7 @@
     },
     {
       "path": "experiments/native-stack/NativeStackProbe/CompositionProbe.cs",
-      "sha256": "f6aa9d564444227123f858b3ba3d21758db25d53e82bf916eba3abe4340092bb"
+      "sha256": "448e5123217a487375438dfc7277a6f8c22b86e7bb488dbc68b6174257c2b563"
     },
     {
       "path": "experiments/native-stack/NativeStackProbe/ControlsProbe.cs",
@@ -32,7 +32,7 @@
     },
     {
       "path": "experiments/native-stack/NativeStackProbe/IssueBrowser.cs",
-      "sha256": "4522d476a8b205dd28dd7911f0a03c9251fc54fc2f0243a836efc442ae3ef4b6"
+      "sha256": "4d61657aa032a0b10907f34abe28dfcce046ce8eb017f3a1d8f72292d270e877"
     },
     {
       "path": "experiments/native-stack/NativeStackProbe/LayoutProbe.cs",
@@ -84,7 +84,7 @@
     },
     {
       "path": "experiments/native-stack/run-issue-15-proof.ps1",
-      "sha256": "b0be93fd207fdd29ec09663d0e21dcf983e0e5c56b268fac90193f7e1512a992"
+      "sha256": "db354d4de804d7070d302285b530d75830d4d7358eb7ae6ef7a6ceb190189a9a"
     }
   ]
 }

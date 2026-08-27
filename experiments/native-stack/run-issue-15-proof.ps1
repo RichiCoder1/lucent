@@ -12,9 +12,9 @@ New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 @"
 # Issue #15 performance gate
 
-Run ``../run-issue-15-proof.ps1``. It locked-restores and warning-free NativeAOT-publishes the real issue browser, then fail-closes on 500 serial mounted-input-to-SDL-present samples, idle frames, virtualization, and managed-memory budgets.
+Run ``../run-issue-15-proof.ps1``. It locked-restores and warning-free NativeAOT-publishes the real issue browser, then fail-closes on 500 serial semantic-input-to-present samples, 500 real SDL-resize-to-layout/paint/present samples, 20 end-proven scroll cycles, idle presenter calls, virtualization, and managed-memory budgets.
 
-``proof.json`` records the run; ``input-manifest.json`` hashes every measured local source input when the experiment tree is dirty.
+``proof.json`` retains both raw sample arrays, records the published process's ``!RuntimeFeature.IsDynamicCodeSupported`` NativeAOT result, and ``input-manifest.json`` hashes every measured local source input when the experiment tree is dirty.
 "@ | Set-Content (Join-Path $OutputDirectory 'README.md') -NoNewline -Encoding UTF8
 $sourceFiles = @(git -C $repository ls-files --cached --others --exclude-standard -- experiments/native-stack | Where-Object {
     $_ -like 'experiments/native-stack/NativeStackProbe/*' -or $_ -in @(
@@ -40,7 +40,7 @@ dotnet publish $project -c Release -r win-x64 --self-contained true --no-restore
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $benchmark = & $exe --issue-15-benchmark | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0 -or -not $benchmark.Ok -or $benchmark.SampleCount -ne $budgets.sampleCount -or $benchmark.P95Milliseconds -gt $budgets.p95Milliseconds -or $benchmark.P99Milliseconds -gt $budgets.p99Milliseconds -or $benchmark.IdleElapsedMilliseconds -lt ($budgets.idleSeconds * 1000) -or $benchmark.IdleFrames -ne 0 -or $benchmark.IdleFrameRequests -ne 0 -or $benchmark.RealizedRows -gt $benchmark.RealizedRowLimit -or $benchmark.LiveGrowthBytes -gt $budgets.liveGrowthBytes -or $benchmark.PostCollectionBytes -gt $benchmark.ReturnLimitBytes) { throw 'Issue #15 benchmark budget failed.' }
+if ($LASTEXITCODE -ne 0 -or -not $benchmark.Ok -or -not $benchmark.RuntimeNativeAot -or $benchmark.SampleCount -ne $budgets.sampleCount -or $benchmark.SemanticInputToPresentSamples.Count -ne $budgets.sampleCount -or $benchmark.ResizeSamples.Count -ne $budgets.sampleCount -or $benchmark.ScrollCycleEvidence.Count -ne $budgets.scrollCycles -or @($benchmark.ScrollCycleEvidence | Where-Object { -not $_.ReachedListEnd -or -not $_.ResetToStart }).Count -ne 0 -or $benchmark.SemanticInputToPresentP95Milliseconds -gt $budgets.p95Milliseconds -or $benchmark.SemanticInputToPresentP99Milliseconds -gt $budgets.p99Milliseconds -or $benchmark.ResizeP95Milliseconds -gt $budgets.p95Milliseconds -or $benchmark.IdleElapsedMilliseconds -lt ($budgets.idleSeconds * 1000) -or $benchmark.IdleFrames -ne 0 -or $benchmark.IdleFrameRequests -ne 0 -or $benchmark.IdleNativePresentCalls -ne 0 -or $benchmark.RealizedRows -gt $benchmark.RealizedRowLimit -or $benchmark.LiveGrowthBytes -gt $budgets.liveGrowthBytes -or $benchmark.PostCollectionBytes -gt $benchmark.ReturnLimitBytes) { throw 'Issue #15 benchmark budget failed.' }
 $regressionWork = Join-Path ([IO.Path]::GetTempPath()) ('native-stack-issue15-' + [Guid]::NewGuid())
 try {
     New-Item -ItemType Directory $regressionWork | Out-Null
@@ -61,7 +61,7 @@ $os = Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, Bu
 $proof = [ordered]@{
     ok = $true
     issue = 15
-    nativeAot = $true
+    nativeAot = $benchmark.RuntimeNativeAot
     budgets = $budgets
     benchmark = $benchmark
     regressions = [ordered]@{ issue14ProviderContract = $issue14.Ok; virtualization = $virtualization.Ok; composition = $composition.Ok; reactiveStaleRetention = $reactive.StaleRetention; compositionUnrelatedInvalidation = $composition.UnrelatedWriteIdle }
