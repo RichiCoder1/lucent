@@ -31,7 +31,7 @@ $contract = (git -C $root hash-object experiments/native-stack/GAUNTLET-REFRAME.
 $proof = [ordered]@{
     ok = $true
     issue = 24
-    source = [ordered]@{ head = (git -C $root rev-parse HEAD).Trim(); clean = $true; contractBlob = $contract; contractCommit = '4546d79'; implementationCommit = '0e2c2ee' }
+    source = [ordered]@{ head = (git -C $root rev-parse HEAD).Trim(); clean = $true; contractBlob = $contract; contractCommit = '4546d79'; implementationCommit = '7f9fce4' }
     results = [ordered]@{ native = $nativeClosed.Observed; avalonia = $avaloniaClosed.observed; expected = 667 }
     walkthrough = [ordered]@{ native = 12; avalonia = 12 }
     scores = [ordered]@{ native = @(3,3,3,3,3,3,2,2); avalonia = @(1,3,1,3,2,2,1,1); nativeHypothesisWins = 3; requiredWins = 3 }

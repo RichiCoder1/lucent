@@ -1,21 +1,21 @@
 {
   "task": "Add mutually exclusive Closed status filter",
   "contractCommit": "4546d79",
-  "implementationCommit": "0e2c2ee",
+  "implementationCommit": "7f9fce4",
   "expectedResults": 667,
   "native": {
     "authoredFiles": ["NativeStackProbe/IssueBrowser.cs"],
-    "addedLines": 16,
+    "addedLines": 19,
     "deletedLines": 4,
-    "touchedHunks": 7,
+    "touchedHunks": 8,
     "imperativeSynchronizationAdded": 0,
     "result": 667
   },
   "avalonia": {
     "authoredFiles": ["baseline/IssueBrowser.Avalonia/IssueBrowser.lui", "baseline/IssueBrowser.Avalonia/Program.cs"],
-    "addedLines": 16,
-    "deletedLines": 9,
-    "touchedHunks": 10,
+    "addedLines": 17,
+    "deletedLines": 10,
+    "touchedHunks": 11,
     "imperativeSynchronizationAdded": 3,
     "result": 667
   },

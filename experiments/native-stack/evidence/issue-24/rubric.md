@@ -22,7 +22,7 @@ scores remain unchanged.
   **3/5 hypothesis categories**. Structure and styling tie.
 - Native has no two-point deficit.
 - The frozen task touches one Native authored file versus two Avalonia authored
-  files, and seven Native hunks versus ten Avalonia hunks.
+  files, and eight Native hunks versus eleven Avalonia hunks.
 
 ## Decision
 
