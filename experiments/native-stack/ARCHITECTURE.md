@@ -31,11 +31,23 @@ The scheduler follows the useful semantics of alien-signals rather than copying 
 
 Straight C# uses bounded read tracking inside explicit reactive callbacks. Future `.lui` output may register compiler-derived edges directly. Both paths use the same graph and scheduling rules.
 
-Async computed values preserve Lucent's proven behavior: cancellation, stale-value retention, latest-generation wins, pending/error facets, and UI-scheduler commits.
+Async computed values reuse behaviors validated in the current Lucent experiment: cancellation, stale-value retention, latest-generation wins, pending/error facets, and UI-scheduler commits. This is design evidence, not a compatibility promise.
+
+The current bounded implementation caps one runtime callback at 64 distinct
+reads and requires the host UI loop to call `Drain` for queued async commits.
+`RegisterDependencies(target, sources)` is the only compiler-facing direct-edge
+API. It deliberately has no `.lui` lowering, cross-thread graph access, or
+general observer layer.
 
 ## Elements and structural regions
 
 Elements are stable identities with optional facets for layout, paint, input, focus, and semantics. Reactive properties update those facets in place.
+
+`NativeUi` is the composition boundary used by straight C#: finite row, column,
+text, control, `Show`, and keyed `For` constructors plus typed modifiers. Its
+generic retained projection allocates stable elements and scopes, computes
+bounds, projects scene/semantic snapshots, and disposes departing branches.
+Authoring code cannot assign bounds, IDs, dirty facets, or scene commands.
 
 Structural changes are explicit:
 
@@ -66,7 +78,27 @@ The spike owns a bounded flex system:
 - scroll viewport and virtualized list placement;
 - device-scale rounding.
 
+The finite algorithm clamps each fixed or intrinsic main-axis base to its
+minimum/maximum, subtracts padding and fixed gaps, then distributes positive
+free space by `grow` or negative free space by `shrink × clamped-base`.
+`start`, `center`, `end`, `space-between`, and `space-around` consume remaining
+positive space; cross-axis start/center/end/stretch is resolved before the final
+away-from-zero device-scale rounding. Invalid available sizes, negative values,
+and duplicate identities fail at this boundary. The implementation is capped at
+32 children; it has no grid, wrapping, percentage/calc, absolute positioning,
+baseline generalization, or CSS box model.
+
 Grid, wrapping, and absolute-layout generalization are deferred.
+
+## Virtualization
+
+`ScrollViewport` clamps a pixel offset to bounded content and owns wheel and
+keyboard scrolling. `VirtualizedList` uses keyed structural branches for only
+fixed-height rows intersecting the viewport plus two rows of overscan on each
+side; its proof uses 10,000 rows. Realized keys retain their elements and scopes
+across moves and reorders. Departing branches use normal structural disposal for
+reactive scopes, input/capture, focus, scene, and semantics. Variable-height
+measurement, anchoring, and general list APIs are excluded.
 
 ## Styling and themes
 
@@ -90,7 +122,9 @@ There is no selector matching, specificity, implicit inheritance beyond document
 
 Element changes mark layout, paint, or semantics facets dirty. Layout changes propagate only as far as required by constraints. Paint changes rebuild affected scene subtrees. Idle performs no rendering work.
 
-Skia is hidden behind a renderer interface so headless raster tests and a future renderer can share the same scene contract. The spike does not own shaders, glyph atlases, or a custom GPU backend.
+Skia is hidden behind one deliberately narrow renderer interface so native presentation and headless raster tests share the same scene contract. This is a sanctioned test seam, not a commitment to multiple production renderers. The spike does not own shaders, glyph atlases, or a custom GPU backend.
+
+For the current Windows proof, that contract targets a CPU `SKCanvas`: a Skia bitmap is uploaded to an SDL `ABGR8888` streaming texture and `SDL_RenderPresent` presents it through the SDL-owned HWND. `SDL_RenderReadPixels` captures the composed SDL renderer framebuffer before present for the native raster comparison. Resize reads SDL's current logical window size and recreates that upload texture; DPI is recorded from `GetDpiForWindow` alongside SDL's display scale. This is the selected present path for the spike, not a second renderer or host.
 
 ## Platform boundary
 
@@ -104,6 +138,8 @@ SDL3-CS is the provisional host. The Windows adapter owns:
 
 If SDL ownership prevents correct UIA or text integration, replace only this adapter with direct Win32.
 
+Milestone 1 must exercise the selected SDL or Win32 host, Skia present path, text shaper, IME path, and UIA provider together from a NativeAOT-published build. A minimal unrelated AOT executable is not evidence. UIA COM interop must use an AOT-compatible generated COM or `ComWrappers` path; built-in runtime COM marshalling is not assumed.
+
 ## Text
 
 The spike supports a practical single-line field:
@@ -114,6 +150,13 @@ The spike supports a practical single-line field:
 - UIA Value behavior.
 
 Rich text, multiline layout, text ranges, and editor-grade undo are excluded.
+
+`SkiaSharp.HarfBuzz.SKShaper` receives an explicit HarfBuzz buffer direction,
+script, and language. Its exact glyph IDs, clusters, positions, and cached
+`SKTextBlob` are used for intrinsic advance and the retained-scene Skia seam;
+measurement does not call a separate text API. Mixed-script proof input is
+explicit Latin/CJK/Arabic runs with covering faces. It proves this shaping seam,
+not automatic font fallback, Unicode script segmentation, or a UBA implementation.
 
 ## Test architecture
 
@@ -127,6 +170,8 @@ The portable core must run without a window. Headless tests exercise signals, la
 - reactive dependency edges.
 
 A smaller Windows-native suite validates HWND lifecycle, DPI, IME, UIA/Narrator integration, and NativeAOT behavior.
+
+The same seeded scenes must produce equivalent element, layout, style, and semantic dumps in headless and native paths. Raster comparisons use an explicitly recorded tolerance where exact pixel equality is inappropriate.
 
 ## NativeAOT
 

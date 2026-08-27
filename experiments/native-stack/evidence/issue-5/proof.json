@@ -1,0 +1,35 @@
+{
+    "ok":  true,
+    "deterministicRuns":  2,
+    "artifacts":  [
+                      {
+                          "name":  "layout-text.json",
+                          "sha256":  "1232a09611a6f2311f67ffa24536ae9ffa0749e6a1b99253a83cde94681e7ca9"
+                      },
+                      {
+                          "name":  "layout-text.png",
+                          "sha256":  "2d7ce3622de61443802808ad76858fc0662b0f6ef1612894cd2c16faef5effbe"
+                      }
+                  ],
+    "layout":  {
+                   "Ok":  true,
+                   "ArtifactDirectory":  "D:\\src\\richicoder1\\lucent\\experiments\\native-stack\\evidence\\issue-5",
+                   "Artifacts":  [
+                                     {
+                                         "Name":  "layout-text.json",
+                                         "Sha256":  "1232a09611a6f2311f67ffa24536ae9ffa0749e6a1b99253a83cde94681e7ca9"
+                                     },
+                                     {
+                                         "Name":  "layout-text.png",
+                                         "Sha256":  "2d7ce3622de61443802808ad76858fc0662b0f6ef1612894cd2c16faef5effbe"
+                                     }
+                                 ],
+                   "FlexChecks":  true,
+                   "ShapeChecks":  true,
+                   "CultureChecks":  true,
+                   "GlyphsRendered":  true,
+                   "SkiaPackage":  "4.151.1",
+                   "ShaperPackage":  "4.151.1",
+                   "HarfBuzzPackage":  "14.2.1.1"
+               }
+}

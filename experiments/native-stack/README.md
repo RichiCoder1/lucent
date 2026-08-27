@@ -2,7 +2,7 @@
 
 ## Status
 
-**Planning.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
+**Milestone 2B passed; Milestone 3 is authorized.** The Windows platform/runtime foundations, reactive engine, bounded authoring interface, and reframed issue-browser comparison passed. The frozen first comparison remains a valid STOP for its source commit; the registered second attempt passed only after the missing retained composition and typed styling interface existed.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 
@@ -45,19 +45,69 @@ SDL3-CS is provisional. Milestone 1 must prove safe HWND/UIA integration, practi
 The runtime-first spike uses straight C#. `.lui` lowering is deliberately deferred until the runtime model passes.
 
 ```csharp
-var count = Signal(0);
-
-Column(
-    Text(() => $"Count: {count.Value}"),
-    Button("Increment", () => count.Value++)
-        .Style(Styles.Compose(
-            Theme.Button,
-            Theme.Primary,
-            Style.Px(4),
-            Style.Hover(x => x.Bg(Tokens.AccentHover)))));
+var details = graph.Signal(true, "details");
+var issues = graph.Signal(new[] { "a", "b" }, "issues");
+using var app = NativeUi.Mount(graph,
+    NativeUi.Column(
+        NativeUi.Text("Issues").Fg(SemanticToken.Primary),
+        NativeUi.Row(
+            NativeUi.Control("Save").OnPress(Save),
+            NativeUi.Show(() => details.Value, () => NativeUi.Text("Details"))),
+        NativeUi.For(() => issues.Value, issue => issue, issue => NativeUi.Text(issue)))
+    .Gap(3).Padding(2).Bg(SemanticToken.Background).Fg(SemanticToken.Foreground));
 ```
 
-Reactive reads are tracked only inside explicit reactive callbacks. A later compiler may provide static dependency tables to the same scheduler. Stable nodes update directly; `Show` and keyed `For` own structural regions. There is no general virtual DOM or runtime selector engine.
+Reactive reads are tracked only inside explicit reactive callbacks: `Text(() => query.Value)` updates its stable semantic facet, `For(() => filtered.Value, ...)` owns keyed collection changes, and `VirtualizedList(..., () => filtered.Value, ...)` owns its realized window. A later compiler may provide static dependency tables to the same scheduler. There is no general virtual DOM or runtime selector engine.
+
+The first issue-browser did not meet this shape: it drew application geometry
+and colors directly and manually synchronized computed rows into
+virtualization. [The authoring reframe](AUTHORING-REFRAME.md) now makes the
+missing composition, reactive-property, typed-style, behavior, and generic
+projection modules explicit before another comparison is allowed.
+
+## Issue #23 Milestone 2A application gate
+
+```powershell
+./run-issue-23-proof.ps1
+```
+
+The issue browser is now authored entirely through `NativeUi`: a three-region
+typed composition, reactive TextFields and styles, a composition-owned
+fixed-height virtual list, mounted behaviors, and generic retained projection.
+Its authored file contains no Skia/canvas renderer, direct bounds or scene
+commands, manual semantic mirror, `Sync`, or `SetItems`. The proof publishes
+NativeAOT, executes W1–W12, enforces the 21-row realization ceiling, captures
+light/dark 1200×760 output, records deterministic dumps, scans forbidden seams,
+and reruns issues #20–#22 regressions. Parent visual review and the final Sol
+xhigh adversarial gate both passed.
+
+## Issue #20 typed composition proof
+
+```powershell
+./run-composition-proof.ps1
+```
+
+`NativeUi` is the bounded straight-C# surface: `Row`, `Column`, `Text`,
+`Control`, `Show`, and keyed `For`, with typed paint/layout/control modifiers.
+Mounting owns stable IDs, scopes, bounds, retained commands, semantics, and
+disposal; application code supplies none of them. The NativeAOT proof builds a
+representative tree, renders its retained scene both headlessly and through the
+hidden SDL `SdlSkiaPresenter`, requires a zero-pixel raster difference and a
+native capture, compares independent tree/layout/style/semantic dumps, invokes
+the composed control once, retains keyed entries through explicit `For` refresh
+churn, checks `Show` while visible, and releases scene/semantic state. Reactive
+collection binding remains issue #21.
+
+## Issue #22 finite styles and behaviors proof
+
+```powershell
+./run-issue-22-proof.ps1
+```
+
+NativeUi stays ordinary typed C#: `NativeUi.Control("Save").OnPress(Save)` and
+`NativeUi.Control("Theme-aware").Style(new Style().Size(80, 20).Padding(2).Gap(1).Align(UiAlignment.Center).Type(14, 600).Bg(SemanticToken.Card).Fg(SemanticToken.CardForeground).Border(new("#333")).Rounded(4).Shadow(2).Opacity(.8f).Transform(1, 2).Ring(2)).Variants(buttonStates).Theme(() => theme.Value).State(() => state.Value)`.
+The proof records source-ordered immutable facets, variant precedence, reactive
+light/dark state retention, bounded motion, and behavior-owned press/edit/focus/selection/disposal semantics. It excludes selectors, inheritance, property bags, arbitrary animation, and the issue-browser rewrite.
 
 ## Validation application
 
@@ -78,13 +128,184 @@ Stop the experiment if:
 2. issue-browser application code is not materially clearer than an equivalent Avalonia implementation;
 3. it misses the agreed interaction, idle, resize, virtualization, or memory evidence.
 
-Framework internals may be substantial if they remain coherent and testable. Raw line count is not itself a failure.
+Framework internals may be substantial if they remain coherent and testable. Raw line count or elapsed time is not itself a failure. For this spike, "disproportionate machinery" means the bounded platform proof cannot satisfy UIA, real IME, or NativeAOT without delegating controls to another UI framework or introducing a second general UI stack.
 
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md)
 - [Milestones and gates](MILESTONES.md)
+- [Final adoption decision and platform risks](ADOPTION.md)
 - [References and credits](REFERENCES.md)
+- [Adversarial plan review](REVIEW.md)
+
+## Issue #2 acceptance evidence
+
+`NativeStack.sln` contains `NativeStackProbe`, a `net9.0-windows` NativeAOT executable, and the separate non-AOT `UiaExternalHelper`. `run-probe.ps1` publishes `win-x64` and runs the published probe. A successful JSON record proves a hidden SDL window and nonzero HWND, generated `GetDpiForWindow`, a Skia raster/PNG, HarfBuzz shaping of `office` and Arabic, an available fallback font, and loaded SDL/Skia/HarfBuzz native modules. It exits nonzero if any probe fails.
+
+This is dependency and NativeAOT evidence for issue #2 only. It does **not** pass the Milestone 1 UIA, IME, presentation, retained-scene, resize, DPI, or parity gates.
+
+## Issue #3 slice A host proof
+
+The default `run-probe.ps1` behavior remains the issue #2 dependency probe. The same published executable has explicit bounded host modes:
+
+```powershell
+# visible create/show/resize/pump/subclass/remove/destroy proof; exits after about a second
+./run-probe.ps1 --automated
+
+# visible IME target; type with a real Windows IME, then close the window
+./run-probe.ps1 --manual .\ime-events.jsonl
+```
+
+Automated JSON exits nonzero unless stable/nonzero HWND and DPI, positive current scale, exact `SDL_SyncWindow` resize, shown/resized events, forced focus-loss (`SDL_HideWindow`), a real `WM_CLOSE`-driven SDL close-request event, duplicate `SetWindowSubclass` installation, exactly one callback for one `SendMessage`, removal with zero post-removal callbacks, and destruction all pass. It reports but does not require a display-scale-changed event because the host cannot force a monitor scale transition. It uses SDL's event pump only.
+
+Manual mode sets `SDL_IME_IMPLEMENTED_UI=composition` before SDL initialization and calls `SDL_StartTextInput`, `SDL_SetTextInputArea`, and `SDL_StopTextInput`. Keep the native OS candidate UI enabled, select Japanese **あ** mode, compose, commit, cancel with an empty preedit, switch focus away/back, then close. The owned surface shows muted instructions, committed text, accent underlined preedit, and a moving caret; it does not render candidates. The requested JSONL path is AutoFlush-written for `editing`, `input`, focus, and one close record with committed and preedit text separated. Completed transcripts and visual review are recorded under [`evidence/`](evidence/README.md).
+
+## Issue #3 slice B UIA proof
+
+```powershell
+./run-uia-proof.ps1
+
+# lifecycle-only hand-written COM diagnostic; phase may be wrappers, create,
+# qi, options, disconnect, or release
+./run-probe.ps1 --uia-ccw-self-check release
+```
+
+For parent Accessibility Insights review, start the visible manual host, attach to the HWND recorded in `uia-ready.json`, then close its window (or create the close-signal file). It has the same Simple-only provider and lifecycle checks as the automated host; it adds no UIA tree or patterns.
+
+```powershell
+./NativeStackProbe/bin/Release/net9.0-windows/win-x64/publish/NativeStackProbe.exe --uia-manual .\uia-ready.json .\uia-close.signal
+```
+
+The script performs a locked restore, warning-free isolated build, NativeAOT publish, then starts the published SDL host and a separate non-AOT UIAutomation client process. It fails closed unless the external Name/AutomationId assertion and provider property-call count pass. The isolated published hand-written CCW lifecycle check reaches wrapper construction, CCW creation, Simple QI, a native-vtable `ProviderOptions` call, disconnect, and release. The real external proof passes with exact Name/AutomationId across repeated and worker-thread reads, genuine `WM_GETOBJECT` delivery, property calls, Simple interface creation, successful disconnect, subclass removal, provider release, and HWND destruction.
+
+The provider is Simple-only: server-side, immutable Name/AutomationId/ControlType snapshot, null pattern providers, and a native host provider. A dedicated hand-written `ComWrappers` vtable exposes exactly the SDK IUnknown and four `IRawElementProviderSimple` HRESULT slots. Its raw `VARIANT` writes BSTR/I4 values directly. COM callbacks do not call SDL or Skia.
+
+Issue #19’s direct-Win32 discriminator is conditional and superseded by the passing SDL UIA proof. Do not begin Win32 IME or adapter work.
+
+## Issue #4 retained-scene proof
+
+```powershell
+./run-scene-proof.ps1
+```
+
+The seeded fixed-bounds scene has explicit value IDs (`app.root`, `app.panel`, and `app.badge`), not traversal IDs. Layout, style, and semantic snapshots are keyed by those IDs and update only from their respective dirty projection paths; canonical dumps read snapshots rather than mutable elements. Separate seeded element/scene instances run in headless and native paths before their independently projected hierarchy, layout, style, and semantic dumps are compared.
+
+The selected present path is CPU Skia raster (`SKBitmap`/`SKCanvas`) uploaded as an `ABGR8888` SDL streaming texture and presented with `SDL_RenderPresent` on the existing SDL HWND window. `SDL_RenderReadPixels` captures the SDL renderer framebuffer after `SDL_RenderTexture` and before present; it is converted to RGBA for comparison with the headless input raster. Each native present reads the current SDL logical size; the proof resizes from 128×96 to 256×192 through `SDL_SetWindowSize` + `SDL_SyncWindow`, recreates the upload texture, and requires positive display scale and nonzero `GetDpiForWindow` DPI.
+
+`run-scene-proof.ps1` publishes the locked NativeAOT executable, requires exactly six capture artifacts in each run before comparing names and SHA-256 values, and fails on identity/facet/dump/raster/frame/present/resize failure. Idle and semantic-only writes cause zero scheduled native presents; the changed panel bounds cause one layout-driven present and the changed badge style causes one further paint-driven present. Its JSON records a zero-pixel tolerance.
+
+## Issue #5 bounded layout and text proof
+
+```powershell
+./run-layout-proof.ps1
+```
+
+The dedicated NativeAOT self-check has a fixed 32-child row/column flex ceiling.
+It checks grow/shrink, min/max clamping, padding/gap, start/center/end/stretch,
+space-between/around, and 1.25×/2× rounding; it fails invalid constraints and
+duplicate IDs. Its retained shaped runs use the pinned `SkiaSharp.HarfBuzz`
+result for both intrinsic width and scene-seam glyph rasterization. Two runs
+must yield exactly `layout-text.json` and `layout-text.png` with matching SHA-256
+hashes. The dump records package versions, requested/resolved typefaces, glyph
+counts, advances/bounds, direction, cultures, scales, and shared shape IDs.
+Globalization is enabled so the NativeAOT proof can execute en-US/tr-TR; the
+recorded published `win-x64` directory is 156,895,896 bytes (the prior
+invariant-globalization output is not a comparable retained artifact).
+
+## Issue #7 reactive graph proof
+
+```powershell
+./run-reactive-proof.ps1
+```
+
+The UI-thread-only graph has named signals, lazy memoized computed values,
+batched effects, ownership disposal, and a 64-read cap for runtime dependency
+tracking. `RegisterDependencies(target, sources)` is the single direct edge
+registration seam for future compiler output; no compiler or `.lui` integration
+is included. Async computed values retain their last result while pending,
+cancel superseded owned work, and only commit the current generation through
+the UI-thread `Drain` queue. The proof records zero frames for unrelated writes
+and rejects stale/disposed completions. It does not provide cross-thread graph
+access, automatic UI-loop pumping, or a general observer API.
+
+## Issue #8 structural and interaction proof
+
+```powershell
+./run-structural-proof.ps1
+```
+
+The bounded core gives `Show` and keyed `For` ownership of their created
+branches and `ReactiveScope`; keyed entries retain their stable elements and
+there is no arbitrary-tree reconciliation. It covers deepest hit testing,
+bubbling only, pointer capture, focus scopes/tab traversal, and projected
+role/name/value/actions/enabled/focus semantics. Interactive elements fail the
+self-check without matching semantics. Emergency suppressions need a nonempty
+reason and are retained in the semantic dump. The proof churns a branch while
+focused, captured, effect-owned, and async-pending, then checks cancellation,
+effect unregistration, and scene/semantic release; it also reruns the reactive
+and scene checks from the published NativeAOT executable.
+
+## Issue #9 style semantics proof
+
+```powershell
+./run-style-proof.ps1
+```
+
+The NativeAOT self-check proves immutable typed style composition, layered
+semantic light/dark tokens, finite fluent helpers, and retained reactive paint
+projection. Active variants compose in this order: base, selected,
+focus-visible, hover, pressed, invalid, disabled. The one frame-scheduler clock
+drives only opacity/transform paint transitions; reduced motion snaps both at
+startup and while active, and idle clocks schedule zero frames. CSS, selector
+matching, implicit inheritance, layout animation, and a general animation
+framework remain excluded.
+
+## Issue #10 composed controls proof
+
+```powershell
+./run-controls-proof.ps1
+```
+
+`Button` and the practical single-line `TextField` compose stable elements with
+the existing input, focus, semantic, and typed-style facets; neither introduces
+a control hierarchy. The published NativeAOT proof covers pointer/Enter/Space
+button activation, scalar-safe caret and selection edits, IME committed versus
+preedit state, copy/cut/paste through an injected clipboard seam, focus-visible
+state, portable `edit`/`set-value` semantic Value updates, invalid boundary
+edits, and focus/input disposal. It also reruns text, structural, and style
+regressions. Native child UIA transport remains deferred; the semantic Value
+facet is its portable seam.
+
+## Issue #11 scroll and virtualization proof
+
+```powershell
+./run-virtualization-proof.ps1
+```
+
+`ScrollViewport` is bounded and supports wheel plus Arrow/Page/Home/End
+scrolling. Its keyed `VirtualizedList` realizes only fixed-height viewport rows
+plus two rows of overscan on each side (14 rows for the 100px/10px proof), while
+exercising 10,000 keys. Realized rows retain stable elements and scopes;
+departing rows release scopes, input, focus/capture, scene commands, and
+semantic snapshots. Selection and focus use keys across reorders, and removed
+selected/focused rows deterministically choose the row at the prior index
+(clamped). The NativeAOT proof also records coarse post-collection managed
+memory growth; issue #15 owns the final quantitative budget. Variable-height
+virtualization is explicitly excluded.
+
+## Milestone 1 combined gate
+
+```powershell
+./run-milestone-1-gate.ps1
+```
+
+The gate locked-restores, warning-free builds, and NativeAOT-publishes once,
+then runs the selected SDL host lifecycle, text-state, UIA, retained-scene, and
+layout/shaper checks from that published graph. It writes
+`evidence/milestone-1/proof.json` with source, lock-file, machine, artifact,
+and decision evidence. It validates the existing issue #3 real Japanese IME
+transcripts and issue #4/#5 artifact sets and hashes; those transcripts remain
+supplemental manual SDL/Windows evidence, not an automated OS IME claim.
 
 ## Explicit exclusions
 
@@ -95,5 +316,7 @@ Framework internals may be substantial if they remain coherent and testable. Raw
 - multiple windows, dialogs, and drag/drop;
 - an interactive developer-tools inspector;
 - macOS and Linux adapters before the Windows decision.
+
+Issue #3's real-IME and Accessibility Insights evidence is recorded under [`evidence/`](evidence/README.md). The broader Narrator walkthrough remains a later Milestone 3 gate.
 
 Headless tree, layout, style, semantic, and reactive dumps are included because they enable deterministic tests. They are not an interactive inspector.

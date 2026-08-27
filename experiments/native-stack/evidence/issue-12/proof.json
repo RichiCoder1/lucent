@@ -1,0 +1,110 @@
+﻿{
+    "issue":  12,
+    "result":  "pass",
+    "gauntletSha256":  "808268b07a0387c1ccb2eb95abc4685c3e0a2632d896279613b630c723f35a72",
+    "inputs":  [
+                   {
+                       "path":  "experiments/native-stack/GAUNTLET.md",
+                       "sha256":  "808268b07a0387c1ccb2eb95abc4685c3e0a2632d896279613b630c723f35a72"
+                   },
+                   {
+                       "path":  "experiments/native-stack/gauntlet/issues.seed.json",
+                       "sha256":  "22ee1bba6258b19eda03fc09e32e7642e09f06b2482d989e3e0201f5dde37324"
+                   },
+                   {
+                       "path":  "experiments/native-stack/run-issue-12-proof.ps1",
+                       "sha256":  "bfd0b7a0e9c8ab532e7bb2483421d302571b2b9e9ef75402a8449dc694163f9b"
+                   },
+                   {
+                       "path":  "experiments/native-stack/Directory.Packages.props",
+                       "sha256":  "2ab95955676b04b600393bd59f04900261c2214c763e917fdface17833b11c84"
+                   },
+                   {
+                       "path":  "experiments/native-stack/NativeStackProbe/IssueBrowser.cs",
+                       "sha256":  "f0400f99b56ccaa7aee424455870befe633c34fc0c8f1e91e751d4287b7fc815"
+                   },
+                   {
+                       "path":  "experiments/native-stack/NativeStackProbe/Program.cs",
+                       "sha256":  "366aaf58e247f4fa2e255719253a6b484cddd9ebc8267c9dc3be10d59dbcacbb"
+                   },
+                   {
+                       "path":  "experiments/native-stack/NativeStackProbe/NativeStackProbe.csproj",
+                       "sha256":  "e02d5189d1a872ebc231291524f6436717a432e9c2c66c39f1a7bd6c1a503634"
+                   },
+                   {
+                       "path":  "experiments/native-stack/NativeStackProbe/packages.lock.json",
+                       "sha256":  "236b60385de498c2a6689818962e2f7dd550b1641f9cdbc85bf4fd6598649e0a"
+                   },
+                   {
+                       "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/Program.cs",
+                       "sha256":  "8be37062a9c90f5a3fca186e53506484e8280b398d57e5d932ae1a66b2f6448a"
+                   },
+                   {
+                       "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/IssueBrowser.lui",
+                       "sha256":  "299585ebcf2258fb7f2041f84357ea26a183dcf0afa3883f229823915821782c"
+                   },
+                   {
+                       "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/IssueBrowser.css",
+                       "sha256":  "9f4950e7f8b21df13f9383f69a96159783af9716b3827c4e036259fcc2be3944"
+                   },
+                   {
+                       "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/IssueBrowser.Avalonia.csproj",
+                       "sha256":  "a12002197f296ea9f732ae26e0f8e6ac61abaff2dcf1a25d4d5b0d1ccfe7e74c"
+                   },
+                   {
+                       "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/packages.lock.json",
+                       "sha256":  "9558c800f6760f5eb9e97de359a290ed54005587daf38e864444cb0ee368c2e3"
+                   }
+               ],
+    "machine":  {
+                    "os":  "Microsoft Windows NT 10.0.26200.0",
+                    "framework":  "4.0.30319.42000",
+                    "dotnet":  "9.0.317"
+                },
+    "artifacts":  [
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/README.md",
+                          "sha256":  "05b013b752376e5b5b89d0b6996f5b82d0d638775a87bf3f5eb44bbdbf0cf36d"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/avalonia/dark.png",
+                          "sha256":  "df2217bab98b333b33b021562bb3c3990f86b673f04ca72aa2eba485f283a069"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/avalonia/identity.json",
+                          "sha256":  "bf120e4614f58fa50265c53e1c4664210ff5fff7f7a268b27ccd78400b815dfb"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/avalonia/light.png",
+                          "sha256":  "63d5022eeabdc345c512089d156270e7a8a3955ea705d72adca11f51e6934cc2"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/avalonia/semantics.json",
+                          "sha256":  "77d8a303dac9e6257eb8f5407e0f1463a3ad8042e26bad5b672bd5f387e6146b"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/avalonia/walkthrough.jsonl",
+                          "sha256":  "6e7d29b618569b3db9068d58f9f6e879742524bc2b402eb160acc56c447d1df5"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/native/dark.png",
+                          "sha256":  "5dbbc2050173bfb78191dd734c2128e2821c056c26363e989a42ac1d03dcd1b5"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/native/identity.json",
+                          "sha256":  "1b0b2a75b8ae40511946991665b8ebb63d1516696c0caff087f01fa6b494d03e"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/native/light.png",
+                          "sha256":  "fdbde3b2352db05442ed9263b95d1664fbe947808e9aadbf3f0cccc967b71398"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/native/semantics.json",
+                          "sha256":  "1dc39ceb87d945d4b07b303eab301d5bb4359fd4cab38bce04375506ac45177b"
+                      },
+                      {
+                          "path":  "experiments/native-stack/evidence/issue-12/native/walkthrough.jsonl",
+                          "sha256":  "ff5470008359fb380f593dc1632a6b8f400a972d6edb5bcfe858c2df3c2bddf9"
+                      }
+                  ]
+}

@@ -1,0 +1,76 @@
+﻿{
+    "ok":  true,
+    "issue":  24,
+    "source":  {
+                   "head":  "49742bb42952ce222257e2f812569c1543dfb739",
+                   "scope":  "experiments/native-stack",
+                   "experimentCleanAtStart":  true,
+                   "repositoryCleanAtStart":  false,
+                   "outOfScopeChangesAtStart":  1,
+                   "contractBlob":  "b539904c73504772bf8f3d586ec1793a25b3907b",
+                   "contractCommit":  "4546d79",
+                   "implementationCommit":  "7f9fce4"
+               },
+    "results":  {
+                    "native":  667,
+                    "avalonia":  667,
+                    "expected":  667
+                },
+    "walkthrough":  {
+                        "native":  12,
+                        "avalonia":  12
+                    },
+    "scores":  {
+                   "native":  [
+                                  3,
+                                  3,
+                                  3,
+                                  3,
+                                  3,
+                                  3,
+                                  2,
+                                  2
+                              ],
+                   "avalonia":  [
+                                    1,
+                                    3,
+                                    1,
+                                    3,
+                                    2,
+                                    2,
+                                    1,
+                                    1
+                                ],
+                   "nativeHypothesisWins":  3,
+                   "requiredWins":  3
+               },
+    "change":  {
+                   "task":  "Add mutually exclusive Closed status filter",
+                   "contractCommit":  "4546d79",
+                   "implementationCommit":  "7f9fce4",
+                   "expectedResults":  667,
+                   "native":  {
+                                  "authoredFiles":  [
+                                                        "NativeStackProbe/IssueBrowser.cs"
+                                                    ],
+                                  "addedLines":  19,
+                                  "deletedLines":  4,
+                                  "touchedHunks":  8,
+                                  "imperativeSynchronizationAdded":  0,
+                                  "result":  667
+                              },
+                   "avalonia":  {
+                                    "authoredFiles":  [
+                                                          "baseline/IssueBrowser.Avalonia/IssueBrowser.lui",
+                                                          "baseline/IssueBrowser.Avalonia/Program.cs"
+                                                      ],
+                                    "addedLines":  17,
+                                    "deletedLines":  10,
+                                    "touchedHunks":  11,
+                                    "imperativeSynchronizationAdded":  3,
+                                    "result":  667
+                                },
+                   "nativeTouchesNoMoreSites":  true
+               },
+    "decision":  "proceed"
+}

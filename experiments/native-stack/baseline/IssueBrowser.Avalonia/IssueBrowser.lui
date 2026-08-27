@@ -1,0 +1,74 @@
+namespace IssueBrowser.Avalonia;
+
+using Avalonia.Controls;
+using Avalonia.Layout;
+using Avalonia.Media;
+
+component IssueBrowserWindow(IssueBrowserSession session)
+{
+    Fragment Render() => Window {
+        Title: "Lucent Issue Browser";
+        Width: 1200;
+        Height: 760;
+        RequestedThemeVariant: binding(session.RequestedTheme);
+        Grid { Class: "issue-browser"; ColumnDefinitions: "208,424,*";
+            Border { Class: "filter-rail"; Padding: 16;
+                StackPanel { Spacing: 12;
+                    TextBlock { Class: "brand"; Text: "LUCENT"; }
+                    TextBlock { Class: "rail-title"; Text: "Issue tracker"; }
+                    TextBox { Class: "search"; Text: binding(session.Query); PlaceholderText: "Search issues"; TextChanged: (sender, e) => { if (sender.IsFocused) session.Search(sender.Text ?? ""); }; }
+                    TextBlock { Class: "section-label"; Text: "FILTERS"; }
+                    StackPanel { Orientation: Orientation.Horizontal; Spacing: 8;
+                        CheckBox { Class: "filter-chip"; Content: "Ada"; IsChecked: binding(session.AdaChecked); Click: (sender, e) => session.ToggleAda(); }
+                        CheckBox { Class: "filter-chip"; Content: "Open"; IsChecked: binding(session.OpenChecked); Click: (sender, e) => session.ToggleOpen(); }
+                    }
+                    StackPanel { Orientation: Orientation.Horizontal; Spacing: 8;
+                        CheckBox { Class: "filter-chip"; Content: "Closed"; IsChecked: binding(session.ClosedChecked); Click: (sender, e) => session.ToggleClosed(); }
+                        CheckBox { Class: "filter-chip"; Content: "High"; IsChecked: binding(session.HighChecked); Click: (sender, e) => session.ToggleHigh(); }
+                    }
+                    TextBlock { Class: "section-label"; Text: "VIEWS"; }
+                    TextBlock { Text: "All issues"; }
+                    TextBlock { Class: "muted"; Text: "Assigned to me"; }
+                    TextBlock { Class: "muted"; Text: "Recently updated"; }
+                }
+            }
+            Border { Grid.Column: 1; Class: "list-panel";
+                Grid { RowDefinitions: "64,*";
+                    StackPanel { Margin: (16, 12); Spacing: 2;
+                        TextBlock { Class: "panel-title"; Text: "Open issues"; }
+                        TextBlock { Class: "muted"; Text: binding(session.MatchSummary); }
+                    }
+                    ListBox { Grid.Row: 1; Class: "issue-list"; ItemsSource: binding(session.RowItems); SelectedItem: binding(session.SelectedItem); SelectionChanged: (sender, e) => { if (sender.SelectedItem is IssueRow item) session.Select(item); };
+                        template ItemTemplate(IssueRow row) {
+                            Grid { Class: "issue-row"; ColumnDefinitions: "12,* Auto"; Height: 38;
+                                Border { Class: row.Status == "Open" ? "status-dot open" : "status-dot closed"; Width: 7; Height: 7; CornerRadius: 4; }
+                                TextBlock { Grid.Column: 1; Text: row.Title; }
+                                TextBlock { Grid.Column: 2; Class: "issue-id"; Text: row.Id; }
+                            }
+                        }
+                    }
+                }
+            }
+            Border { Grid.Column: 2; Class: "detail-pane"; Padding: 32;
+                StackPanel { Spacing: 16;
+                    TextBlock { Class: "section-label"; Text: "ISSUE DETAILS"; }
+                    TextBlock { Class: "detail-title"; Text: binding(session.SelectedTitle); }
+                    TextBlock { Class: "muted"; Text: binding(session.DetailKey); }
+                    StackPanel { Orientation: Orientation.Horizontal; Spacing: 8;
+                        Border { Class: "status-badge"; Padding: (12, 4); TextBlock { Text: binding(session.SelectedStatus); } }
+                        Border { Class: "priority-badge"; Padding: (12, 4); TextBlock { Text: binding(session.SelectedPriority); } }
+                    }
+                    TextBlock { Class: "field-label"; Text: "Title"; }
+                    TextBox { Class: "title"; Text: binding(session.Title); TextChanged: (sender, e) => { if (sender.IsFocused) session.EditTitle(sender.Text ?? ""); }; }
+                    TextBlock { Class: "field-label"; Text: "Description"; }
+                    TextBlock { Class: "description"; Text: "Investigate the reported behavior and document the smallest safe fix. Preserve current issue context."; TextWrapping: TextWrapping.Wrap; }
+                    StackPanel { Orientation: Orientation.Horizontal; Spacing: 10;
+                        Button { Class: "primary"; Content: "Save changes"; Click: (sender, e) => session.CommitTitle(); }
+                        Button { Class: "secondary"; Content: "Retry"; Click: (sender, e) => session.Retry(); }
+                        Button { Class: "secondary"; Content: "Theme"; Click: (sender, e) => session.ToggleTheme(); }
+                    }
+                }
+            }
+        }
+    };
+}
