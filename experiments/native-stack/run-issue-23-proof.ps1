@@ -43,7 +43,6 @@ if ($LASTEXITCODE -ne 0 -or -not $composition.Ok -or -not $style.Ok -or -not $co
 git -C "$PSScriptRoot/../.." diff --check
 if ($LASTEXITCODE -ne 0) { throw 'git diff --check failed.' }
 $head = (git -C "$PSScriptRoot/../.." rev-parse HEAD).Trim()
-$diff = (git -C "$PSScriptRoot/../.." diff --binary -- experiments/native-stack | git hash-object --stdin).Trim()
 function Get-Sha256([string]$Path) {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { return ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path))) -replace '-', '').ToLowerInvariant() }
@@ -62,7 +61,7 @@ $proof = [ordered]@{
     ok = $true
     issue = 23
     nativeAot = $true
-    source = [ordered]@{ head = $head; trackedDiff = $diff; inputManifestSha256 = $manifestHash; inputCount = $inputs.Count; inputs = $inputs }
+    source = [ordered]@{ head = $head; trackedAndIndexClean = $true; inputManifestSha256 = $manifestHash; inputCount = $inputs.Count; inputs = $inputs }
     publish = [ordered]@{
         rid = 'win-x64'
         configuration = 'Release'
