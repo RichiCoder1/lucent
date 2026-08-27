@@ -134,6 +134,7 @@ Framework internals may be substantial if they remain coherent and testable. Raw
 
 - [Architecture](ARCHITECTURE.md)
 - [Milestones and gates](MILESTONES.md)
+- [Final adoption decision and platform risks](ADOPTION.md)
 - [References and credits](REFERENCES.md)
 - [Adversarial plan review](REVIEW.md)
 

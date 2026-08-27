@@ -201,6 +201,14 @@ the first STOP result intact beside the new result.
 
 Stop on an accessibility wall or performance miss. Passing the gate permits an explicit decision to replace the unreleased Avalonia implementation; it does not perform that replacement automatically.
 
+### Recorded decision
+
+Milestone 3 passed. The final decision is **replace**: adopt the Lucent Native
+architecture for the unreleased runtime, migrate forward without a dual backend
+or compatibility layer, and validate macOS and Wayland as separate bounded
+adapter spikes. The evidence, deletion sequence, and platform STOP conditions
+are recorded in [ADOPTION.md](ADOPTION.md).
+
 ## Tracking
 
 The live implementation slices and dependencies are maintained in the [Lucent Native GitHub Project](https://github.com/users/RichiCoder1/projects/4/views/1). Do not duplicate the issue-title catalog here.
