@@ -66,6 +66,16 @@ The spike owns a bounded flex system:
 - scroll viewport and virtualized list placement;
 - device-scale rounding.
 
+The finite algorithm clamps each fixed or intrinsic main-axis base to its
+minimum/maximum, subtracts padding and fixed gaps, then distributes positive
+free space by `grow` or negative free space by `shrink × clamped-base`.
+`start`, `center`, `end`, `space-between`, and `space-around` consume remaining
+positive space; cross-axis start/center/end/stretch is resolved before the final
+away-from-zero device-scale rounding. Invalid available sizes, negative values,
+and duplicate identities fail at this boundary. The implementation is capped at
+32 children; it has no grid, wrapping, percentage/calc, absolute positioning,
+baseline generalization, or CSS box model.
+
 Grid, wrapping, and absolute-layout generalization are deferred.
 
 ## Styling and themes
@@ -118,6 +128,13 @@ The spike supports a practical single-line field:
 - UIA Value behavior.
 
 Rich text, multiline layout, text ranges, and editor-grade undo are excluded.
+
+`SkiaSharp.HarfBuzz.SKShaper` receives an explicit HarfBuzz buffer direction,
+script, and language. Its exact glyph IDs, clusters, positions, and cached
+`SKTextBlob` are used for intrinsic advance and the retained-scene Skia seam;
+measurement does not call a separate text API. Mixed-script proof input is
+explicit Latin/CJK/Arabic runs with covering faces. It proves this shaping seam,
+not automatic font fallback, Unicode script segmentation, or a UBA implementation.
 
 ## Test architecture
 

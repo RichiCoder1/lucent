@@ -24,12 +24,13 @@ internal sealed class StableElement(ElementId id, Bounds bounds, ResolvedStyle s
     public void Clear(DirtyFacet facets) => Dirty &= ~facets;
 }
 
-internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius);
+internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius, ShapedRun? Text = null);
 internal sealed class RetainedScene
 {
     private readonly Dictionary<ElementId, SceneCommand> _commands = [];
     public IEnumerable<SceneCommand> Commands => _commands.Values.OrderBy(command => command.Id.Value, StringComparer.Ordinal);
     public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius);
+    public void UpsertText(ElementId id, Bounds bounds, string color, ShapedRun text) => _commands[id] = new(id, bounds, color, 0, text);
 }
 
 internal sealed class ProjectedSnapshots
@@ -50,7 +51,8 @@ internal sealed class SkiaSceneRenderer : ISkiaSceneRenderer
         foreach (var command in scene.Commands)
         {
             using var paint = new SKPaint { Color = SKColor.Parse(command.Color), IsAntialias = false };
-            canvas.DrawRoundRect(new SKRect(command.Bounds.X, command.Bounds.Y, command.Bounds.X + command.Bounds.Width, command.Bounds.Y + command.Bounds.Height), command.CornerRadius, command.CornerRadius, paint);
+            if (command.Text is not null) command.Text.Draw(canvas, command.Bounds.X, command.Bounds.Y + command.Bounds.Height - 8, paint);
+            else canvas.DrawRoundRect(new SKRect(command.Bounds.X, command.Bounds.Y, command.Bounds.X + command.Bounds.Width, command.Bounds.Y + command.Bounds.Height), command.CornerRadius, command.CornerRadius, paint);
         }
     }
 }

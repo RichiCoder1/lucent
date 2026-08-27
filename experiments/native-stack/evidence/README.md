@@ -55,3 +55,20 @@ The recorded tolerance is **0 RGBA pixels**. `native-framebuffer.png` is read fr
 4ba8996b03db4792eaaff208d6e821836e73720714d4ad950e96946fdc081315  semantics.json
 7e118e21b2f36cf20b00b30934526a3b9952c78b00eefb18111230f25d510c9f  style.json
 ```
+
+## Issue #5 bounded layout and shaped-text evidence
+
+`../run-layout-proof.ps1` locked-restores, warning-free NativeAOT-publishes,
+then runs the layout proof twice. The canonical dump and raster are under
+[`issue-5/`](issue-5/); the script rejects any artifact-set or SHA-256 mismatch.
+It covers ligature-sensitive Latin, combining marks, RTL Arabic, CJK fallback,
+mixed script, emoji/surrogate pairs, a missing requested font, executable
+en-US/tr-TR culture independence, and 1.25×/2× scale rounding. The current
+published evidence pins SkiaSharp/SkiaSharp.HarfBuzz 4.151.1 and HarfBuzzSharp
+14.2.1.1; the dump records their actual assembly versions, glyph IDs, clusters,
+shape hashes, language, direction, script, and resolved faces.
+
+```text
+1232a09611a6f2311f67ffa24536ae9ffa0749e6a1b99253a83cde94681e7ca9  layout-text.json
+2d7ce3622de61443802808ad76858fc0662b0f6ef1612894cd2c16faef5effbe  layout-text.png
+```

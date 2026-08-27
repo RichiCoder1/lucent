@@ -143,6 +143,24 @@ The selected present path is CPU Skia raster (`SKBitmap`/`SKCanvas`) uploaded as
 
 `run-scene-proof.ps1` publishes the locked NativeAOT executable, requires exactly six capture artifacts in each run before comparing names and SHA-256 values, and fails on identity/facet/dump/raster/frame/present/resize failure. Idle and semantic-only writes cause zero scheduled native presents; the changed panel bounds cause one layout-driven present and the changed badge style causes one further paint-driven present. Its JSON records a zero-pixel tolerance.
 
+## Issue #5 bounded layout and text proof
+
+```powershell
+./run-layout-proof.ps1
+```
+
+The dedicated NativeAOT self-check has a fixed 32-child row/column flex ceiling.
+It checks grow/shrink, min/max clamping, padding/gap, start/center/end/stretch,
+space-between/around, and 1.25×/2× rounding; it fails invalid constraints and
+duplicate IDs. Its retained shaped runs use the pinned `SkiaSharp.HarfBuzz`
+result for both intrinsic width and scene-seam glyph rasterization. Two runs
+must yield exactly `layout-text.json` and `layout-text.png` with matching SHA-256
+hashes. The dump records package versions, requested/resolved typefaces, glyph
+counts, advances/bounds, direction, cultures, scales, and shared shape IDs.
+Globalization is enabled so the NativeAOT proof can execute en-US/tr-TR; the
+recorded published `win-x64` directory is 156,895,896 bytes (the prior
+invariant-globalization output is not a comparable retained artifact).
+
 ## Explicit exclusions
 
 - `.lui` syntax and compiler lowering;
