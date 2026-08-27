@@ -7,10 +7,11 @@ $avaloniaProject = "$PSScriptRoot/baseline/IssueBrowser.Avalonia/IssueBrowser.Av
 $nativeOutput = Join-Path $OutputDirectory native
 $avaloniaOutput = Join-Path $OutputDirectory avalonia
 
-git -C $root diff --quiet -- experiments/native-stack
-if ($LASTEXITCODE -ne 0) { throw 'Issue 24 proof requires clean tracked experiment source.' }
-git -C $root diff --cached --quiet -- experiments/native-stack
-if ($LASTEXITCODE -ne 0) { throw 'Issue 24 proof requires an empty experiment index.' }
+$experimentStatus = @(git -C $root status --porcelain=v1 --untracked-files=all -- experiments/native-stack)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect Issue 24 experiment source.' }
+if ($experimentStatus.Count -ne 0) { throw 'Issue 24 proof requires a clean experiment tree and index.' }
+$repositoryStatus = @(git -C $root status --porcelain=v1 --untracked-files=all)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect repository source.' }
 
 dotnet build $nativeProject -c Release --no-restore -warnaserror
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -31,7 +32,16 @@ $contract = (git -C $root hash-object experiments/native-stack/GAUNTLET-REFRAME.
 $proof = [ordered]@{
     ok = $true
     issue = 24
-    source = [ordered]@{ head = (git -C $root rev-parse HEAD).Trim(); clean = $true; contractBlob = $contract; contractCommit = '4546d79'; implementationCommit = '7f9fce4' }
+    source = [ordered]@{
+        head = (git -C $root rev-parse HEAD).Trim()
+        scope = 'experiments/native-stack'
+        experimentCleanAtStart = ($experimentStatus.Count -eq 0)
+        repositoryCleanAtStart = ($repositoryStatus.Count -eq 0)
+        outOfScopeChangesAtStart = $repositoryStatus.Count
+        contractBlob = $contract
+        contractCommit = '4546d79'
+        implementationCommit = '7f9fce4'
+    }
     results = [ordered]@{ native = $nativeClosed.Observed; avalonia = $avaloniaClosed.observed; expected = 667 }
     walkthrough = [ordered]@{ native = 12; avalonia = 12 }
     scores = [ordered]@{ native = @(3,3,3,3,3,3,2,2); avalonia = @(1,3,1,3,2,2,1,1); nativeHypothesisWins = 3; requiredWins = 3 }
