@@ -1,9 +1,0 @@
-namespace Demo;
-component Host(string title)
-{
-    slot actions;
-    Fragment Render() => StackPanel {
-        TextBlock { Text: title; }
-        ContentControl { yield actions; }
-    };
-}

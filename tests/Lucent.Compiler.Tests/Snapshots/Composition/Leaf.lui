@@ -1,2 +1,0 @@
-namespace Demo;
-component Leaf(string text) => TextBlock { Text: text; };
