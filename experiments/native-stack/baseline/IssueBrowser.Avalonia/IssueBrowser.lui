@@ -21,6 +21,9 @@ component IssueBrowserWindow(IssueBrowserSession session)
                     StackPanel { Orientation: Orientation.Horizontal; Spacing: 8;
                         CheckBox { Class: "filter-chip"; Content: "Ada"; IsChecked: binding(session.AdaChecked); Click: (sender, e) => session.ToggleAda(); }
                         CheckBox { Class: "filter-chip"; Content: "Open"; IsChecked: binding(session.OpenChecked); Click: (sender, e) => session.ToggleOpen(); }
+                    }
+                    StackPanel { Orientation: Orientation.Horizontal; Spacing: 8;
+                        CheckBox { Class: "filter-chip"; Content: "Closed"; IsChecked: binding(session.ClosedChecked); Click: (sender, e) => session.ToggleClosed(); }
                         CheckBox { Class: "filter-chip"; Content: "High"; IsChecked: binding(session.HighChecked); Click: (sender, e) => session.ToggleHigh(); }
                     }
                     TextBlock { Class: "section-label"; Text: "VIEWS"; }

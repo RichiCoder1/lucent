@@ -13,7 +13,7 @@ internal static class IssueBrowser
 
     internal enum InputCommand
     {
-        Search, OpenFilter, HighFilter, AssigneeFilter, PageDown, End, Home,
+        Search, OpenFilter, ClosedFilter, HighFilter, AssigneeFilter, PageDown, End, Home,
         SelectFirst, Next, RemoveSelected, EditTitle, CommitTitle, RevertTitle,
         FailSearch, Retry, ToggleTheme, ReducedMotion, Tab, ShiftTab, EscapeToList
     }
@@ -26,6 +26,7 @@ internal static class IssueBrowser
         var steps = app.Walkthrough();
         File.WriteAllLines(Path.Combine(directory, "walkthrough.jsonl"), steps.Select(step => JsonSerializer.Serialize(step, ProbeJsonContext.Default.IssueBrowserStep)));
         File.WriteAllText(Path.Combine(directory, "assignee-filter.json"), JsonSerializer.Serialize(app.AssigneeCheck(), ProbeJsonContext.Default.IssueBrowserAssigneeFilterCheck));
+        File.WriteAllText(Path.Combine(directory, "closed-filter.json"), JsonSerializer.Serialize(app.ClosedFilterCheck(), ProbeJsonContext.Default.IssueBrowserClosedFilterCheck));
         File.WriteAllText(Path.Combine(directory, "semantics.json"), JsonSerializer.Serialize(app.Semantics(), ProbeJsonContext.Default.IssueBrowserSemanticArray));
         File.WriteAllText(Path.Combine(directory, "identity.json"), JsonSerializer.Serialize(app.Identity(), ProbeJsonContext.Default.IssueBrowserIdentity));
         File.WriteAllText(Path.Combine(directory, "tree.txt"), app.TreeDump());
@@ -152,7 +153,8 @@ internal static class IssueBrowser
                     (NativeUi.Text("Issue tracker").Style(Label(176, 30, 20, 600))),
                     (NativeUi.TextField("Search issues", () => _query.Value, SetQuery).Style(new Style().Size(176, 38).Bg(SemanticToken.Muted).Fg(SemanticToken.Foreground).Rounded(7).Padding(10).Type(13))),
                     (NativeUi.Text("FILTERS").Style(Label(176, 20, 11, 700).Fg(SemanticToken.MutedForeground))),
-                    NativeUi.Row(Pill("Ada", _assignee, "Ada", 52), Pill("Open", _status, "Open", 68), Pill("High", _priority, "High", 56)).Style(new Style().Size(176, 30).Bg(transparent).Gap(8)),
+                    NativeUi.Row(Pill("Ada", _assignee, "Ada", 52), Pill("Open", _status, "Open", 68)).Style(new Style().Size(176, 30).Bg(transparent).Gap(8)),
+                    NativeUi.Row(Pill("Closed", _status, "Closed", 76), Pill("High", _priority, "High", 56)).Style(new Style().Size(176, 30).Bg(transparent).Gap(8)),
                     (NativeUi.Text("Views").Style(Label(176, 24, 11, 600).Fg(SemanticToken.MutedForeground))),
                     (NativeUi.Text("All issues").Style(Label(176, 28, 13, 500))),
                     (NativeUi.Text("Assigned to me").Style(Label(176, 28, 13).Fg(SemanticToken.MutedForeground))),
@@ -197,6 +199,7 @@ internal static class IssueBrowser
             {
                 case InputCommand.Search: _ui.Input(new(CompositionInputKind.Semantic, "Search issues", "set-value:" + (text ?? ""))); break;
                 case InputCommand.OpenFilter: _ui.Input(new(CompositionInputKind.Semantic, "Open", "press")); break;
+                case InputCommand.ClosedFilter: _ui.Input(new(CompositionInputKind.Semantic, "Closed", "press")); break;
                 case InputCommand.HighFilter: _ui.Input(new(CompositionInputKind.Semantic, "High", "press")); break;
                 case InputCommand.AssigneeFilter: _ui.Input(new(CompositionInputKind.Semantic, "Ada", "press")); break;
                 case InputCommand.PageDown: _ui.Input(new(CompositionInputKind.Semantic, "Issue list", "PageDown")); break;
@@ -319,10 +322,10 @@ internal static class IssueBrowser
             output.Add(Step("W10 theme", ReferenceEquals(Theme, Themes.Dark) && _selected.Value == selected && Query == queryState && _status.Value == status && _priority.Value == priority && _ui.ScrollOffset("Issue list") == scroll && _draft.Value == "draft" && _reducedMotion.Value && motionActive && motionSnapped && stayedSnapped, "theme preserves state and reduced motion snaps an active mounted transition", $"active={motionActive}; snapped={motionSnapped}; stayed={stayedSnapped}"));
             _ui.Input(new(CompositionInputKind.Semantic, "Search issues", "focus"));
             var focus = new List<string?> { _ui.FocusedName() };
-            for (var index = 0; index != 7; index++) { Send(InputCommand.Tab); focus.Add(_ui.FocusedName()); }
+            for (var index = 0; index != 8; index++) { Send(InputCommand.Tab); focus.Add(_ui.FocusedName()); }
             Send(InputCommand.ShiftTab); focus.Add(_ui.FocusedName());
             _ui.Input(new(CompositionInputKind.Semantic, "Title", "focus")); Send(InputCommand.RevertTitle); focus.Add(_ui.FocusedName());
-            var expectedFocus = new string?[] { "Search issues", "Ada", "Open", "High", "Issue list", "Title", "Save changes", "Retry", "Save changes", "Issue list" };
+            var expectedFocus = new string?[] { "Search issues", "Ada", "Open", "Closed", "High", "Issue list", "Title", "Save changes", "Retry", "Save changes", "Issue list" };
             output.Add(Step("W11 keyboard", focus.SequenceEqual(expectedFocus), "real filter/list/detail Tab traversal and authored Escape focus", string.Join('>', focus)));
             var semantics = Semantics();
             output.Add(Step("W12 semantics", semantics.All(item => item.Role.Length > 0 && item.Name.Length > 0 && item.SuppressionReason is null) && semantics.Any(item => item.Name == "Title" && item.Actions.Contains("set-value")) && semantics.Any(item => item.Name == "Issue list" && item.Value == _selected.Value) && semantics.Any(item => item.Selected) && semantics.Any(item => item.Focused), "complete mounted semantics with zero suppressions", "projected semantic tree"));
@@ -333,6 +336,14 @@ internal static class IssueBrowser
         {
             _query.Value = "auth"; _status.Value = null; _priority.Value = null; _assignee.Value = "Ada"; _removed.Value = null; _ = _latest.Value; CompleteAsync();
             return new(Rows.Count == 1000, 1000, Rows.Count, _assignee.Value ?? "none");
+        }
+
+        public IssueBrowserClosedFilterCheck ClosedFilterCheck()
+        {
+            _selected.Value = "issue-00000";
+            var selected = _selected.Value; var theme = Theme; var draft = _draft.Value; var reduced = _reducedMotion.Value;
+            _query.Value = "auth"; _status.Value = "Closed"; _priority.Value = null; _assignee.Value = null; _removed.Value = null; _ = _latest.Value; CompleteAsync();
+            return new(_status.Value == "Closed" && Rows.Count == 667 && _selected.Value == selected && ReferenceEquals(Theme, theme) && _draft.Value == draft && _reducedMotion.Value == reduced, 667, Rows.Count, "Closed");
         }
 
         public IssueBrowserSemantic[] Semantics() => _ui.Semantics().Select(pair => new IssueBrowserSemantic(pair.Name, pair.Value.Role, pair.Value.Name, pair.Value.Value, pair.Value.Actions ?? [], pair.Value.Enabled, pair.Value.Focused, pair.Value.Selected, pair.Value.SuppressionReason)).ToArray();
@@ -359,4 +370,5 @@ internal sealed record IssueBrowserStep([property: System.Text.Json.Serializatio
 internal sealed record IssueBrowserIdentity(int Rows, int Realized, string Selected, string Theme, string Query, string? Status, string? Priority, string? Assignee, int Scroll, string Draft, bool ReducedMotion, int Width, int Height);
 internal sealed record IssueBrowserSemantic(string Id, string Role, string Name, string? Value, string[] Actions, bool Enabled, bool Focused, bool Selected, string? SuppressionReason);
 internal sealed record IssueBrowserAssigneeFilterCheck(bool Pass, int Expected, int Observed, string Assignee);
+internal sealed record IssueBrowserClosedFilterCheck(bool Pass, int Expected, int Observed, string Status);
 internal sealed record IssueBrowserSeed([property: System.Text.Json.Serialization.JsonPropertyName("count")] int Count, [property: System.Text.Json.Serialization.JsonPropertyName("asyncDelayMilliseconds")] int AsyncDelayMilliseconds, [property: System.Text.Json.Serialization.JsonPropertyName("failureQuery")] string FailureQuery);

@@ -762,5 +762,6 @@ internal sealed record FailureResult(bool Ok, string Error);
 [JsonSerializable(typeof(IssueBrowserIdentity))]
 [JsonSerializable(typeof(IssueBrowserSemantic[]))]
 [JsonSerializable(typeof(IssueBrowserAssigneeFilterCheck))]
+[JsonSerializable(typeof(IssueBrowserClosedFilterCheck))]
 [JsonSerializable(typeof(IssueBrowserSeed))]
 internal sealed partial class ProbeJsonContext : JsonSerializerContext;
