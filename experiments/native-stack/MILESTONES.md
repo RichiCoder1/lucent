@@ -39,7 +39,7 @@ Record reproducible commands, source/dependency identities, machine-readable tes
 the issue #3 IME evidence plus the issue #4/#5 parity artifacts. Direct Win32
 is not run when that SDL gate passes.
 
-## Milestone 2 — interactive reactive application
+## Milestone 2 — interactive reactive engine
 
 ### Work
 
@@ -49,29 +49,109 @@ is not run when that SDL gate passes.
 4. Add hit testing, bubbling, pointer capture, focus scopes, and keyboard traversal.
 5. Implement the typed style/token core, fluent utilities, state variants, light/dark switching, and bounded animation.
 6. Add composable Button, TextField, selection/filter, ScrollViewport, and virtualized list behaviors.
-7. Build the functional issue-browser gauntlet.
-8. Before judging either side, freeze one common issue-browser feature walkthrough and rubric. Build a source-pinned Lucent-on-Avalonia baseline for that walkthrough and record the `.lui`/CSS versus C# authoring confound separately.
+7. Build the functional issue-browser gauntlet as an integration probe.
 
-### Gate
+### Recorded engine result
 
-- normal state, derived state, conditional regions, lists, and async flows remain obvious in straight C#;
-- the application uses no imperative UI synchronization or general reconciliation;
-- controls are keyboard operable and emit valid semantics;
-- light/dark switching retains application state;
-- the Lucent Native application is materially clearer than the Avalonia equivalent.
+Issues #7–#11 proved the reactive graph, structural ownership, input/focus,
+portable semantics, typed style core, controls, and bounded virtualization under
+NativeAOT. The issue browser exposed that these engine modules did not yet form
+an application-facing authoring interface: application code still rendered
+directly, synchronized virtualization manually, and duplicated behavior and
+semantic wiring.
 
-Stop if authoring is not materially simpler.
+That is a missing product layer, not evidence against the engine hypothesis.
+Milestone 2A is the approved bounded attempt to add it.
 
-### Recorded authoring decision
+### Recorded first authoring attempt
 
 The frozen issue-browser rubric in `evidence/issue-13/` records **STOP**:
 Native won 3/8 categories and trailed by two points in styling, missing both
-predeclared scoring conditions. Milestone 3 is not authorized without an
-explicit decision to override or reframe the experiment.
+predeclared scoring conditions. That result remains valid for commit `3d0da02`;
+it is not rescored or weakened. It compared a mature Avalonia authoring surface
+to a Native integration probe that bypassed its own style and retained-element
+modules. The approved reframe registers a new attempt with prerequisites that
+the first comparison did not require.
 
 ### Evidence
 
-Record the shared walkthrough, source commits, build mode, exclusions, and rubric before comparison. Score state/derived state, structure, async flows, styling, accessibility, lifecycle, testing, and total integration separately. Store executable interaction results and the completed rubric.
+The original evidence remains under `evidence/issue-13/` and the frozen contract
+remains in `GAUNTLET.md`.
+
+## Milestone 2A — application authoring interface
+
+The detailed contract and exclusions are in [AUTHORING-REFRAME.md](AUTHORING-REFRAME.md).
+
+### Work
+
+1. Put a small typed C# composition interface over stable elements: layout,
+   text, controls, `Show`, keyed `For`, and virtualized lists.
+2. Make the generic retained projection and renderer consume that element tree;
+   application code must not draw on Skia or assign pixel geometry.
+3. Bind reactive values and collections directly to element properties and
+   virtualization. Remove application-level `Sync`/`SetItems` reconciliation.
+4. Compose input, focus, semantics, and disposal as reusable behaviors owned by
+   elements rather than by the application.
+5. Complete the finite typed style interface needed by the issue browser:
+   semantic tokens, layout, typography, background, border, radius, shadow,
+   opacity, transform, state variants, theme switching, and bounded transition
+   chaining. Do not add CSS or a selector engine.
+6. Expose deterministic element, layout, resolved-style, reactive, and semantic
+   dumps through the same interface used by tests.
+7. Rewrite the Native issue browser using only this authoring interface.
+
+### Gate
+
+- the issue browser contains no canvas calls, renderer, direct bounds, manual
+  semantic mirror, or application-level synchronization method;
+- state, derived state, structure, async ownership, and virtualized collections
+  are declared once and update through the reactive graph;
+- normal styling is concise typed assignment/chaining, while state variants,
+  themes, and reduced motion do not require application event handlers;
+- reusable framework modules, not issue-browser helpers, own rendering, input,
+  focus, semantics, and disposal;
+- the frozen W1–W12 walkthrough still passes under NativeAOT and deterministic
+  dumps identify the resolved tree and style state.
+
+Stop if satisfying this gate requires a virtual DOM, general reconciliation,
+runtime selectors, or application-specific framework hooks.
+
+## Milestone 2B — registered authoring comparison
+
+### Work
+
+1. Freeze a new comparison contract before scoring. Keep the existing Avalonia
+   baseline, seed, walkthrough, and first-attempt evidence source-pinned.
+2. Score the rewritten Native application against both Avalonia `.lui`/CSS and
+   the bounded straight-C# Avalonia comparison where syntax is the confound.
+3. Run a second small feature change selected before measurement and record
+   touched sites, authored lines, imperative synchronization, and diagnostics.
+
+### Gate
+
+Native must:
+
+- score at least 2 in every category;
+- score 3 in reactive state/derived state, async/lifecycle ownership, and typed
+  styling/state variants;
+- beat Avalonia in at least three of the five hypothesis categories: reactive
+  state, structural composition, async/lifecycle, styling/state variants, and
+  change locality;
+- have no two-point deficit in any category; and
+- pass the change task without more touched authoring sites than Avalonia.
+
+The rubric must reward concise composition, assignment, and chaining—not merely
+the existence of a declarative file format. Visual polish and control breadth
+are parity checks, not substitutes for authoring clarity.
+
+Stop if the completed authoring interface still does not meet this gate.
+Milestone 3 remains unauthorized until Milestone 2B records **PROCEED**.
+
+### Evidence
+
+Record the new contract hash, source commits, exact authored-file boundaries,
+walkthrough artifacts, dumps, category rationales, and change-task diff. Keep
+the first STOP result intact beside the new result.
 
 ## Milestone 3 — accessibility and viability proof
 

@@ -31,3 +31,27 @@ Opus proposed a calendar or line-count ceiling. That was not adopted because the
 ## Result
 
 The corrected plan is ready to begin issue #2. Each milestone still requires a recorded proceed/stop decision; this review does not pre-approve Milestones 2 or 3.
+
+## Milestone 2 authoring reframe
+
+The first authoring gate later recorded STOP at commit `3d0da02`. That result is
+retained unchanged. Parent review found that the comparison application bypassed
+the product interface it intended to test: it owned a Skia renderer and pixel
+geometry, manually synchronized computed rows into virtualization, and assembled
+input, focus, rendering, and semantics in application code while the typed style
+and retained-element modules remained isolated proofs.
+
+The approved reframe therefore does not lower the old threshold or proceed to
+Milestone 3. It inserts two new gates:
+
+1. Milestone 2A must produce a bounded application-facing composition,
+   reactivity, styling, behavior, projection, and diagnostics interface and
+   rewrite the issue browser through it.
+2. Milestone 2B then runs a newly frozen comparison weighted toward the actual
+   hypothesis: reactive state, structural composition, async/lifecycle,
+   styling/state variants, and change locality.
+
+The review deliberately rejects three shortcuts: crediting engine primitives
+that application code does not use, treating a declarative file format alone as
+good styling ergonomics, and adding a virtual DOM/CSS engine to manufacture
+parity. Issues #20–#24 track the bounded reframe. Milestone 3 remains blocked.

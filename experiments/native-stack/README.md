@@ -2,7 +2,7 @@
 
 ## Status
 
-**Milestone 2 authoring gate recorded STOP.** The Windows platform/runtime foundations passed, but the frozen issue-browser comparison did not find the current Native authoring model materially clearer. This folder remains intentionally independent of the existing Avalonia runtime and main solution.
+**Milestone 2 engine passed; its first authoring attempt recorded STOP and is now explicitly reframed.** The Windows platform/runtime foundations and reactive engine passed, but the frozen issue-browser comparison measured an integration probe that bypassed the intended retained composition and typed styling interface. That STOP remains valid for its source commit. Milestone 2A is authorized to build the missing bounded authoring interface; Milestone 3 remains blocked pending a new Milestone 2B comparison.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 
@@ -58,6 +58,12 @@ Column(
 ```
 
 Reactive reads are tracked only inside explicit reactive callbacks. A later compiler may provide static dependency tables to the same scheduler. Stable nodes update directly; `Show` and keyed `For` own structural regions. There is no general virtual DOM or runtime selector engine.
+
+The first issue-browser did not meet this shape: it drew application geometry
+and colors directly and manually synchronized computed rows into
+virtualization. [The authoring reframe](AUTHORING-REFRAME.md) now makes the
+missing composition, reactive-property, typed-style, behavior, and generic
+projection modules explicit before another comparison is allowed.
 
 ## Validation application
 
