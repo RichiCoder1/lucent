@@ -36,9 +36,10 @@ internal static class Program
                 "--issue-browser-uia-host" when args.Length == 3 => IssueBrowser.RunUiaHost(args[1], args[2]),
                 "--issue-browser-visible-uia-host" when args.Length == 3 => IssueBrowser.RunUiaHost(args[1], args[2], visible: true),
                 "--issue-14-provider-contract" => IssueBrowser.RunIssue14Contract(args.Skip(1).FirstOrDefault()),
+                "--issue-15-benchmark" => IssueBrowser.RunIssue15Benchmark(),
                 "--issue-browser" => IssueBrowser.RunVisible(),
                 null => JsonSerializer.Serialize(RunDependencyProbe(), ProbeJsonContext.Default.ProbeResult),
-                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --controls-self-check, --composition-self-check, --virtualization-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release], --issue-browser-walkthrough [output], or --issue-14-provider-contract [output].")
+                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --controls-self-check, --composition-self-check, --virtualization-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release], --issue-browser-walkthrough [output], --issue-14-provider-contract [output], or --issue-15-benchmark.")
             };
             Console.WriteLine(json);
             return 0;
@@ -787,4 +788,5 @@ internal sealed record FailureResult(bool Ok, string Error);
 [JsonSerializable(typeof(Issue14RoleMapping[]))]
 [JsonSerializable(typeof(Issue14ProviderContract))]
 [JsonSerializable(typeof(IssueBrowserSeed))]
+[JsonSerializable(typeof(Issue15BenchmarkResult))]
 internal sealed partial class ProbeJsonContext : JsonSerializerContext;

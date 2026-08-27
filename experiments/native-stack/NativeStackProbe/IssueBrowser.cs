@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Runtime.CompilerServices;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using SDL3;
 
 /// <summary>The issue browser owns state and intent only; NativeUi owns its tree, rendering, input, and semantics.</summary>
@@ -9,6 +11,15 @@ internal static class IssueBrowser
     private const int Height = 760;
     private const int RowHeight = 34;
     private const int ViewportHeight = 578;
+    private const int Issue15Samples = 500;
+    private const int Issue15Warmup = 50;
+    private const int Issue15IdleSeconds = 10;
+    private const int Issue15ScrollCycles = 20;
+    private const double Issue15P95BudgetMilliseconds = 16.7;
+    private const double Issue15P99BudgetMilliseconds = 33.3;
+    private const long Issue15LiveGrowthBudgetBytes = 16L * 1024 * 1024;
+    private const long Issue15ReturnAllowanceBytes = 8L * 1024 * 1024;
+    private static readonly string[] Issue15Corpus = Enumerable.Range(0, Issue15Samples).Select(index => (index % 41) switch { 0 => "Home", 40 => "End", _ => "PageDown" }).ToArray();
 
     private sealed record Issue(string Id, string Title, string Status, string Priority, string Assignee);
 
@@ -104,6 +115,89 @@ internal static class IssueBrowser
         return $"{{\"mode\":\"native-ui\",\"rows\":{app.Rows.Count},\"realized\":{app.Realized}}}";
     }
 
+    /// <summary>Fail-closed serial NativeAOT benchmark over the issue browser's mounted input and SDL present path.</summary>
+    public static string RunIssue15Benchmark()
+    {
+        using var app = new State(LoadSeed());
+        using var host = new WindowHost("Lucent Native Issue Browser issue-15", Width, Height, SDL.WindowFlags.Hidden);
+        using var presenter = new SdlSkiaPresenter(host.Window, new SkiaSceneRenderer(), captureReadback: false);
+        app.Present(presenter);
+
+        for (var index = 0; index < Issue15Warmup; index++) PresentInput(app, presenter, Issue15Corpus[index]);
+        var staleRetained = app.Issue15StaleRetained();
+        app.CompleteAsync();
+        app.Send(InputCommand.Search, "");
+        app.CompleteAsync();
+        app.Present(presenter);
+        var unrelatedInvalidation = app.Issue15UnrelatedWriteIdle();
+
+        ForceCollection();
+        var postWarmBaseline = GC.GetTotalMemory(false);
+        var scrollDispatches = 0;
+        for (var cycle = 0; cycle < Issue15ScrollCycles; cycle++)
+        {
+            scrollDispatches += app.Issue15FullScrollCycle();
+            app.Present(presenter);
+        }
+        // GetTotalMemory(false) includes dead allocation churn; compact first so this is live managed state.
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        var liveAfterScroll = GC.GetTotalMemory(false);
+        ForceCollection();
+        var postCollection = GC.GetTotalMemory(false);
+
+        var gcBefore = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
+        var allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+        var samples = new double[Issue15Samples];
+        for (var index = 0; index < samples.Length; index++)
+        {
+            var started = Stopwatch.GetTimestamp();
+            PresentInput(app, presenter, Issue15Corpus[index]);
+            samples[index] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        }
+        var allocatedAfter = GC.GetTotalAllocatedBytes(precise: true);
+        var gcAfter = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) };
+
+        var framesBeforeIdle = app.PresentedFrames;
+        var requestsBeforeIdle = app.RequestedFrames;
+        var idleStarted = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(idleStarted) < TimeSpan.FromSeconds(Issue15IdleSeconds))
+        {
+            app.Advance(TimeSpan.FromMilliseconds(20));
+            SDL.Delay(20);
+        }
+        var idleElapsedMilliseconds = Stopwatch.GetElapsedTime(idleStarted).TotalMilliseconds;
+        var idleFrames = app.PresentedFrames - framesBeforeIdle;
+        var idleRequests = app.RequestedFrames - requestsBeforeIdle;
+        var ordered = samples.OrderBy(value => value).ToArray();
+        var p95 = Percentile(ordered, .95);
+        var p99 = Percentile(ordered, .99);
+        var visibleRows = (ViewportHeight + RowHeight - 1) / RowHeight;
+        var returnLimit = checked(postWarmBaseline + postWarmBaseline / 10 + Issue15ReturnAllowanceBytes);
+        var result = new Issue15BenchmarkResult(
+            p95 <= Issue15P95BudgetMilliseconds && p99 <= Issue15P99BudgetMilliseconds &&
+            idleElapsedMilliseconds >= Issue15IdleSeconds * 1000 && idleFrames == 0 && idleRequests == 0 && app.Realized <= visibleRows * 3 &&
+            liveAfterScroll - postWarmBaseline <= Issue15LiveGrowthBudgetBytes && postCollection <= returnLimit &&
+            staleRetained && unrelatedInvalidation,
+            Issue15Samples, Issue15Warmup, Issue15IdleSeconds, Issue15ScrollCycles, Issue15Corpus,
+            p95, p99, Issue15P95BudgetMilliseconds, Issue15P99BudgetMilliseconds,
+            idleElapsedMilliseconds, idleFrames, idleRequests, app.Realized, visibleRows, visibleRows * 3,
+            postWarmBaseline, liveAfterScroll, postCollection, liveAfterScroll - postWarmBaseline, Issue15LiveGrowthBudgetBytes, returnLimit,
+            allocatedAfter - allocatedBefore, new(gcAfter[0] - gcBefore[0], gcAfter[1] - gcBefore[1], gcAfter[2] - gcBefore[2]),
+            presenter.PresentCalls, app.PresentedFrames, app.RequestedFrames, app.ProjectionCalls, scrollDispatches,
+            staleRetained, unrelatedInvalidation, RuntimeInformation.FrameworkDescription, RuntimeInformation.ProcessArchitecture.ToString(), Environment.Version.ToString(), host.ReadDpi());
+        if (!result.Ok) throw new InvalidOperationException($"Issue #15 budget failed: {JsonSerializer.Serialize(result, ProbeJsonContext.Default.Issue15BenchmarkResult)}");
+        return JsonSerializer.Serialize(result, ProbeJsonContext.Default.Issue15BenchmarkResult);
+    }
+
+    private static void PresentInput(State app, SdlSkiaPresenter presenter, string command)
+    {
+        if (!app.Route(new(CompositionInputKind.Semantic, "Issue list", command))) throw new InvalidOperationException($"Issue #15 input was not handled: {command}.");
+        app.Present(presenter);
+    }
+
+    private static double Percentile(double[] ordered, double percentile) => ordered[Math.Clamp((int)Math.Ceiling(ordered.Length * percentile) - 1, 0, ordered.Length - 1)];
+    private static void ForceCollection() { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+
     public static string RunUiaHost(string readyPath, string closePath, bool visible = false)
     {
         using var app = new State(LoadSeed()); using var host = new WindowHost("Lucent Native Issue Browser", Width, Height, visible ? SDL.WindowFlags.Resizable : SDL.WindowFlags.Hidden);
@@ -179,9 +273,13 @@ internal static class IssueBrowser
         private readonly ReactiveAsyncComputed<Issue[]> _latest;
         private readonly RetainedComposition _ui;
         private readonly ReactiveSignal<bool> _reducedMotion;
+        private readonly ReactiveSignal<int> _issue15Unrelated;
 
         public List<Issue> Rows => (_latest.Value ?? []).ToList();
         public int Realized => _ui.RealizedCount("Issue list");
+        public int RequestedFrames => _ui.RequestedFrames;
+        public int PresentedFrames => _ui.PresentedFrames;
+        public int ProjectionCalls => _ui.ProjectionCalls;
         public string Query => _query.Value;
         public string? CurrentTitle => Current?.Title;
         public UiaSemanticNode[] UiaNodes { get { _graph.Drain(); return _ui.UiaNodes(); } }
@@ -208,6 +306,7 @@ internal static class IssueBrowser
             _assignee = _graph.Signal<string?>(null, "issues.assignee");
             _theme = _graph.Signal(Themes.Light, "issues.theme");
             _reducedMotion = _graph.Signal(false, "issues.reduced-motion");
+            _issue15Unrelated = _graph.Signal(0, "issues.issue-15-unrelated");
             _latest = _graph.AsyncComputed(async cancellation =>
             {
                 var query = _query.Value;
@@ -328,6 +427,36 @@ internal static class IssueBrowser
 
         public bool Route(CompositionInput input) { var handled = _ui.Input(input); _graph.Drain(); return handled; }
         public void Advance(TimeSpan elapsed) => _ui.Advance(elapsed);
+
+        internal bool Issue15StaleRetained()
+        {
+            var stale = Rows.Select(issue => issue.Id).ToArray();
+            Send(InputCommand.Search, "auth");
+            return _latest.Pending && stale.SequenceEqual(Rows.Select(issue => issue.Id));
+        }
+
+        internal bool Issue15UnrelatedWriteIdle()
+        {
+            var projections = _ui.ProjectionCalls;
+            var requested = _ui.RequestedFrames;
+            _issue15Unrelated.Value++;
+            _graph.Drain();
+            return _ui.ProjectionCalls == projections && _ui.RequestedFrames == requested;
+        }
+
+        internal int Issue15FullScrollCycle()
+        {
+            var count = 0;
+            Route(new(CompositionInputKind.Semantic, "Issue list", "Home")); count++;
+            var lastOffset = -1;
+            while (_ui.ScrollOffset("Issue list") != lastOffset)
+            {
+                lastOffset = _ui.ScrollOffset("Issue list");
+                Route(new(CompositionInputKind.Semantic, "Issue list", "PageDown")); count++;
+            }
+            Route(new(CompositionInputKind.Semantic, "Issue list", "Home"));
+            return count + 1;
+        }
 
         private void ToggleFilter(ReactiveSignal<string?> signal, string value)
         {
@@ -462,6 +591,7 @@ internal static class IssueBrowser
             _ui.Dispose(); _latest.Dispose();
             _source.Dispose(); _query.Dispose(); _selected.Dispose(); _draft.Dispose(); _removed.Dispose();
             _status.Dispose(); _priority.Dispose(); _assignee.Dispose(); _theme.Dispose(); _reducedMotion.Dispose();
+            _issue15Unrelated.Dispose();
         }
 
         private static IssueBrowserStep Step(string step, bool pass, string expected, string observed) => new(step, pass, expected, observed);
@@ -479,3 +609,5 @@ internal sealed record Issue14ProviderContract(bool CompleteSemantics, bool Valu
     public bool Ok => CompleteSemantics && ValueSet && ValueCommitted && Invoked && SelectedAndFocused && RetryAvailable && Retried && EmergencySuppressions == 0;
 }
 internal sealed record IssueBrowserSeed([property: System.Text.Json.Serialization.JsonPropertyName("count")] int Count, [property: System.Text.Json.Serialization.JsonPropertyName("asyncDelayMilliseconds")] int AsyncDelayMilliseconds, [property: System.Text.Json.Serialization.JsonPropertyName("failureQuery")] string FailureQuery);
+internal sealed record Issue15GcCounts(int Gen0, int Gen1, int Gen2);
+internal sealed record Issue15BenchmarkResult(bool Ok, int SampleCount, int WarmupCount, int IdleSeconds, int ScrollCycles, string[] Corpus, double P95Milliseconds, double P99Milliseconds, double P95BudgetMilliseconds, double P99BudgetMilliseconds, double IdleElapsedMilliseconds, int IdleFrames, int IdleFrameRequests, int RealizedRows, int VisibleRows, int RealizedRowLimit, long PostWarmBaselineBytes, long LiveAfterScrollBytes, long PostCollectionBytes, long LiveGrowthBytes, long LiveGrowthBudgetBytes, long ReturnLimitBytes, long ProcessAllocatedBytes, Issue15GcCounts GcCollections, int NativePresentCalls, int ScheduledPresentCalls, int FrameRequests, int ProjectionCalls, int ScrollDispatches, bool StaleRetention, bool UnrelatedWriteWithoutInvalidation, string FrameworkDescription, string ProcessArchitecture, string EnvironmentVersion, uint Dpi);

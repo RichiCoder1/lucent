@@ -173,6 +173,13 @@ internal sealed class FrameScheduler
         _present();
         PresentCalls++;
     }
+    /// <summary>Completes a frame presented by the native host rather than the clock callback.</summary>
+    public void Presented()
+    {
+        if (!_pending) return;
+        _pending = false;
+        PresentCalls++;
+    }
 }
 
 /// <summary>The only clock allowed to request retained-scene paint frames.</summary>
@@ -366,14 +373,16 @@ internal sealed unsafe class SdlSkiaPresenter : IDisposable
     private readonly ISkiaSceneRenderer _sceneRenderer;
     public int PresentCalls { get; private set; }
     public Capture? LastCapture { get; private set; }
-    public SdlSkiaPresenter(nint window, ISkiaSceneRenderer sceneRenderer)
+    public SdlSkiaPresenter(nint window, ISkiaSceneRenderer sceneRenderer, bool captureReadback = true)
     {
         Window = window;
         _sceneRenderer = sceneRenderer;
+        _captureReadback = captureReadback;
         _renderer = SDL.CreateRenderer(window, null);
         if (_renderer == 0) throw new InvalidOperationException($"SDL_CreateRenderer: {SDL.GetError()}");
     }
     private nint Window { get; }
+    private readonly bool _captureReadback;
     public void Present(RetainedScene scene)
     {
         if (!SDL.GetWindowSize(Window, out var width, out var height) || width <= 0 || height <= 0) throw new InvalidOperationException("SDL scene size was invalid.");
@@ -384,7 +393,7 @@ internal sealed unsafe class SdlSkiaPresenter : IDisposable
         try
         {
             if (!SDL.UpdateTexture(texture, IntPtr.Zero, bitmap.GetPixels(), bitmap.RowBytes) || !SDL.RenderTexture(_renderer, texture, IntPtr.Zero, IntPtr.Zero)) throw new InvalidOperationException($"SDL scene render: {SDL.GetError()}");
-            LastCapture = Readback();
+            if (_captureReadback) LastCapture = Readback();
             if (!SDL.RenderPresent(_renderer)) throw new InvalidOperationException($"SDL_RenderPresent: {SDL.GetError()}");
             PresentCalls++;
         }

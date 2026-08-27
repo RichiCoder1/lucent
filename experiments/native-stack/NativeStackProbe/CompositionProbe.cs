@@ -135,8 +135,10 @@ internal sealed class RetainedComposition : IDisposable
     private bool SelectByElement(StableElement element) { if (MountedByElement(element.Id)?.Behavior is not Selectable selectable) return false; selectable.InvokeSemanticSelect(); Project([element]); return true; }
     private bool FocusByElement(StableElement element) { if (_input.Get(element)?.Focusable != true) return false; if (MountedByElement(element.Id)?.Behavior is { } behavior) behavior.Focus(true); else _focus.Focus(_root.Element, element); Project([element]); return true; }
     private static StableElement? Parent(StableElement root, ElementId child) => root.Children.Any(item => item.Id == child) ? root : root.Children.Select(item => Parent(item, child)).FirstOrDefault(item => item is not null);
-    internal void Present(SdlSkiaPresenter presenter) => presenter.Present(_scene);
+    internal void Present(SdlSkiaPresenter presenter) { presenter.Present(_scene); _scheduler.Presented(); }
     internal void Advance(TimeSpan elapsed) { _scheduler.Clock.Tick(elapsed); _scheduler.Pump(); }
+    internal int RequestedFrames => _scheduler.RequestedFrames;
+    internal int PresentedFrames => _scheduler.PresentCalls;
     internal bool TransitionActive(string name) => Mounted(name)?.TransitionActive == true;
     /// <summary>The sole generic input boundary for mounted behavior, including SDL events and proof actions.</summary>
     internal bool Input(CompositionInput input)
