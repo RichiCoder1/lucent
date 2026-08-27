@@ -80,3 +80,12 @@ shape hashes, language, direction, script, and resolved faces.
 1232a09611a6f2311f67ffa24536ae9ffa0749e6a1b99253a83cde94681e7ca9  layout-text.json
 2d7ce3622de61443802808ad76858fc0662b0f6ef1612894cd2c16faef5effbe  layout-text.png
 ```
+
+## Issue #9 style semantics evidence
+
+`../run-style-proof.ps1` locked-restores, warning-free NativeAOT-publishes, and
+writes [`issue-9/proof.json`](issue-9/proof.json). The executable proof covers
+explicit last-write-wins composition, token dependency updates on a live
+light/dark switch without losing selected state, every overlapping state layer,
+reduced motion at startup and mid-transition, scheduler-owned clock disposal,
+and zero idle frames.

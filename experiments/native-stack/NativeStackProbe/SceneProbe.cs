@@ -9,7 +9,7 @@ internal enum DirtyFacet { None = 0, Layout = 1, Paint = 2, Semantics = 4 }
 
 internal readonly record struct ElementId(string Value);
 internal readonly record struct Bounds(int X, int Y, int Width, int Height);
-internal sealed record ResolvedStyle(string Background, string Foreground, int CornerRadius);
+internal sealed record ResolvedStyle(string Background, string Foreground, int CornerRadius, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1);
 internal sealed record Semantics(string Role, string Name, string? Value = null, string[]? Actions = null, bool Enabled = true, bool Focused = false, string? SuppressionReason = null);
 
 internal sealed class StableElement(ElementId id, Bounds bounds, ResolvedStyle style, Semantics semantics)
@@ -24,13 +24,13 @@ internal sealed class StableElement(ElementId id, Bounds bounds, ResolvedStyle s
     public void Clear(DirtyFacet facets) => Dirty &= ~facets;
 }
 
-internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius, ShapedRun? Text = null);
+internal sealed record SceneCommand(ElementId Id, Bounds Bounds, string Color, int CornerRadius, ShapedRun? Text = null, float Opacity = 1, float TranslateX = 0, float TranslateY = 0, float Scale = 1);
 internal sealed class RetainedScene
 {
     private readonly Dictionary<ElementId, SceneCommand> _commands = [];
     public IEnumerable<SceneCommand> Commands => _commands.Values.OrderBy(command => command.Id.Value, StringComparer.Ordinal);
     public int Count => _commands.Count;
-    public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius);
+    public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius, null, style.Opacity, style.TranslateX, style.TranslateY, style.Scale);
     public void UpsertText(ElementId id, Bounds bounds, string color, ShapedRun text) => _commands[id] = new(id, bounds, color, 0, text);
     public void Remove(ElementId id) => _commands.Remove(id);
 }
@@ -53,9 +53,11 @@ internal sealed class SkiaSceneRenderer : ISkiaSceneRenderer
         canvas.Clear(new SKColor(9, 12, 20));
         foreach (var command in scene.Commands)
         {
-            using var paint = new SKPaint { Color = SKColor.Parse(command.Color), IsAntialias = false };
-            if (command.Text is not null) command.Text.Draw(canvas, command.Bounds.X, command.Bounds.Y + command.Bounds.Height - 8, paint);
-            else canvas.DrawRoundRect(new SKRect(command.Bounds.X, command.Bounds.Y, command.Bounds.X + command.Bounds.Width, command.Bounds.Y + command.Bounds.Height), command.CornerRadius, command.CornerRadius, paint);
+            using var paint = new SKPaint { Color = SKColor.Parse(command.Color).WithAlpha((byte)Math.Round(255 * Math.Clamp(command.Opacity, 0, 1))), IsAntialias = false };
+            var left = command.Bounds.X + command.TranslateX; var top = command.Bounds.Y + command.TranslateY;
+            var width = command.Bounds.Width * command.Scale; var height = command.Bounds.Height * command.Scale;
+            if (command.Text is not null) command.Text.Draw(canvas, left, top + height - 8, paint);
+            else canvas.DrawRoundRect(new SKRect(left, top, left + width, top + height), command.CornerRadius, command.CornerRadius, paint);
         }
     }
 }
@@ -102,11 +104,14 @@ internal sealed class SceneProjection(RetainedScene scene, ProjectedSnapshots sn
     }
 }
 
-internal sealed class FrameScheduler(Action present)
+internal sealed class FrameScheduler
 {
+    private readonly Action _present;
     private bool _pending;
+    public FrameClock Clock { get; }
     public int RequestedFrames { get; private set; }
     public int PresentCalls { get; private set; }
+    public FrameScheduler(Action present) { _present = present; Clock = new(this); }
     public void Projected(ProjectionResult result)
     {
         if (result.Paint == 0 || _pending) return;
@@ -117,8 +122,39 @@ internal sealed class FrameScheduler(Action present)
     {
         if (!_pending) return;
         _pending = false;
-        present();
+        _present();
         PresentCalls++;
+    }
+}
+
+/// <summary>The only clock allowed to request retained-scene paint frames.</summary>
+internal sealed class FrameClock : IDisposable
+{
+    public FrameScheduler Owner { get; }
+    private readonly List<Action<TimeSpan>> _subscribers = [];
+    private TimeSpan _now;
+    public TimeSpan Now => _now;
+    public bool Disposed { get; private set; }
+    public int TickCalls { get; private set; }
+    public FrameClock(FrameScheduler owner) => Owner = owner;
+    public IDisposable Subscribe(Action<TimeSpan> tick)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        _subscribers.Add(tick);
+        return new Subscription(_subscribers, tick);
+    }
+    public void Tick(TimeSpan elapsed)
+    {
+        ObjectDisposedException.ThrowIf(Disposed, this);
+        if (_subscribers.Count == 0) return;
+        _now += elapsed;
+        TickCalls++;
+        foreach (var subscriber in _subscribers.ToArray()) subscriber(_now);
+    }
+    public void Dispose() { Disposed = true; _subscribers.Clear(); }
+    private sealed class Subscription(List<Action<TimeSpan>> subscribers, Action<TimeSpan> tick) : IDisposable
+    {
+        public void Dispose() => subscribers.Remove(tick);
     }
 }
 

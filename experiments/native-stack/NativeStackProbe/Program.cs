@@ -22,6 +22,7 @@ internal static class Program
                 "--manual" => JsonSerializer.Serialize(RunManual(args.Skip(1).FirstOrDefault() ?? "native-stack-ime.jsonl"), ProbeJsonContext.Default.ManualResult),
                 "--text-self-check" => JsonSerializer.Serialize(TextState.SelfCheck(), ProbeJsonContext.Default.TextCheckResult),
                 "--reactive-self-check" => JsonSerializer.Serialize(ReactiveProbe.Run(), ProbeJsonContext.Default.ReactiveCheckResult),
+                "--style-self-check" => JsonSerializer.Serialize(StyleProbe.Run(), ProbeJsonContext.Default.StyleCheckResult),
                 "--structural-self-check" => JsonSerializer.Serialize(StructuralProbe.Run(), ProbeJsonContext.Default.StructuralCheckResult),
                 "--scene-self-check" when args.Length == 2 => JsonSerializer.Serialize(SceneProbe.Run(args[1]), ProbeJsonContext.Default.SceneCheckResult),
                 "--layout-self-check" when args.Length == 2 => JsonSerializer.Serialize(LayoutProbe.Run(args[1]), ProbeJsonContext.Default.LayoutCheckResult),
@@ -29,7 +30,7 @@ internal static class Program
                 "--uia-manual" when args.Length == 3 => JsonSerializer.Serialize(RunUiaHost(args[1], args[2], manual: true), ProbeJsonContext.Default.UiaHostResult),
                 "--uia-ccw-self-check" when args.Length is 1 or 2 => JsonSerializer.Serialize(RunUiaCcwSelfCheck(args.Skip(1).FirstOrDefault()), ProbeJsonContext.Default.CcwSelfCheckResult),
                 null => JsonSerializer.Serialize(RunDependencyProbe(), ProbeJsonContext.Default.ProbeResult),
-                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --structural-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
+                _ => throw new ArgumentException("Use --automated, --manual [jsonl-path], --text-self-check, --reactive-self-check, --style-self-check, --structural-self-check, --scene-self-check|--layout-self-check <artifact-directory>, --uia-host|--uia-manual <ready-json> <close-signal>, or --uia-ccw-self-check [wrappers|create|qi|options|disconnect|release].")
             };
             Console.WriteLine(json);
             return 0;
@@ -736,6 +737,7 @@ internal sealed record FailureResult(bool Ok, string Error);
 [JsonSerializable(typeof(ManualResult))]
 [JsonSerializable(typeof(TextCheckResult))]
 [JsonSerializable(typeof(ReactiveCheckResult))]
+[JsonSerializable(typeof(StyleCheckResult))]
 [JsonSerializable(typeof(StructuralCheckResult))]
 [JsonSerializable(typeof(SemanticDumpItem[]))]
 [JsonSerializable(typeof(SceneCheckResult))]

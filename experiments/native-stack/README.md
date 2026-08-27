@@ -194,6 +194,21 @@ focused, captured, effect-owned, and async-pending, then checks cancellation,
 effect unregistration, and scene/semantic release; it also reruns the reactive
 and scene checks from the published NativeAOT executable.
 
+## Issue #9 style semantics proof
+
+```powershell
+./run-style-proof.ps1
+```
+
+The NativeAOT self-check proves immutable typed style composition, layered
+semantic light/dark tokens, finite fluent helpers, and retained reactive paint
+projection. Active variants compose in this order: base, selected,
+focus-visible, hover, pressed, invalid, disabled. The one frame-scheduler clock
+drives only opacity/transform paint transitions; reduced motion snaps both at
+startup and while active, and idle clocks schedule zero frames. CSS, selector
+matching, implicit inheritance, layout animation, and a general animation
+framework remain excluded.
+
 ## Milestone 1 combined gate
 
 ```powershell
