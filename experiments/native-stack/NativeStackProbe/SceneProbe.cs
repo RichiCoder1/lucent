@@ -10,7 +10,7 @@ internal enum DirtyFacet { None = 0, Layout = 1, Paint = 2, Semantics = 4 }
 internal readonly record struct ElementId(string Value);
 internal readonly record struct Bounds(int X, int Y, int Width, int Height);
 internal sealed record ResolvedStyle(string Background, string Foreground, int CornerRadius);
-internal sealed record Semantics(string Role, string Name);
+internal sealed record Semantics(string Role, string Name, string? Value = null, string[]? Actions = null, bool Enabled = true, bool Focused = false, string? SuppressionReason = null);
 
 internal sealed class StableElement(ElementId id, Bounds bounds, ResolvedStyle style, Semantics semantics)
 {
@@ -29,8 +29,10 @@ internal sealed class RetainedScene
 {
     private readonly Dictionary<ElementId, SceneCommand> _commands = [];
     public IEnumerable<SceneCommand> Commands => _commands.Values.OrderBy(command => command.Id.Value, StringComparer.Ordinal);
+    public int Count => _commands.Count;
     public void Upsert(ElementId id, Bounds bounds, ResolvedStyle style) => _commands[id] = new(id, bounds, style.Background, style.CornerRadius);
     public void UpsertText(ElementId id, Bounds bounds, string color, ShapedRun text) => _commands[id] = new(id, bounds, color, 0, text);
+    public void Remove(ElementId id) => _commands.Remove(id);
 }
 
 internal sealed class ProjectedSnapshots
@@ -38,6 +40,7 @@ internal sealed class ProjectedSnapshots
     public Dictionary<ElementId, Bounds> Layout { get; } = [];
     public Dictionary<ElementId, ResolvedStyle> Style { get; } = [];
     public Dictionary<ElementId, Semantics> Semantics { get; } = [];
+    public void Remove(ElementId id) { Layout.Remove(id); Style.Remove(id); Semantics.Remove(id); }
 }
 
 /// <summary>The one renderer seam: headless and SDL presentation send retained commands to this Skia canvas.</summary>
@@ -61,10 +64,13 @@ internal sealed class SceneProjection(RetainedScene scene, ProjectedSnapshots sn
 {
     public ProjectionResult Project(IEnumerable<StableElement> elements)
     {
+        var current = elements.ToArray();
+        if (current.Any(element => string.IsNullOrWhiteSpace(element.Id.Value)) || current.GroupBy(element => element.Id).Any(group => group.Count() != 1))
+            throw new InvalidOperationException("Live element IDs must be nonempty and unique.");
         var layout = 0;
         var paint = 0;
         var semantics = 0;
-        foreach (var element in elements)
+        foreach (var element in current)
         {
             if ((element.Dirty & DirtyFacet.Layout) != 0)
             {
@@ -88,6 +94,11 @@ internal sealed class SceneProjection(RetainedScene scene, ProjectedSnapshots sn
             }
         }
         return new(layout, paint, semantics);
+    }
+
+    public void Release(IEnumerable<StableElement> elements)
+    {
+        foreach (var element in elements) { scene.Remove(element.Id); snapshots.Remove(element.Id); }
     }
 }
 

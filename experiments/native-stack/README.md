@@ -177,6 +177,23 @@ the UI-thread `Drain` queue. The proof records zero frames for unrelated writes
 and rejects stale/disposed completions. It does not provide cross-thread graph
 access, automatic UI-loop pumping, or a general observer API.
 
+## Issue #8 structural and interaction proof
+
+```powershell
+./run-structural-proof.ps1
+```
+
+The bounded core gives `Show` and keyed `For` ownership of their created
+branches and `ReactiveScope`; keyed entries retain their stable elements and
+there is no arbitrary-tree reconciliation. It covers deepest hit testing,
+bubbling only, pointer capture, focus scopes/tab traversal, and projected
+role/name/value/actions/enabled/focus semantics. Interactive elements fail the
+self-check without matching semantics. Emergency suppressions need a nonempty
+reason and are retained in the semantic dump. The proof churns a branch while
+focused, captured, effect-owned, and async-pending, then checks cancellation,
+effect unregistration, and scene/semantic release; it also reruns the reactive
+and scene checks from the published NativeAOT executable.
+
 ## Milestone 1 combined gate
 
 ```powershell
