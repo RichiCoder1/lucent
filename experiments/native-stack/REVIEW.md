@@ -61,3 +61,9 @@ round verified real pointer/key/focus behavior, composition-owned same-key
 updates and clipping, reusable SDL translation, a clean source manifest,
 published NativeAOT identity, all twelve walkthrough steps, and zero forbidden
 application seams. This authorizes only the registered Milestone 2B comparison.
+
+Milestone 2B then passed its frozen Closed-filter task and rubric. Parent scoring
+gave Native 20 and Avalonia 14; Sol xhigh independently confirmed all category
+scores and gate arithmetic, correcting only the non-blocking hunk counts to
+eight Native versus eleven Avalonia. Milestone 3 remains the viability gate,
+not a foregone adoption decision.

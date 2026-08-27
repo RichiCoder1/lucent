@@ -2,7 +2,7 @@
 
 ## Status
 
-**Milestone 2A passed; Milestone 2B comparison is next.** The Windows platform/runtime foundations and reactive engine passed. The frozen first issue-browser comparison remains a valid STOP for its source commit, but the approved reframe has now produced and validated the missing retained composition and typed styling interface. Milestone 3 remains blocked pending the new Milestone 2B comparison.
+**Milestone 2B passed; Milestone 3 is authorized.** The Windows platform/runtime foundations, reactive engine, bounded authoring interface, and reframed issue-browser comparison passed. The frozen first comparison remains a valid STOP for its source commit; the registered second attempt passed only after the missing retained composition and typed styling interface existed.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 

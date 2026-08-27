@@ -158,6 +158,15 @@ are parity checks, not substitutes for authoring clarity.
 Stop if the completed authoring interface still does not meet this gate.
 Milestone 3 remains unauthorized until Milestone 2B records **PROCEED**.
 
+### Recorded decision
+
+**PROCEED.** The frozen Closed-filter task passed at exactly 667 results on both
+implementations. Native scored 20 versus Avalonia's 14, met every minimum and
+required category score, won three of five hypothesis categories, had no
+two-point deficit, and touched one authored file/eight hunks versus Avalonia's
+two authored files/eleven hunks. Sol xhigh independently verified the scores
+and gate arithmetic after correcting the hunk counts. Milestone 3 is authorized.
+
 ### Evidence
 
 Record the new contract hash, source commits, exact authored-file boundaries,
