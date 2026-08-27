@@ -62,6 +62,13 @@ is not run when that SDL gate passes.
 
 Stop if authoring is not materially simpler.
 
+### Recorded authoring decision
+
+The frozen issue-browser rubric in `evidence/issue-13/` records **STOP**:
+Native won 3/8 categories and trailed by two points in styling, missing both
+predeclared scoring conditions. Milestone 3 is not authorized without an
+explicit decision to override or reframe the experiment.
+
 ### Evidence
 
 Record the shared walkthrough, source commits, build mode, exclusions, and rubric before comparison. Score state/derived state, structure, async flows, styling, accessibility, lifecycle, testing, and total integration separately. Store executable interaction results and the completed rubric.

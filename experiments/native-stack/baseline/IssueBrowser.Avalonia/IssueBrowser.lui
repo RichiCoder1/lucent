@@ -19,6 +19,7 @@ component IssueBrowserWindow(IssueBrowserSession session)
                     TextBox { Class: "search"; Text: binding(session.Query); PlaceholderText: "Search issues"; TextChanged: (sender, e) => { if (sender.IsFocused) session.Search(sender.Text ?? ""); }; }
                     TextBlock { Class: "section-label"; Text: "FILTERS"; }
                     StackPanel { Orientation: Orientation.Horizontal; Spacing: 8;
+                        CheckBox { Class: "filter-chip"; Content: "Ada"; IsChecked: binding(session.AdaChecked); Click: (sender, e) => session.ToggleAda(); }
                         CheckBox { Class: "filter-chip"; Content: "Open"; IsChecked: binding(session.OpenChecked); Click: (sender, e) => session.ToggleOpen(); }
                         CheckBox { Class: "filter-chip"; Content: "High"; IsChecked: binding(session.HighChecked); Click: (sender, e) => session.ToggleHigh(); }
                     }

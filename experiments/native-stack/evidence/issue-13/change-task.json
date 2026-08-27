@@ -1,0 +1,105 @@
+﻿{
+    "issue":  13,
+    "baselineCommit":  "3d0da02",
+    "gauntletSha256":  "808268b07a0387c1ccb2eb95abc4685c3e0a2632d896279613b630c723f35a72",
+    "changedFilesAndLines":  {
+                                 "native":  [
+                                                {
+                                                    "path":  "experiments/native-stack/NativeStackProbe/IssueBrowser.cs",
+                                                    "hunks":  [
+                                                                  "@@ -11 +11 @@ internal static class IssueBrowser",
+                                                                  "@@ -20,0 +21 @@ internal static class IssueBrowser",
+                                                                  "@@ -51,2 +52,3 @@ internal static class IssueBrowser",
+                                                                  "@@ -92 +94 @@ internal static class IssueBrowser",
+                                                                  "@@ -115 +117 @@ internal static class IssueBrowser",
+                                                                  "@@ -118,2 +120,2 @@ internal static class IssueBrowser",
+                                                                  "@@ -123,3 +125,3 @@ internal static class IssueBrowser",
+                                                                  "@@ -128,2 +130,2 @@ internal static class IssueBrowser",
+                                                                  "@@ -147,0 +150,5 @@ internal static class IssueBrowser",
+                                                                  "@@ -153 +160 @@ internal static class IssueBrowser",
+                                                                  "@@ -170,3 +177,3 @@ internal static class IssueBrowser",
+                                                                  "@@ -174,2 +181,2 @@ internal static class IssueBrowser",
+                                                                  "@@ -182 +189 @@ internal sealed record IssueBrowserStep([property: System.Text.Json.Serializatio",
+                                                                  "@@ -183,0 +191 @@ internal sealed record IssueBrowserSemantic(string Id, string Role, string Name,"
+                                                              ]
+                                                },
+                                                {
+                                                    "path":  "experiments/native-stack/NativeStackProbe/Program.cs",
+                                                    "hunks":  [
+                                                                  "@@ -761,0 +762 @@ internal sealed record FailureResult(bool Ok, string Error);"
+                                                              ]
+                                                }
+                                            ],
+                                 "avalonia":  [
+                                                  {
+                                                      "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/Program.cs",
+                                                      "hunks":  [
+                                                                    "@@ -29 +29 @@ internal static class Program",
+                                                                    "@@ -31,0 +32 @@ internal static class Program",
+                                                                    "@@ -60 +61 @@ internal static class Program",
+                                                                    "@@ -63,3 +64,3 @@ internal static class Program",
+                                                                    "@@ -89 +90 @@ public sealed class IssueBrowserSession : INotifyPropertyChanged",
+                                                                    "@@ -92 +93 @@ public sealed class IssueBrowserSession : INotifyPropertyChanged",
+                                                                    "@@ -98,0 +100,2 @@ public sealed class IssueBrowserSession : INotifyPropertyChanged",
+                                                                    "@@ -111,2 +114,2 @@ public sealed class IssueBrowserSession : INotifyPropertyChanged",
+                                                                    "@@ -115,0 +119,2 @@ public sealed class IssueBrowserSession : INotifyPropertyChanged"
+                                                                ]
+                                                  },
+                                                  {
+                                                      "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/IssueBrowser.lui",
+                                                      "hunks":  [
+                                                                    "@@ -21,0 +22 @@ component IssueBrowserWindow(IssueBrowserSession session)"
+                                                                ]
+                                                  },
+                                                  {
+                                                      "path":  "experiments/native-stack/baseline/IssueBrowser.Avalonia/StraightCSharpFilterBar.cs",
+                                                      "before":  "absent",
+                                                      "after":  "1-33"
+                                                  }
+                                              ]
+                             },
+    "authoredLoc":  {
+                        "native":  {
+                                       "before":  184,
+                                       "after":  192
+                                   },
+                        "avalonia":  {
+                                         "before":  213,
+                                         "after":  252
+                                     }
+                    },
+    "imperativeUiSynchronizationCounts":  {
+                                              "native":  {
+                                                             "before":  6,
+                                                             "after":  7,
+                                                             "basis":  "four/five semantic property assignments plus two manual list reconciliations"
+                                                         },
+                                              "avalonia":  {
+                                                               "before":  6,
+                                                               "after":  6,
+                                                               "basis":  "two notification helpers plus four manual collection reconciliations"
+                                                           }
+                                          },
+    "filterBarSyntaxConfound":  {
+                                    "native":  {
+                                                   "authoredLoc":  1,
+                                                   "imperativeUiSynchronizationSites":  0
+                                               },
+                                    "avaloniaLui":  {
+                                                        "authoredLoc":  8,
+                                                        "imperativeUiSynchronizationSites":  0
+                                                    },
+                                    "avaloniaStraightCSharp":  {
+                                                                   "authoredLoc":  33,
+                                                                   "imperativeUiSynchronizationSites":  7,
+                                                                   "compiledOnly":  true
+                                                               }
+                                },
+    "verification":  {
+                         "w1ToW12":  "pass",
+                         "assigneeFilter":  "Ada: 1000 exact rows on both implementations",
+                         "captures":  "light/dark PNG, 1200x760, signature checked",
+                         "nativeAot":  "pass",
+                         "diffCheck":  "pass"
+                     }
+}

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Milestone 1 SDL feasibility gate is reproducible.** This folder is intentionally independent of the existing Avalonia runtime and main solution.
+**Milestone 2 authoring gate recorded STOP.** The Windows platform/runtime foundations passed, but the frozen issue-browser comparison did not find the current Native authoring model materially clearer. This folder remains intentionally independent of the existing Avalonia runtime and main solution.
 
 Lucent Native asks whether Lucent should own the UI semantic stack while borrowing only platform integration, text shaping, and rendering. It is a falsifiable experiment, not a second supported backend.
 
