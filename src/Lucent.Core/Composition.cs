@@ -18,6 +18,7 @@ public sealed class Composition : IDisposable
     private int _behaviorDepth;
     private InputRouter? _input;
     private long _nextSceneGeneration;
+    private long _interactionVisualGeneration;
 
     public Composition(ReactiveGraph graph, string name)
     {
@@ -38,6 +39,11 @@ public sealed class Composition : IDisposable
     internal InputRouter? InputIfCreated => _input;
     internal long NextSceneGeneration() { _graph.CheckThread(); ThrowIfDisposed(); return checked(++_nextSceneGeneration); }
     internal long LatestSceneGeneration => _nextSceneGeneration;
+    internal long InteractionVisualGeneration => _interactionVisualGeneration;
+    internal void InvalidateInteractionVisuals() => _interactionVisualGeneration = checked(_interactionVisualGeneration + 1);
+
+    /// <summary>Commits this composition's pending reactive work on its owning UI thread.</summary>
+    public void Flush() { _graph.CheckThread(); ThrowIfBehaviorAttachment(); ThrowIfDisposed(); _graph.Drain(); }
 
     /// <summary>Advances bounded presentation samples; it queues no background work.</summary>
     public void AdvanceTransitions(int milliseconds) { _graph.CheckThread(); ThrowIfBehaviorAttachment(); ThrowIfDisposed(); _transitions.Advance(milliseconds); }
@@ -285,15 +291,23 @@ public sealed class Element : IDisposable
     /// <summary>Associates the one typed property model with this retained element.</summary>
     public void Present(ThemeContext theme, Style? component = null, Style? author = null, params Transition[] transitions)
     {
+        ValidatePresentation(theme, component, author, transitions);
+        _presentation = new ElementPresentation(this, theme, component ?? Style.Empty, author ?? Style.Empty, transitions);
+    }
+
+    /// <summary>Checks presentation inputs without allocating reactive presentation state.</summary>
+    internal void ValidatePresentation(ThemeContext theme, Style? component = null, Style? author = null, params Transition[] transitions)
+    {
         Composition.CheckThread();
         Composition.ThrowIfBehaviorAttachment();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(theme);
         if (!ReferenceEquals(theme.Graph, Composition.Graph)) throw new ArgumentException("Theme context belongs to another reactive graph.", nameof(theme));
+        theme.ValidateLive();
         ArgumentNullException.ThrowIfNull(transitions);
         if (_presentation is not null) throw new InvalidOperationException("An element has one presentation model.");
         if (transitions.Any(transition => transition is null)) throw new ArgumentException("Transitions cannot contain null.", nameof(transitions));
-        _presentation = new ElementPresentation(this, theme, component ?? Style.Empty, author ?? Style.Empty, transitions);
+        ElementPresentation.Validate(component ?? Style.Empty, author ?? Style.Empty, transitions);
     }
 
     /// <summary>Updates finite interaction state without creating a second modifier model.</summary>
@@ -325,15 +339,7 @@ public sealed class Element : IDisposable
         Composition.ThrowIfBehaviorAttachment();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(behaviors);
-        var claims = _behaviorClaims;
-        foreach (var behavior in behaviors)
-        {
-            ArgumentNullException.ThrowIfNull(behavior);
-            ReactiveGraph.ValidateName(behavior.Name, nameof(behaviors));
-            ValidateOwnership(behavior.Ownership);
-            if ((claims & behavior.Ownership) != 0) throw new InvalidOperationException("Exclusive behavior ownership conflicts on this element.");
-            claims |= behavior.Ownership;
-        }
+        var claims = ValidateBehaviorAttachment(behaviors);
 
         var provisional = new List<(ReactiveScope Scope, BehaviorContext Context)>();
         try
@@ -368,6 +374,25 @@ public sealed class Element : IDisposable
                 try { Composition.RunBehaviorCleanup(item.Scope.Dispose); } catch (Exception cleanup) { errors.Add(cleanup); }
             Composition.ThrowAll(errors, "Behavior attachment failed.");
         }
+    }
+
+    /// <summary>Checks exclusive behavior ownership without changing presentation or input state.</summary>
+    internal BehaviorOwnership ValidateBehaviorAttachment(params Behavior[] behaviors)
+    {
+        Composition.CheckThread();
+        Composition.ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(behaviors);
+        var claims = _behaviorClaims;
+        foreach (var behavior in behaviors)
+        {
+            ArgumentNullException.ThrowIfNull(behavior);
+            ReactiveGraph.ValidateName(behavior.Name, nameof(behaviors));
+            ValidateOwnership(behavior.Ownership);
+            if ((claims & behavior.Ownership) != 0) throw new InvalidOperationException("Exclusive behavior ownership conflicts on this element.");
+            claims |= behavior.Ownership;
+        }
+        return claims;
     }
 
     internal void Attach(Element child)
@@ -450,9 +475,26 @@ public sealed class Element : IDisposable
         Composition.InvalidateSemantics();
     }
 
-    internal void RefreshBehaviorVariants()
+    internal void UpdateControl<T>(Property<T> property, T value)
     {
-        if (_presentation is null || IsDisposed) return;
+        Composition.CheckThread();
+        Composition.ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        (_presentation ?? throw new InvalidOperationException("An element needs a presentation before control state can update it.")).SetControl(property, value);
+    }
+
+    internal void UpdateControlSemantics(SemanticDeclaration semantics)
+    {
+        Composition.CheckThread();
+        Composition.ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        if (_semantics is null) throw new InvalidOperationException("An element needs semantic behavior before control state can update it.");
+        SetSemantics(semantics ?? throw new ArgumentNullException(nameof(semantics)));
+    }
+
+    internal bool RefreshBehaviorVariants()
+    {
+        if (_presentation is null || IsDisposed) return false;
         var variants = VariantState.None;
         foreach (var behavior in _behaviors)
         {
@@ -461,14 +503,18 @@ public sealed class Element : IDisposable
             if (behavior.State.GetValueOrDefault(BehaviorState.FocusVisible)) variants |= VariantState.FocusVisible;
         }
         if (_inputDisabled) variants |= VariantState.Disabled;
-        _presentation.SetBehaviorVariants(variants);
+        if (!_presentation.SetBehaviorVariants(variants)) return false;
+        Composition.InvalidateInteractionVisuals();
+        return true;
     }
 
-    internal void SetInputDisabledVariant(bool disabled)
+    internal bool SetInputDisabledVariant(bool disabled)
     {
-        if (_inputDisabled == disabled) return;
+        if (_inputDisabled == disabled) return false;
         _inputDisabled = disabled;
+        var visualChanged = RefreshBehaviorVariants();
         ReconcileSemanticState();
+        return visualChanged;
     }
 
     private bool HasBehaviorState(BehaviorState state) => _behaviors.Any(behavior => behavior.State.GetValueOrDefault(state));

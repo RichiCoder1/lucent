@@ -45,8 +45,9 @@ internal static class InputContracts
         calls.Clear(); router.DispatchKey(new(KeyCommandKind.Down, Key.Enter)); router.DispatchKey(new(KeyCommandKind.Down, Key.Enter, IsRepeat: true));
         Assert(calls.SequenceEqual(["key", "root-key", "repeat", "root-key"]), "Keyboard routing or repeat identity changed.");
         theme.Theme = theme.Theme.Set(enabled, false);
-        Assert(router.SetScene(SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())) && router.FocusedElement is null && router.DispatchPointer(new(PointerCommandKind.Down, 2, 1, 1, PointerButton.Primary)).Target?.ElementId != child.Id,
-            "Disabled element retained focus or became a hit target.");
+        Assert(!router.SetScene(SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())) && router.FocusedElement is null &&
+            router.SetScene(SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())) && router.DispatchPointer(new(PointerCommandKind.Down, 2, 1, 1, PointerButton.Primary)).Target?.ElementId != child.Id,
+            "Disabled element retained focus, accepted stale paint, or became a hit target.");
     }
 
     private static void SnapshotFailureAndReorderSafety()
@@ -102,7 +103,8 @@ internal static class InputContracts
         theme.Theme = theme.Theme.Set(visible, false);
         Assert(router.DispatchPointer(new(PointerCommandKind.Move, 4, 1, 1)).Rejection == InputRejection.StaleScene, "Property-only scene change was not stale.");
         var second = SceneLayout.Project(composition, new(40, 40, 1), new EmptyShaper()); var third = SceneLayout.Project(composition, new(40, 40, 1), new EmptyShaper());
-        Assert(!router.SetScene(second) && router.SetScene(third) && router.DispatchPointer(new(PointerCommandKind.Down, 5, 1, 1, PointerButton.Primary)).Target?.ElementId != child.Id && router.Dump().Contains("kind=Pointer/Down", StringComparison.Ordinal), "Router accepted a superseded scene generation or used hidden retained input.");
+        Assert(!router.SetScene(second) && !router.SetScene(third) && router.SetScene(SceneLayout.Project(composition, new(40, 40, 1), new EmptyShaper())) &&
+            router.DispatchPointer(new(PointerCommandKind.Down, 5, 1, 1, PointerButton.Primary)).Target?.ElementId != child.Id && router.Dump().Contains("kind=Pointer/Down", StringComparison.Ordinal), "Router accepted a superseded or unreconciled scene, or used hidden retained input.");
 
         var retry = composition.Child(composition.Root, "retry"); Present(retry, theme, 1, 1, true);
         Expect<InvalidOperationException>(() => retry.AttachBehaviors(new FailingFocusable()));
@@ -182,7 +184,7 @@ internal static class InputContracts
         var initial = composition.SemanticSnapshot()!.Children.Single(); Assert(initial.Focused && initial.Selected && composition.Dump().Contains("focused=true selected=true", StringComparison.Ordinal), "Effective focus/selection dump and snapshot diverged.");
         theme.Theme = theme.Theme.Set(text, "A;B").Set(font, "C").Set(enabled, false);
         Assert(router.DispatchPointer(new(PointerCommandKind.Move, 11, 1, 1)).Rejection == InputRejection.StaleScene && !composition.IsCurrent(initial.Identity), "Delimiter collision retained stale input/semantic identity.");
-        var second = SceneLayout.Project(composition, new(40, 40, 1), new MetricShaper()); Assert(second.Boxes.Single(box => box.Identity.ElementId == child.Id).Text!.Width != first.Boxes.Single(box => box.Identity.ElementId == child.Id).Text!.Width && router.SetScene(second), "Collision repro did not change geometry and reject old scene.");
+        var second = SceneLayout.Project(composition, new(40, 40, 1), new MetricShaper()); Assert(second.Boxes.Single(box => box.Identity.ElementId == child.Id).Text!.Width != first.Boxes.Single(box => box.Identity.ElementId == child.Id).Text!.Width && !router.SetScene(second) && router.SetScene(SceneLayout.Project(composition, new(40, 40, 1), new MetricShaper())), "Collision repro did not change geometry and reject old scene.");
         var disabled = composition.SemanticSnapshot()!.Children.Single(); Assert(!disabled.Enabled && composition.IsCurrent(disabled.Identity), "Effective disabled semantic state was not reconciled.");
         _ = router.DispatchPointer(new(PointerCommandKind.Move, 11, 1, 1)); Assert(composition.IsCurrent(disabled.Identity), "No-op dispatch changed semantic identity.");
         Assert(second.Dump().Contains("scene generation=", StringComparison.Ordinal) && second.Dump().Contains("input epoch=", StringComparison.Ordinal) && router.Dump().Contains("registration kind=pointer", StringComparison.Ordinal) && router.Dump().Contains("focusable owner=", StringComparison.Ordinal), "Input diagnostics omitted retained metadata or registrations.");

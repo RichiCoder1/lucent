@@ -6,20 +6,21 @@ try
 {
     var first = Dump();
     if (first != Dump()) throw new InvalidOperationException("Issue Browser composition is not deterministic.");
-    if (!first.Contains("issue-browser.header", StringComparison.Ordinal) || !first.Contains("issue-browser.issue-list", StringComparison.Ordinal) ||
+    if (!first.Contains("issue-browser.header", StringComparison.Ordinal) || !first.Contains("issue-browser.scroll-viewport", StringComparison.Ordinal) || !first.Contains("issue-browser.issue-list", StringComparison.Ordinal) ||
         first.Split('\n').Count(line => line.Contains("issue-browser.issue-row", StringComparison.Ordinal)) != 3 || first.Contains("issue-browser.loading\"", StringComparison.Ordinal) ||
         first.Contains("retained composition", StringComparison.OrdinalIgnoreCase))
         throw new InvalidOperationException("Issue Browser did not produce only its active static/state-driven structure.");
     var snapshot = Snapshot();
-    if (!first.Contains("property name=\"surface\" winner=\"author:token:page-surface:theme\"#0", StringComparison.Ordinal) ||
-        !first.Contains("behavior name=\"issue-row-action\" ownership=Focus, Action, Semantics", StringComparison.Ordinal) ||
-        first.Split('\n').Count(line => line.Contains("semantic element=", StringComparison.Ordinal)) != 6 ||
+    if (!first.Contains("property name=\"scene-fill\" winner=\"author:token:page-surface:theme\"#0", StringComparison.Ordinal) ||
+        !first.Contains("behavior name=\"selectable\" ownership=Focus, Action, Semantics", StringComparison.Ordinal) ||
+        first.Split('\n').Count(line => line.Contains("semantic element=", StringComparison.Ordinal)) != 8 ||
         first.Contains("Implement retained", StringComparison.Ordinal) ||
         !Flatten(snapshot).Any(node => node.Actions == SemanticAction.Select))
         throw new InvalidOperationException("Issue Browser did not consume typed presentation, behavior, and semantic contracts without leaking issue values.");
     ShapeLayoutAndPaint();
     RoutedRows();
     AppearancePalettes();
+    StartupUsesFrameworkFlush();
     Console.WriteLine("Lucent.IssueBrowser composition contract: PASS");
     return 0;
 }
@@ -125,4 +126,21 @@ static void AppearancePalettes()
     var high = SceneLayout.Project(composition, new(800, 500, 1), renderer).Dump();
     if (!light.Contains("color=0xfff8fafc", StringComparison.Ordinal) || !dark.Contains("color=0xff0f172a", StringComparison.Ordinal) || !high.Contains("color=0xff000000", StringComparison.Ordinal) || light == dark || dark == high)
         throw new InvalidOperationException("Typed light, dark, and high-contrast appearance palettes did not alter retained paint.");
+}
+
+static void StartupUsesFrameworkFlush()
+{
+    var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
+    while (directory is not null)
+    {
+        var program = Path.Combine(directory.FullName, "apps", "Lucent.IssueBrowser", "Program.cs");
+        if (File.Exists(program))
+        {
+            if (File.ReadAllText(program).Contains(".Drain(", StringComparison.Ordinal))
+                throw new InvalidOperationException("Issue Browser startup still wires application graph draining into the host.");
+            return;
+        }
+        directory = directory.Parent;
+    }
+    throw new InvalidOperationException("Could not locate Issue Browser startup source.");
 }

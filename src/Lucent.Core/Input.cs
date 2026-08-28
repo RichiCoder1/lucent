@@ -64,6 +64,8 @@ public sealed class PointerRoute
     public ElementIdentity Target { get; }
     public ElementIdentity CurrentTarget { get; }
     public IReadOnlyList<ElementIdentity> Route { get; }
+    /// <summary>Whether this callback's retained element contains the pointer coordinates.</summary>
+    public bool IsInsideCurrentTarget { get { Check(); return _router.Contains(CurrentTarget, Command.X, Command.Y); } }
     public bool Handled { get { Check(); return _handled; } set { Check(); _handled = value; } }
     public bool Capture() { Check(); return _router.TryCapture(Command.PointerId, CurrentTarget, Command.Kind == PointerCommandKind.Down); }
     public void Focus() { Check(); _router.RequestFocus(CurrentTarget, FocusChangeReason.Pointer, _errors); }
@@ -73,14 +75,17 @@ public sealed class PointerRoute
 
 public sealed class KeyRoute
 {
-    private bool _active = true; private bool _handled;
-    internal KeyRoute(KeyCommand command, ElementIdentity target, ElementIdentity current, IEnumerable<ElementIdentity> route)
-    { Command = command; Target = target; CurrentTarget = current; Route = Array.AsReadOnly(route.ToArray()); }
+    private readonly InputRouter _router; private bool _active = true; private bool _handled;
+    internal KeyRoute(InputRouter router, KeyCommand command, ElementIdentity target, ElementIdentity current, IEnumerable<ElementIdentity> route)
+    { _router = router; Command = command; Target = target; CurrentTarget = current; Route = Array.AsReadOnly(route.ToArray()); }
     public KeyCommand Command { get; }
     public ElementIdentity Target { get; }
     public ElementIdentity CurrentTarget { get; }
     public IReadOnlyList<ElementIdentity> Route { get; }
     public bool Handled { get { Check(); return _handled; } set { Check(); _handled = value; } }
+    public bool ScrollBy(float horizontal, float vertical) { Check(); return _router.ScrollBy(CurrentTarget, horizontal, vertical); }
+    public bool ScrollToStart() { Check(); return _router.ScrollTo(CurrentTarget, default); }
+    public bool ScrollToEnd() { Check(); return _router.ScrollToEnd(CurrentTarget); }
     internal bool Finish() { _active = false; return _handled; }
     private void Check() { if (!_active) throw new InvalidOperationException("A routed key context expires when its callback returns."); }
 }
@@ -101,6 +106,7 @@ public sealed class InputRouter
     private readonly List<Registration<Action<FocusRoute>>> _focus = [];
     private readonly List<Registration<Action<PointerCaptureLoss>>> _captureLoss = [];
     private readonly Dictionary<long, Focusable> _focusable = [];
+    private readonly Dictionary<long, Scrollable> _scrollable = [];
     private readonly Dictionary<int, Capture> _captures = [];
     private RetainedScene? _scene;
     private Dictionary<long, RetainedInputElement> _input = [];
@@ -124,12 +130,35 @@ public sealed class InputRouter
                 if (_scene is not null && EnsureScene(rejectedErrors) == InputRejection.StaleScene) Throw(rejectedErrors);
                 return false;
             }
+            var priorInput = _input;
+            var nextInput = scene.Input.ToDictionary(item => item.Identity.ElementId);
+            bool clamped;
+            try { _input = nextInput; clamped = ClampScrolls(); }
+            finally { _input = priorInput; }
+            if (clamped)
+            {
+                var rejectedErrors = new List<Exception>();
+                if (_scene is not null) ReleaseAll(PointerCaptureLossReason.SceneChanged, rejectedErrors);
+                if (_focused is not null) RequestFocus(null, FocusChangeReason.SceneChanged, rejectedErrors);
+                _scene = null; _input.Clear();
+                Throw(rejectedErrors); return false;
+            }
             var errors = new List<Exception>();
-            if (_scene is not null) ReleaseAll(PointerCaptureLossReason.SceneChanged, errors);
-            _scene = scene; _input = scene.Input.ToDictionary(item => item.Identity.ElementId);
+            var visualGeneration = _composition.InteractionVisualGeneration;
+            _scene = scene; _input = nextInput;
+            foreach (var scrollable in _scrollable)
+                if (_input.ContainsKey(scrollable.Key)) scrollable.Value.InstalledOffset = scrollable.Value.State.Offset;
+            foreach (var capture in _captures.ToArray())
+                if (SameStructuralPath(capture.Value.Owner, priorInput)) _captures[capture.Key] = capture.Value with { Generation = scene.Generation };
+                else Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
             SyncAvailability(errors);
             if (_focused is { } focus && (!Eligible(focus.Identity) || !_input.TryGetValue(focus.Identity.ElementId, out var retained) || retained.Order != focus.Order || !Path(focus.Identity).SequenceEqual(focus.Path)))
                 RequestFocus(null, FocusChangeReason.Reordered, errors);
+            if (_composition.InteractionVisualGeneration != visualGeneration)
+            {
+                _scene = null;
+                Throw(errors); return false;
+            }
             Throw(errors); return true;
         }
         finally { Exit(); }
@@ -207,6 +236,12 @@ public sealed class InputRouter
         var entry = new Focusable(tabStop, context); _focusable.Add(elementId, entry);
         scope.OnDispose(() => { if (_focusable.TryGetValue(elementId, out var current) && ReferenceEquals(current, entry)) _focusable.Remove(elementId); });
     }
+    internal void RegisterScrollable(long elementId, ReactiveScope scope, ScrollViewportState state)
+    {
+        if (_scrollable.ContainsKey(elementId)) throw new InvalidOperationException("An element has one scroll behavior.");
+        var entry = new Scrollable(state); _scrollable.Add(elementId, entry);
+        scope.OnDispose(() => { if (_scrollable.TryGetValue(elementId, out var current) && ReferenceEquals(current, entry)) _scrollable.Remove(elementId); });
+    }
     internal void RemoveElement(Element element, PointerCaptureLossReason reason)
     {
         var errors = new List<Exception>();
@@ -261,7 +296,7 @@ public sealed class InputRouter
             catch (Exception error) { errors.Add(error); }
         }
         _disposed = true;
-        _pointer.Clear(); _key.Clear(); _focus.Clear(); _captureLoss.Clear(); _focusable.Clear(); _input.Clear(); _scene = null; _focused = null; _pendingFocus = null;
+        _pointer.Clear(); _key.Clear(); _focus.Clear(); _captureLoss.Clear(); _focusable.Clear(); _scrollable.Clear(); _input.Clear(); _scene = null; _focused = null; _pendingFocus = null;
         Throw(errors);
     }
 
@@ -284,7 +319,7 @@ public sealed class InputRouter
         var handled = false;
         foreach (var callback in callbacks)
         {
-            var context = new KeyRoute(command, target, callback.Identity, route);
+            var context = new KeyRoute(this, command, target, callback.Identity, route);
             try { callback.Callback(context); } catch (Exception error) { errors.Add(error); }
             handled |= context.Finish(); if (handled) break;
         }
@@ -293,11 +328,25 @@ public sealed class InputRouter
     }
     private bool MoveFocusCore(FocusTraversalDirection direction, List<Exception> errors)
     {
-        var candidates = _scene!.Input.Where(item => Eligible(item.Identity) && _focusable.TryGetValue(item.Identity.ElementId, out var focusable) && focusable.TabStop).OrderBy(item => item.Order).ToArray();
+        var candidates = _scene!.Input.Where(item => Eligible(item.Identity) && _focusable.TryGetValue(item.Identity.ElementId, out var focusable) && focusable.TabStop &&
+            (!_scrollable.ContainsKey(item.Identity.ElementId) || !HasFocusableDescendant(item.Identity))).OrderBy(item => item.Order).ToArray();
         if (candidates.Length == 0) { RequestFocus(null, FocusChangeReason.Traversal, errors); return false; }
         var index = _focused is { } focused ? Array.FindIndex(candidates, item => item.Identity == focused.Identity) : -1;
         index = direction == FocusTraversalDirection.Next ? (index + 1 + candidates.Length) % candidates.Length : (index - 1 + candidates.Length) % candidates.Length;
         RequestFocus(candidates[index].Identity, FocusChangeReason.Traversal, errors); return true;
+    }
+    private bool HasFocusableDescendant(ElementIdentity ancestor)
+    {
+        foreach (var candidate in _scene!.Input)
+        {
+            for (var parent = candidate.Parent; parent is { } current;)
+            {
+                if (current == ancestor && Eligible(candidate.Identity) && _focusable.TryGetValue(candidate.Identity.ElementId, out var focusable) && focusable.TabStop) return true;
+                if (!_input.TryGetValue(current.ElementId, out var retained)) break;
+                parent = retained.Parent;
+            }
+        }
+        return false;
     }
     private void SetModality(InputModality modality, List<Exception> errors)
     {
@@ -356,6 +405,7 @@ public sealed class InputRouter
             if (Available(candidate.Identity) && Contains(candidate.Bounds, x, y) && ClippedIn(candidate.Identity, x, y)) return candidate.Identity;
         return null;
     }
+    internal bool Contains(ElementIdentity identity, float x, float y) => _input.TryGetValue(identity.ElementId, out var retained) && Contains(retained.Bounds, x, y) && ClippedIn(identity, x, y);
     private bool Eligible(ElementIdentity identity) => _input.ContainsKey(identity.ElementId) && Available(identity);
     private bool Available(ElementIdentity identity)
     {
@@ -386,6 +436,18 @@ public sealed class InputRouter
             if (retained.Parent is not { } parent) return true; current = parent;
         }
     }
+    private bool SameStructuralPath(ElementIdentity identity, IReadOnlyDictionary<long, RetainedInputElement> prior)
+    {
+        var current = identity;
+        while (true)
+        {
+            if (!prior.TryGetValue(current.ElementId, out var old) || !_input.TryGetValue(current.ElementId, out var next) ||
+                old.Identity != next.Identity || old.Parent != next.Parent || old.Order != next.Order)
+                return false;
+            if (old.Parent is not { } parent) return Eligible(identity);
+            current = parent;
+        }
+    }
     private IEnumerable<ElementIdentity> Path(ElementIdentity identity)
     {
         var path = new List<ElementIdentity>();
@@ -404,6 +466,60 @@ public sealed class InputRouter
         ArgumentNullException.ThrowIfNull(callback); var registration = new Registration<T>(elementId, checked(++_nextRegistration), callback); list.Add(registration);
         scope.OnDispose(() => list.Remove(registration));
     }
+    internal bool ScrollBy(ElementIdentity identity, float horizontal, float vertical)
+    {
+        if (!float.IsFinite(horizontal) || !float.IsFinite(vertical)) throw new ArgumentOutOfRangeException(nameof(horizontal));
+        if (!_scrollable.TryGetValue(identity.ElementId, out var scrollable)) return false;
+        var current = scrollable.State.Offset;
+        return SetScroll(identity, scrollable, current.X + horizontal, current.Y + vertical, scrollable.InstalledOffset);
+    }
+    internal bool ScrollTo(ElementIdentity identity, ScrollOffset offset)
+    {
+        if (!_scrollable.TryGetValue(identity.ElementId, out var scrollable)) return false;
+        offset.Validate(); return SetScroll(identity, scrollable, offset.X, offset.Y, scrollable.InstalledOffset);
+    }
+    internal bool ScrollToEnd(ElementIdentity identity)
+    {
+        if (!_scrollable.TryGetValue(identity.ElementId, out var scrollable)) return false;
+        var bounds = ScrollBounds(identity, scrollable.InstalledOffset);
+        return SetScroll(identity, scrollable, bounds.X, bounds.Y, scrollable.InstalledOffset);
+    }
+    private bool ClampScrolls()
+    {
+        var changed = false;
+        foreach (var pair in _scrollable.ToArray())
+            if (_input.TryGetValue(pair.Key, out var retained))
+            {
+                var projected = pair.Value.State.Offset;
+                changed |= SetScroll(retained.Identity, pair.Value, projected.X, projected.Y, projected);
+            }
+        return changed;
+    }
+    private bool SetScroll(ElementIdentity identity, Scrollable scrollable, float requestedX, float requestedY, ScrollOffset projectedOffset)
+    {
+        var bounds = ScrollBounds(identity, projectedOffset);
+        var next = new ScrollOffset(ClampScroll(requestedX, bounds.X), ClampScroll(requestedY, bounds.Y));
+        if (next == scrollable.State.Offset) return false;
+        scrollable.State.Offset = next; return true;
+    }
+    private ScrollOffset ScrollBounds(ElementIdentity identity, ScrollOffset projectedOffset)
+    {
+        if (!_input.TryGetValue(identity.ElementId, out var viewport)) return default;
+        var right = viewport.Bounds.X; var bottom = viewport.Bounds.Y;
+        foreach (var child in _input.Values.Where(item => IsDescendantOf(item.Identity, identity)))
+        { right = Math.Max(right, child.Bounds.X + child.Bounds.Width + projectedOffset.X); bottom = Math.Max(bottom, child.Bounds.Y + child.Bounds.Height + projectedOffset.Y); }
+        return new(Math.Max(0, right - viewport.Bounds.X - viewport.Bounds.Width), Math.Max(0, bottom - viewport.Bounds.Y - viewport.Bounds.Height));
+    }
+    private bool IsDescendantOf(ElementIdentity identity, ElementIdentity ancestor)
+    {
+        while (_input.TryGetValue(identity.ElementId, out var retained) && retained.Parent is { } parent)
+        {
+            if (parent == ancestor) return true;
+            identity = parent;
+        }
+        return false;
+    }
+    private static float ClampScroll(float requested, float maximum) => !float.IsFinite(requested) ? requested > 0 ? maximum : 0 : Math.Clamp(requested, 0, maximum);
     private static void AppendRegistrations<T>(StringBuilder output, string kind, IEnumerable<Registration<T>> registrations) where T : class
     {
         foreach (var registration in registrations.OrderBy(item => item.ElementId).ThenBy(item => item.Ordinal)) output.Append("registration kind=").Append(kind).Append(" owner=").Append(registration.ElementId.ToString(CultureInfo.InvariantCulture)).Append(" ordinal=").Append(registration.Ordinal.ToString(CultureInfo.InvariantCulture)).Append('\n');
@@ -412,6 +528,7 @@ public sealed class InputRouter
     private static void Throw(List<Exception> errors) { if (errors.Count != 0) throw new AggregateException("Input callbacks failed.", errors); }
     private sealed class Registration<T>(long elementId, long ordinal, T callback) where T : class { public long ElementId { get; } = elementId; public long Ordinal { get; } = ordinal; public T Callback { get; } = callback; }
     private sealed class Focusable(bool tabStop, BehaviorContext context) { public bool TabStop { get; } = tabStop; public BehaviorContext Context { get; } = context; }
+    private sealed class Scrollable(ScrollViewportState state) { public ScrollViewportState State { get; } = state; public ScrollOffset InstalledOffset { get; set; } = state.Offset; }
     private readonly record struct Capture(ElementIdentity Owner, long Generation);
     private readonly record struct FocusState(ElementIdentity Identity, ElementIdentity[] Path, int Order, FocusChangeReason Reason);
     private readonly record struct PendingFocus(ElementIdentity? Identity, FocusChangeReason Reason);
@@ -419,19 +536,67 @@ public sealed class InputRouter
 }
 
 /// <summary>Reusable selectable action; selection is behavior state, not application-side routing state.</summary>
-public sealed class RowActionBehavior(string name, SemanticDeclaration semantics, Action? activate = null) : Behavior
+public sealed class RowActionBehavior(string name, SemanticDeclaration semantics, Action? activate = null, ControlState? state = null) : Behavior
 {
     public override string Name => name;
     public override BehaviorOwnership Ownership => BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
     public override void Attach(BehaviorContext context)
     {
         context.SetSemantics(semantics ?? throw new ArgumentNullException(nameof(semantics))); context.MakeFocusable();
+        int? armedPointer = null;
+        if (state is not null) context.Effect(() => context.SetState(BehaviorState.Selected, state.Selected), "selected-state");
         context.OnPointer(route =>
         {
-            if (route.Command.Kind == PointerCommandKind.Down) { context.SetState(BehaviorState.Pressed, true); route.Focus(); route.Capture(); route.Handled = true; }
-            else if (route.Command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel) { var active = context.State.GetValueOrDefault(BehaviorState.Pressed); context.SetState(BehaviorState.Pressed, false); if (active && route.Command.Kind == PointerCommandKind.Up) { context.SetState(BehaviorState.Selected, true); activate?.Invoke(); } route.Handled = true; }
+            if (route.Command is { Kind: PointerCommandKind.Down, Button: PointerButton.Primary }) { var armed = route.Capture(); armedPointer = armed ? route.Command.PointerId : null; context.SetState(BehaviorState.Pressed, armed); if (armed) route.Focus(); route.Handled = armed; }
+            else if (route.Command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
+            {
+                if (armedPointer != route.Command.PointerId) return;
+                var active = context.State.GetValueOrDefault(BehaviorState.Pressed); context.SetState(BehaviorState.Pressed, false);
+                armedPointer = null;
+                if (active && route.Command.Kind == PointerCommandKind.Up && route.IsInsideCurrentTarget) { context.SetState(BehaviorState.Selected, true); if (state is not null) state.Selected = true; activate?.Invoke(); }
+                route.Handled = active;
+            }
         });
-        context.OnKey(route => { if (route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false, Key: Key.Enter or Key.Space }) { context.SetState(BehaviorState.Selected, true); activate?.Invoke(); route.Handled = true; } });
-        context.OnCaptureLost(_ => context.SetState(BehaviorState.Pressed, false));
+        context.OnKey(route => { if (route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false, Key: Key.Enter or Key.Space }) { context.SetState(BehaviorState.Selected, true); if (state is not null) state.Selected = true; activate?.Invoke(); route.Handled = true; } });
+        context.OnCaptureLost(loss => { if (armedPointer == loss.PointerId) { armedPointer = null; context.SetState(BehaviorState.Pressed, false); } });
+    }
+}
+
+/// <summary>Reusable invoke action for buttons; unlike selectable rows it has no selection state.</summary>
+public sealed class ButtonBehavior(string name, SemanticDeclaration semantics, Action? activate = null) : Behavior
+{
+    public override string Name => name;
+    public override BehaviorOwnership Ownership => BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
+    public override void Attach(BehaviorContext context)
+    {
+        context.SetSemantics(semantics ?? throw new ArgumentNullException(nameof(semantics))); context.MakeFocusable();
+        int? armedPointer = null;
+        context.OnPointer(route =>
+        {
+            if (route.Command is { Kind: PointerCommandKind.Down, Button: PointerButton.Primary }) { var armed = route.Capture(); armedPointer = armed ? route.Command.PointerId : null; context.SetState(BehaviorState.Pressed, armed); if (armed) route.Focus(); route.Handled = armed; }
+            else if (route.Command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel) { if (armedPointer != route.Command.PointerId) return; var active = context.State.GetValueOrDefault(BehaviorState.Pressed); armedPointer = null; context.SetState(BehaviorState.Pressed, false); if (active && route.Command.Kind == PointerCommandKind.Up && route.IsInsideCurrentTarget) activate?.Invoke(); route.Handled = active; }
+        });
+        context.OnKey(route => { if (route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false, Key: Key.Enter or Key.Space }) { activate?.Invoke(); route.Handled = true; } });
+        context.OnCaptureLost(loss => { if (armedPointer == loss.PointerId) { armedPointer = null; context.SetState(BehaviorState.Pressed, false); } });
+    }
+}
+
+/// <summary>Bounded key-driven scrolling for a clipped retained viewport.</summary>
+public sealed class ScrollViewportBehavior(string name, ScrollViewportState state) : Behavior
+{
+    public override string Name => name;
+    public override BehaviorOwnership Ownership => BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
+    public override void Attach(BehaviorContext context)
+    {
+        context.SetSemantics(new(SemanticRole.Group, name, actions: SemanticAction.Scroll)); context.MakeFocusable(); context.RegisterScrollable(state);
+        context.OnKey(route =>
+        {
+            var handled = route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false } && route.Command.Key switch
+            {
+                Key.Left => route.ScrollBy(-40, 0), Key.Right => route.ScrollBy(40, 0), Key.Up => route.ScrollBy(0, -40), Key.Down => route.ScrollBy(0, 40),
+                Key.Home => route.ScrollToStart(), Key.End => route.ScrollToEnd(), _ => false
+            };
+            route.Handled = handled;
+        });
     }
 }

@@ -64,6 +64,7 @@ public sealed class ThemeContext : IDisposable
     private readonly Signal<bool> _reducedMotion;
     private readonly Signal<ThemeAppearance> _appearance;
     private readonly Dictionary<object, ITokenSlot> _tokens = [];
+    private bool _disposed;
     internal ReactiveGraph Graph { get; }
     public ThemeContext(ReactiveScope scope, Theme theme, bool reducedMotion = false, ThemeAppearance? appearance = null)
     {
@@ -78,11 +79,15 @@ public sealed class ThemeContext : IDisposable
     public ThemeAppearance Appearance { get => _appearance.Value; set { _scope.CheckMutationGuard(); value.Validate(); _appearance.Value = value; } }
     internal Theme CurrentTheme => _theme.Value;
     internal bool IsReducedMotion => _reducedMotion.Value;
+    internal void ValidateLive()
+    {
+        if (_disposed || _scope.IsDisposed) throw new ObjectDisposedException(nameof(ThemeContext));
+    }
     internal T Token<T>(Token<T> token) => Slot(token).State.Value;
     internal bool IsThemed<T>(Token<T> token) => Slot(token).State.Themed;
     private TokenSlot<T> Slot<T>(Token<T> token) => _tokens.TryGetValue(token, out var slot) ? (TokenSlot<T>)slot : Add(token);
     private TokenSlot<T> Add<T>(Token<T> token) { var slot = new TokenSlot<T>(_scope.Signal(new TokenState<T>(_theme.Value.Resolve(token), _theme.Value.Has(token)), "token." + token.Name), token); _tokens.Add(token, slot); return slot; }
-    public void Dispose() { _scope.CheckMutationGuard(); _tokens.Clear(); _appearance.Dispose(); _reducedMotion.Dispose(); _theme.Dispose(); }
+    public void Dispose() { _scope.CheckMutationGuard(); if (_disposed) return; _disposed = true; _tokens.Clear(); _appearance.Dispose(); _reducedMotion.Dispose(); _theme.Dispose(); }
     private interface ITokenSlot { void Update(Theme theme); }
     private sealed class TokenSlot<T>(Signal<TokenState<T>> signal, Token<T> token) : ITokenSlot { internal TokenState<T> State => signal.Value; public void Update(Theme theme) => signal.Value = new(theme.Resolve(token), theme.Has(token)); }
 }
@@ -156,12 +161,12 @@ internal readonly record struct FlatAssignment(IAssignment Assignment, VariantSt
 [Flags] public enum BehaviorOwnership { None = 0, Focus = 1, Action = 2, Semantics = 4 }
 public enum BehaviorState { Focused, FocusVisible, Pressed, Selected }
 public enum SemanticRole { Group, Text, Button, List, ListItem, Status }
-[Flags] public enum SemanticAction { None = 0, Invoke = 1, SetValue = 2, Select = 4 }
+[Flags] public enum SemanticAction { None = 0, Invoke = 1, SetValue = 2, Select = 4, Scroll = 8 }
 
 public sealed class SemanticDeclaration
 {
     public SemanticDeclaration(SemanticRole role, string name, bool enabled = true, bool focused = false, bool selected = false, SemanticAction actions = SemanticAction.None, string? value = null)
-    { if (!Enum.IsDefined(role) || ((uint)actions & ~(uint)(SemanticAction.Invoke | SemanticAction.SetValue | SemanticAction.Select)) != 0) throw new ArgumentException("Semantic role/actions must be finite."); if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A semantic name is required.", nameof(name)); Role = role; Name = name; Enabled = enabled; Focused = focused; Selected = selected; Actions = actions; Value = value; }
+    { if (!Enum.IsDefined(role) || ((uint)actions & ~(uint)(SemanticAction.Invoke | SemanticAction.SetValue | SemanticAction.Select | SemanticAction.Scroll)) != 0) throw new ArgumentException("Semantic role/actions must be finite."); if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("A semantic name is required.", nameof(name)); Role = role; Name = name; Enabled = enabled; Focused = focused; Selected = selected; Actions = actions; Value = value; }
     public SemanticRole Role { get; } public string Name { get; } public bool Enabled { get; } public bool Focused { get; } public bool Selected { get; } public SemanticAction Actions { get; } public string? Value { get; }
 }
 
@@ -187,6 +192,8 @@ public sealed class BehaviorContext
     public void OnFocus(Action<FocusRoute> handler) { CheckFocusOwnership(); _composition.Input.RegisterFocus(ElementId, _scope, handler); }
     public void OnCaptureLost(Action<PointerCaptureLoss> handler) { CheckInputOwnership(); _composition.Input.RegisterCaptureLoss(ElementId, _scope, handler); }
     public void MakeFocusable(bool tabStop = true) { CheckFocusOwnership(); _composition.Input.RegisterFocusable(ElementId, _scope, tabStop, this); }
+    internal ReactiveEffect Effect(Action callback, string name) { CheckAttachment(); return _scope.Effect(callback, name); }
+    internal void RegisterScrollable(ScrollViewportState state) { CheckFocusOwnership(); _composition.Input.RegisterScrollable(ElementId, _scope, state ?? throw new ArgumentNullException(nameof(state))); }
     internal SemanticDeclaration? Semantics => _semantic; internal IReadOnlyDictionary<BehaviorState, bool> State => _state; internal void Complete() => _attaching = false;
     private void CheckAttachment() { CheckLive(); if (!_attaching) throw new InvalidOperationException("Behavior registration is only valid while attaching."); }
     private void CheckLive() { if (_scope.IsDisposed) throw new ObjectDisposedException(Behavior.Name); }
@@ -201,18 +208,30 @@ public sealed class BehaviorContext
 
 internal sealed class ElementPresentation
 {
-    private readonly Element _element; private readonly ThemeContext _theme; private readonly FlatAssignment[] _component; private readonly FlatAssignment[] _author; private readonly Transition[] _transitions; private readonly Dictionary<IProperty, Signal<TransitionController.Sample?>> _samples; private readonly Signal<VariantState> _variants; private readonly Signal<VariantState> _behaviorVariants;
+    private readonly Element _element; private readonly ThemeContext _theme; private readonly FlatAssignment[] _component; private readonly FlatAssignment[] _author; private readonly Transition[] _transitions; private readonly Dictionary<IProperty, Signal<TransitionController.Sample?>> _samples; private readonly Signal<VariantState> _variants; private readonly Signal<VariantState> _behaviorVariants; private readonly Dictionary<IProperty, IControlValue> _control = [];
     internal ElementPresentation(Element element, ThemeContext theme, Style component, Style author, Transition[] transitions)
     {
         _element = element; _theme = theme; _component = component.Flatten().ToArray(); _author = author.Flatten().ToArray(); _transitions = [.. transitions];
-        ValidateProperties(_component.Concat(_author).Select(item => item.Assignment.Property).Concat(_transitions.Select(item => item.Property)));
-        if (_transitions.GroupBy(item => item.Property).Any(group => group.Count() != 1)) throw new ArgumentException("Transition properties must be unique.", nameof(transitions));
+        Validate(component, author, _transitions);
         foreach (var assignment in _component.Concat(_author).Select(item => item.Assignment)) assignment.Prime(theme);
         _samples = _transitions.ToDictionary(item => item.Property, item => element.Scope.Signal<TransitionController.Sample?>(null, element.Name + ".transition." + item.Property.Name));
         _variants = element.Scope.Signal(VariantState.None, element.Name + ".variants"); _behaviorVariants = element.Scope.Signal(VariantState.None, element.Name + ".behavior-variants");
     }
     internal void SetVariants(VariantState variants) { _element.Composition.ThrowIfBehaviorAttachment(); VariantStates.Validate(variants, nameof(variants), true); _variants.Value = variants; }
-    internal void SetBehaviorVariants(VariantState variants) { VariantStates.Validate(variants, nameof(variants), true); _behaviorVariants.Value = variants; }
+    internal bool SetBehaviorVariants(VariantState variants)
+    {
+        VariantStates.Validate(variants, nameof(variants), true);
+        if (_behaviorVariants.Value == variants) return false;
+        _behaviorVariants.Value = variants;
+        return true;
+    }
+    /// <summary>Internal control-only mutable channel; control-owned values are authoritative for their properties.</summary>
+    internal void SetControl<T>(Property<T> property, T value)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        if (_control.TryGetValue(property, out var existing)) { ((ControlValue<T>)existing).Value = value; return; }
+        _control.Add(property, new ControlValue<T>(_element.Scope.Signal(value, _element.Name + ".control." + property.Name)));
+    }
     internal void Start<T>(Property<T> property, T value)
     {
         var spec = _transitions.SingleOrDefault(spec => ReferenceEquals(spec.Property, property)) ?? throw new InvalidOperationException("No transition specification exists for this property.");
@@ -224,10 +243,12 @@ internal sealed class ElementPresentation
         ArgumentNullException.ThrowIfNull(property); var candidates = new List<(T Value, PropertyProvenance Provenance)> { (property.DefaultValue, new("default", 0)) };
         if (property.Inherits && _element.Parent is not null) { var inherited = _element.Parent.Resolve(property); candidates.Add((inherited.Value, new("inherited", inherited.Winner.Ordinal))); }
         var active = _variants.Value | _behaviorVariants.Value;
+        var resolved = new List<(T Value, PropertyProvenance Provenance, VariantState Condition, int Source, int Ordinal)>();
         foreach (var item in _component.Select(item => (item, author: false)).Concat(_author.Select(item => (item, author: true)))
-            .Where(entry => ReferenceEquals(entry.item.Assignment.Property, property) && (active & entry.item.Condition) == entry.item.Condition)
-            .OrderBy(entry => VariantOrder.Key(entry.item.Condition)).ThenBy(entry => entry.author).ThenBy(entry => entry.item.Ordinal))
-            candidates.Add(((T)item.item.Assignment.Resolve(_theme)!, new((item.author ? "author" : "component") + (item.item.Assignment.TokenName is { } token ? ":token:" + token + ":" + (item.item.Assignment.IsThemed(_theme) ? "theme" : "fallback") : ""), item.item.Ordinal, item.item.Condition)));
+            .Where(entry => ReferenceEquals(entry.item.Assignment.Property, property) && (active & entry.item.Condition) == entry.item.Condition))
+            resolved.Add(((T)item.item.Assignment.Resolve(_theme)!, new((item.author ? "author" : "component") + (item.item.Assignment.TokenName is { } token ? ":token:" + token + ":" + (item.item.Assignment.IsThemed(_theme) ? "theme" : "fallback") : ""), item.item.Ordinal, item.item.Condition), item.item.Condition, item.author ? 1 : 0, item.item.Ordinal));
+        foreach (var item in resolved.OrderBy(item => VariantOrder.Key(item.Condition)).ThenBy(item => item.Source).ThenBy(item => item.Ordinal)) candidates.Add((item.Value, item.Provenance));
+        if (_control.TryGetValue(property, out var control)) candidates.Add(((T)control.Value!, new("control", 0)));
         PropertyProvenance? suppressed = null;
         if (_samples.TryGetValue(property, out var slot) && slot.Value is { } sample)
         {
@@ -243,9 +264,22 @@ internal sealed class ElementPresentation
         { var value = ((IPropertyDump)property).Dump(this); dump.Append("  property name=").Append(Quote(property.Name)).Append(" winner=").Append(Format(value.Winner)).Append(" overridden=[").Append(string.Join(',', value.Overridden.Select(Format))).Append("]"); if (value.Suppressed is not null) dump.Append(" suppressed=").Append(Format(value.Suppressed)); dump.Append('\n'); }
     }
     private IEnumerable<IProperty> Properties() => OwnProperties().Concat(_element.AncestorProperties().Where(property => property.Inherits)).Distinct();
-    internal IEnumerable<IProperty> OwnProperties() => _component.Concat(_author).Select(item => item.Assignment.Property).Concat(_transitions.Select(item => item.Property));
+    internal IEnumerable<IProperty> OwnProperties() => _component.Concat(_author).Select(item => item.Assignment.Property).Concat(_control.Keys).Concat(_transitions.Select(item => item.Property));
+    internal static void Validate(Style component, Style author, Transition[] transitions)
+    {
+        ArgumentNullException.ThrowIfNull(component); ArgumentNullException.ThrowIfNull(author); ArgumentNullException.ThrowIfNull(transitions);
+        var componentAssignments = component.Flatten().ToArray(); var authorAssignments = author.Flatten().ToArray();
+        ValidateProperties(componentAssignments.Concat(authorAssignments).Select(item => item.Assignment.Property).Concat(transitions.Select(item => item.Property)));
+        if (transitions.GroupBy(item => item.Property).Any(group => group.Count() != 1)) throw new ArgumentException("Transition properties must be unique.", nameof(transitions));
+    }
     private static void ValidateProperties(IEnumerable<IProperty> properties)
     { var names = new Dictionary<string, IProperty>(StringComparer.Ordinal); foreach (var property in properties) { if (names.TryGetValue(property.Name, out var prior) && !ReferenceEquals(prior, property)) throw new ArgumentException("A presentation cannot contain distinct properties with the same name."); names[property.Name] = property; } }
+    private interface IControlValue { object? Value { get; } }
+    private sealed class ControlValue<T>(Signal<T> signal) : IControlValue
+    {
+        public T Value { get => signal.Value; set => signal.Value = value; }
+        object? IControlValue.Value => Value;
+    }
     private string Format(PropertyProvenance value) => DiagnosticText.Quote(value.Source) + "#" + value.Ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture) + (value.Condition == VariantState.None ? "" : "[" + value.Condition + "]");
     private static string Quote(string value) => DiagnosticText.Quote(value);
 }

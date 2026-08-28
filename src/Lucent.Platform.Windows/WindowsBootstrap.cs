@@ -12,9 +12,10 @@ public static class WindowsBootstrap
 {
     private const int InitialLogicalWidth = 800;
     private const int InitialLogicalHeight = 500;
+    private const int InstallAttempts = 3;
 
     [STAThread]
-    public static int Run(string title, Composition composition, ThemeContext? theme = null, Action? drain = null)
+    public static int Run(string title, Composition composition, ThemeContext? theme = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(composition);
@@ -46,7 +47,7 @@ public static class WindowsBootstrap
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
             _ = cursor.Activate();
-            _ = ApplySettings(settings, theme, drain);
+            _ = ApplySettings(composition, settings, theme);
             diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
             while (scheduler.IsOpen)
             {
@@ -61,15 +62,14 @@ public static class WindowsBootstrap
                 refreshSettings |= settingsListener.TakePending();
                 if (refreshSettings)
                 {
-                    if (ApplySettings(settings, theme, drain)) scheduler.Request();
+                    if (ApplySettings(composition, settings, theme)) scheduler.Request();
                     diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
                 }
 
                 var viewport = GetViewport(window, sdlRenderer);
                 if (!scheduler.TryBegin(viewport)) continue;
                 var started = Stopwatch.GetTimestamp();
-                var scene = SceneLayout.Project(composition, new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale), sceneRenderer);
-                _ = composition.Input.SetScene(scene);
+                var scene = ProjectAndInstall(composition, new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale), sceneRenderer);
                 var projected = Stopwatch.GetTimestamp();
                 var phase = presenter.Present(scene, viewport, sceneRenderer);
                 scheduler.Complete(FrameTiming.FromTimestamps(started, projected, phase.Rasterized, phase.Uploaded, phase.Presented));
@@ -113,12 +113,27 @@ public static class WindowsBootstrap
         }
     }
 
-    internal static bool ApplySettings(WindowsSettings settings, ThemeContext? theme, Action? drain)
+    internal static bool ApplySettings(Composition composition, WindowsSettings settings, ThemeContext? theme)
     {
+        ArgumentNullException.ThrowIfNull(composition);
         ArgumentNullException.ThrowIfNull(settings);
         if (!settings.Apply(theme)) return false;
-        drain?.Invoke();
+        composition.Flush();
         return true;
+    }
+
+    /// <summary>Projects only a scene accepted by Core input; reconciliation may require a bounded reprojection.</summary>
+    internal static RetainedScene ProjectAndInstall(Composition composition, LayoutViewport viewport, ITextShaper shaper)
+    {
+        ArgumentNullException.ThrowIfNull(composition);
+        ArgumentNullException.ThrowIfNull(shaper);
+        for (var attempt = 0; attempt < InstallAttempts; attempt++)
+        {
+            composition.Flush();
+            var scene = SceneLayout.Project(composition, viewport, shaper);
+            if (composition.Input.SetScene(scene)) return scene;
+        }
+        throw new InvalidOperationException($"Core input rejected {InstallAttempts} consecutive projected scenes.");
     }
 
     internal static WindowsSettingsDiagnostic ReportDiagnostics(WindowsSettings settings, WindowsSettingsDiagnostic prior, Action<string>? output)

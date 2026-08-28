@@ -8,6 +8,8 @@ try
     DpiAwarenessContract();
     FrameSchedulingMatrix();
     WindowsHostContracts.InputAdapterAndRoutingContract();
+    WindowsHostContracts.InputInstallConvergenceContract();
+    WindowsHostContracts.InputReconciliationPaintContract();
     WindowsHostContracts.SettingsAndAppearanceContract();
     WindowsHostContracts.ClipboardAndCursorContract();
     WindowsHostContracts.ThrowingCleanupContract();
