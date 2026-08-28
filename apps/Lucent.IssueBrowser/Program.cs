@@ -6,7 +6,7 @@ try
     var graph = new ReactiveGraph();
     using var composition = IssueBrowserStructure.Create(graph);
     graph.Drain();
-    return WindowsBootstrap.Run("Lucent Issue Browser — M0 (1.25x test presentation)");
+    return WindowsBootstrap.Run("Lucent Issue Browser — M1 (1.25x test presentation)", composition);
 }
 catch (Exception exception)
 {
@@ -28,19 +28,22 @@ public static class IssueBrowserStructure
         var loading = composition.Root.Scope.Signal(true, "issue-browser.loading");
         var issues = composition.Root.Scope.Signal<Issue[]>([], "issue-browser.issues");
         var theme = new ThemeContext(composition.Root.Scope, new Theme("issue-browser-light").Set(PageSurface, 0xfff8fafcU).Set(PageForeground, 0xff0f172aU));
-        composition.Root.Present(theme, author: Style.Empty.Set(Surface, PageSurface).Set(Foreground, PageForeground));
+        composition.Root.Present(theme, author: Style.Empty.Set(Surface, PageSurface).Set(Foreground, PageForeground)
+            .Set(SceneProperties.Fill, PageSurface).Set(SceneProperties.Foreground, PageForeground)
+            .Set(Arrangement.Axis, LayoutAxis.Column).Set(Arrangement.Clip, true));
         composition.Root.AttachBehaviors(new Semantics("root-semantics", new(SemanticRole.Group, "Issue Browser")));
         var header = composition.Child(composition.Root, "issue-browser.header");
-        header.Present(theme, Style.Empty, Style.Empty.Set(Opacity, 1f));
+        header.Present(theme, Style.Empty, Style.Empty.Set(Opacity, 1f).Set(Arrangement.Height, 52f).Set(Arrangement.Width, 800f)
+            .Set(Arrangement.Axis, LayoutAxis.Column).Set(SceneProperties.Fill, 0xffe2e8f0U));
         header.AttachBehaviors(new Semantics("header-semantics", new(SemanticRole.Group, "Issue Browser header")));
         var title = composition.Child(header, "issue-browser.title");
-        title.Present(theme);
+        title.Present(theme, author: Style.Empty.Set(Arrangement.Height, 24f).Set(SceneProperties.Text, "Issues").Set(SceneProperties.FontSize, 18f));
         title.AttachBehaviors(new Semantics("title-semantics", new(SemanticRole.Text, "Issues")));
         _ = composition.When(composition.Root, "issue-browser.loading-region", () => loading.Value,
             context =>
             {
                 var element = context.Element("issue-browser.loading");
-                element.Present(theme, author: Style.Empty.Set(Opacity, 1f));
+                element.Present(theme, author: Style.Empty.Set(Opacity, 1f).Set(Arrangement.Height, 28f).Set(SceneProperties.Text, "Loading issues"));
                 element.AttachBehaviors(new Semantics("loading-semantics", new(SemanticRole.Status, "Loading issues")));
                 return element;
             });
@@ -49,7 +52,8 @@ public static class IssueBrowserStructure
             {
                 var row = context.Element("issue-browser.issue-row");
                 row.Present(theme,
-                    Style.Empty.Set(Opacity, 1f).When(VariantState.Selected, Style.Empty.Set(Opacity, .9f)),
+                    Style.Empty.Set(Opacity, 1f).Set(Arrangement.Height, 30f).Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, 0xffffffffU)
+                        .Set(SceneProperties.Text, "Issue " + issue.Number).When(VariantState.Selected, Style.Empty.Set(Opacity, .9f)),
                     Style.Empty.When(VariantState.Selected, Style.Empty.Set(Opacity, .8f)));
                 if (issue.Number == 29) row.SetVariants(VariantState.Selected);
                 row.AttachBehaviors(new Semantics("issue-row-semantics", new(SemanticRole.ListItem, "Issue " + issue.Number, actions: SemanticAction.Select)));

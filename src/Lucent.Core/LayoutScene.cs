@@ -1,0 +1,302 @@
+using System.Globalization;
+using System.Text;
+
+namespace Lucent.Core;
+
+/// <summary>The finite arrangement values resolved by the existing typed presentation model.</summary>
+public static class Arrangement
+{
+    public static readonly Property<LayoutAxis> Axis = new("layout-axis", LayoutAxis.Column);
+    public static readonly Property<float?> Width = new("layout-width", null);
+    public static readonly Property<float?> Height = new("layout-height", null);
+    public static readonly Property<float> MinWidth = new("layout-min-width", 0);
+    public static readonly Property<float> MinHeight = new("layout-min-height", 0);
+    public static readonly Property<float> MaxWidth = new("layout-max-width", float.PositiveInfinity);
+    public static readonly Property<float> MaxHeight = new("layout-max-height", float.PositiveInfinity);
+    public static readonly Property<float> Spacing = new("layout-spacing", 0);
+    public static readonly Property<LayoutAlignment> MainAlignment = new("layout-main-alignment", LayoutAlignment.Start);
+    public static readonly Property<LayoutAlignment> CrossAlignment = new("layout-cross-alignment", LayoutAlignment.Stretch);
+    public static readonly Property<bool> Clip = new("layout-clip", false);
+    public static readonly Property<ScrollOffset> Scroll = new("layout-scroll", default);
+}
+
+/// <summary>The minimal renderer-facing visual values; they are ordinary typed properties, not a second style model.</summary>
+public static class SceneProperties
+{
+    public static readonly Property<uint> Fill = new("scene-fill", 0x00000000U, transition: TransitionKind.Color);
+    public static readonly Property<uint> Foreground = new("scene-foreground", 0xff000000U, inherits: true, transition: TransitionKind.Color);
+    public static readonly Property<string?> Text = new("scene-text", null);
+    public static readonly Property<string> FontFamily = new("scene-font-family", "Segoe UI");
+    public static readonly Property<float> FontSize = new("scene-font-size", 14);
+    public static readonly Property<string> Language = new("scene-language", "en");
+    public static readonly Property<TextDirection> TextDirection = new("scene-text-direction", global::Lucent.Core.TextDirection.LeftToRight);
+}
+
+public enum LayoutAxis { Row, Column }
+public enum LayoutAlignment { Start, Center, End, Stretch }
+public enum TextDirection { LeftToRight, RightToLeft }
+
+public readonly record struct LayoutViewport(float Width, float Height, float Scale)
+{
+    public void Validate()
+    {
+        if (!float.IsFinite(Width) || !float.IsFinite(Height) || !float.IsFinite(Scale) || Width <= 0 || Height <= 0 || Scale <= 0)
+            throw new ArgumentOutOfRangeException(nameof(LayoutViewport), "Viewport and scale must be finite and positive.");
+    }
+}
+
+public readonly record struct ScrollOffset(float X, float Y)
+{
+    internal void Validate() { if (!float.IsFinite(X) || !float.IsFinite(Y) || X < 0 || Y < 0) throw new ArgumentOutOfRangeException(nameof(ScrollOffset)); }
+}
+
+public readonly record struct LayoutRect(float X, float Y, float Width, float Height)
+{
+    internal static LayoutRect Round(float x, float y, float width, float height, float scale)
+    {
+        static float Edge(float value, float deviceScale) { var scaled = value * deviceScale; if (!float.IsFinite(scaled)) throw new ArgumentOutOfRangeException(nameof(value), "Device rounding overflow."); var rounded = MathF.Round(scaled, MidpointRounding.AwayFromZero) / deviceScale; if (!float.IsFinite(rounded)) throw new ArgumentOutOfRangeException(nameof(value), "Device rounding overflow."); return rounded; }
+        if (!float.IsFinite(x) || !float.IsFinite(y) || !float.IsFinite(width) || !float.IsFinite(height) || width < 0 || height < 0) throw new ArgumentOutOfRangeException(nameof(width));
+        var left = Edge(x, scale); var top = Edge(y, scale); var right = Edge(x + width, scale); var bottom = Edge(y + height, scale);
+        return new(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
+    }
+}
+
+public readonly record struct ElementIdentity(long CompositionEpoch, long ElementId);
+public readonly record struct TextMeasureRequest(string Text, string FontFamily, float FontSize, string Language, TextDirection Direction, float Scale)
+{
+    public void Validate()
+    {
+        if (Text is null || string.IsNullOrWhiteSpace(FontFamily) || string.IsNullOrWhiteSpace(Language) || !float.IsFinite(FontSize) || FontSize <= 0 || !float.IsFinite(Scale) || Scale <= 0 || !Enum.IsDefined(Direction))
+            throw new ArgumentException("Text requests require finite font/scale and explicit language/direction.");
+    }
+}
+
+public readonly record struct ShapedGlyph(uint GlyphId, uint Cluster, float X, float Y, float XAdvance, float XOffset, float YOffset);
+
+/// <summary>One immutable face/direction run. Positions are the measured HarfBuzz positions painted by every renderer.</summary>
+public sealed class ShapedRun
+{
+    private readonly IReadOnlyList<ShapedGlyph> _glyphs;
+    public ShapedRun(string identity, string family, int weight, int width, int slant, string fingerprint, int collectionIndex, string sourceIdentity, TextDirection direction, string language, float fontSize, float originX, float baseline, float ascent, float descent, float runWidth, IReadOnlyList<ShapedGlyph> glyphs)
+    {
+        if (string.IsNullOrWhiteSpace(identity) || string.IsNullOrWhiteSpace(family) || string.IsNullOrWhiteSpace(fingerprint) || string.IsNullOrWhiteSpace(sourceIdentity) || collectionIndex < 0 || string.IsNullOrWhiteSpace(language) || !Enum.IsDefined(direction) || !float.IsFinite(fontSize) || fontSize <= 0 || !float.IsFinite(originX) || !float.IsFinite(baseline) || !float.IsFinite(ascent) || !float.IsFinite(descent) || !float.IsFinite(runWidth) || runWidth < 0 || ascent > descent)
+            throw new ArgumentException("Shaped run fields must be finite and explicit.");
+        ArgumentNullException.ThrowIfNull(glyphs);
+        var copy = glyphs.ToArray();
+        if (copy.Length == 0 || copy.Any(glyph => glyph.GlyphId == 0 || glyph.GlyphId > ushort.MaxValue || !float.IsFinite(glyph.X) || !float.IsFinite(glyph.Y) || !float.IsFinite(glyph.XAdvance) || !float.IsFinite(glyph.XOffset) || !float.IsFinite(glyph.YOffset)) || MathF.Abs(copy.Sum(glyph => glyph.XAdvance) - runWidth) > .001f)
+            throw new ArgumentException("A shaped run requires finite non-missing glyphs.", nameof(glyphs));
+        Identity = identity; Family = family; Weight = weight; Width = width; Slant = slant; Fingerprint = fingerprint; CollectionIndex = collectionIndex; SourceIdentity = sourceIdentity; Direction = direction; Language = language; FontSize = fontSize; OriginX = originX; Baseline = baseline; Ascent = ascent; Descent = descent; RunWidth = runWidth;
+        _glyphs = Array.AsReadOnly(copy);
+    }
+    public string Identity { get; } public string Family { get; } public int Weight { get; } public int Width { get; } public int Slant { get; } public string Fingerprint { get; } public int CollectionIndex { get; } public string SourceIdentity { get; }
+    public string TypefaceIdentity => Family + ":" + Weight.ToString(CultureInfo.InvariantCulture) + ":" + Width.ToString(CultureInfo.InvariantCulture) + ":" + Slant.ToString(CultureInfo.InvariantCulture);
+    public TextDirection Direction { get; } public string Language { get; } public float FontSize { get; } public float OriginX { get; } public float Baseline { get; } public float Ascent { get; } public float Descent { get; } public float RunWidth { get; }
+    public IReadOnlyList<ShapedGlyph> Glyphs => _glyphs;
+}
+
+public sealed class ShapedText
+{
+    private readonly IReadOnlyList<ShapedRun> _runs;
+    public ShapedText(string identity, float width, float height, IReadOnlyList<ShapedRun> runs)
+    {
+        ArgumentNullException.ThrowIfNull(identity); ArgumentNullException.ThrowIfNull(runs);
+        var copy = runs.ToArray();
+        if (string.IsNullOrWhiteSpace(identity) || !float.IsFinite(width) || !float.IsFinite(height) || width < 0 || height < 0 || copy.Any(run => run is null)) throw new ArgumentException("Shaped text must be finite and immutable.");
+        Identity = identity; Width = width; Height = height; _runs = Array.AsReadOnly(copy);
+    }
+    public string Identity { get; } public float Width { get; } public float Height { get; } public IReadOnlyList<ShapedRun> Runs => _runs;
+    public void Validate(TextMeasureRequest request)
+    {
+        if (request.Text.Length == 0 ? Runs.Count != 0 || Width != 0 || Height != 0 : Runs.Count == 0) throw new InvalidOperationException("The text shaper returned an invalid run set.");
+        if (Runs.Count == 0) return;
+        var first = Runs[0];
+        if (MathF.Abs(first.OriginX) > .001f || Runs.Any(run => run.Language != request.Language || run.FontSize != request.FontSize || MathF.Abs(run.Baseline - first.Baseline) > .001f || MathF.Abs(run.Ascent - first.Ascent) > .001f || MathF.Abs(run.Descent - first.Descent) > .001f || !float.IsFinite(run.OriginX + run.RunWidth)) || MathF.Abs(first.Baseline + first.Ascent) > .001f || MathF.Abs(first.Descent - first.Ascent - Height) > .001f)
+            throw new InvalidOperationException("The shaped text metrics are inconsistent.");
+        var end = 0f;
+        foreach (var run in Runs)
+        {
+            if (MathF.Abs(run.OriginX - end) > .001f) throw new InvalidOperationException("The shaped run origins are not contiguous.");
+            var cursor = 0f; uint? priorCluster = null;
+            foreach (var glyph in run.Glyphs)
+            {
+                if (glyph.Cluster >= request.Text.Length || MathF.Abs(glyph.X - (cursor + glyph.XOffset)) > .001f || MathF.Abs(glyph.Y + glyph.YOffset) > .001f) throw new InvalidOperationException("The shaped glyph positions are inconsistent.");
+                if (priorCluster is { } prior && (run.Direction == TextDirection.LeftToRight ? glyph.Cluster < prior : glyph.Cluster > prior)) throw new InvalidOperationException("The shaped glyph cluster order is inconsistent with its run direction.");
+                priorCluster = glyph.Cluster; cursor += glyph.XAdvance;
+            }
+            if (MathF.Abs(cursor - run.RunWidth) > .001f) throw new InvalidOperationException("The shaped run advances do not match its width.");
+            end += run.RunWidth;
+            if (!float.IsFinite(end)) throw new InvalidOperationException("The shaped run origins overflow.");
+        }
+        if (MathF.Abs(end - Width) > .001f) throw new InvalidOperationException("The shaped text width does not match its runs.");
+    }
+}
+
+/// <summary>Implemented by the renderer; Core owns only this portable request/result contract.</summary>
+public interface ITextShaper { ShapedText Shape(TextMeasureRequest request); }
+
+public readonly record struct LayoutBox(ElementIdentity Identity, LayoutRect Bounds, ShapedText? Text);
+public enum SceneNodeKind { Paint, Text, Clip }
+public readonly record struct SceneNodeIdentity(ElementIdentity Element, SceneNodeKind Kind);
+public abstract class SceneNode(SceneNodeIdentity identity, LayoutRect bounds) { public SceneNodeIdentity Identity { get; } = identity; public LayoutRect Bounds { get; } = bounds; }
+public sealed class PaintSceneNode(SceneNodeIdentity identity, LayoutRect bounds, uint color) : SceneNode(identity, bounds) { public uint Color { get; } = color; }
+public sealed class TextSceneNode(SceneNodeIdentity identity, LayoutRect bounds, uint color, ShapedText text) : SceneNode(identity, bounds) { public uint Color { get; } = color; public ShapedText Text { get; } = text ?? throw new ArgumentNullException(nameof(text)); }
+public sealed class ClipSceneNode : SceneNode
+{
+    private readonly IReadOnlyList<SceneNode> _children;
+    public ClipSceneNode(SceneNodeIdentity identity, LayoutRect bounds, IReadOnlyList<SceneNode> children) : base(identity, bounds) { _children = Array.AsReadOnly(children?.Select(Clone).ToArray() ?? throw new ArgumentNullException(nameof(children))); }
+    public IReadOnlyList<SceneNode> Children => _children;
+    internal static SceneNode Clone(SceneNode node) => node switch { PaintSceneNode paint => new PaintSceneNode(paint.Identity, paint.Bounds, paint.Color), TextSceneNode text => new TextSceneNode(text.Identity, text.Bounds, text.Color, text.Text), ClipSceneNode clip => new ClipSceneNode(clip.Identity, clip.Bounds, clip.Children), _ => throw new ArgumentException("Unknown scene node.") };
+}
+
+/// <summary>A renderer-facing retained snapshot. It owns no platform or renderer resources.</summary>
+public sealed class RetainedScene
+{
+    internal RetainedScene(LayoutViewport viewport, IReadOnlyList<LayoutBox> boxes, IReadOnlyList<SceneNode> nodes) { Viewport = viewport; Boxes = Array.AsReadOnly(boxes.ToArray()); Nodes = Array.AsReadOnly(nodes.Select(ClipSceneNode.Clone).ToArray()); }
+    public LayoutViewport Viewport { get; }
+    public IReadOnlyList<LayoutBox> Boxes { get; }
+    public IReadOnlyList<SceneNode> Nodes { get; }
+    public string Dump()
+    {
+        var output = new StringBuilder("scene viewport=").Append(Format(new LayoutRect(0, 0, Viewport.Width, Viewport.Height))).Append(" scale=").Append(Viewport.Scale.ToString("R", CultureInfo.InvariantCulture)).Append("\n");
+        foreach (var box in Boxes.OrderBy(box => box.Identity.ElementId))
+        {
+            output.Append("layout epoch=").Append(box.Identity.CompositionEpoch.ToString(CultureInfo.InvariantCulture)).Append(" element=").Append(box.Identity.ElementId.ToString(CultureInfo.InvariantCulture)).Append(" bounds=")
+                .Append(Format(box.Bounds));
+            if (box.Text is not null) foreach (var run in box.Text.Runs) output.Append(" shape=").Append(DiagnosticText.Quote(run.Identity)).Append(" face=").Append(DiagnosticText.Quote(run.TypefaceIdentity)).Append(" fingerprint=").Append(DiagnosticText.Quote(run.Fingerprint)).Append(" collection=").Append(run.CollectionIndex.ToString(CultureInfo.InvariantCulture)).Append(" source=").Append(DiagnosticText.Quote(run.SourceIdentity)).Append(" origin=").Append(run.OriginX.ToString("R", CultureInfo.InvariantCulture)).Append(" width=").Append(run.RunWidth.ToString("R", CultureInfo.InvariantCulture)).Append(" fontSize=").Append(run.FontSize.ToString("R", CultureInfo.InvariantCulture)).Append(" direction=").Append(run.Direction).Append(" language=").Append(DiagnosticText.Quote(run.Language)).Append(" baseline=").Append(run.Baseline.ToString("R", CultureInfo.InvariantCulture)).Append(" ascent=").Append(run.Ascent.ToString("R", CultureInfo.InvariantCulture)).Append(" descent=").Append(run.Descent.ToString("R", CultureInfo.InvariantCulture)).Append(" glyphs=[").Append(string.Join(',', run.Glyphs.Select(glyph => glyph.GlyphId.ToString(CultureInfo.InvariantCulture) + ":" + glyph.Cluster.ToString(CultureInfo.InvariantCulture) + ":" + glyph.X.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.Y.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.XAdvance.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.XOffset.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.YOffset.ToString("R", CultureInfo.InvariantCulture)))).Append(']');
+            output.Append('\n');
+        }
+        Append(Nodes, output, 0, null);
+        return output.ToString();
+    }
+    private static void Append(IEnumerable<SceneNode> nodes, StringBuilder output, int depth, long? parent)
+    {
+        foreach (var node in nodes)
+        {
+            output.Append("node epoch=").Append(node.Identity.Element.CompositionEpoch.ToString(CultureInfo.InvariantCulture)).Append(" element=").Append(node.Identity.Element.ElementId.ToString(CultureInfo.InvariantCulture)).Append(" parent=").Append(parent?.ToString(CultureInfo.InvariantCulture) ?? "-").Append(" depth=").Append(depth.ToString(CultureInfo.InvariantCulture)).Append(" kind=").Append(node.Identity.Kind).Append(" bounds=").Append(Format(node.Bounds));
+            if (node is PaintSceneNode paint) output.Append(" color=0x").Append(paint.Color.ToString("x8", CultureInfo.InvariantCulture));
+            if (node is TextSceneNode text) output.Append(" color=0x").Append(text.Color.ToString("x8", CultureInfo.InvariantCulture)).Append(" shape=").Append(DiagnosticText.Quote(text.Text.Identity));
+            output.Append('\n');
+            if (node is ClipSceneNode clip) Append(clip.Children, output, depth + 1, node.Identity.Element.ElementId);
+        }
+    }
+    private static string Format(LayoutRect value) => "[" + value.X.ToString("R", CultureInfo.InvariantCulture) + "," + value.Y.ToString("R", CultureInfo.InvariantCulture) + "," + value.Width.ToString("R", CultureInfo.InvariantCulture) + "," + value.Height.ToString("R", CultureInfo.InvariantCulture) + "]";
+}
+
+/// <summary>Finite row/column layout: invalid values fail; fixed over-constraint is retained and bounded by an explicit clip.</summary>
+public static class SceneLayout
+{
+    public static RetainedScene Project(Composition composition,
+LayoutViewport viewport, ITextShaper shaper)
+    {
+        ArgumentNullException.ThrowIfNull(composition); ArgumentNullException.ThrowIfNull(shaper); viewport.Validate();
+        var boxes = new List<LayoutBox>();
+        var shapes = new Dictionary<long, ShapedText?>();
+        var nodes = Layout(composition.Root, new LayoutRect(0, 0, viewport.Width, viewport.Height), viewport, shaper, boxes, shapes, null, false);
+        return new RetainedScene(viewport, boxes, nodes);
+    }
+
+    private static IReadOnlyList<SceneNode> Layout(Element element, LayoutRect allotted, LayoutViewport viewport, ITextShaper shaper, List<LayoutBox> boxes, Dictionary<long, ShapedText?> shapes, LayoutAxis? parentAxis, bool crossAllotted)
+    {
+        var style = Read(element); var text = Shape(element, style, viewport.Scale, shaper, shapes);
+        var width = Constrain(style.Width ?? (text?.Width ?? allotted.Width), style.MinWidth, style.MaxWidth);
+        var height = Constrain(style.Height ?? (text?.Height ?? allotted.Height), style.MinHeight, style.MaxHeight);
+        if (crossAllotted && parentAxis == LayoutAxis.Row && style.Height is null) height = Constrain(allotted.Height, style.MinHeight, style.MaxHeight);
+        if (crossAllotted && parentAxis == LayoutAxis.Column && style.Width is null) width = Constrain(allotted.Width, style.MinWidth, style.MaxWidth);
+        if (element.Parent is null) { width = allotted.Width; height = allotted.Height; }
+        var bounds = LayoutRect.Round(allotted.X, allotted.Y, width, height, viewport.Scale);
+        boxes.Add(new(new(element.Composition.Epoch, element.Id), bounds, text));
+        var childNodes = new List<SceneNode>();
+        if (element.Children.Count != 0)
+        {
+            var axis = style.Axis;
+            var mainLimit = axis == LayoutAxis.Row ? bounds.Width : bounds.Height;
+            var crossLimit = axis == LayoutAxis.Row ? bounds.Height : bounds.Width;
+            var measured = element.Children.Select(child => Measure(child, axis, crossLimit, viewport.Scale, shaper, shapes)).ToArray();
+            var total = 0f;
+            foreach (var item in measured) total = Finite(total + item.Main);
+            total = Finite(total + Finite(style.Spacing * (element.Children.Count - 1)));
+            var cursor = style.MainAlignment switch { LayoutAlignment.Center => Math.Max(0, (mainLimit - total) / 2), LayoutAlignment.End => Math.Max(0, mainLimit - total), _ => 0 };
+            foreach (var item in measured)
+            {
+                var cross = style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross ? crossLimit : item.Cross;
+                var crossOffset = style.CrossAlignment switch { LayoutAlignment.Center => (crossLimit - cross) / 2, LayoutAlignment.End => crossLimit - cross, _ => 0 };
+                var x = Finite(Finite(bounds.X + (axis == LayoutAxis.Row ? cursor : crossOffset)) - style.Scroll.X);
+                var y = Finite(Finite(bounds.Y + (axis == LayoutAxis.Row ? crossOffset : cursor)) - style.Scroll.Y);
+                var childBounds = axis == LayoutAxis.Row ? new LayoutRect(x, y, item.Main, cross) : new LayoutRect(x, y, cross, item.Main);
+                childNodes.AddRange(Layout(item.Element, childBounds, viewport, shaper, boxes, shapes, axis, style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross));
+                cursor = Finite(cursor + item.Main + style.Spacing);
+            }
+        }
+        var identity = new ElementIdentity(element.Composition.Epoch, element.Id);
+        var result = new List<SceneNode>();
+        if (style.Fill != 0) result.Add(new PaintSceneNode(new(identity, SceneNodeKind.Paint), bounds, style.Fill));
+        if (text is not null) result.Add(new TextSceneNode(new(identity, SceneNodeKind.Text), bounds, style.Foreground, text));
+        result.AddRange(childNodes);
+        return style.Clip ? [new ClipSceneNode(new(identity, SceneNodeKind.Clip), bounds, result)] : result;
+    }
+
+    private static (Element Element, float Main, float Cross, bool AutoCross) Measure(Element element, LayoutAxis parentAxis, float crossLimit, float scale, ITextShaper shaper, Dictionary<long, ShapedText?> shapes)
+    {
+        var style = Read(element); var text = Shape(element, style, scale, shaper, shapes);
+        var intrinsic = Intrinsic(element, style, text, scale, shaper, shapes);
+        var width = Constrain(style.Width ?? intrinsic.Width, style.MinWidth, style.MaxWidth);
+        var height = Constrain(style.Height ?? intrinsic.Height, style.MinHeight, style.MaxHeight);
+        return parentAxis == LayoutAxis.Row ? (element, width, height, style.Height is null) : (element, height, width, style.Width is null);
+    }
+
+    private static (float Width, float Height) Intrinsic(Element element, Values style, ShapedText? text, float scale, ITextShaper shaper, Dictionary<long, ShapedText?> shapes)
+    {
+        var width = text?.Width ?? 0f; var height = text?.Height ?? 0f;
+        if (element.Children.Count == 0) return (width, height);
+        var children = element.Children.Select(child => Measure(child, style.Axis, float.MaxValue, scale, shaper, shapes)).ToArray();
+        if (style.Axis == LayoutAxis.Row)
+        {
+            foreach (var child in children) width = Finite(width + child.Main);
+            width = Finite(width + Finite(style.Spacing * Math.Max(0, children.Length - 1)));
+            foreach (var child in children) height = Math.Max(height, child.Cross);
+        }
+        else
+        {
+            foreach (var child in children) height = Finite(height + child.Main);
+            height = Finite(height + Finite(style.Spacing * Math.Max(0, children.Length - 1)));
+            foreach (var child in children) width = Math.Max(width, child.Cross);
+        }
+        return (Finite(width), Finite(height));
+    }
+
+    private static ShapedText? Shape(Element element, Values style, float scale, ITextShaper shaper, Dictionary<long, ShapedText?> shapes)
+    {
+        if (shapes.TryGetValue(element.Id, out var cached)) return cached;
+        if (string.IsNullOrEmpty(style.Text)) return null;
+        var request = new TextMeasureRequest(style.Text, style.FontFamily, style.FontSize, style.Language, style.Direction, scale);
+        request.Validate();
+        var shaped = shaper.Shape(request); shaped.Validate(request); shapes.Add(element.Id, shaped); return shaped;
+    }
+
+    private static float Constrain(float value, float min, float max)
+    {
+        if (!float.IsFinite(value) || !float.IsFinite(min) || (!float.IsFinite(max) && !float.IsPositiveInfinity(max)) || value < 0 || min < 0 || max < min)
+            throw new ArgumentOutOfRangeException(nameof(value), "Arrangement sizes must be finite/nonnegative and min must not exceed max.");
+        return Math.Clamp(value, min, max);
+    }
+
+    private static float Finite(float value)
+    {
+        if (!float.IsFinite(value)) throw new ArgumentOutOfRangeException(nameof(value), "Layout arithmetic overflow.");
+        return value;
+    }
+
+    private static Values Read(Element element)
+    {
+        var values = new Values(element.Resolve(Arrangement.Axis).Value, element.Resolve(Arrangement.Width).Value, element.Resolve(Arrangement.Height).Value,
+            element.Resolve(Arrangement.MinWidth).Value, element.Resolve(Arrangement.MinHeight).Value, element.Resolve(Arrangement.MaxWidth).Value, element.Resolve(Arrangement.MaxHeight).Value,
+            element.Resolve(Arrangement.Spacing).Value, element.Resolve(Arrangement.MainAlignment).Value, element.Resolve(Arrangement.CrossAlignment).Value, element.Resolve(Arrangement.Clip).Value,
+            element.Resolve(Arrangement.Scroll).Value, element.Resolve(SceneProperties.Fill).Value, element.Resolve(SceneProperties.Foreground).Value, element.Resolve(SceneProperties.Text).Value,
+            element.Resolve(SceneProperties.FontFamily).Value, element.Resolve(SceneProperties.FontSize).Value, element.Resolve(SceneProperties.Language).Value, element.Resolve(SceneProperties.TextDirection).Value);
+        if (!Enum.IsDefined(values.Axis) || !Enum.IsDefined(values.MainAlignment) || !Enum.IsDefined(values.CrossAlignment) || !Enum.IsDefined(values.Direction) || !float.IsFinite(values.Spacing) || values.Spacing < 0 || values.Width is { } width && (!float.IsFinite(width) || width < 0) || values.Height is { } height && (!float.IsFinite(height) || height < 0))
+            throw new ArgumentOutOfRangeException(nameof(element), "Arrangement values must be finite and nonnegative.");
+        values.Scroll.Validate(); return values;
+    }
+
+    private readonly record struct Values(LayoutAxis Axis, float? Width, float? Height, float MinWidth, float MinHeight, float MaxWidth, float MaxHeight, float Spacing, LayoutAlignment MainAlignment, LayoutAlignment CrossAlignment, bool Clip, ScrollOffset Scroll, uint Fill, uint Foreground, string? Text, string FontFamily, float FontSize, string Language, TextDirection Direction);
+}

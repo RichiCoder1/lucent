@@ -1,3 +1,4 @@
+using Lucent.Core;
 using Lucent.Renderer.Skia;
 using SDL3;
 using SkiaSharp;
@@ -14,9 +15,10 @@ public static class WindowsBootstrap
     private const int TestPresentationHeight = 500;
 
     [STAThread]
-    public static int Run(string title)
+    public static int Run(string title, Composition composition)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentNullException.ThrowIfNull(composition);
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 14393))
             throw new PlatformNotSupportedException("M0 requires Windows 10 version 1607 or later.");
         RequireNativeAssets();
@@ -55,9 +57,14 @@ public static class WindowsBootstrap
             if (texture == 0)
                 throw new InvalidOperationException($"SDL texture: {SDL.GetError()}");
 
+            using var rendererScene = new SkiaSceneRenderer();
+            var scene = SceneLayout.Project(composition, new(logicalWidth, logicalHeight, BackingScale), rendererScene);
             using var bitmap = new SKBitmap(backingWidth, backingHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
             using (var canvas = new SKCanvas(bitmap))
-                BootstrapPainter.Paint(canvas, backingWidth, backingHeight);
+            {
+                canvas.Clear(new SKColor(15, 23, 42));
+                rendererScene.Render(scene, canvas);
+            }
             var destination = new SDL.FRect { X = 0, Y = 0, W = logicalWidth, H = logicalHeight };
             if (!SDL.UpdateTexture(texture, 0, bitmap.GetPixels(), bitmap.RowBytes) ||
                 !SDL.RenderTexture(renderer, texture, 0, in destination) ||
