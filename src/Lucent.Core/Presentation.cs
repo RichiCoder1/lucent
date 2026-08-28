@@ -26,6 +26,17 @@ internal sealed record ResolutionDump(PropertyProvenance Winner, IReadOnlyList<P
 
 public enum TransitionKind { None, Color, Opacity, Transform, FocusRing }
 [Flags] public enum VariantState { None = 0, Hover = 1, FocusVisible = 2, Selected = 4, Pressed = 8, Invalid = 16, Disabled = 32 }
+public enum ThemeColorScheme { Light, Dark }
+public enum ThemeContrast { Normal, High }
+public readonly record struct ThemeAppearance(ThemeColorScheme ColorScheme, ThemeContrast Contrast)
+{
+    public static readonly ThemeAppearance Light = new(ThemeColorScheme.Light, ThemeContrast.Normal);
+    public void Validate()
+    {
+        if (!Enum.IsDefined(ColorScheme) || !Enum.IsDefined(Contrast))
+            throw new ArgumentException("Theme appearance requires finite color scheme and contrast values.");
+    }
+}
 
 public sealed class Token<T>
 {
@@ -51,22 +62,27 @@ public sealed class ThemeContext : IDisposable
     private readonly ReactiveScope _scope;
     private readonly Signal<Theme> _theme;
     private readonly Signal<bool> _reducedMotion;
+    private readonly Signal<ThemeAppearance> _appearance;
     private readonly Dictionary<object, ITokenSlot> _tokens = [];
     internal ReactiveGraph Graph { get; }
-    public ThemeContext(ReactiveScope scope, Theme theme, bool reducedMotion = false)
+    public ThemeContext(ReactiveScope scope, Theme theme, bool reducedMotion = false, ThemeAppearance? appearance = null)
     {
         ArgumentNullException.ThrowIfNull(scope); ArgumentNullException.ThrowIfNull(theme);
-        _scope = scope; Graph = scope.Graph; _theme = scope.Signal(theme, "theme"); _reducedMotion = scope.Signal(reducedMotion, "reduced-motion"); scope.Own(this);
+        var initialAppearance = appearance ?? ThemeAppearance.Light;
+        initialAppearance.Validate();
+        _scope = scope; Graph = scope.Graph; _theme = scope.Signal(theme, "theme"); _reducedMotion = scope.Signal(reducedMotion, "reduced-motion"); _appearance = scope.Signal(initialAppearance, "theme-appearance"); scope.Own(this);
     }
     public Theme Theme { get => _theme.Value; set { _scope.CheckMutationGuard(); var theme = value ?? throw new ArgumentNullException(nameof(value)); _theme.Value = theme; foreach (var slot in _tokens.Values) slot.Update(theme); } }
     public bool ReducedMotion { get => _reducedMotion.Value; set { _scope.CheckMutationGuard(); _reducedMotion.Value = value; } }
+    /// <summary>Portable system appearance. Authors choose typed theme/token values for each appearance.</summary>
+    public ThemeAppearance Appearance { get => _appearance.Value; set { _scope.CheckMutationGuard(); value.Validate(); _appearance.Value = value; } }
     internal Theme CurrentTheme => _theme.Value;
     internal bool IsReducedMotion => _reducedMotion.Value;
     internal T Token<T>(Token<T> token) => Slot(token).State.Value;
     internal bool IsThemed<T>(Token<T> token) => Slot(token).State.Themed;
     private TokenSlot<T> Slot<T>(Token<T> token) => _tokens.TryGetValue(token, out var slot) ? (TokenSlot<T>)slot : Add(token);
     private TokenSlot<T> Add<T>(Token<T> token) { var slot = new TokenSlot<T>(_scope.Signal(new TokenState<T>(_theme.Value.Resolve(token), _theme.Value.Has(token)), "token." + token.Name), token); _tokens.Add(token, slot); return slot; }
-    public void Dispose() { _scope.CheckMutationGuard(); _tokens.Clear(); _reducedMotion.Dispose(); _theme.Dispose(); }
+    public void Dispose() { _scope.CheckMutationGuard(); _tokens.Clear(); _appearance.Dispose(); _reducedMotion.Dispose(); _theme.Dispose(); }
     private interface ITokenSlot { void Update(Theme theme); }
     private sealed class TokenSlot<T>(Signal<TokenState<T>> signal, Token<T> token) : ITokenSlot { internal TokenState<T> State => signal.Value; public void Update(Theme theme) => signal.Value = new(theme.Resolve(token), theme.Has(token)); }
 }

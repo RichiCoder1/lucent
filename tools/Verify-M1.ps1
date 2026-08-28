@@ -22,4 +22,5 @@ Write-Output 'Core compiled runtime-discovery/property-model scan: PASS'
 & (Join-Path $root 'tests/Lucent.Renderer.Skia.Tests/bin/Release/net10.0/win-x64/publish/Lucent.Renderer.Skia.Tests.exe'); if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet publish $platformContracts -c Release -r win-x64 --self-contained true --no-restore -p:PublishAot=true -p:PublishTrimmed=true -warnaserror; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & (Join-Path $root 'tests/Lucent.Platform.Windows.Tests/bin/Release/net10.0-windows10.0.26100.0/win-x64/publish/Lucent.Platform.Windows.Tests.exe'); if ($LASTEXITCODE) { exit $LASTEXITCODE }
+& (Join-Path $PSScriptRoot 'Smoke-WindowsListener.ps1') (Join-Path $root 'tests/Lucent.Platform.Windows.Tests/bin/Release/net10.0-windows10.0.26100.0/win-x64/publish/Lucent.Platform.Windows.Tests.exe'); if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & (Join-Path $PSScriptRoot 'Verify-M0.ps1'); exit $LASTEXITCODE

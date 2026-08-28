@@ -19,6 +19,7 @@ try
         throw new InvalidOperationException("Issue Browser did not consume typed presentation, behavior, and semantic contracts without leaking issue values.");
     ShapeLayoutAndPaint();
     RoutedRows();
+    AppearancePalettes();
     Console.WriteLine("Lucent.IssueBrowser composition contract: PASS");
     return 0;
 }
@@ -95,6 +96,8 @@ static void RoutedRows()
     if (!router.MoveFocus(FocusTraversalDirection.Next) || router.FocusedElement != new ElementIdentity(rows[0].Identity.CompositionEpoch, rows[0].Identity.ElementId)) throw new InvalidOperationException("Row behavior did not enter traversal order.");
     router.DispatchKey(new(KeyCommandKind.Down, Key.Tab));
     if (router.FocusedElement != new ElementIdentity(rows[1].Identity.CompositionEpoch, rows[1].Identity.ElementId) || !router.Dump().Contains("modality=Keyboard", StringComparison.Ordinal)) throw new InvalidOperationException("Row behavior did not traverse with keyboard-visible focus.");
+    var focusPaint = SceneLayout.Project(composition, new(800, 500, 1), renderer).Dump().Split('\n').Any(line => line.Contains("element=" + rows[1].Identity.ElementId + " ", StringComparison.Ordinal) && line.Contains("color=0xffffff00", StringComparison.Ordinal));
+    if (!focusPaint) throw new InvalidOperationException("Issue Browser did not author a visible high-contrast keyboard focus paint.");
     var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
     if (!router.SetScene(scene)) throw new InvalidOperationException("Issue Browser rejected refreshed scene.");
     var box = scene.Boxes.Single(candidate => candidate.Identity.ElementId == rows[2].Identity.ElementId);
@@ -107,4 +110,19 @@ static void RoutedRows()
     if (router.FocusedElement?.ElementId != rows[2].Identity.ElementId || composition.IsCurrent(rows[2].Identity) || router.Dump().Contains("capture pointer=7", StringComparison.Ordinal) || selected.Length != 1 || selected[0].Identity.ElementId != rows[2].Identity.ElementId ||
         !dump.Contains("element " + rows[2].Identity.ElementId + " ", StringComparison.Ordinal) || !dump.Contains("style variants=Selected", StringComparison.Ordinal))
         throw new InvalidOperationException("Reusable row action did not select, focus, and release structurally.");
+}
+
+static void AppearancePalettes()
+{
+    var graph = new ReactiveGraph();
+    using var composition = IssueBrowserStructure.Create(graph, out var theme);
+    using var renderer = new SkiaSceneRenderer();
+    graph.Drain();
+    var light = SceneLayout.Project(composition, new(800, 500, 1), renderer).Dump();
+    theme.Appearance = new(ThemeColorScheme.Dark, ThemeContrast.Normal); graph.Drain();
+    var dark = SceneLayout.Project(composition, new(800, 500, 1), renderer).Dump();
+    theme.Appearance = new(ThemeColorScheme.Light, ThemeContrast.High); graph.Drain();
+    var high = SceneLayout.Project(composition, new(800, 500, 1), renderer).Dump();
+    if (!light.Contains("color=0xfff8fafc", StringComparison.Ordinal) || !dark.Contains("color=0xff0f172a", StringComparison.Ordinal) || !high.Contains("color=0xff000000", StringComparison.Ordinal) || light == dark || dark == high)
+        throw new InvalidOperationException("Typed light, dark, and high-contrast appearance palettes did not alter retained paint.");
 }

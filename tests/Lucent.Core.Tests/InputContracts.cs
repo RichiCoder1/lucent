@@ -166,6 +166,13 @@ internal static class InputContracts
 
     private static void SignatureSemanticsLifetimeAndDiagnostics()
     {
+        var geometryGraph = new ReactiveGraph(); using var geometry = new Composition(geometryGraph, "geometry-signature"); var geometryText = new Token<string?>("geometry-text", "A"); var geometryTheme = new ThemeContext(geometry.Root.Scope, new Theme("geometry-signature").Set(geometryText, "A"));
+        Present(geometry.Root, geometryTheme, 40, 40, true); var geometryChild = geometry.Child(geometry.Root, "child"); geometryChild.Present(geometryTheme, author: Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f).Set(SceneProperties.Text, geometryText));
+        var geometryRouter = geometry.Input; Assert(geometryRouter.SetScene(SceneLayout.Project(geometry, new(40, 40, 1), new MetricShaper())), "Geometry signature scene rejected.");
+        geometryTheme.Theme = geometryTheme.Theme.Set(geometryText, "AAAA");
+        Assert(geometryChild.Resolve(InputProperties.Enabled).Value && geometryChild.Resolve(InputProperties.Visible).Value && geometryRouter.DispatchPointer(new(PointerCommandKind.Move, 30, 1, 1)).Rejection == InputRejection.StaleScene,
+            "Shaping-only geometry change did not stale the retained input scene while availability stayed unchanged.");
+
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "signature"); var text = new Token<string?>("text", "A"); var font = new Token<string>("font", "B;C"); var enabled = new Token<bool>("enabled", true); var theme = new ThemeContext(composition.Root.Scope, new Theme("signature").Set(text, "A").Set(font, "B;C").Set(enabled, true));
         Present(composition.Root, theme, 40, 40, true); var child = composition.Child(composition.Root, "child");
         child.Present(theme, author: Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f).Set(SceneProperties.Text, text).Set(SceneProperties.FontFamily, font).Set(InputProperties.Enabled, enabled));

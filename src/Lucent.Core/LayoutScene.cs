@@ -332,7 +332,7 @@ LayoutViewport viewport, ITextShaper shaper)
         {
             writer.Write((int)value.Axis); writer.Write(value.Width.HasValue); if (value.Width is { } width) writer.Write(width); writer.Write(value.Height.HasValue); if (value.Height is { } height) writer.Write(height);
             writer.Write(value.MinWidth); writer.Write(value.MinHeight); writer.Write(value.MaxWidth); writer.Write(value.MaxHeight); writer.Write(value.Spacing); writer.Write((int)value.MainAlignment); writer.Write((int)value.CrossAlignment); writer.Write(value.Clip); writer.Write(value.Scroll.X); writer.Write(value.Scroll.Y);
-            writer.Write(value.Fill); writer.Write(value.Foreground); writer.Write(value.Text is not null); if (value.Text is { } text) writer.Write(text); writer.Write(value.FontFamily); writer.Write(value.FontSize); writer.Write(value.Language); writer.Write((int)value.Direction);
+            writer.Write(value.Text is not null); if (value.Text is { } text) writer.Write(text); writer.Write(value.FontFamily); writer.Write(value.FontSize); writer.Write(value.Language); writer.Write((int)value.Direction);
             writer.Write(element.Resolve(InputProperties.Enabled).Value); writer.Write(element.Resolve(InputProperties.Visible).Value);
         });
     }

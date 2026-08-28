@@ -64,6 +64,14 @@ internal static class PresentationContracts
         Assert(transition.Value == 1f && transitionRuns == 3, "Transition expiry did not invalidate a derived reader.");
         child.StartTransition(Opacity, .5f); theme.ReducedMotion = true;
         Assert(child.Resolve(Opacity).SuppressedTransition?.Source == "transition-suppressed" && child.Resolve(Opacity).Winner.Source == "default", "Reduced motion did not suppress the active sample.");
+        var appearanceRuns = 0;
+        var appearance = composition.Root.Scope.Derived(() => { appearanceRuns++; return theme.Appearance; }, "appearance-reader");
+        Assert(appearance.Value == ThemeAppearance.Light && appearanceRuns == 1, "Initial portable appearance was not light/normal.");
+        theme.Appearance = new(ThemeColorScheme.Dark, ThemeContrast.High); graph.Drain();
+        Assert(appearance.Value == new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.High) && appearanceRuns == 2, "Appearance did not invalidate its own readers.");
+        theme.Appearance = new(ThemeColorScheme.Dark, ThemeContrast.High); graph.Drain();
+        Assert(appearanceRuns == 2, "Equal appearance assignment invalidated readers.");
+        Expect<ArgumentException>(() => theme.Appearance = new((ThemeColorScheme)99, ThemeContrast.Normal));
         var tokenA = composition.Child(composition.Root, "token-a"); var tokenB = composition.Child(composition.Root, "token-b");
         tokenA.Present(theme, author: Style.Empty.Set(TokenAValue, Accent)); tokenB.Present(theme, author: Style.Empty.Set(TokenBValue, AccentB));
         var tokenRuns = 0; var directRuns = 0;

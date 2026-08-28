@@ -1,10 +1,16 @@
 using Lucent.Platform.Windows;
 
+if (args is ["--listener-proof"]) return ListenerProof.Run();
+
 try
 {
     DpiAndResourceMatrix();
     DpiAwarenessContract();
     FrameSchedulingMatrix();
+    WindowsHostContracts.InputAdapterAndRoutingContract();
+    WindowsHostContracts.SettingsAndAppearanceContract();
+    WindowsHostContracts.ClipboardAndCursorContract();
+    WindowsHostContracts.ThrowingCleanupContract();
     Console.WriteLine("Lucent.Platform.Windows presenter contract/AOT seam: PASS");
     return 0;
 }
@@ -80,6 +86,14 @@ static void FrameSchedulingMatrix()
     Assert(scheduler.PresentedFrames == 2 && !scheduler.IsFrameRequested, "Restore emitted more than one frame.");
     scheduler.Observe(WindowsFrameEvent.Closed);
     Assert(!scheduler.IsOpen && !scheduler.IsFrameRequested, "Close left a pending frame.");
+
+    var requested = new WindowsFrameScheduler();
+    Assert(requested.TryBegin(normal), "Requested-frame scheduler did not begin initially.");
+    requested.Complete(FrameTiming.FromTimestamps(200, 210, 220, 230, 240));
+    requested.Request();
+    Assert(requested.TryBegin(normal), "Event-caused invalidation did not request exactly one frame.");
+    requested.Complete(FrameTiming.FromTimestamps(250, 260, 270, 280, 290));
+    Assert(!requested.IsFrameRequested && requested.PresentedFrames == 2, "Event-caused invalidation left idle frame work behind.");
 }
 
 static void Assert(bool condition, string message)

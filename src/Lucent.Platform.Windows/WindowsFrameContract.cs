@@ -79,6 +79,14 @@ internal sealed class WindowsFrameScheduler
     public int PresentedFrames { get; private set; }
     public FrameTiming LastTiming { get; private set; }
 
+    /// <summary>Requests one event-caused frame without adding a timer or idle work.</summary>
+    public void Request()
+    {
+        if (!IsOpen || _minimized) return;
+        _requested = true;
+        _awaitingRenderable = false;
+    }
+
     public void Observe(WindowsFrameEvent @event)
     {
         switch (@event)

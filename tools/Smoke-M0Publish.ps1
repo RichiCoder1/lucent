@@ -11,6 +11,12 @@ public static class M0Window {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort Vk; public ushort Scan; public uint Flags; public uint Time; public IntPtr ExtraInfo; }
+  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int X; public int Y; public uint Data; public uint Flags; public uint Time; public IntPtr ExtraInfo; }
+  [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT Mi; [FieldOffset(0)] public KEYBDINPUT Ki; }
+  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint Type; public INPUTUNION Data; }
+  [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] input, int size);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
@@ -18,6 +24,8 @@ public static class M0Window {
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
   [DllImport("gdi32.dll")] public static extern uint GetPixel(IntPtr hdc, int x, int y);
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct HIGHCONTRAST { public uint Size; public uint Flags; public IntPtr Scheme; }
+  [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool SystemParametersInfo(uint action, uint parameter, ref HIGHCONTRAST value, uint flags);
 }
 '@
 
@@ -67,7 +75,19 @@ function Get-WindowPixel([IntPtr] $Hwnd, [int] $X, [int] $Y) {
     finally { [void][M0Window]::ReleaseDC([IntPtr]::Zero, $desktop) }
 }
 
-function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, [int] $Iteration) {
+function Get-EffectiveAppearance {
+    $contrast = [M0Window+HIGHCONTRAST]::new()
+    $contrast.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][M0Window+HIGHCONTRAST])
+    if (-not [M0Window]::SystemParametersInfo(0x0042, $contrast.Size, [ref]$contrast, 0)) { throw "Could not read Windows high-contrast state (Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." }
+    if (($contrast.Flags -band 1) -ne 0) { return [pscustomobject]@{ Name = 'high-contrast'; Header = 0x000000; Page = 0x000000; Focus = 0x00FFFF } }
+    try { $light = [int](Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop) }
+    catch { throw "Could not read Windows app color preference: $($_.Exception.Message)" }
+    if ($light -eq 1) { return [pscustomobject]@{ Name = 'light'; Header = 0xF0E8E2; Page = 0xFCFAF8; Focus = 0x00FFFF } }
+    if ($light -eq 0) { return [pscustomobject]@{ Name = 'dark'; Header = 0x3B291E; Page = 0x2A170F; Focus = 0x15CCFA } }
+    throw "Windows AppsUseLightTheme was not finite: $light"
+}
+
+function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
     $scale = $Dpi / 96.0
     $headerX = [Math]::Round(20 * $scale); $headerY = [Math]::Round(45 * $scale)
     $pageX = [Math]::Round(20 * $scale); $pageY = [Math]::Round(160 * $scale)
@@ -76,10 +96,45 @@ function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Clie
     do {
         $header = Get-WindowPixel $Hwnd $headerX $headerY
         $page = Get-WindowPixel $Hwnd $pageX $pageY
-        if ($header -eq 0xF0E8E2 -and $page -eq 0xFCFAF8) { return 'header/page channels and one-scale geometry' }
+        if ($header -eq $Appearance.Header -and $page -eq $Appearance.Page) { return "$($Appearance.Name) header/page channels and one-scale geometry" }
         Start-Sleep -Milliseconds 100
     } until ([Environment]::TickCount64 -ge $deadline)
-    throw ("Iteration {0} SDL/Skia capture failed: header=0x{1:X6} page=0x{2:X6} at scale={3}." -f $Iteration, $header, $page, $scale)
+    throw ("Iteration {0} SDL/Skia {4} capture failed: header=0x{1:X6} page=0x{2:X6} at scale={3}." -f $Iteration, $header, $page, $scale, $Appearance.Name)
+}
+
+function Assert-KeyboardFocusPixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
+    [void][M0Window]::SetForegroundWindow($Hwnd)
+    Start-Sleep -Milliseconds 100
+    $input = @(
+        [M0Window+INPUT]@{ Type = 1; Data = [M0Window+INPUTUNION]@{ Ki = [M0Window+KEYBDINPUT]@{ Vk = 0x09 } } },
+        [M0Window+INPUT]@{ Type = 1; Data = [M0Window+INPUTUNION]@{ Ki = [M0Window+KEYBDINPUT]@{ Vk = 0x09; Flags = 2 } } }
+    )
+    if ([M0Window]::SendInput([uint32]$input.Count, $input, [Runtime.InteropServices.Marshal]::SizeOf([type][M0Window+INPUT])) -ne $input.Count) { throw "Iteration $Iteration could not send ordinary Tab input (Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." }
+    $deadline = [Environment]::TickCount64 + 5000
+    $located = $false
+    do {
+        $origin = [M0Window+POINT]::new()
+        if (-not [M0Window]::ClientToScreen($Hwnd, [ref]$origin)) { Start-Sleep -Milliseconds 100; continue }
+        $located = $true
+        $desktop = [M0Window]::GetDC([IntPtr]::Zero)
+        if ($desktop -eq [IntPtr]::Zero) { throw "Iteration $Iteration could not observe keyboard focus pixels." }
+        try {
+            $scale = $Dpi / 96.0
+            $x = [Math]::Round(20 * $scale); $y = [Math]::Round(67 * $scale)
+            if ($x -lt $Client.Right -and $y -lt $Client.Bottom -and (([M0Window]::GetPixel($desktop, $origin.X + $x, $origin.Y + $y) -band 0xffffff) -eq $Appearance.Focus)) { return "ordinary Tab input produced $($Appearance.Name) visible focus" }
+        }
+        finally { [void][M0Window]::ReleaseDC([IntPtr]::Zero, $desktop) }
+        Start-Sleep -Milliseconds 100
+    } until ([Environment]::TickCount64 -ge $deadline)
+    if (-not $located) { throw "Iteration $Iteration could not locate the client for keyboard focus observation." }
+    throw "Iteration $Iteration did not paint the keyboard-visible focus color after ordinary Tab input."
+}
+
+function Assert-SettingsListener([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
+    if (-not [M0Window]::PostMessage($Hwnd, 0x031A, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw "Iteration $Iteration could not post WM_THEMECHANGED to the host listener." }
+    Start-Sleep -Milliseconds 250
+    [void](Assert-ScenePixels $Hwnd $Dpi $Client $Appearance $Iteration)
+    'WM_THEMECHANGED chained through host listener'
 }
 
 $copy = Join-Path ([IO.Path]::GetTempPath()) ("lucent-m0-publish-" + [Guid]::NewGuid())
@@ -101,12 +156,15 @@ try {
             if (-not [M0Window]::GetClientRect($process.MainWindowHandle, [ref]$client) -or $client.Right -le 0 -or $client.Bottom -le 0) { throw "Iteration $iteration did not expose a positive client backing size." }
             $dpi = [M0Window]::GetDpiForWindow($process.MainWindowHandle)
             if ($dpi -lt 96) { throw "Iteration $iteration did not expose a usable Per-Monitor V2 DPI." }
-            $pixels = Assert-ScenePixels $process.MainWindowHandle $dpi $client $iteration
+            $appearance = Get-EffectiveAppearance
+            $pixels = Assert-ScenePixels $process.MainWindowHandle $dpi $client $appearance $iteration
+            $listener = Assert-SettingsListener $process.MainWindowHandle $dpi $client $appearance $iteration
+            $keyboard = Assert-KeyboardFocusPixels $process.MainWindowHandle $dpi $client $appearance $iteration
             $hwnd = ('0x{0:X}' -f $process.MainWindowHandle.ToInt64())
             if (-not [M0Window]::PostMessage($process.MainWindowHandle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw "Iteration $iteration ordinary WM_CLOSE request failed." }
             if (-not $process.WaitForExit(10000)) { throw "Iteration $iteration exceeded teardown timeout." }
             if ($process.ExitCode -ne 0) { throw "Iteration $iteration exited $($process.ExitCode)." }
-            $observations += [ordered]@{ iteration = $iteration; hwnd = $hwnd; client = @($client.Right, $client.Bottom); dpi = $dpi; presenter = 'persistent CPU Skia to SDL streaming texture'; pixels = $pixels; exitCode = $process.ExitCode }
+            $observations += [ordered]@{ iteration = $iteration; hwnd = $hwnd; client = @($client.Right, $client.Bottom); dpi = $dpi; appearance = $appearance.Name; presenter = 'persistent CPU Skia to SDL streaming texture'; pixels = $pixels; listener = $listener; keyboard = $keyboard; exitCode = $process.ExitCode }
         }
         finally { Stop-LaunchedProcess $process }
         Start-Sleep -Milliseconds 250

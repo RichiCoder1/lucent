@@ -14,7 +14,7 @@ public static class WindowsBootstrap
     private const int InitialLogicalHeight = 500;
 
     [STAThread]
-    public static int Run(string title, Composition composition)
+    public static int Run(string title, Composition composition, ThemeContext? theme = null, Action? drain = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(composition);
@@ -33,24 +33,43 @@ public static class WindowsBootstrap
             sdlRenderer = SDL.CreateRenderer(window, null);
             if (sdlRenderer == 0) throw new InvalidOperationException($"SDL_CreateRenderer: {SDL.GetError()}");
             if (!SDL.SetRenderVSync(sdlRenderer, WindowsPresentationContract.VsyncInterval)) throw new InvalidOperationException($"SDL_SetRenderVSync: {SDL.GetError()}");
+            var hwnd = SDL.GetPointerProperty(SDL.GetWindowProperties(window), SDL.Props.WindowWin32HWNDPointer, 0);
+            if (hwnd == 0) throw new InvalidOperationException("SDL window did not expose an HWND.");
 
             using var presenter = new CpuSkiaPresenter(sdlRenderer);
             using var sceneRenderer = new SkiaSceneRenderer();
+            using var cursor = new WindowsCursor();
+            using var clipboard = new WindowsClipboard();
+            using var settingsListener = new WindowsSettingsListener(hwnd);
             var scheduler = new WindowsFrameScheduler();
+            using var input = new WindowsInputAdapter(composition);
+            var settings = new WindowsSettings();
+            var diagnostics = WindowsSettingsDiagnostic.None;
+            _ = cursor.Activate();
+            _ = ApplySettings(settings, theme, drain);
+            diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
             while (scheduler.IsOpen)
             {
+                var refreshSettings = false;
                 if (scheduler.ShouldWaitForEvent)
                 {
                     if (!SDL.WaitEvent(out var @event)) throw new InvalidOperationException($"SDL_WaitEvent: {SDL.GetError()}");
-                    Observe(scheduler, (SDL.EventType)@event.Type);
+                    refreshSettings |= Observe(scheduler, input, @event);
                 }
-                while (SDL.PollEvent(out var @event)) Observe(scheduler, (SDL.EventType)@event.Type);
+                while (SDL.PollEvent(out var @event)) refreshSettings |= Observe(scheduler, input, @event);
                 if (!scheduler.IsOpen) break;
+                refreshSettings |= settingsListener.TakePending();
+                if (refreshSettings)
+                {
+                    if (ApplySettings(settings, theme, drain)) scheduler.Request();
+                    diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
+                }
 
                 var viewport = GetViewport(window, sdlRenderer);
                 if (!scheduler.TryBegin(viewport)) continue;
                 var started = Stopwatch.GetTimestamp();
                 var scene = SceneLayout.Project(composition, new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale), sceneRenderer);
+                _ = composition.Input.SetScene(scene);
                 var projected = Stopwatch.GetTimestamp();
                 var phase = presenter.Present(scene, viewport, sceneRenderer);
                 scheduler.Complete(FrameTiming.FromTimestamps(started, projected, phase.Rasterized, phase.Uploaded, phase.Presented));
@@ -74,20 +93,40 @@ public static class WindowsBootstrap
         return new(width, height, dpi / 96F);
     }
 
-    private static void Observe(WindowsFrameScheduler scheduler, SDL.EventType @event)
+    private static bool Observe(WindowsFrameScheduler scheduler, WindowsInputAdapter input, SDL.Event @event)
     {
-        switch (@event)
+        var type = (SDL.EventType)@event.Type;
+        try { if (input.Dispatch(@event)) scheduler.Request(); }
+        finally { if (input.ConsumeRepaintRequest()) scheduler.Request(); }
+        switch (type)
         {
             case SDL.EventType.Quit:
-            case SDL.EventType.WindowCloseRequested: scheduler.Observe(WindowsFrameEvent.Closed); break;
-            case SDL.EventType.WindowMinimized: scheduler.Observe(WindowsFrameEvent.Minimized); break;
-            case SDL.EventType.WindowRestored: scheduler.Observe(WindowsFrameEvent.Restored); break;
-            case SDL.EventType.WindowExposed: scheduler.Observe(WindowsFrameEvent.Exposed); break;
-            case SDL.EventType.WindowResized: scheduler.Observe(WindowsFrameEvent.Resized); break;
-            case SDL.EventType.WindowPixelSizeChanged: scheduler.Observe(WindowsFrameEvent.PixelSizeChanged); break;
-            case SDL.EventType.WindowDisplayChanged: scheduler.Observe(WindowsFrameEvent.DisplayChanged); break;
-            case SDL.EventType.WindowDisplayScaleChanged: scheduler.Observe(WindowsFrameEvent.DisplayScaleChanged); break;
+            case SDL.EventType.WindowCloseRequested: scheduler.Observe(WindowsFrameEvent.Closed); return false;
+            case SDL.EventType.WindowMinimized: scheduler.Observe(WindowsFrameEvent.Minimized); return false;
+            case SDL.EventType.WindowRestored: scheduler.Observe(WindowsFrameEvent.Restored); return false;
+            case SDL.EventType.WindowExposed: scheduler.Observe(WindowsFrameEvent.Exposed); return false;
+            case SDL.EventType.WindowResized: scheduler.Observe(WindowsFrameEvent.Resized); return false;
+            case SDL.EventType.WindowPixelSizeChanged: scheduler.Observe(WindowsFrameEvent.PixelSizeChanged); return false;
+            case SDL.EventType.WindowDisplayChanged: scheduler.Observe(WindowsFrameEvent.DisplayChanged); return false;
+            case SDL.EventType.WindowDisplayScaleChanged: scheduler.Observe(WindowsFrameEvent.DisplayScaleChanged); return false;
+            default: return false;
         }
+    }
+
+    internal static bool ApplySettings(WindowsSettings settings, ThemeContext? theme, Action? drain)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (!settings.Apply(theme)) return false;
+        drain?.Invoke();
+        return true;
+    }
+
+    internal static WindowsSettingsDiagnostic ReportDiagnostics(WindowsSettings settings, WindowsSettingsDiagnostic prior, Action<string>? output)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (settings.Diagnostics == prior) return prior;
+        output?.Invoke("Lucent Windows settings diagnostics: " + settings.DiagnosticStatus);
+        return settings.Diagnostics;
     }
 
     private static void EnablePerMonitorV2()
