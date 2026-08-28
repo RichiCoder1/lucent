@@ -12,6 +12,8 @@ namespace Lucent.Renderer.Skia;
 /// <summary>CPU Skia/HarfBuzz shaper. Itemization is deliberately bounded: common LTR and Arabic/Hebrew RTL only; full Unicode bidi is deferred.</summary>
 public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 {
+    // Pinned SKShaper encodes HarfBuzz positions against this source constant.
+    private const float FontSizeScale = 512f;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private bool _disposed;
 
@@ -32,20 +34,22 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             buffer.Language = new Language(request.Language);
             var result = shaper.Shape(buffer, font);
             var positions = buffer.GlyphPositions;
-            if (result.Codepoints.Length == 0 || result.Codepoints.Any(glyph => glyph == 0) || positions.Length != result.Codepoints.Length) throw new InvalidOperationException("Font fallback produced a missing glyph.");
-            var cursor = 0f;
+            if (result.Codepoints.Length == 0 || result.Codepoints.Any(glyph => glyph == 0) || positions.Length != result.Codepoints.Length || result.Points.Length != result.Codepoints.Length) throw new InvalidOperationException("Font fallback produced a missing glyph.");
+            var textSizeY = font.Size / FontSizeScale; var textSizeX = textSizeY * font.ScaleX;
+            if (!float.IsFinite(textSizeX) || !float.IsFinite(textSizeY) || !float.IsFinite(result.Width) || result.Width < 0) throw new InvalidOperationException("SKShaper returned non-finite text metrics.");
             var glyphs = new ShapedGlyph[result.Codepoints.Length];
             for (var index = 0; index < glyphs.Length; index++)
             {
                 var position = positions[index];
-                var advance = position.XAdvance / 64f; var xOffset = position.XOffset / 64f; var yOffset = position.YOffset / 64f;
-                if (!float.IsFinite(cursor) || !float.IsFinite(advance) || !float.IsFinite(xOffset) || !float.IsFinite(yOffset)) throw new InvalidOperationException("HarfBuzz returned non-finite glyph metrics.");
-                glyphs[index] = new(result.Codepoints[index], result.Clusters[index] + (uint)piece.Utf16Offset, cursor + xOffset, -yOffset, advance, xOffset, yOffset);
-                cursor = Checked(cursor + advance);
+                var advance = position.XAdvance * textSizeX; var xOffset = position.XOffset * textSizeX; var yOffset = position.YOffset * textSizeY; var point = result.Points[index];
+                if (!float.IsFinite(point.X) || !float.IsFinite(point.Y) || !float.IsFinite(advance) || !float.IsFinite(xOffset) || !float.IsFinite(yOffset)) throw new InvalidOperationException("HarfBuzz returned non-finite glyph metrics.");
+                glyphs[index] = new(result.Codepoints[index], result.Clusters[index] + (uint)piece.Utf16Offset, point.X, point.Y, advance, xOffset, yOffset);
             }
+            var width = glyphs.Sum(glyph => glyph.XAdvance);
+            if (MathF.Abs(width - result.Width) > .001f) throw new InvalidOperationException("SKShaper points and HarfBuzz advances disagree.");
             var metrics = font.Metrics; var ascent = metrics.Ascent; var descent = metrics.Descent;
             var family = face.FamilyName; var style = face.FontStyle;
-            pending.Add(new(family, style, FaceFingerprint(face, collectionIndex), collectionIndex, family + "#" + collectionIndex.ToString(CultureInfo.InvariantCulture), piece.Direction, cursor, ascent, descent, glyphs));
+            pending.Add(new(family, style, FaceFingerprint(face, collectionIndex), collectionIndex, family + "#" + collectionIndex.ToString(CultureInfo.InvariantCulture), piece.Direction, result.Width, ascent, descent, glyphs));
         }
         var lineAscent = pending.Min(run => run.Ascent); var lineDescent = pending.Max(run => run.Descent); var baseline = -lineAscent; var height = Checked(lineDescent - lineAscent); var origin = 0f;
         var runs = new List<ShapedRun>();
