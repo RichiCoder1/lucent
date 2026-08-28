@@ -55,8 +55,7 @@ public static class IssueBrowserStructure
                     Style.Empty.Set(Opacity, 1f).Set(Arrangement.Height, 30f).Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, 0xffffffffU)
                         .Set(SceneProperties.Text, "Issue " + issue.Number).When(VariantState.Selected, Style.Empty.Set(Opacity, .9f)),
                     Style.Empty.When(VariantState.Selected, Style.Empty.Set(Opacity, .8f)));
-                if (issue.Number == 29) row.SetVariants(VariantState.Selected);
-                row.AttachBehaviors(new Semantics("issue-row-semantics", new(SemanticRole.ListItem, "Issue " + issue.Number, actions: SemanticAction.Select)));
+                row.AttachBehaviors(new RowActionBehavior("issue-row-action", new(SemanticRole.ListItem, "Issue " + issue.Number, actions: SemanticAction.Select)));
                 return row;
             });
 

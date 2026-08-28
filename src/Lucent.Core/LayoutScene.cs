@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace Lucent.Core;
@@ -135,6 +136,8 @@ public sealed class ShapedText
 public interface ITextShaper { ShapedText Shape(TextMeasureRequest request); }
 
 public readonly record struct LayoutBox(ElementIdentity Identity, LayoutRect Bounds, ShapedText? Text);
+/// <summary>Immutable input projection; it contains no platform event or application values.</summary>
+public readonly record struct RetainedInputElement(ElementIdentity Identity, ElementIdentity? Parent, LayoutRect Bounds, int Order, bool Clip, bool Enabled, bool Visible, string Signature);
 public enum SceneNodeKind { Paint, Text, Clip }
 public readonly record struct SceneNodeIdentity(ElementIdentity Element, SceneNodeKind Kind);
 public abstract class SceneNode(SceneNodeIdentity identity, LayoutRect bounds) { public SceneNodeIdentity Identity { get; } = identity; public LayoutRect Bounds { get; } = bounds; }
@@ -151,13 +154,19 @@ public sealed class ClipSceneNode : SceneNode
 /// <summary>A renderer-facing retained snapshot. It owns no platform or renderer resources.</summary>
 public sealed class RetainedScene
 {
-    internal RetainedScene(LayoutViewport viewport, IReadOnlyList<LayoutBox> boxes, IReadOnlyList<SceneNode> nodes) { Viewport = viewport; Boxes = Array.AsReadOnly(boxes.ToArray()); Nodes = Array.AsReadOnly(nodes.Select(ClipSceneNode.Clone).ToArray()); }
+    internal RetainedScene(long generation, LayoutViewport viewport, IReadOnlyList<LayoutBox> boxes, IReadOnlyList<SceneNode> nodes, IReadOnlyList<RetainedInputElement> input) { Generation = generation; Viewport = viewport; Boxes = Array.AsReadOnly(boxes.ToArray()); Nodes = Array.AsReadOnly(nodes.Select(ClipSceneNode.Clone).ToArray()); Input = Array.AsReadOnly(input.ToArray()); InputSignature = Signature(Input); }
+    /// <summary>Monotonic composition-local identity; routers reject older snapshots.</summary>
+    public long Generation { get; }
     public LayoutViewport Viewport { get; }
     public IReadOnlyList<LayoutBox> Boxes { get; }
     public IReadOnlyList<SceneNode> Nodes { get; }
+    /// <summary>Retained hit/focus metadata matched to this scene generation.</summary>
+    public IReadOnlyList<RetainedInputElement> Input { get; }
+    public string InputSignature { get; }
     public string Dump()
     {
-        var output = new StringBuilder("scene viewport=").Append(Format(new LayoutRect(0, 0, Viewport.Width, Viewport.Height))).Append(" scale=").Append(Viewport.Scale.ToString("R", CultureInfo.InvariantCulture)).Append("\n");
+        var output = new StringBuilder("scene generation=").Append(Generation.ToString(CultureInfo.InvariantCulture)).Append(" inputSignature=").Append(InputSignature).Append(" viewport=").Append(Format(new LayoutRect(0, 0, Viewport.Width, Viewport.Height))).Append(" scale=").Append(Viewport.Scale.ToString("R", CultureInfo.InvariantCulture)).Append("\n");
+        foreach (var input in Input.OrderBy(item => item.Identity.ElementId)) output.Append("input epoch=").Append(input.Identity.CompositionEpoch.ToString(CultureInfo.InvariantCulture)).Append(" element=").Append(input.Identity.ElementId.ToString(CultureInfo.InvariantCulture)).Append(" parent=").Append(input.Parent?.ElementId.ToString(CultureInfo.InvariantCulture) ?? "-").Append(" order=").Append(input.Order.ToString(CultureInfo.InvariantCulture)).Append(" bounds=").Append(Format(input.Bounds)).Append(" clip=").Append(input.Clip ? "true" : "false").Append(" enabled=").Append(input.Enabled ? "true" : "false").Append(" visible=").Append(input.Visible ? "true" : "false").Append(" signature=").Append(input.Signature).Append('\n');
         foreach (var box in Boxes.OrderBy(box => box.Identity.ElementId))
         {
             output.Append("layout epoch=").Append(box.Identity.CompositionEpoch.ToString(CultureInfo.InvariantCulture)).Append(" element=").Append(box.Identity.ElementId.ToString(CultureInfo.InvariantCulture)).Append(" bounds=")
@@ -180,6 +189,19 @@ public sealed class RetainedScene
         }
     }
     private static string Format(LayoutRect value) => "[" + value.X.ToString("R", CultureInfo.InvariantCulture) + "," + value.Y.ToString("R", CultureInfo.InvariantCulture) + "," + value.Width.ToString("R", CultureInfo.InvariantCulture) + "," + value.Height.ToString("R", CultureInfo.InvariantCulture) + "]";
+    private static string Signature(IEnumerable<RetainedInputElement> input) => Hash(writer =>
+    {
+        var copy = input.OrderBy(item => item.Order).ToArray(); writer.Write(copy.Length);
+        foreach (var item in copy)
+        {
+            writer.Write(item.Identity.CompositionEpoch); writer.Write(item.Identity.ElementId); writer.Write(item.Parent.HasValue); if (item.Parent is { } parent) { writer.Write(parent.CompositionEpoch); writer.Write(parent.ElementId); }
+            writer.Write(item.Bounds.X); writer.Write(item.Bounds.Y); writer.Write(item.Bounds.Width); writer.Write(item.Bounds.Height); writer.Write(item.Order); writer.Write(item.Clip); writer.Write(item.Enabled); writer.Write(item.Visible); writer.Write(item.Signature);
+        }
+    });
+    private static string Hash(Action<BinaryWriter> write)
+    {
+        using var stream = new MemoryStream(); using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true); write(writer); writer.Flush(); return Convert.ToHexString(SHA256.HashData(stream.ToArray()));
+    }
 }
 
 /// <summary>Finite row/column layout: invalid values fail; fixed over-constraint is retained and bounded by an explicit clip.</summary>
@@ -192,7 +214,10 @@ LayoutViewport viewport, ITextShaper shaper)
         var boxes = new List<LayoutBox>();
         var shapes = new Dictionary<long, ShapedText?>();
         var nodes = Layout(composition.Root, new LayoutRect(0, 0, viewport.Width, viewport.Height), viewport, shaper, boxes, shapes, null, false);
-        return new RetainedScene(viewport, boxes, nodes);
+        var byId = boxes.ToDictionary(box => box.Identity.ElementId);
+        var input = composition.Elements().Select((element, order) => new RetainedInputElement(new(composition.Epoch, element.Id), element.Parent is null ? null : new(composition.Epoch, element.Parent.Id), byId[element.Id].Bounds, order,
+            element.Resolve(Arrangement.Clip).Value, element.Resolve(InputProperties.Enabled).Value, element.Resolve(InputProperties.Visible).Value, InputSignature(element))).ToArray();
+        return new RetainedScene(composition.NextSceneGeneration(), viewport, boxes, nodes, input);
     }
 
     private static IReadOnlyList<SceneNode> Layout(Element element, LayoutRect allotted, LayoutViewport viewport, ITextShaper shaper, List<LayoutBox> boxes, Dictionary<long, ShapedText?> shapes, LayoutAxis? parentAxis, bool crossAllotted)
@@ -299,4 +324,21 @@ LayoutViewport viewport, ITextShaper shaper)
     }
 
     private readonly record struct Values(LayoutAxis Axis, float? Width, float? Height, float MinWidth, float MinHeight, float MaxWidth, float MaxHeight, float Spacing, LayoutAlignment MainAlignment, LayoutAlignment CrossAlignment, bool Clip, ScrollOffset Scroll, uint Fill, uint Foreground, string? Text, string FontFamily, float FontSize, string Language, TextDirection Direction);
+
+    internal static string InputSignature(Element element)
+    {
+        var value = Read(element);
+        return Hash(writer =>
+        {
+            writer.Write((int)value.Axis); writer.Write(value.Width.HasValue); if (value.Width is { } width) writer.Write(width); writer.Write(value.Height.HasValue); if (value.Height is { } height) writer.Write(height);
+            writer.Write(value.MinWidth); writer.Write(value.MinHeight); writer.Write(value.MaxWidth); writer.Write(value.MaxHeight); writer.Write(value.Spacing); writer.Write((int)value.MainAlignment); writer.Write((int)value.CrossAlignment); writer.Write(value.Clip); writer.Write(value.Scroll.X); writer.Write(value.Scroll.Y);
+            writer.Write(value.Fill); writer.Write(value.Foreground); writer.Write(value.Text is not null); if (value.Text is { } text) writer.Write(text); writer.Write(value.FontFamily); writer.Write(value.FontSize); writer.Write(value.Language); writer.Write((int)value.Direction);
+            writer.Write(element.Resolve(InputProperties.Enabled).Value); writer.Write(element.Resolve(InputProperties.Visible).Value);
+        });
+    }
+
+    private static string Hash(Action<BinaryWriter> write)
+    {
+        using var stream = new MemoryStream(); using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true); write(writer); writer.Flush(); return Convert.ToHexString(SHA256.HashData(stream.ToArray()));
+    }
 }

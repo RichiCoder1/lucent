@@ -138,7 +138,7 @@ internal sealed class Assignment<T> : IAssignment
 internal readonly record struct FlatAssignment(IAssignment Assignment, VariantState Condition, int Ordinal);
 
 [Flags] public enum BehaviorOwnership { None = 0, Focus = 1, Action = 2, Semantics = 4 }
-public enum BehaviorState { Focused, Pressed, Selected }
+public enum BehaviorState { Focused, FocusVisible, Pressed, Selected }
 public enum SemanticRole { Group, Text, Button, List, ListItem, Status }
 [Flags] public enum SemanticAction { None = 0, Invoke = 1, SetValue = 2, Select = 4 }
 
@@ -157,16 +157,25 @@ public abstract class Behavior { public abstract string Name { get; } public vir
 /// <summary>Behavior-only capability surface: identity, deterministic state, semantics, and scope-owned cleanup.</summary>
 public sealed class BehaviorContext
 {
-    private readonly Composition _composition; private readonly ReactiveScope _scope; private readonly Dictionary<BehaviorState, bool> _state = []; private bool _active = true; private SemanticDeclaration? _semantic;
-    internal BehaviorContext(long elementId, Composition composition, ReactiveScope scope, Behavior behavior) { ElementId = elementId; _composition = composition; _scope = scope; Behavior = behavior; }
+    private readonly Composition _composition; private readonly ReactiveScope _scope; private readonly Dictionary<BehaviorState, bool> _state = []; private bool _attaching = true; private SemanticDeclaration? _semantic; private readonly Action _stateChanged;
+    internal BehaviorContext(long elementId, Composition composition, ReactiveScope scope, Behavior behavior, Action stateChanged) { ElementId = elementId; _composition = composition; _scope = scope; Behavior = behavior; _stateChanged = stateChanged; }
     public long ElementId { get; }
     public Behavior Behavior { get; }
-    public void OnDispose(Action cleanup) { Check(); ArgumentNullException.ThrowIfNull(cleanup); _scope.OnDispose(() => _composition.RunBehaviorCleanup(cleanup)); }
-    public T Own<T>(T value) where T : IDisposable { Check(); ArgumentNullException.ThrowIfNull(value); _scope.Own(new GuardedDisposable(_composition, value)); return value; }
-    public void SetState(BehaviorState state, bool value) { Check(); if (!Enum.IsDefined(state)) throw new ArgumentException("Behavior state must be finite.", nameof(state)); _state[state] = value; }
-    public void SetSemantics(SemanticDeclaration semantics) { Check(); if (!Behavior.Ownership.HasFlag(BehaviorOwnership.Semantics)) throw new InvalidOperationException("Only semantic ownership can declare semantics."); _semantic = semantics ?? throw new ArgumentNullException(nameof(semantics)); }
-    internal SemanticDeclaration? Semantics => _semantic; internal IReadOnlyDictionary<BehaviorState, bool> State => _state; internal void Complete() => _active = false;
-    private void Check() { if (!_active) throw new InvalidOperationException("Behavior attachment has completed."); }
+    public void OnDispose(Action cleanup) { CheckAttachment(); ArgumentNullException.ThrowIfNull(cleanup); _scope.OnDispose(() => _composition.RunBehaviorCleanup(cleanup)); }
+    public T Own<T>(T value) where T : IDisposable { CheckAttachment(); ArgumentNullException.ThrowIfNull(value); _scope.Own(new GuardedDisposable(_composition, value)); return value; }
+    /// <summary>Updates behavior-owned visual state. Router callbacks may call this after attachment.</summary>
+    public void SetState(BehaviorState state, bool value) { _composition.CheckThread(); CheckLive(); if (!Enum.IsDefined(state)) throw new ArgumentException("Behavior state must be finite.", nameof(state)); if (_state.GetValueOrDefault(state) == value) return; _state[state] = value; _stateChanged(); }
+    public void SetSemantics(SemanticDeclaration semantics) { CheckAttachment(); if (!Behavior.Ownership.HasFlag(BehaviorOwnership.Semantics)) throw new InvalidOperationException("Only semantic ownership can declare semantics."); _semantic = semantics ?? throw new ArgumentNullException(nameof(semantics)); }
+    public void OnPointer(Action<PointerRoute> handler) { CheckInputOwnership(); _composition.Input.RegisterPointer(ElementId, _scope, handler); }
+    public void OnKey(Action<KeyRoute> handler) { CheckInputOwnership(); _composition.Input.RegisterKey(ElementId, _scope, handler); }
+    public void OnFocus(Action<FocusRoute> handler) { CheckFocusOwnership(); _composition.Input.RegisterFocus(ElementId, _scope, handler); }
+    public void OnCaptureLost(Action<PointerCaptureLoss> handler) { CheckInputOwnership(); _composition.Input.RegisterCaptureLoss(ElementId, _scope, handler); }
+    public void MakeFocusable(bool tabStop = true) { CheckFocusOwnership(); _composition.Input.RegisterFocusable(ElementId, _scope, tabStop, this); }
+    internal SemanticDeclaration? Semantics => _semantic; internal IReadOnlyDictionary<BehaviorState, bool> State => _state; internal void Complete() => _attaching = false;
+    private void CheckAttachment() { CheckLive(); if (!_attaching) throw new InvalidOperationException("Behavior registration is only valid while attaching."); }
+    private void CheckLive() { if (_scope.IsDisposed) throw new ObjectDisposedException(Behavior.Name); }
+    private void CheckInputOwnership() { CheckAttachment(); if ((Behavior.Ownership & (BehaviorOwnership.Action | BehaviorOwnership.Focus)) == 0) throw new InvalidOperationException("Input handlers require action or focus ownership."); }
+    private void CheckFocusOwnership() { CheckAttachment(); if (!Behavior.Ownership.HasFlag(BehaviorOwnership.Focus)) throw new InvalidOperationException("Focus handlers require focus ownership."); }
     private sealed class GuardedDisposable(Composition composition, IDisposable value) : IDisposable
     {
         private IDisposable? _value = value;
@@ -176,7 +185,7 @@ public sealed class BehaviorContext
 
 internal sealed class ElementPresentation
 {
-    private readonly Element _element; private readonly ThemeContext _theme; private readonly FlatAssignment[] _component; private readonly FlatAssignment[] _author; private readonly Transition[] _transitions; private readonly Dictionary<IProperty, Signal<TransitionController.Sample?>> _samples; private readonly Signal<VariantState> _variants;
+    private readonly Element _element; private readonly ThemeContext _theme; private readonly FlatAssignment[] _component; private readonly FlatAssignment[] _author; private readonly Transition[] _transitions; private readonly Dictionary<IProperty, Signal<TransitionController.Sample?>> _samples; private readonly Signal<VariantState> _variants; private readonly Signal<VariantState> _behaviorVariants;
     internal ElementPresentation(Element element, ThemeContext theme, Style component, Style author, Transition[] transitions)
     {
         _element = element; _theme = theme; _component = component.Flatten().ToArray(); _author = author.Flatten().ToArray(); _transitions = [.. transitions];
@@ -184,9 +193,10 @@ internal sealed class ElementPresentation
         if (_transitions.GroupBy(item => item.Property).Any(group => group.Count() != 1)) throw new ArgumentException("Transition properties must be unique.", nameof(transitions));
         foreach (var assignment in _component.Concat(_author).Select(item => item.Assignment)) assignment.Prime(theme);
         _samples = _transitions.ToDictionary(item => item.Property, item => element.Scope.Signal<TransitionController.Sample?>(null, element.Name + ".transition." + item.Property.Name));
-        _variants = element.Scope.Signal(VariantState.None, element.Name + ".variants");
+        _variants = element.Scope.Signal(VariantState.None, element.Name + ".variants"); _behaviorVariants = element.Scope.Signal(VariantState.None, element.Name + ".behavior-variants");
     }
     internal void SetVariants(VariantState variants) { _element.Composition.ThrowIfBehaviorAttachment(); VariantStates.Validate(variants, nameof(variants), true); _variants.Value = variants; }
+    internal void SetBehaviorVariants(VariantState variants) { VariantStates.Validate(variants, nameof(variants), true); _behaviorVariants.Value = variants; }
     internal void Start<T>(Property<T> property, T value)
     {
         var spec = _transitions.SingleOrDefault(spec => ReferenceEquals(spec.Property, property)) ?? throw new InvalidOperationException("No transition specification exists for this property.");
@@ -197,7 +207,7 @@ internal sealed class ElementPresentation
     {
         ArgumentNullException.ThrowIfNull(property); var candidates = new List<(T Value, PropertyProvenance Provenance)> { (property.DefaultValue, new("default", 0)) };
         if (property.Inherits && _element.Parent is not null) { var inherited = _element.Parent.Resolve(property); candidates.Add((inherited.Value, new("inherited", inherited.Winner.Ordinal))); }
-        var active = _variants.Value;
+        var active = _variants.Value | _behaviorVariants.Value;
         foreach (var item in _component.Select(item => (item, author: false)).Concat(_author.Select(item => (item, author: true)))
             .Where(entry => ReferenceEquals(entry.item.Assignment.Property, property) && (active & entry.item.Condition) == entry.item.Condition)
             .OrderBy(entry => VariantOrder.Key(entry.item.Condition)).ThenBy(entry => entry.author).ThenBy(entry => entry.item.Ordinal))
@@ -212,7 +222,7 @@ internal sealed class ElementPresentation
     }
     internal void AppendDump(StringBuilder dump)
     {
-        dump.Append("  style variants=").Append(_variants.Value).Append(" reducedMotion=").Append(_theme.IsReducedMotion ? "true" : "false").Append('\n');
+        dump.Append("  style variants=").Append(_variants.Value | _behaviorVariants.Value).Append(" reducedMotion=").Append(_theme.IsReducedMotion ? "true" : "false").Append('\n');
         foreach (var property in Properties().OrderBy(item => item.Name, StringComparer.Ordinal))
         { var value = ((IPropertyDump)property).Dump(this); dump.Append("  property name=").Append(Quote(property.Name)).Append(" winner=").Append(Format(value.Winner)).Append(" overridden=[").Append(string.Join(',', value.Overridden.Select(Format))).Append("]"); if (value.Suppressed is not null) dump.Append(" suppressed=").Append(Format(value.Suppressed)); dump.Append('\n'); }
     }

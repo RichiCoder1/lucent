@@ -16,6 +16,8 @@ public sealed class Composition : IDisposable
     private long _nextElementId;
     private CompositionContext? _factory;
     private int _behaviorDepth;
+    private InputRouter? _input;
+    private long _nextSceneGeneration;
 
     public Composition(ReactiveGraph graph, string name)
     {
@@ -28,9 +30,14 @@ public sealed class Composition : IDisposable
     /// <summary>The stable root element for this composition.</summary>
     public Element Root { get; }
     public bool IsDisposed { get; private set; }
+    /// <summary>Composition-owned portable input, focus, and capture router.</summary>
+    public InputRouter Input { get { _graph.CheckThread(); ThrowIfDisposed(); return _input ??= new InputRouter(this); } }
     internal ReactiveGraph Graph => _graph;
     internal long Epoch => _epoch;
     internal TransitionController Transitions => _transitions;
+    internal InputRouter? InputIfCreated => _input;
+    internal long NextSceneGeneration() { _graph.CheckThread(); ThrowIfDisposed(); return checked(++_nextSceneGeneration); }
+    internal long LatestSceneGeneration => _nextSceneGeneration;
 
     /// <summary>Advances bounded presentation samples; it queues no background work.</summary>
     public void AdvanceTransitions(int milliseconds) { _graph.CheckThread(); ThrowIfBehaviorAttachment(); ThrowIfDisposed(); _transitions.Advance(milliseconds); }
@@ -161,6 +168,21 @@ public sealed class Composition : IDisposable
 
     internal void InvalidateSemantics() => _emittedSemantics.Clear();
 
+    internal Element? Find(ElementIdentity identity) => identity.CompositionEpoch == _epoch ? Find(Root, identity.ElementId) : null;
+    internal IReadOnlyList<Element> Path(Element element)
+    {
+        var path = new List<Element>();
+        for (Element? current = element; current is not null; current = current.Parent) path.Add(current);
+        path.Reverse(); return path;
+    }
+    internal IEnumerable<Element> Elements() => Traverse(Root);
+    private static IEnumerable<Element> Traverse(Element element)
+    {
+        if (element.IsDisposed) yield break;
+        yield return element;
+        foreach (var child in element.Children) foreach (var descendant in Traverse(child)) yield return descendant;
+    }
+
     private void ThrowIfFactoryCreation()
     {
         _graph.CheckThread();
@@ -173,8 +195,11 @@ public sealed class Composition : IDisposable
         _graph.CheckThread();
         ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
+        List<Exception>? errors = null;
+        try { _input?.Cleanup(); } catch (Exception exception) { errors = [exception]; }
         IsDisposed = true;
-        Root.Dispose();
+        try { Root.Dispose(); } catch (Exception exception) { (errors ??= []).Add(exception); }
+        ThrowAll(errors, "Composition cleanup failed.");
     }
 
     private long NextId() => checked(++_nextElementId);
@@ -226,6 +251,8 @@ public sealed class Element : IDisposable
     private BehaviorOwnership _behaviorClaims;
     private SemanticDeclaration? _semantics;
     private long _semanticGeneration;
+    private bool _inputDisabled;
+    private EffectiveSemanticState? _effectiveSemanticState;
 
     internal Element(Composition composition, Element? parent, ReactiveScope scope, long id, string name)
     {
@@ -314,7 +341,7 @@ public sealed class Element : IDisposable
             foreach (var behavior in behaviors)
             {
                 var scope = Scope.CreateChild(Name + ".behavior." + behavior.Name);
-                var context = new BehaviorContext(Id, Composition, scope, behavior);
+                var context = new BehaviorContext(Id, Composition, scope, behavior, BehaviorStateChanged);
                 provisional.Add((scope, context));
                 Composition.RunBehavior(context, () => behavior.Attach(context));
                 if (behavior.Ownership.HasFlag(BehaviorOwnership.Semantics) && context.Semantics is null)
@@ -332,6 +359,7 @@ public sealed class Element : IDisposable
                 item.Scope.OnDispose(() => _behaviors.Remove(mount));
             }
             _behaviorClaims = claims;
+            RefreshBehaviorVariants();
         }
         catch (Exception error)
         {
@@ -377,11 +405,14 @@ public sealed class Element : IDisposable
         if (IsDisposed) throw new ObjectDisposedException(Name);
     }
 
-    internal SemanticSnapshot? CreateSemanticSnapshot(IReadOnlyList<SemanticSnapshot> children) => _semantics is null ? null : new SemanticSnapshot(
-        new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration), _semantics.Role, _semantics.Name, _semantics.Value, _semantics.Enabled,
-        _semantics.Focused, _semantics.Selected, _semantics.Actions, children);
+    internal SemanticSnapshot? CreateSemanticSnapshot(IReadOnlyList<SemanticSnapshot> children)
+    {
+        if (_semantics is null) return null;
+        var state = ReconcileSemanticState();
+        return new(new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration), _semantics.Role, _semantics.Name, _semantics.Value, state.Enabled, state.Focused, state.Selected, _semantics.Actions, children);
+    }
 
-    internal bool IsCurrent(SemanticIdentity identity) => !IsDisposed && identity.Generation == _semanticGeneration && (_semantics is not null || _semanticGeneration == 0);
+    internal bool IsCurrent(SemanticIdentity identity) { if (_semantics is not null) _ = ReconcileSemanticState(); return !IsDisposed && identity.Generation == _semanticGeneration && (_semantics is not null || _semanticGeneration == 0); }
 
     internal SemanticSnapshot CreateStructuralSemanticSnapshot(IReadOnlyList<SemanticSnapshot> children) => new(
         new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration), SemanticRole.Group, Name, null, true, false, false, SemanticAction.None, children);
@@ -402,18 +433,62 @@ public sealed class Element : IDisposable
             dump.Append("  behavior name=").Append(Quote(behavior.Name)).Append(" ownership=").Append(behavior.Ownership)
                 .Append(" state=[").Append(string.Join(',', behavior.State.OrderBy(item => item.Key).Select(item => item.Key + "=" + (item.Value ? "true" : "false")))).Append("]\n");
         if (_semantics is not null)
+        {
+            var state = ReconcileSemanticState();
             dump.Append("  semantic element=").Append(Id.ToString(CultureInfo.InvariantCulture)).Append(" generation=")
                 .Append(_semanticGeneration.ToString(CultureInfo.InvariantCulture)).Append(" role=").Append(_semantics.Role)
-                .Append(" enabled=").Append(_semantics.Enabled ? "true" : "false").Append(" focused=").Append(_semantics.Focused ? "true" : "false")
-                .Append(" selected=").Append(_semantics.Selected ? "true" : "false").Append(" actions=").Append(_semantics.Actions).Append('\n');
+                .Append(" enabled=").Append(state.Enabled ? "true" : "false").Append(" focused=").Append(state.Focused ? "true" : "false")
+                .Append(" selected=").Append(state.Selected ? "true" : "false").Append(" actions=").Append(_semantics.Actions).Append('\n');
+        }
     }
 
     private void SetSemantics(SemanticDeclaration semantics)
     {
         _semantics = semantics;
+        _effectiveSemanticState = null;
         _semanticGeneration = checked(_semanticGeneration + 1);
         Composition.InvalidateSemantics();
     }
+
+    internal void RefreshBehaviorVariants()
+    {
+        if (_presentation is null || IsDisposed) return;
+        var variants = VariantState.None;
+        foreach (var behavior in _behaviors)
+        {
+            if (behavior.State.GetValueOrDefault(BehaviorState.Pressed)) variants |= VariantState.Pressed;
+            if (behavior.State.GetValueOrDefault(BehaviorState.Selected)) variants |= VariantState.Selected;
+            if (behavior.State.GetValueOrDefault(BehaviorState.FocusVisible)) variants |= VariantState.FocusVisible;
+        }
+        if (_inputDisabled) variants |= VariantState.Disabled;
+        _presentation.SetBehaviorVariants(variants);
+    }
+
+    internal void SetInputDisabledVariant(bool disabled)
+    {
+        if (_inputDisabled == disabled) return;
+        _inputDisabled = disabled;
+        ReconcileSemanticState();
+    }
+
+    private bool HasBehaviorState(BehaviorState state) => _behaviors.Any(behavior => behavior.State.GetValueOrDefault(state));
+    private bool InputAvailable() => !IsDisposed && (_parent is null || _parent.InputAvailable()) && Resolve(InputProperties.Enabled).Value && Resolve(InputProperties.Visible).Value;
+    private void BehaviorStateChanged()
+    {
+        RefreshBehaviorVariants();
+        _ = ReconcileSemanticState();
+    }
+
+    /// <summary>Single source of truth for exported semantic availability and behavior state.</summary>
+    private EffectiveSemanticState ReconcileSemanticState()
+    {
+        if (_semantics is null) return default;
+        var next = new EffectiveSemanticState(_semantics.Enabled && InputAvailable(), _semantics.Focused || HasBehaviorState(BehaviorState.Focused), _semantics.Selected || HasBehaviorState(BehaviorState.Selected));
+        if (_effectiveSemanticState is { } prior && prior != next) { _semanticGeneration = checked(_semanticGeneration + 1); Composition.InvalidateSemantics(); }
+        _effectiveSemanticState = next;
+        return next;
+    }
+    internal void ReconcileSemanticStateForInput() => _ = ReconcileSemanticState();
 
     private static void ValidateOwnership(BehaviorOwnership ownership)
     {
@@ -430,9 +505,11 @@ public sealed class Element : IDisposable
         IsDisposed = true;
         Composition.InvalidateSemantics();
         Composition.Transitions.Remove(this);
+        List<Exception>? errors = null;
+        try { if (Composition.InputIfCreated is { } input) input.RemoveElement(this, PointerCaptureLossReason.Disposed); }
+        catch (Exception exception) { errors = [exception]; }
         var children = _children.ToArray();
         _children.Clear();
-        List<Exception>? errors = null;
         for (var index = children.Length - 1; index >= 0; index--)
         {
             try { children[index].Dispose(); }
@@ -451,6 +528,7 @@ public sealed class Element : IDisposable
     }
 
     private sealed record BehaviorMount(string Name, BehaviorOwnership Ownership, IReadOnlyDictionary<BehaviorState, bool> State);
+    private readonly record struct EffectiveSemanticState(bool Enabled, bool Focused, bool Selected);
     private static string Quote(string value) => DiagnosticText.Quote(value);
 }
 

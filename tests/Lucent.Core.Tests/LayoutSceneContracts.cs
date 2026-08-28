@@ -29,10 +29,10 @@ internal static class LayoutSceneContracts
         var shaper = new ProbeShaper();
         var firstScene = SceneLayout.Project(composition, new(51, 20, 1.25f), shaper);
         var secondScene = SceneLayout.Project(composition, new(51, 20, 1.25f), shaper);
-        Assert(firstScene.Dump() == secondScene.Dump() && firstScene.Boxes.Count == 3 && firstScene.Nodes.Single() is ClipSceneNode, "Retained scene was not stable or clipped.");
+        Assert(StableDump(firstScene) == StableDump(secondScene) && firstScene.Generation + 1 == secondScene.Generation && firstScene.Boxes.Count == 3 && firstScene.Nodes.Single() is ClipSceneNode, "Retained scene was not stable or clipped.");
         Assert(firstScene.Boxes[1].Bounds.X == 4f && firstScene.Boxes[2].Bounds.X == 27.2f && firstScene.Boxes[1].Text!.Identity == secondScene.Boxes[1].Text!.Identity, "Row alignment/edge rounding or shaped identity diverged.");
         var original = CultureInfo.CurrentCulture;
-        try { CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR"); Assert(firstScene.Dump() == SceneLayout.Project(composition, new(51, 20, 1.25f), shaper).Dump(), "Scene dump was culture-sensitive."); }
+        try { CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR"); Assert(StableDump(firstScene) == StableDump(SceneLayout.Project(composition, new(51, 20, 1.25f), shaper)), "Scene dump was culture-sensitive."); }
         finally { CultureInfo.CurrentCulture = original; }
         Assert(!firstScene.Dump().Contains("ffi", StringComparison.Ordinal) && shaper.Requests == 6, "Scene dump leaked text or layout did not share shaped results: " + shaper.Requests);
     }
@@ -110,6 +110,12 @@ internal static class LayoutSceneContracts
             var run = new ShapedRun("run-" + request.Text.Length.ToString(CultureInfo.InvariantCulture), "probe", 400, 5, 0, "probe-fingerprint", 0, "probe#0", request.Direction, request.Language, request.FontSize, 0, request.FontSize, -request.FontSize, 0, runWidth, glyphs);
             return new("shape-" + request.Text.Length.ToString(CultureInfo.InvariantCulture) + "-" + request.Language, runWidth, request.FontSize, [run]);
         }
+    }
+    private static string StableDump(RetainedScene scene)
+    {
+        var lines = scene.Dump().Split('\n');
+        lines[0] = lines[0][(lines[0].IndexOf(" viewport=", StringComparison.Ordinal) + 1)..];
+        return string.Join('\n', lines);
     }
     private static void Expect<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException("Expected " + typeof(T).Name); }
     private static void Assert(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

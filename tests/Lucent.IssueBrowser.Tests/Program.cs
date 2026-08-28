@@ -12,13 +12,13 @@ try
         throw new InvalidOperationException("Issue Browser did not produce only its active static/state-driven structure.");
     var snapshot = Snapshot();
     if (!first.Contains("property name=\"surface\" winner=\"author:token:page-surface:theme\"#0", StringComparison.Ordinal) ||
-        !first.Contains("property name=\"opacity\" winner=\"author\"#0[Selected]", StringComparison.Ordinal) ||
-        !first.Contains("behavior name=\"issue-row-semantics\" ownership=Action, Semantics", StringComparison.Ordinal) ||
+        !first.Contains("behavior name=\"issue-row-action\" ownership=Focus, Action, Semantics", StringComparison.Ordinal) ||
         first.Split('\n').Count(line => line.Contains("semantic element=", StringComparison.Ordinal)) != 6 ||
         first.Contains("Implement retained", StringComparison.Ordinal) ||
         !Flatten(snapshot).Any(node => node.Actions == SemanticAction.Select))
         throw new InvalidOperationException("Issue Browser did not consume typed presentation, behavior, and semantic contracts without leaking issue values.");
     ShapeLayoutAndPaint();
+    RoutedRows();
     Console.WriteLine("Lucent.IssueBrowser composition contract: PASS");
     return 0;
 }
@@ -80,4 +80,31 @@ static void ShapeLayoutAndPaint()
     using (var canvas = new SKCanvas(bitmap)) { canvas.Clear(SKColors.Transparent); renderer.Render(scene, canvas); }
     if (!Enumerable.Range(0, bitmap.Width).Any(x => bitmap.GetPixel(x, 0).Alpha != 0))
         throw new InvalidOperationException("Headless Core-to-Skia scene did not paint.");
+}
+
+static void RoutedRows()
+{
+    var graph = new ReactiveGraph();
+    using var composition = IssueBrowserStructure.Create(graph);
+    using var renderer = new SkiaSceneRenderer();
+    graph.Drain();
+    var router = composition.Input;
+    if (!router.SetScene(SceneLayout.Project(composition, new(800, 500, 1), renderer))) throw new InvalidOperationException("Issue Browser rejected its retained scene.");
+    var initial = composition.SemanticSnapshot()!;
+    var rows = Flatten(initial).Where(node => node.Role == SemanticRole.ListItem).ToArray();
+    if (!router.MoveFocus(FocusTraversalDirection.Next) || router.FocusedElement != new ElementIdentity(rows[0].Identity.CompositionEpoch, rows[0].Identity.ElementId)) throw new InvalidOperationException("Row behavior did not enter traversal order.");
+    router.DispatchKey(new(KeyCommandKind.Down, Key.Tab));
+    if (router.FocusedElement != new ElementIdentity(rows[1].Identity.CompositionEpoch, rows[1].Identity.ElementId) || !router.Dump().Contains("modality=Keyboard", StringComparison.Ordinal)) throw new InvalidOperationException("Row behavior did not traverse with keyboard-visible focus.");
+    var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+    if (!router.SetScene(scene)) throw new InvalidOperationException("Issue Browser rejected refreshed scene.");
+    var box = scene.Boxes.Single(candidate => candidate.Identity.ElementId == rows[2].Identity.ElementId);
+    var x = box.Bounds.X + 1; var y = box.Bounds.Y + 1;
+    router.DispatchPointer(new(PointerCommandKind.Down, 7, x, y, PointerButton.Primary));
+    if (!router.Dump().Contains("capture pointer=7 owner=" + rows[2].Identity.ElementId, StringComparison.Ordinal)) throw new InvalidOperationException("Row behavior did not own pointer capture.");
+    router.DispatchPointer(new(PointerCommandKind.Up, 7, x, y)); graph.Drain();
+    var dump = composition.Dump();
+    var selected = Flatten(composition.SemanticSnapshot()!).Where(node => node.Selected).ToArray();
+    if (router.FocusedElement?.ElementId != rows[2].Identity.ElementId || composition.IsCurrent(rows[2].Identity) || router.Dump().Contains("capture pointer=7", StringComparison.Ordinal) || selected.Length != 1 || selected[0].Identity.ElementId != rows[2].Identity.ElementId ||
+        !dump.Contains("element " + rows[2].Identity.ElementId + " ", StringComparison.Ordinal) || !dump.Contains("style variants=Selected", StringComparison.Ordinal))
+        throw new InvalidOperationException("Reusable row action did not select, focus, and release structurally.");
 }
