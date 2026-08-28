@@ -1,37 +1,33 @@
-# Lucent Language
+# Lucent
 
-Lucent defines the author-facing concepts used to declare compiled .NET desktop UI while keeping ordinary computation in C#.
+Lucent defines the author-facing concepts of a native desktop UI stack for .NET.
 
 ## Language
 
-**Component instance**:
-The logical, state-owning lifetime created for a component invocation. It is not an Avalonia control and may produce zero, one, or many rendered nodes.
-_Avoid_: Component control, view object
+**Reference application**:
+The first complete application built with Lucent to discover and validate the framework surface; it is expected to mature into a maintained example.
+_Avoid_: Spike app, demo harness, test app
 
-**Render method**:
-The required `Fragment Render()` member of a block-bodied component that describes its current output from inputs, state, slots, and context.
-_Avoid_: Render region, view block, template, UI block
+**Framework surface**:
+The coherent set of Lucent capabilities available to application authors, independent of any one authoring syntax.
+_Avoid_: Library API, engine API
 
-**C# island**:
-A complete C# expression or statement embedded in Lucent source and interpreted with normal C# semantics.
-_Avoid_: Inline C#, code snippet
+**Authoring surface**:
+A supported way to declare Lucent UI. Typed C# composition and `.lui` are authoring surfaces over the same framework model.
+_Avoid_: Frontend, binding syntax, wrapper
 
-**Fragment**:
-An ordered sequence of zero or more rendered nodes produced by a component or supplied as slot content.
-_Avoid_: Virtual DOM, control collection
+**Diagnostic dump**:
+A complete deterministic snapshot of relevant Lucent state used to explain behavior and make debugging decisions. It is distinct from sampled operational telemetry.
+_Avoid_: Trace, log bundle, telemetry export
 
-**State member**:
-An explicitly declared reactive value owned for the lifetime of a component instance.
-_Avoid_: Hook slot, mutable field
+**Style**:
+An immutable set of typed assignments that determines an element's arrangement and visual representation. It does not own interaction, semantics, lifecycle, or content structure.
+_Avoid_: CSS rule, property bag, modifier
 
-**Renderable symbol**:
-A Lucent component or projected Avalonia control that is valid in render position.
-_Avoid_: Widget type, node type
+**Behavior**:
+A reusable interaction contract that adds input, focus, semantics, and lifecycle ownership to an element without changing its content structure.
+_Avoid_: Control subclass, event bundle, style
 
-**Slot**:
-A named or implicit input through which a caller supplies renderable content to a component invocation.
-_Avoid_: Template property, control collection
-
-**Yield site**:
-The location in a render method where a component places supplied slot content.
-_Avoid_: Placeholder, insertion point
+**Composition**:
+The authored structure and ownership of elements and supplied content. Composition is distinct from both visual styling and interactive behavior.
+_Avoid_: Template expansion, render tree, layout

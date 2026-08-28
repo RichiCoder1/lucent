@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
-  <title id="title">Lucent</title>
-  <desc id="desc">A grayscale extruded letter L.</desc>
-  <path fill="#424A4C" d="m12 10 6 6v38l-6-6Z"/>
-  <path fill="#C4C9C9" d="M12 10h14l6 6H18Z"/>
-  <path fill="#7F898A" d="M26 34h20l6 6H32Z"/>
-  <path fill="#596264" d="m46 34 6 6v14l-6-6Z"/>
-  <path fill="#9DA5A6" d="M18 16h14v24h20v14H18Z"/>
-</svg>

@@ -16,16 +16,10 @@ coverage/
 *.coverage
 *.coveragexml
 
-# Node and VS Code extension output
+# Node output
 node_modules/
 .blume/
 dist/
-editors/vscode/out/
-editors/vscode/server/
-*.vsix
-
-# Generated Lucent output
-*.lui.g.cs
 
 # OS files
 .DS_Store
