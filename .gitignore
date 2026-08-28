@@ -2,6 +2,8 @@
 [Bb]in/
 [Oo]bj/
 [Aa]rtifacts/
+.dotnet/
+.dotnet-install.ps1
 
 # IDE and editor state
 .vs/

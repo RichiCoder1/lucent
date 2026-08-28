@@ -29,3 +29,17 @@ Before adding a dependency or adopting a new architectural reference:
 2. Record the consulted version or commit and license.
 3. Distinguish conceptual influence from copied or translated code.
 4. Re-check NativeAOT support and distribution notices against the final published output.
+
+## M0 runtime dependency ledger
+
+These M0 `win-x64` NativeAOT dependencies were checked on 2026-08-27 before their package references were added. The dependency choice follows the validated Native spike; `tools/Verify-M0Assets.ps1` reconciles the final publish directory.
+
+| Dependency | Exact identity | License | NativeAOT status | Distribution notice |
+| --- | --- | --- | --- | --- |
+| [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) | SDK `10.0.400`, runtime `10.0.11`, `win-x64` | MIT ([runtime](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT)) | Required baseline; NativeAOT compiler and trimming analyzers are enabled for M0 | Publish SDK `LICENSE.txt` and `ThirdPartyNotices.txt` as `notices/dotnet-LICENSE.txt` and `notices/dotnet-ThirdPartyNotices.txt`. |
+| [SDL3-CS](https://www.nuget.org/packages/SDL3-CS/3.4.14.1) / [SDL3-CS.Windows](https://www.nuget.org/packages/SDL3-CS.Windows/3.4.14.1) | `3.4.14.1`, [`edwardgushchin/SDL3-CS@b525db5bf89a46c3416efe21b09431c28cf00b8d`](https://github.com/edwardgushchin/SDL3-CS/tree/b525db5bf89a46c3416efe21b09431c28cf00b8d); `SDL3.dll` | zlib | Spike-validated NativeAOT window, stable HWND retrieval, streaming-texture presentation | Ship `SDL3-CS.Windows/LICENSE` as `notices/SDL3-CS.txt`. |
+| [SkiaSharp](https://www.nuget.org/packages/SkiaSharp/4.151.1) / [SkiaSharp.HarfBuzz](https://www.nuget.org/packages/SkiaSharp.HarfBuzz/4.151.1) | `4.151.1`, [`mono/SkiaSharp@279f93f4ffa7f9fe4e9c0bc298bedc3c9e439764`](https://github.com/mono/SkiaSharp/tree/279f93f4ffa7f9fe4e9c0bc298bedc3c9e439764); transitive HarfBuzzSharp `14.2.1.1`; `libSkiaSharp.dll` | MIT bindings; Skia BSD-3-Clause | Windows native-assets package supplies the selected `win-x64` native DLL; spike NativeAOT-published this line | Ship `SkiaSharp.NativeAssets.Win32/LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` as `notices/SkiaSharp-LICENSE.txt` and `notices/SkiaSharp-NOTICES.txt`. |
+| [HarfBuzzSharp](https://www.nuget.org/packages/HarfBuzzSharp/14.2.1.1) | transitive from `SkiaSharp.HarfBuzz 4.151.1`; `libHarfBuzzSharp.dll` | MIT binding and HarfBuzz | Windows native-assets package supplies selected `win-x64` native DLL; spike NativeAOT-published this line | Ship `HarfBuzzSharp.NativeAssets.Win32/LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` as `notices/HarfBuzzSharp-LICENSE.txt` and `notices/HarfBuzzSharp-NOTICES.txt`. |
+| [Microsoft.Windows.CsWin32](https://www.nuget.org/packages/Microsoft.Windows.CsWin32/0.3.321) | `0.3.321`, [`microsoft/CsWin32@b0f1e799e6aa793eccffafa6ba8164ca45a9266f`](https://github.com/microsoft/CsWin32/tree/b0f1e799e6aa793eccffafa6ba8164ca45a9266f) | MIT | Source-generated P/Invoke; M0 uses `CsWin32RunAsBuildTask` and disables runtime marshalling per [its NativeAOT guidance](https://microsoft.github.io/CsWin32/docs/getting-started.html) | Build-time-only (`PrivateAssets="all"`); no package asset is shipped. |
+
+M0 carries no copied source. CsWin32 output is generated from Microsoft Win32 metadata at build time and is not a runtime dependency.
