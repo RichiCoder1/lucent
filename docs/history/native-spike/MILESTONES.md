@@ -1,5 +1,7 @@
 # Lucent Native milestones
 
+> Historical and superseded for execution. These gates describe the completed validation spike; active production milestones are in [`../../ROADMAP.md`](../../ROADMAP.md).
+
 Each milestone ends in a decision gate. Do not begin the next milestone merely because code exists; record the evidence and decision first.
 
 ## Milestone 1 — platform and rendering feasibility

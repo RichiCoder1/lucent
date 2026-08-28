@@ -1,5 +1,7 @@
 # Lucent Native adoption decision
 
+> Historical and superseded for execution. This file records the validation spike's decision and evidence; active production work follows [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) and [`../../ROADMAP.md`](../../ROADMAP.md).
+
 ## Decision
 
 **Replace the unreleased Avalonia runtime with the Lucent Native architecture.**
