@@ -8,9 +8,14 @@ namespace Lucent.Core;
 /// <summary>Owns a retained structural tree and the scopes of its mounted elements.</summary>
 public sealed class Composition : IDisposable
 {
+    private static long _nextEpoch;
     private readonly ReactiveGraph _graph;
+    private readonly long _epoch = Interlocked.Increment(ref _nextEpoch);
+    private readonly HashSet<SemanticIdentity> _emittedSemantics = [];
+    private readonly TransitionController _transitions = new();
     private long _nextElementId;
     private CompositionContext? _factory;
+    private int _behaviorDepth;
 
     public Composition(ReactiveGraph graph, string name)
     {
@@ -23,6 +28,12 @@ public sealed class Composition : IDisposable
     /// <summary>The stable root element for this composition.</summary>
     public Element Root { get; }
     public bool IsDisposed { get; private set; }
+    internal ReactiveGraph Graph => _graph;
+    internal long Epoch => _epoch;
+    internal TransitionController Transitions => _transitions;
+
+    /// <summary>Advances bounded presentation samples; it queues no background work.</summary>
+    public void AdvanceTransitions(int milliseconds) { _graph.CheckThread(); ThrowIfBehaviorAttachment(); ThrowIfDisposed(); _transitions.Advance(milliseconds); }
 
     /// <summary>Adds fixed authored structure below an already-mounted element.</summary>
     public Element Child(Element parent, string name)
@@ -67,6 +78,25 @@ public sealed class Composition : IDisposable
         return dump.ToString();
     }
 
+    /// <summary>Returns the portable retained semantic snapshot; no platform transport is involved.</summary>
+    public SemanticSnapshot? SemanticSnapshot()
+    {
+        _graph.CheckThread();
+        ThrowIfDisposed();
+        _emittedSemantics.Clear();
+        var snapshots = BuildSemantic(Root);
+        var snapshot = snapshots.Count == 0 ? null : Root.HasSemantics ? snapshots.Single() : Root.CreateStructuralSemanticSnapshot(snapshots);
+        if (snapshot is not null) Register(snapshot);
+        return snapshot;
+    }
+
+    /// <summary>Rejects a semantic identity once its element has changed or departed.</summary>
+    public bool IsCurrent(SemanticIdentity identity)
+    {
+        _graph.CheckThread();
+        return !IsDisposed && identity.CompositionEpoch == _epoch && _emittedSemantics.Contains(identity) && Find(Root, identity.ElementId) is { } element && element.IsCurrent(identity);
+    }
+
     internal Element Create(Element parent, string name, bool attach, CompositionContext? factory = null)
     {
         _graph.CheckThread();
@@ -94,6 +124,23 @@ public sealed class Composition : IDisposable
         finally { _factory = null; }
     }
 
+    internal void RunBehavior(BehaviorContext context, Action attach)
+    {
+        _graph.CheckThread();
+        if (_behaviorDepth != 0) throw new InvalidOperationException("Behavior attachment cannot nest.");
+        _behaviorDepth++;
+        try { attach(); }
+        finally { _behaviorDepth--; }
+    }
+
+    internal void RunBehaviorCleanup(Action cleanup)
+    {
+        _graph.CheckThread();
+        _behaviorDepth++;
+        try { cleanup(); }
+        finally { _behaviorDepth--; }
+    }
+
     internal void ThrowIfDisposed()
     {
         if (IsDisposed) throw new ObjectDisposedException(nameof(Composition));
@@ -101,15 +148,30 @@ public sealed class Composition : IDisposable
 
     internal void CheckThread() => _graph.CheckThread();
 
+    internal void ThrowIfBehaviorAttachment()
+    {
+        if (_behaviorDepth != 0) throw new InvalidOperationException("Behaviors cannot configure styles.");
+    }
+
+    private void Register(SemanticSnapshot snapshot)
+    {
+        _emittedSemantics.Add(snapshot.Identity);
+        foreach (var child in snapshot.Children) Register(child);
+    }
+
+    internal void InvalidateSemantics() => _emittedSemantics.Clear();
+
     private void ThrowIfFactoryCreation()
     {
         _graph.CheckThread();
         if (_factory is not null) throw new InvalidOperationException("Structural creation must use the active composition context.");
+        if (_behaviorDepth != 0) throw new InvalidOperationException("Behaviors cannot create structure.");
     }
 
     public void Dispose()
     {
         _graph.CheckThread();
+        ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
         IsDisposed = true;
         Root.Dispose();
@@ -124,7 +186,22 @@ public sealed class Composition : IDisposable
             .Append(" scope=").Append(element.Scope.Id.ToString(CultureInfo.InvariantCulture))
             .Append(" name=").Append(Quote(element.Name))
             .Append(" parent=").Append(parent?.Id.ToString(CultureInfo.InvariantCulture) ?? "-").Append('\n');
+        element.AppendPresentationDump(dump);
         foreach (var child in element.Children) Append(child, element, dump);
+    }
+
+    private static List<SemanticSnapshot> BuildSemantic(Element element)
+    {
+        var children = element.Children.SelectMany(BuildSemantic).ToArray();
+        return element.CreateSemanticSnapshot(children) is { } semantic ? [semantic] : [.. children];
+    }
+
+    private static Element? Find(Element element, long id)
+    {
+        if (element.Id == id) return element;
+        foreach (var child in element.Children)
+            if (Find(child, id) is { } found) return found;
+        return null;
     }
 
     internal static void ThrowAll(List<Exception>? errors, string message)
@@ -134,7 +211,7 @@ public sealed class Composition : IDisposable
         throw new AggregateException(message, errors);
     }
 
-    private static string Quote(string value) => '"' + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal) + '"';
+    private static string Quote(string value) => DiagnosticText.Quote(value);
 }
 
 /// <summary>A stable retained structural identity. It intentionally has no visual or platform state.</summary>
@@ -144,6 +221,11 @@ public sealed class Element : IDisposable
     private readonly ReadOnlyCollection<Element> _childrenView;
     private Element? _parent;
     private Action? _disposed;
+    private ElementPresentation? _presentation;
+    private readonly List<BehaviorMount> _behaviors = [];
+    private BehaviorOwnership _behaviorClaims;
+    private SemanticDeclaration? _semantics;
+    private long _semanticGeneration;
 
     internal Element(Composition composition, Element? parent, ReactiveScope scope, long id, string name)
     {
@@ -151,6 +233,7 @@ public sealed class Element : IDisposable
         _parent = parent;
         _childrenView = _children.AsReadOnly();
         Scope = scope;
+        Scope.SetMutationGuard(composition.ThrowIfBehaviorAttachment);
         Id = id;
         Name = name;
         Scope.OnDispose(Dispose);
@@ -162,6 +245,102 @@ public sealed class Element : IDisposable
     public IReadOnlyList<Element> Children => _childrenView;
     public bool IsDisposed { get; private set; }
     internal Composition Composition { get; }
+    internal Element? Parent => _parent;
+    internal ElementPresentation? Presentation => _presentation;
+    internal bool HasSemantics => _semantics is not null;
+    internal IEnumerable<IProperty> AncestorProperties()
+    {
+        for (var parent = _parent; parent is not null; parent = parent._parent)
+            if (parent._presentation is not null)
+                foreach (var property in parent._presentation.OwnProperties()) yield return property;
+    }
+
+    /// <summary>Associates the one typed property model with this retained element.</summary>
+    public void Present(ThemeContext theme, Style? component = null, Style? author = null, params Transition[] transitions)
+    {
+        Composition.CheckThread();
+        Composition.ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(theme);
+        if (!ReferenceEquals(theme.Graph, Composition.Graph)) throw new ArgumentException("Theme context belongs to another reactive graph.", nameof(theme));
+        ArgumentNullException.ThrowIfNull(transitions);
+        if (_presentation is not null) throw new InvalidOperationException("An element has one presentation model.");
+        if (transitions.Any(transition => transition is null)) throw new ArgumentException("Transitions cannot contain null.", nameof(transitions));
+        _presentation = new ElementPresentation(this, theme, component ?? Style.Empty, author ?? Style.Empty, transitions);
+    }
+
+    /// <summary>Updates finite interaction state without creating a second modifier model.</summary>
+    public void SetVariants(VariantState variants)
+    {
+        Composition.CheckThread();
+        ThrowIfDisposed();
+        (_presentation ?? throw new InvalidOperationException("An element needs a presentation before it can have variants.")).SetVariants(variants);
+    }
+
+    public ResolvedProperty<T> Resolve<T>(Property<T> property)
+    {
+        Composition.CheckThread();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(property);
+        if (_presentation is not null) return _presentation.Resolve(property);
+        if (property.Inherits && _parent is not null)
+        {
+            var inherited = _parent.Resolve(property);
+            return new ResolvedProperty<T>(inherited.Value, new PropertyProvenance("inherited", inherited.Winner.Ordinal), [new PropertyProvenance("default", 0)]);
+        }
+        return new ResolvedProperty<T>(property.DefaultValue, new PropertyProvenance("default", 0), []);
+    }
+
+    /// <summary>Attaches interaction behavior transactionally; all cleanup remains in element-owned child scopes.</summary>
+    public void AttachBehaviors(params Behavior[] behaviors)
+    {
+        Composition.CheckThread();
+        Composition.ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(behaviors);
+        var claims = _behaviorClaims;
+        foreach (var behavior in behaviors)
+        {
+            ArgumentNullException.ThrowIfNull(behavior);
+            ReactiveGraph.ValidateName(behavior.Name, nameof(behaviors));
+            ValidateOwnership(behavior.Ownership);
+            if ((claims & behavior.Ownership) != 0) throw new InvalidOperationException("Exclusive behavior ownership conflicts on this element.");
+            claims |= behavior.Ownership;
+        }
+
+        var provisional = new List<(ReactiveScope Scope, BehaviorContext Context)>();
+        try
+        {
+            foreach (var behavior in behaviors)
+            {
+                var scope = Scope.CreateChild(Name + ".behavior." + behavior.Name);
+                var context = new BehaviorContext(Id, Composition, scope, behavior);
+                provisional.Add((scope, context));
+                Composition.RunBehavior(context, () => behavior.Attach(context));
+                if (behavior.Ownership.HasFlag(BehaviorOwnership.Semantics) && context.Semantics is null)
+                    throw new InvalidOperationException("Behavior requires semantics.");
+                if (context.Semantics is { Actions: not SemanticAction.None } && !behavior.Ownership.HasFlag(BehaviorOwnership.Action))
+                    throw new InvalidOperationException("Semantic actions require action ownership.");
+                context.Complete();
+            }
+            var semantic = provisional.Select(item => item.Context.Semantics).SingleOrDefault(value => value is not null);
+            if (semantic is not null) SetSemantics(semantic);
+            foreach (var item in provisional)
+            {
+                var mount = new BehaviorMount(item.Context.Behavior.Name, item.Context.Behavior.Ownership, item.Context.State);
+                _behaviors.Add(mount);
+                item.Scope.OnDispose(() => _behaviors.Remove(mount));
+            }
+            _behaviorClaims = claims;
+        }
+        catch (Exception error)
+        {
+            var errors = new List<Exception> { error };
+            foreach (var item in provisional.AsEnumerable().Reverse())
+                try { Composition.RunBehaviorCleanup(item.Scope.Dispose); } catch (Exception cleanup) { errors.Add(cleanup); }
+            Composition.ThrowAll(errors, "Behavior attachment failed.");
+        }
+    }
 
     internal void Attach(Element child)
     {
@@ -198,11 +377,59 @@ public sealed class Element : IDisposable
         if (IsDisposed) throw new ObjectDisposedException(Name);
     }
 
+    internal SemanticSnapshot? CreateSemanticSnapshot(IReadOnlyList<SemanticSnapshot> children) => _semantics is null ? null : new SemanticSnapshot(
+        new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration), _semantics.Role, _semantics.Name, _semantics.Value, _semantics.Enabled,
+        _semantics.Focused, _semantics.Selected, _semantics.Actions, children);
+
+    internal bool IsCurrent(SemanticIdentity identity) => !IsDisposed && identity.Generation == _semanticGeneration && (_semantics is not null || _semanticGeneration == 0);
+
+    internal SemanticSnapshot CreateStructuralSemanticSnapshot(IReadOnlyList<SemanticSnapshot> children) => new(
+        new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration), SemanticRole.Group, Name, null, true, false, false, SemanticAction.None, children);
+
+    /// <summary>Starts a bounded, composition-owned sample for an eligible transition specification.</summary>
+    public void StartTransition<T>(Property<T> property, T value)
+    {
+        Composition.CheckThread();
+        Composition.ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        (_presentation ?? throw new InvalidOperationException("An element needs a presentation before transition samples can start.")).Start(property, value);
+    }
+
+    internal void AppendPresentationDump(StringBuilder dump)
+    {
+        _presentation?.AppendDump(dump);
+        foreach (var behavior in _behaviors.OrderBy(behavior => behavior.Name, StringComparer.Ordinal))
+            dump.Append("  behavior name=").Append(Quote(behavior.Name)).Append(" ownership=").Append(behavior.Ownership)
+                .Append(" state=[").Append(string.Join(',', behavior.State.OrderBy(item => item.Key).Select(item => item.Key + "=" + (item.Value ? "true" : "false")))).Append("]\n");
+        if (_semantics is not null)
+            dump.Append("  semantic element=").Append(Id.ToString(CultureInfo.InvariantCulture)).Append(" generation=")
+                .Append(_semanticGeneration.ToString(CultureInfo.InvariantCulture)).Append(" role=").Append(_semantics.Role)
+                .Append(" enabled=").Append(_semantics.Enabled ? "true" : "false").Append(" focused=").Append(_semantics.Focused ? "true" : "false")
+                .Append(" selected=").Append(_semantics.Selected ? "true" : "false").Append(" actions=").Append(_semantics.Actions).Append('\n');
+    }
+
+    private void SetSemantics(SemanticDeclaration semantics)
+    {
+        _semantics = semantics;
+        _semanticGeneration = checked(_semanticGeneration + 1);
+        Composition.InvalidateSemantics();
+    }
+
+    private static void ValidateOwnership(BehaviorOwnership ownership)
+    {
+        const BehaviorOwnership all = BehaviorOwnership.Focus | BehaviorOwnership.Action | BehaviorOwnership.Semantics;
+        if ((ownership & ~all) != 0 || (ownership.HasFlag(BehaviorOwnership.Action) && !ownership.HasFlag(BehaviorOwnership.Semantics)))
+            throw new ArgumentException("Behavior ownership must use finite claims and actions require semantic ownership.", nameof(ownership));
+    }
+
     public void Dispose()
     {
         Composition.CheckThread();
+        Composition.ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
         IsDisposed = true;
+        Composition.InvalidateSemantics();
+        Composition.Transitions.Remove(this);
         var children = _children.ToArray();
         _children.Clear();
         List<Exception>? errors = null;
@@ -222,6 +449,9 @@ public sealed class Element : IDisposable
         catch (Exception exception) { (errors ??= []).Add(exception); }
         Composition.ThrowAll(errors, "Element cleanup failed.");
     }
+
+    private sealed record BehaviorMount(string Name, BehaviorOwnership Ownership, IReadOnlyDictionary<BehaviorState, bool> State);
+    private static string Quote(string value) => DiagnosticText.Quote(value);
 }
 
 /// <summary>The only factory context; it creates unattached content until a region commits it.</summary>
@@ -239,6 +469,7 @@ public sealed class CompositionContext : IDisposable
     /// <summary>Creates the one root supplied by this conditional or keyed-item factory.</summary>
     public Element Element(string name)
     {
+        _composition.ThrowIfBehaviorAttachment();
         ThrowIfInactive();
         if (_root is not null) throw new InvalidOperationException("A content factory creates exactly one root element.");
         _root = _composition.Create(_parent, name, attach: false, this);
@@ -248,6 +479,7 @@ public sealed class CompositionContext : IDisposable
     /// <summary>Adds fixed authored structure below a factory-created element.</summary>
     public Element Child(Element parent, string name)
     {
+        _composition.ThrowIfBehaviorAttachment();
         ThrowIfInactive();
         var root = Root;
         if (!root.IsAncestorOf(parent)) throw new ArgumentException("A content factory can only add children below its provisional root.", nameof(parent));
@@ -286,6 +518,7 @@ public sealed class CompositionContext : IDisposable
     public void Dispose()
     {
         _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
         if (_disposed) return;
         _disposed = true;
         if (!_committed) _root?.Dispose();
@@ -331,11 +564,17 @@ public sealed class ConditionalRegion : IDisposable
     public bool IsDisposed { get; private set; }
 
     /// <summary>Re-evaluates the condition. Usual callers let the owned effect invoke this.</summary>
-    public void Refresh() => Update(_active!());
+    public void Refresh()
+    {
+        _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
+        Update(_active!());
+    }
 
     public void Update(bool active)
     {
         _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
         if (_updating) throw new InvalidOperationException("A conditional region cannot update reentrantly.");
         _updating = true;
@@ -381,6 +620,7 @@ public sealed class ConditionalRegion : IDisposable
     public void Dispose()
     {
         _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
         IsDisposed = true;
         List<Exception>? errors = null;
@@ -427,11 +667,17 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
     public bool IsDisposed { get; private set; }
 
     /// <summary>Re-evaluates the source. Usual callers let the owned effect invoke this.</summary>
-    public void Refresh() => Update(_source!());
+    public void Refresh()
+    {
+        _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
+        Update(_source!());
+    }
 
     public void Update(IEnumerable<TItem> items)
     {
         _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
         ArgumentNullException.ThrowIfNull(items);
         if (IsDisposed) return;
         if (_updating) throw new InvalidOperationException("A keyed region cannot update reentrantly.");
@@ -521,6 +767,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
     public void Dispose()
     {
         _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
         IsDisposed = true;
         List<Exception>? errors = null;

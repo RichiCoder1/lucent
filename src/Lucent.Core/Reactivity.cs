@@ -697,6 +697,7 @@ public sealed class ReactiveScope : IDisposable
     private readonly ReactiveGraph _graph;
     private readonly List<IDisposable> _owned = [];
     private ReactiveScope? _parent;
+    private Action? _mutationGuard;
 
     internal ReactiveScope(ReactiveGraph graph, ReactiveScope? parent, string name)
     {
@@ -712,6 +713,7 @@ public sealed class ReactiveScope : IDisposable
     public string Name { get; }
     public ReactiveScope? Parent => _parent;
     public bool IsDisposed { get; private set; }
+    internal ReactiveGraph Graph => _graph;
     public ReactiveScope CreateChild(string name) { CheckActive(); ReactiveGraph.ValidateName(name, nameof(name)); return new ReactiveScope(_graph, this, name); }
     public Signal<T> Signal<T>(T value, string name) { CheckActive(); ReactiveGraph.ValidateName(name, nameof(name)); return Own(new Signal<T>(_graph, value, name, this)); }
     public Derived<T> Derived<T>(Func<T> compute, string name) { CheckActive(); ArgumentNullException.ThrowIfNull(compute); ReactiveGraph.ValidateName(name, nameof(name)); return Own(new Derived<T>(_graph, compute, name, this)); }
@@ -724,6 +726,7 @@ public sealed class ReactiveScope : IDisposable
     public void Dispose()
     {
         _graph.CheckThread();
+        _mutationGuard?.Invoke();
         if (IsDisposed) return;
         IsDisposed = true;
         var owned = _owned.ToArray();
@@ -741,10 +744,13 @@ public sealed class ReactiveScope : IDisposable
     }
 
     internal void Detach(IDisposable value) => _owned.Remove(value);
+    internal void SetMutationGuard(Action guard) => _mutationGuard = guard ?? throw new ArgumentNullException(nameof(guard));
+    internal void CheckMutationGuard() { _graph.CheckThread(); _mutationGuard?.Invoke(); }
 
     private void CheckActive()
     {
         _graph.CheckThread();
+        _mutationGuard?.Invoke();
         if (IsDisposed) throw new ObjectDisposedException(Name);
     }
 

@@ -37,8 +37,9 @@ function Assert-PublicApi([string] $AssemblyPath, [bool] $ExpectFailure) {
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prior
     if ($ExpectFailure) {
-        if ($exitCode -eq 0 -or ($output -join "`n") -notmatch 'Forbidden Core public API type: .*SDL3.SDL\+WindowFlags') {
-            throw "Compiled metadata inspection did not reject the aliased, multiline generic platform API fixture: $($output -join "`n")"
+        $text = $output -join "`n"
+        if ($exitCode -eq 0 -or $text -notmatch 'Forbidden Core public API type: .*SDL3.SDL\+WindowFlags' -or $text -notmatch 'Forbidden Core runtime discovery type: System.ComponentModel.TypeDescriptor') {
+            throw "Compiled metadata inspection did not report both platform and runtime-discovery fixture violations: $text"
         }
     }
     elseif ($exitCode -ne 0) { throw "Compiled Core public API inspection failed: $($output -join "`n")" }

@@ -5,7 +5,10 @@ using System.Reflection.PortableExecutable;
 using Lucent.Core;
 
 if (args.Length == 0)
-    return ReactiveContracts.Run() == 0 ? CompositionContracts.Run() : 1;
+{
+    if (ReactiveContracts.Run() != 0 || CompositionContracts.Run() != 0) return 1;
+    return PresentationContracts.Run();
+}
 if (args.Length != 1)
     return 2;
 
@@ -13,6 +16,13 @@ using var stream = File.OpenRead(args[0]);
 using var pe = new PEReader(stream);
 var metadata = pe.GetMetadataReader();
 var provider = new TypeNameProvider();
+var violations = new List<string>();
+foreach (var handle in metadata.TypeReferences)
+{
+    var referenced = provider.GetTypeFromReference(metadata, handle, 0);
+    if (IsRuntimeDiscoveryType(referenced))
+        violations.Add($"Forbidden Core runtime discovery type: {referenced}");
+}
 foreach (var handle in metadata.TypeDefinitions)
 {
     var type = metadata.GetTypeDefinition(handle);
@@ -21,13 +31,11 @@ foreach (var handle in metadata.TypeDefinitions)
     foreach (var exposed in ExposedTypes(metadata, type, provider))
     {
         if (IsForbidden(exposed))
-        {
-            Console.Error.WriteLine($"Forbidden Core public API type: {exposed}");
-            return 1;
-        }
+            violations.Add($"Forbidden Core public API type: {exposed}");
     }
 }
-return 0;
+foreach (var violation in violations.Distinct(StringComparer.Ordinal)) Console.Error.WriteLine(violation);
+return violations.Count == 0 ? 0 : 1;
 
 static IEnumerable<string> ExposedTypes(MetadataReader metadata, TypeDefinition type, TypeNameProvider provider)
 {
@@ -77,6 +85,9 @@ static IEnumerable<string> ExposedTypes(MetadataReader metadata, TypeDefinition 
 static bool IsForbidden(string type) => type.Split('|').Any(part =>
     new[] { "SDL3", "SkiaSharp", "Windows.Win32", "Microsoft.Windows.CsWin32", "Lucent.Platform.Windows" }
         .Any(prefix => part.StartsWith(prefix, StringComparison.Ordinal)));
+
+static bool IsRuntimeDiscoveryType(string type) => type is "System.Reflection.Assembly" or "System.Reflection.MemberInfo" or "System.Reflection.MethodInfo" or "System.Reflection.PropertyInfo" or "System.Reflection.FieldInfo" or "System.ComponentModel.TypeDescriptor" or "System.ComponentModel.PropertyDescriptor"
+    || new[] { "System.Dynamic", "System.Linq.Expressions", "System.Runtime.Loader", "System.Text.Json", "System.Xml" }.Any(prefix => type.StartsWith(prefix, StringComparison.Ordinal));
 
 internal sealed class TypeNameProvider : ISignatureTypeProvider<string, object?>
 {
