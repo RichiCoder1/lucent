@@ -11,6 +11,7 @@ public static class M0Window {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
@@ -57,6 +58,7 @@ try {
             $deadline = [Environment]::TickCount64 + 10000
             do { Start-Sleep -Milliseconds 100; $process.Refresh() } until ($process.MainWindowHandle -ne 0 -or $process.HasExited -or [Environment]::TickCount64 -ge $deadline)
             if ($process.HasExited -or $process.MainWindowHandle -eq 0) { throw "Iteration $iteration did not present a window." }
+            if (-not [M0Window]::SetWindowPos($process.MainWindowHandle, [IntPtr](-1), 0, 0, 0, 0, 0x0013)) { throw "Iteration $iteration could not expose the presentation for external sampling." }
             Start-Sleep -Milliseconds 500
             $client = [M0Window+RECT]::new()
             if (-not [M0Window]::GetClientRect($process.MainWindowHandle, [ref]$client) -or $client.Right -ne 800 -or $client.Bottom -ne 500) { throw "Iteration $iteration did not expose the declared 800x500 backing output." }
