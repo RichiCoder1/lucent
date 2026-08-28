@@ -121,6 +121,7 @@ Also require post-GC return to the predeclared retained baseline and bounded gro
 A miss triggers diagnosis and optimization first. Changing hardware, scope, or a budget requires a new explicit evidence-backed decision; thresholds are not silently weakened after results are known.
 
 **Gate:** clean-machine launch from an unsigned self-contained NativeAOT directory/zip, checksums, exact dependency/license/native-asset inventory, warning-clean tests/publish, complete walkthrough, compact proof summary, no unexplained AOT suppressions, and an explicit pass for the declared visual/accessibility/IME gates. Add standard .NET activities/metrics only for real observed operations, with no listener/exporter by default and a fixed low-cardinality tag allowlist.
+
 ## Milestone 7 — `.lui` and optimized DevX (`0.2`)
 
 Design `.lui` as the preferred opinionated authoring surface over the frozen framework model. Lower to ordinary supported C# APIs where practical and to narrow generated dependency/registration calls only for measured optimization. Generated readability is useful but secondary because output remains an implementation detail.
