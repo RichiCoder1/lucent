@@ -99,11 +99,13 @@ function Select-Checks([string[]] $ChangedPaths, [string[]] $UnsafePaths) {
         $lower = $path.ToLowerInvariant()
         $gate = if ($lower -match '^src/lucent\.core/.*\.cs$|^tests/lucent\.core\.tests/.*\.cs$') { 'core' }
             elseif ($lower -match '^src/lucent\.renderer\.skia/.*\.cs$|^tests/lucent\.renderer\.skia\.tests/.*\.cs$') { 'renderer' }
+            elseif ($lower -match '^src/lucent\.platform\.windows/.*\.cs$|^tests/lucent\.platform\.windows\.tests/.*\.cs$') { 'platform' }
             elseif ($lower -match '^apps/lucent\.issuebrowser/.*\.cs$|^tests/lucent\.issuebrowser\.tests/.*\.cs$') { 'issue' }
             else { 'fallback' }
         $reason = switch ($gate) {
             'core' { 'Core production or contract-test source changed' }
             'renderer' { 'Renderer production or contract-test source changed' }
+            'platform' { 'Windows presenter production or contract-test source changed' }
             'issue' { 'Issue Browser or contract-test source changed' }
             default { 'Unknown, shared, build, configuration, architecture, or platform path' }
         }
@@ -121,6 +123,9 @@ function Select-Checks([string[]] $ChangedPaths, [string[]] $UnsafePaths) {
     }
     if (@($normalized | Where-Object Gate -eq 'renderer').Count -gt 0) {
         $checks.Add((New-DotnetCheck 'Renderer contracts' 'Renderer-only changes have a focused headless/AOT seam check' 'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj'))
+    }
+    if (@($normalized | Where-Object Gate -eq 'platform').Count -gt 0) {
+        $checks.Add((New-DotnetCheck 'Windows presenter contracts' 'Windows-only changes have a focused DPI/resource/frame check' 'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj'))
     }
     if (@($normalized | Where-Object Gate -eq 'issue').Count -gt 0) {
         $checks.Add((New-DotnetCheck 'Issue Browser contracts' 'Issue Browser changes have a focused composition contract check' 'tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj'))

@@ -103,13 +103,13 @@ The retained scene contains renderer-facing paint commands without SDL, HWND, fr
 
 ## Rendering and presentation
 
-The initial internal seam is equivalent to:
+The initial internal seam is:
 
 ```text
-Paint(RetainedScene, SKCanvas, FrameGeometry)
+SkiaSceneRenderer.Render(RetainedScene, SKCanvas)
 ```
 
-`FrameGeometry` makes logical viewport, backing-pixel size, scale, and color format explicit. The presenter owns the target surface and frame lifecycle.
+Windows owns a `WindowsViewport`: SDL render output is the backing-pixel size, `GetDpiForWindow / 96` is the only scale authority, and logical viewport dimensions are backing pixels divided by that scale. Per-Monitor V2 startup fails unless the effective thread context is already Per-Monitor V2. Skia applies that scale once; SDL receives the matching backing-sized texture without logical presentation scaling. A zero backing size retains its pending frame and waits for the next window event rather than spinning. The CPU presenter owns its target surface and frame lifecycle.
 
 Production starts with a persistent CPU Skia raster surface and persistent SDL streaming texture. Resources are recreated only when backing size or format changes. Format, alpha, vsync, logical-to-device transforms, and mixed-DPI behavior are explicit; production rendering does not read frames back.
 
@@ -156,4 +156,4 @@ The Issue Browser contains no test mode, capture orchestration, or proof runner.
 
 Each pull request runs contract/integration tests, the reference walkthrough, and one `win-x64` NativeAOT publish/smoke. Larger performance corpora, clean-machine packaging, selective visual review, and manual accessibility/IME checks run locally, nightly when economical, or at milestone gates. Large captures, binaries, and traces are CI artifacts; Git retains scripts and compact summaries.
 
-`tools/Verify-Affected.ps1` is an optional focused runner for changed Core, renderer, and Issue Browser source/test files. Platform, shared, build/configuration, architecture, unknown, deleted, and renamed paths fail closed to `tools/Verify-M1.ps1`. The M1 script remains the mandatory final milestone and issue-closure gate.
+`tools/Verify-Affected.ps1` is an optional focused runner for changed Core, renderer, Issue Browser, and Windows-presentation source/test files. Shared, build/configuration, architecture, unknown, deleted, and renamed paths fail closed to `tools/Verify-M1.ps1`. The M1 script remains the mandatory final milestone and issue-closure gate.

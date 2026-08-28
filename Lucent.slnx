@@ -5,5 +5,6 @@
   <Project Path="src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
   <Project Path="tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj" />
   <Project Path="tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj" />
+  <Project Path="tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj" />
   <Project Path="tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj" />
 </Solution>
