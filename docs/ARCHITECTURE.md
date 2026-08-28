@@ -66,7 +66,7 @@ Async cancellation is resource cleanup, not the correctness mechanism. Generatio
 
 ### Composition
 
-Composition creates stable retained elements and explicit structural regions. Conditional and keyed collection operations own identity and disposal; there is no virtual DOM or general reconciliation pass.
+Composition creates stable retained elements and explicit structural regions. Conditional and keyed collection operations own identity and disposal; there is no virtual DOM or general reconciliation pass. Keyed identity follows the normal .NET dictionary contract: equality and hash behavior must remain stable and side-effect-free while an item is mounted. Supporting mutable or composition-mutating key comparisons is outside the `0.1` contract.
 
 For `0.1`, source-owned C# component recipes accept explicit content or child factories. General control templates and named `.lui` slot syntax are deferred until the C# framework surface is frozen.
 
