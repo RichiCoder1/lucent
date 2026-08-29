@@ -13,7 +13,7 @@ public enum PointerCommandKind { Down, Move, Up, Cancel }
 public enum PointerButton { None, Primary, Secondary, Middle }
 [Flags] public enum KeyModifiers { None = 0, Shift = 1, Control = 2, Alt = 4, Meta = 8 }
 public enum KeyCommandKind { Down, Up }
-public enum Key { Tab, Enter, Space, Escape, Left, Right, Up, Down, Home, End }
+public enum Key { Tab, Enter, Space, Escape, Left, Right, Up, Down, Home, End, Backspace, Delete, A, C, V, X, Y, Z }
 public enum FocusTraversalDirection { Next, Previous }
 public enum InputModality { None, Pointer, Keyboard }
 public enum FocusChangeReason { Pointer, Keyboard, Traversal, Disposed, Disabled, Hidden, Reordered, SceneChanged }
@@ -97,6 +97,16 @@ public sealed class FocusRoute
     public ElementIdentity Target { get; }
 }
 
+public sealed class TextRoute
+{
+    private bool _active = true; private bool _handled;
+    internal TextRoute(TextInputCommand command, ElementIdentity target) { Command = command; Target = target; }
+    public TextInputCommand Command { get; } public ElementIdentity Target { get; }
+    public bool Handled { get { Check(); return _handled; } set { Check(); _handled = value; } }
+    internal bool Finish() { _active = false; return _handled; }
+    private void Check() { if (!_active) throw new InvalidOperationException("A routed text context expires when its callback returns."); }
+}
+
 /// <summary>Composition-owned UI-thread router. It accepts only retained Core metadata and portable commands.</summary>
 public sealed class InputRouter
 {
@@ -104,9 +114,12 @@ public sealed class InputRouter
     private readonly List<Registration<Action<PointerRoute>>> _pointer = [];
     private readonly List<Registration<Action<KeyRoute>>> _key = [];
     private readonly List<Registration<Action<FocusRoute>>> _focus = [];
+    private readonly List<Registration<Action<TextRoute>>> _text = [];
     private readonly List<Registration<Action<PointerCaptureLoss>>> _captureLoss = [];
     private readonly Dictionary<long, Focusable> _focusable = [];
     private readonly Dictionary<long, Scrollable> _scrollable = [];
+    private readonly Dictionary<long, TextFieldState> _textFields = [];
+    private readonly Dictionary<TextClipboardRequest, ClipboardTicket> _clipboardTickets = [];
     private readonly Dictionary<int, Capture> _captures = [];
     private RetainedScene? _scene;
     private Dictionary<long, RetainedInputElement> _input = [];
@@ -203,6 +216,67 @@ public sealed class InputRouter
         finally { Exit(); }
     }
 
+    public InputDispatchResult DispatchText(TextInputCommand command)
+    {
+        Enter(); try
+        {
+            command.Validate(); var errors = new List<Exception>();
+            if (EnsureScene(errors) is { } rejection) return Reject(rejection, "Text/" + command.Kind, errors);
+            SyncAvailability(errors);
+            if (_focused is not { } focus || !Eligible(focus.Identity) || !_textFields.ContainsKey(focus.Identity.ElementId)) return Reject(InputRejection.NoTarget, "Text/" + command.Kind, errors);
+            var handled = false;
+            foreach (var callback in Snapshot(_text, [focus.Identity]))
+            {
+                var route = new TextRoute(command, callback.Identity);
+                try { callback.Callback(route); } catch (Exception error) { errors.Add(error); }
+                handled |= route.Finish(); if (handled) break;
+            }
+            SetLast("Text/" + command.Kind, InputDispatchStatus.Delivered, InputRejection.None, focus.Identity, [focus.Identity], handled); Throw(errors);
+            return new(InputDispatchStatus.Delivered, InputRejection.None, focus.Identity, [focus.Identity], handled);
+        }
+        finally { Exit(); }
+    }
+
+    /// <summary>Adapters perform clipboard I/O after retrieving a one-shot request from its focused origin.</summary>
+    public bool TryTakeClipboardRequest(out TextClipboardRequest request)
+    {
+        Enter(); try
+        {
+            request = default!;
+            if (_focused is not { } focus || !Eligible(focus.Identity) || !_textFields.TryGetValue(focus.Identity.ElementId, out var state) || !state.TryTakeClipboard(out request)) return false;
+            _clipboardTickets.Add(request, new(focus.Identity, state, state.EditGeneration)); return true;
+        }
+        finally { Exit(); }
+    }
+    /// <summary>Drops stale, replayed, moved-focus, or disposed clipboard completions without affecting another field.</summary>
+    public bool CompleteClipboardRequest(TextClipboardRequest request, bool succeeded, string? text = null)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        Enter(); try
+        {
+            if (!_clipboardTickets.Remove(request, out var ticket) || ticket.State.IsDisposed || ticket.State.EditGeneration != ticket.Generation || !_textFields.TryGetValue(ticket.Origin.ElementId, out var state) || !ReferenceEquals(state, ticket.State)) return false;
+            if (request.Operation is TextClipboardOperation.Paste or TextClipboardOperation.Cut && (_focused is not { } focus || focus.Identity != ticket.Origin || !Eligible(ticket.Origin))) return false;
+            return ticket.State.CompleteClipboard(request, succeeded, text);
+        }
+        finally { Exit(); }
+    }
+    /// <summary>Uses the installed shaped text snapshot to anchor native candidates at the focused caret.</summary>
+    public bool TryGetCaretGeometry(out LayoutRect rectangle)
+    {
+        Enter(); try
+        {
+            rectangle = default;
+            _composition.Flush();
+            if (_scene is null || !ValidateScene(_scene) || _focused is not { } focus || !Eligible(focus.Identity) || !_textFields.TryGetValue(focus.Identity.ElementId, out var state)) return false;
+            var box = _scene.Boxes.SingleOrDefault(value => value.Identity == focus.Identity); if (box.Identity != focus.Identity) return false;
+            var x = box.Bounds.X;
+            if (box.Text is { Runs.Count: > 0 } shaped)
+                x += SceneLayout.TextPosition(shaped, state.DisplayText, state.DisplayCaret) - SceneLayout.TextViewOffset(shaped, state.DisplayText, state.DisplayCaret, box.Bounds.Width);
+            rectangle = new(x, box.Bounds.Y, 1, box.Bounds.Height); return true;
+        }
+        finally { Exit(); }
+    }
+
     public bool MoveFocus(FocusTraversalDirection direction)
     {
         Enter(); try
@@ -229,6 +303,7 @@ public sealed class InputRouter
     internal void RegisterPointer(long elementId, ReactiveScope scope, Action<PointerRoute> callback) => Register(_pointer, elementId, scope, callback);
     internal void RegisterKey(long elementId, ReactiveScope scope, Action<KeyRoute> callback) => Register(_key, elementId, scope, callback);
     internal void RegisterFocus(long elementId, ReactiveScope scope, Action<FocusRoute> callback) => Register(_focus, elementId, scope, callback);
+    internal void RegisterText(long elementId, ReactiveScope scope, Action<TextRoute> callback) => Register(_text, elementId, scope, callback);
     internal void RegisterCaptureLoss(long elementId, ReactiveScope scope, Action<PointerCaptureLoss> callback) => Register(_captureLoss, elementId, scope, callback);
     internal void RegisterFocusable(long elementId, ReactiveScope scope, bool tabStop, BehaviorContext context)
     {
@@ -241,6 +316,15 @@ public sealed class InputRouter
         if (_scrollable.ContainsKey(elementId)) throw new InvalidOperationException("An element has one scroll behavior.");
         var entry = new Scrollable(state); _scrollable.Add(elementId, entry);
         scope.OnDispose(() => { if (_scrollable.TryGetValue(elementId, out var current) && ReferenceEquals(current, entry)) _scrollable.Remove(elementId); });
+    }
+    internal void RegisterTextField(long elementId, ReactiveScope scope, TextFieldState state)
+    {
+        if (_textFields.ContainsKey(elementId)) throw new InvalidOperationException("An element has one text behavior.");
+        _textFields.Add(elementId, state); scope.OnDispose(() =>
+        {
+            _textFields.Remove(elementId);
+            foreach (var request in _clipboardTickets.Where(ticket => ReferenceEquals(ticket.Value.State, state)).Select(ticket => ticket.Key).ToArray()) _clipboardTickets.Remove(request);
+        });
     }
     internal void RemoveElement(Element element, PointerCaptureLossReason reason)
     {
@@ -296,7 +380,7 @@ public sealed class InputRouter
             catch (Exception error) { errors.Add(error); }
         }
         _disposed = true;
-        _pointer.Clear(); _key.Clear(); _focus.Clear(); _captureLoss.Clear(); _focusable.Clear(); _scrollable.Clear(); _input.Clear(); _scene = null; _focused = null; _pendingFocus = null;
+        _pointer.Clear(); _key.Clear(); _focus.Clear(); _text.Clear(); _captureLoss.Clear(); _focusable.Clear(); _scrollable.Clear(); _textFields.Clear(); _clipboardTickets.Clear(); _input.Clear(); _scene = null; _focused = null; _pendingFocus = null;
         Throw(errors);
     }
 
@@ -529,6 +613,7 @@ public sealed class InputRouter
     private sealed class Registration<T>(long elementId, long ordinal, T callback) where T : class { public long ElementId { get; } = elementId; public long Ordinal { get; } = ordinal; public T Callback { get; } = callback; }
     private sealed class Focusable(bool tabStop, BehaviorContext context) { public bool TabStop { get; } = tabStop; public BehaviorContext Context { get; } = context; }
     private sealed class Scrollable(ScrollViewportState state) { public ScrollViewportState State { get; } = state; public ScrollOffset InstalledOffset { get; set; } = state.Offset; }
+    private readonly record struct ClipboardTicket(ElementIdentity Origin, TextFieldState State, long Generation);
     private readonly record struct Capture(ElementIdentity Owner, long Generation);
     private readonly record struct FocusState(ElementIdentity Identity, ElementIdentity[] Path, int Order, FocusChangeReason Reason);
     private readonly record struct PendingFocus(ElementIdentity? Identity, FocusChangeReason Reason);

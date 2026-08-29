@@ -8,7 +8,7 @@ internal static class WindowsHostContracts
     public static void InputAdapterAndRoutingContract()
     {
     Assert(WindowsInputAdapter.MapKey(SDL.Keycode.Tab) == Key.Tab && WindowsInputAdapter.MapKey(SDL.Keycode.KpEnter) == Key.Enter &&
-        WindowsInputAdapter.MapKey(SDL.Keycode.A) is null && WindowsInputAdapter.MapKey(SDL.Keycode.RAlt) is null,
+        WindowsInputAdapter.MapKey(SDL.Keycode.A) is null && WindowsInputAdapter.MapShortcut(SDL.Keycode.A, KeyModifiers.Control) == Key.A && WindowsInputAdapter.MapShortcut(SDL.Keycode.A, KeyModifiers.Control | KeyModifiers.Alt) is null && WindowsInputAdapter.MapShortcut(SDL.Keycode.A, KeyModifiers.Meta | KeyModifiers.Alt) is null && WindowsInputAdapter.MapShortcut(SDL.Keycode.A, KeyModifiers.None) is null && WindowsInputAdapter.MapKey(SDL.Keycode.RAlt) is null,
         "Command-key translation invented printable, AltGr, or dead-key text input.");
     var modifiers = WindowsInputAdapter.MapModifiers(SDL.Keymod.LShift | SDL.Keymod.LCtrl | SDL.Keymod.RAlt | SDL.Keymod.RGUI);
     Assert(modifiers ==
@@ -43,6 +43,19 @@ internal static class WindowsHostContracts
         "Mapped key down did not route to focused Core behavior.");
     adapter.Dispose();
     Assert(!adapter.Dispatch(new SDL.Event { Key = new() { Type = SDL.EventType.KeyDown, Key = SDL.Keycode.Tab, Down = true } }), "Disposed adapter accepted a stale callback.");
+
+    var textGraph = new ReactiveGraph(); using var textComposition = new Composition(textGraph, "windows-text-input"); var textTheme = new ThemeContext(textComposition.Root.Scope, ControlThemes.Light);
+    Controls.Panel(textComposition.Root, textTheme, "root", Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f)); var textField = textComposition.Child(textComposition.Root, "field"); Controls.TextField(textField, textTheme, "Field", "a", Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f));
+    var textRouter = textComposition.Input; Assert(textRouter.SetScene(SceneLayout.Project(textComposition, new(40, 20, 1), renderer)) && textRouter.MoveFocus(FocusTraversalDirection.Next), "Text adapter field did not focus."); textComposition.Flush(); Assert(textRouter.SetScene(SceneLayout.Project(textComposition, new(40, 20, 1), renderer)), "Focused text field scene did not converge.");
+    var starts = 0; var stops = 0; SDL.Rect? area = null; var active = false;
+    using (var textAdapter = new WindowsInputAdapter(textComposition, 1, textInput: new TextInputTransport(_ => active, _ => { starts++; active = true; return true; }, _ => { stops++; active = false; return true; }, (_, value, _) => { area = value; return true; })))
+    {
+        textAdapter.RefreshTextInput(); Assert(starts == 1 && area is { W: 1, H: 20 }, "Focused text field did not start SDL input with its Core caret rectangle.");
+        Assert(textAdapter.DispatchText(new(TextInputKind.Preedit, "中", 0, 1)) && stops == 0 && starts == 1, "Handled preedit synchronized stale text geometry and stopped SDL input.");
+        textAdapter.Dispatch(new SDL.Event { Window = new() { Type = SDL.EventType.WindowFocusLost } }); Assert(!textAdapter.DispatchText(new(TextInputKind.Commit, "x")) && stops == 1 && starts == 1, "Window focus loss accepted queued text or failed to stop SDL input."); textAdapter.RefreshTextInput(); Assert(stops == 1 && starts == 1, "Refresh restarted text input while unfocused.");
+        textAdapter.Dispatch(new SDL.Event { Window = new() { Type = SDL.EventType.WindowFocusGained } }); Assert(starts == 2, "Window focus gain did not permit text input restart.");
+    }
+    Assert(stops == 2, "Text adapter disposal did not stop SDL text input.");
 
     }
 
@@ -195,15 +208,16 @@ internal static class WindowsHostContracts
     cleanupChild.AttachBehaviors(new ThrowingCaptureBehavior());
     var cleanupRouter = cleanupComposition.Input;
     Assert(cleanupRouter.SetScene(SceneLayout.Project(cleanupComposition, new(20, 20, 1), renderer)), "Cleanup scene rejected.");
-    var cleanupAdapter = new WindowsInputAdapter(cleanupComposition);
+    var stopCalls = 0;
+    var cleanupAdapter = new WindowsInputAdapter(cleanupComposition, 1, textInput: new TextInputTransport(_ => true, _ => true, _ => { stopCalls++; throw new InvalidOperationException("stop cleanup"); }, (_, _, _) => true));
     foreach (var pointer in new uint[] { 31, 32 }) _ = cleanupAdapter.Dispatch(new SDL.Event { Button = new() { Type = SDL.EventType.MouseButtonDown, Which = pointer, Button = 1, X = 1, Y = 1 } });
     try { cleanupAdapter.Dispatch(new SDL.Event { Window = new() { Type = SDL.EventType.WindowFocusLost } }); throw new InvalidOperationException("Focus-loss cancellation did not aggregate failures."); }
-    catch (AggregateException error) { Assert(error.Flatten().InnerExceptions.Count == 2, "Focus-loss cancellation did not continue after each callback failure."); }
+    catch (AggregateException error) { Assert(error.Flatten().InnerExceptions.Count == 3 && stopCalls == 1, "Focus-loss cleanup did not independently continue through pointer, text, and SDL stop failures."); }
     Assert(!cleanupRouter.Dump().Contains("capture pointer=31", StringComparison.Ordinal) && !cleanupRouter.Dump().Contains("capture pointer=32", StringComparison.Ordinal) && cleanupAdapter.ConsumeRepaintRequest() && !cleanupAdapter.ConsumeRepaintRequest(),
         "Focus-loss cancellation retained capture or requested more than one repaint.");
     foreach (var pointer in new uint[] { 33, 34 }) _ = cleanupAdapter.Dispatch(new SDL.Event { Button = new() { Type = SDL.EventType.MouseButtonDown, Which = pointer, Button = 1, X = 1, Y = 1 } });
     try { cleanupAdapter.Dispose(); throw new InvalidOperationException("Dispose cancellation did not aggregate failures."); }
-    catch (AggregateException error) { Assert(error.Flatten().InnerExceptions.Count == 2, "Dispose cancellation did not continue after each callback failure."); }
+    catch (AggregateException error) { Assert(error.Flatten().InnerExceptions.Count == 3 && stopCalls == 2, "Dispose cleanup did not independently continue through pointer, text, and SDL stop failures."); }
         Assert(!cleanupRouter.Dump().Contains("capture pointer=33", StringComparison.Ordinal) && !cleanupRouter.Dump().Contains("capture pointer=34", StringComparison.Ordinal) && !cleanupAdapter.Dispatch(new SDL.Event { Key = new() { Type = SDL.EventType.KeyDown, Key = SDL.Keycode.Tab, Down = true } }),
         "Disposed adapter left Core capture state or accepted stale dispatch.");
     }

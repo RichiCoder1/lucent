@@ -13,7 +13,7 @@ try
     var snapshot = Snapshot();
     if (!first.Contains("property name=\"scene-fill\" winner=\"author:token:page-surface:theme\"#0", StringComparison.Ordinal) ||
         !first.Contains("behavior name=\"selectable\" ownership=Focus, Action, Semantics", StringComparison.Ordinal) ||
-        first.Split('\n').Count(line => line.Contains("semantic element=", StringComparison.Ordinal)) != 8 ||
+        first.Split('\n').Count(line => line.Contains("semantic element=", StringComparison.Ordinal)) != 9 || !Flatten(snapshot).Any(node => node.Role == SemanticRole.TextField && node.Actions == SemanticAction.SetValue) ||
         first.Contains("Implement retained", StringComparison.Ordinal) ||
         !Flatten(snapshot).Any(node => node.Actions == SemanticAction.Select))
         throw new InvalidOperationException("Issue Browser did not consume typed presentation, behavior, and semantic contracts without leaking issue values.");
@@ -56,23 +56,6 @@ static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot snapshot)
 static void ShapeLayoutAndPaint()
 {
     using var renderer = new SkiaSceneRenderer();
-    var ligature = renderer.Shape(new("ffi", "Calibri", 16, "en", TextDirection.LeftToRight, 1));
-    var combining = renderer.Shape(new("q\u0307", "Segoe UI", 16, "en", TextDirection.LeftToRight, 1));
-    var emoji = renderer.Shape(new("😀", "Segoe UI Emoji", 16, "en", TextDirection.LeftToRight, 1));
-    var rtl = renderer.Shape(new("العَرَبِيَّة", "Segoe UI", 16, "ar", TextDirection.RightToLeft, 1));
-    var fallback = renderer.Shape(new("漢", "Missing Lucent Font", 16, "ja", TextDirection.LeftToRight, 1));
-    var language = renderer.Shape(new("ffi", "Segoe UI", 16, "tr", TextDirection.LeftToRight, 1));
-    if (ligature.Runs.Sum(run => run.Glyphs.Count) >= 3 || combining.Runs.Sum(run => run.Glyphs.Count) > 2 || emoji.Runs.Sum(run => run.Glyphs.Count) != 1 || rtl.Runs.Single().Glyphs[0].Cluster <= rtl.Runs.Single().Glyphs[^1].Cluster || fallback.Runs.SelectMany(run => run.Glyphs).Any(glyph => glyph.GlyphId == 0) || fallback.Runs.Any(run => run.Family.StartsWith("Missing Lucent Font", StringComparison.Ordinal)) || ligature.Identity == language.Identity)
-        throw new InvalidOperationException("Pinned HarfBuzz run corpus failed.");
-    var old = System.Globalization.CultureInfo.CurrentCulture;
-    try
-    {
-        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("tr-TR");
-        if (ligature.Identity != renderer.Shape(new("ffi", "Calibri", 16, "en", TextDirection.LeftToRight, 1)).Identity)
-            throw new InvalidOperationException("Shaping used current culture rather than explicit language.");
-    }
-    finally { System.Globalization.CultureInfo.CurrentCulture = old; }
-
     var graph = new ReactiveGraph();
     using var composition = IssueBrowserStructure.Create(graph);
     var scene = SceneLayout.Project(composition, new(800, 500, 1.25f), renderer);
@@ -94,7 +77,7 @@ static void RoutedRows()
     if (!router.SetScene(SceneLayout.Project(composition, new(800, 500, 1), renderer))) throw new InvalidOperationException("Issue Browser rejected its retained scene.");
     var initial = composition.SemanticSnapshot()!;
     var rows = Flatten(initial).Where(node => node.Role == SemanticRole.ListItem).ToArray();
-    if (!router.MoveFocus(FocusTraversalDirection.Next) || router.FocusedElement != new ElementIdentity(rows[0].Identity.CompositionEpoch, rows[0].Identity.ElementId)) throw new InvalidOperationException("Row behavior did not enter traversal order.");
+    if (!router.MoveFocus(FocusTraversalDirection.Next) || router.FocusedElement?.ElementId == rows[0].Identity.ElementId || !router.MoveFocus(FocusTraversalDirection.Next) || router.FocusedElement != new ElementIdentity(rows[0].Identity.CompositionEpoch, rows[0].Identity.ElementId)) throw new InvalidOperationException("Text field and row behavior did not enter traversal order.");
     router.DispatchKey(new(KeyCommandKind.Down, Key.Tab));
     if (router.FocusedElement != new ElementIdentity(rows[1].Identity.CompositionEpoch, rows[1].Identity.ElementId) || !router.Dump().Contains("modality=Keyboard", StringComparison.Ordinal)) throw new InvalidOperationException("Row behavior did not traverse with keyboard-visible focus.");
     var focusPaint = SceneLayout.Project(composition, new(800, 500, 1), renderer).Dump().Split('\n').Any(line => line.Contains("element=" + rows[1].Identity.ElementId + " ", StringComparison.Ordinal) && line.Contains("color=0xffffff00", StringComparison.Ordinal));

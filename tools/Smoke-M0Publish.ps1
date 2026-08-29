@@ -89,7 +89,7 @@ function Get-EffectiveAppearance {
 
 function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
     $scale = $Dpi / 96.0
-    $headerX = [Math]::Round(20 * $scale); $headerY = [Math]::Round(45 * $scale)
+    $headerX = [Math]::Round(500 * $scale); $headerY = [Math]::Round(45 * $scale)
     $pageX = [Math]::Round(20 * $scale); $pageY = [Math]::Round(160 * $scale)
     if ($headerX -ge $Client.Right -or $pageX -ge $Client.Right -or $headerY -ge $Client.Bottom -or $pageY -ge $Client.Bottom) { throw "Iteration $Iteration did not expose enough client backing pixels for the scale proof." }
     $deadline = [Environment]::TickCount64 + 5000
@@ -120,7 +120,7 @@ function Assert-KeyboardFocusPixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+REC
         if ($desktop -eq [IntPtr]::Zero) { throw "Iteration $Iteration could not observe keyboard focus pixels." }
         try {
             $scale = $Dpi / 96.0
-            $x = [Math]::Round(20 * $scale); $y = [Math]::Round(67 * $scale)
+            $x = [Math]::Round(20 * $scale); $y = [Math]::Round(35 * $scale)
             if ($x -lt $Client.Right -and $y -lt $Client.Bottom -and (([M0Window]::GetPixel($desktop, $origin.X + $x, $origin.Y + $y) -band 0xffffff) -eq $Appearance.Focus)) { return "ordinary Tab input produced $($Appearance.Name) visible focus" }
         }
         finally { [void][M0Window]::ReleaseDC([IntPtr]::Zero, $desktop) }

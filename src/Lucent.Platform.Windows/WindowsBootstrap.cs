@@ -23,6 +23,8 @@ public static class WindowsBootstrap
             throw new PlatformNotSupportedException("M2 requires Windows 10 version 1607 or later.");
         EnablePerMonitorV2();
         RequireNativeAssets();
+        if (!SDL.SetHint("SDL_IME_IMPLEMENTED_UI", "composition"))
+            throw new InvalidOperationException("SDL_IME_IMPLEMENTED_UI hint was not accepted.");
         if (!SDL.Init(SDL.InitFlags.Video)) throw new InvalidOperationException($"SDL_Init: {SDL.GetError()}");
 
         nint window = 0;
@@ -43,7 +45,7 @@ public static class WindowsBootstrap
             using var clipboard = new WindowsClipboard();
             using var settingsListener = new WindowsSettingsListener(hwnd);
             var scheduler = new WindowsFrameScheduler();
-            using var input = new WindowsInputAdapter(composition);
+            using var input = new WindowsInputAdapter(composition, window, clipboard);
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
             _ = cursor.Activate();
@@ -70,6 +72,7 @@ public static class WindowsBootstrap
                 if (!scheduler.TryBegin(viewport)) continue;
                 var started = Stopwatch.GetTimestamp();
                 var scene = ProjectAndInstall(composition, new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale), sceneRenderer);
+                input.RefreshTextInput();
                 var projected = Stopwatch.GetTimestamp();
                 var phase = presenter.Present(scene, viewport, sceneRenderer);
                 scheduler.Complete(FrameTiming.FromTimestamps(started, projected, phase.Rasterized, phase.Uploaded, phase.Presented));

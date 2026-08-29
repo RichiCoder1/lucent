@@ -65,6 +65,9 @@ public static class Controls
         .When(VariantState.Pressed, Style.Empty.Set(SceneProperties.Fill, ControlThemes.AccentPressed))
         .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Focus).Set(SceneProperties.Foreground, ControlThemes.FocusForeground))
         .When(VariantState.Disabled, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Disabled));
+    private static readonly Style TextFieldStyle = RowStyle.Set(Arrangement.Clip, true).Set(SceneProperties.Fill, ControlThemes.Surface)
+        .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Focus).Set(SceneProperties.Foreground, ControlThemes.FocusForeground))
+        .When(VariantState.Disabled, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Disabled));
     private static readonly Style SelectableStyle = RowStyle.Set(Arrangement.Clip, true)
         .When(VariantState.Selected, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Selected))
         .When(VariantState.Pressed, Style.Empty.Set(SceneProperties.Fill, ControlThemes.AccentPressed).Set(SceneProperties.Foreground, ControlThemes.Surface))
@@ -97,6 +100,22 @@ public static class Controls
     public static void Button(Element element, ThemeContext theme, string label, Action? activate = null, Style? style = null)
     {
         label = Required(label, nameof(label)); Configure(element, theme, ButtonStyle.Set(SceneProperties.Text, label), style, new ButtonBehavior("button", new(SemanticRole.Button, label, actions: SemanticAction.Invoke), activate));
+    }
+    public static TextFieldState TextField(Element element, ThemeContext theme, string name, string value = "", Style? style = null)
+    {
+        name = Required(name, nameof(name)); TextFieldState.ValidateText(value);
+        var component = TextFieldStyle.Set(SceneProperties.Text, value);
+        Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
+        var state = new TextFieldState(element.Scope, element.Name + ".text", value);
+        Configure(element, theme, component, style, new TextFieldBehavior(state, name));
+        _ = element.Scope.Effect(() =>
+        {
+            element.UpdateControl(SceneProperties.Text, state.DisplayText.Length == 0 && !state.Focused ? name : state.DisplayText);
+            element.UpdateControl(SceneProperties.TextSelectionStart, state.Focused ? state.DisplaySelectionStart : null);
+            element.UpdateControl(SceneProperties.TextSelectionEnd, state.Focused ? state.DisplaySelectionEnd : null);
+            element.UpdateControl(SceneProperties.TextCaret, state.Focused ? state.DisplayCaret : null);
+        }, element.Name + ".text-value");
+        return state;
     }
     public static ControlState Selectable(Element element, ThemeContext theme, string label, Action? activate = null, Style? style = null)
     {

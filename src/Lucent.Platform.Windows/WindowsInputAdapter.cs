@@ -1,17 +1,25 @@
 using Lucent.Core;
 using SDL3;
+using System.Runtime.InteropServices;
 
 namespace Lucent.Platform.Windows;
 
-/// <summary>Converts SDL's bounded command keys and mouse events on the host UI thread; text/IME events remain unhandled until M3.</summary>
+/// <summary>Converts SDL input on the host UI thread; Core receives only portable commands and text.</summary>
 internal sealed class WindowsInputAdapter : IDisposable
 {
     private readonly InputRouter _router;
+    private readonly nint _window;
+    private readonly WindowsClipboard? _clipboard;
+    private readonly TextInputTransport _textInput;
     private readonly Dictionary<int, (float X, float Y)> _pointers = [];
     private bool _disposed;
+    private bool _windowFocused = true;
     private bool _repaintRequested;
 
-    internal WindowsInputAdapter(Composition composition) => _router = (composition ?? throw new ArgumentNullException(nameof(composition))).Input;
+    internal WindowsInputAdapter(Composition composition, nint window = 0, WindowsClipboard? clipboard = null, TextInputTransport? textInput = null)
+    {
+        _router = (composition ?? throw new ArgumentNullException(nameof(composition))).Input; _window = window; _clipboard = clipboard; _textInput = textInput ?? TextInputTransport.Sdl;
+    }
 
     internal bool Dispatch(SDL.Event @event)
     {
@@ -26,8 +34,14 @@ internal sealed class WindowsInputAdapter : IDisposable
             case SDL.EventType.KeyDown:
             case SDL.EventType.KeyUp:
                 return Key(@event.Key);
+            case SDL.EventType.TextInput:
+                return DispatchText(new(TextInputKind.Commit, Marshal.PtrToStringUTF8(@event.Text.Text) ?? ""));
+            case SDL.EventType.TextEditing:
+                return DispatchText(new(TextInputKind.Preedit, Marshal.PtrToStringUTF8(@event.Edit.Text) ?? "", @event.Edit.Start, @event.Edit.Length));
             case SDL.EventType.WindowFocusLost:
-                CancelPointers(); return false;
+                _windowFocused = false; CleanupInput(); return false;
+            case SDL.EventType.WindowFocusGained:
+                _windowFocused = true; SyncTextInput(); return false;
             default: return false;
         }
     }
@@ -53,11 +67,12 @@ internal sealed class WindowsInputAdapter : IDisposable
     }
 
     internal bool ConsumeRepaintRequest() { var requested = _repaintRequested; _repaintRequested = false; return requested; }
+    internal void RefreshTextInput() { if (!_disposed) SyncTextInput(); }
 
     public void Dispose()
     {
         if (_disposed) return;
-        try { CancelPointers(); }
+        try { CleanupInput(); }
         finally { _disposed = true; }
     }
 
@@ -83,9 +98,65 @@ internal sealed class WindowsInputAdapter : IDisposable
 
     private bool Key(SDL.KeyboardEvent @event)
     {
-        if (MapKey(@event.Key) is not { } key) return false;
-        _ = _router.DispatchKey(new(@event.Down ? KeyCommandKind.Down : KeyCommandKind.Up, key, MapModifiers(@event.Mod), @event.Down && @event.Repeat));
+        var modifiers = MapModifiers(@event.Mod); var key = MapKey(@event.Key) ?? MapShortcut(@event.Key, modifiers);
+        if (key is null) return false;
+        _ = _router.DispatchKey(new(@event.Down ? KeyCommandKind.Down : KeyCommandKind.Up, key.Value, modifiers, @event.Down && @event.Repeat));
+        if (@event.Down) Clipboard();
         return true;
+    }
+
+    internal bool DispatchText(TextInputCommand command)
+    {
+        if (!_windowFocused) return false;
+        if (command.Kind is TextInputKind.Commit or TextInputKind.Preedit)
+        {
+            if (!TextFieldState.TryNormalizeSingleLine(command.Text, out var text)) return false;
+            command = command with { Text = text };
+        }
+        try { var result = _router.DispatchText(command); _repaintRequested |= result.Handled; return result.Handled; }
+        catch (Exception error) when (error is ObjectDisposedException or ArgumentException) { return false; }
+    }
+    private bool CancelText()
+    {
+        try { var result = _router.DispatchText(new(TextInputKind.Cancel, "")); _repaintRequested |= result.Handled; return result.Handled; }
+        catch (ObjectDisposedException) { return false; }
+    }
+    private void Clipboard()
+    {
+        if (_clipboard is null || !_router.TryTakeClipboardRequest(out var request)) return;
+        if (request.Operation == TextClipboardOperation.Paste)
+        {
+            var read = _clipboard.Read(); _repaintRequested |= _router.CompleteClipboardRequest(request, read.Succeeded, read.Text);
+        }
+        else
+        {
+            var write = _clipboard.Write(request.Text!); _repaintRequested |= _router.CompleteClipboardRequest(request, write.Succeeded);
+        }
+    }
+    private void SyncTextInput()
+    {
+        if (_window == 0) return;
+        if (!_windowFocused) { StopTextInput(); return; }
+        if (_router.TryGetCaretGeometry(out var caret))
+        {
+            var area = new SDL.Rect { X = (int)MathF.Round(caret.X), Y = (int)MathF.Round(caret.Y), W = Math.Max(1, (int)MathF.Ceiling(caret.Width)), H = Math.Max(1, (int)MathF.Ceiling(caret.Height)) };
+            if (!_textInput.Active(_window) && !_textInput.Start(_window)) throw new InvalidOperationException("SDL_StartTextInput: " + SDL.GetError());
+            if (!_textInput.SetArea(_window, area, 0)) throw new InvalidOperationException("SDL_SetTextInputArea: " + SDL.GetError());
+        }
+        else StopTextInput();
+    }
+    private void StopTextInput()
+    {
+        if (_window != 0 && _textInput.Active(_window) && !_textInput.Stop(_window)) throw new InvalidOperationException("SDL_StopTextInput: " + SDL.GetError());
+    }
+
+    private void CleanupInput()
+    {
+        var errors = new List<Exception>();
+        try { CancelPointers(); } catch (Exception error) { errors.Add(error); }
+        try { _ = CancelText(); } catch (Exception error) { errors.Add(error); }
+        try { StopTextInput(); } catch (Exception error) { errors.Add(error); }
+        if (errors.Count != 0) throw new AggregateException("Windows input cleanup failed.", errors);
     }
 
     internal static Key? MapKey(SDL.Keycode key) => key switch
@@ -100,7 +171,14 @@ internal sealed class WindowsInputAdapter : IDisposable
         SDL.Keycode.Down => Core.Key.Down,
         SDL.Keycode.Home => Core.Key.Home,
         SDL.Keycode.End => Core.Key.End,
+        SDL.Keycode.Backspace => Core.Key.Backspace,
+        SDL.Keycode.Delete => Core.Key.Delete,
         _ => null
+    };
+
+    internal static Key? MapShortcut(SDL.Keycode key, KeyModifiers modifiers) => (modifiers & KeyModifiers.Alt) != 0 || (modifiers & (KeyModifiers.Control | KeyModifiers.Meta)) == 0 ? null : key switch
+    {
+        SDL.Keycode.A => Core.Key.A, SDL.Keycode.C => Core.Key.C, SDL.Keycode.V => Core.Key.V, SDL.Keycode.X => Core.Key.X, SDL.Keycode.Y => Core.Key.Y, SDL.Keycode.Z => Core.Key.Z, _ => null
     };
 
     internal static PointerButton? MapButton(byte button) => button switch
@@ -121,4 +199,14 @@ internal sealed class WindowsInputAdapter : IDisposable
         if ((flags & (ushort)SDL.Keymod.GUI) != 0) result |= KeyModifiers.Meta;
         return result;
     }
+}
+
+internal sealed class TextInputTransport(Func<nint, bool> active, Func<nint, bool> start, Func<nint, bool> stop, Func<nint, SDL.Rect, int, bool> setArea)
+{
+    internal static TextInputTransport Sdl { get; } = new(SDL.TextInputActive, SDL.StartTextInput, SDL.StopTextInput, SetTextInputArea);
+    internal Func<nint, bool> Active { get; } = active;
+    internal Func<nint, bool> Start { get; } = start;
+    internal Func<nint, bool> Stop { get; } = stop;
+    internal Func<nint, SDL.Rect, int, bool> SetArea { get; } = setArea;
+    private static bool SetTextInputArea(nint window, SDL.Rect area, int cursor) => SDL.SetTextInputArea(window, in area, cursor);
 }

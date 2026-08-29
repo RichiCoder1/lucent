@@ -6,7 +6,7 @@ using Lucent.Core;
 
 if (args.Length == 0)
 {
-    if (ReactiveContracts.Run() != 0 || CompositionContracts.Run() != 0 || LayoutSceneContracts.Run() != 0 || InputContracts.Run() != 0 || ControlsContracts.Run() != 0) return 1;
+    if (ReactiveContracts.Run() != 0 || CompositionContracts.Run() != 0 || LayoutSceneContracts.Run() != 0 || InputContracts.Run() != 0 || ControlsContracts.Run() != 0 || TextFieldContracts.Run() != 0) return 1;
     return PresentationContracts.Run();
 }
 if (args.Length != 1)

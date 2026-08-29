@@ -42,6 +42,8 @@ public static class IssueBrowserStructure
         Controls.Panel(header, themeContext, "Issue Browser header", Style.Empty.Set(Arrangement.Height, 52f).Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, HeaderSurface));
         var title = composition.Child(header, "issue-browser.title");
         Controls.Text(title, themeContext, "Issues", Style.Empty.Set(Arrangement.Height, 24f).Set(SceneProperties.FontSize, 18f));
+        var filter = composition.Child(header, "issue-browser.filter");
+        Controls.TextField(filter, themeContext, "Filter issues", style: Style.Empty.Set(Arrangement.Width, 280f).Set(Arrangement.Height, 24f));
 
         _ = composition.When(composition.Root, "issue-browser.loading-region", () => loading.Value,
             Controls.Recipe("issue-browser.loading", (context, element) => Controls.Loading(element, themeContext, "Loading issues", Style.Empty.Set(Arrangement.Height, 28f))));

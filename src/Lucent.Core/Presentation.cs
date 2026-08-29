@@ -160,7 +160,7 @@ internal readonly record struct FlatAssignment(IAssignment Assignment, VariantSt
 
 [Flags] public enum BehaviorOwnership { None = 0, Focus = 1, Action = 2, Semantics = 4 }
 public enum BehaviorState { Focused, FocusVisible, Pressed, Selected }
-public enum SemanticRole { Group, Text, Button, List, ListItem, Status }
+public enum SemanticRole { Group, Text, TextField, Button, List, ListItem, Status }
 [Flags] public enum SemanticAction { None = 0, Invoke = 1, SetValue = 2, Select = 4, Scroll = 8 }
 
 public sealed class SemanticDeclaration
@@ -187,13 +187,16 @@ public sealed class BehaviorContext
     /// <summary>Updates behavior-owned visual state. Router callbacks may call this after attachment.</summary>
     public void SetState(BehaviorState state, bool value) { _composition.CheckThread(); CheckLive(); if (!Enum.IsDefined(state)) throw new ArgumentException("Behavior state must be finite.", nameof(state)); if (_state.GetValueOrDefault(state) == value) return; _state[state] = value; _stateChanged(); }
     public void SetSemantics(SemanticDeclaration semantics) { CheckAttachment(); if (!Behavior.Ownership.HasFlag(BehaviorOwnership.Semantics)) throw new InvalidOperationException("Only semantic ownership can declare semantics."); _semantic = semantics ?? throw new ArgumentNullException(nameof(semantics)); }
+    internal void UpdateSemantics(SemanticDeclaration semantics) { CheckLive(); _semantic = semantics ?? throw new ArgumentNullException(nameof(semantics)); _composition.Find(new ElementIdentity(_composition.Epoch, ElementId))?.UpdateControlSemantics(semantics); }
     public void OnPointer(Action<PointerRoute> handler) { CheckInputOwnership(); _composition.Input.RegisterPointer(ElementId, _scope, handler); }
     public void OnKey(Action<KeyRoute> handler) { CheckInputOwnership(); _composition.Input.RegisterKey(ElementId, _scope, handler); }
     public void OnFocus(Action<FocusRoute> handler) { CheckFocusOwnership(); _composition.Input.RegisterFocus(ElementId, _scope, handler); }
+    public void OnText(Action<TextRoute> handler) { CheckInputOwnership(); _composition.Input.RegisterText(ElementId, _scope, handler); }
     public void OnCaptureLost(Action<PointerCaptureLoss> handler) { CheckInputOwnership(); _composition.Input.RegisterCaptureLoss(ElementId, _scope, handler); }
     public void MakeFocusable(bool tabStop = true) { CheckFocusOwnership(); _composition.Input.RegisterFocusable(ElementId, _scope, tabStop, this); }
     internal ReactiveEffect Effect(Action callback, string name) { CheckAttachment(); return _scope.Effect(callback, name); }
     internal void RegisterScrollable(ScrollViewportState state) { CheckFocusOwnership(); _composition.Input.RegisterScrollable(ElementId, _scope, state ?? throw new ArgumentNullException(nameof(state))); }
+    internal void RegisterText(TextFieldState state) { CheckFocusOwnership(); _composition.Input.RegisterTextField(ElementId, _scope, state ?? throw new ArgumentNullException(nameof(state))); }
     internal SemanticDeclaration? Semantics => _semantic; internal IReadOnlyDictionary<BehaviorState, bool> State => _state; internal void Complete() => _attaching = false;
     private void CheckAttachment() { CheckLive(); if (!_attaching) throw new InvalidOperationException("Behavior registration is only valid while attaching."); }
     private void CheckLive() { if (_scope.IsDisposed) throw new ObjectDisposedException(Behavior.Name); }
