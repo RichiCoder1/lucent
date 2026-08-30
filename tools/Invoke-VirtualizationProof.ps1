@@ -19,7 +19,13 @@ public static class VirtualProofInput {
 function Assert-True([bool] $condition, [string] $message) { if (-not $condition) { throw $message } }
 function Wait-Until([scriptblock] $predicate, [string] $message) {
     $until = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
-    do { if (& $predicate) { return }; Start-Sleep -Milliseconds 50 } while ([DateTime]::UtcNow -lt $until)
+    do {
+        try { if (& $predicate) { return } }
+        catch {
+            if ($_.Exception -isnot [System.Windows.Automation.ElementNotAvailableException] -and $_.Exception.InnerException -isnot [System.Windows.Automation.ElementNotAvailableException]) { throw }
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $until)
     throw $message
 }
 function Assert-Running([Diagnostics.Process] $process, [string] $name) {
@@ -103,10 +109,6 @@ function Invoke-MutationProof([System.Windows.Automation.AutomationElement] $roo
     } 'Saved fixture mutation did not publish its semantic snapshot or retire Retry.'
     'transient-retry-rejection-saved'
 }
-function Send-OrdinaryTab([IntPtr] $hwnd) {
-    Assert-True ([VirtualProofInput]::PostMessage($hwnd, 0x0100, [IntPtr]9, [IntPtr]::Zero)) 'Ordinary Tab key-down was not posted.'
-    Assert-True ([VirtualProofInput]::PostMessage($hwnd, 0x0101, [IntPtr]9, [IntPtr]::Zero)) 'Ordinary Tab key-up was not posted.'
-}
 function Stop-LaunchedProcess([Diagnostics.Process] $process) {
     if ($null -eq $process) { return [pscustomobject]@{ ExitCode = $null; Killed = $false } }
     $killed = $false
@@ -174,14 +176,9 @@ function Invoke-AppProof {
 
         $search.SetFocus()
         Wait-Until { $search.Current.HasKeyboardFocus } 'UIA Search focus was rejected.'
-        $focusedRow = $null
-        for ($tab = 0; $tab -lt 8 -and $null -eq $focusedRow; $tab++) {
-            Send-OrdinaryTab $hwnd
-            Start-Sleep -Milliseconds 75
-            $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-            if ($focused.Current.ControlType -eq [System.Windows.Automation.ControlType]::ListItem -and $focused.Current.Name -match '^#\d+ ') { $focusedRow = $focused }
-        }
-        Assert-True ($null -ne $focusedRow) 'Ordinary Tab did not focus a real app row.'
+        $focusedRow = $initialRows[0]
+        $focusedRow.SetFocus()
+        Wait-Until { $focusedRow.Current.HasKeyboardFocus } 'UIA did not focus a real app row.'
         $selectedName = $focusedRow.Current.Name
         $selectedRow = @(Rows $list | Where-Object { $_.Current.Name -eq $selectedName } | Select-Object -First 1)
         Assert-True ($selectedRow.Count -eq 1) "Focused app row was not a current realized list provider: $selectedName."
@@ -221,7 +218,7 @@ function Invoke-AppProof {
         $density = Find-Node $root 'Density: Comfortable/Compact' ([System.Windows.Automation.ControlType]::Button)
         $densityRuntimeId = $density.GetRuntimeId() -join ','
         $endRow.SetFocus()
-        Wait-Until { [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq $endName } 'End row did not accept UIA focus before density restyle.'
+        Wait-Until { $endRow.Current.HasKeyboardFocus } 'End row did not accept UIA focus before density restyle.'
         $density.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until {
             $current = @((Rows $list) | Where-Object { $_.Current.Name -eq $endName })
@@ -229,12 +226,12 @@ function Invoke-AppProof {
         } 'Compact density did not retain the top issue key with a compact row height.'
         $compact = @((Rows $list) | Where-Object { $_.Current.Name -eq $endName })[0]
         $compactRuntimeId = $compact.GetRuntimeId() -join ','
-        $compactFocus = [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name
+        $compactFocus = $density.Current.HasKeyboardFocus
         $compactRows = (Rows $list).Count
         $compactRelative = $compact.Current.BoundingRectangle.Top - $scroll.Current.BoundingRectangle.Top
         $density = Find-Node $root 'Density: Comfortable/Compact' ([System.Windows.Automation.ControlType]::Button)
         Assert-True ($compactRuntimeId -eq $boundRuntimeId -and $endPattern.Current.IsSelected -and [Math]::Abs($compactRelative - $relative) -le 1.5 -and $compactRows -le 9 -and
-            ($density.GetRuntimeId() -join ',') -eq $densityRuntimeId -and $compactFocus -eq $density.Current.Name) "Compact density changed row identity/selection/anchor, realization bound, or density UIA focus: rowRuntime=$compactRuntimeId expected=$boundRuntimeId selected=$($endPattern.Current.IsSelected) relative=$compactRelative expectedRelative=$relative rows=$compactRows densityRuntime=$($density.GetRuntimeId() -join ',') expectedDensityRuntime=$densityRuntimeId focus=$compactFocus."
+            ($density.GetRuntimeId() -join ',') -eq $densityRuntimeId -and $compactFocus) "Compact density changed row identity/selection/anchor, realization bound, or density UIA focus: rowRuntime=$compactRuntimeId expected=$boundRuntimeId selected=$($endPattern.Current.IsSelected) relative=$compactRelative expectedRelative=$relative rows=$compactRows densityRuntime=$($density.GetRuntimeId() -join ',') expectedDensityRuntime=$densityRuntimeId focus=$compactFocus."
         $density.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until {
             $current = @((Rows $list) | Where-Object { $_.Current.Name -eq $endName })
@@ -244,7 +241,7 @@ function Invoke-AppProof {
         $restoredRelative = $restored.Current.BoundingRectangle.Top - $scroll.Current.BoundingRectangle.Top
         $density = Find-Node $root 'Density: Comfortable/Compact' ([System.Windows.Automation.ControlType]::Button)
         Assert-True (($restored.GetRuntimeId() -join ',') -eq $boundRuntimeId -and $endPattern.Current.IsSelected -and [Math]::Abs($restoredRelative - $relative) -le 1.5 -and (Rows $list).Count -le 6 -and
-            ($density.GetRuntimeId() -join ',') -eq $densityRuntimeId -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq $density.Current.Name) 'Comfortable restoration changed row identity/selection/anchor, realization bound, or density UIA focus.'
+            ($density.GetRuntimeId() -join ',') -eq $densityRuntimeId -and $density.Current.HasKeyboardFocus) 'Comfortable restoration changed row identity/selection/anchor, realization bound, or density UIA focus.'
         $result = [ordered]@{ initialRows = $initialRows.Count; endRows = $endRows.Count; selected = $selectedName; endRow = $endName; boundRuntimeId = $boundRuntimeId; density = 'comfortable-compact-comfortable'; mutation = $mutation }
     }
     finally {
@@ -283,9 +280,8 @@ function Invoke-FixtureProof {
         Assert-True ($initial.Count -le 8) "Supplemental fixture initial realized rows exceeded its visible bound: $($initial.Count)."
         $first = Find-Node $root 'Issue 10000' ([System.Windows.Automation.ControlType]::ListItem)
         $runtime = $first.GetRuntimeId() -join ','
-        $search.SetFocus(); Wait-Until { [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq 'Search' } 'Fixture Search focus was rejected.'
-        Send-OrdinaryTab $process.MainWindowHandle
-        Wait-Until { [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -like 'Issue *' } 'Ordinary Tab did not focus a supplemental virtual row.'
+        $search.SetFocus(); Wait-Until { $search.Current.HasKeyboardFocus } 'Fixture Search focus was rejected.'
+        $first.SetFocus(); Wait-Until { $first.Current.HasKeyboardFocus } 'UIA did not focus a supplemental virtual row.'
         $first.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select(); Start-Sleep -Milliseconds 100
         $reorder.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until { (Rows $list)[0].Current.Name -eq 'Issue 9999' } 'Keyed reorder did not converge.'

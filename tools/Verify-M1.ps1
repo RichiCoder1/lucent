@@ -9,6 +9,17 @@ $rendererContracts = Join-Path $root 'tests/Lucent.Renderer.Skia.Tests/Lucent.Re
 $platformContracts = Join-Path $root 'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj'
 $appExe = Join-Path $root 'apps/Lucent.IssueBrowser/bin/Release/net10.0-windows10.0.26100.0/win-x64/publish/Lucent.IssueBrowser.exe'
 $platformExe = Join-Path $root 'tests/Lucent.Platform.Windows.Tests/bin/Release/net10.0-windows10.0.26100.0/win-x64/publish/Lucent.Platform.Windows.Tests.exe'
+function Invoke-IsolatedPwsh([string] $script, [string[]] $arguments, [int] $timeoutSeconds = 180) {
+    $start = [Diagnostics.ProcessStartInfo]::new((Get-Process -Id $PID).Path)
+    $start.UseShellExecute = $false
+    foreach ($argument in @('-NoProfile', '-File', $script) + $arguments) { [void]$start.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        if (-not $process.WaitForExit($timeoutSeconds * 1000)) { $process.Kill($true); throw "Isolated proof exceeded ${timeoutSeconds}s: $script" }
+        if ($process.ExitCode) { exit $process.ExitCode }
+    }
+    finally { $process.Dispose() }
+}
 
 & $dotnet restore $solution --locked-mode; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet build $solution --no-restore -warnaserror; if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -28,4 +39,4 @@ Write-Output 'Core compiled runtime-discovery/property-model scan: PASS'
 & (Join-Path $PSScriptRoot 'Verify-M0.ps1'); if ($LASTEXITCODE) { exit $LASTEXITCODE }
 if (-not (Test-Path $appExe -PathType Leaf)) { throw "Verify-M0 did not produce the published NativeAOT app: $appExe" }
 if (-not (Test-Path $platformExe -PathType Leaf)) { throw "Missing published virtualization host: $platformExe" }
-& (Join-Path $PSScriptRoot 'Invoke-VirtualizationProof.ps1') -AppExe $appExe -HostExe $platformExe; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+Invoke-IsolatedPwsh (Join-Path $PSScriptRoot 'Invoke-VirtualizationProof.ps1') @('-AppExe', $appExe, '-HostExe', $platformExe)
