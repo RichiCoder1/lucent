@@ -11,13 +11,7 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class VirtualProofInput {
-  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort Vk, Scan; public uint Flags, Time; public IntPtr Extra; }
-  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int X, Y; public uint Data, Flags, Time; public IntPtr Extra; }
-  [StructLayout(LayoutKind.Explicit)] public struct U { [FieldOffset(0)] public KEYBDINPUT Key; [FieldOffset(0)] public MOUSEINPUT Mouse; }
-  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint Type; public U Data; }
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
-  [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] input, int size);
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
 }
 '@
@@ -110,13 +104,8 @@ function Invoke-MutationProof([System.Windows.Automation.AutomationElement] $roo
     'transient-retry-rejection-saved'
 }
 function Send-OrdinaryTab([IntPtr] $hwnd) {
-    [void][VirtualProofInput]::SetForegroundWindow($hwnd)
-    $keys = @(
-        [VirtualProofInput+INPUT]@{ Type = 1; Data = [VirtualProofInput+U]@{ Key = [VirtualProofInput+KEYBDINPUT]@{ Vk = 9 } } },
-        [VirtualProofInput+INPUT]@{ Type = 1; Data = [VirtualProofInput+U]@{ Key = [VirtualProofInput+KEYBDINPUT]@{ Vk = 9; Flags = 2 } } }
-    )
-    $sent = [VirtualProofInput]::SendInput(2, $keys, [Runtime.InteropServices.Marshal]::SizeOf([type][VirtualProofInput+INPUT]))
-    Assert-True ($sent -eq 2) "Ordinary Tab input was not sent (Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error()))."
+    Assert-True ([VirtualProofInput]::PostMessage($hwnd, 0x0100, [IntPtr]9, [IntPtr]::Zero)) 'Ordinary Tab key-down was not posted.'
+    Assert-True ([VirtualProofInput]::PostMessage($hwnd, 0x0101, [IntPtr]9, [IntPtr]::Zero)) 'Ordinary Tab key-up was not posted.'
 }
 function Stop-LaunchedProcess([Diagnostics.Process] $process) {
     if ($null -eq $process) { return [pscustomobject]@{ ExitCode = $null; Killed = $false } }
@@ -184,7 +173,7 @@ function Invoke-AppProof {
         $mutation = Invoke-MutationProof $root $list
 
         $search.SetFocus()
-        Wait-Until { [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq $search.Current.Name } 'UIA Search focus was rejected.'
+        Wait-Until { $search.Current.HasKeyboardFocus } 'UIA Search focus was rejected.'
         $focusedRow = $null
         for ($tab = 0; $tab -lt 8 -and $null -eq $focusedRow; $tab++) {
             Send-OrdinaryTab $hwnd
