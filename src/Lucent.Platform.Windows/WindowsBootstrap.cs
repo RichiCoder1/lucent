@@ -47,6 +47,7 @@ public static class WindowsBootstrap
             using var cursor = new WindowsCursor();
             using var clipboard = new WindowsClipboard();
             using var settingsListener = new WindowsSettingsListener(hwnd);
+            using var m6Diagnostics = new M6Diagnostics();
             var scheduler = new WindowsFrameScheduler();
             using var input = new WindowsInputAdapter(composition, window, clipboard);
             var settings = new WindowsSettings();
@@ -54,6 +55,7 @@ public static class WindowsBootstrap
             _ = cursor.Activate();
             _ = ApplySettings(composition, settings, theme);
             diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
+            var recordedM6Baseline = false;
             while (scheduler.IsOpen)
             {
                 uiaDispatcher.SetOwnerPhase("events");
@@ -84,9 +86,21 @@ public static class WindowsBootstrap
                 input.RefreshTextInput();
                 var projected = Stopwatch.GetTimestamp();
                 var phase = presenter.Present(scene, viewport, sceneRenderer);
-                scheduler.Complete(FrameTiming.FromTimestamps(started, projected, phase.Rasterized, phase.Uploaded, phase.Presented));
+                var timing = FrameTiming.FromTimestamps(started, projected, phase.Rasterized, phase.Uploaded, phase.Presented);
+                scheduler.Complete(timing);
+                m6Diagnostics.Record(scheduler.CurrentRequest.Complete(phase.Presented), timing, presenter, sceneRenderer, uiaProvider);
+                if (!recordedM6Baseline)
+                {
+                    m6Diagnostics.RecordResources("pre", presenter.LiveSurfaceCount, presenter.LiveTextureCount, sceneRenderer.LiveTextBlobCount, uiaProvider.CacheCount);
+                    recordedM6Baseline = true;
+                }
             }
             uiaDispatcher.SetOwnerPhase("shutdown");
+            uiaListener.Dispose();
+            uiaProvider.Dispose();
+            presenter.Dispose();
+            sceneRenderer.Dispose();
+            m6Diagnostics.RecordPostGcResources(presenter.LiveSurfaceCount, presenter.LiveTextureCount, sceneRenderer.LiveTextBlobCount, uiaProvider.CacheCount);
             return 0;
         }
         finally
@@ -108,9 +122,10 @@ public static class WindowsBootstrap
 
     private static bool Observe(WindowsFrameScheduler scheduler, WindowsInputAdapter input, SDL.Event @event)
     {
+        var timestamp = Stopwatch.GetTimestamp();
         var type = (SDL.EventType)@event.Type;
-        try { if (input.Dispatch(@event)) scheduler.Request(); }
-        finally { if (input.ConsumeRepaintRequest()) scheduler.Request(); }
+        try { if (input.Dispatch(@event)) scheduler.Request(FrameOperation.Input, timestamp); }
+        finally { if (input.ConsumeRepaintRequest()) scheduler.Request(FrameOperation.Input, timestamp); }
         switch (type)
         {
             case SDL.EventType.Quit:
@@ -118,10 +133,10 @@ public static class WindowsBootstrap
             case SDL.EventType.WindowMinimized: scheduler.Observe(WindowsFrameEvent.Minimized); return false;
             case SDL.EventType.WindowRestored: scheduler.Observe(WindowsFrameEvent.Restored); return false;
             case SDL.EventType.WindowExposed: scheduler.Observe(WindowsFrameEvent.Exposed); return false;
-            case SDL.EventType.WindowResized: scheduler.Observe(WindowsFrameEvent.Resized); return false;
-            case SDL.EventType.WindowPixelSizeChanged: scheduler.Observe(WindowsFrameEvent.PixelSizeChanged); return false;
-            case SDL.EventType.WindowDisplayChanged: scheduler.Observe(WindowsFrameEvent.DisplayChanged); return false;
-            case SDL.EventType.WindowDisplayScaleChanged: scheduler.Observe(WindowsFrameEvent.DisplayScaleChanged); return false;
+            case SDL.EventType.WindowResized: scheduler.Observe(WindowsFrameEvent.Resized, timestamp); return false;
+            case SDL.EventType.WindowPixelSizeChanged: scheduler.Observe(WindowsFrameEvent.PixelSizeChanged, timestamp); return false;
+            case SDL.EventType.WindowDisplayChanged: scheduler.Observe(WindowsFrameEvent.DisplayChanged, timestamp); return false;
+            case SDL.EventType.WindowDisplayScaleChanged: scheduler.Observe(WindowsFrameEvent.DisplayScaleChanged, timestamp); return false;
             default: return false;
         }
     }

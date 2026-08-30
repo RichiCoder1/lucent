@@ -72,30 +72,33 @@ internal sealed class WindowsFrameScheduler
     private bool _requested = true;
     private bool _minimized;
     private bool _awaitingRenderable;
+    private FrameRequest? _pendingRequest = new(FrameOperation.Startup, Stopwatch.GetTimestamp());
 
     public bool IsOpen { get; private set; } = true;
     public bool IsFrameRequested => _requested;
     public bool ShouldWaitForEvent => !_requested || _awaitingRenderable;
     public int PresentedFrames { get; private set; }
     public FrameTiming LastTiming { get; private set; }
+    internal FrameRequest CurrentRequest { get; private set; }
 
     /// <summary>Requests one event-caused frame without adding a timer or idle work.</summary>
-    public void Request()
+    public void Request(FrameOperation operation = FrameOperation.Unpaired, long? timestamp = null)
     {
         if (!IsOpen || _minimized) return;
         _requested = true;
         _awaitingRenderable = false;
+        RecordRequest(operation, timestamp);
     }
 
-    public void Observe(WindowsFrameEvent @event)
+    public void Observe(WindowsFrameEvent @event, long? timestamp = null)
     {
         switch (@event)
         {
-            case WindowsFrameEvent.Closed: IsOpen = false; _requested = false; _awaitingRenderable = false; break;
-            case WindowsFrameEvent.Minimized: _minimized = true; _requested = false; _awaitingRenderable = false; break;
-            case WindowsFrameEvent.Restored: _minimized = false; _requested = true; _awaitingRenderable = false; break;
+            case WindowsFrameEvent.Closed: IsOpen = false; _requested = false; _awaitingRenderable = false; _pendingRequest = null; break;
+            case WindowsFrameEvent.Minimized: _minimized = true; _requested = false; _awaitingRenderable = false; _pendingRequest = null; break;
+            case WindowsFrameEvent.Restored: _minimized = false; _requested = true; _awaitingRenderable = false; RecordRequest(FrameOperation.Other, timestamp); break;
             case WindowsFrameEvent.Moved: break;
-            default: if (!_minimized) { _requested = true; _awaitingRenderable = false; } break;
+            default: if (!_minimized) { _requested = true; _awaitingRenderable = false; RecordRequest(@event is WindowsFrameEvent.Resized or WindowsFrameEvent.PixelSizeChanged ? FrameOperation.Resize : FrameOperation.Other, timestamp); } break;
         }
     }
 
@@ -105,10 +108,23 @@ internal sealed class WindowsFrameScheduler
         if (!viewport.IsRenderable) { _awaitingRenderable = true; return false; }
         _requested = false;
         _awaitingRenderable = false;
+        CurrentRequest = _pendingRequest ?? new(FrameOperation.Unpaired, Stopwatch.GetTimestamp());
+        _pendingRequest = null;
         return true;
     }
 
     public void Complete(FrameTiming timing) { LastTiming = timing; PresentedFrames++; }
+
+    private void RecordRequest(FrameOperation operation, long? timestamp)
+    {
+        var request = new FrameRequest(operation, timestamp ?? Stopwatch.GetTimestamp());
+        if (_pendingRequest is not { } pending) { _pendingRequest = request; return; }
+        if (pending.Operation == request.Operation) return;
+        // Expose is a repaint notification, not a second cause for an input/resize operation.
+        if (pending.Operation == FrameOperation.Other && request.Operation is FrameOperation.Input or FrameOperation.Resize) { _pendingRequest = request; return; }
+        if (request.Operation == FrameOperation.Other && pending.Operation is FrameOperation.Input or FrameOperation.Resize) return;
+        _pendingRequest = new(FrameOperation.Mixed, Math.Min(pending.Timestamp, request.Timestamp));
+    }
 }
 
 /// <summary>Measured in phase order so projection, CPU raster, upload, and present cannot be collapsed into one opaque duration.</summary>
@@ -120,4 +136,10 @@ internal readonly record struct FrameTiming(TimeSpan Projection, TimeSpan Raster
             throw new ArgumentOutOfRangeException(nameof(presented), "Frame phase timestamps must be ordered.");
         return new(Stopwatch.GetElapsedTime(started, projected), Stopwatch.GetElapsedTime(projected, rasterized), Stopwatch.GetElapsedTime(rasterized, uploaded), Stopwatch.GetElapsedTime(uploaded, presented));
     }
+}
+
+internal enum FrameOperation { Startup, Input, Resize, Other, Mixed, Unpaired }
+internal readonly record struct FrameRequest(FrameOperation Operation, long Timestamp, long Presented = 0)
+{
+    internal FrameRequest Complete(long timestamp) => this with { Presented = timestamp };
 }

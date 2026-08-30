@@ -8,7 +8,7 @@ $manifest = Get-Content (Join-Path $PSScriptRoot 'm0-assets.json') -Raw | Conver
 
 function Get-RelativeFiles([string] $Directory) {
     $prefix = (Resolve-Path $Directory).Path.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    @(Get-ChildItem $Directory -File -Recurse | ForEach-Object {
+    @(Get-ChildItem $Directory -Force -File -Recurse | ForEach-Object {
         $_.FullName.Substring($prefix.Length).Replace('\', '/')
     } | Sort-Object)
 }
@@ -43,6 +43,7 @@ if ($Negative) {
     $negativeCases += Assert-Rejected 'missing notice rejected' { param($copy) Remove-Item (Join-Path $copy 'notices/SDL3-CS.txt') -Force }
     $negativeCases += Assert-Rejected 'undeclared nested asset rejected' { param($copy) New-Item (Join-Path $copy 'nested') -ItemType Directory | Out-Null; Set-Content (Join-Path $copy 'nested/rogue.bin') rogue }
     $negativeCases += Assert-Rejected 'undeclared nested notice rejected' { param($copy) Set-Content (Join-Path $copy 'notices/rogue.txt') rogue }
+    $negativeCases += Assert-Rejected 'undeclared hidden system asset rejected' { param($copy) $rogue = Join-Path $copy 'nested/.rogue.bin'; New-Item (Split-Path $rogue) -ItemType Directory -Force | Out-Null; Set-Content $rogue rogue; (Get-Item $rogue).Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System }
     [ordered]@{ ok = $true; negative = $negativeCases } | ConvertTo-Json -Compress
 }
 else { Assert-Inventory $resolved }

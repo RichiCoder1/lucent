@@ -5,12 +5,10 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 public static class ListenerProofWindow {
-  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
-  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
   [DllImport("gdi32.dll")] public static extern uint GetPixel(IntPtr hdc, int x, int y);
 }
 '@
@@ -28,12 +26,10 @@ function Stop-Proof([Diagnostics.Process] $Process) {
 }
 
 function Get-Pixel([IntPtr] $Hwnd) {
-    $point = [ListenerProofWindow+POINT]::new()
-    if (-not [ListenerProofWindow]::ClientToScreen($Hwnd, [ref]$point)) { return $null }
-    $dc = [ListenerProofWindow]::GetDC([IntPtr]::Zero)
+    $dc = [ListenerProofWindow]::GetDC($Hwnd)
     if ($dc -eq [IntPtr]::Zero) { return $null }
-    try { return [ListenerProofWindow]::GetPixel($dc, $point.X + 10, $point.Y + 10) -band 0xffffff }
-    finally { [void][ListenerProofWindow]::ReleaseDC([IntPtr]::Zero, $dc) }
+    try { return [ListenerProofWindow]::GetPixel($dc, 10, 10) -band 0xffffff }
+    finally { [void][ListenerProofWindow]::ReleaseDC($Hwnd, $dc) }
 }
 
 $process = $null

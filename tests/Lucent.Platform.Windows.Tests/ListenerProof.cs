@@ -16,6 +16,7 @@ internal static partial class ListenerProof
         {
             window = SDL.CreateWindow("Lucent Windows listener proof", 160, 120, SDL.WindowFlags.Resizable);
             if (window == 0) return Fail("SDL_CreateWindow: " + SDL.GetError());
+            if (!SDL.ShowWindow(window)) return Fail("SDL_ShowWindow: " + SDL.GetError());
             var hwnd = SDL.GetPointerProperty(SDL.GetWindowProperties(window), SDL.Props.WindowWin32HWNDPointer, 0);
             if (hwnd == 0) return Fail("SDL window did not expose an HWND.");
             listener = new WindowsSettingsListener(hwnd);
@@ -25,7 +26,7 @@ internal static partial class ListenerProof
             while (SDL.WaitEvent(out var @event))
             {
                 if (listener.TakePending()) { refreshed = true; Paint(hwnd, Green); Console.WriteLine("LISTENER-PROOF REFRESHED"); }
-                if ((SDL.EventType)@event.Type == SDL.EventType.WindowExposed && !refreshed) Paint(hwnd, Red);
+                if (!refreshed) Paint(hwnd, Red); // SDL may repaint after the initial marker; preserve the required pre-refresh state.
                 if ((SDL.EventType)@event.Type is SDL.EventType.Quit or SDL.EventType.WindowCloseRequested) return 0;
             }
             return Fail("SDL_WaitEvent: " + SDL.GetError());

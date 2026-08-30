@@ -9,6 +9,7 @@ try
     DpiAndResourceMatrix();
     DpiAwarenessContract();
     FrameSchedulingMatrix();
+    TelemetryContract();
     UiaDispatcherContract();
     UiaLifecycleContracts.Run();
     UiaSnapshotReadContract();
@@ -102,6 +103,43 @@ static void FrameSchedulingMatrix()
     Assert(requested.TryBegin(normal), "Event-caused invalidation did not request exactly one frame.");
     requested.Complete(FrameTiming.FromTimestamps(250, 260, 270, 280, 290));
     Assert(!requested.IsFrameRequested && requested.PresentedFrames == 2, "Event-caused invalidation left idle frame work behind.");
+
+    var causal = new WindowsFrameScheduler();
+    Assert(causal.TryBegin(normal), "Causality scheduler did not start.");
+    causal.Complete(FrameTiming.FromTimestamps(1, 2, 3, 4, 5));
+    causal.Request(FrameOperation.Input, 200);
+    causal.Observe(WindowsFrameEvent.Exposed, 210);
+    Assert(causal.TryBegin(normal) && causal.CurrentRequest is { Operation: FrameOperation.Input, Timestamp: 200 }, "Expose changed an input frame's causality or timestamp.");
+    causal.Complete(FrameTiming.FromTimestamps(210, 220, 230, 240, 250));
+    causal.Request(FrameOperation.Input, 300);
+    causal.Observe(WindowsFrameEvent.Resized, 310);
+    Assert(causal.TryBegin(normal) && causal.CurrentRequest is { Operation: FrameOperation.Mixed, Timestamp: 300 }, "Mixed input/resize frame was not explicitly classified from its earliest cause.");
+    causal.Complete(FrameTiming.FromTimestamps(310, 320, 330, 340, 350));
+    causal.Request();
+    Assert(causal.TryBegin(normal) && causal.CurrentRequest.Operation == FrameOperation.Unpaired, "Unpaired frame work was not explicitly classified.");
+}
+
+static void TelemetryContract()
+{
+    using var activities = new System.Diagnostics.ActivityListener();
+    string? activityOperation = null, metricOperation = null;
+    activities.ShouldListenTo = static _ => true;
+    activities.Sample = static (ref System.Diagnostics.ActivityCreationOptions<System.Diagnostics.ActivityContext> _) => System.Diagnostics.ActivitySamplingResult.AllData;
+    activities.SampleUsingParentId = static (ref System.Diagnostics.ActivityCreationOptions<string> _) => System.Diagnostics.ActivitySamplingResult.AllData;
+    activities.ActivityStopped = activity => { foreach (var tag in activity.Tags) if (tag.Key == "lucent.operation") activityOperation = tag.Value; };
+    System.Diagnostics.ActivitySource.AddActivityListener(activities);
+    using var metrics = new System.Diagnostics.Metrics.MeterListener();
+    metrics.InstrumentPublished = (instrument, listener) => { if (instrument.Meter.Name == "Lucent.Windows" && instrument.Name == "lucent.frame.present.ms") listener.EnableMeasurementEvents(instrument); };
+    metrics.SetMeasurementEventCallback<double>((_, _, tags, _) => { foreach (var tag in tags) if (tag.Key == "lucent.operation") metricOperation = tag.Value?.ToString(); });
+    metrics.Start();
+    var started = System.Diagnostics.Stopwatch.GetTimestamp();
+    M6Diagnostics.EmitTelemetry(new FrameRequest(FrameOperation.Input, started).Complete(started + 40), FrameTiming.FromTimestamps(10, 20, 30, 40, 50));
+    Assert(activityOperation == "input" && metricOperation == "input" && M6Diagnostics.AllowedTags.SequenceEqual(["lucent.operation=input", "lucent.operation=resize", "lucent.operation=startup", "lucent.operation=other"]),
+        $"Frame telemetry did not emit the fixed real-operation tag allowlist through local opt-in listeners: activity={activityOperation ?? "-"}, metric={metricOperation ?? "-"}.");
+    M6Diagnostics.EmitTelemetry(new FrameRequest(FrameOperation.Mixed, started).Complete(started + 40), FrameTiming.FromTimestamps(10, 20, 30, 40, 50));
+    Assert(activityOperation == "other" && metricOperation == "other", "Mixed frame telemetry escaped the fixed tag allowlist.");
+    M6Diagnostics.EmitTelemetry(new FrameRequest(FrameOperation.Unpaired, started).Complete(started + 40), FrameTiming.FromTimestamps(10, 20, 30, 40, 50));
+    Assert(activityOperation == "other" && metricOperation == "other", "Unpaired frame telemetry escaped the fixed tag allowlist.");
 }
 
 static void UiaDispatcherContract()

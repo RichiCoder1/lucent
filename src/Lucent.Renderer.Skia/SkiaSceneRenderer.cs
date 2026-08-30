@@ -14,13 +14,22 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 {
     // Pinned SKShaper encodes HarfBuzz positions against this source constant.
     private const float FontSizeScale = 512f;
+    private const int ShapeCacheCapacity = 256;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
+    private readonly Dictionary<FaceKey, string> _faceFingerprints = [];
+    private readonly Dictionary<TextMeasureRequest, ShapedText> _shapes = [];
+    private readonly Queue<TextMeasureRequest> _shapeOrder = [];
     private bool _disposed;
+    private int _liveTextBlobs;
+
+    /// <summary>Current renderer-owned text blobs; all paint blobs are disposed before a frame completes.</summary>
+    public int LiveTextBlobCount => _liveTextBlobs;
 
     public ShapedText Shape(TextMeasureRequest request)
     {
         CheckThread(); ThrowIfDisposed(); request.Validate();
-        if (request.Text.Length == 0) return new ShapedText(Identity(request, []), 0, 0, []);
+        if (_shapes.TryGetValue(request, out var cached)) return cached;
+        if (request.Text.Length == 0) return Cache(request, new ShapedText(Identity(request, []), 0, 0, []));
         var pieces = Itemize(request);
         var pending = new List<PendingRun>();
         foreach (var piece in pieces)
@@ -58,7 +67,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             var run = new ShapedRun(RunIdentity(request, value.Family, value.Style, value.Fingerprint, value.CollectionIndex, value.Direction, value.Glyphs, origin, baseline, lineAscent, lineDescent), value.Family, value.Style.Weight, value.Style.Width, (int)value.Style.Slant, value.Fingerprint, value.CollectionIndex, value.SourceIdentity, value.Direction, request.Language, request.FontSize, origin, baseline, lineAscent, lineDescent, value.Width, value.Glyphs);
             runs.Add(run); origin = Checked(origin + value.Width);
         }
-        return new ShapedText(Identity(request, runs), origin, height, runs);
+        return Cache(request, new ShapedText(Identity(request, runs), origin, height, runs));
     }
 
     public void Render(RetainedScene scene, SKCanvas canvas)
@@ -92,7 +101,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         }
     }
 
-    private static void PaintRun(SKCanvas canvas, LayoutRect bounds, ShapedRun run, SKPaint brush)
+    private void PaintRun(SKCanvas canvas, LayoutRect bounds, ShapedRun run, SKPaint brush)
     {
         using var face = SKTypeface.FromFamilyName(run.Family, run.Weight, run.Width, (SKFontStyleSlant)run.Slant) ?? throw new InvalidOperationException("Scene face is unavailable.");
         if (FaceFingerprint(face, run.CollectionIndex) != run.Fingerprint) throw new InvalidOperationException("Scene face fingerprint did not match its shaped run.");
@@ -100,9 +109,10 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         using var builder = new SKTextBlobBuilder();
         builder.AddPositionedRun(run.Glyphs.Select(glyph => checked((ushort)glyph.GlyphId)).ToArray(), font, run.Glyphs.Select(glyph => new SKPoint(glyph.X, glyph.Y)).ToArray());
         using var blob = builder.Build() ?? throw new InvalidOperationException("Immutable run produced no paintable text blob.");
+        _liveTextBlobs++;
         canvas.Save();
         try { canvas.ClipRect(Rect(bounds)); canvas.DrawText(blob, bounds.X + run.OriginX, bounds.Y + run.Baseline, brush); }
-        finally { canvas.Restore(); }
+        finally { canvas.Restore(); _liveTextBlobs--; }
     }
 
     private static SKTypeface ResolveFace(TextMeasureRequest request, string text, out int collectionIndex)
@@ -127,7 +137,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         return shaper.Shape(buffer, font).Codepoints.All(glyph => glyph != 0);
     }
 
-    private static List<Piece> Itemize(TextMeasureRequest request)
+    private List<Piece> Itemize(TextMeasureRequest request)
     {
         var blocks = new List<DirectionalBlock>(); var enumerator = StringInfo.GetTextElementEnumerator(request.Text);
         TextDirection prior = request.Direction;
@@ -163,9 +173,15 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         return fallback;
     }
 
-    public void Dispose() { CheckThread(); if (_disposed) return; _disposed = true; }
+    public void Dispose() { CheckThread(); if (_disposed) return; _disposed = true; _shapes.Clear(); _shapeOrder.Clear(); _faceFingerprints.Clear(); }
     private void CheckThread() { if (Environment.CurrentManagedThreadId != _ownerThread) throw new InvalidOperationException("Renderer access must remain on its owner thread."); }
     private void ThrowIfDisposed() { if (_disposed) throw new ObjectDisposedException(nameof(SkiaSceneRenderer)); }
+    private ShapedText Cache(TextMeasureRequest request, ShapedText shaped)
+    {
+        if (_shapes.Count == ShapeCacheCapacity) _shapes.Remove(_shapeOrder.Dequeue());
+        _shapes.Add(request, shaped); _shapeOrder.Enqueue(request);
+        return shaped;
+    }
     private static float Checked(float value) { if (!float.IsFinite(value)) throw new InvalidOperationException("Text metric overflow."); return value; }
     private static string Identity(TextMeasureRequest request, IEnumerable<ShapedRun> runs) => Hash(request.FontFamily + "\n" + request.FontSize.ToString("R", CultureInfo.InvariantCulture) + "\n" + request.Language + "\n" + request.Direction + "\n" + request.Scale.ToString("R", CultureInfo.InvariantCulture) + "\n" + string.Join('|', runs.Select(run => run.Identity)));
     private static string RunIdentity(TextMeasureRequest request, string family, SKFontStyle style, string fingerprint, int collectionIndex, TextDirection direction, IEnumerable<ShapedGlyph> glyphs, float origin, float baseline, float ascent, float descent) => Hash(family + "\n" + style.Weight + "\n" + style.Width + "\n" + style.Slant + "\n" + fingerprint + "\n" + collectionIndex.ToString(CultureInfo.InvariantCulture) + "\n" + request.FontSize.ToString("R", CultureInfo.InvariantCulture) + "\n" + request.Language + "\n" + direction + "\n" + origin.ToString("R", CultureInfo.InvariantCulture) + ":" + baseline.ToString("R", CultureInfo.InvariantCulture) + ":" + ascent.ToString("R", CultureInfo.InvariantCulture) + ":" + descent.ToString("R", CultureInfo.InvariantCulture) + "\n" + string.Join(';', glyphs.Select(glyph => glyph.GlyphId + ":" + glyph.Cluster + ":" + glyph.X.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.Y.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.XAdvance.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.XOffset.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.YOffset.ToString("R", CultureInfo.InvariantCulture))));
@@ -178,16 +194,22 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         if (index < 0) throw new InvalidOperationException("Typeface OpenStream returned an invalid collection index.");
         return index;
     }
-    private static string FaceFingerprint(SKTypeface face, int collectionIndex)
+    private string FaceFingerprint(SKTypeface face, int collectionIndex)
     {
+        var style = face.FontStyle;
+        var key = new FaceKey(face.FamilyName, style.Weight, style.Width, (int)style.Slant, collectionIndex);
+        if (_faceFingerprints.TryGetValue(key, out var fingerprint)) return fingerprint;
         using var stream = face.OpenStream(out var actualIndex) ?? throw new InvalidOperationException("Typeface OpenStream did not expose bytes for fingerprint verification.");
         if (actualIndex != collectionIndex) throw new InvalidOperationException("Typeface collection index changed.");
         using var data = SKData.Create(stream);
         if (data is null || data.Size == 0) throw new InvalidOperationException("Typeface OpenStream produced no fingerprintable bytes.");
-        return Hash(Convert.ToHexString(data.ToArray()));
+        fingerprint = Hash(Convert.ToHexString(data.ToArray()));
+        _faceFingerprints.Add(key, fingerprint);
+        return fingerprint;
     }
     private sealed record TextElement(string Text, int Offset);
     private sealed class DirectionalBlock(TextDirection direction, List<TextElement> elements) { public TextDirection Direction { get; } = direction; public List<TextElement> Elements { get; } = elements; }
     private sealed record Piece(string Text, int Utf16Offset, TextDirection Direction, string Face);
     private sealed record PendingRun(string Family, SKFontStyle Style, string Fingerprint, int CollectionIndex, string SourceIdentity, TextDirection Direction, float Width, float Ascent, float Descent, ShapedGlyph[] Glyphs);
+    private readonly record struct FaceKey(string Family, int Weight, int Width, int Slant, int CollectionIndex);
 }

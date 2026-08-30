@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "frozenBeforeMeasurement": true,
+  "samplesPerCorpus": 500,
+  "latencyMilliseconds": { "p95Maximum": 16.7, "p99Maximum": 33.3, "rendererP95Maximum": 8.3 },
+  "idleSeconds": 10,
+  "virtualization": { "rows": 10000, "visibleRows": 2, "maximumRealizedRows": 6 },
+  "managed": { "cycles": 20, "liveGrowthBytesMaximum": 16777216, "gcProcedure": "create/dispose one full-list warmup, then full compacting collect, wait for finalizers, full compacting collect before and after cycles" },
+  "postGcResources": {
+    "skiaSurfacesMaximum": 1,
+    "skiaTextBlobsMaximum": 0,
+    "sdlTexturesMaximum": 1,
+    "uiaProvidersMaximum": 18,
+    "nativeHandleGrowthMaximum": 128,
+    "rationale": "The presenter has one persistent surface/texture pair; paint blobs are scoped per draw; the existing UIA proof bounds the virtual provider cache at 18. The handle delta is deliberately conservative for stable process/window bookkeeping."
+  },
+  "warmup": "eight keyboard focus transitions and one resize before either corpus",
+  "vsync": "SDL_SetRenderVSync(renderer, 1)",
+  "clock": "host Stopwatch timestamp immediately before SDL input/window dispatch through the timestamp immediately after SDL_RenderPresent returns",
+  "tags": ["lucent.operation=input", "lucent.operation=resize", "lucent.operation=startup", "lucent.operation=other"]
+}

@@ -22,6 +22,9 @@ internal sealed class CpuSkiaPresenter : IDisposable
         _renderer = renderer;
     }
 
+    internal int LiveSurfaceCount => _surface is null ? 0 : 1;
+    internal int LiveTextureCount => _texture == 0 ? 0 : 1;
+
     public PresenterPhaseTimestamps Present(RetainedScene scene, WindowsViewport viewport, SkiaSceneRenderer renderer)
     {
         CheckThread(); ThrowIfDisposed(); ArgumentNullException.ThrowIfNull(scene); ArgumentNullException.ThrowIfNull(renderer);
