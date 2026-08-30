@@ -89,7 +89,7 @@ function Get-EffectiveAppearance {
 
 function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
     $scale = $Dpi / 96.0
-    $headerX = [Math]::Round(500 * $scale); $headerY = [Math]::Round(45 * $scale)
+    $headerX = [Math]::Round(790 * $scale); $headerY = [Math]::Round(12 * $scale)
     $pageX = [Math]::Round(20 * $scale); $pageY = [Math]::Round(160 * $scale)
     if ($headerX -ge $Client.Right -or $pageX -ge $Client.Right -or $headerY -ge $Client.Bottom -or $pageY -ge $Client.Bottom) { throw "Iteration $Iteration did not expose enough client backing pixels for the scale proof." }
     $deadline = [Environment]::TickCount64 + 5000
