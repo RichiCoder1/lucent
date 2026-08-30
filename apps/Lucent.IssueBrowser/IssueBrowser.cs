@@ -86,6 +86,39 @@ public sealed class GitHubIssueSource(HttpClient client)
     }
 }
 
+public enum IssueDensity { Comfortable, Compact }
+
+/// <summary>Application-owned save results; transport policy is deliberately not a Core concern.</summary>
+public abstract record IssueStatusSaveOutcome
+{
+    public sealed record Saved : IssueStatusSaveOutcome;
+    public sealed record Rejected(string Reason) : IssueStatusSaveOutcome;
+    public sealed record TransientFailure(string Reason) : IssueStatusSaveOutcome;
+}
+
+public interface IIssueStatusSource
+{
+    Task<IssueStatusSaveOutcome> SaveAsync(int issueNumber, string status, CancellationToken cancellationToken);
+}
+
+/// <summary>Ordinary offline source: each deterministic branch keeps the reference app useful without test startup modes.</summary>
+public sealed class FixtureIssueStatusSource : IIssueStatusSource
+{
+    private readonly HashSet<int> _transientFailures = [];
+
+    public Task<IssueStatusSaveOutcome> SaveAsync(int issueNumber, string status, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        IssueStatusSaveOutcome outcome = (issueNumber % 3) switch
+        {
+            0 => new IssueStatusSaveOutcome.Rejected("Fixture policy rejected this change."),
+            1 when _transientFailures.Add(issueNumber) => new IssueStatusSaveOutcome.TransientFailure("Fixture source is temporarily unavailable."),
+            _ => new IssueStatusSaveOutcome.Saved()
+        };
+        return Task.FromResult(outcome);
+    }
+}
+
 /// <summary>Application state backed by the framework-owned latest-generation async value.</summary>
 public sealed class IssueBrowserState
 {
@@ -94,27 +127,41 @@ public sealed class IssueBrowserState
     private readonly Signal<string> _status;
     private readonly Signal<string> _assignee;
     private readonly Signal<int?> _selectedNumber;
+    private readonly Signal<IssueDensity> _density;
+    private readonly Signal<IReadOnlyDictionary<int, string>> _statuses;
+    private readonly Signal<IReadOnlyDictionary<int, string>> _messages;
     private readonly AsyncValue<IReadOnlyList<BrowserIssue>> _issues;
     private readonly Derived<IReadOnlyList<BrowserIssue>> _visible;
+    private readonly ReactiveScope _scope;
+    private readonly IIssueStatusSource _statusSource;
+    private readonly Dictionary<int, IssueStatusMutation> _mutations = [];
 
-    public IssueBrowserState(ReactiveScope scope, GitHubIssueSource source)
+    public IssueBrowserState(ReactiveScope scope, GitHubIssueSource source, IIssueStatusSource? statusSource = null)
     {
         ArgumentNullException.ThrowIfNull(scope); ArgumentNullException.ThrowIfNull(source);
+        _scope = scope;
+        _statusSource = statusSource ?? new FixtureIssueStatusSource();
         _retry = scope.Signal(0, "issue-browser.retry");
         _search = scope.Signal("", "issue-browser.search");
         _status = scope.Signal("all", "issue-browser.status");
         _assignee = scope.Signal("all", "issue-browser.assignee");
         _selectedNumber = scope.Signal<int?>(null, "issue-browser.selection");
+        _density = scope.Signal(IssueDensity.Comfortable, "issue-browser.density");
+        _statuses = scope.Signal<IReadOnlyDictionary<int, string>>(new Dictionary<int, string>(), "issue-browser.statuses");
+        _messages = scope.Signal<IReadOnlyDictionary<int, string>>(new Dictionary<int, string>(), "issue-browser.mutation-messages");
         _issues = scope.Async(async token => { _ = _retry.Value; return await source.LoadAsync(token).ConfigureAwait(false); }, "issue-browser.issues");
         _visible = scope.Derived<IReadOnlyList<BrowserIssue>>(() => Issues.Where(Matches).ToArray(), "issue-browser.visible-issues");
     }
 
-    public IReadOnlyList<BrowserIssue> Issues => _issues.Value ?? Array.Empty<BrowserIssue>();
+    public IReadOnlyList<BrowserIssue> Issues => (_issues.Value ?? Array.Empty<BrowserIssue>()).Select(issue => _statuses.Value.TryGetValue(issue.Number, out var status) ? issue with { Status = status } : issue).ToArray();
     public IReadOnlyList<BrowserIssue> VisibleIssues => _visible.Value;
     public bool IsLoading => _issues.IsPending;
     public bool IsStale => _issues.HasValue && _issues.IsPending;
     public string? Error => _issues.Error?.Message;
     public BrowserIssue? SelectedIssue => Issues.FirstOrDefault(issue => issue.Number == _selectedNumber.Value);
+    public IssueDensity Density { get => _density.Value; set => _density.Value = value; }
+    public string? SelectedMutationMessage => _selectedNumber.Value is { } number && _messages.Value.TryGetValue(number, out var message) ? message : null;
+    public bool CanRetrySelected { get { _ = _messages.Value; return _selectedNumber.Value is { } number && _mutations.TryGetValue(number, out var mutation) && mutation.CanRetry; } }
     public bool IsSelected(int number) => _selectedNumber.Value == number;
     public string Search { get => _search.Value; set => _search.Value = value.Trim(); }
     public string Status { get => _status.Value; set => _status.Value = Normalize(value, "all"); }
@@ -122,10 +169,98 @@ public sealed class IssueBrowserState
 
     public void Retry() => _retry.Value++;
     public void Select(int number) => _selectedNumber.Value = Issues.Any(issue => issue.Number == number) ? number : null;
+    public void ToggleDensity() => Density = Density == IssueDensity.Comfortable ? IssueDensity.Compact : IssueDensity.Comfortable;
+    public void ToggleSelectedStatus()
+    {
+        if (SelectedIssue is not { } issue) return;
+        var next = issue.Status == "open" ? "closed" : "open";
+        Set(_statuses, issue.Number, next);
+        Set(_messages, issue.Number, null);
+        Mutation(issue.Number).Start(issue.Status, next);
+    }
+    public void RetrySelected()
+    {
+        if (_selectedNumber.Value is { } number && _mutations.TryGetValue(number, out var mutation) && mutation.Retry()) Set(_messages, number, null);
+    }
 
     private bool Matches(BrowserIssue issue) => (Status == "all" || issue.Status == Status) && (Assignee == "all" || issue.Assignee == Assignee) &&
         (string.IsNullOrWhiteSpace(Search) || (issue.Title + " " + issue.Labels + " " + issue.Body).Contains(Search, StringComparison.OrdinalIgnoreCase));
     private static string Normalize(string value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim().ToLowerInvariant();
+    private IssueStatusMutation Mutation(int number) => _mutations.TryGetValue(number, out var mutation) ? mutation : _mutations[number] = new IssueStatusMutation(_scope, number, _statusSource, CompleteMutation);
+    private void CompleteMutation(int number, string original, string requested, IssueStatusSaveOutcome outcome)
+    {
+        var status = requested;
+        string? message = outcome switch
+        {
+            IssueStatusSaveOutcome.Saved => null,
+            IssueStatusSaveOutcome.Rejected rejected => "Rejected: " + rejected.Reason,
+            IssueStatusSaveOutcome.TransientFailure failure => "Not synced: " + failure.Reason,
+            _ => throw new InvalidOperationException("Unknown issue status save outcome.")
+        };
+        if (outcome is IssueStatusSaveOutcome.Rejected) status = original;
+        Set(_statuses, number, status);
+        Set(_messages, number, message);
+    }
+    private static void Set(Signal<IReadOnlyDictionary<int, string>> values, int number, string? value)
+    {
+        var next = new Dictionary<int, string>(values.Value);
+        if (value is null) next.Remove(number); else next[number] = value;
+        values.Value = next;
+    }
+
+    private sealed class IssueStatusMutation
+    {
+        private readonly Signal<Request?> _request;
+        private readonly AsyncValue<IssueStatusSaveOutcome> _save;
+        private readonly Action<int, string, string, IssueStatusSaveOutcome> _complete;
+        private long _generation;
+        private long _completed;
+        private Request? _lastTransient;
+
+        public IssueStatusMutation(ReactiveScope scope, int number, IIssueStatusSource source, Action<int, string, string, IssueStatusSaveOutcome> complete)
+        {
+            _complete = complete;
+            _request = scope.Signal<Request?>(null, "issue-browser.mutation." + number);
+            _save = scope.Async(async token =>
+            {
+                var request = _request.Value ?? throw new InvalidOperationException("Issue mutation started without a request.");
+                return await source.SaveAsync(number, request.Status, token).ConfigureAwait(false);
+            }, "issue-browser.mutation-save." + number);
+            _ = scope.Effect(() => Commit(number), "issue-browser.mutation-commit." + number);
+        }
+
+        public bool CanRetry => _lastTransient is not null;
+        public void Start(string original, string status) { _lastTransient = null; _request.Value = new(++_generation, original, status); }
+        public bool Retry()
+        {
+            if (_lastTransient is not { } request) return false;
+            _lastTransient = null;
+            _request.Value = request with { Generation = ++_generation };
+            return true;
+        }
+
+        private void Commit(int number)
+        {
+            var request = _request.Value;
+            if (request is null) return;
+            var error = _save.Error;
+            if (_save.IsPending || _save.IsCancelled || request.Generation == _completed) return;
+            _completed = request.Generation;
+            var outcome = error is null ? _save.Value ?? throw new InvalidOperationException("Issue mutation completed without an outcome.") : new IssueStatusSaveOutcome.TransientFailure(FailureReason(error));
+            _lastTransient = outcome is IssueStatusSaveOutcome.TransientFailure ? request : null;
+            _complete(number, request.Original, request.Status, outcome);
+        }
+
+        private static string FailureReason(Exception error)
+        {
+            var reason = error.GetBaseException().Message.Trim();
+            if (string.IsNullOrWhiteSpace(reason)) reason = error.GetBaseException().GetType().Name;
+            const int maximum = 160;
+            return "Unexpected save failure: " + (reason.Length <= maximum ? reason : reason[..maximum] + "…");
+        }
+
+        private sealed record Request(long Generation, string Original, string Status);
+    }
 }
 
 public static class IssueBrowserStructure
@@ -136,41 +271,51 @@ public static class IssueBrowserStructure
     private static readonly Token<uint> RowSurface = new("row-surface", 0xffffffffU);
     private static readonly Token<uint> FocusSurface = new("focus-surface", 0xffffff00U);
     private static readonly Token<uint> FocusForeground = new("focus-foreground", 0xff0f172aU);
-    private static readonly Theme LightTheme = Palette(ControlThemes.Light, 0xfff8fafcU, 0xff0f172aU, 0xffe2e8f0U, 0xffffffffU, 0xffffff00U, 0xff0f172aU);
-    private static readonly Theme DarkTheme = Palette(ControlThemes.Dark, 0xff0f172aU, 0xfff8fafcU, 0xff1e293bU, 0xff111827U, 0xfffacc15U, 0xff0f172aU);
-    private static readonly Theme HighContrastTheme = Palette(ControlThemes.HighContrast, 0xff000000U, 0xffffffffU, 0xff000000U, 0xff000000U, 0xffffff00U, 0xff000000U);
+    private static readonly Token<float?> DensityHeaderHeight = new("issue-density-header-height", 84f);
+    private static readonly Token<float?> DensityFilterHeight = new("issue-density-filter-height", 28f);
+    private static readonly Token<float> DensitySpacing = new("issue-density-spacing", 8f);
+    private static readonly Token<float> DensityFontSize = new("issue-density-font-size", 14f);
+    private static readonly Token<float> DensityTitleFontSize = new("issue-density-title-font-size", 18f);
 
     public static Composition Create(ReactiveGraph graph) => Create(graph, out _);
     public static Composition Create(ReactiveGraph graph, out ThemeContext theme)
     {
         var handler = new FixtureHttpHandler();
         var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.github.local/") };
-        return Create(graph, new GitHubIssueSource(client), client, out _, out theme);
+        return Create(graph, new GitHubIssueSource(client), new FixtureIssueStatusSource(), client, out _, out theme);
     }
 
-    public static Composition Create(ReactiveGraph graph, GitHubIssueSource source, out IssueBrowserState state, out ThemeContext theme) => Create(graph, source, null, out state, out theme);
+    public static Composition Create(ReactiveGraph graph, GitHubIssueSource source, out IssueBrowserState state, out ThemeContext theme) => Create(graph, source, new FixtureIssueStatusSource(), null, out state, out theme);
+    public static Composition Create(ReactiveGraph graph, GitHubIssueSource source, IIssueStatusSource statusSource, out IssueBrowserState state, out ThemeContext theme) => Create(graph, source, statusSource, null, out state, out theme);
 
-    private static Composition Create(ReactiveGraph graph, GitHubIssueSource source, IDisposable? transport, out IssueBrowserState state, out ThemeContext theme)
+    private static Composition Create(ReactiveGraph graph, GitHubIssueSource source, IIssueStatusSource statusSource, IDisposable? transport, out IssueBrowserState state, out ThemeContext theme)
     {
-        ArgumentNullException.ThrowIfNull(graph); ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(graph); ArgumentNullException.ThrowIfNull(source); ArgumentNullException.ThrowIfNull(statusSource);
         IssueFixture.AssertIntegrity();
         var composition = new Composition(graph, "issue-browser");
         if (transport is not null) composition.Root.Scope.Own(transport);
-        var browser = new IssueBrowserState(composition.Root.Scope, source);
-        var themeContext = new ThemeContext(composition.Root.Scope, LightTheme);
+        var browser = new IssueBrowserState(composition.Root.Scope, source, statusSource);
+        var themeContext = new ThemeContext(composition.Root.Scope, Palette(ControlThemes.Light, 0xfff8fafcU, 0xff0f172aU, 0xffe2e8f0U, 0xffffffffU, 0xffffff00U, 0xff0f172aU, IssueDensity.Comfortable));
         theme = themeContext;
-        _ = composition.Root.Scope.Effect(() => themeContext.Theme = themeContext.Appearance.Contrast == ThemeContrast.High ? HighContrastTheme : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? DarkTheme : LightTheme, "issue-browser-appearance");
+        _ = composition.Root.Scope.Effect(() => themeContext.Theme = Palette(themeContext.Appearance.Contrast == ThemeContrast.High ? ControlThemes.HighContrast : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? ControlThemes.Dark : ControlThemes.Light,
+            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xff0f172aU : 0xfff8fafcU,
+            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xffffffffU : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xfff8fafcU : 0xff0f172aU,
+            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xff1e293bU : 0xffe2e8f0U,
+            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xff111827U : 0xffffffffU,
+            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xffffff00U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xfffacc15U : 0xffffff00U,
+            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : 0xff0f172aU, browser.Density), "issue-browser-appearance");
         Controls.Column(composition.Root, themeContext, "Issue Browser", Style.Empty.Set(SceneProperties.Fill, PageSurface).Set(SceneProperties.Foreground, PageForeground).Set(Arrangement.Clip, true));
 
         var header = composition.Child(composition.Root, "issue-browser.header");
-        Controls.Panel(header, themeContext, "Issue Browser header", Style.Empty.Set(Arrangement.Height, 56f).Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, HeaderSurface));
+        Controls.Panel(header, themeContext, "Issue Browser header", Style.Empty.Set<float?>(Arrangement.Height, DensityHeaderHeight).Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, HeaderSurface));
         var title = composition.Child(header, "issue-browser.title");
-        Controls.Text(title, themeContext, "Issues", Style.Empty.Set(Arrangement.Height, 24f).Set(SceneProperties.FontSize, 18f));
+        Controls.Text(title, themeContext, "Issues", Style.Empty.Set(Arrangement.Height, 24f).Set<float>(SceneProperties.FontSize, DensityTitleFontSize));
         var filters = composition.Child(header, "issue-browser.filters");
-        Controls.Row(filters, themeContext, "Issue filters", Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 28f).Set(Arrangement.Spacing, 8f));
+        Controls.Row(filters, themeContext, "Issue filters", Style.Empty.Set(Arrangement.Width, 800f).Set<float?>(Arrangement.Height, DensityFilterHeight).Set<float>(Arrangement.Spacing, DensitySpacing));
         BindFilter(composition.Child(filters, "issue-browser.search"), themeContext, "Search issues", value => browser.Search = value);
         BindFilter(composition.Child(filters, "issue-browser.status"), themeContext, "Status: all, open, closed", value => browser.Status = value);
         BindFilter(composition.Child(filters, "issue-browser.assignee"), themeContext, "Assignee: all, marta, devin, joel", value => browser.Assignee = value);
+        Controls.Button(composition.Child(header, "issue-browser.density"), themeContext, "Density: Comfortable/Compact", browser.ToggleDensity, Style.Empty.Set(Arrangement.Width, 250f).Set<float?>(Arrangement.Height, DensityFilterHeight));
 
         _ = composition.When(composition.Root, "issue-browser.loading-region", () => browser.IsLoading,
             Controls.Recipe("issue-browser.loading", (context, element) => Controls.Loading(element, themeContext, browser.IsStale ? "Refreshing issues" : "Loading issues", Style.Empty.Set(Arrangement.Height, 28f))));
@@ -182,24 +327,40 @@ public static class IssueBrowserStructure
             }));
 
         var viewport = composition.Child(composition.Root, "issue-browser.scroll-viewport");
-        Controls.ScrollViewport(viewport, themeContext, "Issues", style: Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 60f));
+        var scroll = Controls.ScrollViewport(viewport, themeContext, "Issues", style: Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 60f));
         var list = Controls.VirtualizedList(viewport, themeContext, "issue-browser.issue-list", "Issues", () => browser.VisibleIssues, issue => issue.Number, (issue, context) =>
         {
             var row = context.Element("issue-browser.issue-row");
-            var selectable = Controls.Selectable(row, themeContext, $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}", () => browser.Select(issue.Number), Style.Empty.Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, RowSurface)
+            var selectable = Controls.Selectable(row, themeContext, $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}", () => browser.Select(issue.Number), Style.Empty.Set(Arrangement.Width, 800f).Set<float>(Arrangement.Spacing, DensitySpacing).Set<float>(SceneProperties.FontSize, DensityFontSize).Set(SceneProperties.Fill, RowSurface)
                 .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, FocusSurface).Set(SceneProperties.Foreground, FocusForeground)));
-            _ = row.Scope.Effect(() => selectable.Selected = browser.IsSelected(issue.Number), row.Name + ".selection");
+            _ = row.Scope.Effect(() => { var current = browser.Issues.First(candidate => candidate.Number == issue.Number); selectable.Label = $"#{current.Number} {current.Title} — {current.Status} · {current.Assignee}"; selectable.Selected = browser.IsSelected(issue.Number); }, row.Name + ".selection");
             return row;
         }, 30f);
-        _ = composition.When(composition.Root, "issue-browser.details-region", () => browser.SelectedIssue is not null,
-            Controls.Recipe("issue-browser.details", (context, element) =>
-            {
-                var issue = browser.SelectedIssue!;
-                Controls.Panel(element, themeContext, "Issue details", Style.Empty.Set(Arrangement.Width, 800f));
-                Controls.Text(context.Child(element, "issue-browser.details-title"), themeContext, $"#{issue.Number} {issue.Title}");
-                Controls.Text(context.Child(element, "issue-browser.details-meta"), themeContext, $"{issue.Status} · {issue.Assignee} · {issue.Labels} · {issue.Updated}");
-                Controls.Text(context.Child(element, "issue-browser.details-body"), themeContext, issue.Body);
-            }));
+        var rowHeight = 30f;
+        _ = composition.Root.Scope.Effect(() =>
+        {
+            var next = browser.Density == IssueDensity.Comfortable ? 30f : 22f;
+            if (next == rowHeight) return;
+            var previous = rowHeight;
+            var index = MathF.Floor(scroll.Offset.Y / previous);
+            var relative = scroll.Offset.Y - index * previous;
+            rowHeight = next;
+            list.SetRowHeight(next);
+            scroll.Offset = new(scroll.Offset.X, index * next + relative);
+        }, "issue-browser-density-anchor");
+        _ = composition.ForEach(composition.Root, "issue-browser.details-region", () => browser.SelectedIssue is { } issue ? [issue] : Array.Empty<BrowserIssue>(), issue => issue.Number, (issue, context) =>
+        {
+            var element = context.Element("issue-browser.details");
+            Controls.Panel(element, themeContext, "Issue details", Style.Empty.Set(Arrangement.Width, 800f).Set<float>(Arrangement.Spacing, DensitySpacing).Set<float>(SceneProperties.FontSize, DensityFontSize));
+            Controls.Text(context.Child(element, "issue-browser.details-title"), themeContext, $"#{issue.Number} {issue.Title}");
+            var status = Controls.Loading(context.Child(element, "issue-browser.details-status"), themeContext, issue.Status);
+            Controls.Text(context.Child(element, "issue-browser.details-body"), themeContext, issue.Body);
+            Controls.Button(context.Child(element, "issue-browser.status-action"), themeContext, "Open/Close", browser.ToggleSelectedStatus, Style.Empty.Set<float?>(Arrangement.Height, DensityFilterHeight));
+            _ = element.Scope.Effect(() => status.Label = browser.SelectedIssue is { } selected && selected.Number == issue.Number ? selected.Status + (browser.SelectedMutationMessage is { } message ? " · " + message : "") : issue.Status, element.Name + ".status");
+            return element;
+        });
+        _ = composition.When(composition.Root, "issue-browser.details-retry-region", () => browser.SelectedIssue is not null && browser.CanRetrySelected,
+            Controls.Recipe("issue-browser.details-retry", (context, element) => Controls.Button(element, themeContext, "Retry", browser.RetrySelected, Style.Empty.Set<float?>(Arrangement.Height, DensityFilterHeight))));
         state = browser;
         return composition;
     }
@@ -210,8 +371,10 @@ public static class IssueBrowserStructure
         _ = element.Scope.Effect(() => set(input.Value), element.Name + ".binding");
     }
 
-    private static Theme Palette(Theme controls, uint surface, uint foreground, uint header, uint row, uint focus, uint focusForeground) => controls
-        .Set(PageSurface, surface).Set(PageForeground, foreground).Set(HeaderSurface, header).Set(RowSurface, row).Set(FocusSurface, focus).Set(FocusForeground, focusForeground);
+    private static Theme Palette(Theme controls, uint surface, uint foreground, uint header, uint row, uint focus, uint focusForeground, IssueDensity density) => controls
+        .Set(PageSurface, surface).Set(PageForeground, foreground).Set(HeaderSurface, header).Set(RowSurface, row).Set(FocusSurface, focus).Set(FocusForeground, focusForeground)
+        .Set(DensityHeaderHeight, density == IssueDensity.Comfortable ? 84f : 68f).Set(DensityFilterHeight, density == IssueDensity.Comfortable ? 28f : 22f)
+        .Set(DensitySpacing, density == IssueDensity.Comfortable ? 8f : 4f).Set(DensityFontSize, density == IssueDensity.Comfortable ? 14f : 12f).Set(DensityTitleFontSize, density == IssueDensity.Comfortable ? 18f : 16f);
 
     private sealed class FixtureHttpHandler : HttpMessageHandler
     {

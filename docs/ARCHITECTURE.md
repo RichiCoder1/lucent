@@ -140,6 +140,17 @@ Typed C# composition is the first supported authoring surface. APIs remain unsta
 
 `.lui` begins only after the complete C# reference application and two frozen feature changes validate the framework surface. It lowers to the same supported composition, style, and behavior APIs wherever practical, with narrow generated registration or direct-dependency calls only for measured optimization. Generated readability is useful for diagnosis but remains secondary to correctness and source mapping.
 
+The Milestone 5 compiler-facing contract is:
+
+- structure lowers to `Composition.Child`, `When`, and `ForEach`, `CompositionContext` factories, and bounded `Controls` recipes including `VirtualizedList`;
+- presentation lowers to typed `Property<T>`, `Style.Set`/`When`/`Compose`, `Token<T>`, `Theme`/`ThemeContext`, `Transition`, and `Element.Present` or the equivalent `Controls` recipe;
+- behavior references lower to precompiled `Behavior` instances attached with `Element.AttachBehaviors`; custom behavior bodies and `BehaviorContext` registration remain authored C# rather than generated `.lui` code;
+- reactive expressions use ordinary `Signal`, `Derived`, `Effect`, and `AsyncValue` reads under runtime dependency tracking;
+- generated structure and resources belong to their `Element.Scope` or `CompositionContext`, so generated code adds no parallel lifetime or synchronization loop;
+- dynamic fixed-height list density may call the supported `VirtualizedRegion.SetRowHeight` seam while the author preserves its application scroll anchor.
+
+No direct-dependency registration API is frozen. M7 may add one narrow generated-only seam only after measurement proves runtime tracking insufficient. Manual region refresh/update/realization, `InputRouter`, semantic snapshots and commands, diagnostic dumps, `SceneLayout`, retained-scene internals, renderer types, and platform transport are not compiler targets. Public visibility before 1.0 does not promote any excluded API into this contract.
+
 The preferred `.lui` experience requires C#-quality completion, hover and XML documentation, diagnostics, rename/references, formatting, exact source maps, inspectable generated output, no implementation-name leakage, and no editor dead spots.
 
 ## NativeAOT

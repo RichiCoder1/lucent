@@ -9,6 +9,9 @@ try
 {
     FixtureIdentity();
     AsyncBrowserStates();
+    DensityRestyle();
+    OptimisticStatusMutations();
+    SourceExceptionsBecomeTransientFailures();
     VisualSurface();
     DisposedRequestCannotCommit();
     StartupStaysFrameworkOwned();
@@ -98,6 +101,98 @@ static void DisposedRequestCannotCommit()
     Assert(transport.Cancellations == 1 && !graph.Dump().Contains("issue-browser", StringComparison.Ordinal), "Disposed request retained or committed browser state.");
 }
 
+static void DensityRestyle()
+{
+    using var transport = new DeferredGitHubHandler();
+    using var client = new HttpClient(transport) { BaseAddress = new Uri("https://api.github.local/") };
+    var graph = new ReactiveGraph();
+    using var composition = IssueBrowserStructure.Create(graph, new GitHubIssueSource(client), out var browser, out var theme);
+    graph.Drain(); transport.ReplyJson(0); graph.Drain();
+    using var renderer = new SkiaSceneRenderer();
+    var viewport = new LayoutViewport(800, 500, 1);
+    var scene = SceneLayout.Project(composition, viewport, renderer);
+    Assert(composition.Input.SetScene(scene), "Density baseline scene did not install.");
+    var scroll = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll));
+    Assert(composition.Input.ScrollSemantic(new(scroll.Identity.CompositionEpoch, scroll.Identity.ElementId), new(SemanticCommandKind.Scroll, Vertical: 1507)), "Density proof could not reach a mid-list offset.");
+    graph.Drain(); scene = SceneLayout.Project(composition, viewport, renderer);
+    Assert(composition.Input.SetScene(scene), "Density mid-list scene did not install.");
+    var comfortable = TopRow(scene, composition, "density comfortable");
+    Assert(composition.ExecuteSemanticCommand(comfortable.Semantic.Identity, new(SemanticCommandKind.Select)) == SemanticCommandResult.Applied && composition.Input.FocusSemantic(new(comfortable.Semantic.Identity.CompositionEpoch, comfortable.Semantic.Identity.ElementId)), "Density proof could not select and focus its top row.");
+    graph.Drain(); scene = SceneLayout.Project(composition, viewport, renderer);
+    Assert(composition.Input.SetScene(scene), "Density focused scene did not install.");
+    comfortable = TopRow(scene, composition, "density focused comfortable");
+    var focused = composition.Input.FocusedElement;
+    var density = Flatten(composition.SemanticSnapshot()!).Single(node => node.Role == SemanticRole.Button && node.Name == "Density: Comfortable/Compact");
+    Assert(composition.ExecuteSemanticCommand(density.Identity, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Applied, "Keyboard/UIA density button rejected Invoke.");
+    graph.Drain(); scene = SceneLayout.Project(composition, viewport, renderer);
+    Assert(composition.Input.SetScene(scene), "Compact density scene did not install.");
+    var compact = TopRow(scene, composition, "density compact");
+    Assert(compact.Number == comfortable.Number && MathF.Abs(compact.Relative - comfortable.Relative) < .001f && compact.Height == 22f &&
+        composition.Input.FocusedElement == focused && compact.Semantic.Identity == comfortable.Semantic.Identity && composition.IsCurrent(comfortable.Semantic.Identity), "Compact density lost its scroll anchor, focus, UIA identity, or typed row restyle: comfortable=" + comfortable + " compact=" + compact + " focused=" + focused + "/" + composition.Input.FocusedElement + ".");
+    Assert(Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem) <= 9 && scene.Boxes.Single(box => box.Identity.ElementId == compact.Semantic.Identity.ElementId).Text!.Runs.Single().FontSize == 12f, "Compact density exceeded its bounded realization or retained comfortable typography.");
+    Assert(composition.ExecuteSemanticCommand(density.Identity, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Applied, "Compact density button identity was stale.");
+    graph.Drain(); scene = SceneLayout.Project(composition, viewport, renderer);
+    Assert(composition.Input.SetScene(scene), "Restored comfortable density scene did not install.");
+    var restored = TopRow(scene, composition, "density restored comfortable");
+    Assert(restored.Number == comfortable.Number && MathF.Abs(restored.Relative - comfortable.Relative) < .001f && restored.Height == 30f && restored.Semantic.Identity == comfortable.Semantic.Identity && composition.Input.FocusedElement == focused,
+        "Comfortable restoration changed the retained row, offset, focus, or UIA identity.");
+    foreach (var appearance in new[] { new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.Normal), new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal), new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.High) })
+    {
+        theme.Appearance = appearance; graph.Drain();
+        scene = SceneLayout.Project(composition, viewport, renderer);
+        Assert(composition.Input.SetScene(scene), "Density style did not remain installable for " + appearance + ".");
+    }
+}
+
+static void OptimisticStatusMutations()
+{
+    using var transport = new DeferredGitHubHandler();
+    using var client = new HttpClient(transport) { BaseAddress = new Uri("https://api.github.local/") };
+    var saves = new DeferredStatusSource();
+    var graph = new ReactiveGraph();
+    var composition = IssueBrowserStructure.Create(graph, new GitHubIssueSource(client), saves, out var browser, out _);
+    graph.Drain(); transport.ReplyJson(0); graph.Drain();
+    Assert(new FixtureIssueStatusSource().SaveAsync(3, "closed", default).Result is IssueStatusSaveOutcome.Rejected && new FixtureIssueStatusSource().SaveAsync(4, "closed", default).Result is IssueStatusSaveOutcome.TransientFailure && new FixtureIssueStatusSource().SaveAsync(5, "closed", default).Result is IssueStatusSaveOutcome.Saved,
+        "The ordinary local status source no longer exposes deterministic rejection, transient, and success paths.");
+    browser.Select(10_000); browser.ToggleSelectedStatus(); graph.Drain();
+    Assert(browser.SelectedIssue?.Status == "closed" && saves.Requests.Count == 1 && !browser.CanRetrySelected && !HasRetry(composition), "Status save was not optimistic or exposed Retry before a transient result.");
+    browser.Search = "native"; browser.Select(9_999); browser.ToggleSelectedStatus(); graph.Drain();
+    Assert(saves.Requests.Count == 2 && saves.Cancellations == 0, "Filtering, selection, or an unrelated issue cancelled an application save.");
+    browser.Search = ""; browser.Select(10_000); browser.ToggleSelectedStatus(); graph.Drain();
+    Assert(saves.Requests.Count == 3 && saves.Cancellations >= 1 && browser.SelectedIssue?.Status == "open", "A newer per-issue generation did not replace the optimistic status.");
+    saves.Reply(0, new IssueStatusSaveOutcome.Saved()); graph.Drain();
+    Assert(browser.SelectedIssue?.Status == "open", "Stale save completion committed over the newest issue generation.");
+    saves.Reply(2, new IssueStatusSaveOutcome.Rejected("policy")); graph.Drain();
+    Assert(browser.SelectedIssue?.Status == "closed" && browser.SelectedMutationMessage == "Rejected: policy" && !browser.CanRetrySelected && !HasRetry(composition), "Rejected save did not roll back with its reason or hid Retry.");
+    browser.Select(9_999); saves.Reply(1, new IssueStatusSaveOutcome.TransientFailure("offline")); graph.Drain();
+    Assert(browser.SelectedMutationMessage == "Not synced: offline" && browser.SelectedIssue is { } optimistic && optimistic.Status != IssueFixture.Issues.First(issue => issue.Number == optimistic.Number).Status && browser.CanRetrySelected && HasRetry(composition), "Transient save did not retain the optimistic status and expose Retry.");
+    browser.RetrySelected(); graph.Drain();
+    Assert(saves.Requests.Count == 4 && !browser.CanRetrySelected && !HasRetry(composition), "Manual retry did not start exactly one save and hide Retry while pending.");
+    saves.Reply(3, new IssueStatusSaveOutcome.Saved()); graph.Drain();
+    Assert(browser.SelectedMutationMessage is null && !browser.CanRetrySelected && !HasRetry(composition), "Successful retry retained a transient failure message or Retry action.");
+    browser.ToggleSelectedStatus(); graph.Drain(); composition.Dispose();
+    Assert(saves.Cancellations >= 2 && !graph.Dump().Contains("issue-browser.mutation", StringComparison.Ordinal), "Application disposal did not cancel and release outstanding issue saves.");
+}
+
+static void SourceExceptionsBecomeTransientFailures()
+{
+    using var transport = new DeferredGitHubHandler();
+    using var client = new HttpClient(transport) { BaseAddress = new Uri("https://api.github.local/") };
+    var saves = new DeferredStatusSource();
+    var graph = new ReactiveGraph();
+    using var composition = IssueBrowserStructure.Create(graph, new GitHubIssueSource(client), saves, out var browser, out _);
+    graph.Drain(); transport.ReplyJson(0); graph.Drain();
+    browser.Select(10_000); browser.ToggleSelectedStatus(); graph.Drain(); saves.Fail(0, new InvalidOperationException("first fault")); graph.Drain();
+    Assert(browser.SelectedIssue?.Status == "closed" && browser.SelectedMutationMessage == "Not synced: Unexpected save failure: first fault" && browser.CanRetrySelected,
+        "A first source exception did not become a retryable transient failure while retaining optimism.");
+    browser.RetrySelected(); graph.Drain(); saves.Reply(1, new IssueStatusSaveOutcome.Saved()); graph.Drain();
+    Assert(browser.SelectedIssue?.Status == "closed" && browser.SelectedMutationMessage is null && !browser.CanRetrySelected,
+        "A successful retry did not clear its transient state.");
+    browser.ToggleSelectedStatus(); graph.Drain(); saves.Fail(2, new InvalidOperationException(new string('x', 200))); graph.Drain();
+    Assert(browser.SelectedIssue?.Status == "open" && browser.SelectedMutationMessage is { } message && message.StartsWith("Not synced: Unexpected save failure: ", StringComparison.Ordinal) && message.Length <= 200 && browser.CanRetrySelected,
+        "A fault after a saved value reused the old value or exposed an unbounded reason.");
+}
+
 static void VisualSurface()
 {
     using var transport = new DeferredGitHubHandler();
@@ -147,6 +242,19 @@ static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot snapshot)
         foreach (var node in Flatten(child)) yield return node;
 }
 
+static TopVisibleRow TopRow(RetainedScene scene, Composition composition, string phase)
+{
+    var scroll = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll));
+    var viewport = scene.Boxes.Single(box => box.Identity.ElementId == scroll.Identity.ElementId).Bounds;
+    var candidates = Flatten(composition.SemanticSnapshot()!).Where(node => node.Role == SemanticRole.ListItem).Select(node => new { Semantic = node, Box = scene.Boxes.Single(box => box.Identity.ElementId == node.Identity.ElementId) })
+        .Where(candidate => candidate.Box.Bounds.Y <= viewport.Y && candidate.Box.Bounds.Y + candidate.Box.Bounds.Height > viewport.Y).ToArray();
+    var number = candidates.Length == 1 && int.TryParse(candidates[0].Semantic.Name.Split(' ')[0].TrimStart('#'), out var parsed) ? parsed : 0;
+    Assert(number != 0, phase + " did not retain one top visible issue row.");
+    return new(number, candidates[0].Box.Bounds.Y - viewport.Y, candidates[0].Box.Bounds.Height, candidates[0].Semantic);
+}
+
+static bool HasRetry(Composition composition) => Flatten(composition.SemanticSnapshot()!).Any(node => node.Role == SemanticRole.Button && node.Name == "Retry");
+
 static void Assert(bool value, string message)
 {
     if (!value) throw new InvalidOperationException(message);
@@ -172,3 +280,24 @@ sealed class DeferredGitHubHandler : HttpMessageHandler
 
     private static HttpResponseMessage Response(HttpStatusCode status, string body) => new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 }
+
+sealed class DeferredStatusSource : IIssueStatusSource
+{
+    private readonly List<TaskCompletionSource<IssueStatusSaveOutcome>> _responses = [];
+    public List<(int Number, string Status)> Requests { get; } = [];
+    public int Cancellations { get; private set; }
+
+    public Task<IssueStatusSaveOutcome> SaveAsync(int issueNumber, string status, CancellationToken cancellationToken)
+    {
+        Requests.Add((issueNumber, status));
+        cancellationToken.Register(() => Cancellations++);
+        var response = new TaskCompletionSource<IssueStatusSaveOutcome>();
+        _responses.Add(response);
+        return response.Task;
+    }
+
+    public void Reply(int index, IssueStatusSaveOutcome outcome) => Task.Run(() => _responses[index].SetResult(outcome)).GetAwaiter().GetResult();
+    public void Fail(int index, Exception error) => Task.Run(() => _responses[index].SetException(error)).GetAwaiter().GetResult();
+}
+
+readonly record struct TopVisibleRow(int Number, float Relative, float Height, SemanticSnapshot Semantic);

@@ -118,6 +118,11 @@ internal static class LayoutSceneContracts
         var input = composition.Input;
         Assert(input.SetScene(scene) && list.SourceCount == 10_000 && list.Items.Count == 3 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height == 300_000,
             "Virtual list did not realize a bounded fixed-height initial window.");
+        list.SetRowHeight(20f); graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
+        Assert(input.SetScene(scene) && list.RowHeight == 20f && list.Items.Count == 4 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height == 200_000,
+            "A live fixed-row-height update did not retain a bounded virtual list.");
+        list.SetRowHeight(30f); graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
+        Assert(input.SetScene(scene), "Restored virtual row height scene was rejected.");
         Assert(input.ScrollSemantic(scene.Input.Single(item => item.Identity.ElementId == viewport.Id).Identity, new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)), "Virtual list could not scroll to its end.");
         graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
         Assert(input.SetScene(scene) && list.Items.Count == 3 && composition.SemanticDump().Contains("suppressions=[]", StringComparison.Ordinal), "Virtual end window or semantic dump was not bounded.");

@@ -38,6 +38,14 @@ function Find-Node([System.Windows.Automation.AutomationElement] $root, [string]
     }
     throw "Missing $name/$($type.ProgrammaticName)."
 }
+function Find-OptionalNode([System.Windows.Automation.AutomationElement] $root, [string] $name, [System.Windows.Automation.ControlType] $type) {
+    try {
+        foreach ($node in @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))) {
+            if ($node.Current.Name -eq $name -and $node.Current.ControlType -eq $type) { return $node }
+        }
+    } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    return $null
+}
 function Find-Search([System.Windows.Automation.AutomationElement] $root) {
     foreach ($node in @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))) {
         if ($node.Current.Name -like 'Search*' -and $node.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit) { return $node }
@@ -46,6 +54,60 @@ function Find-Search([System.Windows.Automation.AutomationElement] $root) {
 }
 function Rows([System.Windows.Automation.AutomationElement] $list) {
     @($list.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem))))
+}
+function Find-IssueRow([System.Windows.Automation.AutomationElement] $list, [int] $number) {
+    foreach ($row in @(Rows $list)) { if ($row.Current.Name -like "#$number *") { return $row } }
+    return $null
+}
+function Select-Issue([System.Windows.Automation.AutomationElement] $root, [System.Windows.Automation.AutomationElement] $list, [int] $number) {
+    $rowRef = [ref]$null
+    Wait-Until { $rowRef.Value = Find-IssueRow $list $number; $null -ne $rowRef.Value } "Issue #$number was not realized for the mutation proof."
+    $rowRef.Value.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    Wait-Until {
+        try {
+            $title = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text -and $_.Current.Name -like "#$number *" })
+            $title.Count -eq 1 -and $null -ne (Find-OptionalNode $root 'Open/Close' ([System.Windows.Automation.ControlType]::Button))
+        } catch [System.Windows.Automation.ElementNotAvailableException] { $false }
+    } "Issue #$number selection did not publish an inspector semantic snapshot."
+}
+function Invoke-NodeEventually([System.Windows.Automation.AutomationElement] $root, [string] $name) {
+    Wait-Until {
+        try {
+            $button = Find-OptionalNode $root $name ([System.Windows.Automation.ControlType]::Button)
+            if ($null -eq $button) { return $false }
+            $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            $true
+        } catch { $false }
+    } "$name did not accept Invoke after its semantic snapshot was observed."
+}
+function Invoke-MutationProof([System.Windows.Automation.AutomationElement] $root, [System.Windows.Automation.AutomationElement] $list) {
+    Select-Issue $root $list 10000
+    Assert-True ($null -eq (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))) 'Retry was available before the selected issue had a transient outcome.'
+    Invoke-NodeEventually $root 'Open/Close'
+    Wait-Until {
+        $status = Find-OptionalNode $root 'closed · Not synced: Fixture source is temporarily unavailable.' ([System.Windows.Automation.ControlType]::StatusBar)
+        $null -ne $status -and $null -ne (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
+    } 'Transient fixture mutation did not publish Not synced and Retry.'
+    Invoke-NodeEventually $root 'Retry'
+    Wait-Until {
+        $status = Find-OptionalNode $root 'closed' ([System.Windows.Automation.ControlType]::StatusBar)
+        $null -ne $status -and $null -eq (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
+    } 'Successful manual retry did not publish its semantic snapshot or retire Retry.'
+
+    Select-Issue $root $list 9999
+    Invoke-NodeEventually $root 'Open/Close'
+    Wait-Until {
+        $status = Find-OptionalNode $root 'closed · Rejected: Fixture policy rejected this change.' ([System.Windows.Automation.ControlType]::StatusBar)
+        $null -ne $status -and $null -eq (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
+    } 'Rejected fixture mutation did not roll back, publish its reason, or retire Retry.'
+
+    Select-Issue $root $list 9998
+    Invoke-NodeEventually $root 'Open/Close'
+    Wait-Until {
+        $status = Find-OptionalNode $root 'closed' ([System.Windows.Automation.ControlType]::StatusBar)
+        $null -ne $status -and $null -eq (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
+    } 'Saved fixture mutation did not publish its semantic snapshot or retire Retry.'
+    'transient-retry-rejection-saved'
 }
 function Send-OrdinaryTab([IntPtr] $hwnd) {
     [void][VirtualProofInput]::SetForegroundWindow($hwnd)
@@ -119,6 +181,7 @@ function Invoke-AppProof {
         $initialRows = @(Rows $list)
         Assert-True ($initialRows.Count -le 6) "Actual app initial realized rows exceeded the 3x visible bound: $($initialRows.Count)."
         Assert-RowGeometry $initialRows $scale 'Actual app initial list'
+        $mutation = Invoke-MutationProof $root $list
 
         $search.SetFocus()
         Wait-Until { [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq $search.Current.Name } 'UIA Search focus was rejected.'
@@ -144,7 +207,9 @@ function Invoke-AppProof {
         $endRows = @(Rows $list)
         Assert-True ($endRows.Count -le 6) "Actual app end realized rows exceeded the 3x visible bound: $($endRows.Count)."
         Assert-RowGeometry $endRows $scale 'Actual app end list'
-        $endRow = $endRows[0]
+        $endRow = @($endRows | Where-Object { $_.Current.BoundingRectangle.Top -le $scroll.Current.BoundingRectangle.Top -and $_.Current.BoundingRectangle.Bottom -gt $scroll.Current.BoundingRectangle.Top } | Select-Object -First 1)
+        Assert-True ($endRow.Count -eq 1) 'Actual app end list did not retain one top visible row.'
+        $endRow = $endRow[0]
         $endPattern = $endRow.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
         $listRuntimeId = $list.GetRuntimeId() -join ','
         $boundContainer = $endPattern.Current.SelectionContainer
@@ -153,7 +218,45 @@ function Invoke-AppProof {
         $endName = $endRow.Current.Name
         Start-Sleep -Milliseconds 50
         Assert-True ($boundRuntimeId -eq ($endRow.GetRuntimeId() -join ',') -and $endName -eq $endRow.Current.Name) 'End row provider identity was not stable.'
-        $result = [ordered]@{ initialRows = $initialRows.Count; endRows = $endRows.Count; selected = $selectedName; endRow = $endName; boundRuntimeId = $boundRuntimeId }
+        $scrollPattern.SetScrollPercent(-1, 50)
+        Wait-Until { $scrollPattern.Current.VerticalScrollPercent -ge 49.9 -and $scrollPattern.Current.VerticalScrollPercent -le 50.1 } 'Actual app mid-list scroll did not converge for density proof.'
+        $midRows = @(Rows $list)
+        $endRow = @($midRows | Where-Object { $_.Current.BoundingRectangle.Top -le $scroll.Current.BoundingRectangle.Top -and $_.Current.BoundingRectangle.Bottom -gt $scroll.Current.BoundingRectangle.Top } | Select-Object -First 1)[0]
+        Assert-True ($null -ne $endRow) 'Actual app mid-list did not retain one top visible row.'
+        $boundRuntimeId = $endRow.GetRuntimeId() -join ','
+        $endName = $endRow.Current.Name
+        $endPattern = $endRow.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+        $endPattern.Select()
+        Wait-Until { $endPattern.Current.IsSelected } 'Mid-list row did not retain UIA selection before density restyle.'
+        $relative = $endRow.Current.BoundingRectangle.Top - $scroll.Current.BoundingRectangle.Top
+        $density = Find-Node $root 'Density: Comfortable/Compact' ([System.Windows.Automation.ControlType]::Button)
+        $densityRuntimeId = $density.GetRuntimeId() -join ','
+        $endRow.SetFocus()
+        Wait-Until { [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq $endName } 'End row did not accept UIA focus before density restyle.'
+        $density.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Wait-Until {
+            $current = @((Rows $list) | Where-Object { $_.Current.Name -eq $endName })
+            $current.Count -eq 1 -and [Math]::Abs($current[0].Current.BoundingRectangle.Height - (22 * $scale)) -le 2.5
+        } 'Compact density did not retain the top issue key with a compact row height.'
+        $compact = @((Rows $list) | Where-Object { $_.Current.Name -eq $endName })[0]
+        $compactRuntimeId = $compact.GetRuntimeId() -join ','
+        $compactFocus = [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name
+        $compactRows = (Rows $list).Count
+        $compactRelative = $compact.Current.BoundingRectangle.Top - $scroll.Current.BoundingRectangle.Top
+        $density = Find-Node $root 'Density: Comfortable/Compact' ([System.Windows.Automation.ControlType]::Button)
+        Assert-True ($compactRuntimeId -eq $boundRuntimeId -and $endPattern.Current.IsSelected -and [Math]::Abs($compactRelative - $relative) -le 1.5 -and $compactRows -le 9 -and
+            ($density.GetRuntimeId() -join ',') -eq $densityRuntimeId -and $compactFocus -eq $density.Current.Name) "Compact density changed row identity/selection/anchor, realization bound, or density UIA focus: rowRuntime=$compactRuntimeId expected=$boundRuntimeId selected=$($endPattern.Current.IsSelected) relative=$compactRelative expectedRelative=$relative rows=$compactRows densityRuntime=$($density.GetRuntimeId() -join ',') expectedDensityRuntime=$densityRuntimeId focus=$compactFocus."
+        $density.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Wait-Until {
+            $current = @((Rows $list) | Where-Object { $_.Current.Name -eq $endName })
+            $current.Count -eq 1 -and [Math]::Abs($current[0].Current.BoundingRectangle.Height - (30 * $scale)) -le 2.5
+        } 'Comfortable density did not restore the top issue key and row height.'
+        $restored = @((Rows $list) | Where-Object { $_.Current.Name -eq $endName })[0]
+        $restoredRelative = $restored.Current.BoundingRectangle.Top - $scroll.Current.BoundingRectangle.Top
+        $density = Find-Node $root 'Density: Comfortable/Compact' ([System.Windows.Automation.ControlType]::Button)
+        Assert-True (($restored.GetRuntimeId() -join ',') -eq $boundRuntimeId -and $endPattern.Current.IsSelected -and [Math]::Abs($restoredRelative - $relative) -le 1.5 -and (Rows $list).Count -le 6 -and
+            ($density.GetRuntimeId() -join ',') -eq $densityRuntimeId -and [System.Windows.Automation.AutomationElement]::FocusedElement.Current.Name -eq $density.Current.Name) 'Comfortable restoration changed row identity/selection/anchor, realization bound, or density UIA focus.'
+        $result = [ordered]@{ initialRows = $initialRows.Count; endRows = $endRows.Count; selected = $selectedName; endRow = $endName; boundRuntimeId = $boundRuntimeId; density = 'comfortable-compact-comfortable'; mutation = $mutation }
     }
     finally {
         $cleanup = Stop-LaunchedProcess $process

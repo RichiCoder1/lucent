@@ -1058,7 +1058,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     }
 
     public Element Region { get; }
-    public float RowHeight { get; }
+    public float RowHeight { get; private set; }
     public int SourceCount => _items.Length;
     public IReadOnlyList<Element> Items => Region.Children;
     public bool IsDisposed { get; private set; }
@@ -1068,6 +1068,18 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
         _composition.CheckThread();
         Region.UpdateControl(Arrangement.VirtualRowHeight, RowHeight);
         Region.UpdateControl(Arrangement.VirtualItemCount, _items.Length);
+    }
+
+    /// <summary>Changes the fixed row height while retaining keyed entries; callers preserve any logical scroll anchor.</summary>
+    public void SetRowHeight(float rowHeight)
+    {
+        _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
+        if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
+        if (IsDisposed || RowHeight == rowHeight) return;
+        RowHeight = rowHeight;
+        Region.UpdateControl(Arrangement.VirtualRowHeight, rowHeight);
+        foreach (var entry in _entries.Values) entry.UpdateControl(Arrangement.Height, rowHeight);
     }
 
     /// <summary>Re-evaluates the source. Normal callers let the owned reactive effect invoke this.</summary>

@@ -5,7 +5,7 @@ try
 {
     var graph = new ReactiveGraph();
     using var composition = IssueBrowserStructure.Create(graph, out var theme);
-    return WindowsBootstrap.Run("Lucent Issue Browser — M4", composition, theme);
+    return WindowsBootstrap.Run("Lucent Issue Browser", composition, theme);
 }
 catch (Exception exception)
 {
