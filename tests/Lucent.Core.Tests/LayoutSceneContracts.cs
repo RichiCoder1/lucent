@@ -11,6 +11,7 @@ internal static class LayoutSceneContracts
             InvalidBoundsFail();
             ExplicitZeroAndOverflow();
             CrossAxisIntrinsicAndMalformedRuns();
+            FixedHeightVirtualization();
             Console.WriteLine("Lucent.Core layout/scene contracts: PASS");
             return 0;
         }
@@ -97,6 +98,37 @@ internal static class LayoutSceneContracts
         Expect<ArgumentException>(() => new ShapedRun("bad", "probe", 400, 5, 0, "fingerprint", 0, "source", TextDirection.LeftToRight, "en", 1, 1, 1, -1, 0, 1, [glyph]));
         var goodGlyph = new ShapedGlyph(1, 0, 0, 0, 1, 0, 0);
         Expect<InvalidOperationException>(() => new ShapedText("bad-text", 1, 1, [new ShapedRun("shifted", "probe", 400, 5, 0, "fingerprint", 0, "source", TextDirection.LeftToRight, "en", 1, 1, 1, -1, 0, 1, [goodGlyph])]).Validate(new("x", "probe", 1, "en", TextDirection.LeftToRight, 1)));
+    }
+
+    private static void FixedHeightVirtualization()
+    {
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "virtual-layout");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("virtual-layout"));
+        Controls.Column(composition.Root, theme, "root");
+        var viewport = composition.Child(composition.Root, "viewport");
+        Controls.ScrollViewport(viewport, theme, "Rows", style: Style.Empty.Set(Arrangement.Width, 120f).Set(Arrangement.Height, 30f));
+        var values = graph.Signal(Enumerable.Range(1, 10_000).ToArray(), "virtual-values");
+        var list = Controls.VirtualizedList(viewport, theme, "rows", "Rows", () => values.Value, value => value, (value, context) =>
+        {
+            var row = context.Element("row"); Controls.Selectable(row, theme, "row " + value); return row;
+        }, 30f);
+        graph.Drain();
+        var shaper = new ProbeShaper();
+        var scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
+        var input = composition.Input;
+        Assert(input.SetScene(scene) && list.SourceCount == 10_000 && list.Items.Count == 3 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height == 300_000,
+            "Virtual list did not realize a bounded fixed-height initial window.");
+        Assert(input.ScrollSemantic(scene.Input.Single(item => item.Identity.ElementId == viewport.Id).Identity, new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)), "Virtual list could not scroll to its end.");
+        graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
+        Assert(input.SetScene(scene) && list.Items.Count == 3 && composition.SemanticDump().Contains("suppressions=[]", StringComparison.Ordinal), "Virtual end window or semantic dump was not bounded.");
+        var before = list.Items.Select(item => item.Id).ToArray();
+        var reordered = values.Value.ToArray(); (reordered[^1], reordered[^2]) = (reordered[^2], reordered[^1]); values.Value = reordered; graph.Drain();
+        scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
+        Assert(input.SetScene(scene) && list.Items.Select(item => item.Id).SequenceEqual([before[0], before[2], before[1]]), "Keyed virtual rows did not retain their identities across a move.");
+        values.Value = reordered[..^1]; graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
+        Assert(!input.SetScene(scene), "A removed end row did not force bounded scroll reconciliation.");
+        graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
+        Assert(input.SetScene(scene) && list.SourceCount == 9_999 && list.Items.Count <= 3, "Removal left an unbounded virtual window.");
     }
 
     private sealed class ProbeShaper : ITextShaper

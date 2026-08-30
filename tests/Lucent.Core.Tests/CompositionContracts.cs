@@ -19,6 +19,7 @@ internal static class CompositionContracts
             Assert(!first.Contains("secret", StringComparison.OrdinalIgnoreCase) && !first.Contains("value=", StringComparison.OrdinalIgnoreCase), "Composition dump exposed application values.");
             ReleasedPayload();
             ReleasedOwnershipIdentities();
+            UnrelatedSemanticRefreshKeepsIdentityCurrent();
             Console.WriteLine("Lucent.Core composition contracts: PASS");
             return 0;
         }
@@ -85,6 +86,18 @@ internal static class CompositionContracts
         rows.Value = ["a"];
         graph.Drain();
         Assert(c.IsDisposed && cleanup.GetValueOrDefault("c") == 1 && cleanup.GetValueOrDefault("d") == 1, "Departed keyed entries were not cleaned once.");
+    }
+
+    private static void UnrelatedSemanticRefreshKeepsIdentityCurrent()
+    {
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "semantic-current");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light); Controls.Panel(composition.Root, theme, "root");
+        var first = composition.Child(composition.Root, "first"); var invoked = 0; Controls.Button(first, theme, "First", () => invoked++);
+        var second = composition.Child(composition.Root, "second"); var status = Controls.Loading(second, theme, "Ready");
+        graph.Drain(); var identity = composition.SemanticSnapshot()!.Children.Single(node => node.Name == "First").Identity;
+        status.Label = "Changed"; graph.Drain();
+        Assert(composition.ExecuteSemanticCommand(identity, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Applied && invoked == 1,
+            "An unrelated semantic refresh invalidated a still-current command identity.");
     }
 
     private static void DepartedFacetsAndLateAsync()

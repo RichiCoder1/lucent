@@ -2,6 +2,7 @@ using Lucent.Platform.Windows;
 
 if (args is ["--listener-proof"]) return ListenerProof.Run();
 if (args is ["--uia-fixture"]) return UiaFixture.Run();
+if (args is ["--virtualization-fixture"]) return VirtualizationFixture.Run();
 
 try
 {
@@ -13,6 +14,7 @@ try
     UiaSnapshotReadContract();
     WindowsHostContracts.InputAdapterAndRoutingContract();
     WindowsHostContracts.InputInstallConvergenceContract();
+    WindowsHostContracts.VirtualizedInputFreshnessContract();
     WindowsHostContracts.InputReconciliationPaintContract();
     WindowsHostContracts.SettingsAndAppearanceContract();
     WindowsHostContracts.ClipboardAndCursorContract();

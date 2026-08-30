@@ -17,6 +17,7 @@ public sealed class Composition : IDisposable
     private CompositionContext? _factory;
     private int _behaviorDepth;
     private InputRouter? _input;
+    private readonly List<IVirtualizedRegion> _virtualized = [];
     private long _nextSceneGeneration;
     private long _interactionVisualGeneration;
     private long _semanticRevision;
@@ -85,6 +86,18 @@ public sealed class Composition : IDisposable
         return new KeyedRegion<TKey, TItem>(this, parent, name, source, key, content);
     }
 
+    /// <summary>Creates a fixed-height keyed region whose mounted entries are derived from its containing viewport.</summary>
+    internal VirtualizedRegion<TKey, TItem> Virtualize<TKey, TItem>(Element viewport, string name, Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight) where TKey : notnull
+    {
+        ThrowIfFactoryCreation();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(content);
+        return new VirtualizedRegion<TKey, TItem>(this, viewport, name, source, key, content, rowHeight);
+    }
+
     /// <summary>Returns active structure and stable identities without application values.</summary>
     public string Dump()
     {
@@ -120,7 +133,7 @@ public sealed class Composition : IDisposable
     public bool IsCurrent(SemanticIdentity identity)
     {
         _graph.CheckThread();
-        return !IsDisposed && identity.CompositionEpoch == _epoch && _emittedSemantics.Contains(identity) && Find(Root, identity.ElementId) is { } element && element.IsCurrent(identity);
+        return !IsDisposed && identity.CompositionEpoch == _epoch && Find(Root, identity.ElementId) is { } element && element.IsCurrent(identity);
     }
 
     /// <summary>Executes one declared portable semantic command on the owning UI thread.</summary>
@@ -226,6 +239,14 @@ public sealed class Composition : IDisposable
         _emittedSemantics.Clear();
         _semanticRevision = checked(_semanticRevision + 1);
         SemanticsChanged?.Invoke();
+    }
+
+    internal void Register(IVirtualizedRegion region) => _virtualized.Add(region);
+    internal void Unregister(IVirtualizedRegion region) => _virtualized.Remove(region);
+    internal void RealizeVirtualized(LayoutViewport viewport)
+    {
+        _graph.CheckThread();
+        foreach (var region in _virtualized.ToArray()) region.Realize(viewport);
     }
 
     internal Element? Find(ElementIdentity identity) => identity.CompositionEpoch == _epoch ? Find(Root, identity.ElementId) : null;
@@ -1000,5 +1021,161 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
         _content = null;
         Region.Scope.Detach(this);
         Composition.ThrowAll(errors, "Keyed region cleanup failed.");
+    }
+}
+
+internal interface IVirtualizedRegion
+{
+    void Realize(LayoutViewport viewport);
+}
+
+/// <summary>A fixed-height keyed region that owns only the visible rows plus two rows of overscan on each side.</summary>
+public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRegion where TKey : notnull
+{
+    private const int Overscan = 2;
+    private readonly Composition _composition;
+    private readonly Element _viewport;
+    private Func<IEnumerable<TItem>>? _source;
+    private Func<TItem, TKey>? _key;
+    private Func<TItem, CompositionContext, Element>? _content;
+    private readonly ReactiveEffect _effect;
+    private TItem[] _items = [];
+    private TKey[] _keys = [];
+    private Dictionary<TKey, Element> _entries = [];
+    private bool _updating;
+
+    internal VirtualizedRegion(Composition composition, Element viewport, string name, Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight)
+    {
+        if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
+        _composition = composition;
+        _viewport = viewport ?? throw new ArgumentNullException(nameof(viewport));
+        Region = composition.Child(viewport, name);
+        _source = source; _key = key; _content = content; RowHeight = rowHeight;
+        Region.Scope.Own(this);
+        _composition.Register(this);
+        _effect = Region.Scope.Effect(Refresh, name + ".items");
+    }
+
+    public Element Region { get; }
+    public float RowHeight { get; }
+    public int SourceCount => _items.Length;
+    public IReadOnlyList<Element> Items => Region.Children;
+    public bool IsDisposed { get; private set; }
+
+    internal void Configure()
+    {
+        _composition.CheckThread();
+        Region.UpdateControl(Arrangement.VirtualRowHeight, RowHeight);
+        Region.UpdateControl(Arrangement.VirtualItemCount, _items.Length);
+    }
+
+    /// <summary>Re-evaluates the source. Normal callers let the owned reactive effect invoke this.</summary>
+    public void Refresh()
+    {
+        _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
+        Update(_source!());
+    }
+
+    /// <summary>Updates source identity; realization waits for the next framework projection.</summary>
+    public void Update(IEnumerable<TItem> items)
+    {
+        _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
+        ArgumentNullException.ThrowIfNull(items);
+        if (IsDisposed) return;
+        var next = items.ToArray(); var keys = new TKey[next.Length]; var unique = new HashSet<TKey>();
+        for (var index = 0; index < next.Length; index++)
+        {
+            var key = _key!(next[index]);
+            if (!unique.Add(key)) throw new ArgumentException("Virtualized region keys must be unique.", nameof(items));
+            keys[index] = key;
+        }
+        _items = next; _keys = keys;
+        Region.UpdateControl(Arrangement.VirtualItemCount, next.Length);
+    }
+
+    void IVirtualizedRegion.Realize(LayoutViewport viewport) => Realize(viewport);
+    public void Realize(LayoutViewport viewport)
+    {
+        _composition.CheckThread();
+        if (IsDisposed) return;
+        viewport.Validate();
+        if (_updating) throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
+        var viewportHeight = _viewport.Resolve(Arrangement.Height).Value ?? viewport.Height;
+        var offset = _viewport.Resolve(Arrangement.Scroll).Value.Y;
+        var first = Math.Max(0, (int)MathF.Floor(offset / RowHeight) - Overscan);
+        var last = Math.Min(_items.Length, (int)MathF.Ceiling((offset + viewportHeight) / RowHeight) + Overscan);
+        Realize(first, last);
+    }
+
+    private void Realize(int first, int last)
+    {
+        _updating = true;
+        try
+        {
+            var wanted = new HashSet<TKey>(_keys[first..last]);
+            var retained = new Dictionary<TKey, Element>(_entries);
+            var provisional = new List<(TKey Key, Element Element, CompositionContext Context)>();
+            try
+            {
+                for (var index = first; index < last; index++)
+                {
+                    if (retained.ContainsKey(_keys[index])) continue;
+                    var context = new CompositionContext(_composition, Region);
+                    var entry = context.Run(() => _content!(_items[index], context));
+                    context.Validate(entry);
+                    entry.UpdateControl(Arrangement.Height, RowHeight);
+                    entry.UpdateControl(Arrangement.VirtualRowIndex, index);
+                    provisional.Add((_keys[index], entry, context));
+                }
+            }
+            catch (Exception error)
+            {
+                var errors = new List<Exception> { error };
+                foreach (var entry in provisional)
+                    try { entry.Context.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); }
+                Composition.ThrowAll(errors, "Virtualized region factory failed.");
+                throw;
+            }
+
+            var next = new Dictionary<TKey, Element>();
+            var ordered = new List<Element>(last - first);
+            for (var index = first; index < last; index++)
+            {
+                var key = _keys[index];
+                var entry = retained.TryGetValue(key, out var current) ? current : provisional.Single(value => EqualityComparer<TKey>.Default.Equals(value.Key, key)).Element;
+                entry.UpdateControl(Arrangement.VirtualRowIndex, index);
+                next.Add(key, entry); ordered.Add(entry);
+            }
+            foreach (var entry in provisional) entry.Context.Complete();
+            var departed = _entries.Where(pair => !wanted.Contains(pair.Key)).Select(pair => pair.Value).ToArray();
+            _entries = next;
+            Region.ReplaceChildren(ordered);
+            foreach (var entry in provisional) entry.Context.Dispose();
+            List<Exception>? cleanupErrors = null;
+            foreach (var entry in departed)
+                try { entry.Dispose(); } catch (Exception error) { (cleanupErrors ??= []).Add(error); }
+            Composition.ThrowAll(cleanupErrors, "Virtualized region cleanup failed.");
+        }
+        finally { _updating = false; }
+    }
+
+    public void Dispose()
+    {
+        _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
+        if (IsDisposed) return;
+        IsDisposed = true; _composition.Unregister(this);
+        List<Exception>? errors = null;
+        try { _effect.Dispose(); } catch (Exception error) { errors = [error]; }
+        var entries = _entries.Values.ToArray(); _entries.Clear();
+        if (!Region.IsDisposed) Region.ReplaceChildren([]);
+        foreach (var entry in entries.Reverse())
+            try { entry.Dispose(); } catch (Exception error) { (errors ??= []).Add(error); }
+        _source = null; _key = null; _content = null; _items = []; _keys = [];
+        Region.Scope.Detach(this);
+        Composition.ThrowAll(errors, "Virtualized region cleanup failed.");
     }
 }

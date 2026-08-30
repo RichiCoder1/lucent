@@ -126,6 +126,33 @@ internal static class WindowsHostContracts
             "Out-of-range scroll did not reproject to an accepted scene within the bounded host install loop.");
     }
 
+    public static void VirtualizedInputFreshnessContract()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "windows-virtual-freshness");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f).Set(Arrangement.Clip, true));
+        var field = composition.Child(composition.Root, "search"); Controls.TextField(field, theme, "Search", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
+        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, theme, "Rows", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 30f));
+        var values = graph.Signal(Array.Empty<int>(), "virtual-values");
+        var loaded = graph.Signal(false, "virtual-loaded");
+        _ = Controls.VirtualizedList(viewport, theme, "rows", "Rows", () => values.Value, value => value, (value, context) =>
+        {
+            var row = context.Element("row"); Controls.Selectable(row, theme, "row " + value); return row;
+        }, 30f);
+        _ = composition.When(composition.Root, "loading", () => !loaded.Value, Controls.Recipe("loading", (context, element) => Controls.Loading(element, theme, "Loading", Style.Empty.Set(Arrangement.Height, 20f))));
+        _ = WindowsBootstrap.ProjectAndInstall(composition, new(100, 100, 1), renderer);
+        _ = composition.SemanticSnapshot();
+        values.Value = Enumerable.Range(1, 10_000).ToArray();
+        loaded.Value = true;
+        using var adapter = new WindowsInputAdapter(composition);
+        adapter.RefreshTextInput();
+        Assert(adapter.Dispatch(new SDL.Event { Key = new() { Type = SDL.EventType.KeyDown, Key = SDL.Keycode.Tab, Down = true } }) && composition.Input.FocusedElement?.ElementId == field.Id,
+            "A pending async/virtual update left the installed scene stale for ordinary Tab focus.");
+        _ = WindowsBootstrap.ProjectAndInstall(composition, new(100, 100, 1), renderer);
+        Assert(composition.Input.FocusedElement?.ElementId == field.Id, "Virtual realization/reprojection dropped ordinary Tab focus.");
+    }
+
     public static void InputReconciliationPaintContract()
     {
         using var renderer = new SkiaSceneRenderer();

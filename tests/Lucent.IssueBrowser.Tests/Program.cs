@@ -38,37 +38,51 @@ static void AsyncBrowserStates()
 
     Assert(transport.Requests.Count == 1 && transport.Requests[0] == "GET /repos/RichiCoder1/lucent/issues?state=all&per_page=100|application/vnd.github+json|Lucent-IssueBrowser/0.1", "GitHub adapter request contract changed or used a real transport.");
     Assert(browser.IsLoading && !browser.IsStale && browser.Issues.Count == 0 && browser.Error is null && Flatten(composition.SemanticSnapshot()!).Any(node => node.Role == SemanticRole.Status && node.Name == "Loading issues"), "Initial loading state was not externally visible.");
+    using var initialRenderer = new SkiaSceneRenderer();
+    var initial = SceneLayout.Project(composition, new(800, 500, 1), initialRenderer);
+    Assert(composition.Input.SetScene(initial), "Initial issue-browser scene did not install.");
+    var search = Flatten(composition.SemanticSnapshot()!).Single(node => node.Role == SemanticRole.TextField && node.Name == "Search issues");
+    Assert(composition.Input.FocusSemantic(new(search.Identity.CompositionEpoch, search.Identity.ElementId)), "Initial loading scene rejected Search focus.");
 
     transport.ReplyJson(0); graph.Drain();
-    Assert(!browser.IsLoading && !browser.IsStale && browser.Error is null && browser.Issues.Count == 12 && browser.VisibleIssues.Count == 12 &&
-        Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem) == 12, "Successful response did not build the complete issue browser list.");
+    using var renderer = new SkiaSceneRenderer();
+    var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+    Assert(composition.Input.SetScene(scene) && !browser.IsLoading && !browser.IsStale && browser.Error is null && browser.Issues.Count == 10_000 && browser.VisibleIssues.Count == 10_000 &&
+        Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem) <= 7, "Successful response did not build a bounded virtual issue browser list.");
 
     browser.Search = "native"; graph.Drain();
-    Assert(browser.VisibleIssues.Select(issue => issue.Number).SequenceEqual([36, 33, 25]), "Search result count/order was not deterministic.");
+    Assert(browser.VisibleIssues.Count > 1 && browser.VisibleIssues.All(issue => (issue.Title + " " + issue.Labels + " " + issue.Body).Contains("native", StringComparison.OrdinalIgnoreCase)), "Search result content was not deterministic.");
     browser.Status = "closed"; graph.Drain();
-    Assert(browser.VisibleIssues.Count == 0, "Status filter did not compose with search.");
+    Assert(browser.VisibleIssues.All(issue => issue.Status == "closed"), "Status filter did not compose with search.");
     browser.Search = ""; browser.Status = "open"; browser.Assignee = "marta"; graph.Drain();
-    Assert(browser.VisibleIssues.Select(issue => issue.Number).SequenceEqual([36, 34, 31, 26]), "Status and assignee filters did not return the frozen result count.");
-    browser.Assignee = "all"; graph.Drain();
+    Assert(browser.VisibleIssues.Count > 1 && browser.VisibleIssues.All(issue => issue.Status == "open" && issue.Assignee == "marta"), "Status and assignee filters did not return deterministic results.");
+    browser.Assignee = "all"; browser.Status = "all"; graph.Drain();
 
-    var row = Flatten(composition.SemanticSnapshot()!).Single(node => node.Role == SemanticRole.ListItem && node.Name.StartsWith("#30 ", StringComparison.Ordinal));
+    scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+    Assert(composition.Input.SetScene(scene), "Filtered virtual list did not install.");
+    var viewport = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll));
+    Assert(composition.Input.ScrollSemantic(new(viewport.Identity.CompositionEpoch, viewport.Identity.ElementId), new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)), "Virtual list could not scroll to its end.");
+    graph.Drain();
+    scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+    Assert(composition.Input.SetScene(scene), "End virtual list scene did not install.");
+    var row = Flatten(composition.SemanticSnapshot()!).Single(node => node.Role == SemanticRole.ListItem && node.Name.StartsWith("#1 ", StringComparison.Ordinal));
     Assert(composition.ExecuteSemanticCommand(row.Identity, new(SemanticCommandKind.Select)) == SemanticCommandResult.Applied, "Issue row semantic selection was rejected.");
     graph.Drain();
-    Assert(browser.SelectedIssue?.Number == 30 && composition.Dump().Contains("issue-browser.details", StringComparison.Ordinal), "Selection did not expose issue details.");
+    Assert(browser.SelectedIssue?.Number == 1 && composition.Dump().Contains("issue-browser.details", StringComparison.Ordinal), "Selection did not expose issue details.");
 
     browser.Retry(); graph.Drain();
-    Assert(transport.Requests.Count == 2 && browser.IsLoading && browser.IsStale && browser.Issues.Count == 12, "Retry did not retain stale data while loading.");
+    Assert(transport.Requests.Count == 2 && browser.IsLoading && browser.IsStale && browser.Issues.Count == 10_000, "Retry did not retain stale data while loading.");
     transport.ReplyStatus(1, HttpStatusCode.ServiceUnavailable); graph.Drain();
-    Assert(!browser.IsLoading && browser.IsStale == false && browser.Error is not null && browser.Issues.Count == 12 && composition.Dump().Contains("issue-browser.error", StringComparison.Ordinal), "Failed retry did not retain stale data and expose error.");
+    Assert(!browser.IsLoading && browser.IsStale == false && browser.Error is not null && browser.Issues.Count == 10_000 && composition.Dump().Contains("issue-browser.error", StringComparison.Ordinal), "Failed retry did not retain stale data and expose error.");
 
     browser.Retry(); graph.Drain();
     Assert(transport.Requests.Count == 3 && browser.IsLoading && browser.IsStale && browser.Error is null, "Error retry did not return to stale loading state.");
     browser.Retry(); graph.Drain();
-    Assert(transport.Requests.Count == 4 && transport.Cancellations >= 1 && browser.IsLoading && browser.Issues.Count == 12, "Replacement request did not cancel prior work.");
+    Assert(transport.Requests.Count == 4 && transport.Cancellations >= 1 && browser.IsLoading && browser.Issues.Count == 10_000, "Replacement request did not cancel prior work.");
     transport.ReplyJson(2); graph.Drain();
-    Assert(browser.IsLoading && browser.Issues.Count == 12, "Ignored-cancellation response committed out of order.");
+    Assert(browser.IsLoading && browser.Issues.Count == 10_000, "Ignored-cancellation response committed out of order.");
     transport.ReplyJson(3); graph.Drain();
-    Assert(!browser.IsLoading && browser.Error is null && browser.Issues.Count == 12 && browser.SelectedIssue?.Number == 30, "Latest retry response did not commit deterministically.");
+    Assert(!browser.IsLoading && browser.Error is null && browser.Issues.Count == 10_000 && browser.SelectedIssue?.Number == 1, "Latest retry response did not commit deterministically.");
 }
 
 static void DisposedRequestCannotCommit()

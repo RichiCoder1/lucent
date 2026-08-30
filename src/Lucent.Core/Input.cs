@@ -266,7 +266,6 @@ public sealed class InputRouter
         Enter(); try
         {
             rectangle = default;
-            _composition.Flush();
             if (_scene is null || !ValidateScene(_scene) || _focused is not { } focus || !Eligible(focus.Identity) || !_textFields.TryGetValue(focus.Identity.ElementId, out var state)) return false;
             var box = _scene.Boxes.SingleOrDefault(value => value.Identity == focus.Identity); if (box.Identity != focus.Identity) return false;
             var x = box.Bounds.X;

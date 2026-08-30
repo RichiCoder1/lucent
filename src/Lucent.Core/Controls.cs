@@ -97,6 +97,15 @@ public static class Controls
         Bind(element, state, value => element.UpdateControl(Arrangement.Scroll, value.Offset));
         return state;
     }
+    /// <summary>Creates a fixed-height keyed list owned by its scroll viewport. Rows outside the bounded viewport window do not remain mounted.</summary>
+    public static VirtualizedRegion<TKey, TItem> VirtualizedList<TKey, TItem>(Element viewport, ThemeContext theme, string name, string label,
+        Func<IEnumerable<TItem>> source, Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> row, float rowHeight) where TKey : notnull
+    {
+        ArgumentNullException.ThrowIfNull(viewport); ArgumentNullException.ThrowIfNull(theme); ArgumentNullException.ThrowIfNull(source); ArgumentNullException.ThrowIfNull(key); ArgumentNullException.ThrowIfNull(row);
+        var region = viewport.Composition.Virtualize(viewport, Required(name, nameof(name)), source, key, row, rowHeight);
+        try { List(region.Region, theme, Required(label, nameof(label))); region.Configure(); return region; }
+        catch { region.Dispose(); throw; }
+    }
     public static void Button(Element element, ThemeContext theme, string label, Action? activate = null, Style? style = null)
     {
         label = Required(label, nameof(label)); Configure(element, theme, ButtonStyle.Set(SceneProperties.Text, label), style, new ButtonBehavior("button", new(SemanticRole.Button, label, actions: SemanticAction.Invoke), activate));

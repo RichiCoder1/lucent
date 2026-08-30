@@ -11,11 +11,11 @@ public sealed record BrowserIssue(int Number, string Title, string Status, strin
 public static class IssueFixture
 {
     public const string Seed = "lucent-issue-browser-v1";
-    public const string Sha256 = "5021c89ddf0911e3f00445a816be039bd3626c10111f1184f70796803a0f76fe";
-    public const int TotalCount = 12;
-    public const int OpenCount = 8;
-    public const int ClosedCount = 4;
-    public static IReadOnlyList<BrowserIssue> Issues { get; } =
+    public const string Sha256 = "9f4a8b3ce5df46f73a4a3c662345b4dcd479557f37cc7a599d5bb6472b8b4efa";
+    public const int TotalCount = 10_000;
+    public const int OpenCount = 6_667;
+    public const int ClosedCount = 3_333;
+    private static readonly BrowserIssue[] Seeds =
     [
         new(36, "Native IME composition must cancel cleanly", "open", "marta", "input, accessibility", "2025-01-16", "Keep preedit ownership inside the input adapter."),
         new(35, "Wire retained scene focus invalidation", "closed", "devin", "render", "2025-01-15", "Refresh focus paint without rebuilding input ownership."),
@@ -30,6 +30,7 @@ public static class IssueFixture
         new(26, "Stabilize keyboard list selection", "open", "marta", "input", "2025-01-06", "Keep selection coherent through keyed list updates."),
         new(25, "Add CI artifact verification", "open", "joel", "build", "2025-01-05", "Verify the published native application contents.")
     ];
+    public static IReadOnlyList<BrowserIssue> Issues { get; } = CreateIssues();
 
     public static string Json => "[" + string.Join(',', Issues.Select(issue =>
         $"{{\"number\":{issue.Number},\"title\":\"{issue.Title}\",\"state\":\"{issue.Status}\",\"assignee\":{{\"login\":\"{issue.Assignee}\"}},\"labels\":[{string.Join(',', issue.Labels.Split(", ", StringSplitOptions.None).Select(label => $"{{\"name\":\"{label}\"}}"))}],\"updated_at\":\"{issue.Updated}T00:00:00Z\",\"body\":\"{issue.Body}\"}}")) + "]";
@@ -40,6 +41,24 @@ public static class IssueFixture
         var actual = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
         if (Issues.Count != TotalCount || Issues.Count(issue => issue.Status == "open") != OpenCount || Issues.Count(issue => issue.Status == "closed") != ClosedCount || actual != Sha256)
             throw new InvalidOperationException("The frozen issue fixture identity or counts changed.");
+    }
+
+    private static IReadOnlyList<BrowserIssue> CreateIssues()
+    {
+        var issues = new List<BrowserIssue>(TotalCount);
+        var generated = 0;
+        for (var number = TotalCount; number >= 37; number--)
+        {
+            var seed = Seeds[generated++ % Seeds.Length];
+            issues.Add(seed with { Number = number, Title = seed.Title + " (issue #" + number + ")", Body = seed.Body + " Deterministic fixture issue #" + number + "." });
+        }
+        for (var number = 24; number >= 1; number--)
+        {
+            var seed = Seeds[generated++ % Seeds.Length];
+            issues.Add(seed with { Number = number, Title = seed.Title + " (issue #" + number + ")", Body = seed.Body + " Deterministic fixture issue #" + number + "." });
+        }
+        issues.AddRange(Seeds);
+        return issues.AsReadOnly();
     }
 }
 
@@ -96,6 +115,7 @@ public sealed class IssueBrowserState
     public bool IsStale => _issues.HasValue && _issues.IsPending;
     public string? Error => _issues.Error?.Message;
     public BrowserIssue? SelectedIssue => Issues.FirstOrDefault(issue => issue.Number == _selectedNumber.Value);
+    public bool IsSelected(int number) => _selectedNumber.Value == number;
     public string Search { get => _search.Value; set => _search.Value = value.Trim(); }
     public string Status { get => _status.Value; set => _status.Value = Normalize(value, "all"); }
     public string Assignee { get => _assignee.Value; set => _assignee.Value = Normalize(value, "all"); }
@@ -162,15 +182,15 @@ public static class IssueBrowserStructure
             }));
 
         var viewport = composition.Child(composition.Root, "issue-browser.scroll-viewport");
-        Controls.ScrollViewport(viewport, themeContext, "Issues", style: Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 90f));
-        var list = composition.ForEach(viewport, "issue-browser.issue-list", () => browser.VisibleIssues, issue => issue.Number, (issue, context) =>
+        Controls.ScrollViewport(viewport, themeContext, "Issues", style: Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 60f));
+        var list = Controls.VirtualizedList(viewport, themeContext, "issue-browser.issue-list", "Issues", () => browser.VisibleIssues, issue => issue.Number, (issue, context) =>
         {
             var row = context.Element("issue-browser.issue-row");
-            Controls.Selectable(row, themeContext, $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}", () => browser.Select(issue.Number), Style.Empty.Set(Arrangement.Height, 30f).Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, RowSurface)
+            var selectable = Controls.Selectable(row, themeContext, $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}", () => browser.Select(issue.Number), Style.Empty.Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, RowSurface)
                 .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, FocusSurface).Set(SceneProperties.Foreground, FocusForeground)));
+            _ = row.Scope.Effect(() => selectable.Selected = browser.IsSelected(issue.Number), row.Name + ".selection");
             return row;
-        });
-        Controls.List(list.Region, themeContext, "Issues");
+        }, 30f);
         _ = composition.When(composition.Root, "issue-browser.details-region", () => browser.SelectedIssue is not null,
             Controls.Recipe("issue-browser.details", (context, element) =>
             {
@@ -195,10 +215,7 @@ public static class IssueBrowserStructure
 
     private sealed class FixtureHttpHandler : HttpMessageHandler
     {
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            await Task.Yield();
-            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(IssueFixture.Json, Encoding.UTF8, "application/json") };
-        }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(IssueFixture.Json, Encoding.UTF8, "application/json") });
     }
 }

@@ -19,6 +19,9 @@ public static class Arrangement
     public static readonly Property<LayoutAlignment> CrossAlignment = new("layout-cross-alignment", LayoutAlignment.Stretch);
     public static readonly Property<bool> Clip = new("layout-clip", false);
     public static readonly Property<ScrollOffset> Scroll = new("layout-scroll", default);
+    internal static readonly Property<float?> VirtualRowHeight = new("layout-virtual-row-height", null);
+    internal static readonly Property<int> VirtualItemCount = new("layout-virtual-item-count", 0);
+    internal static readonly Property<int> VirtualRowIndex = new("layout-virtual-row-index", 0);
 }
 
 /// <summary>The minimal renderer-facing visual values; they are ordinary typed properties, not a second style model.</summary>
@@ -214,6 +217,9 @@ public static class SceneLayout
 LayoutViewport viewport, ITextShaper shaper)
     {
         ArgumentNullException.ThrowIfNull(composition); ArgumentNullException.ThrowIfNull(shaper); viewport.Validate();
+        composition.RealizeVirtualized(viewport);
+        composition.Flush(); // Virtual row factories may register effects; a projected scene must not precede their first commit.
+        composition.RealizeVirtualized(viewport);
         var boxes = new List<LayoutBox>();
         var shapes = new Dictionary<long, ShapedText?>();
         var nodes = Layout(composition.Root, new LayoutRect(0, 0, viewport.Width, viewport.Height), viewport, shaper, boxes, shapes, null, false);
@@ -246,13 +252,15 @@ LayoutViewport viewport, ITextShaper shaper)
             var cursor = style.MainAlignment switch { LayoutAlignment.Center => Math.Max(0, (mainLimit - total) / 2), LayoutAlignment.End => Math.Max(0, mainLimit - total), _ => 0 };
             foreach (var item in measured)
             {
+                var virtualIndex = style.VirtualRowHeight is null ? 0 : Read(item.Element).VirtualRowIndex;
                 var cross = style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross ? crossLimit : item.Cross;
                 var crossOffset = style.CrossAlignment switch { LayoutAlignment.Center => (crossLimit - cross) / 2, LayoutAlignment.End => crossLimit - cross, _ => 0 };
-                var x = Finite(Finite(bounds.X + (axis == LayoutAxis.Row ? cursor : crossOffset)) - style.Scroll.X);
-                var y = Finite(Finite(bounds.Y + (axis == LayoutAxis.Row ? crossOffset : cursor)) - style.Scroll.Y);
+                var main = style.VirtualRowHeight is { } rowHeight ? virtualIndex * rowHeight : cursor;
+                var x = Finite(Finite(bounds.X + (axis == LayoutAxis.Row ? main : crossOffset)) - style.Scroll.X);
+                var y = Finite(Finite(bounds.Y + (axis == LayoutAxis.Row ? crossOffset : main)) - style.Scroll.Y);
                 var childBounds = axis == LayoutAxis.Row ? new LayoutRect(x, y, item.Main, cross) : new LayoutRect(x, y, cross, item.Main);
                 childNodes.AddRange(Layout(item.Element, childBounds, viewport, shaper, boxes, shapes, axis, style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross));
-                cursor = Finite(cursor + item.Main + style.Spacing);
+                if (style.VirtualRowHeight is null) cursor = Finite(cursor + item.Main + style.Spacing);
             }
         }
         var identity = new ElementIdentity(element.Composition.Epoch, element.Id);
@@ -289,7 +297,7 @@ LayoutViewport viewport, ITextShaper shaper)
     private static (float Width, float Height) Intrinsic(Element element, Values style, ShapedText? text, float scale, ITextShaper shaper, Dictionary<long, ShapedText?> shapes)
     {
         var width = text?.Width ?? 0f; var height = text?.Height ?? 0f;
-        if (element.Children.Count == 0) return (width, height);
+        if (element.Children.Count == 0) return style.VirtualRowHeight is { } emptyRowHeight ? (width, Finite(emptyRowHeight * style.VirtualItemCount)) : (width, height);
         var children = element.Children.Select(child => Measure(child, style.Axis, float.MaxValue, scale, shaper, shapes)).ToArray();
         if (style.Axis == LayoutAxis.Row)
         {
@@ -303,6 +311,7 @@ LayoutViewport viewport, ITextShaper shaper)
             height = Finite(height + Finite(style.Spacing * Math.Max(0, children.Length - 1)));
             foreach (var child in children) width = Math.Max(width, child.Cross);
         }
+        if (style.VirtualRowHeight is { } rowHeight) height = Finite(rowHeight * style.VirtualItemCount);
         return (Finite(width), Finite(height));
     }
 
@@ -333,15 +342,15 @@ LayoutViewport viewport, ITextShaper shaper)
         var values = new Values(element.Resolve(Arrangement.Axis).Value, element.Resolve(Arrangement.Width).Value, element.Resolve(Arrangement.Height).Value,
             element.Resolve(Arrangement.MinWidth).Value, element.Resolve(Arrangement.MinHeight).Value, element.Resolve(Arrangement.MaxWidth).Value, element.Resolve(Arrangement.MaxHeight).Value,
             element.Resolve(Arrangement.Spacing).Value, element.Resolve(Arrangement.MainAlignment).Value, element.Resolve(Arrangement.CrossAlignment).Value, element.Resolve(Arrangement.Clip).Value,
-            element.Resolve(Arrangement.Scroll).Value, element.Resolve(SceneProperties.Fill).Value, element.Resolve(SceneProperties.Foreground).Value, element.Resolve(SceneProperties.Text).Value,
+            element.Resolve(Arrangement.Scroll).Value, element.Resolve(Arrangement.VirtualRowHeight).Value, element.Resolve(Arrangement.VirtualItemCount).Value, element.Resolve(Arrangement.VirtualRowIndex).Value, element.Resolve(SceneProperties.Fill).Value, element.Resolve(SceneProperties.Foreground).Value, element.Resolve(SceneProperties.Text).Value,
             element.Resolve(SceneProperties.FontFamily).Value, element.Resolve(SceneProperties.FontSize).Value, element.Resolve(SceneProperties.Language).Value, element.Resolve(SceneProperties.TextDirection).Value,
             element.Resolve(SceneProperties.TextSelectionStart).Value, element.Resolve(SceneProperties.TextSelectionEnd).Value, element.Resolve(SceneProperties.TextCaret).Value);
-        if (!Enum.IsDefined(values.Axis) || !Enum.IsDefined(values.MainAlignment) || !Enum.IsDefined(values.CrossAlignment) || !Enum.IsDefined(values.Direction) || !float.IsFinite(values.Spacing) || values.Spacing < 0 || values.Width is { } width && (!float.IsFinite(width) || width < 0) || values.Height is { } height && (!float.IsFinite(height) || height < 0))
+        if (!Enum.IsDefined(values.Axis) || !Enum.IsDefined(values.MainAlignment) || !Enum.IsDefined(values.CrossAlignment) || !Enum.IsDefined(values.Direction) || !float.IsFinite(values.Spacing) || values.Spacing < 0 || values.Width is { } width && (!float.IsFinite(width) || width < 0) || values.Height is { } height && (!float.IsFinite(height) || height < 0) || values.VirtualRowHeight is { } rowHeight && (!float.IsFinite(rowHeight) || rowHeight <= 0 || values.VirtualItemCount < 0 || values.VirtualRowIndex < 0))
             throw new ArgumentOutOfRangeException(nameof(element), "Arrangement values must be finite and nonnegative.");
         values.Scroll.Validate(); return values;
     }
 
-    private readonly record struct Values(LayoutAxis Axis, float? Width, float? Height, float MinWidth, float MinHeight, float MaxWidth, float MaxHeight, float Spacing, LayoutAlignment MainAlignment, LayoutAlignment CrossAlignment, bool Clip, ScrollOffset Scroll, uint Fill, uint Foreground, string? Text, string FontFamily, float FontSize, string Language, TextDirection Direction, int? SelectionStart, int? SelectionEnd, int? Caret);
+    private readonly record struct Values(LayoutAxis Axis, float? Width, float? Height, float MinWidth, float MinHeight, float MaxWidth, float MaxHeight, float Spacing, LayoutAlignment MainAlignment, LayoutAlignment CrossAlignment, bool Clip, ScrollOffset Scroll, float? VirtualRowHeight, int VirtualItemCount, int VirtualRowIndex, uint Fill, uint Foreground, string? Text, string FontFamily, float FontSize, string Language, TextDirection Direction, int? SelectionStart, int? SelectionEnd, int? Caret);
 
     /// <summary>Returns a bounded LTR caret position; it interpolates grapheme boundaries inside one ligature cluster and does not implement full bidi caret ordering.</summary>
     internal static float TextPosition(ShapedText text, string source, int utf16Offset)
