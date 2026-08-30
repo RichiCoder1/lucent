@@ -18,10 +18,41 @@ internal static class ControlsContracts
             ViewportFocusAndSceneInstallation();
             ScrollUsesInstalledGeometry();
             VisualRejectionPreservesOnlyStableCapture();
+            SemanticCommandsFailClosed();
             Console.WriteLine("Lucent.Core controls contracts: PASS");
             return 0;
         }
         catch (Exception error) { Console.Error.WriteLine("Lucent.Core controls contracts: FAIL: " + error.Message); return 1; }
+    }
+
+    private static void SemanticCommandsFailClosed()
+    {
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "semantic-commands"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 60f));
+        var calls = 0; var button = composition.Child(composition.Root, "button"); Controls.Button(button, theme, "Button", () => calls++);
+        var field = composition.Child(composition.Root, "field"); Controls.TextField(field, theme, "Field");
+        var list = composition.Child(composition.Root, "list"); Controls.List(list, theme, "Choices");
+        var keep = composition.Child(list, "keep"); var keepState = Controls.Selectable(keep, theme, "Keep");
+        var retire = composition.Child(list, "retire"); var retireState = Controls.Selectable(retire, theme, "Retire");
+        graph.Drain(); var nodes = Flatten(composition.SemanticSnapshot()!).ToArray();
+        var buttonNode = nodes.Single(node => node.Name == "Button"); var fieldNode = nodes.Single(node => node.Name == "Field");
+        Assert(composition.SemanticDump().Contains("suppressions=[]", StringComparison.Ordinal), "Declared semantic matrix did not report zero suppressions.");
+        Assert(composition.ExecuteSemanticCommand(buttonNode.Identity, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Applied && calls == 1, "Declared Invoke did not dispatch through its behavior.");
+        Assert(composition.ExecuteSemanticCommand(fieldNode.Identity, new(SemanticCommandKind.SetValue, "日本")) == SemanticCommandResult.Applied, "Declared SetValue did not dispatch through text state."); graph.Drain();
+        fieldNode = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Field");
+        Assert(fieldNode.Value == "日本", "Semantic SetValue did not refresh the retained value.");
+        Assert(composition.ExecuteSemanticCommand(buttonNode.Identity, new(SemanticCommandKind.Select)) == SemanticCommandResult.Rejected &&
+            composition.ExecuteSemanticCommand(fieldNode.Identity, new(SemanticCommandKind.SetValue, "bad\nvalue")) == SemanticCommandResult.Rejected &&
+            composition.ExecuteSemanticCommand(buttonNode.Identity with { Generation = buttonNode.Identity.Generation + 1 }, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Stale,
+            "Unsupported, malformed, or stale semantic commands did not fail closed.");
+        var keepNode = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Keep"); var retireNode = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Retire");
+        var firstSelection = composition.ExecuteSemanticCommand(keepNode.Identity, new(SemanticCommandKind.Select));
+        retireNode = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Retire");
+        var secondSelection = composition.ExecuteSemanticCommand(retireNode.Identity, new(SemanticCommandKind.Select));
+        Assert(firstSelection == SemanticCommandResult.Applied && secondSelection == SemanticCommandResult.Applied, $"Selectable semantic commands were rejected: {firstSelection}/{secondSelection}.");
+        graph.Drain();
+        var selected = Flatten(composition.SemanticSnapshot()!).Where(node => node.Role == SemanticRole.ListItem && node.Selected).ToArray();
+        Assert(selected.Length == 1 && selected[0].Name == "Retire" && !keepState.Selected && retireState.Selected, "List selection did not clear the sibling behavior and ControlState.");
     }
 
     private static string Build(out Fixture fixture)

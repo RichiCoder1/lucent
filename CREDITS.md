@@ -22,6 +22,7 @@ These sources were consulted on 2026-08-27. They are conceptual references only;
 | [Avalonia](https://github.com/AvaloniaUI/Avalonia/tree/0442ba19098e6642185431c41c23f7138a270e0c) | `0442ba19098e6642185431c41c23f7138a270e0c`; prior implementation used 12.1.1 | MIT | Named value sources, explicit inheritance metadata, transition diagnostics; not selectors/XAML |
 | [shadcn/ui](https://github.com/shadcn-ui/ui/tree/683a5a9b370acdb7785a0529434e6a3b8c7e0441) | `683a5a9b370acdb7785a0529434e6a3b8c7e0441` | MIT | Paired semantic foreground/surface tokens and source-owned components |
 | [Design Tokens Community Group](https://github.com/design-tokens/community-group/tree/16c902d9327c18290e956a21130c445f1b88c40f) | `16c902d9327c18290e956a21130c445f1b88c40f`; Format Module 2025.10 | Community Group report, not a W3C Standard | Potential build-time token interchange; never executable runtime input |
+| [Windows UI Automation SDK](https://learn.microsoft.com/windows/win32/winauto/uiauto-serversideprovider) | Windows SDK `10.0.26100.0` `UIAutomationCore.idl` and `UIAutomationCoreApi.h`, consulted 2026-08-29 | Windows SDK platform contract; no copied source | Exact UIA provider IIDs, vtable slots, HRESULT, VARIANT and SAFEARRAY ownership |
 
 Before adding a dependency or adopting a new architectural reference:
 

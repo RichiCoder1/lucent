@@ -19,6 +19,7 @@ public sealed class Composition : IDisposable
     private InputRouter? _input;
     private long _nextSceneGeneration;
     private long _interactionVisualGeneration;
+    private long _semanticRevision;
 
     public Composition(ReactiveGraph graph, string name)
     {
@@ -31,6 +32,9 @@ public sealed class Composition : IDisposable
     /// <summary>The stable root element for this composition.</summary>
     public Element Root { get; }
     public bool IsDisposed { get; private set; }
+    /// <summary>Monotonic notification token for retained semantic changes; it contains no platform transport.</summary>
+    public long SemanticRevision => _semanticRevision;
+    public event Action? SemanticsChanged;
     /// <summary>Composition-owned portable input, focus, and capture router.</summary>
     public InputRouter Input { get { _graph.CheckThread(); ThrowIfDisposed(); return _input ??= new InputRouter(this); } }
     internal ReactiveGraph Graph => _graph;
@@ -103,11 +107,56 @@ public sealed class Composition : IDisposable
         return snapshot;
     }
 
+    /// <summary>Returns a deterministic, value-free semantic diagnostic dump. The declared M3 matrix has no suppressions.</summary>
+    public string SemanticDump()
+    {
+        _graph.CheckThread(); ThrowIfDisposed();
+        var snapshot = SemanticSnapshot(); var output = new StringBuilder("semantics revision=").Append(_semanticRevision.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        if (snapshot is not null) Append(snapshot, output);
+        return output.ToString();
+    }
+
     /// <summary>Rejects a semantic identity once its element has changed or departed.</summary>
     public bool IsCurrent(SemanticIdentity identity)
     {
         _graph.CheckThread();
         return !IsDisposed && identity.CompositionEpoch == _epoch && _emittedSemantics.Contains(identity) && Find(Root, identity.ElementId) is { } element && element.IsCurrent(identity);
+    }
+
+    /// <summary>Executes one declared portable semantic command on the owning UI thread.</summary>
+    public SemanticCommandResult ExecuteSemanticCommand(SemanticIdentity identity, SemanticCommand command)
+    {
+        _graph.CheckThread();
+        if (IsDisposed) return SemanticCommandResult.Stale;
+        command.Validate();
+        if (!IsCurrent(identity) || Find(Root, identity.ElementId) is not { } element) return SemanticCommandResult.Stale;
+        if (!element.SemanticEnabled()) return SemanticCommandResult.Disabled;
+        return element.ExecuteSemanticCommand(command) ? SemanticCommandResult.Applied : SemanticCommandResult.Rejected;
+    }
+
+    /// <summary>Selects one retained list item and clears every selectable sibling in its nearest semantic list.</summary>
+    internal bool SelectSemantic(ElementIdentity identity)
+    {
+        _graph.CheckThread();
+        if (identity.CompositionEpoch != _epoch || Find(Root, identity.ElementId) is not { } target || !target.SemanticEnabled()) return false;
+        var list = target.Parent;
+        while (list is not null && list.DeclaredSemanticRole != SemanticRole.List) list = list.Parent;
+        if (list is null) return target.SetSelected(true);
+        foreach (var element in SemanticChildren(list))
+            if (element.HasSelectableSemantics) element.SetSelected(ReferenceEquals(element, target));
+        return true;
+    }
+
+    private static IEnumerable<Element> SemanticChildren(Element parent)
+    {
+        foreach (var child in parent.Children)
+        {
+            if (child.DeclaredSemanticRole is null)
+            {
+                foreach (var descendant in SemanticChildren(child)) yield return descendant;
+            }
+            else yield return child;
+        }
     }
 
     internal Element Create(Element parent, string name, bool attach, CompositionContext? factory = null)
@@ -172,7 +221,12 @@ public sealed class Composition : IDisposable
         foreach (var child in snapshot.Children) Register(child);
     }
 
-    internal void InvalidateSemantics() => _emittedSemantics.Clear();
+    internal void InvalidateSemantics()
+    {
+        _emittedSemantics.Clear();
+        _semanticRevision = checked(_semanticRevision + 1);
+        SemanticsChanged?.Invoke();
+    }
 
     internal Element? Find(ElementIdentity identity) => identity.CompositionEpoch == _epoch ? Find(Root, identity.ElementId) : null;
     internal IReadOnlyList<Element> Path(Element element)
@@ -227,6 +281,14 @@ public sealed class Composition : IDisposable
         return element.CreateSemanticSnapshot(children) is { } semantic ? [semantic] : [.. children];
     }
 
+    private static void Append(SemanticSnapshot snapshot, StringBuilder output)
+    {
+        output.Append("semantic epoch=").Append(snapshot.Identity.CompositionEpoch.ToString(CultureInfo.InvariantCulture)).Append(" element=").Append(snapshot.Identity.ElementId.ToString(CultureInfo.InvariantCulture))
+            .Append(" generation=").Append(snapshot.Identity.Generation.ToString(CultureInfo.InvariantCulture)).Append(" role=").Append(snapshot.Role).Append(" enabled=").Append(snapshot.Enabled ? "true" : "false")
+            .Append(" focused=").Append(snapshot.Focused ? "true" : "false").Append(" selected=").Append(snapshot.Selected ? "true" : "false").Append(" actions=").Append(snapshot.Actions).Append(" suppressions=[]\n");
+        foreach (var child in snapshot.Children) Append(child, output);
+    }
+
     private static Element? Find(Element element, long id)
     {
         if (element.Id == id) return element;
@@ -256,6 +318,8 @@ public sealed class Element : IDisposable
     private readonly List<BehaviorMount> _behaviors = [];
     private BehaviorOwnership _behaviorClaims;
     private SemanticDeclaration? _semantics;
+    private Func<SemanticCommand, bool>? _semanticCommand;
+    private Action<bool>? _selectionChanged;
     private long _semanticGeneration;
     private bool _inputDisabled;
     private EffectiveSemanticState? _effectiveSemanticState;
@@ -356,8 +420,13 @@ public sealed class Element : IDisposable
                     throw new InvalidOperationException("Semantic actions require action ownership.");
                 context.Complete();
             }
-            var semantic = provisional.Select(item => item.Context.Semantics).SingleOrDefault(value => value is not null);
-            if (semantic is not null) SetSemantics(semantic);
+            var semanticContext = provisional.SingleOrDefault(item => item.Context.Semantics is not null);
+            if (semanticContext.Context?.Semantics is { } semantic)
+            {
+                SetSemantics(semantic);
+                _semanticCommand = semanticContext.Context.SemanticCommand;
+                _selectionChanged = semanticContext.Context.SelectionChanged;
+            }
             foreach (var item in provisional)
             {
                 var mount = new BehaviorMount(item.Context.Behavior.Name, item.Context.Behavior.Ownership, item.Context.State);
@@ -439,6 +508,21 @@ public sealed class Element : IDisposable
 
     internal bool IsCurrent(SemanticIdentity identity) { if (_semantics is not null) _ = ReconcileSemanticState(); return !IsDisposed && identity.Generation == _semanticGeneration && (_semantics is not null || _semanticGeneration == 0); }
 
+    internal bool ExecuteSemanticCommand(SemanticCommand command)
+    {
+        if (_semantics is null || _semanticCommand is null || !Allows(command)) return false;
+        return _semanticCommand(command);
+    }
+    internal SemanticRole? DeclaredSemanticRole => _semantics?.Role;
+    internal bool HasSelectableSemantics => _semantics?.Actions.HasFlag(SemanticAction.Select) == true && _selectionChanged is not null;
+    internal bool SetSelected(bool value)
+    {
+        if (_selectionChanged is null) return false;
+        _selectionChanged(value);
+        return true;
+    }
+    internal bool SemanticEnabled() => _semantics is not null && ReconcileSemanticState().Enabled;
+
     internal SemanticSnapshot CreateStructuralSemanticSnapshot(IReadOnlyList<SemanticSnapshot> children) => new(
         new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration), SemanticRole.Group, Name, null, true, false, false, SemanticAction.None, children);
 
@@ -474,6 +558,16 @@ public sealed class Element : IDisposable
         _semanticGeneration = checked(_semanticGeneration + 1);
         Composition.InvalidateSemantics();
     }
+
+    private bool Allows(SemanticCommand command) => command.Kind switch
+    {
+        SemanticCommandKind.Focus => true,
+        SemanticCommandKind.Invoke => _semantics!.Actions.HasFlag(SemanticAction.Invoke),
+        SemanticCommandKind.SetValue => _semantics!.Actions.HasFlag(SemanticAction.SetValue),
+        SemanticCommandKind.Select => _semantics!.Actions.HasFlag(SemanticAction.Select),
+        SemanticCommandKind.Scroll => _semantics!.Actions.HasFlag(SemanticAction.Scroll),
+        _ => false
+    };
 
     internal void UpdateControl<T>(Property<T> property, T value)
     {

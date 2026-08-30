@@ -288,6 +288,47 @@ public sealed class InputRouter
         finally { Exit(); }
     }
 
+    /// <summary>Focuses one current retained semantic target without exposing platform focus transport.</summary>
+    public bool FocusSemantic(ElementIdentity identity)
+    {
+        Enter(); try
+        {
+            var errors = new List<Exception>();
+            if (EnsureScene(errors) is not null || !Eligible(identity) || !_focusable.ContainsKey(identity.ElementId)) { Throw(errors); return false; }
+            SetModality(InputModality.Keyboard, errors); RequestFocus(identity, FocusChangeReason.Traversal, errors); Throw(errors);
+            return _focused?.Identity == identity;
+        }
+        finally { Exit(); }
+    }
+
+    /// <summary>Applies a bounded semantic scroll request through the installed retained geometry.</summary>
+    public bool ScrollSemantic(ElementIdentity identity, SemanticCommand command)
+    {
+        Enter(); try
+        {
+            command.Validate();
+            if (command.Kind != SemanticCommandKind.Scroll || !_scrollable.TryGetValue(identity.ElementId, out var scrollable)) return false;
+            var errors = new List<Exception>(); if (EnsureScene(errors) is not null || !Eligible(identity)) { Throw(errors); return false; }
+            var offset = scrollable.State.Offset;
+            var changed = command.Endpoint switch
+            {
+                SemanticScrollEndpoint.Start => SetScroll(identity, scrollable, 0, 0, offset),
+                SemanticScrollEndpoint.End => ScrollToEnd(identity),
+                _ => SetScroll(identity, scrollable, offset.X + command.Horizontal, offset.Y + command.Vertical, offset)
+            };
+            Throw(errors); return changed;
+        }
+        finally { Exit(); }
+    }
+
+    /// <summary>Returns the installed retained scroll geometry for a semantic adapter snapshot.</summary>
+    public SemanticScrollState? GetSemanticScroll(ElementIdentity identity)
+    {
+        Check();
+        if (!_scrollable.TryGetValue(identity.ElementId, out var scrollable) || !_input.TryGetValue(identity.ElementId, out var viewport) || !Eligible(identity)) return null;
+        return new(scrollable.State.Offset, ScrollBounds(identity, scrollable.InstalledOffset), viewport.Bounds);
+    }
+
     public string Dump()
     {
         Check(); var output = new StringBuilder("input scene=");
@@ -620,6 +661,9 @@ public sealed class InputRouter
     private enum Unavailable { Scene, Hidden, Disabled }
 }
 
+/// <summary>Immutable retained scroll state for semantic adapters; values are logical Core coordinates.</summary>
+public readonly record struct SemanticScrollState(ScrollOffset Offset, ScrollOffset Maximum, LayoutRect Viewport);
+
 /// <summary>Reusable selectable action; selection is behavior state, not application-side routing state.</summary>
 public sealed class RowActionBehavior(string name, SemanticDeclaration semantics, Action? activate = null, ControlState? state = null) : Behavior
 {
@@ -628,8 +672,15 @@ public sealed class RowActionBehavior(string name, SemanticDeclaration semantics
     public override void Attach(BehaviorContext context)
     {
         context.SetSemantics(semantics ?? throw new ArgumentNullException(nameof(semantics))); context.MakeFocusable();
+        context.OnSemanticCommand(command => command.Kind switch
+        {
+            SemanticCommandKind.Focus => context.CompositionInput().FocusSemantic(context.Identity),
+            SemanticCommandKind.Select => Select(),
+            _ => false
+        });
+        context.OnSelectionChanged(ApplySelection);
         int? armedPointer = null;
-        if (state is not null) context.Effect(() => context.SetState(BehaviorState.Selected, state.Selected), "selected-state");
+        if (state is not null) context.Effect(() => { if (state.Selected) context.SelectSemantic(); else context.SetState(BehaviorState.Selected, false); }, "selected-state");
         context.OnPointer(route =>
         {
             if (route.Command is { Kind: PointerCommandKind.Down, Button: PointerButton.Primary }) { var armed = route.Capture(); armedPointer = armed ? route.Command.PointerId : null; context.SetState(BehaviorState.Pressed, armed); if (armed) route.Focus(); route.Handled = armed; }
@@ -638,12 +689,15 @@ public sealed class RowActionBehavior(string name, SemanticDeclaration semantics
                 if (armedPointer != route.Command.PointerId) return;
                 var active = context.State.GetValueOrDefault(BehaviorState.Pressed); context.SetState(BehaviorState.Pressed, false);
                 armedPointer = null;
-                if (active && route.Command.Kind == PointerCommandKind.Up && route.IsInsideCurrentTarget) { context.SetState(BehaviorState.Selected, true); if (state is not null) state.Selected = true; activate?.Invoke(); }
+                if (active && route.Command.Kind == PointerCommandKind.Up && route.IsInsideCurrentTarget) Select();
                 route.Handled = active;
             }
         });
-        context.OnKey(route => { if (route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false, Key: Key.Enter or Key.Space }) { context.SetState(BehaviorState.Selected, true); if (state is not null) state.Selected = true; activate?.Invoke(); route.Handled = true; } });
+        context.OnKey(route => { if (route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false, Key: Key.Enter or Key.Space }) { route.Handled = Select(); } });
         context.OnCaptureLost(loss => { if (armedPointer == loss.PointerId) { armedPointer = null; context.SetState(BehaviorState.Pressed, false); } });
+
+        bool Select() { if (!context.SelectSemantic()) return false; activate?.Invoke(); return true; }
+        void ApplySelection(bool value) { context.SetState(BehaviorState.Selected, value); if (state is not null) state.Selected = value; }
     }
 }
 
@@ -655,6 +709,7 @@ public sealed class ButtonBehavior(string name, SemanticDeclaration semantics, A
     public override void Attach(BehaviorContext context)
     {
         context.SetSemantics(semantics ?? throw new ArgumentNullException(nameof(semantics))); context.MakeFocusable();
+        context.OnSemanticCommand(command => command.Kind switch { SemanticCommandKind.Focus => context.CompositionInput().FocusSemantic(context.Identity), SemanticCommandKind.Invoke => Invoke(), _ => false });
         int? armedPointer = null;
         context.OnPointer(route =>
         {
@@ -663,6 +718,7 @@ public sealed class ButtonBehavior(string name, SemanticDeclaration semantics, A
         });
         context.OnKey(route => { if (route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false, Key: Key.Enter or Key.Space }) { activate?.Invoke(); route.Handled = true; } });
         context.OnCaptureLost(loss => { if (armedPointer == loss.PointerId) { armedPointer = null; context.SetState(BehaviorState.Pressed, false); } });
+        bool Invoke() { activate?.Invoke(); return true; }
     }
 }
 
@@ -674,6 +730,7 @@ public sealed class ScrollViewportBehavior(string name, ScrollViewportState stat
     public override void Attach(BehaviorContext context)
     {
         context.SetSemantics(new(SemanticRole.Group, name, actions: SemanticAction.Scroll)); context.MakeFocusable(); context.RegisterScrollable(state);
+        context.OnSemanticCommand(command => command.Kind == SemanticCommandKind.Focus ? context.CompositionInput().FocusSemantic(context.Identity) : command.Kind == SemanticCommandKind.Scroll && context.CompositionInput().ScrollSemantic(context.Identity, command));
         context.OnKey(route =>
         {
             var handled = route.Command is { Kind: KeyCommandKind.Down, IsRepeat: false } && route.Command.Key switch

@@ -1,12 +1,16 @@
 using Lucent.Platform.Windows;
 
 if (args is ["--listener-proof"]) return ListenerProof.Run();
+if (args is ["--uia-fixture"]) return UiaFixture.Run();
 
 try
 {
     DpiAndResourceMatrix();
     DpiAwarenessContract();
     FrameSchedulingMatrix();
+    UiaDispatcherContract();
+    UiaLifecycleContracts.Run();
+    UiaSnapshotReadContract();
     WindowsHostContracts.InputAdapterAndRoutingContract();
     WindowsHostContracts.InputInstallConvergenceContract();
     WindowsHostContracts.InputReconciliationPaintContract();
@@ -96,6 +100,97 @@ static void FrameSchedulingMatrix()
     Assert(requested.TryBegin(normal), "Event-caused invalidation did not request exactly one frame.");
     requested.Complete(FrameTiming.FromTimestamps(250, 260, 270, 280, 290));
     Assert(!requested.IsFrameRequested && requested.PresentedFrames == 2, "Event-caused invalidation left idle frame work behind.");
+}
+
+static void UiaDispatcherContract()
+{
+    if (!SDL3.SDL.Init(SDL3.SDL.InitFlags.Video)) throw new InvalidOperationException("SDL_Init(UIA dispatcher): " + SDL3.SDL.GetError());
+    try
+    {
+        using var dispatcher = new WindowsUiaDispatcher();
+        var worker = Task.Run(() => dispatcher.TryInvoke("test", () => Environment.CurrentManagedThreadId, out var owner) ? owner : -1);
+        var until = Environment.TickCount64 + 2_000;
+        while (dispatcher.PendingCount == 0 && Environment.TickCount64 < until) Thread.Sleep(1);
+        var woke = false; var types = new List<uint>();
+        while (!woke && Environment.TickCount64 < until)
+        {
+            while (SDL3.SDL.PollEvent(out var @event)) { types.Add(@event.Type); woke |= dispatcher.IsWakeEvent(@event); }
+            if (!woke) Thread.Sleep(1);
+        }
+        var pending = dispatcher.PendingCount; var processed = dispatcher.Process(); var completed = worker.Wait(2_000); var result = completed ? worker.Result : -2;
+        if (pending != 1 || !woke || processed != 1 || !completed || result != Environment.CurrentManagedThreadId)
+            throw new InvalidOperationException($"UIA dispatcher failed: registered={dispatcher.EventType} pending={pending} woke={woke} events=[{string.Join(',', types)}] processed={processed} completed={completed} result={result} owner={Environment.CurrentManagedThreadId}.");
+        var rejected = Task.Run(() => dispatcher.TryInvoke("test", () => 1, out _));
+        while (dispatcher.PendingCount == 0 && Environment.TickCount64 < until) Thread.Sleep(1);
+        dispatcher.Dispose();
+        if (rejected.GetAwaiter().GetResult()) throw new InvalidOperationException("Disposed UIA dispatcher ran a pending external request.");
+
+        using var raced = new WindowsUiaDispatcher(TimeSpan.FromMilliseconds(10));
+        using var started = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        var completedAfterClaim = Task.Run(() => raced.TryInvoke("race", () => { started.Set(); release.Wait(); return 7; }, out var value) ? value : -1);
+        var raceUntil = Environment.TickCount64 + 2_000;
+        while (raced.PendingCount == 0 && Environment.TickCount64 < raceUntil) Thread.Sleep(1);
+        _ = Task.Run(() => { started.Wait(2_000); Thread.Sleep(30); release.Set(); });
+        if (raced.Process() != 1 || !completedAfterClaim.Wait(2_000) || completedAfterClaim.Result != 7 || raced.PendingCount != 0)
+            throw new InvalidOperationException("UIA dispatcher returned timeout after the owner claimed a request or leaked its queue slot.");
+
+        const int capacity = 128; // WindowsUiaDispatcher's fixed slot capacity.
+        using var saturated = new WindowsUiaDispatcher(TimeSpan.FromMilliseconds(20));
+        var executed = 0;
+        for (var round = 0; round < 3; round++)
+        {
+            var attempts = Enumerable.Range(0, capacity * 2).Select(_ => Task.Run(() => saturated.TryInvoke("timeout", () => { Interlocked.Increment(ref executed); return 1; }, out _))).ToArray();
+            if (!Task.WaitAll(attempts, 5_000) || saturated.PendingCount != capacity || saturated.PendingCount > capacity || executed != 0)
+                throw new InvalidOperationException($"Repeated queued UIA timeouts exceeded the bounded capacity: round={round} pending={saturated.PendingCount} executed={executed}.");
+        }
+        if (saturated.Process() != 0 || saturated.PendingCount != 0)
+            throw new InvalidOperationException($"Physical UIA dispatch did not drain cancelled requests: pending={saturated.PendingCount}.");
+        var recovered = Task.Run(() => saturated.TryInvoke("recovered", () => 9, out var value) ? value : -1);
+        var recoveredUntil = Environment.TickCount64 + 2_000;
+        while (saturated.PendingCount == 0 && Environment.TickCount64 < recoveredUntil) Thread.Sleep(1);
+        if (saturated.PendingCount != 1 || saturated.Process() != 1 || !recovered.Wait(2_000) || recovered.Result != 9 || saturated.PendingCount != 0)
+            throw new InvalidOperationException("UIA dispatcher did not recover a slot after physical queue drainage.");
+        var disposed = Task.Run(() => saturated.TryInvoke("disposed", () => 10, out _));
+        var disposedUntil = Environment.TickCount64 + 2_000;
+        while (saturated.PendingCount == 0 && Environment.TickCount64 < disposedUntil) Thread.Sleep(1);
+        if (!disposed.Wait(2_000) || disposed.Result || saturated.PendingCount != 1)
+            throw new InvalidOperationException("UIA dispatcher did not retain a queued timeout for disposal drainage.");
+        saturated.Dispose();
+        if (saturated.PendingCount != 0) throw new InvalidOperationException("UIA dispatcher Dispose did not release its queued slot.");
+
+        using var failedPush = new WindowsUiaDispatcher(TimeSpan.FromMilliseconds(10), static (ref SDL3.SDL.Event _) => false);
+        var rejectedPushes = Enumerable.Range(0, capacity * 2).Select(_ => Task.Run(() => failedPush.TryInvoke("push-failure", () => 1, out _))).ToArray();
+        Task.WaitAll(rejectedPushes);
+        if (rejectedPushes.Any(task => task.Result) || failedPush.PendingCount != capacity || failedPush.Process() != 0 || failedPush.PendingCount != 0)
+            throw new InvalidOperationException("Failed SDL event pushes escaped the dispatcher's physical queue bound or did not release on dequeue.");
+    }
+    finally { SDL3.SDL.Quit(); }
+}
+
+static void UiaSnapshotReadContract()
+{
+    if (!SDL3.SDL.Init(SDL3.SDL.InitFlags.Video)) throw new InvalidOperationException("SDL_Init(UIA snapshot): " + SDL3.SDL.GetError());
+    nint window = 0;
+    try
+    {
+        window = SDL3.SDL.CreateWindow("Lucent UIA snapshot", 1, 1, SDL3.SDL.WindowFlags.Hidden);
+        if (window == 0) throw new InvalidOperationException("SDL_CreateWindow(UIA snapshot): " + SDL3.SDL.GetError());
+        var hwnd = SDL3.SDL.GetPointerProperty(SDL3.SDL.GetWindowProperties(window), SDL3.SDL.Props.WindowWin32HWNDPointer, 0);
+        if (hwnd == 0) throw new InvalidOperationException("SDL UIA snapshot did not expose an HWND.");
+        using var composition = new Lucent.Core.Composition(new Lucent.Core.ReactiveGraph(), "uia-snapshot");
+        using var dispatcher = new WindowsUiaDispatcher();
+        using var provider = new WindowsUiaProvider(hwnd, composition, dispatcher);
+        if (provider.ScrollPercent(-1, 101) != unchecked((int)0x80070057))
+            throw new InvalidOperationException("Invalid UIA scroll percent did not return E_INVALIDARG at the provider boundary.");
+        var read = Task.Run(() => provider.ProviderActions);
+        if (!read.Wait(2_000) || dispatcher.PendingCount != 0)
+            throw new InvalidOperationException("A read-only UIA callback waited for the SDL owner thread instead of the published snapshot.");
+    }
+    finally
+    {
+        if (window != 0) SDL3.SDL.DestroyWindow(window);
+        SDL3.SDL.Quit();
+    }
 }
 
 static void Assert(bool condition, string message)

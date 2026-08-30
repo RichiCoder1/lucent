@@ -182,6 +182,12 @@ public sealed class TextFieldBehavior(TextFieldState state, string name) : Behav
     public override void Attach(BehaviorContext context)
     {
         ArgumentNullException.ThrowIfNull(state); context.SetSemantics(new(SemanticRole.TextField, name, actions: SemanticAction.SetValue, value: state.Value)); context.MakeFocusable(); context.RegisterText(state);
+        context.OnSemanticCommand(command =>
+        {
+            if (command.Kind == SemanticCommandKind.Focus) return context.CompositionInput().FocusSemantic(context.Identity);
+            if (command.Kind != SemanticCommandKind.SetValue || !TextFieldState.TryNormalizeSingleLine(command.Value, out var value)) return false;
+            state.Value = value; return true;
+        });
         context.Effect(() => context.UpdateSemantics(new(SemanticRole.TextField, name, actions: SemanticAction.SetValue, value: state.Value)), name + ".semantics");
         context.OnFocus(route => { state.SetFocused(route.Command.Kind == FocusCommandKind.Gained); if (route.Command.Kind == FocusCommandKind.Lost) state.CancelComposition(); });
         context.OnPointer(route => { if (route.Command is { Kind: PointerCommandKind.Down, Button: PointerButton.Primary }) { route.Focus(); route.Handled = true; } });

@@ -39,6 +39,9 @@ public static class WindowsBootstrap
             var hwnd = SDL.GetPointerProperty(SDL.GetWindowProperties(window), SDL.Props.WindowWin32HWNDPointer, 0);
             if (hwnd == 0) throw new InvalidOperationException("SDL window did not expose an HWND.");
 
+            using var uiaDispatcher = new WindowsUiaDispatcher();
+            using var uiaProvider = new WindowsUiaProvider(hwnd, composition, uiaDispatcher);
+            using var uiaListener = new WindowsUiaListener(hwnd, uiaProvider);
             using var presenter = new CpuSkiaPresenter(sdlRenderer);
             using var sceneRenderer = new SkiaSceneRenderer();
             using var cursor = new WindowsCursor();
@@ -53,6 +56,7 @@ public static class WindowsBootstrap
             diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
             while (scheduler.IsOpen)
             {
+                uiaDispatcher.SetOwnerPhase("events");
                 var refreshSettings = false;
                 if (scheduler.ShouldWaitForEvent)
                 {
@@ -60,6 +64,8 @@ public static class WindowsBootstrap
                     refreshSettings |= Observe(scheduler, input, @event);
                 }
                 while (SDL.PollEvent(out var @event)) refreshSettings |= Observe(scheduler, input, @event);
+                uiaDispatcher.SetOwnerPhase("dispatch");
+                if (uiaDispatcher.Process() != 0) scheduler.Request();
                 if (!scheduler.IsOpen) break;
                 refreshSettings |= settingsListener.TakePending();
                 if (refreshSettings)
@@ -70,13 +76,17 @@ public static class WindowsBootstrap
 
                 var viewport = GetViewport(window, sdlRenderer);
                 if (!scheduler.TryBegin(viewport)) continue;
+                uiaDispatcher.SetOwnerPhase("frame");
+                uiaDispatcher.RecordFrame();
                 var started = Stopwatch.GetTimestamp();
                 var scene = ProjectAndInstall(composition, new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale), sceneRenderer);
+                uiaProvider.Refresh(scene);
                 input.RefreshTextInput();
                 var projected = Stopwatch.GetTimestamp();
                 var phase = presenter.Present(scene, viewport, sceneRenderer);
                 scheduler.Complete(FrameTiming.FromTimestamps(started, projected, phase.Rasterized, phase.Uploaded, phase.Presented));
             }
+            uiaDispatcher.SetOwnerPhase("shutdown");
             return 0;
         }
         finally
