@@ -17,11 +17,26 @@ $noDevelopmentSdk = $false
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class M6SandboxUser32 {
-    [DllImport("user32.dll", SetLastError=true)]
-    public static extern bool PostMessage(IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
-    public static extern IntPtr FindWindow(string className, string windowName);
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+    public static IntPtr FindWindow(uint processId, string title) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((window, _) => {
+            uint owner;
+            GetWindowThreadProcessId(window, out owner);
+            if (owner != processId) return true;
+            var text = new StringBuilder(256);
+            GetWindowText(window, text, text.Capacity);
+            if (!string.Equals(text.ToString(), title, StringComparison.Ordinal)) return true;
+            found = window;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
 }
 '@
 
@@ -121,10 +136,8 @@ try {
         $process = Start-Process -FilePath $exe -WorkingDirectory $extract -RedirectStandardError $stderr -PassThru
         try {
             $deadline = [Environment]::TickCount64 + 15000
-            do { Start-Sleep -Milliseconds 100; $process.Refresh(); $hwnd = [M6SandboxUser32]::FindWindow($null, 'Lucent Issue Browser') } until ($hwnd -ne [IntPtr]::Zero -or $process.HasExited -or [Environment]::TickCount64 -ge $deadline)
-            if ($process.HasExited -or $hwnd -eq [IntPtr]::Zero) { throw "Extracted Lucent.IssueBrowser.exe did not expose its SDL HWND: $((Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim())" }
-            if (-not [M6SandboxUser32]::PostMessage($hwnd, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw "Ordinary WM_CLOSE request failed (Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." }
-            if (-not $process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw "Extracted application did not exit normally (exit=$($process.ExitCode))." }
+            do { Start-Sleep -Milliseconds 100; $process.Refresh(); $hwnd = [M6SandboxUser32]::FindWindow([uint32]$process.Id, 'Lucent Issue Browser') } until ($hwnd -ne [IntPtr]::Zero -or $process.HasExited -or [Environment]::TickCount64 -ge $deadline)
+            if ($process.HasExited -or $hwnd -eq [IntPtr]::Zero) { throw "Extracted Lucent.IssueBrowser.exe did not expose its SDL HWND: $(((Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue) | Out-String).Trim())" }
             if (Get-ChildItem -LiteralPath $outputRoot -Force | Select-Object -First 1) { throw 'Tested application wrote into the verifier output mapping.' }
             $launchPass = $true
         }

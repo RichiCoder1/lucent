@@ -67,10 +67,10 @@ function Get-Result([string] $OutputDirectory, [int64] $Deadline) {
     do {
         if ((Test-Path -LiteralPath $Path -PathType Leaf) -and (Test-Path -LiteralPath $completionPath -PathType Leaf)) {
             try {
-                $completion = Get-Content -LiteralPath $completionPath -Raw | ConvertFrom-Json
+                $completion = Get-Content -LiteralPath $completionPath -Raw | ConvertFrom-Json -DateKind String
                 Assert-Properties $completion @('resultSha256','schema') 'sandbox completion marker'
                 if ($completion.schema -isnot [long] -or $completion.schema -ne 1L -or $completion.resultSha256 -isnot [string] -or $completion.resultSha256 -cne (Get-Hash $Path)) { throw 'Sandbox completion marker does not bind the result.' }
-                return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+                return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -DateKind String)
             } catch { }
         }
         Start-Sleep -Milliseconds 500
@@ -98,7 +98,7 @@ $evidence = (Resolve-Path -LiteralPath $CandidateEvidencePath -ErrorAction Stop)
 if ((Split-Path -Leaf $zip) -cne 'lucent-win-x64.zip') { throw 'CandidateZipPath must name the exact lucent-win-x64.zip package.' }
 $candidateEvidenceSha256 = Get-Hash $evidence
 $packageSha256 = Get-Hash $zip
-$candidate = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json
+$candidate = Get-Content -LiteralPath $evidence -Raw | ConvertFrom-Json -DateKind String
 Validate-Candidate $candidate $zip
 $sourceCommit = $candidate.environment.source.commit
 if (-not $GateRecordPath) { $GateRecordPath = Join-Path (Split-Path -Parent $evidence) 'clean-machine-gate.json' }
@@ -126,6 +126,7 @@ $wsbXml = @"
 $wsb = Get-Command wsb.exe, wsb -ErrorAction SilentlyContinue | Select-Object -First 1
 $wsbPath = if ($wsb) { $wsb.Source } else { $null }
 $sandboxId = $null
+$completed = $false
 try {
     $priorIds = @(Get-SandboxIds)
     Start-Process -FilePath $sandboxGui.Source -ArgumentList $config | Out-Null
@@ -139,10 +140,12 @@ try {
     $result = Get-Result $output ([Environment]::TickCount64 + ($TimeoutSeconds * 1000))
     Validate-Result $result $candidateEvidenceSha256 $packageSha256 $sourceCommit
     Copy-Atomic (Join-Path $output 'clean-machine-gate.json') $GateRecordPath
+    $completed = $true
     Write-Output "M6 clean-machine gate: $GateRecordPath"
 }
 finally {
     Stop-Sandbox $sandboxId
-    if (-not $sandboxId) { Write-Warning "The sandbox ID was unavailable; the session may remain open and temporary mapped folders were retained at $root." }
+    if (-not $completed) { Write-Warning "Sandbox validation failed; temporary mapped folders were retained at $root." }
+    elseif (-not $sandboxId) { Write-Warning "The sandbox ID was unavailable; the session may remain open and temporary mapped folders were retained at $root." }
     else { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
 }
