@@ -54,6 +54,14 @@ function Assert-TrueBoolean($Value, [string] $Name) {
     if ($Value -isnot [bool] -or $Value -ne $true) { throw "$Name must be Boolean true." }
 }
 
+function Assert-JsonInteger($Value, [string] $Name) {
+    if ($Value -isnot [long]) { throw "$Name must be a JSON integer." }
+}
+
+function Assert-JsonNumber($Value, [string] $Name) {
+    if ($Value -isnot [long] -and ($Value -isnot [double] -or -not [double]::IsFinite($Value))) { throw "$Name must be a finite JSON number." }
+}
+
 function Assert-UtcTimestamp($Value, [string] $Name) {
     if ($Value -isnot [string] -or -not $Value.EndsWith('Z', [StringComparison]::Ordinal)) { throw "$Name must be a round-trip UTC timestamp." }
     $parsed = [DateTimeOffset]::MinValue
@@ -105,7 +113,7 @@ if ($Mode -eq 'Final') {
     if ($candidate.schema -isnot [long] -or $candidate.schema -ne 2L -or $candidate.issue -isnot [long] -or $candidate.issue -ne 38L) { throw 'M6 candidate evidence has the wrong schema or issue type/value.' }
     Assert-ExactString $candidate.mode 'Candidate' 'candidate.mode'; Assert-ExactString $candidate.acceptance 'clean-automated-candidate' 'candidate.acceptance'
     if ($null -ne $candidate.gates) { throw 'Candidate M6 evidence must not contain gate records.' }
-    $expectedPending = @('manual visual review', 'manual Accessibility Insights/Narrator walkthrough', 'manual real Japanese IME smoke', 'clean-machine NativeAOT package run')
+    $expectedPending = @('manual visual review', 'manual Accessibility Insights walkthrough', 'bounded basic international/IME review', 'clean-machine NativeAOT package run')
     Assert-Exact $candidate.pending $expectedPending 'candidate.pending'; Assert-Exact $candidate.manualNotRun $expectedPending 'candidate.manualNotRun'
     Assert-Exact $candidate.baseline $baseline 'candidate.baseline'
     Assert-Properties $candidate.hashes @('baselineSha256','verifierSha256') 'candidate.hashes'
@@ -120,24 +128,37 @@ if ($Mode -eq 'Final') {
     foreach ($corpus in @('input','resize')) {
         Assert-Properties $candidate.operations.$corpus @('p95Ms','p99Ms','rendererP95Ms','samples') "candidate.operations.$corpus"
         Assert-Properties $candidate.operations.corpusDelimiters.$corpus @('firstFrame','lastFrame','samples') "candidate.operations.corpusDelimiters.$corpus"
+        Assert-JsonInteger $candidate.operations.$corpus.samples "candidate.operations.$corpus.samples"
+        foreach ($metric in @('p95Ms','p99Ms','rendererP95Ms')) { Assert-JsonNumber $candidate.operations.$corpus.$metric "candidate.operations.$corpus.$metric" }
+        foreach ($field in @('firstFrame','lastFrame','samples')) { Assert-JsonInteger $candidate.operations.corpusDelimiters.$corpus.$field "candidate.operations.corpusDelimiters.$corpus.$field" }
         if ($candidate.operations.corpusDelimiters.$corpus.samples -ne 500 -or $candidate.operations.corpusDelimiters.$corpus.firstFrame -le 0 -or $candidate.operations.corpusDelimiters.$corpus.lastFrame -lt $candidate.operations.corpusDelimiters.$corpus.firstFrame) { throw "Candidate $corpus corpus delimiters are invalid." }
     }
+    Assert-JsonInteger $candidate.operations.idleFrames 'candidate.operations.idleFrames'
     if ($candidate.operations.input.samples -ne 500 -or $candidate.operations.resize.samples -ne 500 -or $candidate.operations.input.p95Ms -gt 16.7 -or $candidate.operations.resize.p95Ms -gt 16.7 -or $candidate.operations.input.p99Ms -gt 33.3 -or $candidate.operations.resize.p99Ms -gt 33.3 -or $candidate.operations.input.rendererP95Ms -gt 8.3 -or $candidate.operations.resize.rendererP95Ms -gt 8.3 -or $candidate.operations.idleFrames -ne 0) { throw 'Candidate operation evidence does not satisfy frozen latency/idle bounds.' }
     Assert-Properties $candidate.operations.virtualization @('realizedMaximum','sourceRows','visibleRowsMaximum') 'candidate.operations.virtualization'
     Assert-Properties $candidate.operations.managed @('baselineBytes','cycles','growthBytes','limitBytes','peakBytes','postGcBytes') 'candidate.operations.managed'
+    foreach ($field in @('realizedMaximum','sourceRows','visibleRowsMaximum')) { Assert-JsonInteger $candidate.operations.virtualization.$field "candidate.operations.virtualization.$field" }
+    foreach ($field in @('baselineBytes','cycles','growthBytes','limitBytes','peakBytes','postGcBytes')) { Assert-JsonInteger $candidate.operations.managed.$field "candidate.operations.managed.$field" }
     if ($candidate.operations.virtualization.sourceRows -ne 10000 -or $candidate.operations.virtualization.realizedMaximum -gt 6 -or $candidate.operations.managed.cycles -ne 20 -or $candidate.operations.managed.growthBytes -gt 16777216) { throw 'Candidate operation evidence does not satisfy frozen virtualization/memory bounds.' }
     $resources = $candidate.operations.resources
     Assert-Properties $resources @('handles','lifecycle','surfaceMaximum','textBlobMaximum','textureMaximum','uiaProviderMaximum') 'candidate.operations.resources'
+    foreach ($field in @('surfaceMaximum','textBlobMaximum','textureMaximum','uiaProviderMaximum')) { Assert-JsonInteger $resources.$field "candidate.operations.resources.$field" }
     if ($resources.surfaceMaximum -gt 1 -or $resources.textureMaximum -gt 1 -or $resources.textBlobMaximum -gt 0 -or $resources.uiaProviderMaximum -gt 18) { throw 'Candidate resource evidence exceeds frozen bounds.' }
     Assert-Properties $resources.handles @('baseline','final','finalDelta','peak','peakDelta') 'candidate.operations.resources.handles'
+    foreach ($field in @('baseline','final','finalDelta','peak','peakDelta')) { Assert-JsonInteger $resources.handles.$field "candidate.operations.resources.handles.$field" }
     if ($resources.handles.peakDelta -ne ($resources.handles.peak - $resources.handles.baseline) -or $resources.handles.finalDelta -ne ($resources.handles.final - $resources.handles.baseline) -or $resources.handles.peakDelta -gt 128 -or $resources.handles.finalDelta -gt 128) { throw 'Candidate handle evidence is inconsistent or exceeds frozen bounds.' }
     Assert-Properties $resources.lifecycle @('peak','post','pre') 'candidate.operations.resources.lifecycle'
-    foreach ($phase in @('pre','post')) { Assert-Properties $resources.lifecycle.$phase @('handles','surfaces','textBlobs','textures','uiaProviders') "candidate.operations.resources.lifecycle.$phase" }
+    foreach ($phase in @('pre','post')) { Assert-Properties $resources.lifecycle.$phase @('handles','surfaces','textBlobs','textures','uiaProviders') "candidate.operations.resources.lifecycle.$phase"; foreach ($field in @('handles','surfaces','textBlobs','textures','uiaProviders')) { Assert-JsonInteger $resources.lifecycle.$phase.$field "candidate.operations.resources.lifecycle.$phase.$field" } }
     Assert-Properties $resources.lifecycle.peak @('surfaces','textBlobs','textures','uiaProviders') 'candidate.operations.resources.lifecycle.peak'
+    foreach ($field in @('surfaces','textBlobs','textures','uiaProviders')) { Assert-JsonInteger $resources.lifecycle.peak.$field "candidate.operations.resources.lifecycle.peak.$field" }
     if ($resources.lifecycle.post.surfaces -ne 0 -or $resources.lifecycle.post.textures -ne 0 -or $resources.lifecycle.post.textBlobs -ne 0 -or $resources.lifecycle.post.uiaProviders -ne 0) { throw 'Candidate lifecycle resources did not return after disposal/GC.' }
     Assert-Properties $candidate.informational @('coldLaunchMilliseconds','publishBytes','testedWindow','workingSetBytes','zipBytes') 'candidate.informational'
-    foreach ($value in @($candidate.informational.coldLaunchMilliseconds,$candidate.informational.publishBytes,$candidate.informational.workingSetBytes,$candidate.informational.zipBytes)) { if ($null -eq $value -or $value -le 0) { throw 'Candidate informational evidence is incomplete.' } }
+    Assert-JsonNumber $candidate.informational.coldLaunchMilliseconds 'candidate.informational.coldLaunchMilliseconds'
+    foreach ($field in @('publishBytes','workingSetBytes','zipBytes')) { Assert-JsonInteger $candidate.informational.$field "candidate.informational.$field" }
+    foreach ($value in @($candidate.informational.coldLaunchMilliseconds,$candidate.informational.publishBytes,$candidate.informational.workingSetBytes,$candidate.informational.zipBytes)) { if ($value -le 0) { throw 'Candidate informational evidence is incomplete.' } }
     Assert-Properties $candidate.informational.testedWindow @('clientPixels','dpi','hwnd','monitor','monitorBounds','scale') 'candidate.informational.testedWindow'
+    Assert-JsonInteger $candidate.informational.testedWindow.dpi 'candidate.informational.testedWindow.dpi'; Assert-JsonNumber $candidate.informational.testedWindow.scale 'candidate.informational.testedWindow.scale'
+    foreach ($field in @('clientPixels','monitorBounds')) { if ($candidate.informational.testedWindow.$field -isnot [array]) { throw "candidate.informational.testedWindow.$field must be an array." }; foreach ($value in $candidate.informational.testedWindow.$field) { Assert-JsonInteger $value "candidate.informational.testedWindow.$field entry" } }
     if ($candidate.informational.testedWindow.hwnd -isnot [string] -or [string]::IsNullOrWhiteSpace($candidate.informational.testedWindow.hwnd) -or $candidate.informational.testedWindow.monitor -isnot [string] -or [string]::IsNullOrWhiteSpace($candidate.informational.testedWindow.monitor) -or $candidate.informational.testedWindow.dpi -le 0 -or $candidate.informational.testedWindow.scale -le 0 -or $candidate.informational.testedWindow.clientPixels.Count -ne 2 -or $candidate.informational.testedWindow.monitorBounds.Count -ne 4) { throw 'Candidate tested-window evidence is incomplete.' }
     Assert-Properties $candidate.packaging @('copiedPublish','extractedChecksumsMatch','extractedPackageInventory','nativeAssetAndLicenseInventory','publishBytes','zip','zipBytes','zipSha256') 'candidate.packaging'
     Assert-TrueBoolean $candidate.packaging.copiedPublish 'candidate.packaging.copiedPublish'; Assert-TrueBoolean $candidate.packaging.extractedChecksumsMatch 'candidate.packaging.extractedChecksumsMatch'
@@ -250,7 +271,7 @@ $environment.source = $source
 if ($Mode -eq 'Candidate') {
     if ($source.status.Count -ne 0 -or -not [string]::Equals($source.commit, $candidateSource.commit, [StringComparison]::Ordinal) -or -not [string]::Equals($source.tree, $candidateSource.tree, [StringComparison]::Ordinal) -or -not [string]::Equals($source.workingTreeSha256, $candidateSource.workingTreeSha256, [StringComparison]::Ordinal)) { throw 'Candidate M6 source changed during verification.' }
 }
-$pending = @('manual visual review', 'manual Accessibility Insights/Narrator walkthrough', 'manual real Japanese IME smoke', 'clean-machine NativeAOT package run')
+$pending = @('manual visual review', 'manual Accessibility Insights walkthrough', 'bounded basic international/IME review', 'clean-machine NativeAOT package run')
 $acceptance = if ($Mode -eq 'Candidate') { 'clean-automated-candidate' } else { 'precommit-automated-only' }
 [ordered]@{
     schema = 2; issue = 38; mode = $Mode; acceptance = $acceptance; baseline = $baseline; hashes = $hashes; environment = $environment; operations = $operations; informational = $informational

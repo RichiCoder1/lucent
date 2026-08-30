@@ -18,8 +18,8 @@ Execution lives in [Lucent Native Project 4](https://github.com/users/RichiCoder
 - Stable composition, rows/columns, bounded layout, scrolling, and fixed-height keyed virtualization.
 - Typed styles, semantic tokens, finite variants, light/dark/high-contrast settings, reduced motion, and bounded transitions.
 - Text, panel/layout primitives, button, single-line text field, selectable/list row, scroll viewport, virtualized list, loading/progress, and simple error state.
-- Basic international single-line editing and a real Japanese IME smoke.
-- Keyboard and Narrator completion of the defined Issue Browser walkthrough; UIA Value, Invoke, Selection, Scroll, focus/events, stale-node rejection, and virtualization for that control set.
+- Basic international single-line editing with bounded composition evidence; real-language manual IME smokes are supplemental.
+- Keyboard completion of the defined Issue Browser walkthrough; UIA Value, Invoke, Selection, Scroll, focus/events, stale-node rejection, and virtualization for that control set. Accessibility Insights is the manual `0.1` gate; Narrator is supplemental.
 - Rich deterministic dumps plus late-`0.1` opt-in application-owned standard .NET/OpenTelemetry export.
 - A persistent CPU Skia/SDL presentation path with correct backing-pixel scaling.
 - Deterministic local data and fake async behavior, with an optional live GitHub adapter.
@@ -83,7 +83,7 @@ Build the production SDL/Windows adapter around the headless kernel. Reuse persi
 
 Compose the bounded `0.1` controls from elements, styles, behaviors, semantics, and composition. Implement production single-line text state and basic international input. Map retained semantics into AOT-compatible UIA fragments, patterns, and events.
 
-**Gate:** a frozen control-by-control UIA matrix defines roles, names, properties, Value/Invoke/SelectionItem/Selection/Scroll patterns, actions, events, focus, runtime IDs, and stale behavior. External UIA validates that matrix against bounded fixtures; deterministic text-state tests plus one real Japanese composition smoke pass. Complete Narrator/keyboard and virtualized-child acceptance occurs after the reference application and virtualized list exist in Milestone 4.
+**Gate:** a frozen control-by-control UIA matrix defines roles, names, properties, Value/Invoke/SelectionItem/Selection/Scroll patterns, actions, events, focus, runtime IDs, and stale behavior. External UIA validates that matrix against bounded fixtures; deterministic text-state and basic international-composition evidence pass. Complete keyboard and virtualized-child acceptance occurs after the reference application and virtualized list exist in Milestone 4; Narrator remains supplemental.
 
 This is meaningful best-effort support for the defined surface, not exhaustive IME or accessibility certification.
 
@@ -93,7 +93,7 @@ This is meaningful best-effort support for the defined surface, not exhaustive I
 
 Add fake and optional live data sources, async loading/error/retry with stale retention, filters, details, 10,000-row keyed virtualization, and the complete externally driven walkthrough. Keep application code free of framework synchronization, renderer access, proof modes, and duplicated semantics.
 
-**Gate:** every gating walkthrough step passes from external integration/E2E tests under managed and NativeAOT builds; 10,000-row reorders/removals preserve keyed identity, focus, selection, and bounded UIA providers; departed scopes cannot commit input, async, semantics, or scene work; keyboard and Narrator complete the walkthrough; Accessibility Insights receives a manual milestone review; the semantic dump has zero suppressions for the declared matrix.
+**Gate:** every gating walkthrough step passes from external integration/E2E tests under managed and NativeAOT builds; 10,000-row reorders/removals preserve keyed identity, focus, selection, and bounded UIA providers; departed scopes cannot commit input, async, semantics, or scene work; keyboard completes the walkthrough; Accessibility Insights receives a manual milestone review; the semantic dump has zero suppressions for the declared matrix. Narrator is supplemental.
 
 **Stop:** the Issue Browser needs application-specific framework hooks, manual collection synchronization, direct bounds/drawing, or test-only startup behavior.
 
