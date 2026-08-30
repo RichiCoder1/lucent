@@ -20,12 +20,16 @@ using System.Runtime.InteropServices;
 public static class M6SandboxUser32 {
     [DllImport("user32.dll", SetLastError=true)]
     public static extern bool PostMessage(IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string className, string windowName);
 }
 '@
 
 function Get-Hash([string] $Path) {
     (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
+
+function Test-JsonInteger($Value) { $Value -is [int] -or $Value -is [long] }
 
 function Assert-Properties($Value, [string[]] $Expected, [string] $Name) {
     if ($Value -isnot [System.Management.Automation.PSCustomObject]) { throw "$Name has the wrong type." }
@@ -51,14 +55,14 @@ function Assert-Inventory($Expected, $Actual) {
     if ($Expected -isnot [array] -or $Actual -isnot [array] -or $Expected.Count -eq 0 -or $Expected.Count -ne $Actual.Count) { throw 'Candidate extracted inventory is missing or has the wrong length.' }
     for ($i = 0; $i -lt $Expected.Count; $i++) {
         Assert-Properties $Expected[$i] @('bytes', 'path', 'sha256') "candidate inventory[$i]"
-        if ($Expected[$i].bytes -isnot [long] -or $Expected[$i].bytes -lt 0 -or $Expected[$i].path -isnot [string] -or [string]::IsNullOrWhiteSpace($Expected[$i].path) -or $Expected[$i].sha256 -notmatch '^[0-9a-f]{64}$') { throw "candidate inventory[$i] is malformed." }
+        if (-not (Test-JsonInteger $Expected[$i].bytes) -or $Expected[$i].bytes -lt 0 -or $Expected[$i].path -isnot [string] -or [string]::IsNullOrWhiteSpace($Expected[$i].path) -or $Expected[$i].sha256 -notmatch '^[0-9a-f]{64}$') { throw "candidate inventory[$i] is malformed." }
         foreach ($part in $Expected[$i].path.Split('/')) { if ($part -eq '..' -or $part -eq '') { throw "candidate inventory[$i] contains an unsafe path." } }
         if ($Expected[$i].path -cne $Actual[$i].path -or $Expected[$i].bytes -ne $Actual[$i].bytes -or $Expected[$i].sha256 -cne $Actual[$i].sha256) { throw "Candidate extracted file evidence differs at index $i." }
     }
 }
 
 function Write-Result([string] $Environment) {
-    New-Item -LiteralPath $outputRoot -ItemType Directory -Force | Out-Null
+    New-Item -Path $outputRoot -ItemType Directory -Force | Out-Null
     $temporary = Join-Path $outputRoot ('.clean-machine-gate.' + [Guid]::NewGuid().ToString('N') + '.tmp')
     $result = [ordered]@{
         candidateEvidenceSha256 = $candidateEvidenceSha256
@@ -86,7 +90,7 @@ try {
     $packageSha256 = Get-Hash $zipPath
     $candidate = Get-Content -LiteralPath $evidencePath -Raw | ConvertFrom-Json
     Assert-Properties $candidate @('acceptance', 'baseline', 'environment', 'gates', 'hashes', 'informational', 'issue', 'manualNotRun', 'mode', 'operations', 'packaging', 'pending', 'schema') 'candidate evidence'
-    if ($candidate.schema -isnot [long] -or $candidate.schema -ne 2L -or $candidate.issue -isnot [long] -or $candidate.issue -ne 38L -or $candidate.mode -cne 'Candidate' -or $candidate.acceptance -cne 'clean-automated-candidate' -or $null -ne $candidate.gates) { throw 'Candidate evidence is not a clean automated candidate.' }
+    if (-not (Test-JsonInteger $candidate.schema) -or $candidate.schema -ne 2 -or -not (Test-JsonInteger $candidate.issue) -or $candidate.issue -ne 38 -or $candidate.mode -cne 'Candidate' -or $candidate.acceptance -cne 'clean-automated-candidate' -or $null -ne $candidate.gates) { throw 'Candidate evidence is not a clean automated candidate.' }
     Assert-Properties $candidate.environment @('build', 'cpu', 'display', 'gpu', 'logicalProcessors', 'machine', 'os', 'powerPlan', 'ramBytes', 'recordedAtUtc', 'runtime', 'scaleAuthority', 'source') 'candidate.environment'
     Assert-Properties $candidate.environment.source @('branch', 'commit', 'status', 'tree', 'untracked', 'workingTreeSha256') 'candidate.environment.source'
     if ($candidate.environment.source.status.Count -ne 0 -or $candidate.environment.source.commit -isnot [string] -or [string]::IsNullOrWhiteSpace($candidate.environment.source.commit)) { throw 'Candidate evidence does not prove a clean source commit.' }
@@ -105,7 +109,7 @@ try {
     if (-not $noDevelopmentSdk) { throw 'The clean machine has a dotnet command or development SDK.' }
 
     $extract = Join-Path $env:TEMP ('lucent-m6-sandbox-' + [Guid]::NewGuid().ToString('N'))
-    New-Item -LiteralPath $extract -ItemType Directory -Force | Out-Null
+    New-Item -Path $extract -ItemType Directory -Force | Out-Null
     try {
         Expand-Archive -LiteralPath $zipPath -DestinationPath $extract -Force
         $actualInventory = Get-Inventory $extract
@@ -113,12 +117,13 @@ try {
         $inventoryPass = $true
         $exe = Join-Path $extract 'Lucent.IssueBrowser.exe'
         if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Extracted package lacks the exact Lucent.IssueBrowser.exe.' }
-        $process = Start-Process -FilePath $exe -WorkingDirectory $extract -PassThru
+        $stderr = Join-Path $extract 'stderr.txt'
+        $process = Start-Process -FilePath $exe -WorkingDirectory $extract -RedirectStandardError $stderr -PassThru
         try {
             $deadline = [Environment]::TickCount64 + 15000
-            do { Start-Sleep -Milliseconds 100; $process.Refresh() } until ($process.MainWindowHandle -ne 0 -or $process.HasExited -or [Environment]::TickCount64 -ge $deadline)
-            if ($process.HasExited -or $process.MainWindowHandle -eq 0) { throw 'Extracted Lucent.IssueBrowser.exe did not expose an HWND.' }
-            if (-not [M6SandboxUser32]::PostMessage($process.MainWindowHandle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw "Ordinary WM_CLOSE request failed (Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." }
+            do { Start-Sleep -Milliseconds 100; $process.Refresh(); $hwnd = [M6SandboxUser32]::FindWindow($null, 'Lucent Issue Browser') } until ($hwnd -ne [IntPtr]::Zero -or $process.HasExited -or [Environment]::TickCount64 -ge $deadline)
+            if ($process.HasExited -or $hwnd -eq [IntPtr]::Zero) { throw "Extracted Lucent.IssueBrowser.exe did not expose its SDL HWND: $((Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue).Trim())" }
+            if (-not [M6SandboxUser32]::PostMessage($hwnd, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw "Ordinary WM_CLOSE request failed (Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." }
             if (-not $process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw "Extracted application did not exit normally (exit=$($process.ExitCode))." }
             if (Get-ChildItem -LiteralPath $outputRoot -Force | Select-Object -First 1) { throw 'Tested application wrote into the verifier output mapping.' }
             $launchPass = $true
@@ -134,6 +139,7 @@ try {
 }
 catch {
     [Console]::Error.WriteLine("M6 clean-machine verification failed: $($_.Exception.Message)")
+    try { [IO.File]::WriteAllText((Join-Path $outputRoot 'verification-error.txt'), $_.Exception.ToString(), (New-Object Text.UTF8Encoding($false))) } catch { }
     try { Write-Result 'Windows Sandbox; networking disabled; verification failed' } catch { [Console]::Error.WriteLine("Could not write clean-machine result: $($_.Exception.Message)") }
     exit 1
 }

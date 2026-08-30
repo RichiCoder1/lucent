@@ -1,0 +1,17 @@
+Microsoft Visual C++ Runtime 14.44.35211.0 (x64)
+
+This package redistributes the unmodified app-local vcruntime140.dll from
+Microsoft Visual Studio 2022 Community under the Visual Studio license's
+Redistributable Code terms. Microsoft recommends the centrally serviced
+Visual C++ Redistributable when an installer is available; Lucent's zip uses
+app-local deployment so the NativeAOT application runs on a clean Windows
+installation.
+
+Source path in Visual Studio 2022:
+VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT/vcruntime140.dll
+
+SHA-256: d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066
+
+Redistribution guidance:
+https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files
+https://learn.microsoft.com/cpp/windows/deployment-in-visual-cpp

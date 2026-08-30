@@ -24,7 +24,7 @@ public static class M0Window {
 '@
 
 $source = (Resolve-Path $PublishDirectory).Path
-$assets = @('SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll')
+$assets = @('SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'vcruntime140.dll')
 function Assert-NativePreflight([string] $Asset) {
     $copy = Join-Path ([IO.Path]::GetTempPath()) ("lucent-m0-missing-" + [Guid]::NewGuid())
     $process = $null

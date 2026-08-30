@@ -9,7 +9,13 @@ $ErrorActionPreference = 'Stop'
 $prerequisite = 'DISM.exe /Online /Enable-Feature /FeatureName:Containers-DisposableClientVM /All /NoRestart'
 
 function Stop-Sandbox([string] $Id) {
-    if ($Id) { try { & $script:wsbPath stop --id $Id 2>$null | Out-Null } catch { } }
+    if ($Id) { try { & $script:wsbPath StopSandbox --id $Id 2>$null | Out-Null } catch { } }
+}
+
+function Get-SandboxIds {
+    if (-not $script:wsbPath) { return @() }
+    try { @((& $script:wsbPath list --raw | ConvertFrom-Json).WindowsSandboxEnvironments.Id) }
+    catch { @() }
 }
 
 function Get-Hash([string] $Path) {
@@ -35,7 +41,7 @@ function Assert-Utc([string] $Value, [string] $Name) {
 function Copy-Atomic([string] $Source, [string] $Destination) {
     $Destination = [IO.Path]::GetFullPath($Destination)
     $parent = Split-Path -Parent $Destination
-    New-Item -LiteralPath $parent -ItemType Directory -Force | Out-Null
+    New-Item -Path $parent -ItemType Directory -Force | Out-Null
     $temporary = Join-Path $parent ('.clean-machine-gate.' + [Guid]::NewGuid().ToString('N') + '.tmp')
     Copy-Item -LiteralPath $Source -Destination $temporary -Force
     Move-Item -LiteralPath $temporary -Destination $Destination -Force
@@ -84,8 +90,8 @@ function Validate-Result($Result, [string] $CandidateEvidenceSha256, [string] $P
 }
 
 if ($env:OS -ne 'Windows_NT') { throw "Windows Sandbox is unavailable on this host. Enable it separately with: $prerequisite" }
-$sandboxCommand = Get-Command wsb.exe, wsb, WindowsSandbox.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $sandboxCommand) { throw "Windows Sandbox is unavailable. Enable it separately with: $prerequisite" }
+$sandboxGui = Get-Command WindowsSandbox.exe -ErrorAction SilentlyContinue
+if (-not $sandboxGui) { throw "Windows Sandbox is unavailable. Enable it separately with: $prerequisite" }
 
 $zip = (Resolve-Path -LiteralPath $CandidateZipPath -ErrorAction Stop).Path
 $evidence = (Resolve-Path -LiteralPath $CandidateEvidencePath -ErrorAction Stop).Path
@@ -99,7 +105,7 @@ if (-not $GateRecordPath) { $GateRecordPath = Join-Path (Split-Path -Parent $evi
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('lucent-m6-sandbox-' + [Guid]::NewGuid().ToString('N'))
 $input = Join-Path $root 'input'; $output = Join-Path $root 'output'; $config = Join-Path $root 'Lucent-M6.wsb'
-New-Item -LiteralPath $input, $output -ItemType Directory -Force | Out-Null
+New-Item -Path $input, $output -ItemType Directory -Force | Out-Null
 Copy-Item -LiteralPath $zip -Destination (Join-Path $input 'lucent-win-x64.zip')
 Copy-Item -LiteralPath $evidence -Destination (Join-Path $input 'm6-evidence.json')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'M6-SandboxVerify.ps1') -Destination (Join-Path $input 'M6-SandboxVerify.ps1')
@@ -121,17 +127,14 @@ $wsb = Get-Command wsb.exe, wsb -ErrorAction SilentlyContinue | Select-Object -F
 $wsbPath = if ($wsb) { $wsb.Source } else { $null }
 $sandboxId = $null
 try {
+    $priorIds = @(Get-SandboxIds)
+    Start-Process -FilePath $sandboxGui.Source -ArgumentList $config | Out-Null
     if ($wsbPath) {
-        $cliXml = $wsbXml.Replace('<Networking>Disable</Networking>', '<Networking>Disabled</Networking>')
-        $startOutput = (& $wsbPath start --raw --config $cliXml 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE) { throw "wsb start failed: $startOutput" }
-        $guid = [regex]::Match($startOutput, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
-        if ($guid.Success) { $sandboxId = $guid.Value }
-        if (-not $sandboxId) { throw "wsb start did not return a sandbox ID: $startOutput" }
-    }
-    else {
-        Start-Process -FilePath $config | Out-Null
-        Write-Warning 'Windows 11 24H2 wsb CLI not found; launched the .wsb file through its registered Windows Sandbox association.'
+        $idDeadline = [Environment]::TickCount64 + 30000
+        do {
+            Start-Sleep -Milliseconds 500
+            $sandboxId = @(Get-SandboxIds | Where-Object { $_ -notin $priorIds } | Select-Object -First 1)[0]
+        } while (-not $sandboxId -and [Environment]::TickCount64 -lt $idDeadline)
     }
     $result = Get-Result $output ([Environment]::TickCount64 + ($TimeoutSeconds * 1000))
     Validate-Result $result $candidateEvidenceSha256 $packageSha256 $sourceCommit
@@ -140,6 +143,6 @@ try {
 }
 finally {
     Stop-Sandbox $sandboxId
-    if (-not $sandboxId) { Write-Warning "The fallback sandbox session may remain open; temporary mapped folders were retained at $root until it is closed." }
+    if (-not $sandboxId) { Write-Warning "The sandbox ID was unavailable; the session may remain open and temporary mapped folders were retained at $root." }
     else { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
 }

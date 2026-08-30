@@ -180,7 +180,7 @@ public static class WindowsBootstrap
 
     private static void RequireNativeAssets()
     {
-        foreach (var asset in new[] { "SDL3.dll", "libSkiaSharp.dll", "libHarfBuzzSharp.dll" })
+        foreach (var asset in new[] { "SDL3.dll", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "vcruntime140.dll" })
             if (!File.Exists(Path.Combine(AppContext.BaseDirectory, asset)))
                 throw new FileNotFoundException($"Required native asset missing: {asset}.");
     }
