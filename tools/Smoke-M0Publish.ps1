@@ -11,12 +11,6 @@ public static class M0Window {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
   [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
-  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-  [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort Vk; public ushort Scan; public uint Flags; public uint Time; public IntPtr ExtraInfo; }
-  [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int X; public int Y; public uint Data; public uint Flags; public uint Time; public IntPtr ExtraInfo; }
-  [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT Mi; [FieldOffset(0)] public KEYBDINPUT Ki; }
-  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint Type; public INPUTUNION Data; }
-  [DllImport("user32.dll", SetLastError=true)] public static extern uint SendInput(uint count, INPUT[] input, int size);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
@@ -103,13 +97,10 @@ function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Clie
 }
 
 function Assert-KeyboardFocusPixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
-    [void][M0Window]::SetForegroundWindow($Hwnd)
-    Start-Sleep -Milliseconds 100
-    $input = @(
-        [M0Window+INPUT]@{ Type = 1; Data = [M0Window+INPUTUNION]@{ Ki = [M0Window+KEYBDINPUT]@{ Vk = 0x09 } } },
-        [M0Window+INPUT]@{ Type = 1; Data = [M0Window+INPUTUNION]@{ Ki = [M0Window+KEYBDINPUT]@{ Vk = 0x09; Flags = 2 } } }
-    )
-    if ([M0Window]::SendInput([uint32]$input.Count, $input, [Runtime.InteropServices.Marshal]::SizeOf([type][M0Window+INPUT])) -ne $input.Count) { throw "Iteration $Iteration could not send ordinary Tab input (Win32=$([Runtime.InteropServices.Marshal]::GetLastWin32Error()))." }
+    if (-not [M0Window]::PostMessage($Hwnd, 0x0100, [UIntPtr]0x09, [IntPtr]::Zero) -or
+        -not [M0Window]::PostMessage($Hwnd, 0x0101, [UIntPtr]0x09, [IntPtr]::Zero)) {
+        throw "Iteration $Iteration could not post ordinary Tab input."
+    }
     $deadline = [Environment]::TickCount64 + 5000
     $located = $false
     do {
