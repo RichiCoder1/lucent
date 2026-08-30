@@ -100,7 +100,7 @@ if ($Mode -eq 'Final') {
     $evidencePath = Join-Path $EvidenceDirectory 'm6-evidence.json'; $zip = Join-Path $EvidenceDirectory 'lucent-win-x64.zip'
     if (-not (Test-Path $evidencePath -PathType Leaf) -or -not (Test-Path $zip -PathType Leaf)) { throw 'Final M6 requires existing candidate evidence and package.' }
     $candidateEvidenceSha256 = (Get-FileHash $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $candidate = Get-Content $evidencePath -Raw | ConvertFrom-Json
+    $candidate = Get-Content $evidencePath -Raw | ConvertFrom-Json -DateKind String
     Assert-Properties $candidate @('acceptance','baseline','environment','gates','hashes','informational','issue','manualNotRun','mode','operations','packaging','pending','schema') 'M6 candidate evidence'
     if ($candidate.schema -isnot [long] -or $candidate.schema -ne 2L -or $candidate.issue -isnot [long] -or $candidate.issue -ne 38L) { throw 'M6 candidate evidence has the wrong schema or issue type/value.' }
     Assert-ExactString $candidate.mode 'Candidate' 'candidate.mode'; Assert-ExactString $candidate.acceptance 'clean-automated-candidate' 'candidate.acceptance'
@@ -161,7 +161,7 @@ if ($Mode -eq 'Final') {
     } finally { Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue }
 
     if (-not (Test-Path $ManualGateRecord -PathType Leaf) -or -not (Test-Path $CleanMachineGateRecord -PathType Leaf)) { throw 'Final M6 requires manual and clean-machine gate records.' }
-    $manual = Get-Content $ManualGateRecord -Raw | ConvertFrom-Json; $clean = Get-Content $CleanMachineGateRecord -Raw | ConvertFrom-Json
+    $manual = Get-Content $ManualGateRecord -Raw | ConvertFrom-Json -DateKind String; $clean = Get-Content $CleanMachineGateRecord -Raw | ConvertFrom-Json -DateKind String
     Assert-Properties $manual @('accessibility','candidateEvidenceSha256','ime','issue','packageSha256','recordedAtUtc','schema','sourceCommit','visual') 'Manual gate record'
     Assert-Properties $clean @('candidateEvidenceSha256','environment','inventoryPass','issue','launchPass','noDevelopmentSdk','packageSha256','recordedAtUtc','schema','sourceCommit') 'Clean-machine gate record'
     if ($manual.schema -isnot [long] -or $manual.schema -ne 1L -or $manual.issue -isnot [long] -or $manual.issue -ne 38L) { throw 'Manual gate record has the wrong schema or issue type/value.' }
