@@ -14,6 +14,8 @@ internal static class CompositionContracts
             PublicFactoryStructuralGuards();
             ManualScopeDisposalRetiresEntries();
             KeyedFactoryTransactionsAndReentrancy();
+            RecipeMountsAndMetadataSurface();
+            NestedFactoryIsolationAndVirtualRows();
             var first = EquivalentDump();
             Assert(first == EquivalentDump(), "Composition dumps differ for equivalent active trees.");
             Assert(!first.Contains("secret", StringComparison.OrdinalIgnoreCase) && !first.Contains("value=", StringComparison.OrdinalIgnoreCase), "Composition dump exposed application values.");
@@ -98,6 +100,106 @@ internal static class CompositionContracts
         status.Label = "Changed"; graph.Drain();
         Assert(composition.ExecuteSemanticCommand(identity, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Applied && invoked == 1,
             "An unrelated semantic refresh invalidated a still-current command identity.");
+    }
+
+    private static void RecipeMountsAndMetadataSurface()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "recipe-mount");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var active = graph.Signal(true, "recipe-active");
+        var items = graph.Signal(new[] { 1 }, "recipe-items");
+        var changes = new List<string>();
+        var invoked = 0;
+        var root = composition.Mount(composition.Root, theme, context =>
+        {
+            Assert(ReferenceEquals(context.Theme, theme), "Root recipe did not receive its explicit theme.");
+            var panel = context.Element("recipe-panel");
+            Controls.Panel(panel, context.Theme, "Recipe panel");
+            _ = context.Mount(panel, child => { Assert(ReferenceEquals(child.Theme, theme), "Nested mount lost its root theme."); return Controls.Row(child, "recipe-row", row => Controls.TextField(row, "recipe-field", "initial", changes.Add)); });
+            _ = context.When(panel, "recipe-when", () => active.Value, child => { Assert(ReferenceEquals(child.Theme, theme), "Conditional recipe lost its root theme."); return Controls.Button(child, "recipe-button", "Invoke", () => invoked++); });
+            _ = context.ForEach(panel, "recipe-items", () => items.Value, value => value, (value, child) => { Assert(ReferenceEquals(child.Theme, theme), "Keyed recipe lost its root theme."); return Controls.Text(child, "recipe-text-" + value, "Item " + value); });
+            return panel;
+        });
+        graph.Drain();
+        Assert(root.Children.Count == 3 && composition.Dump().Contains("name=\"recipe-field\"", StringComparison.Ordinal) &&
+            composition.SemanticSnapshot()!.Children.Single(node => node.Name == "Recipe panel").Children.Any(node => node.Name == "Invoke"),
+            "Nested recipe mount, scalar content, or element content changed the retained tree.");
+        var field = root.Children[0].Children.Single();
+        var fieldNode = Descendants(composition.SemanticSnapshot()!).Single(node => node.Role == SemanticRole.TextField);
+        Assert(composition.ExecuteSemanticCommand(fieldNode.Identity, new(SemanticCommandKind.SetValue, "changed")) == SemanticCommandResult.Applied, "Recipe text field rejected its control command.");
+        graph.Drain();
+        var button = Descendants(composition.SemanticSnapshot()!).Single(node => node.Name == "Invoke");
+        Assert(changes.SequenceEqual(["changed"]) && composition.ExecuteSemanticCommand(button.Identity, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Applied && invoked == 1 && field.Name == "recipe-field",
+            "Recipe control callbacks or structural identities diverged from control behavior.");
+
+        var before = composition.Dump();
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, _ => composition.Root));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { _ = context.Element("wrong-root"); return composition.Root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var first = context.Element("bad-first"); _ = context.Element("bad-second"); return first; }));
+        Assert(composition.Dump() == before && !root.IsDisposed, "Invalid recipe root did not roll back atomically.");
+        Expect<AggregateException>(() => composition.Mount(composition.Root, theme, context => { var failed = context.Element("cleanup-failure"); failed.Scope.OnDispose(() => throw new InvalidOperationException("nested-cleanup")); throw new InvalidOperationException("nested-factory"); }));
+        Assert(composition.Dump() == before, "Nested factory cleanup failure leaked provisional structure.");
+        Expect<ArgumentException>(() => composition.Mount(composition.Root, theme, context => { var escaped = context.Element("escaped"); _ = context.Mount(composition.Root, child => Controls.Text(child, "escape", "Escape")); return escaped; }));
+        Assert(composition.Dump() == before, "Nested recipe escaped its factory parent.");
+        root.Dispose();
+        Assert(root.IsDisposed && !composition.Dump().Contains("recipe-panel", StringComparison.Ordinal), "Mounted recipe disposal retained its scope-owned tree.");
+    }
+
+    private static void NestedFactoryIsolationAndVirtualRows()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "factory-isolation");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var conditionalReads = 0; var keyedReads = 0;
+        var conditional = composition.When(composition.Root, "live-conditional", () => { conditionalReads++; return false; }, context => context.Element("live-child"));
+        var keyed = composition.ForEach(composition.Root, "live-keyed", () => { keyedReads++; return Array.Empty<int>(); }, value => value, (_, context) => context.Element("live-keyed-child"));
+        graph.Drain();
+        var before = composition.Dump();
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-conditional"); conditional.Update(true); return root; }));
+        Assert(composition.Dump() == before && conditional.Active is null, "An unrelated conditional mutated during an outer recipe.");
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-keyed"); keyed.Update([1]); return root; }));
+        Assert(composition.Dump() == before && keyed.Items.Count == 0, "An unrelated keyed region mutated during an outer recipe.");
+        var initialConditionalReads = conditionalReads; var initialKeyedReads = keyedReads;
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-conditional-refresh"); conditional.Refresh(); return root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-keyed-refresh"); keyed.Refresh(); return root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-conditional-dispose"); conditional.Dispose(); return root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-keyed-dispose"); keyed.Dispose(); return root; }));
+        Assert(conditionalReads == initialConditionalReads && keyedReads == initialKeyedReads && !conditional.IsDisposed && !keyed.IsDisposed && composition.Dump() == before,
+            "Foreign refresh evaluated its source or foreign disposal escaped an outer recipe.");
+
+        Controls.Panel(composition.Root, theme, "root");
+        var viewport = composition.Child(composition.Root, "viewport");
+        _ = Controls.ScrollViewport(viewport, theme, "rows", style: Style.Empty.Set(Arrangement.Width, 10f).Set(Arrangement.Height, 10f));
+        var virtualReads = 0;
+        var themed = Controls.VirtualizedList(viewport, theme, "themed-rows", "Rows", () => { virtualReads++; return new[] { 1 }; }, value => value, (value, context) =>
+        {
+            Assert(ReferenceEquals(context.Theme, theme), "Virtualized row lost its source theme.");
+            return Controls.Text(context, "themed-row", "Row " + value);
+        }, 10f);
+        graph.Drain(); themed.Realize(new(10, 10, 1));
+        Assert(themed.Items.Count == 1 && themed.Items.Single().Resolve(SceneProperties.Text).Value == "Row 1", "Annotated virtualized row did not mount through its themed context.");
+        var virtualBefore = composition.Dump();
+        var initialVirtualReads = virtualReads;
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-virtualized"); themed.Update([1, 2]); return root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-virtualized-refresh"); themed.Refresh(); return root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-virtualized-height"); themed.SetRowHeight(12); return root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-virtualized-realize"); themed.Realize(new(10, 10, 1)); return root; }));
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-virtualized-dispose"); themed.Dispose(); return root; }));
+        Assert(composition.Dump() == virtualBefore && virtualReads == initialVirtualReads && !themed.IsDisposed && themed.RowHeight == 10 && themed.SourceCount == 1 && themed.Items.Count == 1,
+            "An unrelated virtualized region evaluated, mutated, realized, or disposed during an outer recipe.");
+
+        var failingViewport = composition.Child(composition.Root, "failing-viewport");
+        _ = Controls.ScrollViewport(failingViewport, theme, "failing rows", style: Style.Empty.Set(Arrangement.Width, 10f).Set(Arrangement.Height, 10f));
+        Element? provisional = null;
+        var failing = Controls.VirtualizedList(failingViewport, theme, "failing-rows", "Rows", () => new[] { 1 }, value => value, (_, context) =>
+        {
+            provisional = context.Element("failing-row");
+            throw new InvalidOperationException("virtual-row-failure");
+        }, 10f);
+        graph.Drain();
+        Expect<InvalidOperationException>(() => failing.Realize(new(10, 10, 1)));
+        Assert(provisional!.IsDisposed && failing.Items.Count == 0 && failing.Region.Children.Count == 0, "Throwing virtualized row retained a provisional context or element.");
     }
 
     private static void DepartedFacetsAndLateAsync()
@@ -578,10 +680,24 @@ internal static class CompositionContracts
         return composition.Dump();
     }
 
+    private static IEnumerable<SemanticSnapshot> Descendants(SemanticSnapshot node)
+    {
+        yield return node;
+        foreach (var child in node.Children)
+            foreach (var descendant in Descendants(child)) yield return descendant;
+    }
+
     private static void ExpectAggregate(Action action)
     {
         try { action(); throw new InvalidOperationException("Expected aggregate failure."); }
         catch (AggregateException) { }
+    }
+
+    private static void Expect<T>(Action action) where T : Exception
+    {
+        try { action(); }
+        catch (T) { return; }
+        throw new InvalidOperationException("Expected " + typeof(T).Name);
     }
 
     private static AggregateException CaptureAggregate(Action action)

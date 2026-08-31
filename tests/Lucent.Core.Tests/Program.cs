@@ -34,8 +34,87 @@ foreach (var handle in metadata.TypeDefinitions)
             violations.Add($"Forbidden Core public API type: {exposed}");
     }
 }
+VerifyLuiMetadata(metadata, provider, violations);
 foreach (var violation in violations.Distinct(StringComparer.Ordinal)) Console.Error.WriteLine(violation);
 return violations.Count == 0 ? 0 : 1;
+
+static void VerifyLuiMetadata(MetadataReader metadata, TypeNameProvider provider, List<string> violations)
+{
+    var controls = metadata.TypeDefinitions.FirstOrDefault(handle => provider.Name(metadata, metadata.GetTypeDefinition(handle).Namespace, metadata.GetTypeDefinition(handle).Name) == "Lucent.Core.Controls");
+    if (controls.IsNil) { violations.Add("Missing Controls metadata."); return; }
+    foreach (var expected in new[]
+    {
+        new Recipe("Text", ["context", "Name", "Content", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.String", "Lucent.Core.Style"], ["-", "-", "-", "null"], "Content"),
+        new Recipe("Row", ["context", "Name", "Content", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.Func`2|Lucent.Core.CompositionContext|Lucent.Core.Element", "Lucent.Core.Style"], ["-", "-", "-", "null"], "Content"),
+        new Recipe("TextField", ["context", "Name", "InitialValue", "OnChange", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.String", "System.Action`1|System.String", "Lucent.Core.Style"], ["-", "-", "", "null", "null"], null),
+        new Recipe("Button", ["context", "Name", "Label", "OnInvoke", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.String", "System.Action", "Lucent.Core.Style"], ["-", "-", "-", "null", "null"], "Label")
+    })
+    {
+        var recipes = metadata.GetTypeDefinition(controls).GetMethods().Select(metadata.GetMethodDefinition)
+            .Where(method => metadata.GetString(method.Name) == expected.Name && HasAttribute(metadata, method.GetCustomAttributes(), "Lucent.Core.LuiComponentAttribute") &&
+                (method.Attributes & (MethodAttributes.Public | MethodAttributes.Static)) == (MethodAttributes.Public | MethodAttributes.Static) && method.DecodeSignature(provider, null).ReturnType == "Lucent.Core.Element").ToArray();
+        if (recipes.Length != 1) { violations.Add($"Missing exact [LuiComponent] recipe: {expected.Name}"); continue; }
+        var recipe = recipes[0];
+        var signature = recipe.DecodeSignature(provider, null);
+        var parameters = recipe.GetParameters().Select(metadata.GetParameter).Where(parameter => parameter.SequenceNumber != 0).ToArray();
+        if (!parameters.Select(parameter => metadata.GetString(parameter.Name)).SequenceEqual(expected.ParameterNames) || !signature.ParameterTypes.SequenceEqual(expected.ParameterTypes) ||
+            !parameters.Select(parameter => DefaultValue(metadata, parameter)).SequenceEqual(expected.Defaults))
+            violations.Add($"Unexpected [LuiComponent] signature: {expected.Name}");
+        var contents = parameters.Where(parameter => HasAttribute(metadata, parameter.GetCustomAttributes(), "Lucent.Core.LuiContentAttribute")).Select(parameter => metadata.GetString(parameter.Name)).ToArray();
+        var defaults = parameters.Where(parameter => HasDefaultContent(metadata, parameter.GetCustomAttributes())).Select(parameter => metadata.GetString(parameter.Name)).ToArray();
+        if (!(expected.DefaultContent is null ? contents.Length == 0 && defaults.Length == 0 : contents.SequenceEqual([expected.DefaultContent]) && defaults.SequenceEqual([expected.DefaultContent])))
+            violations.Add($"Unexpected default [LuiContent] metadata: {expected.Name}");
+    }
+}
+
+static string DefaultValue(MetadataReader metadata, Parameter parameter)
+{
+    if (!parameter.Attributes.HasFlag(ParameterAttributes.HasDefault)) return "-";
+    var constant = metadata.GetConstant(parameter.GetDefaultValue());
+    if (constant.TypeCode == ConstantTypeCode.NullReference) return "null";
+    if (constant.TypeCode != ConstantTypeCode.String) return "?";
+    var value = metadata.GetBlobReader(constant.Value);
+    return value.ReadUTF16(value.Length);
+}
+
+static bool HasDefaultContent(MetadataReader metadata, CustomAttributeHandleCollection attributes)
+{
+    foreach (var handle in attributes)
+    {
+        var attribute = metadata.GetCustomAttribute(handle);
+        if (AttributeName(metadata, attribute.Constructor) != "Lucent.Core.LuiContentAttribute") continue;
+        var value = metadata.GetBlobReader(attribute.Value);
+        return value.ReadUInt16() == 1 && value.ReadUInt16() == 1 && value.ReadByte() == 0x54 && value.ReadByte() == 0x02 && value.ReadSerializedString() == "IsDefault" && value.ReadByte() == 1;
+    }
+    return false;
+}
+
+static bool HasAttribute(MetadataReader metadata, CustomAttributeHandleCollection attributes, string name)
+    => attributes.Any(handle => AttributeName(metadata, metadata.GetCustomAttribute(handle).Constructor) == name);
+
+static string AttributeName(MetadataReader metadata, EntityHandle constructor) => constructor.Kind switch
+{
+    HandleKind.MethodDefinition => TypeDefinitionName(metadata, metadata.GetMethodDefinition((MethodDefinitionHandle)constructor).GetDeclaringType()),
+    HandleKind.MemberReference => metadata.GetMemberReference((MemberReferenceHandle)constructor).Parent.Kind switch
+    {
+        HandleKind.TypeDefinition => TypeDefinitionName(metadata, (TypeDefinitionHandle)metadata.GetMemberReference((MemberReferenceHandle)constructor).Parent),
+        HandleKind.TypeReference => TypeReferenceName(metadata, (TypeReferenceHandle)metadata.GetMemberReference((MemberReferenceHandle)constructor).Parent),
+        _ => ""
+    },
+    _ => ""
+};
+
+static string TypeDefinitionName(MetadataReader metadata, TypeDefinitionHandle handle)
+{
+    var type = metadata.GetTypeDefinition(handle);
+    return string.IsNullOrEmpty(metadata.GetString(type.Namespace)) ? metadata.GetString(type.Name) : metadata.GetString(type.Namespace) + "." + metadata.GetString(type.Name);
+}
+
+static string TypeReferenceName(MetadataReader metadata, TypeReferenceHandle handle)
+{
+    var type = metadata.GetTypeReference(handle);
+    return string.IsNullOrEmpty(metadata.GetString(type.Namespace)) ? metadata.GetString(type.Name) : metadata.GetString(type.Namespace) + "." + metadata.GetString(type.Name);
+}
 
 static IEnumerable<string> ExposedTypes(MetadataReader metadata, TypeDefinition type, TypeNameProvider provider)
 {
@@ -107,7 +186,13 @@ internal sealed class TypeNameProvider : ISignatureTypeProvider<string, object?>
     public string GetModifiedType(string modifier, string unmodifiedType, bool isRequired) => unmodifiedType;
     public string GetPinnedType(string elementType) => elementType;
     public string GetPointerType(string elementType) => elementType;
-    public string GetPrimitiveType(PrimitiveTypeCode typeCode) => string.Empty;
+    public string GetPrimitiveType(PrimitiveTypeCode typeCode) => typeCode switch
+    {
+        PrimitiveTypeCode.Void => "System.Void", PrimitiveTypeCode.Boolean => "System.Boolean", PrimitiveTypeCode.Char => "System.Char",
+        PrimitiveTypeCode.String => "System.String", PrimitiveTypeCode.Int32 => "System.Int32", PrimitiveTypeCode.Int64 => "System.Int64",
+        PrimitiveTypeCode.Single => "System.Single", PrimitiveTypeCode.Double => "System.Double", PrimitiveTypeCode.Object => "System.Object",
+        _ => typeCode.ToString()
+    };
     public string GetSZArrayType(string elementType) => elementType;
     public string GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind) { var type = reader.GetTypeDefinition(handle); return Name(reader, type.Namespace, type.Name); }
     public string GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle, byte rawTypeKind)
@@ -119,3 +204,5 @@ internal sealed class TypeNameProvider : ISignatureTypeProvider<string, object?>
     }
     public string GetTypeFromSpecification(MetadataReader reader, object? genericContext, TypeSpecificationHandle handle, byte rawTypeKind) => reader.GetTypeSpecification(handle).DecodeSignature(this, genericContext);
 }
+
+internal sealed record Recipe(string Name, string[] ParameterNames, string[] ParameterTypes, string[] Defaults, string? DefaultContent);

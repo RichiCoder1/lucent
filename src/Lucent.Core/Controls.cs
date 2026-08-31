@@ -82,6 +82,49 @@ public static class Controls
         return context => { ArgumentNullException.ThrowIfNull(context); var element = context.Element(name); content(context, element); return element; };
     }
 
+    [LuiComponent]
+    public static Element Text(CompositionContext context, string Name, [LuiContent(IsDefault = true)] string Content, Style? Style = null)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var element = context.Element(Name);
+        Text(element, context.Theme, Content, Style);
+        return element;
+    }
+
+    [LuiComponent]
+    public static Element Row(CompositionContext context, string Name, [LuiContent(IsDefault = true)] Func<CompositionContext, Element> Content, Style? Style = null)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(Content);
+        var element = context.Element(Name);
+        Row(element, context.Theme, Name, Style);
+        _ = context.Mount(element, Content);
+        return element;
+    }
+
+    [LuiComponent]
+    public static Element TextField(CompositionContext context, string Name, string InitialValue = "", Action<string>? OnChange = null, Style? Style = null)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var element = context.Element(Name);
+        var state = TextField(element, context.Theme, Name, InitialValue, Style);
+        if (OnChange is not null)
+        {
+            var prior = state.Value;
+            _ = element.Scope.Effect(() => { var value = state.Value; if (value != prior) { prior = value; OnChange(value); } }, element.Name + ".on-change");
+        }
+        return element;
+    }
+
+    [LuiComponent]
+    public static Element Button(CompositionContext context, string Name, [LuiContent(IsDefault = true)] string Label, Action? OnInvoke = null, Style? Style = null)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var element = context.Element(Name);
+        Button(element, context.Theme, Label, OnInvoke, Style);
+        return element;
+    }
+
     public static void Text(Element element, ThemeContext theme, string text, Style? style = null) => ConfigureSemantic(element, theme, TextStyle.Set(SceneProperties.Text, Required(text, nameof(text))), style, new(SemanticRole.Text, text));
     public static void Panel(Element element, ThemeContext theme, string name, Style? style = null) => ConfigureSemantic(element, theme, PanelStyle, style, new(SemanticRole.Group, Required(name, nameof(name))));
     public static void Row(Element element, ThemeContext theme, string name, Style? style = null) => ConfigureSemantic(element, theme, RowStyle, style, new(SemanticRole.Group, Required(name, nameof(name))));
@@ -102,7 +145,7 @@ public static class Controls
         Func<IEnumerable<TItem>> source, Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> row, float rowHeight) where TKey : notnull
     {
         ArgumentNullException.ThrowIfNull(viewport); ArgumentNullException.ThrowIfNull(theme); ArgumentNullException.ThrowIfNull(source); ArgumentNullException.ThrowIfNull(key); ArgumentNullException.ThrowIfNull(row);
-        var region = viewport.Composition.Virtualize(viewport, Required(name, nameof(name)), source, key, row, rowHeight);
+        var region = viewport.Composition.Virtualize(viewport, Required(name, nameof(name)), source, key, row, rowHeight, theme);
         try { List(region.Region, theme, Required(label, nameof(label))); region.Configure(); return region; }
         catch { region.Dispose(); throw; }
     }

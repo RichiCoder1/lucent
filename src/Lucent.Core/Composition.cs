@@ -39,6 +39,7 @@ public sealed class Composition : IDisposable
     /// <summary>Composition-owned portable input, focus, and capture router.</summary>
     public InputRouter Input { get { _graph.CheckThread(); ThrowIfDisposed(); return _input ??= new InputRouter(this); } }
     internal ReactiveGraph Graph => _graph;
+    internal CompositionContext? Factory => _factory;
     internal long Epoch => _epoch;
     internal TransitionController Transitions => _transitions;
     internal InputRouter? InputIfCreated => _input;
@@ -62,6 +63,21 @@ public sealed class Composition : IDisposable
         ThrowIfFactoryCreation();
         ThrowIfDisposed();
         return Create(parent, name, attach: true);
+    }
+
+    /// <summary>Atomically mounts one recipe root below <paramref name="parent"/> using the supplied theme.</summary>
+    public Element Mount(Element parent, ThemeContext theme, Func<CompositionContext, Element> content)
+    {
+        ThrowIfFactoryCreation();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(theme);
+        ArgumentNullException.ThrowIfNull(content);
+        if (!ReferenceEquals(parent.Composition, this)) throw new ArgumentException("The parent belongs to another composition.", nameof(parent));
+        parent.ThrowIfDisposed();
+        if (!ReferenceEquals(theme.Graph, _graph)) throw new ArgumentException("Theme context belongs to another reactive graph.", nameof(theme));
+        theme.ValidateLive();
+        return MountCore(parent, theme, content);
     }
 
     /// <summary>Creates a zero-or-one structural region whose content follows <paramref name="active"/>.</summary>
@@ -91,14 +107,14 @@ public sealed class Composition : IDisposable
 
     /// <summary>Creates a fixed-height keyed region whose mounted entries are derived from its containing viewport.</summary>
     internal VirtualizedRegion<TKey, TItem> Virtualize<TKey, TItem>(Element viewport, string name, Func<IEnumerable<TItem>> source,
-        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight) where TKey : notnull
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight, ThemeContext theme) where TKey : notnull
     {
         ThrowIfFactoryCreation();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(content);
-        return new VirtualizedRegion<TKey, TItem>(this, viewport, name, source, key, content, rowHeight);
+        return new VirtualizedRegion<TKey, TItem>(this, viewport, name, source, key, content, rowHeight, theme);
     }
 
     /// <summary>Returns active structure and stable identities without application values.</summary>
@@ -196,10 +212,38 @@ public sealed class Composition : IDisposable
     internal T RunFactory<T>(CompositionContext context, Func<T> factory)
     {
         _graph.CheckThread();
-        if (_factory is not null) throw new InvalidOperationException("Content factories cannot nest.");
+        ArgumentNullException.ThrowIfNull(factory);
+        var prior = _factory;
+        if (prior is not null && !prior.Contains(context.Parent))
+            throw new InvalidOperationException("Nested content factories must mount below the active provisional root.");
         _factory = context;
         try { return factory(); }
-        finally { _factory = null; }
+        finally { _factory = prior; }
+    }
+
+    internal Element MountCore(Element parent, ThemeContext theme, Func<CompositionContext, Element> content)
+    {
+        var context = new CompositionContext(this, parent, theme);
+        try
+        {
+            var created = context.Run(() => content(context));
+            if (IsDisposed || parent.IsDisposed) throw new ObjectDisposedException(nameof(Composition));
+            context.Validate(created);
+            parent.Attach(created);
+            context.Complete();
+            return created;
+        }
+        catch (Exception error)
+        {
+            var errors = new List<Exception> { error };
+            try { context.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); }
+            ThrowAll(errors, "Composition mount failed.");
+            throw;
+        }
+        finally
+        {
+            if (context.IsCommitted) context.Dispose();
+        }
     }
 
     internal void RunBehavior(BehaviorContext context, Action attach)
@@ -225,6 +269,13 @@ public sealed class Composition : IDisposable
     }
 
     internal void CheckThread() => _graph.CheckThread();
+
+    internal void RejectForeignFactory(Element parent)
+    {
+        _graph.CheckThread();
+        if (_factory is not null && !_factory.Contains(parent))
+            throw new InvalidOperationException("Structural regions cannot update outside the active provisional root.");
+    }
 
     internal void ThrowIfBehaviorAttachment()
     {
@@ -706,7 +757,16 @@ public sealed class CompositionContext : IDisposable
     private bool _committed;
     private bool _disposed;
 
-    internal CompositionContext(Composition composition, Element parent) { _composition = composition; _parent = parent; }
+    internal CompositionContext(Composition composition, Element parent, ThemeContext? theme = null)
+    {
+        _composition = composition;
+        _parent = parent;
+        _theme = theme;
+    }
+
+    /// <summary>The root mount's theme. Nested recipes can observe it but cannot replace it.</summary>
+    public ThemeContext Theme => _theme ?? throw new InvalidOperationException("This composition context has no root mount theme.");
+    private readonly ThemeContext? _theme;
 
     /// <summary>Creates the one root supplied by this conditional or keyed-item factory.</summary>
     public Element Element(string name)
@@ -728,6 +788,40 @@ public sealed class CompositionContext : IDisposable
         return _composition.Create(parent, name, attach: true, this);
     }
 
+    /// <summary>Atomically mounts one nested recipe root below a provisional element.</summary>
+    public Element Mount(Element parent, Func<CompositionContext, Element> content)
+    {
+        ThrowIfActiveFactory();
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(content);
+        if (!Root.IsAncestorOf(parent)) throw new ArgumentException("A content factory can only mount below its provisional root.", nameof(parent));
+        return _composition.MountCore(parent, Theme, content);
+    }
+
+    /// <summary>Creates a retained conditional region below a provisional element.</summary>
+    public ConditionalRegion When(Element parent, string name, Func<bool> active, Func<CompositionContext, Element> content)
+    {
+        ThrowIfActiveFactory();
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(active);
+        ArgumentNullException.ThrowIfNull(content);
+        if (!Root.IsAncestorOf(parent)) throw new ArgumentException("A content factory can only add regions below its provisional root.", nameof(parent));
+        return new ConditionalRegion(_composition, parent, name, active, content, this, Theme);
+    }
+
+    /// <summary>Creates a retained keyed region below a provisional element.</summary>
+    public KeyedRegion<TKey, TItem> ForEach<TKey, TItem>(Element parent, string name, Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content) where TKey : notnull
+    {
+        ThrowIfActiveFactory();
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(content);
+        if (!Root.IsAncestorOf(parent)) throw new ArgumentException("A content factory can only add regions below its provisional root.", nameof(parent));
+        return new KeyedRegion<TKey, TItem>(_composition, parent, name, source, key, content, this, Theme);
+    }
+
     internal Element Commit(Element created)
     {
         var root = Validate(created);
@@ -747,6 +841,7 @@ public sealed class CompositionContext : IDisposable
     }
 
     internal void Complete() => _committed = true;
+    internal bool IsCommitted => _committed;
 
     internal Element Root
     {
@@ -773,6 +868,14 @@ public sealed class CompositionContext : IDisposable
     }
 
     internal void Record(Element element) => _created.Add(element);
+    internal Element Parent => _parent;
+    internal bool Contains(Element parent) => _root is not null && _root.IsAncestorOf(parent);
+
+    private void ThrowIfActiveFactory()
+    {
+        ThrowIfInactive();
+        if (!ReferenceEquals(_composition.Factory, this)) throw new InvalidOperationException("Composition context operations are only available while their recipe is executing.");
+    }
 
     private void ThrowIfInactive()
     {
@@ -791,10 +894,12 @@ public sealed class ConditionalRegion : IDisposable
     private Element? _child;
     private bool _updating;
 
-    internal ConditionalRegion(Composition composition, Element parent, string name, Func<bool> active, Func<CompositionContext, Element> content)
+    internal ConditionalRegion(Composition composition, Element parent, string name, Func<bool> active, Func<CompositionContext, Element> content,
+        CompositionContext? factory = null, ThemeContext? theme = null)
     {
         _composition = composition;
-        Region = composition.Child(parent, name);
+        Region = composition.Create(parent, name, attach: true, factory);
+        Theme = theme;
         _active = active;
         _content = content;
         Region.Scope.Own(this);
@@ -804,12 +909,14 @@ public sealed class ConditionalRegion : IDisposable
     public Element Region { get; }
     public Element? Active => _child;
     public bool IsDisposed { get; private set; }
+    private ThemeContext? Theme { get; }
 
     /// <summary>Re-evaluates the condition. Usual callers let the owned effect invoke this.</summary>
     public void Refresh()
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         Update(_active!());
     }
 
@@ -817,6 +924,7 @@ public sealed class ConditionalRegion : IDisposable
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         if (IsDisposed) return;
         if (_updating) throw new InvalidOperationException("A conditional region cannot update reentrantly.");
         _updating = true;
@@ -833,7 +941,7 @@ public sealed class ConditionalRegion : IDisposable
                 return;
             }
 
-            var context = new CompositionContext(_composition, Region);
+            var context = new CompositionContext(_composition, Region, Theme);
             Element created;
             try
             {
@@ -863,6 +971,7 @@ public sealed class ConditionalRegion : IDisposable
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         if (IsDisposed) return;
         IsDisposed = true;
         List<Exception>? errors = null;
@@ -893,10 +1002,11 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
     private bool _updating;
 
     internal KeyedRegion(Composition composition, Element parent, string name, Func<IEnumerable<TItem>> source,
-        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content)
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, CompositionContext? factory = null, ThemeContext? theme = null)
     {
         _composition = composition;
-        Region = composition.Child(parent, name);
+        Region = composition.Create(parent, name, attach: true, factory);
+        Theme = theme;
         _source = source;
         _key = key;
         _content = content;
@@ -907,12 +1017,14 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
     public Element Region { get; }
     public IReadOnlyList<Element> Items => Region.Children;
     public bool IsDisposed { get; private set; }
+    private ThemeContext? Theme { get; }
 
     /// <summary>Re-evaluates the source. Usual callers let the owned effect invoke this.</summary>
     public void Refresh()
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         Update(_source!());
     }
 
@@ -921,6 +1033,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
         ArgumentNullException.ThrowIfNull(items);
+        _composition.RejectForeignFactory(Region);
         if (IsDisposed) return;
         if (_updating) throw new InvalidOperationException("A keyed region cannot update reentrantly.");
         _updating = true;
@@ -948,7 +1061,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
                 for (var index = 0; index < next.Length; index++)
                 {
                     if (retained.ContainsKey(keys[index])) continue;
-                    var context = new CompositionContext(_composition, Region);
+                    var context = new CompositionContext(_composition, Region, Theme);
                     provisionalOrder.Add((null!, context));
                     var created = context.Run(() => _content!(next[index], context));
                     if (IsDisposed || Region.IsDisposed) throw new ObjectDisposedException(nameof(KeyedRegion<TKey, TItem>));
@@ -1010,6 +1123,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable where TKey : notnull
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         if (IsDisposed) return;
         IsDisposed = true;
         List<Exception>? errors = null;
@@ -1048,13 +1162,13 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     private bool _updating;
 
     internal VirtualizedRegion(Composition composition, Element viewport, string name, Func<IEnumerable<TItem>> source,
-        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight)
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight, ThemeContext theme)
     {
         if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
         _composition = composition;
         _viewport = viewport ?? throw new ArgumentNullException(nameof(viewport));
         Region = composition.Child(viewport, name);
-        _source = source; _key = key; _content = content; RowHeight = rowHeight;
+        _source = source; _key = key; _content = content; Theme = theme ?? throw new ArgumentNullException(nameof(theme)); RowHeight = rowHeight;
         Region.Scope.Own(this);
         _composition.Register(this);
         _effect = Region.Scope.Effect(Refresh, name + ".items");
@@ -1065,6 +1179,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     public int SourceCount => _items.Length;
     public IReadOnlyList<Element> Items => Region.Children;
     public bool IsDisposed { get; private set; }
+    private ThemeContext Theme { get; }
 
     internal void Configure()
     {
@@ -1078,6 +1193,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
         if (IsDisposed || RowHeight == rowHeight) return;
         RowHeight = rowHeight;
@@ -1090,6 +1206,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         Update(_source!());
     }
 
@@ -1098,6 +1215,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         ArgumentNullException.ThrowIfNull(items);
         if (IsDisposed) return;
         var next = items.ToArray(); var keys = new TKey[next.Length]; var unique = new HashSet<TKey>();
@@ -1115,6 +1233,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     public void Realize(LayoutViewport viewport)
     {
         _composition.CheckThread();
+        _composition.RejectForeignFactory(Region);
         if (IsDisposed) return;
         viewport.Validate();
         if (_updating) throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
@@ -1138,12 +1257,13 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
                 for (var index = first; index < last; index++)
                 {
                     if (retained.ContainsKey(_keys[index])) continue;
-                    var context = new CompositionContext(_composition, Region);
+                    var context = new CompositionContext(_composition, Region, Theme);
+                    provisional.Add((_keys[index], null!, context));
                     var entry = context.Run(() => _content!(_items[index], context));
                     context.Validate(entry);
                     entry.UpdateControl(Arrangement.Height, RowHeight);
                     entry.UpdateControl(Arrangement.VirtualRowIndex, index);
-                    provisional.Add((_keys[index], entry, context));
+                    provisional[^1] = (_keys[index], entry, context);
                 }
             }
             catch (Exception error)
@@ -1181,6 +1301,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     {
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
         if (IsDisposed) return;
         IsDisposed = true; _composition.Unregister(this);
         List<Exception>? errors = null;
