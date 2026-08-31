@@ -128,13 +128,14 @@ Design `.lui` as the preferred opinionated authoring surface over the frozen fra
 
 Execute in independently gated order:
 
-1. [#45](https://github.com/RichiCoder1/lucent/issues/45) splits author-facing layout/visual/typography properties from scene internals, adds one public scope-owned reactive property assignment/invalidation seam, and adds `Color`, solid/linear-gradient `Brush`, four-edge `Insets`/`Padding`, and composited subtree `Opacity`;
-2. [#46](https://github.com/RichiCoder1/lucent/issues/46) proves the atomic root/nested static-recipe and typed-content mount contract, then proves compiler/generator loading in the pinned .NET 10 SDK/editor host and packages an additive MSBuild SDK;
-3. [#47](https://github.com/RichiCoder1/lucent/issues/47) implements recoverable JSX-like syntax, C# expression islands, deterministic formatting, stable diagnostics, and `foreach (...) keyed by ...`;
-4. [#48](https://github.com/RichiCoder1/lucent/issues/48) and [#49](https://github.com/RichiCoder1/lucent/issues/49) bind through Roslyn, lower through the proved C# seams, preserve exact source maps, and enforce incremental SDK behavior;
-5. [#50](https://github.com/RichiCoder1/lucent/issues/50) proves Filter Bar C#/`.lui` parity under NativeAOT and freezes tooling performance budgets;
-6. [#51](https://github.com/RichiCoder1/lucent/issues/51) proves a `.lui` row recipe passed to the existing C# virtualized-list primitive, keyed parity, and stale-output rejection;
-7. [#52](https://github.com/RichiCoder1/lucent/issues/52) through [#55](https://github.com/RichiCoder1/lucent/issues/55) deliver generation-safe shared-model LSP/VS Code tooling, cut the application over to `.lui`, and delete superseded composition code.
+1. [#45](https://github.com/RichiCoder1/lucent/issues/45) seals author-facing property groups, scope-owned `Style.Bind`, pre-drain host wake, transactional component/region mount, and thin annotated element-returning control recipes;
+2. [#56](https://github.com/RichiCoder1/lucent/issues/56) implements `Color`, solid/linear-gradient `Brush`, four-edge `Insets`/`Padding`, composited subtree `Opacity`, renderer migration, and pixel/performance evidence;
+3. [#46](https://github.com/RichiCoder1/lucent/issues/46) proves compiler/generator loading in the pinned SDK/editor host and packages an additive MSBuild SDK;
+4. [#47](https://github.com/RichiCoder1/lucent/issues/47) implements recoverable JSX-like syntax, C# expression islands, deterministic formatting, stable diagnostics, and `foreach (...) keyed by ...`;
+5. [#48](https://github.com/RichiCoder1/lucent/issues/48) and [#49](https://github.com/RichiCoder1/lucent/issues/49) bind through Roslyn, lower through the proved C# seams, preserve exact source maps, and enforce incremental SDK behavior;
+6. [#50](https://github.com/RichiCoder1/lucent/issues/50) proves Filter Bar C#/`.lui` parity under NativeAOT and freezes tooling performance budgets;
+7. [#51](https://github.com/RichiCoder1/lucent/issues/51) proves a `.lui` row recipe passed to the existing C# virtualized-list primitive, keyed parity, and stale-output rejection;
+8. [#52](https://github.com/RichiCoder1/lucent/issues/52) through [#55](https://github.com/RichiCoder1/lucent/issues/55) deliver generation-safe shared-model LSP/VS Code tooling, cut the application over to `.lui`, and delete superseded composition code.
 
 The first language version is `preview`. Named styles are private and tokens/shared components remain C# or source-copied application assets initially. Local state sugar, broader C# islands, bind/color shorthand, exported styles, generic declarations, service injection, hot reload, keyframes, a visual designer, and shared component-copy tooling follow only from measured need.
 

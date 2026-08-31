@@ -10,7 +10,7 @@ The first implementation converts the Issue Browser Filter Bar, then one virtual
 
 ## Documents and components
 
-A document uses standard C# namespace and using syntax and may declare multiple explicit components. The initial convention is one public component per file; multiple declarations remain available for exceptional compositional families.
+A document uses standard C# namespace and using syntax and initially declares exactly one explicit component. Multiple declarations are grammatically reserved for a later real compositional-family use case.
 
 ```lui
 namespace Lucent.IssueBrowser;
@@ -19,9 +19,9 @@ using Lucent.Core;
 using static Lucent.IssueBrowser.Theme;
 
 public component FilterBar(Query Query, Action Clear) {
-    <Row Style={Panel}>
-        <TextField Value={Query.Text} OnChange={Query.SetText} />
-        <Button OnInvoke={Clear}>Clear</Button>
+    <Row Name="filter-bar" Style={Panel}>
+        <TextField Name="search" Value={() => Query.Text} OnChange={Query.SetText} />
+        <Button Name="clear" OnInvoke={Clear}>Clear</Button>
     </Row>
 }
 ```
@@ -35,29 +35,28 @@ composition.Mount(parent, theme, context => FilterBar.Compose(context, query, cl
 context.Mount(parent, childContent);
 ```
 
-The exact names are sealed in #46, but the behavior is fixed: root and nested invocation share the same operation; root mount receives `ThemeContext` explicitly and nested contexts inherit it; each recipe/element-content call creates exactly one root; creation and commit are scope-owned; failures roll back all provisional structure and resources; disposing the mounted root retires the recipe scope. `CompositionContext` exposes transactional nested `Mount`, `When`, and `ForEach` operations so generated structure never escapes to inaccessible `Composition` internals. An element-content value is an in-process `Func<CompositionContext, Element>` capability, not a runtime template object or serializable value.
+The exact names are sealed in #45/#46, but the behavior is fixed: root and nested invocation share the same operation; root mount receives `ThemeContext` explicitly and nested contexts expose it read-only; each recipe/element-content call creates exactly one root; creation and commit are scope-owned; failures roll back all provisional structure and resources; disposing the mounted root retires the recipe scope. `CompositionContext` exposes transactional nested `Mount`, `When`, and `ForEach` operations so generated structure never escapes to inaccessible `Composition` internals. An element-content value is an in-process `Func<CompositionContext, Element>` capability, not a runtime template object or serializable value.
 
 Ordinary parameters are construction-time values. Live inputs are explicit signal-bearing models or typed readers such as `Func<T>` consumed inside a binding or retained region. Generated code never turns an arbitrary value parameter into a live binding by rerunning a component.
 
-C# component recipes opt in with `[LuiComponent]`. Content parameters use explicit `[LuiContent]` metadata with an optional name and exactly one possible default. The parameter type determines whether content is a scalar string or an element factory; body markup must type-check accordingly. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
+C# component recipes opt in with `[LuiComponent]`, return the created root `Element`, and use exact named parameters. Existing controls expose thin annotated element-creating recipes over their current configurators. Every element initially requires the compiler intrinsic `Name`, which is the stable structural/dump identity and is distinct from semantic `Label`/text content. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
+
+Default scalar string or exactly-one-root element-factory content uses explicit `[LuiContent(IsDefault = true)]` metadata and must type-check. Named content parameters and multi-component documents are reserved but not implemented until a real compositional family proves the need.
 
 ## Elements, parameters, and content
 
 Tags resolve normal C# symbols. Parameter names and casing are exact C# names. Attribute order is irrelevant; duplicate, inaccessible, unknown, missing, and ambiguous parameters are errors. Normal Roslyn overload resolution applies to annotated C# components; `.lui` component declarations cannot overload initially.
 
-Unwrapped children map only to the declared default content parameter. Named child blocks contextually resolve exact named content parameters rather than global component types:
+Unwrapped children map only to the declared default scalar or element-factory content parameter. Named child blocks are reserved and rejected initially:
 
 ```lui
-<Card>
-    <Header><Heading>Issue details</Heading></Header>
-    <Content><IssueDetails Issue={Selected} /></Content>
-</Card>
+<Button Name="save" OnInvoke={Save}>Save</Button>
 ```
 
 Simple body text is a trimmed string literal whose internal characters are preserved. Formatting-only whitespace around elements is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Mixed text does not implicitly stringify expressions initially:
 
 ```lui
-<Text Content={$"{State.Count} issues"} />
+<Text Name="issue-count" Content={$"{State.Count} issues"} />
 ```
 
 ## C# expressions and reactivity
@@ -97,7 +96,7 @@ Named and inline styles use one typed body grammar. Style property names resolve
 ```lui
 style PrimaryButton {
     Background: Colors.Primary
-    Color: Colors.OnPrimary
+    TextColor: Colors.OnPrimary
 
     when Hover {
         Background: Colors.PrimaryHover
@@ -105,12 +104,12 @@ style PrimaryButton {
 
 }
 
-<Button Style={PrimaryButton with {
+<Button Name="save" Style={PrimaryButton with {
     Padding: Insets.Symmetric(horizontal: 12, vertical: 8)
 }} OnInvoke={Save}>Save</Button>
 ```
 
-`with` is the sole initial style composition syntax. Evaluation is left to right and the rightmost assignment wins. It lowers to existing ordered `Style.Compose` and `Style.When` APIs. Named styles are file/component-private initially; shared styles are ordinary public C# symbols. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
+`with` is the sole initial style composition syntax. Evaluation is left to right and the rightmost assignment wins. It lowers to existing ordered `Style.Compose` and `Style.When` APIs. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are file/component-private initially; shared styles are ordinary public C# symbols. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
 
 The Lucent SDK may supply opt-out ordinary global/static C# usings for author-facing property groups so style names work without repetitive imports. Those remain real symbols and participate in completion, rename, references, and diagnostics.
 
@@ -144,14 +143,14 @@ The exact initial author-facing property surface is:
 | `Scroll` | `ScrollOffset` | zero | no |
 | `VisualProperties.Background` | `Brush` | transparent solid | no |
 | `Opacity` | `float` | `1` | no |
-| `TypographyProperties.Color` | `Color` | opaque black | yes |
+| `TypographyProperties.TextColor` | `Color` | opaque black | yes |
 | `FontFamily` | `string` | `Segoe UI` | yes |
 | `FontSize` | `float` | `14` | yes |
 | `Language` | `string` | `en` | yes |
 | `Direction` | `TextDirection` | `LeftToRight` | yes |
 | `InputProperties.Enabled` / `Visible` | `bool` | `true` | no |
 
-`Arrangement`, public `SceneProperties`, `Fill`, and `Foreground` are removed during the unreleased API change. Raw text, selection, caret, virtual-row metadata, and projection bookkeeping are internal/compiler-excluded. Portable retained-scene DTOs remain the explicit Core-to-renderer seam.
+`Arrangement`, public `SceneProperties`, `Fill`, and `Foreground` are removed during the unreleased API change. The typography inheritance table is an intentional behavior change from the current surface and receives resolution/dump/row-scale cost evidence. `TextColor` remains eligible for the existing manual `TransitionKind.Color` channel after that channel is retyped to `Color`; `Background : Brush` is transition-ineligible initially. Raw text, selection, caret, virtual-row metadata, and projection bookkeeping are internal/compiler-excluded. Portable retained-scene DTOs remain the explicit Core-to-renderer seam.
 
 `Color` stores canonical 8-bit sRGB RGBA channels and equality/hash follows those channels. `Parse`/`TryParse` initially accept invariant `#RRGGBB` and `#RRGGBBAA` only. `LinearGradient` uses normalized box-relative start/end points, two to sixteen stops with finite nondecreasing positions in `[0,1]`, permits equal-position hard stops, and rejects a degenerate vector. Invalid constructors throw argument exceptions; try-parse returns false. Spatial interpolation is premultiplied linear sRGB.
 
@@ -165,7 +164,7 @@ Brush equality/hash/dumps are canonical. Gradient stops are finite, ordered, and
 
 Stable diagnostic categories begin immediately: parse (`LUI1xxx`), symbol/type (`LUI2xxx`), lowering/lifetime (`LUI3xxx`), and source-map/build (`LUI4xxx`). Invalid, duplicate, ambiguous, stale, or unsupported input fails the current build; stale generated UI is never reused.
 
-The parser recovers at component, element, attribute, style, and structural-region boundaries. Missing tokens remain explicit syntax nodes so one error does not suppress diagnostics or completion for the rest of the file. Invalid components do not emit; valid sibling components may emit deterministically.
+The parser recovers at component, element, attribute, style, and structural-region boundaries. Missing tokens remain explicit syntax nodes so one error does not suppress diagnostics or completion for later independent constructs. An invalid component does not emit.
 
 One deterministic formatter owns document and range formatting plus CLI/check surfaces. Initially it formats `.lui` structure while preserving C# expression-island token text verbatim, comments, line endings under the selected formatter policy, and runtime-significant text. The build never rewrites source automatically. Initial lints are objective only: unstable/missing keys, duplicate or impossible content, unused private styles, and unsupported constructs.
 
@@ -182,5 +181,7 @@ Enhanced `#line` directives map compiler/debugger diagnostics and C# expression 
 `<LucentLuiLangVersion>` defaults to `preview` from the installed SDK. Unknown/newer versions fail clearly. Numeric versions begin only when Lucent intentionally retains an older syntax contract.
 
 Deferred work includes local state sugar, broader C# islands, two-way binding shorthand, textual color sugar, exported `.lui` styles, generic declarations, general element references, implicit/unkeyed dynamic loops, service injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
+
+Control-owned values outrank every component/author style candidate, including a binding. This preserves existing control-state authority for text, scroll, selection, and similar properties; dumps retain the overridden binding candidate and provenance.
 
 Source-copied components are ordinary project `.lui`/C# inputs with normal namespaces, metadata, maps, formatting, review, and ownership. Updates are manual file changes initially; no registry, installer, updater, manifest, or compatibility layer exists.

@@ -19,13 +19,13 @@ Before compiler work, Lucent will seal the author-facing layout and visual primi
 - `Color`, `Brush`, `LinearGradient`, `GradientStop`, and `Insets` are immutable typed values;
 - `Brush` initially supports only solid color and bounded linear gradient; clipping, opacity, images, borders, corners, and layers remain distinct capabilities.
 
-`.lui` is a JSX-like compile-time authoring surface with C# expression islands. A document declares one or more explicit components, though one public component per file is the initial convention. Components lower to partial static C# composition recipes over existing `CompositionContext`, styles, behaviors, controls, `When`, and `ForEach`. Reactive reads retain the existing fine-grained runtime dependency model; there is no component rerender or virtual tree.
+`.lui` is a JSX-like compile-time authoring surface with C# expression islands. The first grammar emits one explicit component per document; multiple declarations are reserved until a real compositional family requires them. Components lower to partial static C# composition recipes over existing `CompositionContext`, styles, behaviors, controls, `When`, and `ForEach`. Reactive reads retain the existing fine-grained runtime dependency model; there is no component rerender or virtual tree.
 
 Before lowering, the C# framework must expose two ordinary typed operations that generated code can call:
 
 - a scope-owned reactive style assignment shaped as `Style.Bind(property, read)`. `Present` materializes it as an element-scope effect while preserving the style candidate's source, variant condition, and ordinal; it commits on the UI thread and rejects disposal. Full scene reprojection is acceptable initially.
 - one edge-triggered `ReactiveGraph.WorkAvailable` notification when posted work changes from empty to nonempty. Windows may only translate it to a registered SDL wake event; the UI thread drains, projects, and presents normally. Reset/recheck must be lost-wake-safe and bursts coalesce without polling or worker-thread Core mutation.
-- one atomic root/nested recipe mount operation over `Func<CompositionContext, Element>`, used equally by handwritten and generated recipes and typed default/named content. Root mount receives `ThemeContext` explicitly; nested contexts inherit it. The operation owns creation, exactly-one-root validation, commit, rollback, scope disposal, and nested parentage.
+- one atomic root/nested recipe mount operation over `Func<CompositionContext, Element>`, used equally by handwritten and generated recipes and default content. Root mount receives `ThemeContext` explicitly; nested contexts expose it read-only. The operation owns creation, exactly-one-root validation, commit, rollback, scope disposal, and nested parentage. Existing controls gain thin annotated element-returning recipes over their current configurators; this is not a second control model.
 
 Ordinary component parameters are construction-time values. A live parameter is explicit in its C# type, such as a signal-bearing model or `Func<T>` read inside a binding/region; the compiler does not make arbitrary values reactive by rerunning components.
 
@@ -36,7 +36,7 @@ The same compiler and project-context model serves build and editor tooling. The
 ## Consequences
 
 - `.lui` cannot require reflection, runtime parsing, stale generated files, a compatibility reader, or a parallel runtime.
-- Invalid components do not emit; parser recovery continues diagnostics for later constructs and valid sibling components.
+- Invalid components do not emit; parser recovery continues diagnostics for later independent constructs.
 - Application logic and state remain C# models or adjacent partial static helpers initially. Local state sugar, broader C# islands, service injection, bind syntax, literal color sugar, exported `.lui` styles, generic component declarations, hot reload, keyframes, and shared source-component tooling are follow-ups over proven contracts.
 - SDK-provided ordinary C# global/static usings may make author-facing properties implicit, with an opt-out. The compiler does not maintain aliases or a hidden symbol registry.
 - Declarative `transition`/keyframe syntax is deferred until Core owns automatic winner-change sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior. Existing manual C# transition samples are not sufficient lowering evidence.
