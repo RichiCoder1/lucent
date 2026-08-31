@@ -128,8 +128,8 @@ Design `.lui` as the preferred opinionated authoring surface over the frozen fra
 
 Execute in independently gated order:
 
-1. [#45](https://github.com/RichiCoder1/lucent/issues/45) seals author-facing property groups, scope-owned `Style.Bind`, pre-drain host wake, transactional component/region mount, and thin annotated element-returning control recipes;
-2. [#56](https://github.com/RichiCoder1/lucent/issues/56) implements `Color`, solid/linear-gradient `Brush`, four-edge `Insets`/`Padding`, composited subtree `Opacity`, renderer migration, and pixel/performance evidence;
+1. [#45](https://github.com/RichiCoder1/lucent/issues/45) seals generic scope-owned `Style.Bind`, pre-drain host wake, transactional component/region mount, and thin annotated element-returning control recipes using the current property types;
+2. [#56](https://github.com/RichiCoder1/lucent/issues/56) replaces the author-facing property groups and implements the exact inheritance/transition table, `Color`, solid/linear-gradient `Brush`, four-edge `Insets`/`Padding`, composited subtree `Opacity`, renderer migration, and pixel/performance evidence;
 3. [#46](https://github.com/RichiCoder1/lucent/issues/46) proves compiler/generator loading in the pinned SDK/editor host and packages an additive MSBuild SDK;
 4. [#47](https://github.com/RichiCoder1/lucent/issues/47) implements recoverable JSX-like syntax, C# expression islands, deterministic formatting, stable diagnostics, and `foreach (...) keyed by ...`;
 5. [#48](https://github.com/RichiCoder1/lucent/issues/48) and [#49](https://github.com/RichiCoder1/lucent/issues/49) bind through Roslyn, lower through the proved C# seams, preserve exact source maps, and enforce incremental SDK behavior;

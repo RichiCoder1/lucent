@@ -20,7 +20,7 @@ using static Lucent.IssueBrowser.Theme;
 
 public component FilterBar(Query Query, Action Clear) {
     <Row Name="filter-bar" Style={Panel}>
-        <TextField Name="search" Value={() => Query.Text} OnChange={Query.SetText} />
+        <TextField Name="search" InitialValue={Query.Text} OnChange={Query.SetText} />
         <Button Name="clear" OnInvoke={Clear}>Clear</Button>
     </Row>
 }
@@ -39,7 +39,7 @@ The exact names are sealed in #45/#46, but the behavior is fixed: root and neste
 
 Ordinary parameters are construction-time values. Live inputs are explicit signal-bearing models or typed readers such as `Func<T>` consumed inside a binding or retained region. Generated code never turns an arbitrary value parameter into a live binding by rerunning a component.
 
-C# component recipes opt in with `[LuiComponent]`, return the created root `Element`, and use exact named parameters. Existing controls expose thin annotated element-creating recipes over their current configurators. Every element initially requires the compiler intrinsic `Name`, which is the stable structural/dump identity and is distinct from semantic `Label`/text content. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
+C# component recipes opt in with `[LuiComponent]`, return the created root `Element`, and use exact named parameters. Existing controls expose thin annotated element-creating recipes over their current configurators. The initial TextField recipe owns `Name`, construction-time `InitialValue`, and `OnChange`; programmatic two-way synchronization remains deferred. The Button recipe owns `Name`, scalar default `Label`, and `OnInvoke`. Every element initially requires the compiler intrinsic `Name`, which is the stable structural/dump identity and is distinct from semantic `Label`/text content. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
 
 Default scalar string or exactly-one-root element-factory content uses explicit `[LuiContent(IsDefault = true)]` metadata and must type-check. Named content parameters and multi-component documents are reserved but not implemented until a real compositional family proves the need.
 
