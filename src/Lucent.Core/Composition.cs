@@ -1237,7 +1237,9 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
         if (IsDisposed) return;
         viewport.Validate();
         if (_updating) throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
-        var viewportHeight = _viewport.Resolve(LayoutProperties.Height).Value ?? viewport.Height;
+        var outerWidth = _viewport.Resolve(LayoutProperties.Width).Value ?? viewport.Width;
+        var outerHeight = _viewport.Resolve(LayoutProperties.Height).Value ?? viewport.Height;
+        var viewportHeight = SceneLayout.ContentBounds(LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale), _viewport.Resolve(LayoutProperties.Padding).Value, viewport.Scale).Height;
         var offset = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
         var first = Math.Max(0, (int)MathF.Floor(offset / RowHeight) - Overscan);
         var last = Math.Min(_items.Length, (int)MathF.Ceiling((offset + viewportHeight) / RowHeight) + Overscan);

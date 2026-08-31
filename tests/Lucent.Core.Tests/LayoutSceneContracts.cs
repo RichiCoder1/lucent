@@ -9,6 +9,7 @@ internal static class LayoutSceneContracts
         try
         {
             ColorAndBrushValues();
+            InsetsAndPadding();
             RowsColumnsClipsAndRounding();
             InvalidBoundsFail();
             ExplicitZeroAndOverflow();
@@ -55,6 +56,52 @@ internal static class LayoutSceneContracts
         foreach (var position in new[] { float.NaN, float.PositiveInfinity, -.1f, 1.1f }) Expect<ArgumentOutOfRangeException>(() => new GradientStop(position, opaque).Validate());
     }
 
+    private static void InsetsAndPadding()
+    {
+        var value = new Insets(1, 2, 3, 4);
+        Assert(value == new Insets(1, 2, 3, 4) && value.GetHashCode() == new Insets(1, 2, 3, 4).GetHashCode() && value.ToString() == "insets(1,2,3,4)" && Insets.Zero == default && Insets.Uniform(2) == new Insets(2, 2, 2, 2) && Insets.Symmetric(2, 3) == new Insets(2, 3, 2, 3), "Insets value contract changed.");
+        foreach (var invalid in new[] { float.NaN, float.PositiveInfinity, -1f }) Expect<ArgumentOutOfRangeException>(() => Insets.Uniform(invalid));
+
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "padding"); var theme = new ThemeContext(composition.Root.Scope, new Theme("padding"));
+        composition.Root.Present(theme, author: Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Row).Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start).Set(LayoutProperties.Padding, new Insets(3, 4, 5, 6)).Set(LayoutProperties.Clip, true).Set(VisualProperties.Background, Color.Parse("#010203")));
+        var child = composition.Child(composition.Root, "child"); child.Present(theme, author: Style.Empty.Set(LayoutProperties.Width, 4f).Set(LayoutProperties.Height, 5f).Set(ProjectionProperties.Text, "x").Set(ProjectionProperties.TextCaret, 0));
+        foreach (var scale in new[] { 1f, 1.25f, 1.5f, 2f })
+        {
+            var scene = SceneLayout.Project(composition, new(20, 20, scale), new ProbeShaper()); var box = scene.Boxes.Single(box => box.Identity.ElementId == child.Id);
+            var text = Flatten(scene.Nodes).OfType<TextSceneNode>().Single(node => node.Identity.Element.ElementId == child.Id);
+            var rootInput = scene.Input.Single(input => input.Identity.ElementId == composition.Root.Id);
+            Assert(box.Bounds.X == MathF.Round(3 * scale, MidpointRounding.AwayFromZero) / scale && box.Bounds.Y == MathF.Round(4 * scale, MidpointRounding.AwayFromZero) / scale && text.Bounds.X == box.Bounds.X && scene.Nodes.OfType<PaintSceneNode>().Single(node => node.Identity.Element.ElementId == composition.Root.Id).Bounds is { Width: 20, Height: 20 } && Flatten(scene.Nodes).OfType<ClipSceneNode>().Single().Bounds.Width == Math.Max(0, MathF.Round((20 - 5) * scale, MidpointRounding.AwayFromZero) / scale - MathF.Round(3 * scale, MidpointRounding.AwayFromZero) / scale) && rootInput.ChildClipBounds == Flatten(scene.Nodes).OfType<ClipSceneNode>().Single().Bounds,
+                "Padding outer/inner edge rounding, input clipping, or background geometry changed at scale " + scale);
+        }
+        var editable = composition.Child(composition.Root, "editable"); editable.Present(theme, author: Style.Empty.Set(LayoutProperties.Width, 12f).Set(LayoutProperties.Height, 10f).Set(LayoutProperties.Padding, new Insets(2, 3, 2, 1)).Set(ProjectionProperties.Text, "xx").Set(ProjectionProperties.TextSelectionStart, 0).Set(ProjectionProperties.TextSelectionEnd, 2).Set(ProjectionProperties.TextCaret, 1));
+        var textScene = SceneLayout.Project(composition, new(40, 20, 1), new ProbeShaper()); var editableBox = textScene.Boxes.Single(box => box.Identity.ElementId == editable.Id).Bounds;
+        Assert(Flatten(textScene.Nodes).OfType<TextSceneNode>().Single(node => node.Identity.Element.ElementId == editable.Id).Bounds.X == editableBox.X + 2 && Flatten(textScene.Nodes).OfType<PaintSceneNode>().Any(node => node.Identity.Element.ElementId == editable.Id && node.Identity.Kind == SceneNodeKind.Selection && node.Bounds.Y == editableBox.Y + 3) && Flatten(textScene.Nodes).OfType<PaintSceneNode>().Any(node => node.Identity.Element.ElementId == editable.Id && node.Identity.Kind == SceneNodeKind.Caret), "Text, selection, or caret did not use the padded content origin.");
+        var intrinsic = composition.Child(composition.Root, "intrinsic"); intrinsic.Present(theme, author: Style.Empty.Set(LayoutProperties.Padding, Insets.Uniform(2))); var leaf = composition.Child(intrinsic, "leaf"); leaf.Present(theme, author: Style.Empty.Set(LayoutProperties.Width, 4f).Set(LayoutProperties.Height, 5f));
+        var measured = SceneLayout.Project(composition, new(40, 20, 1), new ProbeShaper()).Boxes.Single(box => box.Identity.ElementId == intrinsic.Id);
+        Assert(measured.Bounds is { Width: 8, Height: 9 }, "Padding did not contribute to intrinsic outer size.");
+        var constrainedElement = composition.Child(composition.Root, "constrained"); constrainedElement.Present(theme, author: Style.Empty.Set(LayoutProperties.Width, 4f).Set(LayoutProperties.Height, 4f).Set(LayoutProperties.Padding, Insets.Uniform(4)).Set(LayoutProperties.Clip, true));
+        var constrained = SceneLayout.Project(composition, new(40, 20, 1), new ProbeShaper());
+        Assert(Flatten(constrained.Nodes).OfType<ClipSceneNode>().Any(node => node.Identity.Element.ElementId == constrainedElement.Id && node.Bounds is { Width: 0, Height: 0 }), "Over-constrained padding did not clamp the inner box to zero.");
+
+        var nestedGraph = new ReactiveGraph(); using var nested = new Composition(nestedGraph, "nested-padding"); var nestedTheme = new ThemeContext(nested.Root.Scope, new Theme("nested-padding"));
+        nested.Root.Present(nestedTheme, author: Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Row).Set(LayoutProperties.Padding, Insets.Uniform(2)).Set(LayoutProperties.Spacing, 2f).Set(LayoutProperties.MainAlignment, LayoutAlignment.Center).Set(LayoutProperties.CrossAlignment, LayoutAlignment.Stretch));
+        var nestedFirst = nested.Child(nested.Root, "first"); nestedFirst.Present(nestedTheme, author: Style.Empty.Set(LayoutProperties.MinWidth, 6f).Set(LayoutProperties.MaxWidth, 6f).Set(LayoutProperties.Padding, Insets.Uniform(1)));
+        var nestedLeaf = nested.Child(nestedFirst, "leaf"); nestedLeaf.Present(nestedTheme, author: Style.Empty.Set(LayoutProperties.Width, 2f).Set(LayoutProperties.Height, 3f));
+        var nestedSecond = nested.Child(nested.Root, "second"); nestedSecond.Present(nestedTheme, author: Style.Empty.Set(LayoutProperties.Width, 4f));
+        var nestedScene = SceneLayout.Project(nested, new(30, 20, 1), new ProbeShaper()); var nestedBoxes = nestedScene.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);
+        Assert(nestedBoxes[nestedFirst.Id] is { X: 9, Y: 2, Width: 6, Height: 16 } && nestedBoxes[nestedSecond.Id] is { X: 17, Y: 2, Width: 4, Height: 16 } && nestedBoxes[nestedLeaf.Id] is { X: 10, Y: 3 },
+            "Nested padding, min/max, spacing, centered main alignment, or cross-axis stretch changed.");
+
+        var transparentGraph = new ReactiveGraph(); using var transparent = new Composition(transparentGraph, "transparent-padded-clip"); var transparentTheme = new ThemeContext(transparent.Root.Scope, new Theme("transparent-padded-clip"));
+        transparent.Root.Present(transparentTheme, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Padding, Insets.Uniform(5)).Set(LayoutProperties.Clip, true));
+        var paintedChild = transparent.Child(transparent.Root, "painted-child"); paintedChild.Present(transparentTheme, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(VisualProperties.Background, Color.Parse("#ff0000")));
+        var transparentScene = SceneLayout.Project(transparent, new(20, 20, 1), new ProbeShaper());
+        Assert(transparentScene.Nodes.Single() is ClipSceneNode ownerClip && ownerClip.Bounds is { X: 5, Y: 5, Width: 10, Height: 10 } && ownerClip.Children.OfType<PaintSceneNode>().Single().Identity.Element.ElementId == paintedChild.Id,
+            "Transparent padded owner hoisted an overflowing child paint outside its inner clip.");
+    }
+
+    private static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes) { foreach (var node in nodes) { yield return node; if (node is ClipSceneNode clip) foreach (var child in Flatten(clip.Children)) yield return child; } }
+
     private static void RowsColumnsClipsAndRounding()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "layout");
@@ -67,7 +114,7 @@ internal static class LayoutSceneContracts
         var shaper = new ProbeShaper();
         var firstScene = SceneLayout.Project(composition, new(51, 20, 1.25f), shaper);
         var secondScene = SceneLayout.Project(composition, new(51, 20, 1.25f), shaper);
-        Assert(StableDump(firstScene) == StableDump(secondScene) && firstScene.Generation + 1 == secondScene.Generation && firstScene.Boxes.Count == 3 && firstScene.Nodes.Single() is ClipSceneNode, "Retained scene was not stable or clipped.");
+        Assert(StableDump(firstScene) == StableDump(secondScene) && firstScene.Generation + 1 == secondScene.Generation && firstScene.Boxes.Count == 3 && firstScene.Nodes.OfType<ClipSceneNode>().Single() is not null, "Retained scene was not stable or clipped.");
         Assert(firstScene.Boxes[1].Bounds.X == 4f && firstScene.Boxes[2].Bounds.X == 27.2f && firstScene.Boxes[1].Text!.Identity == secondScene.Boxes[1].Text!.Identity, "Row alignment/edge rounding or shaped identity diverged.");
         var original = CultureInfo.CurrentCulture;
         try { CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("tr-TR"); Assert(StableDump(firstScene) == StableDump(SceneLayout.Project(composition, new(51, 20, 1.25f), shaper)), "Scene dump was culture-sensitive."); }
@@ -143,7 +190,7 @@ internal static class LayoutSceneContracts
         var theme = new ThemeContext(composition.Root.Scope, new Theme("virtual-layout"));
         Controls.Column(composition.Root, theme, "root");
         var viewport = composition.Child(composition.Root, "viewport");
-        Controls.ScrollViewport(viewport, theme, "Rows", style: Style.Empty.Set(LayoutProperties.Width, 120f).Set(LayoutProperties.Height, 30f));
+        Controls.ScrollViewport(viewport, theme, "Rows", style: Style.Empty.Set(LayoutProperties.Width, 120f).Set(LayoutProperties.Height, 30f).Set(LayoutProperties.Padding, Insets.Symmetric(2, 5)));
         var values = graph.Signal(Enumerable.Range(1, 10_000).ToArray(), "virtual-values");
         var list = Controls.VirtualizedList(viewport, theme, "rows", "Rows", () => values.Value, value => value, (value, context) =>
         {
@@ -153,10 +200,11 @@ internal static class LayoutSceneContracts
         var shaper = new ProbeShaper();
         var scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
         var input = composition.Input;
-        Assert(input.SetScene(scene) && list.SourceCount == 10_000 && list.Items.Count == 3 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height == 300_000,
+        Assert(input.SetScene(scene), "Virtual list initial scene rejected."); var initialScroll = input.GetSemanticScroll(scene.Input.Single(item => item.Identity.ElementId == viewport.Id).Identity);
+        Assert(initialScroll is { Maximum.Y: 299_980, Viewport.Width: 116, Viewport.Height: 20 } && list.SourceCount == 10_000 && list.Items.Count == 3 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height == 300_000,
             "Virtual list did not realize a bounded fixed-height initial window.");
         list.SetRowHeight(20f); graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
-        Assert(input.SetScene(scene) && list.RowHeight == 20f && list.Items.Count == 4 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height == 200_000,
+        Assert(input.SetScene(scene) && input.GetSemanticScroll(scene.Input.Single(item => item.Identity.ElementId == viewport.Id).Identity)?.Maximum.Y == 199_980 && list.RowHeight == 20f && list.Items.Count == 3 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height == 200_000,
             "A live fixed-row-height update did not retain a bounded virtual list.");
         list.SetRowHeight(30f); graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
         Assert(input.SetScene(scene), "Restored virtual row height scene was rejected.");
@@ -171,6 +219,17 @@ internal static class LayoutSceneContracts
         Assert(!input.SetScene(scene), "A removed end row did not force bounded scroll reconciliation.");
         graph.Drain(); scene = SceneLayout.Project(composition, new(120, 30, 1), shaper);
         Assert(input.SetScene(scene) && list.SourceCount == 9_999 && list.Items.Count <= 3, "Removal left an unbounded virtual window.");
+
+        var fractionalGraph = new ReactiveGraph(); using var fractional = new Composition(fractionalGraph, "fractional-virtual-layout"); var fractionalTheme = new ThemeContext(fractional.Root.Scope, new Theme("fractional-virtual-layout")); Controls.Column(fractional.Root, fractionalTheme, "root");
+        var fractionalViewport = fractional.Child(fractional.Root, "viewport"); Controls.ScrollViewport(fractionalViewport, fractionalTheme, "Rows", style: Style.Empty.Set(LayoutProperties.Width, 60f).Set(LayoutProperties.Height, 31f).Set(LayoutProperties.Padding, new Insets(0, 1.2f, 0, 3.7f)));
+        var fractionalList = Controls.VirtualizedList(fractionalViewport, fractionalTheme, "rows", "Rows", () => Enumerable.Range(1, 100), value => value, (value, context) => { var row = context.Element("row"); Controls.Selectable(row, fractionalTheme, "row " + value); return row; }, 13f);
+        fractionalGraph.Drain();
+        foreach (var (scale, innerHeight) in new[] { (1.25f, 25.6f), (1.5f, 26f) })
+        {
+            var fractionalScene = SceneLayout.Project(fractional, new(60, 31, scale), shaper); var fractionalInput = fractional.Input; Assert(fractionalInput.SetScene(fractionalScene), "Fractional padded virtual scene rejected.");
+            var scroll = fractionalInput.GetSemanticScroll(fractionalScene.Input.Single(item => item.Identity.ElementId == fractionalViewport.Id).Identity);
+            Assert(fractionalList.Items.Count == 4 && scroll is not null && MathF.Abs(scroll.Value.Viewport.Height - innerHeight) < .001f, "Fractional asymmetric padding did not drive rounded inner virtualization at scale " + scale);
+        }
     }
 
     private sealed class ProbeShaper : ITextShaper

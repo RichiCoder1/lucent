@@ -266,12 +266,10 @@ public sealed class InputRouter
         Enter(); try
         {
             rectangle = default;
-            if (_scene is null || !ValidateScene(_scene) || _focused is not { } focus || !Eligible(focus.Identity) || !_textFields.TryGetValue(focus.Identity.ElementId, out var state)) return false;
-            var box = _scene.Boxes.SingleOrDefault(value => value.Identity == focus.Identity); if (box.Identity != focus.Identity) return false;
-            var x = box.Bounds.X;
-            if (box.Text is { Runs.Count: > 0 } shaped)
-                x += SceneLayout.TextPosition(shaped, state.DisplayText, state.DisplayCaret) - SceneLayout.TextViewOffset(shaped, state.DisplayText, state.DisplayCaret, box.Bounds.Width);
-            rectangle = new(x, box.Bounds.Y, 1, box.Bounds.Height); return true;
+            if (_scene is null || !ValidateScene(_scene) || _focused is not { } focus || !Eligible(focus.Identity) || !_textFields.ContainsKey(focus.Identity.ElementId)) return false;
+            var caret = FindCaret(_scene.Nodes, focus.Identity);
+            if (caret is null) return false;
+            rectangle = caret.Bounds; return true;
         }
         finally { Exit(); }
     }
@@ -325,7 +323,7 @@ public sealed class InputRouter
     {
         Check();
         if (!_scrollable.TryGetValue(identity.ElementId, out var scrollable) || !_input.TryGetValue(identity.ElementId, out var viewport) || !Eligible(identity)) return null;
-        return new(scrollable.State.Offset, ScrollBounds(identity, scrollable.InstalledOffset), viewport.Bounds);
+        return new(scrollable.State.Offset, ScrollBounds(identity, scrollable.InstalledOffset), viewport.ChildClipBounds ?? viewport.Bounds);
     }
 
     public string Dump()
@@ -554,11 +552,21 @@ public sealed class InputRouter
     }
     private bool ClippedIn(ElementIdentity identity, float x, float y)
     {
-        for (var current = identity; ;)
+        if (!_input.TryGetValue(identity.ElementId, out var candidate) || candidate.Parent is not { } current) return true;
+        while (true)
         {
-            var retained = _input[current.ElementId]; if (retained.Clip && !Contains(retained.Bounds, x, y)) return false;
+            var retained = _input[current.ElementId]; if (retained.ChildClipBounds is { } clip && !Contains(clip, x, y)) return false;
             if (retained.Parent is not { } parent) return true; current = parent;
         }
+    }
+    private static PaintSceneNode? FindCaret(IEnumerable<SceneNode> nodes, ElementIdentity identity)
+    {
+        foreach (var node in nodes)
+        {
+            if (node is PaintSceneNode { Identity.Kind: SceneNodeKind.Caret } caret && caret.Identity.Element == identity) return caret;
+            if (node is ClipSceneNode clip && FindCaret(clip.Children, identity) is { } nested) return nested;
+        }
+        return null;
     }
     private bool SameStructuralPath(ElementIdentity identity, IReadOnlyDictionary<long, RetainedInputElement> prior)
     {
@@ -629,10 +637,11 @@ public sealed class InputRouter
     private ScrollOffset ScrollBounds(ElementIdentity identity, ScrollOffset projectedOffset)
     {
         if (!_input.TryGetValue(identity.ElementId, out var viewport)) return default;
-        var right = viewport.Bounds.X; var bottom = viewport.Bounds.Y;
+        var content = viewport.ChildClipBounds ?? viewport.Bounds;
+        var right = content.X; var bottom = content.Y;
         foreach (var child in _input.Values.Where(item => IsDescendantOf(item.Identity, identity)))
         { right = Math.Max(right, child.Bounds.X + child.Bounds.Width + projectedOffset.X); bottom = Math.Max(bottom, child.Bounds.Y + child.Bounds.Height + projectedOffset.Y); }
-        return new(Math.Max(0, right - viewport.Bounds.X - viewport.Bounds.Width), Math.Max(0, bottom - viewport.Bounds.Y - viewport.Bounds.Height));
+        return new(Math.Max(0, right - content.X - content.Width), Math.Max(0, bottom - content.Y - content.Height));
     }
     private bool IsDescendantOf(ElementIdentity identity, ElementIdentity ancestor)
     {

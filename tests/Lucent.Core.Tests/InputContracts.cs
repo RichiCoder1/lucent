@@ -153,6 +153,13 @@ internal static class InputContracts
         var clipGraph = new ReactiveGraph(); using var clipped = new Composition(clipGraph, "clip"); var clipTheme = new ThemeContext(clipped.Root.Scope, new Theme("clip")); Present(clipped.Root, clipTheme, 40, 40, true);
         var parent = clipped.Child(clipped.Root, "parent"); Present(parent, clipTheme, 40, 20, true); var child = clipped.Child(parent, "child"); Present(child, clipTheme, 40, 25, true);
         var clippedRouter = clipped.Input; Assert(clippedRouter.SetScene(SceneLayout.Project(clipped, new(40, 40, 1), new EmptyShaper())) && clippedRouter.DispatchPointer(new(PointerCommandKind.Move, 8, 1, 21)).Target?.ElementId == clipped.Root.Id, "Retained clip did not reject an overflowing child hit.");
+
+        var paddedGraph = new ReactiveGraph(); using var padded = new Composition(paddedGraph, "padded-hit"); var paddedTheme = new ThemeContext(padded.Root.Scope, new Theme("padded-hit")); Present(padded.Root, paddedTheme, 40, 40, false);
+        var paddedParent = padded.Child(padded.Root, "padded-parent"); paddedParent.Present(paddedTheme, author: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Padding, Insets.Uniform(5)).Set(LayoutProperties.Clip, true));
+        var paddedChild = padded.Child(paddedParent, "padded-child"); Present(paddedChild, paddedTheme, 40, 20, true);
+        var paddedRouter = padded.Input; Assert(paddedRouter.SetScene(SceneLayout.Project(padded, new(40, 40, 1), new EmptyShaper())), "Padded hit scene rejected.");
+        Assert(paddedRouter.DispatchPointer(new(PointerCommandKind.Move, 9, 2, 2)).Target?.ElementId == paddedParent.Id && paddedRouter.DispatchPointer(new(PointerCommandKind.Move, 9, 34, 10)).Target?.ElementId == paddedChild.Id && paddedRouter.DispatchPointer(new(PointerCommandKind.Move, 9, 37, 10)).Target?.ElementId == paddedParent.Id,
+            "Own padded outer hit or descendant inner clip behavior changed.");
     }
 
     private static void FocusLossDisposalIsIterative()
