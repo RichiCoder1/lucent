@@ -13,11 +13,15 @@ public sealed class ReactiveGraph
     private readonly List<ReactiveScope> _scopes = [];
     private readonly LinkedList<ReactiveEffect> _effects = [];
     private readonly ConcurrentQueue<IPosted> _posted = new();
+    private readonly object _postedGate = new();
     private readonly List<ReactiveNode> _evaluating = [];
     private ReactiveCollector? _collecting;
     private int _batchDepth;
     private int _nextNodeId;
     private int _nextScopeId;
+
+    /// <summary>Raised once when worker-posted work changes from empty to nonempty.</summary>
+    public event Action? WorkAvailable;
 
     public ReactiveScope CreateScope(string name)
     {
@@ -89,17 +93,20 @@ public sealed class ReactiveGraph
     }
 
     /// <summary>Commits posted async completions and scheduled effects on the owning UI thread.</summary>
-    public void Drain()
+    public void Drain() => DrainPosted();
+
+    internal bool DrainPosted()
     {
         CheckThread();
-        if (_batchDepth != 0) return;
+        if (_batchDepth != 0) return false;
 
         List<Exception>? errors = null;
+        var posted = false;
         while (true)
         {
-            while (_posted.TryDequeue(out var post))
+            while (TakePosted(out var post))
             {
-                try { post.Commit(); }
+                try { posted |= post.Commit(); }
                 catch (Exception exception) { (errors ??= []).Add(exception); }
             }
 
@@ -113,6 +120,7 @@ public sealed class ReactiveGraph
         }
 
         if (errors is { Count: > 0 }) throw new AggregateException("Reactive callbacks failed.", errors);
+        return posted;
     }
 
     /// <summary>Returns a deterministic snapshot of active graph topology without values or exception messages.</summary>
@@ -206,7 +214,23 @@ public sealed class ReactiveGraph
         effect.QueueNode = null;
     }
 
-    internal void Post(IPosted post) => _posted.Enqueue(post);
+    internal void Post(IPosted post)
+    {
+        ArgumentNullException.ThrowIfNull(post);
+        Action? available = null;
+        lock (_postedGate)
+        {
+            var wasEmpty = _posted.IsEmpty;
+            _posted.Enqueue(post);
+            if (wasEmpty) available = WorkAvailable;
+        }
+        available?.Invoke();
+    }
+
+    private bool TakePosted(out IPosted post)
+    {
+        lock (_postedGate) return _posted.TryDequeue(out post!);
+    }
 
     internal void CheckThread()
     {
@@ -230,7 +254,7 @@ public sealed class ReactiveGraph
     private static string Quote(string value) => '"' + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal) + '"';
 }
 
-internal interface IPosted { void Commit(); }
+internal interface IPosted { bool Commit(); }
 internal readonly record struct Evaluation<T>(T Value, bool ChangedDuringRun);
 
 internal sealed class ReactiveCollector
@@ -630,18 +654,18 @@ internal sealed class AsyncLease<T>
         catch (Exception exception) { return exception; }
     }
 
-    internal void Commit(AsyncPosted<T> posted, T? value, Exception? error, bool cancelled)
+    internal bool Commit(AsyncPosted<T> posted, T? value, Exception? error, bool cancelled)
     {
         AsyncValue<T>? owner;
         lock (_gate)
         {
-            if (!ReferenceEquals(_posted, posted)) { posted.Release(); return; }
+            if (!ReferenceEquals(_posted, posted)) { posted.Release(); return false; }
             _posted = null;
             owner = _owner;
         }
-        if (owner is null) { posted.Release(); return; }
-        owner.Complete(this, value, error, cancelled);
-        posted.Release();
+        if (owner is null) { posted.Release(); return false; }
+        try { owner.Complete(this, value, error, cancelled); return true; }
+        finally { posted.Release(); }
     }
 
     internal void ReleasePosted()
@@ -672,15 +696,15 @@ internal sealed class AsyncPosted<T>(AsyncLease<T> lease, T? value, Exception? e
     private Exception? _error = error;
     private readonly bool _cancelled = cancelled;
 
-    public void Commit()
+    public bool Commit()
     {
         var lease = Interlocked.Exchange(ref _lease, null);
-        if (lease is null) return;
+        if (lease is null) return false;
         var value = _value;
         var error = _error;
         _value = default;
         _error = null;
-        lease.Commit(this, value, error, _cancelled);
+        return lease.Commit(this, value, error, _cancelled);
     }
 
     internal void Release()

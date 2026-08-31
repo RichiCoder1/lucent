@@ -25,7 +25,12 @@ internal sealed class WindowsUiaDispatcher : IDisposable
         _push = push ?? SDL.PushEvent;
         if (_timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
         _eventType = SDL.RegisterEvents(1);
-        if (_eventType == uint.MaxValue) throw new InvalidOperationException("SDL_RegisterEvents(UIA dispatcher) failed: " + SDL.GetError());
+        ValidateEventType(_eventType);
+    }
+
+    internal static void ValidateEventType(uint eventType)
+    {
+        if (eventType == 0) throw new InvalidOperationException("SDL_RegisterEvents(UIA dispatcher) failed: " + SDL.GetError());
     }
 
     internal bool IsWakeEvent(SDL.Event @event) => @event.Type == _eventType;

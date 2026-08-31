@@ -47,6 +47,7 @@ public static class WindowsBootstrap
             using var cursor = new WindowsCursor();
             using var clipboard = new WindowsClipboard();
             using var settingsListener = new WindowsSettingsListener(hwnd);
+            using var workDispatcher = new WindowsWorkDispatcher(composition);
             using var m6Diagnostics = new M6Diagnostics();
             var scheduler = new WindowsFrameScheduler();
             using var input = new WindowsInputAdapter(composition, window, clipboard);
@@ -63,9 +64,9 @@ public static class WindowsBootstrap
                 if (scheduler.ShouldWaitForEvent)
                 {
                     if (!SDL.WaitEvent(out var @event)) throw new InvalidOperationException($"SDL_WaitEvent: {SDL.GetError()}");
-                    refreshSettings |= Observe(scheduler, input, @event);
+                    refreshSettings |= Observe(scheduler, input, workDispatcher, @event);
                 }
-                while (SDL.PollEvent(out var @event)) refreshSettings |= Observe(scheduler, input, @event);
+                while (SDL.PollEvent(out var @event)) refreshSettings |= Observe(scheduler, input, workDispatcher, @event);
                 uiaDispatcher.SetOwnerPhase("dispatch");
                 if (uiaDispatcher.Process() != 0) scheduler.Request();
                 if (!scheduler.IsOpen) break;
@@ -120,8 +121,9 @@ public static class WindowsBootstrap
         return new(width, height, dpi / 96F);
     }
 
-    private static bool Observe(WindowsFrameScheduler scheduler, WindowsInputAdapter input, SDL.Event @event)
+    private static bool Observe(WindowsFrameScheduler scheduler, WindowsInputAdapter input, WindowsWorkDispatcher workDispatcher, SDL.Event @event)
     {
+        if (workDispatcher.IsWakeEvent(@event)) { if (workDispatcher.Process()) scheduler.Request(); return false; }
         var timestamp = Stopwatch.GetTimestamp();
         var type = (SDL.EventType)@event.Type;
         try { if (input.Dispatch(@event)) scheduler.Request(FrameOperation.Input, timestamp); }

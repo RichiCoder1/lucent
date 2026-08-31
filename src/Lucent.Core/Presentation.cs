@@ -101,6 +101,8 @@ public sealed class Style
     public static Style Empty { get; } = new([]);
     public Style Set<T>(Property<T> property, T value) => Add(new Assignment<T>(property, value));
     public Style Set<T>(Property<T> property, Token<T> token) => Add(new Assignment<T>(property, token));
+    /// <summary>Reads a live value when this candidate's variant is active on a presented element.</summary>
+    public Style Bind<T>(Property<T> property, Func<T> read) => Add(new BindingAssignment<T>(property, read));
     public Style When(VariantState when, Style style) { VariantStates.Validate(when, nameof(when), false); ArgumentNullException.ThrowIfNull(style); return new([.. _nodes, new VariantNode(when, style)]); }
     public static Style Compose(params Style[] styles)
     {
@@ -144,17 +146,49 @@ public sealed class Transition
 public sealed record ResolvedProperty<T>(T Value, PropertyProvenance Winner, IReadOnlyList<PropertyProvenance> Overridden, PropertyProvenance? SuppressedTransition = null);
 public sealed record PropertyProvenance(string Source, int Ordinal, VariantState Condition = VariantState.None);
 
-internal interface IAssignment { IProperty Property { get; } object? Resolve(ThemeContext theme); string? TokenName { get; } bool IsThemed(ThemeContext theme); void Prime(ThemeContext theme); }
+internal interface IAssignment { IProperty Property { get; } bool IsAvailable { get; } object? Resolve(ThemeContext theme); string? TokenName { get; } bool IsThemed(ThemeContext theme); void Prime(ThemeContext theme); }
+internal interface IBindingAssignment { IAssignment Materialize(ElementPresentation presentation, VariantState condition, int ordinal); }
 internal sealed class Assignment<T> : IAssignment
 {
     private readonly T? _value; private readonly Token<T>? _token;
     internal Assignment(Property<T> property, T value) { Property = property ?? throw new ArgumentNullException(nameof(property)); _value = value; }
     internal Assignment(Property<T> property, Token<T> token) { Property = property ?? throw new ArgumentNullException(nameof(property)); _token = token ?? throw new ArgumentNullException(nameof(token)); }
     public IProperty Property { get; }
+    public bool IsAvailable => true;
     public string? TokenName => _token?.Name;
     public bool IsThemed(ThemeContext theme) => _token is not null && theme.IsThemed(_token);
     public object? Resolve(ThemeContext theme) => _token is null ? _value : theme.Token(_token);
     public void Prime(ThemeContext theme) { if (_token is not null) _ = theme.Token(_token); }
+}
+internal sealed class BindingAssignment<T> : IAssignment, IBindingAssignment
+{
+    private readonly Property<T> _property; private readonly Func<T> _read;
+    internal BindingAssignment(Property<T> property, Func<T> read) { _property = property ?? throw new ArgumentNullException(nameof(property)); _read = read ?? throw new ArgumentNullException(nameof(read)); }
+    public IProperty Property => _property;
+    public bool IsAvailable => false;
+    public string? TokenName => null;
+    public bool IsThemed(ThemeContext theme) => false;
+    public object? Resolve(ThemeContext theme) => throw new InvalidOperationException("Bindings are materialized only by Present.");
+    public void Prime(ThemeContext theme) { }
+    public IAssignment Materialize(ElementPresentation presentation, VariantState condition, int ordinal) => new BoundAssignment<T>(presentation, _property, _read, condition, ordinal);
+}
+internal sealed class BoundAssignment<T> : IAssignment
+{
+    private readonly Signal<T> _value;
+    private readonly Signal<bool> _available;
+    internal BoundAssignment(ElementPresentation presentation, Property<T> property, Func<T> read, VariantState condition, int ordinal)
+    {
+        Property = property;
+        _value = presentation.Element.Scope.Signal(property.DefaultValue, presentation.Element.Name + ".bind." + property.Name + "." + ordinal);
+        _available = presentation.Element.Scope.Signal(false, presentation.Element.Name + ".bind-available." + property.Name + "." + ordinal);
+        _ = presentation.Element.Scope.Effect(() => { if (presentation.IsActive(condition)) { _value.Value = read(); _available.Value = true; } }, presentation.Element.Name + ".bind-effect." + property.Name + "." + ordinal);
+    }
+    public IProperty Property { get; }
+    public bool IsAvailable => _available.Value;
+    public string? TokenName => null;
+    public bool IsThemed(ThemeContext theme) => false;
+    public object? Resolve(ThemeContext theme) => _value.Value;
+    public void Prime(ThemeContext theme) { }
 }
 internal readonly record struct FlatAssignment(IAssignment Assignment, VariantState Condition, int Ordinal);
 
@@ -246,13 +280,15 @@ public sealed class BehaviorContext
 internal sealed class ElementPresentation
 {
     private readonly Element _element; private readonly ThemeContext _theme; private readonly FlatAssignment[] _component; private readonly FlatAssignment[] _author; private readonly Transition[] _transitions; private readonly Dictionary<IProperty, Signal<TransitionController.Sample?>> _samples; private readonly Signal<VariantState> _variants; private readonly Signal<VariantState> _behaviorVariants; private readonly Dictionary<IProperty, IControlValue> _control = [];
+    internal Element Element => _element;
     internal ElementPresentation(Element element, ThemeContext theme, Style component, Style author, Transition[] transitions)
     {
-        _element = element; _theme = theme; _component = component.Flatten().ToArray(); _author = author.Flatten().ToArray(); _transitions = [.. transitions];
+        _element = element; _theme = theme; _transitions = [.. transitions];
         Validate(component, author, _transitions);
-        foreach (var assignment in _component.Concat(_author).Select(item => item.Assignment)) assignment.Prime(theme);
         _samples = _transitions.ToDictionary(item => item.Property, item => element.Scope.Signal<TransitionController.Sample?>(null, element.Name + ".transition." + item.Property.Name));
         _variants = element.Scope.Signal(VariantState.None, element.Name + ".variants"); _behaviorVariants = element.Scope.Signal(VariantState.None, element.Name + ".behavior-variants");
+        _component = Materialize(component.Flatten()).ToArray(); _author = Materialize(author.Flatten()).ToArray();
+        foreach (var assignment in _component.Concat(_author).Select(item => item.Assignment)) assignment.Prime(theme);
     }
     internal void SetVariants(VariantState variants) { _element.Composition.ThrowIfBehaviorAttachment(); VariantStates.Validate(variants, nameof(variants), true); _variants.Value = variants; }
     internal bool SetBehaviorVariants(VariantState variants)
@@ -262,6 +298,7 @@ internal sealed class ElementPresentation
         _behaviorVariants.Value = variants;
         return true;
     }
+    internal bool IsActive(VariantState condition) => ((_variants.Value | _behaviorVariants.Value) & condition) == condition;
     /// <summary>Internal control-only mutable channel; control-owned values are authoritative for their properties.</summary>
     internal void SetControl<T>(Property<T> property, T value)
     {
@@ -282,7 +319,7 @@ internal sealed class ElementPresentation
         var active = _variants.Value | _behaviorVariants.Value;
         var resolved = new List<(T Value, PropertyProvenance Provenance, VariantState Condition, int Source, int Ordinal)>();
         foreach (var item in _component.Select(item => (item, author: false)).Concat(_author.Select(item => (item, author: true)))
-            .Where(entry => ReferenceEquals(entry.item.Assignment.Property, property) && (active & entry.item.Condition) == entry.item.Condition))
+            .Where(entry => entry.item.Assignment.IsAvailable && ReferenceEquals(entry.item.Assignment.Property, property) && (active & entry.item.Condition) == entry.item.Condition))
             resolved.Add(((T)item.item.Assignment.Resolve(_theme)!, new((item.author ? "author" : "component") + (item.item.Assignment.TokenName is { } token ? ":token:" + token + ":" + (item.item.Assignment.IsThemed(_theme) ? "theme" : "fallback") : ""), item.item.Ordinal, item.item.Condition), item.item.Condition, item.author ? 1 : 0, item.item.Ordinal));
         foreach (var item in resolved.OrderBy(item => VariantOrder.Key(item.Condition)).ThenBy(item => item.Source).ThenBy(item => item.Ordinal)) candidates.Add((item.Value, item.Provenance));
         if (_control.TryGetValue(property, out var control)) candidates.Add(((T)control.Value!, new("control", 0)));
@@ -311,6 +348,11 @@ internal sealed class ElementPresentation
     }
     private static void ValidateProperties(IEnumerable<IProperty> properties)
     { var names = new Dictionary<string, IProperty>(StringComparer.Ordinal); foreach (var property in properties) { if (names.TryGetValue(property.Name, out var prior) && !ReferenceEquals(prior, property)) throw new ArgumentException("A presentation cannot contain distinct properties with the same name."); names[property.Name] = property; } }
+    private IEnumerable<FlatAssignment> Materialize(IEnumerable<FlatAssignment> assignments)
+    {
+        foreach (var item in assignments)
+            yield return item with { Assignment = item.Assignment is IBindingAssignment binding ? binding.Materialize(this, item.Condition, item.Ordinal) : item.Assignment };
+    }
     private interface IControlValue { object? Value { get; } }
     private sealed class ControlValue<T>(Signal<T> signal) : IControlValue
     {

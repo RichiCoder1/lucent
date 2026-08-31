@@ -11,6 +11,7 @@ try
     FrameSchedulingMatrix();
     TelemetryContract();
     UiaDispatcherContract();
+    ReactiveWakeContract();
     UiaLifecycleContracts.Run();
     UiaSnapshotReadContract();
     WindowsHostContracts.InputAdapterAndRoutingContract();
@@ -231,6 +232,62 @@ static void UiaSnapshotReadContract()
         if (window != 0) SDL3.SDL.DestroyWindow(window);
         SDL3.SDL.Quit();
     }
+}
+
+static void ReactiveWakeContract()
+{
+    if (!SDL3.SDL.Init(SDL3.SDL.InitFlags.Video)) throw new InvalidOperationException("SDL_Init(reactive wake): " + SDL3.SDL.GetError());
+    try
+    {
+        var graph = new Lucent.Core.ReactiveGraph(); using var composition = new Lucent.Core.Composition(graph, "reactive-wake");
+        WindowsWorkDispatcher.ValidateEventType(1); WindowsUiaDispatcher.ValidateEventType(1);
+        ExpectRegisterFailure(() => WindowsWorkDispatcher.ValidateEventType(0)); ExpectRegisterFailure(() => WindowsUiaDispatcher.ValidateEventType(0));
+        var first = new TaskCompletionSource<int>(); var second = new TaskCompletionSource<int>(); var one = graph.Async(_ => first.Task, 0, "reactive-wake-one"); var two = graph.Async(_ => second.Task, 0, "reactive-wake-two"); _ = one.Value; _ = two.Value;
+        using var dispatcher = new WindowsWorkDispatcher(composition);
+        Task.WhenAll(Task.Run(() => first.SetResult(7)), Task.Run(() => second.SetResult(8))).GetAwaiter().GetResult();
+        var until = Environment.TickCount64 + 2_000; var wakes = 0;
+        while (wakes == 0 && Environment.TickCount64 < until)
+        {
+            while (SDL3.SDL.PollEvent(out var @event)) if (dispatcher.IsWakeEvent(@event)) wakes++;
+            if (wakes == 0) Thread.Sleep(1);
+        }
+        if (wakes != 1 || !dispatcher.Process() || one.Value != 7 || two.Value != 8 || dispatcher.Process())
+            throw new InvalidOperationException("Worker-posted idle work did not wake once, drain on the UI thread, and leave zero idle work.");
+
+        var noFrame = new TaskCompletionSource<int>(); var discarded = graph.Async(_ => noFrame.Task, 0, "reactive-wake-disposed"); _ = discarded.Value;
+        Task.Run(() => noFrame.SetResult(9)).GetAwaiter().GetResult(); discarded.Dispose();
+        while (SDL3.SDL.PollEvent(out var @event)) if (dispatcher.IsWakeEvent(@event)) { }
+        if (dispatcher.Process()) throw new InvalidOperationException("Disposed posted work requested a frame.");
+
+        var fatalGraph = new Lucent.Core.ReactiveGraph(); using var fatalComposition = new Lucent.Core.Composition(fatalGraph, "reactive-wake-fatal");
+        var fatalWork = new TaskCompletionSource<int>(); var fatalValue = fatalGraph.Async(_ => fatalWork.Task, 0, "reactive-wake-fatal-value"); _ = fatalValue.Value;
+        var fatals = 0; using var failedPush = new WindowsWorkDispatcher(fatalComposition, static (ref SDL3.SDL.Event _) => false, _ => Interlocked.Increment(ref fatals));
+        Task.Run(() => fatalWork.SetResult(10)).GetAwaiter().GetResult();
+        if (fatals != 1) throw new InvalidOperationException("Reactive SDL push failure did not invoke the fatal path exactly once.");
+
+        var disposedGraph = new Lucent.Core.ReactiveGraph(); using var disposedComposition = new Lucent.Core.Composition(disposedGraph, "reactive-wake-dispatcher-disposed");
+        var disposedWork = new TaskCompletionSource<int>(); var disposedValue = disposedGraph.Async(_ => disposedWork.Task, 0, "reactive-wake-dispatcher-disposed-value"); _ = disposedValue.Value;
+        var pushes = 0; using var disposedDispatcher = new WindowsWorkDispatcher(disposedComposition, (ref SDL3.SDL.Event _) => { Interlocked.Increment(ref pushes); return true; });
+        disposedDispatcher.Dispose(); Task.Run(() => disposedWork.SetResult(11)).GetAwaiter().GetResult();
+        if (pushes != 0) throw new InvalidOperationException("Disposed reactive dispatcher accepted a late worker wake.");
+
+        var raceGraph = new Lucent.Core.ReactiveGraph(); using var raceComposition = new Lucent.Core.Composition(raceGraph, "reactive-wake-dispose-race");
+        var raceWork = new TaskCompletionSource<int>(); var raceValue = raceGraph.Async(_ => raceWork.Task, 0, "reactive-wake-dispose-race-value"); _ = raceValue.Value;
+        using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim(); using var pushed = new ManualResetEventSlim(); using var disposeStarted = new ManualResetEventSlim();
+        using var raceDispatcher = new WindowsWorkDispatcher(raceComposition, (ref SDL3.SDL.Event _) => { entered.Set(); release.Wait(); pushed.Set(); return true; });
+        var producer = Task.Run(() => raceWork.SetResult(12)); if (!entered.Wait(2_000)) throw new InvalidOperationException("Blocking reactive wake did not enter fake SDL push.");
+        var releaser = Task.Run(() => { disposeStarted.Wait(); release.Set(); });
+        disposeStarted.Set(); raceDispatcher.Dispose();
+        if (!pushed.IsSet || !producer.Wait(2_000) || !releaser.Wait(2_000)) throw new InvalidOperationException("Reactive dispatcher disposal returned before its in-flight wake completed.");
+    }
+    finally { SDL3.SDL.Quit(); }
+}
+
+static void ExpectRegisterFailure(Action action)
+{
+    try { action(); }
+    catch (InvalidOperationException) { return; }
+    throw new InvalidOperationException("Expected SDL event registration failure.");
 }
 
 static void Assert(bool condition, string message)

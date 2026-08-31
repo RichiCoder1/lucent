@@ -9,6 +9,7 @@ internal static class ReactiveContracts
             BranchesBatchesAndReentrancy();
             FailureRecoveryAndOwnership();
             AsyncOwnershipAndThreading();
+            WorkAvailableIsEdgeTriggered();
             LifetimeRelease();
             var first = EquivalentDump();
             Assert(first == EquivalentDump(), "Reactive dumps differ for equivalent live graphs.");
@@ -295,6 +296,23 @@ internal static class ReactiveContracts
         GC.KeepAlive(posted.Root);
         GC.KeepAlive(never.Root);
         GC.KeepAlive(never.Producer);
+    }
+
+    private static void WorkAvailableIsEdgeTriggered()
+    {
+        var graph = new ReactiveGraph();
+        var first = new TaskCompletionSource<int>(); var second = new TaskCompletionSource<int>();
+        var one = graph.Async(_ => first.Task, 0, "wake-one"); var two = graph.Async(_ => second.Task, 0, "wake-two");
+        _ = one.Value; _ = two.Value;
+        var wakes = 0; graph.WorkAvailable += () => Interlocked.Increment(ref wakes);
+        Task.WhenAll(Task.Run(() => first.SetResult(1)), Task.Run(() => second.SetResult(2))).GetAwaiter().GetResult();
+        SpinWait.SpinUntil(() => Volatile.Read(ref wakes) != 0, 2_000);
+        graph.Drain();
+        Assert(wakes == 1 && one.Value == 1 && two.Value == 2, "Worker burst did not produce one drainable wake.");
+        var third = new TaskCompletionSource<int>(); var three = graph.Async(_ => third.Task, 0, "wake-three"); _ = three.Value;
+        Task.Run(() => third.SetResult(3)).GetAwaiter().GetResult(); SpinWait.SpinUntil(() => Volatile.Read(ref wakes) == 2, 2_000);
+        graph.Drain();
+        Assert(wakes == 2 && three.Value == 3, "Empty-to-nonempty reset lost a later worker wake.");
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]

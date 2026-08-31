@@ -19,6 +19,8 @@ internal static class PresentationContracts
         try
         {
             StylesTransitionsAndDependencies();
+            BindingsRespectVariantsAndControlAuthority();
+            BindingRowScaleLifecycle();
             BehaviorIsolationAndRollback();
             SemanticsAndDumps();
             Console.WriteLine("Lucent.Core presentation contracts: PASS");
@@ -160,6 +162,59 @@ internal static class PresentationContracts
         var probe = Released(); ForceGc(); Assert(!probe.Payload.IsAlive, "Behavior delegates remained rooted after rollback/disposal."); GC.KeepAlive(probe.Root);
     }
 
+    private static void BindingsRespectVariantsAndControlAuthority()
+    {
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "bindings"); var theme = new ThemeContext(composition.Root.Scope, new Theme("bindings"));
+        var source = composition.Root.Scope.Signal(2, "bound-value"); var reads = 0;
+        var bound = composition.Child(composition.Root, "bound");
+        bound.Present(theme, author: Style.Empty.When(VariantState.Hover, Style.Empty.Bind(Value, () => { reads++; return source.Value; })));
+        graph.Drain();
+        Assert(reads == 0 && bound.Resolve(Value).Value == 1, "Inactive binding evaluated or changed its candidate.");
+        bound.SetVariants(VariantState.Hover); graph.Drain();
+        Assert(reads == 1 && bound.Resolve(Value) is { Value: 2, Winner: { Source: "author", Condition: VariantState.Hover } }, "Active binding lost author provenance or variant condition.");
+        source.Value = 3; graph.Drain();
+        Assert(reads == 2 && bound.Resolve(Value).Value == 3, "Active binding did not track its expression.");
+        bound.SetVariants(VariantState.None); graph.Drain(); source.Value = 4; graph.Drain();
+        Assert(reads == 2 && bound.Resolve(Value).Value == 1, "Inactive binding retained a live dependency.");
+
+        var precedence = composition.Child(composition.Root, "binding-precedence");
+        precedence.Present(theme, Style.Empty.Set(Value, 7).Bind(Value, () => 8), Style.Empty.Set(Value, 9).Bind(Value, () => 10)); graph.Drain();
+        var precedenceValue = precedence.Resolve(Value);
+        Assert(precedenceValue.Value == 10 && precedenceValue.Winner is { Source: "author", Ordinal: 1 } && precedenceValue.Overridden.Any(item => item is { Source: "component", Ordinal: 1 }), "Binding candidates lost component/author or ordinal precedence.");
+
+        var recover = composition.Root.Scope.Signal(true, "binding-failure"); var failed = composition.Child(composition.Root, "binding-failure");
+        failed.Present(theme, author: Style.Empty.Set(Value, 6).Bind(Value, () => recover.Value ? throw new InvalidOperationException("binding read") : 11));
+        Expect<AggregateException>(graph.Drain);
+        var fallback = failed.Resolve(Value);
+        Assert(fallback is { Value: 6, Winner: { Source: "author", Ordinal: 0 } } && fallback.Overridden.All(item => item.Ordinal != 1), "First failed binding published its uncommitted default candidate.");
+        recover.Value = false; graph.Drain();
+        Assert(failed.Resolve(Value) is { Value: 11, Winner: { Source: "author", Ordinal: 1 } }, "Recovered binding did not publish its first successful value.");
+        recover.Value = true; Expect<AggregateException>(graph.Drain);
+        Assert(failed.Resolve(Value) is { Value: 11, Winner: { Source: "author", Ordinal: 1 } }, "Later failed binding discarded its prior successful value.");
+
+        var controlled = composition.Child(composition.Root, "controlled");
+        var state = Controls.Loading(controlled, theme, "Loading", Style.Empty.Bind(SceneProperties.Text, () => "bound"));
+        graph.Drain(); state.Label = "Ready"; graph.Drain();
+        var resolved = controlled.Resolve(SceneProperties.Text);
+        Assert(resolved.Value == "Ready" && resolved.Winner.Source == "control" && resolved.Overridden.Any(item => item.Source == "author"), "Control state did not override the bound author candidate with retained provenance.");
+        var lateReads = reads; bound.Dispose(); source.Value = 5; graph.Drain();
+        Assert(reads == lateReads, "Disposed binding accepted a late expression callback.");
+        var released = ReleasedBinding(); ForceGc(); Assert(!released.Payload.IsAlive, "Disposed binding retained its callback payload."); GC.KeepAlive(released.Root);
+    }
+
+    private static void BindingRowScaleLifecycle()
+    {
+        var graph = new ReactiveGraph(); var composition = new Composition(graph, "binding-row-scale"); var theme = new ThemeContext(composition.Root.Scope, new Theme("binding-row-scale")); var value = composition.Root.Scope.Signal(1, "binding-row-value");
+        const int rows = 64; var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < rows; index++)
+        {
+            var row = composition.Child(composition.Root, "binding-row-" + index); row.Present(theme, author: Style.Empty.Bind(Value, () => value.Value));
+        }
+        graph.Drain(); var allocated = GC.GetAllocatedBytesForCurrentThread() - before; var topology = graph.Dump();
+        Assert(topology.Split("bind-effect", StringSplitOptions.None).Length - 1 == rows && allocated is > 0 and < 1_000_000, "Bound row-scale topology or allocation exceeded the bounded representative datapoint.");
+        composition.Dispose(); Assert(graph.Dump() == "reactive-graph\n", "Disposed bound rows did not return their graph topology.");
+    }
+
     private static void SemanticsAndDumps()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "semantic\r\nroot");
@@ -195,6 +250,12 @@ internal static class PresentationContracts
     {
         var graph = new ReactiveGraph(); var composition = new Composition(graph, "release"); var theme = new ThemeContext(composition.Root.Scope, new Theme("theme")); var payload = new Payload(); var weak = new WeakReference(payload);
         var element = composition.Child(composition.Root, "release-target"); element.Present(theme); element.AttachBehaviors(new Probe("release", BehaviorOwnership.None, context => context.OnDispose(() => GC.KeepAlive(payload)))); element.Dispose(); return new(weak, composition);
+    }
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static ProbeResult ReleasedBinding()
+    {
+        var graph = new ReactiveGraph(); var composition = new Composition(graph, "release-binding"); var theme = new ThemeContext(composition.Root.Scope, new Theme("theme")); var payload = new Payload(); var weak = new WeakReference(payload);
+        var element = composition.Child(composition.Root, "release-binding-target"); element.Present(theme, author: Style.Empty.Bind(Value, () => { GC.KeepAlive(payload); return 1; })); graph.Drain(); element.Dispose(); return new(weak, composition);
     }
     private static Probe Semantics(string id, string name) => new(id, BehaviorOwnership.Semantics, context => context.SetSemantics(new(SemanticRole.Text, name)));
     private static void Expect<T>(Action action) where T : Exception

@@ -48,7 +48,10 @@ public sealed class Composition : IDisposable
     internal void InvalidateInteractionVisuals() => _interactionVisualGeneration = checked(_interactionVisualGeneration + 1);
 
     /// <summary>Commits this composition's pending reactive work on its owning UI thread.</summary>
-    public void Flush() { _graph.CheckThread(); ThrowIfBehaviorAttachment(); ThrowIfDisposed(); _graph.Drain(); }
+    public bool Flush() { _graph.CheckThread(); ThrowIfBehaviorAttachment(); ThrowIfDisposed(); return _graph.DrainPosted(); }
+
+    /// <summary>Forwards worker-posted work notification without exposing a platform transport to Core.</summary>
+    public event Action? WorkAvailable { add => _graph.WorkAvailable += value; remove => _graph.WorkAvailable -= value; }
 
     /// <summary>Advances bounded presentation samples; it queues no background work.</summary>
     public void AdvanceTransitions(int milliseconds) { _graph.CheckThread(); ThrowIfBehaviorAttachment(); ThrowIfDisposed(); _transitions.Advance(milliseconds); }
