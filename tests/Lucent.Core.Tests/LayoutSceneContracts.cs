@@ -10,6 +10,7 @@ internal static class LayoutSceneContracts
         {
             ColorAndBrushValues();
             InsetsAndPadding();
+            OpacityGroups();
             RowsColumnsClipsAndRounding();
             InvalidBoundsFail();
             ExplicitZeroAndOverflow();
@@ -100,7 +101,46 @@ internal static class LayoutSceneContracts
             "Transparent padded owner hoisted an overflowing child paint outside its inner clip.");
     }
 
-    private static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes) { foreach (var node in nodes) { yield return node; if (node is ClipSceneNode clip) foreach (var child in Flatten(clip.Children)) yield return child; } }
+    private static void OpacityGroups()
+    {
+        foreach (var invalid in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity, -.01f, 1.01f })
+        {
+            var graph = new ReactiveGraph(); using var composition = new Composition(graph, "invalid-opacity"); var theme = new ThemeContext(composition.Root.Scope, new Theme("opacity"));
+            composition.Root.Present(theme, author: Style.Empty.Set(VisualProperties.Opacity, invalid));
+            Expect<ArgumentOutOfRangeException>(() => SceneLayout.Project(composition, new(20, 20, 1), new ProbeShaper()));
+        }
+
+        var graph2 = new ReactiveGraph(); using var composition2 = new Composition(graph2, "opacity"); var theme2 = new ThemeContext(composition2.Root.Scope, new Theme("opacity"));
+        composition2.Root.Present(theme2, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(VisualProperties.Background, Color.Parse("#010203")).Set(VisualProperties.Opacity, .5f));
+        var child = composition2.Child(composition2.Root, "overflow"); child.Present(theme2, author: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 10f).Set(VisualProperties.Background, Color.Parse("#ff0000")).Set(VisualProperties.Opacity, .5f));
+        var scene = SceneLayout.Project(composition2, new(20, 20, 1), new ProbeShaper());
+        var outer = (OpacitySceneNode)scene.Nodes.Single(); var inner = outer.Children.OfType<OpacitySceneNode>().Single();
+        Assert(outer.Bounds is { X: 0, Y: 0, Width: 20, Height: 20 } && inner.Bounds is { Width: 20, Height: 10 } && outer.Opacity == .5f && inner.Opacity == .5f && scene.Dump().Contains("kind=Opacity", StringComparison.Ordinal) && !scene.Dump().Contains("cache", StringComparison.OrdinalIgnoreCase), "Opacity groups did not retain bounded visible overflow, nesting, or deterministic diagnostics.");
+
+        var clippedGraph = new ReactiveGraph(); using var clipped = new Composition(clippedGraph, "opacity-clip"); var clippedTheme = new ThemeContext(clipped.Root.Scope, new Theme("opacity-clip"));
+        clipped.Root.Present(clippedTheme, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Clip, true).Set(VisualProperties.Background, Color.Parse("#010203")).Set(VisualProperties.Opacity, .5f));
+        var clippedChild = clipped.Child(clipped.Root, "overflow"); clippedChild.Present(clippedTheme, author: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 10f).Set(VisualProperties.Background, Color.Parse("#ff0000")));
+        var clippedNode = (OpacitySceneNode)SceneLayout.Project(clipped, new(20, 20, 1), new ProbeShaper()).Nodes.Single();
+        Assert(clippedNode.Children[0] is PaintSceneNode && clippedNode.Children[1] is ClipSceneNode { Bounds: { Width: 20, Height: 20 } }, "Opacity did not wrap owner background before its separate inner child clip.");
+
+        var zeroGraph = new ReactiveGraph(); using var zero = new Composition(zeroGraph, "opacity-zero"); var zeroTheme = new ThemeContext(zero.Root.Scope, new Theme("opacity-zero")); var invoked = 0;
+        zero.Root.Present(zeroTheme, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(VisualProperties.Opacity, 0f));
+        var button = zero.Child(zero.Root, "button"); Controls.Button(button, zeroTheme, "Invoke", () => invoked++, Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f));
+        var zeroScene = SceneLayout.Project(zero, new(20, 20, 1), new ProbeShaper()); var router = zero.Input;
+        Assert(zeroScene.Nodes.Single() is OpacitySceneNode { Opacity: 0 } && router.SetScene(zeroScene) && router.MoveFocus(FocusTraversalDirection.Next), "Opacity zero removed retained layout, input, or focus data.");
+        Assert(router.DispatchPointer(new(PointerCommandKind.Down, 77, 1, 1, PointerButton.Primary)).Handled && router.DispatchPointer(new(PointerCommandKind.Up, 77, 1, 1)).Handled && invoked == 1, "Opacity zero removed pointer hit routing or activation.");
+        var semantic = zero.SemanticSnapshot()!.Children.Single();
+        Assert(zero.ExecuteSemanticCommand(semantic.Identity, new(SemanticCommandKind.Invoke)) == SemanticCommandResult.Applied && invoked == 2, "Opacity zero removed semantic actions.");
+
+        var transitionGraph = new ReactiveGraph(); using var transitioned = new Composition(transitionGraph, "opacity-transition"); var transitionTheme = new ThemeContext(transitioned.Root.Scope, new Theme("opacity-transition"));
+        transitioned.Root.Present(transitionTheme, author: Style.Empty.Set(VisualProperties.Background, Color.Parse("#ffffff")), transitions: [Transition.For(VisualProperties.Opacity, 100)]);
+        transitioned.Root.StartTransition(VisualProperties.Opacity, .4f); var activeTransition = SceneLayout.Project(transitioned, new(10, 10, 1), new ProbeShaper());
+        Assert(activeTransition.Nodes.Single() is OpacitySceneNode { Opacity: .4f }, "Active manual opacity transition did not project a composited group.");
+        transitionTheme.ReducedMotion = true; var suppressedTransition = SceneLayout.Project(transitioned, new(10, 10, 1), new ProbeShaper());
+        Assert(suppressedTransition.Nodes.Single() is PaintSceneNode && transitioned.Root.Resolve(VisualProperties.Opacity).SuppressedTransition?.Source == "transition-suppressed", "Reduced motion did not suppress projected opacity transition output.");
+    }
+
+    private static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes) { foreach (var node in nodes) { yield return node; if (node is ClipSceneNode clip) foreach (var child in Flatten(clip.Children)) yield return child; else if (node is OpacitySceneNode opacity) foreach (var child in Flatten(opacity.Children)) yield return child; } }
 
     private static void RowsColumnsClipsAndRounding()
     {

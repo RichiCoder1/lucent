@@ -29,6 +29,7 @@ public static class LayoutProperties
 public static class VisualProperties
 {
     public static readonly Property<Brush> Background = new("visual-background", Brush.Solid(default));
+    public static readonly Property<float> Opacity = new("visual-opacity", 1, transition: TransitionKind.Opacity);
 }
 
 public static class TypographyProperties
@@ -182,7 +183,7 @@ public interface ITextShaper { ShapedText Shape(TextMeasureRequest request); }
 public readonly record struct LayoutBox(ElementIdentity Identity, LayoutRect Bounds, ShapedText? Text);
 /// <summary>Immutable input projection; it contains no platform event or application values.</summary>
 public readonly record struct RetainedInputElement(ElementIdentity Identity, ElementIdentity? Parent, LayoutRect Bounds, LayoutRect? ChildClipBounds, int Order, bool Enabled, bool Visible, string Signature);
-public enum SceneNodeKind { Paint, Text, Selection, Caret, Clip }
+public enum SceneNodeKind { Paint, Text, Selection, Caret, Clip, Opacity }
 public readonly record struct SceneNodeIdentity(ElementIdentity Element, SceneNodeKind Kind);
 public abstract class SceneNode(SceneNodeIdentity identity, LayoutRect bounds) { public SceneNodeIdentity Identity { get; } = identity; public LayoutRect Bounds { get; } = bounds; }
 public sealed class PaintSceneNode(SceneNodeIdentity identity, LayoutRect bounds, Brush brush) : SceneNode(identity, bounds) { public Brush Brush { get; } = brush ?? throw new ArgumentNullException(nameof(brush)); }
@@ -192,7 +193,20 @@ public sealed class ClipSceneNode : SceneNode
     private readonly IReadOnlyList<SceneNode> _children;
     public ClipSceneNode(SceneNodeIdentity identity, LayoutRect bounds, IReadOnlyList<SceneNode> children) : base(identity, bounds) { _children = Array.AsReadOnly(children?.Select(Clone).ToArray() ?? throw new ArgumentNullException(nameof(children))); }
     public IReadOnlyList<SceneNode> Children => _children;
-    internal static SceneNode Clone(SceneNode node) => node switch { PaintSceneNode paint => new PaintSceneNode(paint.Identity, paint.Bounds, paint.Brush), TextSceneNode text => new TextSceneNode(text.Identity, text.Bounds, text.Color, text.Text), ClipSceneNode clip => new ClipSceneNode(clip.Identity, clip.Bounds, clip.Children), _ => throw new ArgumentException("Unknown scene node.") };
+    internal static SceneNode Clone(SceneNode node) => node switch { PaintSceneNode paint => new PaintSceneNode(paint.Identity, paint.Bounds, paint.Brush), TextSceneNode text => new TextSceneNode(text.Identity, text.Bounds, text.Color, text.Text), ClipSceneNode clip => new ClipSceneNode(clip.Identity, clip.Bounds, clip.Children), OpacitySceneNode opacity => new OpacitySceneNode(opacity.Identity, opacity.Bounds, opacity.Opacity, opacity.Children), _ => throw new ArgumentException("Unknown scene node.") };
+}
+
+/// <summary>An immutable compositing group; its opacity applies once after all children have painted.</summary>
+public sealed class OpacitySceneNode : SceneNode
+{
+    private readonly IReadOnlyList<SceneNode> _children;
+    public OpacitySceneNode(SceneNodeIdentity identity, LayoutRect bounds, float opacity, IReadOnlyList<SceneNode> children) : base(identity, bounds)
+    {
+        if (!float.IsFinite(opacity) || opacity < 0 || opacity > 1) throw new ArgumentOutOfRangeException(nameof(opacity), "Opacity must be finite and in [0,1].");
+        Opacity = opacity; _children = Array.AsReadOnly(children?.Select(ClipSceneNode.Clone).ToArray() ?? throw new ArgumentNullException(nameof(children)));
+    }
+    public float Opacity { get; }
+    public IReadOnlyList<SceneNode> Children => _children;
 }
 
 /// <summary>A renderer-facing retained snapshot. It owns no platform or renderer resources.</summary>
@@ -228,8 +242,10 @@ public sealed class RetainedScene
             output.Append("node epoch=").Append(node.Identity.Element.CompositionEpoch.ToString(CultureInfo.InvariantCulture)).Append(" element=").Append(node.Identity.Element.ElementId.ToString(CultureInfo.InvariantCulture)).Append(" parent=").Append(parent?.ToString(CultureInfo.InvariantCulture) ?? "-").Append(" depth=").Append(depth.ToString(CultureInfo.InvariantCulture)).Append(" kind=").Append(node.Identity.Kind).Append(" bounds=").Append(Format(node.Bounds));
             if (node is PaintSceneNode paint) output.Append(" brush=").Append(paint.Brush);
             if (node is TextSceneNode text) output.Append(" color=").Append(text.Color).Append(" shape=").Append(DiagnosticText.Quote(text.Text.Identity));
+            if (node is OpacitySceneNode opacity) output.Append(" opacity=").Append(opacity.Opacity.ToString("R", CultureInfo.InvariantCulture));
             output.Append('\n');
             if (node is ClipSceneNode clip) Append(clip.Children, output, depth + 1, node.Identity.Element.ElementId);
+            else if (node is OpacitySceneNode group) Append(group.Children, output, depth + 1, node.Identity.Element.ElementId);
         }
     }
     private static string Format(LayoutRect value) => "[" + value.X.ToString("R", CultureInfo.InvariantCulture) + "," + value.Y.ToString("R", CultureInfo.InvariantCulture) + "," + value.Width.ToString("R", CultureInfo.InvariantCulture) + "," + value.Height.ToString("R", CultureInfo.InvariantCulture) + "]";
@@ -324,11 +340,23 @@ LayoutViewport viewport, ITextShaper shaper)
         else if (style.Text is "" && style.Caret == 0)
             result.Add(new PaintSceneNode(new(identity, SceneNodeKind.Caret), new(inner.X, inner.Y, 1 / viewport.Scale, inner.Height), style.TextColor));
         result.AddRange(childNodes);
-        if (!style.Clip) return result;
-        var clipped = new List<SceneNode>();
-        if (result.FirstOrDefault() is PaintSceneNode { Identity.Kind: SceneNodeKind.Paint } background && background.Identity.Element == identity) { clipped.Add(background); result.RemoveAt(0); }
-        clipped.Add(new ClipSceneNode(new(identity, SceneNodeKind.Clip), inner, result));
-        return clipped;
+        if (style.Clip)
+        {
+            var clipped = new List<SceneNode>();
+            if (result.FirstOrDefault() is PaintSceneNode { Identity.Kind: SceneNodeKind.Paint } background && background.Identity.Element == identity) { clipped.Add(background); result.RemoveAt(0); }
+            clipped.Add(new ClipSceneNode(new(identity, SceneNodeKind.Clip), inner, result));
+            result = clipped;
+        }
+        return style.Opacity == 1 || result.Count == 0 ? result : [new OpacitySceneNode(new(identity, SceneNodeKind.Opacity), VisibleBounds(result, viewport), style.Opacity, result)];
+    }
+
+    private static LayoutRect VisibleBounds(IReadOnlyList<SceneNode> nodes, LayoutViewport viewport)
+    {
+        var left = nodes.Min(node => node.Bounds.X); var top = nodes.Min(node => node.Bounds.Y);
+        var right = nodes.Max(node => Finite(node.Bounds.X + node.Bounds.Width)); var bottom = nodes.Max(node => Finite(node.Bounds.Y + node.Bounds.Height));
+        var visibleRight = Math.Min(right, viewport.Width); var visibleBottom = Math.Min(bottom, viewport.Height);
+        left = Math.Clamp(left, 0, viewport.Width); top = Math.Clamp(top, 0, viewport.Height);
+        return new(left, top, Math.Max(0, visibleRight - left), Math.Max(0, visibleBottom - top));
     }
 
     private static (Element Element, float Main, float Cross, bool AutoCross) Measure(Element element, LayoutAxis parentAxis, float crossLimit, float scale, ITextShaper shaper, Dictionary<long, ShapedText?> shapes)
@@ -400,15 +428,15 @@ LayoutViewport viewport, ITextShaper shaper)
         var values = new Values(element.Resolve(LayoutProperties.Axis).Value, element.Resolve(LayoutProperties.Width).Value, element.Resolve(LayoutProperties.Height).Value,
             element.Resolve(LayoutProperties.MinWidth).Value, element.Resolve(LayoutProperties.MinHeight).Value, element.Resolve(LayoutProperties.MaxWidth).Value, element.Resolve(LayoutProperties.MaxHeight).Value,
             element.Resolve(LayoutProperties.Spacing).Value, element.Resolve(LayoutProperties.MainAlignment).Value, element.Resolve(LayoutProperties.CrossAlignment).Value, element.Resolve(LayoutProperties.Clip).Value,
-            element.Resolve(LayoutProperties.Padding).Value, element.Resolve(LayoutProperties.Scroll).Value, element.Resolve(LayoutProperties.VirtualRowHeight).Value, element.Resolve(LayoutProperties.VirtualItemCount).Value, element.Resolve(LayoutProperties.VirtualRowIndex).Value, element.Resolve(VisualProperties.Background).Value, element.Resolve(TypographyProperties.TextColor).Value, element.Resolve(ProjectionProperties.Text).Value,
+            element.Resolve(LayoutProperties.Padding).Value, element.Resolve(LayoutProperties.Scroll).Value, element.Resolve(LayoutProperties.VirtualRowHeight).Value, element.Resolve(LayoutProperties.VirtualItemCount).Value, element.Resolve(LayoutProperties.VirtualRowIndex).Value, element.Resolve(VisualProperties.Background).Value, element.Resolve(VisualProperties.Opacity).Value, element.Resolve(TypographyProperties.TextColor).Value, element.Resolve(ProjectionProperties.Text).Value,
             element.Resolve(TypographyProperties.FontFamily).Value, element.Resolve(TypographyProperties.FontSize).Value, element.Resolve(TypographyProperties.Language).Value, element.Resolve(TypographyProperties.Direction).Value,
             element.Resolve(ProjectionProperties.TextSelectionStart).Value, element.Resolve(ProjectionProperties.TextSelectionEnd).Value, element.Resolve(ProjectionProperties.TextCaret).Value);
-        if (!Enum.IsDefined(values.Axis) || !Enum.IsDefined(values.MainAlignment) || !Enum.IsDefined(values.CrossAlignment) || !Enum.IsDefined(values.Direction) || !float.IsFinite(values.Spacing) || values.Spacing < 0 || values.Width is { } width && (!float.IsFinite(width) || width < 0) || values.Height is { } height && (!float.IsFinite(height) || height < 0) || values.VirtualRowHeight is { } rowHeight && (!float.IsFinite(rowHeight) || rowHeight <= 0 || values.VirtualItemCount < 0 || values.VirtualRowIndex < 0))
+        if (!Enum.IsDefined(values.Axis) || !Enum.IsDefined(values.MainAlignment) || !Enum.IsDefined(values.CrossAlignment) || !Enum.IsDefined(values.Direction) || !float.IsFinite(values.Spacing) || values.Spacing < 0 || !float.IsFinite(values.Opacity) || values.Opacity < 0 || values.Opacity > 1 || values.Width is { } width && (!float.IsFinite(width) || width < 0) || values.Height is { } height && (!float.IsFinite(height) || height < 0) || values.VirtualRowHeight is { } rowHeight && (!float.IsFinite(rowHeight) || rowHeight <= 0 || values.VirtualItemCount < 0 || values.VirtualRowIndex < 0))
             throw new ArgumentOutOfRangeException(nameof(element), "LayoutProperties values must be finite and nonnegative.");
         values.Scroll.Validate(); return values;
     }
 
-    private readonly record struct Values(LayoutAxis Axis, float? Width, float? Height, float MinWidth, float MinHeight, float MaxWidth, float MaxHeight, float Spacing, LayoutAlignment MainAlignment, LayoutAlignment CrossAlignment, bool Clip, Insets Padding, ScrollOffset Scroll, float? VirtualRowHeight, int VirtualItemCount, int VirtualRowIndex, Brush Background, Color TextColor, string? Text, string FontFamily, float FontSize, string Language, TextDirection Direction, int? SelectionStart, int? SelectionEnd, int? Caret);
+    private readonly record struct Values(LayoutAxis Axis, float? Width, float? Height, float MinWidth, float MinHeight, float MaxWidth, float MaxHeight, float Spacing, LayoutAlignment MainAlignment, LayoutAlignment CrossAlignment, bool Clip, Insets Padding, ScrollOffset Scroll, float? VirtualRowHeight, int VirtualItemCount, int VirtualRowIndex, Brush Background, float Opacity, Color TextColor, string? Text, string FontFamily, float FontSize, string Language, TextDirection Direction, int? SelectionStart, int? SelectionEnd, int? Caret);
 
     /// <summary>Returns a bounded LTR caret position; it interpolates grapheme boundaries inside one ligature cluster and does not implement full bidi caret ordering.</summary>
     internal static float TextPosition(ShapedText text, string source, int utf16Offset)

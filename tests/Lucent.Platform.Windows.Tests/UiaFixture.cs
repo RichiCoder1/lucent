@@ -35,7 +35,7 @@ internal static class UiaFixture
         var status = Controls.Loading(statusElement, themeContext, "Ready", Style.Empty.Set(LayoutProperties.Height, 24f));
         var retained = composition.Root.Scope.Signal(new[] { "Keep", "Retire", "Disabled" }, "uia-fixture.items"); var invokes = 0;
         var button = composition.Child(group, "button");
-        Controls.Button(button, themeContext, "Invoke", () => { if (invokes++ == 0) throw new InvalidOperationException("fixture action"); status.Label = "Invoked"; retained.Value = ["Keep", "Disabled"]; }, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 24f));
+        Controls.Button(button, themeContext, "Invoke", () => { if (invokes++ == 0) throw new InvalidOperationException("fixture action"); status.Label = "Invoked"; retained.Value = ["Keep", "Disabled"]; }, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 24f).Set(VisualProperties.Opacity, 0f));
         var list = composition.Child(group, "list");
         Controls.List(list, themeContext, "Choices", Style.Empty.Set(LayoutProperties.Width, 300f));
         _ = composition.ForEach(list, "items", () => retained.Value, value => value, (value, context) =>

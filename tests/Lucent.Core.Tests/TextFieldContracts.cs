@@ -8,7 +8,7 @@ internal static class TextFieldContracts
         {
             var graph = new ReactiveGraph(); using var composition = new Composition(graph, "text-field"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
             Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 200f).Set(LayoutProperties.Height, 40f).Set(LayoutProperties.Clip, true));
-            var field = composition.Child(composition.Root, "field"); var state = Controls.TextField(field, theme, "Search", style: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Padding, new Insets(2, 3, 4, 5)));
+            var field = composition.Child(composition.Root, "field"); var state = Controls.TextField(field, theme, "Search", style: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Padding, new Insets(2, 3, 4, 5)).Set(VisualProperties.Opacity, .5f));
             var other = composition.Child(composition.Root, "other"); Controls.TextField(other, theme, "Other", style: Style.Empty.Set(LayoutProperties.Width, 200f).Set(LayoutProperties.Height, 20f));
             var router = composition.Input; var scene = Install(composition, router);
             Assert(field.Resolve(ProjectionProperties.Text).Value == "Search" && FindTextField(composition.SemanticSnapshot()!).Value == "", "Empty unfocused text field did not show its non-semantic placeholder.");
@@ -79,7 +79,7 @@ internal static class TextFieldContracts
         if (!router.SetScene(scene)) { composition.Flush(); scene = SceneLayout.Project(composition, new(200, 40, 1), shaper); Assert(router.SetScene(scene), "Text field scene did not converge."); }
         return scene;
     }
-    private static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes) { foreach (var node in nodes) { yield return node; if (node is ClipSceneNode clip) foreach (var child in Flatten(clip.Children)) yield return child; } }
+private static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes) { foreach (var node in nodes) { yield return node; if (node is ClipSceneNode clip) foreach (var child in Flatten(clip.Children)) yield return child; else if (node is OpacitySceneNode opacity) foreach (var child in Flatten(opacity.Children)) yield return child; } }
     private static SemanticSnapshot FindTextField(SemanticSnapshot snapshot) => snapshot.Role == SemanticRole.TextField ? snapshot : snapshot.Children.Select(FindTextField).First();
     private static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static void Expect<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException("Expected " + typeof(T).Name); }

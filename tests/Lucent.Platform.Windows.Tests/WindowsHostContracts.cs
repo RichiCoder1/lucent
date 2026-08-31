@@ -261,6 +261,7 @@ internal static class WindowsHostContracts
         {
             if (node is PaintSceneNode paint) yield return paint;
             if (node is ClipSceneNode clip) foreach (var child in Paints(clip.Children)) yield return child;
+            if (node is OpacitySceneNode opacity) foreach (var child in Paints(opacity.Children)) yield return child;
         }
     }
 }

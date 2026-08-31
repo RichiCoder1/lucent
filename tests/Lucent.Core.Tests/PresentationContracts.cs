@@ -5,7 +5,6 @@ internal static class PresentationContracts
 {
     private static readonly Property<int> Value = new("value", 1);
     private static readonly Property<int> Inherited = new("inherited", 2, inherits: true);
-    private static readonly Property<float> Opacity = new("opacity", 1, transition: TransitionKind.Opacity);
     private static readonly Property<int> TokenAValue = new("token-a", 0);
     private static readonly Property<int> TokenBValue = new("token-b", 0);
     private static readonly Token<int> Accent = new("accent", 10);
@@ -39,7 +38,7 @@ internal static class PresentationContracts
         var child = composition.Child(middle, "child");
         var nested = Style.Compose(Style.Empty.Set(Value, 2).When(VariantState.Hover, Style.Empty.Set(Value, 3)), Style.Empty.When(VariantState.Selected, Style.Empty.When(VariantState.Pressed, Style.Empty.Set(Value, 4))));
         var author = Style.Empty.Set(Value, 5).When(VariantState.Hover | VariantState.Selected, Style.Empty.Set(Value, 6));
-        child.Present(theme, nested, author, Transition.For(Opacity, 100));
+        child.Present(theme, nested, author, Transition.For(VisualProperties.Opacity, 100));
         child.SetVariants(VariantState.Hover | VariantState.Selected | VariantState.Pressed);
         var resolved = child.Resolve(Value);
         Assert(resolved.Value == 4 && resolved.Winner.Source == "component" && resolved.Winner.Condition == (VariantState.Selected | VariantState.Pressed), "Nested styles did not normalize by cardinality/vector/component order.");
@@ -57,16 +56,16 @@ internal static class PresentationContracts
         equal.SetVariants(VariantState.Hover | VariantState.Selected | VariantState.Pressed);
         Assert(equal.Resolve(Value).Value == 3, "Equal-cardinality compound vector order was not deterministic.");
         var transitionRuns = 0;
-        var transition = composition.Root.Scope.Derived(() => { transitionRuns++; return child.Resolve(Opacity).Value; }, "transition-slot");
+        var transition = composition.Root.Scope.Derived(() => { transitionRuns++; return child.Resolve(VisualProperties.Opacity).Value; }, "transition-slot");
         Assert(transition.Value == 1f && transitionRuns == 1, "Transition reader did not resolve before a sample.");
-        child.StartTransition(Opacity, .4f);
+        child.StartTransition(VisualProperties.Opacity, .4f);
         Assert(transition.Value == .4f && transitionRuns == 2, "Transition start did not invalidate a prior derived reader.");
         composition.AdvanceTransitions(50);
         Assert(transition.Value == .4f && transitionRuns == 2, "Non-expiring transition advance created work.");
         composition.AdvanceTransitions(50);
         Assert(transition.Value == 1f && transitionRuns == 3, "Transition expiry did not invalidate a derived reader.");
-        child.StartTransition(Opacity, .5f); theme.ReducedMotion = true;
-        Assert(child.Resolve(Opacity).SuppressedTransition?.Source == "transition-suppressed" && child.Resolve(Opacity).Winner.Source == "default", "Reduced motion did not suppress the active sample.");
+        child.StartTransition(VisualProperties.Opacity, .5f); theme.ReducedMotion = true;
+        Assert(child.Resolve(VisualProperties.Opacity).SuppressedTransition?.Source == "transition-suppressed" && child.Resolve(VisualProperties.Opacity).Winner.Source == "default", "Reduced motion did not suppress the active sample.");
         var appearanceRuns = 0;
         var appearance = composition.Root.Scope.Derived(() => { appearanceRuns++; return theme.Appearance; }, "appearance-reader");
         Assert(appearance.Value == ThemeAppearance.Light && appearanceRuns == 1, "Initial portable appearance was not light/normal.");
@@ -100,10 +99,10 @@ internal static class PresentationContracts
         var duplicate = composition.Child(composition.Root, "duplicate");
         Expect<ArgumentException>(() => duplicate.Present(theme, author: Style.Empty.Set(Value, 1).Set(new Property<int>("value", 0), 2)));
         var transitions = composition.Child(composition.Root, "duplicate-transitions"); var beforeTransitions = graph.Dump();
-        Expect<ArgumentException>(() => transitions.Present(theme, transitions: [Transition.For(Opacity, 1), Transition.For(Opacity, 2)]));
+        Expect<ArgumentException>(() => transitions.Present(theme, transitions: [Transition.For(VisualProperties.Opacity, 1), Transition.For(VisualProperties.Opacity, 2)]));
         Assert(graph.Dump() == beforeTransitions, "Duplicate transition validation created graph nodes.");
         Expect<ArgumentException>(() => new Property<int>("bad-transition", 0, transition: (TransitionKind)99));
-        Assert(TypographyProperties.TextColor.Transition == TransitionKind.Color && VisualProperties.Background.Transition == TransitionKind.None, "Shipped color/background transition eligibility changed.");
+        Assert(TypographyProperties.TextColor.Transition == TransitionKind.Color && VisualProperties.Background.Transition == TransitionKind.None && VisualProperties.Opacity.Transition == TransitionKind.Opacity && !VisualProperties.Opacity.Inherits && VisualProperties.Opacity.DefaultValue == 1f, "Shipped visual transition/default eligibility changed.");
         _ = new Property<Color>("valid-color-transition", default, transition: TransitionKind.Color);
         Expect<ArgumentException>(() => new Property<uint>("legacy-color-transition", 0, transition: TransitionKind.Color));
         Expect<ArgumentException>(() => new Property<Brush>("brush-color-transition", Brush.Solid(default), transition: TransitionKind.Color));

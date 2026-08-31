@@ -565,6 +565,7 @@ public sealed class InputRouter
         {
             if (node is PaintSceneNode { Identity.Kind: SceneNodeKind.Caret } caret && caret.Identity.Element == identity) return caret;
             if (node is ClipSceneNode clip && FindCaret(clip.Children, identity) is { } nested) return nested;
+            if (node is OpacitySceneNode opacity && FindCaret(opacity.Children, identity) is { } nestedOpacity) return nestedOpacity;
         }
         return null;
     }

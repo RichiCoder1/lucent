@@ -82,7 +82,17 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     {
         foreach (var node in nodes)
         {
-            if (node is ClipSceneNode clip)
+            if (node is OpacitySceneNode opacity)
+            {
+                if (opacity.Opacity == 0) continue;
+                var bounds = Rect(opacity.Bounds);
+                if (bounds.Width <= 0 || bounds.Height <= 0 || canvas.QuickReject(bounds)) continue;
+                using var layer = new SKPaint { Color = SKColors.White.WithAlpha((byte)MathF.Round(opacity.Opacity * byte.MaxValue)) };
+                canvas.SaveLayer(bounds, layer);
+                try { canvas.ClipRect(bounds); Paint(opacity.Children, canvas); }
+                finally { canvas.Restore(); }
+            }
+            else if (node is ClipSceneNode clip)
             {
                 canvas.Save();
                 try { canvas.ClipRect(Rect(clip.Bounds)); Paint(clip.Children, canvas); }
