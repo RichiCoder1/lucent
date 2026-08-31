@@ -31,15 +31,15 @@ A component lowers to a partial static C# recipe whose supported entry point is 
 Handwritten and generated recipes mount through one public atomic C# operation shaped as:
 
 ```csharp
-composition.Mount(parent, context => FilterBar.Compose(context, query, clear));
+composition.Mount(parent, theme, context => FilterBar.Compose(context, query, clear));
 context.Mount(parent, childContent);
 ```
 
-The exact names are sealed in #46, but the behavior is fixed: root and nested invocation share the same operation; each recipe/content call creates exactly one root; creation and commit are scope-owned; failures roll back all provisional structure and resources; disposing the mounted root retires the recipe scope. A content value is an in-process `Func<CompositionContext, Element>` capability, not a runtime template object or serializable value.
+The exact names are sealed in #46, but the behavior is fixed: root and nested invocation share the same operation; root mount receives `ThemeContext` explicitly and nested contexts inherit it; each recipe/element-content call creates exactly one root; creation and commit are scope-owned; failures roll back all provisional structure and resources; disposing the mounted root retires the recipe scope. `CompositionContext` exposes transactional nested `Mount`, `When`, and `ForEach` operations so generated structure never escapes to inaccessible `Composition` internals. An element-content value is an in-process `Func<CompositionContext, Element>` capability, not a runtime template object or serializable value.
 
 Ordinary parameters are construction-time values. Live inputs are explicit signal-bearing models or typed readers such as `Func<T>` consumed inside a binding or retained region. Generated code never turns an arbitrary value parameter into a live binding by rerunning a component.
 
-C# component recipes opt in with `[LuiComponent]`. Content factories use explicit `[LuiContent]` metadata with an optional name and exactly one possible default. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
+C# component recipes opt in with `[LuiComponent]`. Content parameters use explicit `[LuiContent]` metadata with an optional name and exactly one possible default. The parameter type determines whether content is a scalar string or an element factory; body markup must type-check accordingly. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
 
 ## Elements, parameters, and content
 
@@ -66,7 +66,9 @@ Roslyn parses expression islands. The initial allowlist includes literals, membe
 
 Expressions use ordinary C# conversions. Text body literals are the sole markup-specific primitive convenience. Future color/string or `bind:` sugar must lower at compile time to the same typed APIs and diagnostics; there is no implicit runtime string conversion.
 
-Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValue` values under Lucent's runtime tracking. A component recipe establishes retained structure once. Live property expressions lower to the same public, scope-owned typed binding operation used by C#, shaped as `element.Bind(property, () => expression)`. The operation preserves author/variant precedence and provenance, commits on the UI thread, invalidates the affected layout/paint/semantic projection, and cannot commit after disposal. Composition exposes one portable coalescible invalidation notification; Windows turns it into an SDL wake/frame request so idle async completion is visible. There is no compiler-only setter, hidden dependency table, component rerender, or virtual-tree diff.
+Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValue` values under Lucent's runtime tracking. A component recipe establishes retained structure once. Live property expressions lower to the same public operation used by C#, shaped as `Style.Bind(property, () => expression)`. When presented, each binding becomes an element-scope effect and retains that style candidate's component/author source, variant condition, and ordinal. It commits on the UI thread, participates in ordinary precedence/provenance, triggers current scene reprojection, and cannot commit after disposal. Live variants therefore need no control-channel override or compiler-only setter.
+
+`ReactiveGraph.WorkAvailable` is edge-triggered when posted work changes from empty to nonempty, including worker-thread async completion. Windows translates that notification only into a registered SDL wake event; the UI thread drains, projects, and presents. Reset/recheck is lost-wake-safe, bursts coalesce, and no polling or worker-thread Core mutation is permitted. Zero queued work schedules no frames.
 
 ## Structural regions
 
@@ -126,7 +128,36 @@ The compiler targets the framework contracts rather than defining them:
 
 Future `.lui` color literals parse at compile time. A shared golden corpus keeps compile-time conversion identical to public `Color.Parse`/`TryParse` behavior.
 
-Padding participates in Lucent's own bounded algorithm: intrinsic outer size includes the insets; explicit/min/max constraints apply to the outer box; child layout uses an inner box clamped to zero when insets exceed available space; text/caret/selection origins and row/column alignment use that same inner box; scrolling and clipping use explicit tested inner/outer extents; fixed virtual row height is the row's total outer extent; realization uses the viewport's inner height. Shared outer/inner edges round independently at each declared scale without cumulative drift.
+The exact initial author-facing property surface is:
+
+| Group/member | Type | Default | Inherits |
+| --- | --- | --- | --- |
+| `LayoutProperties.Axis` | `LayoutAxis` | `Column` | no |
+| `Width` / `Height` | `float?` | `null` | no |
+| `MinWidth` / `MinHeight` | `float` | `0` | no |
+| `MaxWidth` / `MaxHeight` | `float` | positive infinity | no |
+| `Spacing` | `float` | `0` | no |
+| `MainAlignment` | `LayoutAlignment` | `Start` | no |
+| `CrossAlignment` | `LayoutAlignment` | `Stretch` | no |
+| `Padding` | `Insets` | zero | no |
+| `Clip` | `bool` | `false` | no |
+| `Scroll` | `ScrollOffset` | zero | no |
+| `VisualProperties.Background` | `Brush` | transparent solid | no |
+| `Opacity` | `float` | `1` | no |
+| `TypographyProperties.Color` | `Color` | opaque black | yes |
+| `FontFamily` | `string` | `Segoe UI` | yes |
+| `FontSize` | `float` | `14` | yes |
+| `Language` | `string` | `en` | yes |
+| `Direction` | `TextDirection` | `LeftToRight` | yes |
+| `InputProperties.Enabled` / `Visible` | `bool` | `true` | no |
+
+`Arrangement`, public `SceneProperties`, `Fill`, and `Foreground` are removed during the unreleased API change. Raw text, selection, caret, virtual-row metadata, and projection bookkeeping are internal/compiler-excluded. Portable retained-scene DTOs remain the explicit Core-to-renderer seam.
+
+`Color` stores canonical 8-bit sRGB RGBA channels and equality/hash follows those channels. `Parse`/`TryParse` initially accept invariant `#RRGGBB` and `#RRGGBBAA` only. `LinearGradient` uses normalized box-relative start/end points, two to sixteen stops with finite nondecreasing positions in `[0,1]`, permits equal-position hard stops, and rejects a degenerate vector. Invalid constructors throw argument exceptions; try-parse returns false. Spatial interpolation is premultiplied linear sRGB.
+
+`Opacity` must be finite in `[0,1]`; invalid assignments fail before scene publication. One retained opacity group wraps background, text, and descendants; nested values multiply. With `Clip=false`, group bounds include visible descendant overflow rather than implicitly clipping to the element box. With clipping enabled, clipping bounds the group consistently. Renderer tiling/culling is allowed only when pixels remain equivalent and allocations stay within the issue #45 evidence bounds.
+
+Padding participates in Lucent's own bounded algorithm: intrinsic outer size includes the insets; explicit/min/max constraints apply to the outer box; child layout uses an inner box clamped to zero when insets exceed available space; text/caret/selection origins and row/column alignment use that same inner box. A scroll viewport clips scrolled children to its inner content box; leading and trailing padding participate in scroll extent so content may rest at padded ends. Fixed virtual row height is the row's total outer extent; realization uses the viewport's inner height. Shared outer/inner edges round independently at each declared scale without cumulative drift.
 
 Brush equality/hash/dumps are canonical. Gradient stops are finite, ordered, and box-relative; nested opacity multiplies and one group covers background, text, and descendants, including visible overflow when clipping is disabled. Brush alpha affects only that paint. Dumps contain no renderer object/cache identity.
 

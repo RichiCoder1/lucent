@@ -23,8 +23,9 @@ Before compiler work, Lucent will seal the author-facing layout and visual primi
 
 Before lowering, the C# framework must expose two ordinary typed operations that generated code can call:
 
-- a scope-owned reactive property assignment shaped as `element.Bind(property, read)`, with normal style precedence/provenance, UI-thread commit, projection invalidation, disposal rejection, and one portable composition invalidation notification that the Windows host coalesces into a wake/frame request;
-- one atomic root/nested recipe mount operation over `Func<CompositionContext, Element>`, used equally by handwritten and generated recipes and typed default/named content. It owns creation, exactly-one-root validation, commit, rollback, scope disposal, and nested parentage.
+- a scope-owned reactive style assignment shaped as `Style.Bind(property, read)`. `Present` materializes it as an element-scope effect while preserving the style candidate's source, variant condition, and ordinal; it commits on the UI thread and rejects disposal. Full scene reprojection is acceptable initially.
+- one edge-triggered `ReactiveGraph.WorkAvailable` notification when posted work changes from empty to nonempty. Windows may only translate it to a registered SDL wake event; the UI thread drains, projects, and presents normally. Reset/recheck must be lost-wake-safe and bursts coalesce without polling or worker-thread Core mutation.
+- one atomic root/nested recipe mount operation over `Func<CompositionContext, Element>`, used equally by handwritten and generated recipes and typed default/named content. Root mount receives `ThemeContext` explicitly; nested contexts inherit it. The operation owns creation, exactly-one-root validation, commit, rollback, scope disposal, and nested parentage.
 
 Ordinary component parameters are construction-time values. A live parameter is explicit in its C# type, such as a signal-bearing model or `Func<T>` read inside a binding/region; the compiler does not make arbitrary values reactive by rerunning components.
 

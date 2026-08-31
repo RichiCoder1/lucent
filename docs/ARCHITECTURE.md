@@ -143,7 +143,7 @@ Typed C# composition is the first supported authoring surface. APIs remain unsta
 The Milestone 5 compiler-facing contract is:
 
 - structure lowers to `Composition.Child`, `When`, and `ForEach`, `CompositionContext` factories, and bounded `Controls` recipes including `VirtualizedList`;
-- presentation lowers to typed `Property<T>`, `Style.Set`/`When`/`Compose`, `Token<T>`, `Theme`/`ThemeContext`, `Transition`, and `Element.Present` or the equivalent `Controls` recipe;
+- presentation lowers to typed `Property<T>`, `Style.Set`/`Bind`/`When`/`Compose`, `Token<T>`, `Theme`/`ThemeContext`, and `Element.Present` or the equivalent `Controls` recipe; manual C# transition samples are not an initial compiler target;
 - behavior references lower to precompiled `Behavior` instances attached with `Element.AttachBehaviors`; custom behavior bodies and `BehaviorContext` registration remain authored C# rather than generated `.lui` code;
 - reactive expressions use ordinary `Signal`, `Derived`, `Effect`, and `AsyncValue` reads under runtime dependency tracking;
 - generated structure and resources belong to their `Element.Scope` or `CompositionContext`, so generated code adds no parallel lifetime or synchronization loop;
