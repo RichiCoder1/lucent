@@ -94,7 +94,7 @@ internal static class InputContracts
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "fresh"); var visible = new Token<bool>("visible", true); var theme = new ThemeContext(composition.Root.Scope, new Theme("fresh").Set(visible, true));
         Present(composition.Root, theme, 40, 40, true); var child = composition.Child(composition.Root, "child");
-        child.Present(theme, author: Style.Empty.Set(InputProperties.Visible, visible).Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f).Set(Arrangement.Clip, true));
+        child.Present(theme, author: Style.Empty.Set(InputProperties.Visible, visible).Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Clip, true));
         PointerRoute? escaped = null;
         child.AttachBehaviors(new Probe("escape", BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics, pointer: route => escaped = route));
         var router = composition.Input; var first = SceneLayout.Project(composition, new(40, 40, 1), new EmptyShaper()); Assert(router.SetScene(first), "Fresh scene rejected.");
@@ -169,7 +169,7 @@ internal static class InputContracts
     private static void SignatureSemanticsLifetimeAndDiagnostics()
     {
         var geometryGraph = new ReactiveGraph(); using var geometry = new Composition(geometryGraph, "geometry-signature"); var geometryText = new Token<string?>("geometry-text", "A"); var geometryTheme = new ThemeContext(geometry.Root.Scope, new Theme("geometry-signature").Set(geometryText, "A"));
-        Present(geometry.Root, geometryTheme, 40, 40, true); var geometryChild = geometry.Child(geometry.Root, "child"); geometryChild.Present(geometryTheme, author: Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f).Set(SceneProperties.Text, geometryText));
+        Present(geometry.Root, geometryTheme, 40, 40, true); var geometryChild = geometry.Child(geometry.Root, "child"); geometryChild.Present(geometryTheme, author: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f).Set(ProjectionProperties.Text, geometryText));
         var geometryRouter = geometry.Input; Assert(geometryRouter.SetScene(SceneLayout.Project(geometry, new(40, 40, 1), new MetricShaper())), "Geometry signature scene rejected.");
         geometryTheme.Theme = geometryTheme.Theme.Set(geometryText, "AAAA");
         Assert(geometryChild.Resolve(InputProperties.Enabled).Value && geometryChild.Resolve(InputProperties.Visible).Value && geometryRouter.DispatchPointer(new(PointerCommandKind.Move, 30, 1, 1)).Rejection == InputRejection.StaleScene,
@@ -177,7 +177,7 @@ internal static class InputContracts
 
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "signature"); var text = new Token<string?>("text", "A"); var font = new Token<string>("font", "B;C"); var enabled = new Token<bool>("enabled", true); var theme = new ThemeContext(composition.Root.Scope, new Theme("signature").Set(text, "A").Set(font, "B;C").Set(enabled, true));
         Present(composition.Root, theme, 40, 40, true); var child = composition.Child(composition.Root, "child");
-        child.Present(theme, author: Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f).Set(SceneProperties.Text, text).Set(SceneProperties.FontFamily, font).Set(InputProperties.Enabled, enabled));
+        child.Present(theme, author: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f).Set(ProjectionProperties.Text, text).Set(TypographyProperties.FontFamily, font).Set(InputProperties.Enabled, enabled));
         child.AttachBehaviors(new RowActionBehavior("row", new(SemanticRole.ListItem, "row", actions: SemanticAction.Select)));
         var router = composition.Input; var first = SceneLayout.Project(composition, new(40, 40, 1), new MetricShaper()); Assert(router.SetScene(first), "Initial collision scene rejected.");
         router.DispatchPointer(new(PointerCommandKind.Down, 10, 1, 1, PointerButton.Primary)); router.DispatchPointer(new(PointerCommandKind.Up, 10, 1, 1));
@@ -218,7 +218,7 @@ internal static class InputContracts
     private static void AssertAncestorLossReason(bool disabled, PointerCaptureLossReason expected)
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "ancestor-" + disabled); var flag = new Token<bool>("flag", true); var theme = new ThemeContext(composition.Root.Scope, new Theme("ancestor").Set(flag, true)); Present(composition.Root, theme, 20, 20, true);
-        var parent = composition.Child(composition.Root, "parent"); parent.Present(theme, author: (disabled ? Style.Empty.Set(InputProperties.Enabled, flag) : Style.Empty.Set(InputProperties.Visible, flag)).Set(Arrangement.Width, 20f).Set(Arrangement.Height, 20f));
+        var parent = composition.Child(composition.Root, "parent"); parent.Present(theme, author: (disabled ? Style.Empty.Set(InputProperties.Enabled, flag) : Style.Empty.Set(InputProperties.Visible, flag)).Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f));
         var child = composition.Child(parent, "child"); Present(child, theme, 20, 20, true); PointerCaptureLossReason? reason = null;
         child.AttachBehaviors(new Probe("child", BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics, pointer: route => { if (route.Command.Kind == PointerCommandKind.Down) { route.Focus(); route.Capture(); } }, lost: loss => reason = loss.Reason));
         var router = composition.Input; Assert(router.SetScene(SceneLayout.Project(composition, new(20, 20, 1), new EmptyShaper())), "Ancestor scene rejected."); router.DispatchPointer(new(PointerCommandKind.Down, 23, 1, 1, PointerButton.Primary)); theme.Theme = theme.Theme.Set(flag, false);
@@ -234,7 +234,7 @@ internal static class InputContracts
         _ = composition.Input; child.Dispose(); return new(weak, composition);
     }
 
-    private static void Present(Element element, ThemeContext theme, float width, float height, bool clip, Token<bool>? enabled = null) => element.Present(theme, author: (enabled is null ? Style.Empty : Style.Empty.Set(InputProperties.Enabled, enabled)).Set(Arrangement.Width, width).Set(Arrangement.Height, height).Set(Arrangement.Axis, LayoutAxis.Column).Set(Arrangement.Clip, clip));
+    private static void Present(Element element, ThemeContext theme, float width, float height, bool clip, Token<bool>? enabled = null) => element.Present(theme, author: (enabled is null ? Style.Empty : Style.Empty.Set(InputProperties.Enabled, enabled)).Set(LayoutProperties.Width, width).Set(LayoutProperties.Height, height).Set(LayoutProperties.Axis, LayoutAxis.Column).Set(LayoutProperties.Clip, clip));
     private static void Assert(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
     private static void Expect<T>(Action action) where T : Exception { try { action(); } catch (T) { return; } throw new InvalidOperationException("Expected " + typeof(T).Name); }
 

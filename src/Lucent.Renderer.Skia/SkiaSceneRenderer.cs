@@ -90,7 +90,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             }
             else if (node is PaintSceneNode paint)
             {
-                using var brush = new SKPaint { Color = Color(paint.Color), IsAntialias = false };
+                using var brush = Paint(paint.Brush, paint.Bounds);
                 canvas.DrawRect(Rect(paint.Bounds), brush);
             }
             else if (node is TextSceneNode text)
@@ -187,7 +187,16 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private static string RunIdentity(TextMeasureRequest request, string family, SKFontStyle style, string fingerprint, int collectionIndex, TextDirection direction, IEnumerable<ShapedGlyph> glyphs, float origin, float baseline, float ascent, float descent) => Hash(family + "\n" + style.Weight + "\n" + style.Width + "\n" + style.Slant + "\n" + fingerprint + "\n" + collectionIndex.ToString(CultureInfo.InvariantCulture) + "\n" + request.FontSize.ToString("R", CultureInfo.InvariantCulture) + "\n" + request.Language + "\n" + direction + "\n" + origin.ToString("R", CultureInfo.InvariantCulture) + ":" + baseline.ToString("R", CultureInfo.InvariantCulture) + ":" + ascent.ToString("R", CultureInfo.InvariantCulture) + ":" + descent.ToString("R", CultureInfo.InvariantCulture) + "\n" + string.Join(';', glyphs.Select(glyph => glyph.GlyphId + ":" + glyph.Cluster + ":" + glyph.X.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.Y.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.XAdvance.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.XOffset.ToString("R", CultureInfo.InvariantCulture) + ":" + glyph.YOffset.ToString("R", CultureInfo.InvariantCulture))));
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static SKRect Rect(LayoutRect value) => new(value.X, value.Y, value.X + value.Width, value.Y + value.Height);
-    private static SKColor Color(uint value) => new((byte)(value >> 16 & 0xff), (byte)(value >> 8 & 0xff), (byte)(value & 0xff), (byte)(value >> 24 & 0xff));
+    private static SKPaint Paint(Brush brush, LayoutRect bounds)
+    {
+        if (brush.Color is { } color) return new SKPaint { Color = Color(color), IsAntialias = false };
+        var gradient = brush.Gradient!;
+        var start = new SKPoint(bounds.X + gradient.Start.X * bounds.Width, bounds.Y + gradient.Start.Y * bounds.Height);
+        var end = new SKPoint(bounds.X + gradient.End.X * bounds.Width, bounds.Y + gradient.End.Y * bounds.Height);
+        using var shader = SKShader.CreateLinearGradient(start, end, gradient.Stops.Select(stop => Color(stop.Color)).ToArray(), gradient.Stops.Select(stop => stop.Position).ToArray(), SKShaderTileMode.Clamp);
+        return new SKPaint { Shader = shader, IsAntialias = false };
+    }
+    private static SKColor Color(global::Lucent.Core.Color value) => new(value.R, value.G, value.B, value.A);
     private static int CollectionIndex(SKTypeface face)
     {
         using var stream = face.OpenStream(out var index) ?? throw new InvalidOperationException("Typeface OpenStream did not expose a collection identity.");

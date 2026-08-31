@@ -35,6 +35,7 @@ foreach (var handle in metadata.TypeDefinitions)
     }
 }
 VerifyLuiMetadata(metadata, provider, violations);
+VerifyPropertySurface(metadata, provider, violations);
 foreach (var violation in violations.Distinct(StringComparer.Ordinal)) Console.Error.WriteLine(violation);
 return violations.Count == 0 ? 0 : 1;
 
@@ -64,6 +65,31 @@ static void VerifyLuiMetadata(MetadataReader metadata, TypeNameProvider provider
         var defaults = parameters.Where(parameter => HasDefaultContent(metadata, parameter.GetCustomAttributes())).Select(parameter => metadata.GetString(parameter.Name)).ToArray();
         if (!(expected.DefaultContent is null ? contents.Length == 0 && defaults.Length == 0 : contents.SequenceEqual([expected.DefaultContent]) && defaults.SequenceEqual([expected.DefaultContent])))
             violations.Add($"Unexpected default [LuiContent] metadata: {expected.Name}");
+    }
+}
+
+static void VerifyPropertySurface(MetadataReader metadata, TypeNameProvider provider, List<string> violations)
+{
+    var definitions = metadata.TypeDefinitions.Where(handle => metadata.GetString(metadata.GetTypeDefinition(handle).Namespace) == "Lucent.Core").ToDictionary(handle => TypeDefinitionName(metadata, handle));
+    foreach (var removed in new[] { "Lucent.Core.Arrangement", "Lucent.Core.SceneProperties" })
+        if (definitions.ContainsKey(removed)) violations.Add("Removed public property group remains: " + removed);
+    if (!definitions.TryGetValue("Lucent.Core.ProjectionProperties", out var projection) || (metadata.GetTypeDefinition(projection).Attributes & TypeAttributes.VisibilityMask) == TypeAttributes.Public)
+        violations.Add("ProjectionProperties must exist and remain non-public.");
+    foreach (var expected in new Dictionary<string, Dictionary<string, string>>
+    {
+        ["Lucent.Core.LayoutProperties"] = new() { ["Axis"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAxis", ["Width"] = "Lucent.Core.Property`1|System.Nullable`1|System.Single", ["Height"] = "Lucent.Core.Property`1|System.Nullable`1|System.Single", ["MinWidth"] = "Lucent.Core.Property`1|System.Single", ["MinHeight"] = "Lucent.Core.Property`1|System.Single", ["MaxWidth"] = "Lucent.Core.Property`1|System.Single", ["MaxHeight"] = "Lucent.Core.Property`1|System.Single", ["Spacing"] = "Lucent.Core.Property`1|System.Single", ["MainAlignment"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAlignment", ["CrossAlignment"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAlignment", ["Clip"] = "Lucent.Core.Property`1|System.Boolean", ["Scroll"] = "Lucent.Core.Property`1|Lucent.Core.ScrollOffset" },
+        ["Lucent.Core.VisualProperties"] = new() { ["Background"] = "Lucent.Core.Property`1|Lucent.Core.Brush" },
+        ["Lucent.Core.TypographyProperties"] = new() { ["TextColor"] = "Lucent.Core.Property`1|Lucent.Core.Color", ["FontFamily"] = "Lucent.Core.Property`1|System.String", ["FontSize"] = "Lucent.Core.Property`1|System.Single", ["Language"] = "Lucent.Core.Property`1|System.String", ["Direction"] = "Lucent.Core.Property`1|Lucent.Core.TextDirection" },
+        ["Lucent.Core.InputProperties"] = new() { ["Enabled"] = "Lucent.Core.Property`1|System.Boolean", ["Visible"] = "Lucent.Core.Property`1|System.Boolean" }
+    })
+    {
+        if (!definitions.TryGetValue(expected.Key, out var handle)) { violations.Add("Missing public property group: " + expected.Key); continue; }
+        var type = metadata.GetTypeDefinition(handle);
+        if ((type.Attributes & TypeAttributes.VisibilityMask) != TypeAttributes.Public) violations.Add("Property group is not public: " + expected.Key);
+        var fields = type.GetFields().Select(metadata.GetFieldDefinition).Where(field => (field.Attributes & FieldAttributes.FieldAccessMask) == FieldAttributes.Public).ToDictionary(field => metadata.GetString(field.Name));
+        if (!fields.Keys.Order().SequenceEqual(expected.Value.Keys.Order())) { violations.Add("Unexpected public property members: " + expected.Key); continue; }
+        foreach (var field in expected.Value)
+            if (fields[field.Key].DecodeSignature(provider, null) != field.Value) violations.Add($"Unexpected property type: {expected.Key}.{field.Key}");
     }
 }
 

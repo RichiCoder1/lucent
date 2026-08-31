@@ -170,7 +170,7 @@ internal static class CompositionContracts
 
         Controls.Panel(composition.Root, theme, "root");
         var viewport = composition.Child(composition.Root, "viewport");
-        _ = Controls.ScrollViewport(viewport, theme, "rows", style: Style.Empty.Set(Arrangement.Width, 10f).Set(Arrangement.Height, 10f));
+        _ = Controls.ScrollViewport(viewport, theme, "rows", style: Style.Empty.Set(LayoutProperties.Width, 10f).Set(LayoutProperties.Height, 10f));
         var virtualReads = 0;
         var themed = Controls.VirtualizedList(viewport, theme, "themed-rows", "Rows", () => { virtualReads++; return new[] { 1 }; }, value => value, (value, context) =>
         {
@@ -178,7 +178,7 @@ internal static class CompositionContracts
             return Controls.Text(context, "themed-row", "Row " + value);
         }, 10f);
         graph.Drain(); themed.Realize(new(10, 10, 1));
-        Assert(themed.Items.Count == 1 && themed.Items.Single().Resolve(SceneProperties.Text).Value == "Row 1", "Annotated virtualized row did not mount through its themed context.");
+        Assert(themed.Items.Count == 1 && themed.Items.Single().Resolve(ProjectionProperties.Text).Value == "Row 1", "Annotated virtualized row did not mount through its themed context.");
         var virtualBefore = composition.Dump();
         var initialVirtualReads = virtualReads;
         Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context => { var root = context.Element("outer-virtualized"); themed.Update([1, 2]); return root; }));
@@ -190,7 +190,7 @@ internal static class CompositionContracts
             "An unrelated virtualized region evaluated, mutated, realized, or disposed during an outer recipe.");
 
         var failingViewport = composition.Child(composition.Root, "failing-viewport");
-        _ = Controls.ScrollViewport(failingViewport, theme, "failing rows", style: Style.Empty.Set(Arrangement.Width, 10f).Set(Arrangement.Height, 10f));
+        _ = Controls.ScrollViewport(failingViewport, theme, "failing rows", style: Style.Empty.Set(LayoutProperties.Width, 10f).Set(LayoutProperties.Height, 10f));
         Element? provisional = null;
         var failing = Controls.VirtualizedList(failingViewport, theme, "failing-rows", "Rows", () => new[] { 1 }, value => value, (_, context) =>
         {

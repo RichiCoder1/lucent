@@ -59,7 +59,8 @@ internal sealed class CpuSkiaPresenter : IDisposable
         if (descriptor.Format != WindowsPresentationContract.SurfaceFormat)
             throw new InvalidOperationException("The M2 CPU presenter supports only premultiplied RGBA8888.");
         DestroyResources();
-        _surface = SKSurface.Create(new SKImageInfo(descriptor.Width, descriptor.Height, SKColorType.Rgba8888, SKAlphaType.Premul))
+        using var colorSpace = SKColorSpace.CreateSrgb();
+        _surface = SKSurface.Create(new SKImageInfo(descriptor.Width, descriptor.Height, SKColorType.Rgba8888, SKAlphaType.Premul, colorSpace))
             ?? throw new InvalidOperationException("Skia could not create the CPU raster surface.");
         _texture = SDL.CreateTexture(_renderer, SDL.PixelFormat.ABGR8888, SDL.TextureAccess.Streaming, descriptor.Width, descriptor.Height);
         if (_texture == 0) throw new InvalidOperationException($"SDL_CreateTexture: {SDL.GetError()}");

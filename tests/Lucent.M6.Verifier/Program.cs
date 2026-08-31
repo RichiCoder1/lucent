@@ -199,11 +199,11 @@ static Composition CreateVirtualizationFixture(ReactiveGraph graph, out ThemeCon
 {
     var composition = new Composition(graph, "m6-virtualization");
     var context = new ThemeContext(composition.Root.Scope, ControlThemes.Light); theme = context;
-    Controls.Column(composition.Root, context, "M6", Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 500f).Set(Arrangement.Clip, true));
+    Controls.Column(composition.Root, context, "M6", Style.Empty.Set(LayoutProperties.Width, 800f).Set(LayoutProperties.Height, 500f).Set(LayoutProperties.Clip, true));
     var rows = Enumerable.Range(1, 10_000).ToArray();
     if (rows.Length != 10_000) throw new InvalidOperationException("M6 source fixture did not contain 10,000 rows.");
     var values = composition.Root.Scope.Signal(rows, "m6.rows");
-    var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, context, "Issues", style: Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 60f));
+    var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, context, "Issues", style: Style.Empty.Set(LayoutProperties.Width, 800f).Set(LayoutProperties.Height, 60f));
     _ = Controls.VirtualizedList(viewport, context, "rows", "Issues", () => values.Value, value => value, (value, factory) =>
     {
         var row = factory.Element("row"); Controls.Selectable(row, context, "Issue " + value); return row;

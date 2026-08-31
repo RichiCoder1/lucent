@@ -379,7 +379,7 @@ internal sealed class TransitionController
 
 internal static class TransitionTypes
 {
-    internal static bool Matches(TransitionKind kind, Type type) => kind switch { TransitionKind.Color => type == typeof(uint), TransitionKind.Opacity or TransitionKind.FocusRing => type == typeof(float), TransitionKind.Transform => type == typeof(Matrix3x2), _ => true };
+    internal static bool Matches(TransitionKind kind, Type type) => kind switch { TransitionKind.Color => type == typeof(Color), TransitionKind.Opacity or TransitionKind.FocusRing => type == typeof(float), TransitionKind.Transform => type == typeof(Matrix3x2), _ => true };
 }
 internal static class VariantStates
 {

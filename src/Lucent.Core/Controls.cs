@@ -5,21 +5,22 @@ namespace Lucent.Core;
 /// <summary>Source-owned palettes for the bounded controls. Applications may layer their own tokens over either theme.</summary>
 public static class ControlThemes
 {
-    internal static readonly Token<uint> Surface = new("control-surface", 0xffffffffU);
-    internal static readonly Token<uint> Foreground = new("control-foreground", 0xff0f172aU);
-    internal static readonly Token<uint> Accent = new("control-accent", 0xff2563ebU);
-    internal static readonly Token<uint> AccentPressed = new("control-accent-pressed", 0xff1d4ed8U);
-    internal static readonly Token<uint> Selected = new("control-selected", 0xffdbeafeU);
-    internal static readonly Token<uint> Focus = new("control-focus", 0xffffff00U);
-    internal static readonly Token<uint> FocusForeground = new("control-focus-foreground", 0xff000000U);
-    internal static readonly Token<uint> Disabled = new("control-disabled", 0xff94a3b8U);
+    internal static readonly Token<Brush> Surface = new("control-surface", Color.Parse("#ffffff"));
+    internal static readonly Token<Color> SurfaceColor = new("control-surface-color", Color.Parse("#ffffff"));
+    internal static readonly Token<Color> Foreground = new("control-foreground", Color.Parse("#0f172a"));
+    internal static readonly Token<Brush> Accent = new("control-accent", Color.Parse("#2563eb"));
+    internal static readonly Token<Brush> AccentPressed = new("control-accent-pressed", Color.Parse("#1d4ed8"));
+    internal static readonly Token<Brush> Selected = new("control-selected", Color.Parse("#dbeafe"));
+    internal static readonly Token<Brush> Focus = new("control-focus", Color.Parse("#ffff00"));
+    internal static readonly Token<Color> FocusForeground = new("control-focus-foreground", Color.Parse("#000000"));
+    internal static readonly Token<Brush> Disabled = new("control-disabled", Color.Parse("#94a3b8"));
 
-    public static Theme Light { get; } = Palette("controls-light", 0xffffffffU, 0xff0f172aU, 0xff2563ebU, 0xff1d4ed8U, 0xffdbeafeU, 0xffffff00U, 0xff000000U, 0xff94a3b8U);
-    public static Theme Dark { get; } = Palette("controls-dark", 0xff111827U, 0xfff8fafcU, 0xff60a5faU, 0xff3b82f6U, 0xff1e3a5fU, 0xfffacc15U, 0xff000000U, 0xff64748bU);
-    public static Theme HighContrast { get; } = Palette("controls-high-contrast", 0xff000000U, 0xffffffffU, 0xffffffffU, 0xffffff00U, 0xff0000ffU, 0xffffff00U, 0xff000000U, 0xff808080U);
+    public static Theme Light { get; } = Palette("controls-light", Color.Parse("#ffffff"), Color.Parse("#0f172a"), Color.Parse("#2563eb"), Color.Parse("#1d4ed8"), Color.Parse("#dbeafe"), Color.Parse("#ffff00"), Color.Parse("#000000"), Color.Parse("#94a3b8"));
+    public static Theme Dark { get; } = Palette("controls-dark", Color.Parse("#111827"), Color.Parse("#f8fafc"), Color.Parse("#60a5fa"), Color.Parse("#3b82f6"), Color.Parse("#1e3a5f"), Color.Parse("#facc15"), Color.Parse("#000000"), Color.Parse("#64748b"));
+    public static Theme HighContrast { get; } = Palette("controls-high-contrast", Color.Parse("#000000"), Color.Parse("#ffffff"), Color.Parse("#ffffff"), Color.Parse("#ffff00"), Color.Parse("#0000ff"), Color.Parse("#ffff00"), Color.Parse("#000000"), Color.Parse("#808080"));
 
-    private static Theme Palette(string name, uint surface, uint foreground, uint accent, uint pressed, uint selected, uint focus, uint focusForeground, uint disabled) => new Theme(name)
-        .Set(Surface, surface).Set(Foreground, foreground).Set(Accent, accent).Set(AccentPressed, pressed).Set(Selected, selected).Set(Focus, focus).Set(FocusForeground, focusForeground).Set(Disabled, disabled);
+    private static Theme Palette(string name, Color surface, Color foreground, Color accent, Color pressed, Color selected, Color focus, Color focusForeground, Color disabled) => new Theme(name)
+        .Set(Surface, (Brush)surface).Set(SurfaceColor, surface).Set(Foreground, foreground).Set(Accent, (Brush)accent).Set(AccentPressed, (Brush)pressed).Set(Selected, (Brush)selected).Set(Focus, (Brush)focus).Set(FocusForeground, focusForeground).Set(Disabled, (Brush)disabled);
 }
 
 /// <summary>Scope-owned mutable state for a single control recipe.</summary>
@@ -58,22 +59,22 @@ public sealed class ScrollViewportState
 /// <summary>Bounded component recipes. Structure stays authored by callers; recipes configure one retained element at a time.</summary>
 public static class Controls
 {
-    private static readonly Style TextStyle = Style.Empty.Set(SceneProperties.Foreground, ControlThemes.Foreground);
-    private static readonly Style PanelStyle = Style.Empty.Set(Arrangement.Axis, LayoutAxis.Column).Set(SceneProperties.Fill, ControlThemes.Surface);
-    private static readonly Style RowStyle = Style.Empty.Set(Arrangement.Axis, LayoutAxis.Row).Set(SceneProperties.Fill, ControlThemes.Surface);
-    private static readonly Style ButtonStyle = RowStyle.Set(Arrangement.Clip, true).Set(SceneProperties.Fill, ControlThemes.Accent).Set(SceneProperties.Foreground, ControlThemes.Surface)
-        .When(VariantState.Pressed, Style.Empty.Set(SceneProperties.Fill, ControlThemes.AccentPressed))
-        .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Focus).Set(SceneProperties.Foreground, ControlThemes.FocusForeground))
-        .When(VariantState.Disabled, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Disabled));
-    private static readonly Style TextFieldStyle = RowStyle.Set(Arrangement.Clip, true).Set(SceneProperties.Fill, ControlThemes.Surface)
-        .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Focus).Set(SceneProperties.Foreground, ControlThemes.FocusForeground))
-        .When(VariantState.Disabled, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Disabled));
-    private static readonly Style SelectableStyle = RowStyle.Set(Arrangement.Clip, true)
-        .When(VariantState.Selected, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Selected))
-        .When(VariantState.Pressed, Style.Empty.Set(SceneProperties.Fill, ControlThemes.AccentPressed).Set(SceneProperties.Foreground, ControlThemes.Surface))
-        .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Focus).Set(SceneProperties.Foreground, ControlThemes.FocusForeground))
-        .When(VariantState.Selected | VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Focus).Set(SceneProperties.Foreground, ControlThemes.FocusForeground))
-        .When(VariantState.Disabled, Style.Empty.Set(SceneProperties.Fill, ControlThemes.Disabled));
+    private static readonly Style TextStyle = Style.Empty.Set(TypographyProperties.TextColor, ControlThemes.Foreground);
+    private static readonly Style PanelStyle = Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column).Set(VisualProperties.Background, ControlThemes.Surface);
+    private static readonly Style RowStyle = Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Row).Set(VisualProperties.Background, ControlThemes.Surface);
+    private static readonly Style ButtonStyle = RowStyle.Set(LayoutProperties.Clip, true).Set(VisualProperties.Background, ControlThemes.Accent).Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor)
+        .When(VariantState.Pressed, Style.Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed))
+        .When(VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, ControlThemes.Focus).Set(TypographyProperties.TextColor, ControlThemes.FocusForeground))
+        .When(VariantState.Disabled, Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled));
+    private static readonly Style TextFieldStyle = RowStyle.Set(LayoutProperties.Clip, true).Set(VisualProperties.Background, ControlThemes.Surface)
+        .When(VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, ControlThemes.Focus).Set(TypographyProperties.TextColor, ControlThemes.FocusForeground))
+        .When(VariantState.Disabled, Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled));
+    private static readonly Style SelectableStyle = RowStyle.Set(LayoutProperties.Clip, true)
+        .When(VariantState.Selected, Style.Empty.Set(VisualProperties.Background, ControlThemes.Selected))
+        .When(VariantState.Pressed, Style.Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed).Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor))
+        .When(VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, ControlThemes.Focus).Set(TypographyProperties.TextColor, ControlThemes.FocusForeground))
+        .When(VariantState.Selected | VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, ControlThemes.Focus).Set(TypographyProperties.TextColor, ControlThemes.FocusForeground))
+        .When(VariantState.Disabled, Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled));
 
     /// <summary>Creates an explicit content factory; the callback may add only children below its supplied root.</summary>
     public static Func<CompositionContext, Element> Recipe(string name, Action<CompositionContext, Element> content)
@@ -125,7 +126,7 @@ public static class Controls
         return element;
     }
 
-    public static void Text(Element element, ThemeContext theme, string text, Style? style = null) => ConfigureSemantic(element, theme, TextStyle.Set(SceneProperties.Text, Required(text, nameof(text))), style, new(SemanticRole.Text, text));
+    public static void Text(Element element, ThemeContext theme, string text, Style? style = null) => ConfigureSemantic(element, theme, TextStyle.Set(ProjectionProperties.Text, Required(text, nameof(text))), style, new(SemanticRole.Text, text));
     public static void Panel(Element element, ThemeContext theme, string name, Style? style = null) => ConfigureSemantic(element, theme, PanelStyle, style, new(SemanticRole.Group, Required(name, nameof(name))));
     public static void Row(Element element, ThemeContext theme, string name, Style? style = null) => ConfigureSemantic(element, theme, RowStyle, style, new(SemanticRole.Group, Required(name, nameof(name))));
     public static void Column(Element element, ThemeContext theme, string name, Style? style = null) => Panel(element, theme, name, style);
@@ -133,11 +134,11 @@ public static class Controls
     public static ScrollViewportState ScrollViewport(Element element, ThemeContext theme, string name, ScrollOffset offset = default, Style? style = null)
     {
         name = Required(name, nameof(name)); offset.Validate();
-        var component = PanelStyle.Set(Arrangement.Clip, true).Set(Arrangement.Scroll, offset);
+        var component = PanelStyle.Set(LayoutProperties.Clip, true).Set(LayoutProperties.Scroll, offset);
         Preflight(element, theme, component, style, new ScrollViewportBehavior(name, null!));
         var state = new ScrollViewportState(element.Scope, element.Name + ".scroll", offset);
         Configure(element, theme, component, style, new ScrollViewportBehavior(name, state));
-        Bind(element, state, value => element.UpdateControl(Arrangement.Scroll, value.Offset));
+        Bind(element, state, value => element.UpdateControl(LayoutProperties.Scroll, value.Offset));
         return state;
     }
     /// <summary>Creates a fixed-height keyed list owned by its scroll viewport. Rows outside the bounded viewport window do not remain mounted.</summary>
@@ -151,47 +152,47 @@ public static class Controls
     }
     public static void Button(Element element, ThemeContext theme, string label, Action? activate = null, Style? style = null)
     {
-        label = Required(label, nameof(label)); Configure(element, theme, ButtonStyle.Set(SceneProperties.Text, label), style, new ButtonBehavior("button", new(SemanticRole.Button, label, actions: SemanticAction.Invoke), activate));
+        label = Required(label, nameof(label)); Configure(element, theme, ButtonStyle.Set(ProjectionProperties.Text, label), style, new ButtonBehavior("button", new(SemanticRole.Button, label, actions: SemanticAction.Invoke), activate));
     }
     public static TextFieldState TextField(Element element, ThemeContext theme, string name, string value = "", Style? style = null)
     {
         name = Required(name, nameof(name)); TextFieldState.ValidateText(value);
-        var component = TextFieldStyle.Set(SceneProperties.Text, value);
+        var component = TextFieldStyle.Set(ProjectionProperties.Text, value);
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
         var state = new TextFieldState(element.Scope, element.Name + ".text", value);
         Configure(element, theme, component, style, new TextFieldBehavior(state, name));
         _ = element.Scope.Effect(() =>
         {
-            element.UpdateControl(SceneProperties.Text, state.DisplayText.Length == 0 && !state.Focused ? name : state.DisplayText);
-            element.UpdateControl(SceneProperties.TextSelectionStart, state.Focused ? state.DisplaySelectionStart : null);
-            element.UpdateControl(SceneProperties.TextSelectionEnd, state.Focused ? state.DisplaySelectionEnd : null);
-            element.UpdateControl(SceneProperties.TextCaret, state.Focused ? state.DisplayCaret : null);
+            element.UpdateControl(ProjectionProperties.Text, state.DisplayText.Length == 0 && !state.Focused ? name : state.DisplayText);
+            element.UpdateControl(ProjectionProperties.TextSelectionStart, state.Focused ? state.DisplaySelectionStart : null);
+            element.UpdateControl(ProjectionProperties.TextSelectionEnd, state.Focused ? state.DisplaySelectionEnd : null);
+            element.UpdateControl(ProjectionProperties.TextCaret, state.Focused ? state.DisplayCaret : null);
         }, element.Name + ".text-value");
         return state;
     }
     public static ControlState Selectable(Element element, ThemeContext theme, string label, Action? activate = null, Style? style = null)
     {
-        label = Required(label, nameof(label)); var component = SelectableStyle.Set(SceneProperties.Text, label); var behavior = new RowActionBehavior("selectable", new(SemanticRole.ListItem, label, actions: SemanticAction.Select)); Preflight(element, theme, component, style, behavior);
+        label = Required(label, nameof(label)); var component = SelectableStyle.Set(ProjectionProperties.Text, label); var behavior = new RowActionBehavior("selectable", new(SemanticRole.ListItem, label, actions: SemanticAction.Select)); Preflight(element, theme, component, style, behavior);
         var state = new ControlState(element.Scope, element.Name + ".selectable", label);
         Configure(element, theme, component, style, new RowActionBehavior("selectable", new(SemanticRole.ListItem, label, actions: SemanticAction.Select), activate, state));
-        Bind(element, state, value => element.UpdateControl(SceneProperties.Text, value.Label), value => new(SemanticRole.ListItem, value.Label, actions: SemanticAction.Select));
+        Bind(element, state, value => element.UpdateControl(ProjectionProperties.Text, value.Label), value => new(SemanticRole.ListItem, value.Label, actions: SemanticAction.Select));
         return state;
     }
     public static ControlState Loading(Element element, ThemeContext theme, string label = "Loading", Style? style = null)
     {
-        label = Required(label, nameof(label)); var component = TextStyle.Set(SceneProperties.Text, label); Preflight(element, theme, component, style, new SemanticBehavior(new(SemanticRole.Status, label))); var state = new ControlState(element.Scope, element.Name + ".loading", label);
-        ConfigureSemantic(element, theme, component, style, new(SemanticRole.Status, label)); Bind(element, state, value => element.UpdateControl(SceneProperties.Text, value.Label), value => new(SemanticRole.Status, value.Label)); return state;
+        label = Required(label, nameof(label)); var component = TextStyle.Set(ProjectionProperties.Text, label); Preflight(element, theme, component, style, new SemanticBehavior(new(SemanticRole.Status, label))); var state = new ControlState(element.Scope, element.Name + ".loading", label);
+        ConfigureSemantic(element, theme, component, style, new(SemanticRole.Status, label)); Bind(element, state, value => element.UpdateControl(ProjectionProperties.Text, value.Label), value => new(SemanticRole.Status, value.Label)); return state;
     }
     public static ControlState Progress(Element element, ThemeContext theme, string label, float value, Style? style = null)
     {
-        ControlState.ValidateProgress(value); label = Required(label, nameof(label)); var text = ProgressText(label, value); var component = TextStyle.Set(SceneProperties.Text, text); Preflight(element, theme, component, style, new SemanticBehavior(new(SemanticRole.Status, label))); var state = new ControlState(element.Scope, element.Name + ".progress", label, progress: value);
+        ControlState.ValidateProgress(value); label = Required(label, nameof(label)); var text = ProgressText(label, value); var component = TextStyle.Set(ProjectionProperties.Text, text); Preflight(element, theme, component, style, new SemanticBehavior(new(SemanticRole.Status, label))); var state = new ControlState(element.Scope, element.Name + ".progress", label, progress: value);
         ConfigureSemantic(element, theme, component, style, new(SemanticRole.Status, label, value: Percent(value)));
-        Bind(element, state, current => element.UpdateControl(SceneProperties.Text, ProgressText(current.Label, current.Progress)), current => new(SemanticRole.Status, current.Label, value: Percent(current.Progress))); return state;
+        Bind(element, state, current => element.UpdateControl(ProjectionProperties.Text, ProgressText(current.Label, current.Progress)), current => new(SemanticRole.Status, current.Label, value: Percent(current.Progress))); return state;
     }
     public static ControlState Error(Element element, ThemeContext theme, string message, Style? style = null)
     {
-        message = Required(message, nameof(message)); var component = TextStyle.Set(SceneProperties.Text, message); Preflight(element, theme, component, style, new SemanticBehavior(new(SemanticRole.Status, message))); var state = new ControlState(element.Scope, element.Name + ".error", message);
-        ConfigureSemantic(element, theme, component, style, new(SemanticRole.Status, message)); Bind(element, state, value => element.UpdateControl(SceneProperties.Text, value.Label), value => new(SemanticRole.Status, value.Label)); return state;
+        message = Required(message, nameof(message)); var component = TextStyle.Set(ProjectionProperties.Text, message); Preflight(element, theme, component, style, new SemanticBehavior(new(SemanticRole.Status, message))); var state = new ControlState(element.Scope, element.Name + ".error", message);
+        ConfigureSemantic(element, theme, component, style, new(SemanticRole.Status, message)); Bind(element, state, value => element.UpdateControl(ProjectionProperties.Text, value.Label), value => new(SemanticRole.Status, value.Label)); return state;
     }
 
     private static void Bind(Element element, ControlState state, Action<ControlState> visual, Func<ControlState, SemanticDeclaration> semantics)

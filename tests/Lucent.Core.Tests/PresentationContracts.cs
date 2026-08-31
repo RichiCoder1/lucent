@@ -19,6 +19,7 @@ internal static class PresentationContracts
         try
         {
             StylesTransitionsAndDependencies();
+            TypographyInheritanceScale();
             BindingsRespectVariantsAndControlAuthority();
             BindingRowScaleLifecycle();
             BehaviorIsolationAndRollback();
@@ -102,6 +103,10 @@ internal static class PresentationContracts
         Expect<ArgumentException>(() => transitions.Present(theme, transitions: [Transition.For(Opacity, 1), Transition.For(Opacity, 2)]));
         Assert(graph.Dump() == beforeTransitions, "Duplicate transition validation created graph nodes.");
         Expect<ArgumentException>(() => new Property<int>("bad-transition", 0, transition: (TransitionKind)99));
+        Assert(TypographyProperties.TextColor.Transition == TransitionKind.Color && VisualProperties.Background.Transition == TransitionKind.None, "Shipped color/background transition eligibility changed.");
+        _ = new Property<Color>("valid-color-transition", default, transition: TransitionKind.Color);
+        Expect<ArgumentException>(() => new Property<uint>("legacy-color-transition", 0, transition: TransitionKind.Color));
+        Expect<ArgumentException>(() => new Property<Brush>("brush-color-transition", Brush.Solid(default), transition: TransitionKind.Color));
         Expect<ArgumentException>(() => new SemanticDeclaration((SemanticRole)99, "bad"));
         Expect<ArgumentException>(() => new SemanticDeclaration(SemanticRole.Text, "bad", actions: (SemanticAction)32));
     }
@@ -193,13 +198,44 @@ internal static class PresentationContracts
         Assert(failed.Resolve(Value) is { Value: 11, Winner: { Source: "author", Ordinal: 1 } }, "Later failed binding discarded its prior successful value.");
 
         var controlled = composition.Child(composition.Root, "controlled");
-        var state = Controls.Loading(controlled, theme, "Loading", Style.Empty.Bind(SceneProperties.Text, () => "bound"));
+        var state = Controls.Loading(controlled, theme, "Loading", Style.Empty.Bind(ProjectionProperties.Text, () => "bound"));
         graph.Drain(); state.Label = "Ready"; graph.Drain();
-        var resolved = controlled.Resolve(SceneProperties.Text);
+        var resolved = controlled.Resolve(ProjectionProperties.Text);
         Assert(resolved.Value == "Ready" && resolved.Winner.Source == "control" && resolved.Overridden.Any(item => item.Source == "author"), "Control state did not override the bound author candidate with retained provenance.");
         var lateReads = reads; bound.Dispose(); source.Value = 5; graph.Drain();
         Assert(reads == lateReads, "Disposed binding accepted a late expression callback.");
         var released = ReleasedBinding(); ForceGc(); Assert(!released.Payload.IsAlive, "Disposed binding retained its callback payload."); GC.KeepAlive(released.Root);
+    }
+
+    private static void TypographyInheritanceScale()
+    {
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "typography-scale"); var theme = new ThemeContext(composition.Root.Scope, new Theme("typography-scale"));
+        var color = Color.Parse("#123456");
+        Assert(composition.Root.Resolve(TypographyProperties.TextColor).Value == Color.FromRgb(0, 0, 0) && composition.Root.Resolve(TypographyProperties.FontFamily).Value == "Segoe UI" &&
+            composition.Root.Resolve(TypographyProperties.FontSize).Value == 14f && composition.Root.Resolve(TypographyProperties.Language).Value == "en" && composition.Root.Resolve(TypographyProperties.Direction).Value == TextDirection.LeftToRight,
+            "Typography defaults changed.");
+        composition.Root.Present(theme, author: Style.Empty.Set(TypographyProperties.TextColor, color).Set(TypographyProperties.FontFamily, "Cascadia Mono").Set(TypographyProperties.FontSize, 15f).Set(TypographyProperties.Language, "fr").Set(TypographyProperties.Direction, TextDirection.RightToLeft));
+        var local = composition.Child(composition.Root, "typography-local"); local.Present(theme, author: Style.Empty.Set(TypographyProperties.FontSize, 20f));
+        Assert(local.Resolve(TypographyProperties.TextColor).Value == color && local.Resolve(TypographyProperties.FontFamily).Value == "Cascadia Mono" && local.Resolve(TypographyProperties.FontSize).Value == 20f &&
+            local.Resolve(TypographyProperties.Language).Value == "fr" && local.Resolve(TypographyProperties.Direction).Value == TextDirection.RightToLeft, "Typography inheritance or local override changed.");
+        var localDump = composition.Dump();
+        var localStart = localDump.IndexOf("name=\"typography-local\"", StringComparison.Ordinal); var localEnd = localDump.IndexOf("element ", localStart + 1, StringComparison.Ordinal);
+        var localSegment = localDump[localStart..(localEnd < 0 ? localDump.Length : localEnd)];
+        Assert(new[] { "typography-text-color", "typography-font-family", "typography-language", "typography-direction" }.All(name => localSegment.Contains($"property name=\"{name}\" winner=\"inherited\"", StringComparison.Ordinal)) &&
+            localSegment.Contains("property name=\"typography-font-size\" winner=\"author\"", StringComparison.Ordinal), "Typography dump omitted inherited or local provenance.");
+        var rows = new Element[10_000];
+        for (var index = 0; index < rows.Length; index++) rows[index] = composition.Child(composition.Root, "typography-row-" + index);
+        graph.Drain();
+        var allocatedBefore = GC.GetAllocatedBytesForCurrentThread(); var stopwatch = System.Diagnostics.Stopwatch.StartNew(); var checksum = 0d;
+        foreach (var row in rows)
+        {
+            checksum += row.Resolve(TypographyProperties.TextColor).Value.R;
+            checksum += row.Resolve(TypographyProperties.FontSize).Value;
+            checksum += row.Resolve(TypographyProperties.FontFamily).Value.Length + row.Resolve(TypographyProperties.Language).Value.Length + (int)row.Resolve(TypographyProperties.Direction).Value;
+        }
+        stopwatch.Stop(); var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        Assert(checksum == rows.Length * (0x12 + 15 + "Cascadia Mono".Length + "fr".Length + (int)TextDirection.RightToLeft), "Inherited typography changed across the 10k-row corpus.");
+        Console.WriteLine($"Lucent.Core typography inheritance: rows={rows.Length} elapsedMs={stopwatch.Elapsed.TotalMilliseconds:F3} allocatedBytes={allocated}");
     }
 
     private static void BindingRowScaleLifecycle()

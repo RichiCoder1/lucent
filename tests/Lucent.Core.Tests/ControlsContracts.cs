@@ -28,7 +28,7 @@ internal static class ControlsContracts
     private static void SemanticCommandsFailClosed()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "semantic-commands"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 60f));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 60f));
         var calls = 0; var button = composition.Child(composition.Root, "button"); Controls.Button(button, theme, "Button", () => calls++);
         var field = composition.Child(composition.Root, "field"); Controls.TextField(field, theme, "Field");
         var list = composition.Child(composition.Root, "list"); Controls.List(list, theme, "Choices");
@@ -60,18 +60,18 @@ internal static class ControlsContracts
         var graph = new ReactiveGraph();
         var composition = new Composition(graph, "controls");
         var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        Controls.Column(composition.Root, theme, "Controls", Style.Empty.Set(Arrangement.Clip, true));
-        var text = composition.Child(composition.Root, "text"); Controls.Text(text, theme, "Text", Style.Empty.Set(Arrangement.Height, 10f));
-        var panel = composition.Child(composition.Root, "panel"); Controls.Panel(panel, theme, "Panel", Style.Empty.Set(Arrangement.Height, 10f));
-        var row = composition.Child(composition.Root, "row"); Controls.Row(row, theme, "Row", Style.Empty.Set(Arrangement.Height, 10f));
+        Controls.Column(composition.Root, theme, "Controls", Style.Empty.Set(LayoutProperties.Clip, true));
+        var text = composition.Child(composition.Root, "text"); Controls.Text(text, theme, "Text", Style.Empty.Set(LayoutProperties.Height, 10f));
+        var panel = composition.Child(composition.Root, "panel"); Controls.Panel(panel, theme, "Panel", Style.Empty.Set(LayoutProperties.Height, 10f));
+        var row = composition.Child(composition.Root, "row"); Controls.Row(row, theme, "Row", Style.Empty.Set(LayoutProperties.Height, 10f));
         var calls = new Calls();
-        var button = composition.Child(composition.Root, "button"); Controls.Button(button, theme, "Button", () => calls.Button++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var selectable = composition.Child(composition.Root, "selectable"); Controls.Selectable(selectable, theme, "Selectable", () => calls.Selection++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var loading = composition.Child(composition.Root, "loading"); Controls.Loading(loading, theme, "Loading", Style.Empty.Set(Arrangement.Height, 10f));
-        var progress = composition.Child(composition.Root, "progress"); Controls.Progress(progress, theme, "Progress", .5f, Style.Empty.Set(Arrangement.Height, 10f));
-        var error = composition.Child(composition.Root, "error"); Controls.Error(error, theme, "Failed", Style.Empty.Set(Arrangement.Axis, LayoutAxis.Column).Set(Arrangement.Height, 30f));
-        var retry = composition.Child(error, "retry"); Controls.Button(retry, theme, "Retry", () => calls.Retry++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
+        var button = composition.Child(composition.Root, "button"); Controls.Button(button, theme, "Button", () => calls.Button++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var selectable = composition.Child(composition.Root, "selectable"); Controls.Selectable(selectable, theme, "Selectable", () => calls.Selection++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var loading = composition.Child(composition.Root, "loading"); Controls.Loading(loading, theme, "Loading", Style.Empty.Set(LayoutProperties.Height, 10f));
+        var progress = composition.Child(composition.Root, "progress"); Controls.Progress(progress, theme, "Progress", .5f, Style.Empty.Set(LayoutProperties.Height, 10f));
+        var error = composition.Child(composition.Root, "error"); Controls.Error(error, theme, "Failed", Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column).Set(LayoutProperties.Height, 30f));
+        var retry = composition.Child(error, "retry"); Controls.Button(retry, theme, "Retry", () => calls.Retry++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
         var conditional = composition.When(composition.Root, "recipe", () => true, Controls.Recipe("recipe-child", (context, element) => Controls.Text(element, theme, "Recipe")));
         graph.Drain();
         Assert(conditional.Active is not null, "Explicit recipe did not create its supplied root.");
@@ -102,9 +102,9 @@ internal static class ControlsContracts
     {
         var status = Flatten(fixture.Composition.SemanticSnapshot()!).Where(node => node.Role == SemanticRole.Status).ToArray();
         Assert(status.Length == 3 && status.Single(node => node.Name == "Progress").Value == "50%", "Loading/progress/error status semantics are incomplete.");
-        var light = fixture.Button.Resolve(SceneProperties.Fill).Value;
+        var light = fixture.Button.Resolve(VisualProperties.Background).Value;
         fixture.Theme.Theme = ControlThemes.Dark; fixture.Graph.Drain();
-        Assert(light != fixture.Button.Resolve(SceneProperties.Fill).Value, "Source-owned dark control theme did not invalidate button style.");
+        Assert(light != fixture.Button.Resolve(VisualProperties.Background).Value, "Source-owned dark control theme did not invalidate button style.");
         var identity = Flatten(fixture.Composition.SemanticSnapshot()!).Single(node => node.Name == "Retry").Identity;
         fixture.Retry.Dispose();
         Assert(!fixture.Composition.IsCurrent(identity), "Disposed control semantic identity remained current.");
@@ -116,9 +116,9 @@ internal static class ControlsContracts
     private static void ArmedPointerAndPaletteRegressions()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "armed"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.HighContrast);
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 60f).Set(Arrangement.Clip, true));
-        var calls = 0; var button = composition.Child(composition.Root, "button"); Controls.Button(button, theme, "Button", () => calls++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var row = composition.Child(composition.Root, "row"); var selected = Controls.Selectable(row, theme, "Row", () => calls++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f)); graph.Drain();
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 60f).Set(LayoutProperties.Clip, true));
+        var calls = 0; var button = composition.Child(composition.Root, "button"); Controls.Button(button, theme, "Button", () => calls++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var row = composition.Child(composition.Root, "row"); var selected = Controls.Selectable(row, theme, "Row", () => calls++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f)); graph.Drain();
         var router = composition.Input; var scene = SceneLayout.Project(composition, new(100, 60, 1), new EmptyShaper()); Assert(router.SetScene(scene), "Armed-pointer scene rejected.");
         var expectedCalls = 0;
         foreach (var element in new[] { button, row })
@@ -139,25 +139,25 @@ internal static class ControlsContracts
             expectedCalls++;
         }
         Assert(calls == 4 && selected.Selected, "Armed primary gestures did not activate both controls exactly once.");
-        row.SetVariants(VariantState.FocusVisible); Assert(row.Resolve(SceneProperties.Fill).Value == 0xffffff00U && row.Resolve(SceneProperties.Foreground).Value == 0xff000000U, "High-contrast focus channels collide.");
-        selected.Selected = true; graph.Drain(); Assert(row.Resolve(SceneProperties.Fill).Value == 0xffffff00U, "Focus should remain distinct and visible over selection.");
-        row.SetVariants(VariantState.None); Assert(row.Resolve(SceneProperties.Fill).Value == 0xff0000ffU, "High-contrast selection is indistinguishable from its surface.");
-        theme.Theme = ControlThemes.Dark; Assert(row.Resolve(SceneProperties.Fill).Value == 0xff1e3a5fU, "Dark selection token did not resolve deterministically.");
-        var overrideButton = composition.Child(composition.Root, "override"); Controls.Button(overrideButton, theme, "Override", style: Style.Empty.When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, 0xff00ff00U)));
-        overrideButton.SetVariants(VariantState.FocusVisible); Assert(overrideButton.Resolve(SceneProperties.Fill).Value == 0xff00ff00U, "Typed author focus style did not override the source palette.");
+        row.SetVariants(VariantState.FocusVisible); Assert(row.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#ffff00") && row.Resolve(TypographyProperties.TextColor).Value == Color.Parse("#000000"), "High-contrast focus channels collide.");
+        selected.Selected = true; graph.Drain(); Assert(row.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#ffff00"), "Focus should remain distinct and visible over selection.");
+        row.SetVariants(VariantState.None); Assert(row.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#0000ff"), "High-contrast selection is indistinguishable from its surface.");
+        theme.Theme = ControlThemes.Dark; Assert(row.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#1e3a5f"), "Dark selection token did not resolve deterministically.");
+        var overrideButton = composition.Child(composition.Root, "override"); Controls.Button(overrideButton, theme, "Override", style: Style.Empty.When(VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, Color.Parse("#00ff00"))));
+        overrideButton.SetVariants(VariantState.FocusVisible); Assert(overrideButton.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#00ff00"), "Typed author focus style did not override the source palette.");
     }
 
     private static void CaptureContinuityAcrossReprojection()
     {
-        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "capture-continuity"); var enabled = new Token<bool>("capture-enabled", true); var visible = new Token<bool>("capture-visible", true); var paint = new Token<uint>("capture-paint", 0xff000000U); var refresh = composition.Root.Scope.Signal(false, "capture-refresh"); var baseTheme = ControlThemes.Light.Set(enabled, true).Set(visible, true); var theme = new ThemeContext(composition.Root.Scope, baseTheme.Set(paint, 0xff000000U));
-        _ = composition.Root.Scope.Effect(() => theme.Theme = baseTheme.Set(paint, refresh.Value ? 0xffffffffU : 0xff000000U), "capture-refresh-effect");
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 60f).Set(Arrangement.Clip, true).Set(SceneProperties.Fill, paint));
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "capture-continuity"); var enabled = new Token<bool>("capture-enabled", true); var visible = new Token<bool>("capture-visible", true); var paint = new Token<Brush>("capture-paint", Color.Parse("#000000")); var refresh = composition.Root.Scope.Signal(false, "capture-refresh"); var baseTheme = ControlThemes.Light.Set(enabled, true).Set(visible, true); var theme = new ThemeContext(composition.Root.Scope, baseTheme.Set(paint, Color.Parse("#000000")));
+        _ = composition.Root.Scope.Effect(() => theme.Theme = baseTheme.Set(paint, refresh.Value ? Color.Parse("#ffffff") : Color.Parse("#000000")), "capture-refresh-effect");
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 60f).Set(LayoutProperties.Clip, true).Set(VisualProperties.Background, paint));
         var rows = graph.Signal(new[] { 0, 1 }, "capture-rows"); var calls = 0;
         var region = composition.ForEach(composition.Root, "rows", () => rows.Value, value => value, (value, context) =>
         {
             var row = context.Element("row");
-            if (value == 0) Controls.Button(row, theme, "Button", () => calls++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f).Set(InputProperties.Enabled, enabled));
-            else Controls.Selectable(row, theme, "Selectable", () => calls++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f).Set(InputProperties.Visible, visible));
+            if (value == 0) Controls.Button(row, theme, "Button", () => calls++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f).Set(InputProperties.Enabled, enabled));
+            else Controls.Selectable(row, theme, "Selectable", () => calls++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f).Set(InputProperties.Visible, visible));
             return row;
         });
         graph.Drain(); var router = composition.Input;
@@ -197,20 +197,20 @@ internal static class ControlsContracts
     private static void MutableStateScrollAndRollback()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "mutable"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 120f).Set(Arrangement.Clip, true));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 120f).Set(LayoutProperties.Clip, true));
         var loading = composition.Child(composition.Root, "loading"); var loadingState = Controls.Loading(loading, theme, "Loading");
         var progress = composition.Child(composition.Root, "progress"); var progressState = Controls.Progress(progress, theme, "Progress", .25f);
         var error = composition.Child(composition.Root, "error"); var errorState = Controls.Error(error, theme, "Error");
-        var viewport = composition.Child(composition.Root, "viewport"); var scroll = Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var content = composition.Child(viewport, "content"); Controls.Button(content, theme, "Content", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f)); graph.Drain();
+        var viewport = composition.Child(composition.Root, "viewport"); var scroll = Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var content = composition.Child(viewport, "content"); Controls.Button(content, theme, "Content", style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f)); graph.Drain();
         var before = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Progress").Identity;
         loadingState.Label = "Ready"; progressState.Label = "Uploading"; progressState.Progress = .75f; errorState.Label = "Retry"; graph.Drain();
         var status = Flatten(composition.SemanticSnapshot()!).Where(node => node.Role == SemanticRole.Status).ToArray();
-        Assert(status.Single(node => node.Name == "Uploading").Value == "75%" && loading.Resolve(SceneProperties.Text).Value == "Ready" && !composition.IsCurrent(before), "Mutable control state did not synchronize visual/semantic freshness.");
+        Assert(status.Single(node => node.Name == "Uploading").Value == "75%" && loading.Resolve(ProjectionProperties.Text).Value == "Ready" && !composition.IsCurrent(before), "Mutable control state did not synchronize visual/semantic freshness.");
         var router = composition.Input; var first = SceneLayout.Project(composition, new(100, 120, 1), new EmptyShaper()); Assert(router.SetScene(first) && router.MoveFocus(FocusTraversalDirection.Next), "Scroll test scene/focus rejected.");
         var contentBefore = first.Boxes.Single(box => box.Identity.ElementId == content.Id).Bounds.Y;
         router.DispatchKey(new(KeyCommandKind.Down, Key.Down)); graph.Drain();
-        Assert(scroll.Offset.Y == 40 && viewport.Resolve(Arrangement.Scroll).Value.Y == 40, "Scroll key did not update bounded arrangement state.");
+        Assert(scroll.Offset.Y == 40 && viewport.Resolve(LayoutProperties.Scroll).Value.Y == 40, "Scroll key did not update bounded arrangement state.");
         var second = SceneLayout.Project(composition, new(100, 120, 1), new EmptyShaper()); Assert(second.Boxes.Single(box => box.Identity.ElementId == content.Id).Bounds.Y == contentBefore - 40 && composition.Dump() == composition.Dump(), "Scroll projection or diagnostic dump is not deterministic.");
         Assert(router.SetScene(second), "Scrolled scene rejected."); router.DispatchKey(new(KeyCommandKind.Down, Key.End)); graph.Drain(); Assert(scroll.Offset.Y == 80, "Scroll end did not clamp to content bounds.");
         var stale = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "Viewport").Identity; viewport.Dispose(); Assert(!composition.IsCurrent(stale), "Disposed viewport semantic identity remained current."); Expect<ObjectDisposedException>(() => scroll.Offset = default);
@@ -223,7 +223,7 @@ internal static class ControlsContracts
     private static void PresentationPreflightAndControlAuthority()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "control-preflight"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f));
         var duplicate = composition.Child(composition.Root, "duplicate"); var type = composition.Child(composition.Root, "type");
         var progress = composition.Child(composition.Root, "progress-conflict"); progress.AttachBehaviors(new ConflictBehavior());
         var error = composition.Child(composition.Root, "error-conflict"); error.AttachBehaviors(new ConflictBehavior());
@@ -232,8 +232,8 @@ internal static class ControlsContracts
         var disposedSelectable = composition.Child(composition.Root, "disposed-selectable"); var disposedLoading = composition.Child(composition.Root, "disposed-loading"); var disposedProgress = composition.Child(composition.Root, "disposed-progress"); var disposedError = composition.Child(composition.Root, "disposed-error"); var disposedViewport = composition.Child(composition.Root, "disposed-viewport");
         graph.Drain(); var router = composition.Input; Assert(router.SetScene(SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())), "Preflight baseline scene rejected.");
         var graphDump = graph.Dump(); var compositionDump = composition.Dump(); var semantic = SemanticSummary(composition.SemanticSnapshot()); var input = router.Dump();
-        var duplicateText = Style.Empty.Set(new Property<string?>("scene-text", null), "author");
-        var typeText = Style.Empty.Set(new Property<int>("scene-text", 0), 1);
+        var duplicateText = Style.Empty.Set(new Property<string?>(ProjectionProperties.Text.Name, null), "author");
+        var typeText = Style.Empty.Set(new Property<int>(ProjectionProperties.Text.Name, 0), 1);
         foreach (var attempt in new Action[]
         {
             () => Controls.Selectable(duplicate, theme, "Duplicate", style: duplicateText),
@@ -259,13 +259,13 @@ internal static class ControlsContracts
                 "Disposed theme setup leaked graph, presentation, semantic, or input state.");
         }
 
-        var loading = composition.Child(composition.Root, "author-loading"); var loadingState = Controls.Loading(loading, theme, "Loading", Style.Empty.Set(SceneProperties.Text, "author-text").Set(Arrangement.Height, 10f));
-        var scroll = composition.Child(composition.Root, "author-scroll"); var scrollState = Controls.ScrollViewport(scroll, theme, "Scroll", style: Style.Empty.Set(Arrangement.Scroll, new ScrollOffset(99, 99)).Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var content = composition.Child(scroll, "author-content"); Controls.Panel(content, theme, "content", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f));
+        var loading = composition.Child(composition.Root, "author-loading"); var loadingState = Controls.Loading(loading, theme, "Loading", Style.Empty.Set(ProjectionProperties.Text, "author-text").Set(LayoutProperties.Height, 10f));
+        var scroll = composition.Child(composition.Root, "author-scroll"); var scrollState = Controls.ScrollViewport(scroll, theme, "Scroll", style: Style.Empty.Set(LayoutProperties.Scroll, new ScrollOffset(99, 99)).Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var content = composition.Child(scroll, "author-content"); Controls.Panel(content, theme, "content", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f));
         graph.Drain(); loadingState.Label = "Ready"; scrollState.Offset = new(0, 40); graph.Drain();
         var scene = SceneLayout.Project(composition, new(100, 180, 1), new EmptyShaper());
         var status = Flatten(composition.SemanticSnapshot()!).Single(node => node.Role == SemanticRole.Status && node.Name == "Ready");
-        Assert(loading.Resolve(SceneProperties.Text).Value == status.Name && loading.Resolve(SceneProperties.Text).Winner.Source == "control" && loading.Resolve(Arrangement.Height) is { Value: 10f, Winner.Source: "author" } && scroll.Resolve(Arrangement.Scroll).Value == scrollState.Offset && scroll.Resolve(Arrangement.Scroll).Winner.Source == "control" &&
+        Assert(loading.Resolve(ProjectionProperties.Text).Value == status.Name && loading.Resolve(ProjectionProperties.Text).Winner.Source == "control" && loading.Resolve(LayoutProperties.Height) is { Value: 10f, Winner.Source: "author" } && scroll.Resolve(LayoutProperties.Scroll).Value == scrollState.Offset && scroll.Resolve(LayoutProperties.Scroll).Winner.Source == "control" &&
             scene.Boxes.Single(box => box.Identity.ElementId == content.Id).Bounds.Y < scene.Boxes.Single(box => box.Identity.ElementId == scroll.Id).Bounds.Y && composition.Dump().Contains("winner=\"control\"", StringComparison.Ordinal),
             "Author Text/Scroll assignments split control visuals, dump provenance, or semantics from control state.");
     }
@@ -273,9 +273,9 @@ internal static class ControlsContracts
     private static void ViewportFocusAndSceneInstallation()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "viewport-focus"); var height = new Token<float?>("content-height", 100f); var viewportHeight = new Token<float?>("viewport-height", 20f); var theme = new ThemeContext(composition.Root.Scope, new Theme("viewport-focus").Set(height, 100f).Set(viewportHeight, 20f));
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var viewport = composition.Child(composition.Root, "viewport"); var state = Controls.ScrollViewport(viewport, theme, "Viewport", new(0, 100), Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, viewportHeight));
-        var content = composition.Child(viewport, "content"); Controls.Panel(content, theme, "Content", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, height));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var viewport = composition.Child(composition.Root, "viewport"); var state = Controls.ScrollViewport(viewport, theme, "Viewport", new(0, 100), Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, viewportHeight));
+        var content = composition.Child(viewport, "content"); Controls.Panel(content, theme, "Content", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, height));
         graph.Drain(); var router = composition.Input; var initial = SceneLayout.Project(composition, new(100, 20, 1), new EmptyShaper());
         Assert(!router.SetScene(initial) && state.Offset.Y == 80 && router.DispatchPointer(new(PointerCommandKind.Move, 30, 0, 0)).Rejection == InputRejection.NoScene,
             "Out-of-range initial scroll installed an immediately stale scene.");
@@ -294,7 +294,7 @@ internal static class ControlsContracts
         theme.Theme = theme.Theme.Set(height, 100f).Set(viewportHeight, 10f); graph.Drain();
         Assert(router.SetScene(SceneLayout.Project(composition, new(100, 20, 1), new EmptyShaper())) && router.DispatchPointer(new(PointerCommandKind.Move, 31, 0, 0)).Rejection != InputRejection.StaleScene,
             "Viewport shrink installed a stale retained scene.");
-        var focusable = composition.Child(viewport, "focusable"); Controls.Button(focusable, theme, "Focusable", style: Style.Empty.Set(Arrangement.Height, 10f)); graph.Drain();
+        var focusable = composition.Child(viewport, "focusable"); Controls.Button(focusable, theme, "Focusable", style: Style.Empty.Set(LayoutProperties.Height, 10f)); graph.Drain();
         Assert(router.SetScene(SceneLayout.Project(composition, new(100, 20, 1), new EmptyShaper())) && router.MoveFocus(FocusTraversalDirection.Next) && router.FocusedElement?.ElementId == focusable.Id,
             "Viewport displaced its focusable descendant from deterministic traversal order.");
     }
@@ -305,9 +305,9 @@ internal static class ControlsContracts
         var contentWidth = new Token<float?>("content-width", 100f); var contentHeight = new Token<float?>("content-height", 100f);
         var viewportWidth = new Token<float?>("viewport-width", 20f); var viewportHeight = new Token<float?>("viewport-height", 20f);
         var theme = new ThemeContext(composition.Root.Scope, new Theme("installed-scroll").Set(contentWidth, 100f).Set(contentHeight, 100f).Set(viewportWidth, 20f).Set(viewportHeight, 20f));
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 20f).Set(Arrangement.Height, 20f).Set(Arrangement.Clip, true));
-        var viewport = composition.Child(composition.Root, "viewport"); var state = Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(Arrangement.Width, viewportWidth).Set(Arrangement.Height, viewportHeight));
-        var content = composition.Child(viewport, "content"); Controls.Panel(content, theme, "Content", Style.Empty.Set(Arrangement.Width, contentWidth).Set(Arrangement.Height, contentHeight));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Clip, true));
+        var viewport = composition.Child(composition.Root, "viewport"); var state = Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(LayoutProperties.Width, viewportWidth).Set(LayoutProperties.Height, viewportHeight));
+        var content = composition.Child(viewport, "content"); Controls.Panel(content, theme, "Content", Style.Empty.Set(LayoutProperties.Width, contentWidth).Set(LayoutProperties.Height, contentHeight));
         graph.Drain(); var router = composition.Input; Assert(router.SetScene(SceneLayout.Project(composition, new(20, 20, 1), new EmptyShaper())) && router.MoveFocus(FocusTraversalDirection.Next), "Installed-scroll baseline was rejected.");
         Assert(!router.DispatchKey(new(KeyCommandKind.Down, Key.Left)).Handled && !router.DispatchKey(new(KeyCommandKind.Down, Key.Up)).Handled && !router.DispatchKey(new(KeyCommandKind.Down, Key.Home)).Handled && state.Offset == default,
             "Start-boundary Left, Up, or Home threw or changed the offset.");
@@ -327,13 +327,13 @@ internal static class ControlsContracts
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "visual-rejection");
         var otherEnabled = new Token<bool>("other-enabled", true); var theme = new ThemeContext(composition.Root.Scope, new Theme("visual-rejection").Set(otherEnabled, true));
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 40f).Set(Arrangement.Clip, true));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 40f).Set(LayoutProperties.Clip, true));
         var rows = graph.Signal(new[] { 0, 1 }, "visual-rows"); var activations = 0;
         var region = composition.ForEach(composition.Root, "rows", () => rows.Value, value => value, (value, context) =>
         {
             var row = context.Element("row");
-            if (value == 0) Controls.Button(row, theme, "Button", () => activations++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-            else Controls.Panel(row, theme, "Other", Style.Empty.Set(InputProperties.Enabled, otherEnabled).Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
+            if (value == 0) Controls.Button(row, theme, "Button", () => activations++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+            else Controls.Panel(row, theme, "Other", Style.Empty.Set(InputProperties.Enabled, otherEnabled).Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
             return row;
         });
         RetainedScene Install()

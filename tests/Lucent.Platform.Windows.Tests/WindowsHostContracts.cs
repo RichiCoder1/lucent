@@ -19,10 +19,10 @@ internal static class WindowsHostContracts
     var graph = new ReactiveGraph();
     using var composition = new Composition(graph, "windows-input");
     var theme = new ThemeContext(composition.Root.Scope, new Theme("windows-input"));
-    composition.Root.Present(theme, author: Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 40f).Set(Arrangement.Clip, true));
+    composition.Root.Present(theme, author: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 40f).Set(LayoutProperties.Clip, true));
     var child = composition.Child(composition.Root, "target");
     var activations = 0;
-    child.Present(theme, author: Style.Empty.Set(Arrangement.Width, 20f).Set(Arrangement.Height, 20f).Set(SceneProperties.Fill, 0xffffffffU));
+    child.Present(theme, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(VisualProperties.Background, Color.Parse("#ffffff")));
     child.AttachBehaviors(new RowActionBehavior("target-action", new(SemanticRole.Button, "target", actions: SemanticAction.Invoke), () => activations++));
     using var renderer = new SkiaSceneRenderer();
     var router = composition.Input;
@@ -45,7 +45,7 @@ internal static class WindowsHostContracts
     Assert(!adapter.Dispatch(new SDL.Event { Key = new() { Type = SDL.EventType.KeyDown, Key = SDL.Keycode.Tab, Down = true } }), "Disposed adapter accepted a stale callback.");
 
     var textGraph = new ReactiveGraph(); using var textComposition = new Composition(textGraph, "windows-text-input"); var textTheme = new ThemeContext(textComposition.Root.Scope, ControlThemes.Light);
-    Controls.Panel(textComposition.Root, textTheme, "root", Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f)); var textField = textComposition.Child(textComposition.Root, "field"); Controls.TextField(textField, textTheme, "Field", "a", Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f));
+    Controls.Panel(textComposition.Root, textTheme, "root", Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f)); var textField = textComposition.Child(textComposition.Root, "field"); Controls.TextField(textField, textTheme, "Field", "a", Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f));
     var textRouter = textComposition.Input; Assert(textRouter.SetScene(SceneLayout.Project(textComposition, new(40, 20, 1), renderer)) && textRouter.MoveFocus(FocusTraversalDirection.Next), "Text adapter field did not focus."); textComposition.Flush(); Assert(textRouter.SetScene(SceneLayout.Project(textComposition, new(40, 20, 1), renderer)), "Focused text field scene did not converge.");
     var starts = 0; var stops = 0; SDL.Rect? area = null; var active = false;
     using (var textAdapter = new WindowsInputAdapter(textComposition, 1, textInput: new TextInputTransport(_ => active, _ => { starts++; active = true; return true; }, _ => { stops++; active = false; return true; }, (_, value, _) => { area = value; return true; })))
@@ -100,10 +100,10 @@ internal static class WindowsHostContracts
     {
         using var renderer = new SkiaSceneRenderer();
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "windows-input-drain"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f).Set(Arrangement.Clip, true));
-        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var content = composition.Child(viewport, "content"); Controls.Panel(content, theme, "Content", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f));
-        var selectable = composition.Child(composition.Root, "selectable"); Controls.Selectable(selectable, theme, "Selectable", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f).When(VariantState.Selected | VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, 0xff00ff00U)));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f).Set(LayoutProperties.Clip, true));
+        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, theme, "Viewport", style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var content = composition.Child(viewport, "content"); Controls.Panel(content, theme, "Content", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f));
+        var selectable = composition.Child(composition.Root, "selectable"); Controls.Selectable(selectable, theme, "Selectable", style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f).When(VariantState.Selected | VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, Color.Parse("#00ff00"))));
         var router = composition.Input; var first = WindowsBootstrap.ProjectAndInstall(composition, new(100, 100, 1), renderer);
         Assert(router.DispatchKey(new(KeyCommandKind.Down, Key.Tab)).Handled, "Input-install baseline did not focus the scroll viewport.");
         var before = first.Boxes.Single(box => box.Identity.ElementId == content.Id).Bounds.Y;
@@ -113,13 +113,13 @@ internal static class WindowsHostContracts
             "Event-driven scroll did not flush, project, and install one current scene.");
         Assert(router.DispatchKey(new(KeyCommandKind.Down, Key.Tab)).Handled && router.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled, "Input-install baseline did not select the sibling.");
         var selected = WindowsBootstrap.ProjectAndInstall(composition, new(100, 100, 1), renderer);
-        Assert(selected.Dump().Contains("color=0xff00ff00", StringComparison.Ordinal) && router.DispatchPointer(new(PointerCommandKind.Move, 99, 1, 1)).Rejection != InputRejection.StaleScene,
+        Assert(selected.Dump().Contains("brush=solid(#00FF00FF)", StringComparison.Ordinal) && router.DispatchPointer(new(PointerCommandKind.Move, 99, 1, 1)).Rejection != InputRejection.StaleScene,
             "Event-driven selection did not converge without an application drain callback.");
 
         var clampedGraph = new ReactiveGraph(); using var clamped = new Composition(clampedGraph, "windows-scroll-clamp"); var clampedTheme = new ThemeContext(clamped.Root.Scope, ControlThemes.Light);
-        Controls.Panel(clamped.Root, clampedTheme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f).Set(Arrangement.Clip, true));
-        var clampedViewport = clamped.Child(clamped.Root, "viewport"); var state = Controls.ScrollViewport(clampedViewport, clampedTheme, "Viewport", new(0, 100), Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var clampedContent = clamped.Child(clampedViewport, "content"); Controls.Panel(clampedContent, clampedTheme, "Content", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f));
+        Controls.Panel(clamped.Root, clampedTheme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Clip, true));
+        var clampedViewport = clamped.Child(clamped.Root, "viewport"); var state = Controls.ScrollViewport(clampedViewport, clampedTheme, "Viewport", new(0, 100), Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var clampedContent = clamped.Child(clampedViewport, "content"); Controls.Panel(clampedContent, clampedTheme, "Content", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f));
         var converged = WindowsBootstrap.ProjectAndInstall(clamped, new(100, 20, 1), renderer);
         Assert(state.Offset.Y == 80 && converged.Boxes.Single(box => box.Identity.ElementId == clampedContent.Id).Bounds.Y == -80 &&
             clamped.Input.DispatchPointer(new(PointerCommandKind.Move, 100, 0, 0)).Rejection != InputRejection.StaleScene,
@@ -131,16 +131,16 @@ internal static class WindowsHostContracts
         using var renderer = new SkiaSceneRenderer();
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "windows-virtual-freshness");
         var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 100f).Set(Arrangement.Clip, true));
-        var field = composition.Child(composition.Root, "search"); Controls.TextField(field, theme, "Search", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f));
-        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, theme, "Rows", style: Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 30f));
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f).Set(LayoutProperties.Clip, true));
+        var field = composition.Child(composition.Root, "search"); Controls.TextField(field, theme, "Search", style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
+        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, theme, "Rows", style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 30f));
         var values = graph.Signal(Array.Empty<int>(), "virtual-values");
         var loaded = graph.Signal(false, "virtual-loaded");
         _ = Controls.VirtualizedList(viewport, theme, "rows", "Rows", () => values.Value, value => value, (value, context) =>
         {
             var row = context.Element("row"); Controls.Selectable(row, theme, "row " + value); return row;
         }, 30f);
-        _ = composition.When(composition.Root, "loading", () => !loaded.Value, Controls.Recipe("loading", (context, element) => Controls.Loading(element, theme, "Loading", Style.Empty.Set(Arrangement.Height, 20f))));
+        _ = composition.When(composition.Root, "loading", () => !loaded.Value, Controls.Recipe("loading", (context, element) => Controls.Loading(element, theme, "Loading", Style.Empty.Set(LayoutProperties.Height, 20f))));
         _ = WindowsBootstrap.ProjectAndInstall(composition, new(100, 100, 1), renderer);
         _ = composition.SemanticSnapshot();
         values.Value = Enumerable.Range(1, 10_000).ToArray();
@@ -159,11 +159,11 @@ internal static class WindowsHostContracts
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "windows-input-reconciliation");
         var enabled = new Token<bool>("reconciliation-enabled", true); var visible = new Token<bool>("reconciliation-visible", true);
         var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light.Set(enabled, true).Set(visible, true));
-        const uint normal = 0xff102030U, pressed = 0xff405060U, disabled = 0xff708090U;
-        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f).Set(Arrangement.Clip, true));
+        var normal = Color.Parse("#102030"); var pressed = Color.Parse("#405060"); var disabled = Color.Parse("#708090");
+        Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Clip, true));
         var button = composition.Child(composition.Root, "button"); var activations = 0;
-        Controls.Button(button, theme, "Button", () => activations++, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 20f).Set(InputProperties.Enabled, enabled).Set(InputProperties.Visible, visible)
-            .Set(SceneProperties.Fill, normal).When(VariantState.Pressed, Style.Empty.Set(SceneProperties.Fill, pressed)).When(VariantState.Disabled, Style.Empty.Set(SceneProperties.Fill, disabled)));
+        Controls.Button(button, theme, "Button", () => activations++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f).Set(InputProperties.Enabled, enabled).Set(InputProperties.Visible, visible)
+            .Set(VisualProperties.Background, normal).When(VariantState.Pressed, Style.Empty.Set(VisualProperties.Background, pressed)).When(VariantState.Disabled, Style.Empty.Set(VisualProperties.Background, disabled)));
         var router = composition.Input; var viewport = new LayoutViewport(100, 20, 1);
         var initial = WindowsBootstrap.ProjectAndInstall(composition, viewport, renderer); var point = initial.Boxes.Single(box => box.Identity.ElementId == button.Id).Bounds;
         _ = router.DispatchPointer(new(PointerCommandKind.Down, 50, point.X + 1, point.Y + 1, PointerButton.Primary));
@@ -172,7 +172,7 @@ internal static class WindowsHostContracts
         Assert(!router.SetScene(disabledCandidate) && router.FocusedElement is null && !router.Dump().Contains("capture pointer=50", StringComparison.Ordinal),
             "Disabling a focused pressed control accepted stale input paint.");
         var disabledScene = WindowsBootstrap.ProjectAndInstall(composition, viewport, renderer);
-        Assert(Fill(disabledScene, button) == disabled && button.Resolve(SceneProperties.Fill).Value == disabled && composition.Dump().Contains("style variants=Disabled", StringComparison.Ordinal),
+        Assert(Fill(disabledScene, button) == disabled && button.Resolve(VisualProperties.Background).Value.Color == disabled && composition.Dump().Contains("style variants=Disabled", StringComparison.Ordinal),
             "The presented disabled scene did not resolve the disabled fill and variants.");
 
         theme.Theme = theme.Theme.Set(enabled, true);
@@ -183,7 +183,7 @@ internal static class WindowsHostContracts
         Assert(!router.SetScene(hiddenCandidate) && router.FocusedElement is null && !router.Dump().Contains("capture pointer=51", StringComparison.Ordinal),
             "Hiding a focused pressed control accepted stale input paint.");
         var hiddenScene = WindowsBootstrap.ProjectAndInstall(composition, viewport, renderer);
-        Assert(Fill(hiddenScene, button) == disabled && button.Resolve(SceneProperties.Fill).Value == disabled && composition.Dump().Contains("style variants=Disabled", StringComparison.Ordinal),
+        Assert(Fill(hiddenScene, button) == disabled && button.Resolve(VisualProperties.Background).Value.Color == disabled && composition.Dump().Contains("style variants=Disabled", StringComparison.Ordinal),
             "The presented hidden scene retained pressed or focused paint.");
 
         theme.Theme = theme.Theme.Set(visible, true);
@@ -229,9 +229,9 @@ internal static class WindowsHostContracts
     var cleanupGraph = new ReactiveGraph();
     using var cleanupComposition = new Composition(cleanupGraph, "adapter-cleanup");
     var cleanupTheme = new ThemeContext(cleanupComposition.Root.Scope, new Theme("adapter-cleanup"));
-    cleanupComposition.Root.Present(cleanupTheme, author: Style.Empty.Set(Arrangement.Width, 20f).Set(Arrangement.Height, 20f).Set(Arrangement.Clip, true));
+    cleanupComposition.Root.Present(cleanupTheme, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f).Set(LayoutProperties.Clip, true));
     var cleanupChild = cleanupComposition.Child(cleanupComposition.Root, "target");
-    cleanupChild.Present(cleanupTheme, author: Style.Empty.Set(Arrangement.Width, 20f).Set(Arrangement.Height, 20f));
+    cleanupChild.Present(cleanupTheme, author: Style.Empty.Set(LayoutProperties.Width, 20f).Set(LayoutProperties.Height, 20f));
     cleanupChild.AttachBehaviors(new ThrowingCaptureBehavior());
     var cleanupRouter = cleanupComposition.Input;
     Assert(cleanupRouter.SetScene(SceneLayout.Project(cleanupComposition, new(20, 20, 1), renderer)), "Cleanup scene rejected.");
@@ -254,7 +254,7 @@ internal static class WindowsHostContracts
         if (!condition) throw new InvalidOperationException(message);
     }
 
-    private static uint Fill(RetainedScene scene, Element element) => Paints(scene.Nodes).Single(node => node.Identity.Element.ElementId == element.Id).Color;
+    private static Color Fill(RetainedScene scene, Element element) => Paints(scene.Nodes).Single(node => node.Identity.Element.ElementId == element.Id).Brush.Color ?? throw new InvalidOperationException("Expected solid paint.");
     private static IEnumerable<PaintSceneNode> Paints(IEnumerable<SceneNode> nodes)
     {
         foreach (var node in nodes)

@@ -120,7 +120,7 @@ The compiler targets the framework contracts rather than defining them:
 - immutable sRGB RGBA `Color`, with explicit parse/try-parse APIs;
 - immutable closed `Brush` with solid and bounded linear-gradient variants;
 - safe implicit `Color -> Brush` and `LinearGradient -> Brush` conversions;
-- two to sixteen finite ordered gradient stops and premultiplied linear-sRGB interpolation;
+- two to sixteen finite ordered opaque gradient stops and native sRGB interpolation;
 - physical logical-pixel four-edge `Insets` (`Left`, `Top`, `Right`, `Bottom`), finite and nonnegative, and `Padding` that constrains child content while background covers the arranged box;
 - composited subtree `Opacity`; opacity zero does not change layout, hit testing, focus, or semantics;
 - separate `Clip`; no image, background layers, border, radius, blend mode, repeating/radial/conic gradient, or runtime textual color parser in `.lui`.
@@ -152,7 +152,7 @@ The exact initial author-facing property surface is:
 
 `Arrangement`, public `SceneProperties`, `Fill`, and `Foreground` are removed during the unreleased API change. The typography inheritance table is an intentional behavior change from the current surface and receives resolution/dump/row-scale cost evidence. `TextColor` remains eligible for the existing manual `TransitionKind.Color` channel after that channel is retyped to `Color`; `Background : Brush` is transition-ineligible initially. Raw text, selection, caret, virtual-row metadata, and projection bookkeeping are internal/compiler-excluded. Portable retained-scene DTOs remain the explicit Core-to-renderer seam.
 
-`Color` stores canonical 8-bit sRGB RGBA channels and equality/hash follows those channels. `Parse`/`TryParse` initially accept invariant `#RRGGBB` and `#RRGGBBAA` only. `LinearGradient` uses normalized box-relative start/end points, two to sixteen stops with finite nondecreasing positions in `[0,1]`, permits equal-position hard stops, and rejects a degenerate vector. Invalid constructors throw argument exceptions; try-parse returns false. Spatial interpolation is premultiplied linear sRGB.
+`Color` stores canonical 8-bit sRGB RGBA channels and equality/hash follows those channels. `Parse`/`TryParse` initially accept invariant `#RRGGBB` and `#RRGGBBAA` only. `LinearGradient` uses normalized box-relative start/end points, two to sixteen opaque stops with finite nondecreasing positions in `[0,1]`, permits equal-position hard stops, and rejects a degenerate vector. Invalid constructors throw argument exceptions; try-parse returns false. The first renderer uses SkiaSharp's native sRGB interpolation. Transparent and selectable linear-light gradients are deferred until the renderer binding can prove their interpolation contract; solid brushes continue to support alpha.
 
 `Opacity` must be finite in `[0,1]`; invalid assignments fail before scene publication. One retained opacity group wraps background, text, and descendants; nested values multiply. With `Clip=false`, group bounds include visible descendant overflow rather than implicitly clipping to the element box. With clipping enabled, clipping bounds the group consistently. Renderer tiling/culling is allowed only when pixels remain equivalent and allocations stay within the issue #45 evidence bounds.
 

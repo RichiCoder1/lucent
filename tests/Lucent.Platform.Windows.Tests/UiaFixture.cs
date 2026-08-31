@@ -24,32 +24,32 @@ internal static class UiaFixture
         var composition = new Composition(graph ?? throw new ArgumentNullException(nameof(graph)), "uia-fixture");
         var themeContext = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         theme = themeContext;
-        Controls.Column(composition.Root, themeContext, "Fixture", Style.Empty.Set(Arrangement.Width, 400f).Set(Arrangement.Height, 500f).Set(Arrangement.Clip, true));
+        Controls.Column(composition.Root, themeContext, "Fixture", Style.Empty.Set(LayoutProperties.Width, 400f).Set(LayoutProperties.Height, 500f).Set(LayoutProperties.Clip, true));
         var group = composition.Child(composition.Root, "group");
-        Controls.Panel(group, themeContext, "Controls", Style.Empty.Set(Arrangement.Width, 400f));
+        Controls.Panel(group, themeContext, "Controls", Style.Empty.Set(LayoutProperties.Width, 400f));
         var text = composition.Child(group, "text");
-        Controls.Text(text, themeContext, "Read only", Style.Empty.Set(Arrangement.Height, 24f));
+        Controls.Text(text, themeContext, "Read only", Style.Empty.Set(LayoutProperties.Height, 24f));
         var field = composition.Child(group, "field");
-        Controls.TextField(field, themeContext, "Value", style: Style.Empty.Set(Arrangement.Width, 200f).Set(Arrangement.Height, 24f));
+        Controls.TextField(field, themeContext, "Value", style: Style.Empty.Set(LayoutProperties.Width, 200f).Set(LayoutProperties.Height, 24f));
         var statusElement = composition.Child(group, "status");
-        var status = Controls.Loading(statusElement, themeContext, "Ready", Style.Empty.Set(Arrangement.Height, 24f));
+        var status = Controls.Loading(statusElement, themeContext, "Ready", Style.Empty.Set(LayoutProperties.Height, 24f));
         var retained = composition.Root.Scope.Signal(new[] { "Keep", "Retire", "Disabled" }, "uia-fixture.items"); var invokes = 0;
         var button = composition.Child(group, "button");
-        Controls.Button(button, themeContext, "Invoke", () => { if (invokes++ == 0) throw new InvalidOperationException("fixture action"); status.Label = "Invoked"; retained.Value = ["Keep", "Disabled"]; }, Style.Empty.Set(Arrangement.Width, 100f).Set(Arrangement.Height, 24f));
+        Controls.Button(button, themeContext, "Invoke", () => { if (invokes++ == 0) throw new InvalidOperationException("fixture action"); status.Label = "Invoked"; retained.Value = ["Keep", "Disabled"]; }, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 24f));
         var list = composition.Child(group, "list");
-        Controls.List(list, themeContext, "Choices", Style.Empty.Set(Arrangement.Width, 300f));
+        Controls.List(list, themeContext, "Choices", Style.Empty.Set(LayoutProperties.Width, 300f));
         _ = composition.ForEach(list, "items", () => retained.Value, value => value, (value, context) =>
         {
             var item = context.Element("choice");
-            var style = Style.Empty.Set(Arrangement.Width, 300f).Set(Arrangement.Height, 24f);
+            var style = Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 24f);
             if (value == "Disabled") style = style.Set(InputProperties.Enabled, false);
             Controls.Selectable(item, themeContext, value, style: style);
             return item;
         });
         var viewport = composition.Child(group, "scroll");
-        Controls.ScrollViewport(viewport, themeContext, "Scroll", style: Style.Empty.Set(Arrangement.Width, 300f).Set(Arrangement.Height, 32f));
+        Controls.ScrollViewport(viewport, themeContext, "Scroll", style: Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 32f));
         var content = composition.Child(viewport, "scroll-content");
-        content.Present(themeContext, author: Style.Empty.Set(Arrangement.Width, 300f).Set(Arrangement.Height, 128f));
+        content.Present(themeContext, author: Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 128f));
         return composition;
     }
 }

@@ -7,15 +7,15 @@ internal static class TextFieldContracts
         try
         {
             var graph = new ReactiveGraph(); using var composition = new Composition(graph, "text-field"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-            Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(Arrangement.Width, 200f).Set(Arrangement.Height, 40f).Set(Arrangement.Clip, true));
-            var field = composition.Child(composition.Root, "field"); var state = Controls.TextField(field, theme, "Search", style: Style.Empty.Set(Arrangement.Width, 40f).Set(Arrangement.Height, 20f));
-            var other = composition.Child(composition.Root, "other"); Controls.TextField(other, theme, "Other", style: Style.Empty.Set(Arrangement.Width, 200f).Set(Arrangement.Height, 20f));
+            Controls.Panel(composition.Root, theme, "root", Style.Empty.Set(LayoutProperties.Width, 200f).Set(LayoutProperties.Height, 40f).Set(LayoutProperties.Clip, true));
+            var field = composition.Child(composition.Root, "field"); var state = Controls.TextField(field, theme, "Search", style: Style.Empty.Set(LayoutProperties.Width, 40f).Set(LayoutProperties.Height, 20f));
+            var other = composition.Child(composition.Root, "other"); Controls.TextField(other, theme, "Other", style: Style.Empty.Set(LayoutProperties.Width, 200f).Set(LayoutProperties.Height, 20f));
             var router = composition.Input; var scene = Install(composition, router);
-            Assert(field.Resolve(SceneProperties.Text).Value == "Search" && FindTextField(composition.SemanticSnapshot()!).Value == "", "Empty unfocused text field did not show its non-semantic placeholder.");
+            Assert(field.Resolve(ProjectionProperties.Text).Value == "Search" && FindTextField(composition.SemanticSnapshot()!).Value == "", "Empty unfocused text field did not show its non-semantic placeholder.");
             var fieldBox = scene.Boxes.Single(box => box.Identity.ElementId == field.Id);
             Assert(router.DispatchPointer(new(PointerCommandKind.Down, 1, fieldBox.Bounds.X + 1, fieldBox.Bounds.Y + 1, PointerButton.Primary)).Handled && router.FocusedElement?.ElementId == field.Id, "Primary text-field pointer down did not focus and handle without caret hit testing.");
             scene = Install(composition, router);
-            Assert(field.Resolve(SceneProperties.Text).Value == "", "Focused empty text field retained its placeholder as editable content.");
+            Assert(field.Resolve(ProjectionProperties.Text).Value == "", "Focused empty text field retained its placeholder as editable content.");
             Assert(router.TryGetCaretGeometry(out var initialCaret) && initialCaret.Width == 1 && initialCaret.Height == 20, "Focused text field did not expose caret geometry.");
 
             state.Value = "a😀b"; state.MoveHome(); state.MoveRight(); state.MoveRight(extend: true); state.SetPreedit("中😀", 1, 1);
@@ -58,8 +58,8 @@ internal static class TextFieldContracts
     private static void SetupRollback()
     {
         var graph = new ReactiveGraph(); using var composition = new Composition(graph, "text-field-rollback"); var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light); var field = composition.Child(composition.Root, "field");
-        Expect<ArgumentException>(() => Controls.TextField(field, theme, "Field", style: Style.Empty.Set(new Property<string?>("scene-text", null), "duplicate")));
-        Assert(field.Resolve(SceneProperties.Text).Value is null, "Failed text-field setup retained presentation state.");
+        Expect<ArgumentException>(() => Controls.TextField(field, theme, "Field", style: Style.Empty.Set(new Property<string?>(ProjectionProperties.Text.Name, null), "duplicate")));
+        Assert(field.Resolve(ProjectionProperties.Text).Value is null, "Failed text-field setup retained presentation state.");
         _ = Controls.TextField(field, theme, "Field");
     }
 

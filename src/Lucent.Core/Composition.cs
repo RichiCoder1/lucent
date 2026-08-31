@@ -1184,8 +1184,8 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     internal void Configure()
     {
         _composition.CheckThread();
-        Region.UpdateControl(Arrangement.VirtualRowHeight, RowHeight);
-        Region.UpdateControl(Arrangement.VirtualItemCount, _items.Length);
+        Region.UpdateControl(LayoutProperties.VirtualRowHeight, RowHeight);
+        Region.UpdateControl(LayoutProperties.VirtualItemCount, _items.Length);
     }
 
     /// <summary>Changes the fixed row height while retaining keyed entries; callers preserve any logical scroll anchor.</summary>
@@ -1197,8 +1197,8 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
         if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
         if (IsDisposed || RowHeight == rowHeight) return;
         RowHeight = rowHeight;
-        Region.UpdateControl(Arrangement.VirtualRowHeight, rowHeight);
-        foreach (var entry in _entries.Values) entry.UpdateControl(Arrangement.Height, rowHeight);
+        Region.UpdateControl(LayoutProperties.VirtualRowHeight, rowHeight);
+        foreach (var entry in _entries.Values) entry.UpdateControl(LayoutProperties.Height, rowHeight);
     }
 
     /// <summary>Re-evaluates the source. Normal callers let the owned reactive effect invoke this.</summary>
@@ -1226,7 +1226,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
             keys[index] = key;
         }
         _items = next; _keys = keys;
-        Region.UpdateControl(Arrangement.VirtualItemCount, next.Length);
+        Region.UpdateControl(LayoutProperties.VirtualItemCount, next.Length);
     }
 
     void IVirtualizedRegion.Realize(LayoutViewport viewport) => Realize(viewport);
@@ -1237,8 +1237,8 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
         if (IsDisposed) return;
         viewport.Validate();
         if (_updating) throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
-        var viewportHeight = _viewport.Resolve(Arrangement.Height).Value ?? viewport.Height;
-        var offset = _viewport.Resolve(Arrangement.Scroll).Value.Y;
+        var viewportHeight = _viewport.Resolve(LayoutProperties.Height).Value ?? viewport.Height;
+        var offset = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
         var first = Math.Max(0, (int)MathF.Floor(offset / RowHeight) - Overscan);
         var last = Math.Min(_items.Length, (int)MathF.Ceiling((offset + viewportHeight) / RowHeight) + Overscan);
         Realize(first, last);
@@ -1261,8 +1261,8 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
                     provisional.Add((_keys[index], null!, context));
                     var entry = context.Run(() => _content!(_items[index], context));
                     context.Validate(entry);
-                    entry.UpdateControl(Arrangement.Height, RowHeight);
-                    entry.UpdateControl(Arrangement.VirtualRowIndex, index);
+                    entry.UpdateControl(LayoutProperties.Height, RowHeight);
+                    entry.UpdateControl(LayoutProperties.VirtualRowIndex, index);
                     provisional[^1] = (_keys[index], entry, context);
                 }
             }
@@ -1281,7 +1281,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
             {
                 var key = _keys[index];
                 var entry = retained.TryGetValue(key, out var current) ? current : provisional.Single(value => EqualityComparer<TKey>.Default.Equals(value.Key, key)).Element;
-                entry.UpdateControl(Arrangement.VirtualRowIndex, index);
+                entry.UpdateControl(LayoutProperties.VirtualRowIndex, index);
                 next.Add(key, entry); ordered.Add(entry);
             }
             foreach (var entry in provisional) entry.Context.Complete();

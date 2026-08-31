@@ -207,12 +207,12 @@ static void VisualSurface()
     var focused = router.FocusedElement!.Value;
     var bounds = light.Boxes.Single(box => box.Identity == focused).Bounds;
     Assert(bounds.X <= 20 && bounds.Y <= 35 && bounds.X + bounds.Width > 20 && bounds.Y + bounds.Height > 35, "First keyboard focus target no longer covers the published smoke coordinate.");
-    Assert(SceneLayout.Project(composition, new(800, 500, 1.25f), renderer).Dump().Contains("color=0xffffff00", StringComparison.Ordinal), "Keyboard focus did not produce a visible focus paint.");
+        Assert(SceneLayout.Project(composition, new(800, 500, 1.25f), renderer).Dump().Contains("brush=solid(#FFFF00FF)", StringComparison.Ordinal), "Keyboard focus did not produce a visible focus paint.");
     theme.Appearance = new(ThemeColorScheme.Dark, ThemeContrast.Normal); graph.Drain();
     var dark = SceneLayout.Project(composition, new(800, 500, 1.25f), renderer);
     theme.Appearance = new(ThemeColorScheme.Light, ThemeContrast.High); graph.Drain();
     var high = SceneLayout.Project(composition, new(800, 500, 1.25f), renderer);
-    Assert(light.Dump().Contains("color=0xfff8fafc", StringComparison.Ordinal) && dark.Dump().Contains("color=0xff0f172a", StringComparison.Ordinal) && dark.Dump().Contains("color=0xfffacc15", StringComparison.Ordinal) && high.Dump().Contains("color=0xff000000", StringComparison.Ordinal) && !light.Dump().Contains("Native IME", StringComparison.Ordinal), "Issue Browser appearance or diagnostic-safe retained scene regressed.");
+        Assert(light.Dump().Contains("brush=solid(#F8FAFCFF)", StringComparison.Ordinal) && dark.Dump().Contains("brush=solid(#0F172AFF)", StringComparison.Ordinal) && dark.Dump().Contains("brush=solid(#FACC15FF)", StringComparison.Ordinal) && high.Dump().Contains("brush=solid(#000000FF)", StringComparison.Ordinal) && !light.Dump().Contains("Native IME", StringComparison.Ordinal), "Issue Browser appearance or diagnostic-safe retained scene regressed.");
     using var bitmap = new SKBitmap(1000, 625, SKColorType.Rgba8888, SKAlphaType.Premul);
     using (var canvas = new SKCanvas(bitmap)) { canvas.Clear(SKColors.Transparent); renderer.Render(light, canvas); }
     Assert(Enumerable.Range(0, bitmap.Width).Any(x => bitmap.GetPixel(x, 0).Alpha != 0), "Issue Browser retained scene did not paint.");

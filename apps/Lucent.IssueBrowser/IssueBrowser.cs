@@ -265,12 +265,12 @@ public sealed class IssueBrowserState
 
 public static class IssueBrowserStructure
 {
-    private static readonly Token<uint> PageSurface = new("page-surface", 0xfff8fafcU);
-    private static readonly Token<uint> PageForeground = new("page-foreground", 0xff0f172aU);
-    private static readonly Token<uint> HeaderSurface = new("header-surface", 0xffe2e8f0U);
-    private static readonly Token<uint> RowSurface = new("row-surface", 0xffffffffU);
-    private static readonly Token<uint> FocusSurface = new("focus-surface", 0xffffff00U);
-    private static readonly Token<uint> FocusForeground = new("focus-foreground", 0xff0f172aU);
+    private static readonly Token<Brush> PageSurface = new("page-surface", Color.Parse("#f8fafc"));
+    private static readonly Token<Color> PageForeground = new("page-foreground", Color.Parse("#0f172a"));
+    private static readonly Token<Brush> HeaderSurface = new("header-surface", Color.Parse("#e2e8f0"));
+    private static readonly Token<Brush> RowSurface = new("row-surface", Color.Parse("#ffffff"));
+    private static readonly Token<Brush> FocusSurface = new("focus-surface", Color.Parse("#ffff00"));
+    private static readonly Token<Color> FocusForeground = new("focus-foreground", Color.Parse("#0f172a"));
     private static readonly Token<float?> DensityHeaderHeight = new("issue-density-header-height", 84f);
     private static readonly Token<float?> DensityFilterHeight = new("issue-density-filter-height", 28f);
     private static readonly Token<float> DensitySpacing = new("issue-density-spacing", 8f);
@@ -295,44 +295,44 @@ public static class IssueBrowserStructure
         var composition = new Composition(graph, "issue-browser");
         if (transport is not null) composition.Root.Scope.Own(transport);
         var browser = new IssueBrowserState(composition.Root.Scope, source, statusSource);
-        var themeContext = new ThemeContext(composition.Root.Scope, Palette(ControlThemes.Light, 0xfff8fafcU, 0xff0f172aU, 0xffe2e8f0U, 0xffffffffU, 0xffffff00U, 0xff0f172aU, IssueDensity.Comfortable));
+        var themeContext = new ThemeContext(composition.Root.Scope, Palette(ControlThemes.Light, Color.Parse("#f8fafc"), Color.Parse("#0f172a"), Color.Parse("#e2e8f0"), Color.Parse("#ffffff"), Color.Parse("#ffff00"), Color.Parse("#0f172a"), IssueDensity.Comfortable));
         theme = themeContext;
         _ = composition.Root.Scope.Effect(() => themeContext.Theme = Palette(themeContext.Appearance.Contrast == ThemeContrast.High ? ControlThemes.HighContrast : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? ControlThemes.Dark : ControlThemes.Light,
-            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xff0f172aU : 0xfff8fafcU,
-            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xffffffffU : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xfff8fafcU : 0xff0f172aU,
-            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xff1e293bU : 0xffe2e8f0U,
-            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xff111827U : 0xffffffffU,
-            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xffffff00U : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? 0xfffacc15U : 0xffffff00U,
-            themeContext.Appearance.Contrast == ThemeContrast.High ? 0xff000000U : 0xff0f172aU, browser.Density), "issue-browser-appearance");
-        Controls.Column(composition.Root, themeContext, "Issue Browser", Style.Empty.Set(SceneProperties.Fill, PageSurface).Set(SceneProperties.Foreground, PageForeground).Set(Arrangement.Clip, true));
+            themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000") : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? Color.Parse("#0f172a") : Color.Parse("#f8fafc"),
+            themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#ffffff") : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? Color.Parse("#f8fafc") : Color.Parse("#0f172a"),
+            themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000") : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? Color.Parse("#1e293b") : Color.Parse("#e2e8f0"),
+            themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000") : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? Color.Parse("#111827") : Color.Parse("#ffffff"),
+            themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#ffff00") : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? Color.Parse("#facc15") : Color.Parse("#ffff00"),
+            themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000") : Color.Parse("#0f172a"), browser.Density), "issue-browser-appearance");
+        Controls.Column(composition.Root, themeContext, "Issue Browser", Style.Empty.Set(VisualProperties.Background, PageSurface).Set(TypographyProperties.TextColor, PageForeground).Set(LayoutProperties.Clip, true));
 
         var header = composition.Child(composition.Root, "issue-browser.header");
-        Controls.Panel(header, themeContext, "Issue Browser header", Style.Empty.Set<float?>(Arrangement.Height, DensityHeaderHeight).Set(Arrangement.Width, 800f).Set(SceneProperties.Fill, HeaderSurface));
+        Controls.Panel(header, themeContext, "Issue Browser header", Style.Empty.Set<float?>(LayoutProperties.Height, DensityHeaderHeight).Set(LayoutProperties.Width, 800f).Set(VisualProperties.Background, HeaderSurface));
         var title = composition.Child(header, "issue-browser.title");
-        Controls.Text(title, themeContext, "Issues", Style.Empty.Set(Arrangement.Height, 24f).Set<float>(SceneProperties.FontSize, DensityTitleFontSize));
+        Controls.Text(title, themeContext, "Issues", Style.Empty.Set(LayoutProperties.Height, 24f).Set<float>(TypographyProperties.FontSize, DensityTitleFontSize));
         var filters = composition.Child(header, "issue-browser.filters");
-        Controls.Row(filters, themeContext, "Issue filters", Style.Empty.Set(Arrangement.Width, 800f).Set<float?>(Arrangement.Height, DensityFilterHeight).Set<float>(Arrangement.Spacing, DensitySpacing));
+        Controls.Row(filters, themeContext, "Issue filters", Style.Empty.Set(LayoutProperties.Width, 800f).Set<float?>(LayoutProperties.Height, DensityFilterHeight).Set<float>(LayoutProperties.Spacing, DensitySpacing));
         BindFilter(composition.Child(filters, "issue-browser.search"), themeContext, "Search issues", value => browser.Search = value);
         BindFilter(composition.Child(filters, "issue-browser.status"), themeContext, "Status: all, open, closed", value => browser.Status = value);
         BindFilter(composition.Child(filters, "issue-browser.assignee"), themeContext, "Assignee: all, marta, devin, joel", value => browser.Assignee = value);
-        Controls.Button(composition.Child(header, "issue-browser.density"), themeContext, "Density: Comfortable/Compact", browser.ToggleDensity, Style.Empty.Set(Arrangement.Width, 250f).Set<float?>(Arrangement.Height, DensityFilterHeight));
+        Controls.Button(composition.Child(header, "issue-browser.density"), themeContext, "Density: Comfortable/Compact", browser.ToggleDensity, Style.Empty.Set(LayoutProperties.Width, 250f).Set<float?>(LayoutProperties.Height, DensityFilterHeight));
 
         _ = composition.When(composition.Root, "issue-browser.loading-region", () => browser.IsLoading,
-            Controls.Recipe("issue-browser.loading", (context, element) => Controls.Loading(element, themeContext, browser.IsStale ? "Refreshing issues" : "Loading issues", Style.Empty.Set(Arrangement.Height, 28f))));
+            Controls.Recipe("issue-browser.loading", (context, element) => Controls.Loading(element, themeContext, browser.IsStale ? "Refreshing issues" : "Loading issues", Style.Empty.Set(LayoutProperties.Height, 28f))));
         _ = composition.When(composition.Root, "issue-browser.error-region", () => browser.Error is not null,
             Controls.Recipe("issue-browser.error", (context, element) =>
             {
-                Controls.Error(element, themeContext, browser.Error!, Style.Empty.Set(Arrangement.Axis, LayoutAxis.Column));
-                Controls.Button(context.Child(element, "issue-browser.retry"), themeContext, "Retry", browser.Retry, Style.Empty.Set(Arrangement.Height, 30f));
+                Controls.Error(element, themeContext, browser.Error!, Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column));
+                Controls.Button(context.Child(element, "issue-browser.retry"), themeContext, "Retry", browser.Retry, Style.Empty.Set(LayoutProperties.Height, 30f));
             }));
 
         var viewport = composition.Child(composition.Root, "issue-browser.scroll-viewport");
-        var scroll = Controls.ScrollViewport(viewport, themeContext, "Issues", style: Style.Empty.Set(Arrangement.Width, 800f).Set(Arrangement.Height, 60f));
+        var scroll = Controls.ScrollViewport(viewport, themeContext, "Issues", style: Style.Empty.Set(LayoutProperties.Width, 800f).Set(LayoutProperties.Height, 60f));
         var list = Controls.VirtualizedList(viewport, themeContext, "issue-browser.issue-list", "Issues", () => browser.VisibleIssues, issue => issue.Number, (issue, context) =>
         {
             var row = context.Element("issue-browser.issue-row");
-            var selectable = Controls.Selectable(row, themeContext, $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}", () => browser.Select(issue.Number), Style.Empty.Set(Arrangement.Width, 800f).Set<float>(Arrangement.Spacing, DensitySpacing).Set<float>(SceneProperties.FontSize, DensityFontSize).Set(SceneProperties.Fill, RowSurface)
-                .When(VariantState.FocusVisible, Style.Empty.Set(SceneProperties.Fill, FocusSurface).Set(SceneProperties.Foreground, FocusForeground)));
+            var selectable = Controls.Selectable(row, themeContext, $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}", () => browser.Select(issue.Number), Style.Empty.Set(LayoutProperties.Width, 800f).Set<float>(LayoutProperties.Spacing, DensitySpacing).Set<float>(TypographyProperties.FontSize, DensityFontSize).Set(VisualProperties.Background, RowSurface)
+                .When(VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, FocusSurface).Set(TypographyProperties.TextColor, FocusForeground)));
             _ = row.Scope.Effect(() => { var current = browser.Issues.First(candidate => candidate.Number == issue.Number); selectable.Label = $"#{current.Number} {current.Title} — {current.Status} · {current.Assignee}"; selectable.Selected = browser.IsSelected(issue.Number); }, row.Name + ".selection");
             return row;
         }, 30f);
@@ -351,28 +351,28 @@ public static class IssueBrowserStructure
         _ = composition.ForEach(composition.Root, "issue-browser.details-region", () => browser.SelectedIssue is { } issue ? [issue] : Array.Empty<BrowserIssue>(), issue => issue.Number, (issue, context) =>
         {
             var element = context.Element("issue-browser.details");
-            Controls.Panel(element, themeContext, "Issue details", Style.Empty.Set(Arrangement.Width, 800f).Set<float>(Arrangement.Spacing, DensitySpacing).Set<float>(SceneProperties.FontSize, DensityFontSize));
+            Controls.Panel(element, themeContext, "Issue details", Style.Empty.Set(LayoutProperties.Width, 800f).Set<float>(LayoutProperties.Spacing, DensitySpacing).Set<float>(TypographyProperties.FontSize, DensityFontSize));
             Controls.Text(context.Child(element, "issue-browser.details-title"), themeContext, $"#{issue.Number} {issue.Title}");
             var status = Controls.Loading(context.Child(element, "issue-browser.details-status"), themeContext, issue.Status);
             Controls.Text(context.Child(element, "issue-browser.details-body"), themeContext, issue.Body);
-            Controls.Button(context.Child(element, "issue-browser.status-action"), themeContext, "Open/Close", browser.ToggleSelectedStatus, Style.Empty.Set<float?>(Arrangement.Height, DensityFilterHeight));
+            Controls.Button(context.Child(element, "issue-browser.status-action"), themeContext, "Open/Close", browser.ToggleSelectedStatus, Style.Empty.Set<float?>(LayoutProperties.Height, DensityFilterHeight));
             _ = element.Scope.Effect(() => status.Label = browser.SelectedIssue is { } selected && selected.Number == issue.Number ? selected.Status + (browser.SelectedMutationMessage is { } message ? " · " + message : "") : issue.Status, element.Name + ".status");
             return element;
         });
         _ = composition.When(composition.Root, "issue-browser.details-retry-region", () => browser.SelectedIssue is not null && browser.CanRetrySelected,
-            Controls.Recipe("issue-browser.details-retry", (context, element) => Controls.Button(element, themeContext, "Retry", browser.RetrySelected, Style.Empty.Set<float?>(Arrangement.Height, DensityFilterHeight))));
+            Controls.Recipe("issue-browser.details-retry", (context, element) => Controls.Button(element, themeContext, "Retry", browser.RetrySelected, Style.Empty.Set<float?>(LayoutProperties.Height, DensityFilterHeight))));
         state = browser;
         return composition;
     }
 
     private static void BindFilter(Element element, ThemeContext theme, string name, Action<string> set)
     {
-        var input = Controls.TextField(element, theme, name, style: Style.Empty.Set(Arrangement.Width, 250f).Set(Arrangement.Height, 24f));
+        var input = Controls.TextField(element, theme, name, style: Style.Empty.Set(LayoutProperties.Width, 250f).Set(LayoutProperties.Height, 24f));
         _ = element.Scope.Effect(() => set(input.Value), element.Name + ".binding");
     }
 
-    private static Theme Palette(Theme controls, uint surface, uint foreground, uint header, uint row, uint focus, uint focusForeground, IssueDensity density) => controls
-        .Set(PageSurface, surface).Set(PageForeground, foreground).Set(HeaderSurface, header).Set(RowSurface, row).Set(FocusSurface, focus).Set(FocusForeground, focusForeground)
+    private static Theme Palette(Theme controls, Color surface, Color foreground, Color header, Color row, Color focus, Color focusForeground, IssueDensity density) => controls
+        .Set(PageSurface, (Brush)surface).Set(PageForeground, foreground).Set(HeaderSurface, (Brush)header).Set(RowSurface, (Brush)row).Set(FocusSurface, (Brush)focus).Set(FocusForeground, focusForeground)
         .Set(DensityHeaderHeight, density == IssueDensity.Comfortable ? 84f : 68f).Set(DensityFilterHeight, density == IssueDensity.Comfortable ? 28f : 22f)
         .Set(DensitySpacing, density == IssueDensity.Comfortable ? 8f : 4f).Set(DensityFontSize, density == IssueDensity.Comfortable ? 14f : 12f).Set(DensityTitleFontSize, density == IssueDensity.Comfortable ? 18f : 16f);
 

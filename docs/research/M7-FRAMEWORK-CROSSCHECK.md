@@ -2,6 +2,8 @@
 
 **Status:** pre-implementation research; no code, issue, dependency, or compatibility change
 
+**Subsequent proof:** SkiaSharp 4.151 does not expose Skia's interpolation-space/premultiplication controls. Issue #56 therefore narrows the first renderer to opaque stops and native sRGB interpolation; transparent/selectable linear-light gradients remain deferred rather than adding a custom shader path.
+
 **Prepared:** 2026-08-31
 
 **Lucent snapshot:** `2ed80b1cb5e4993f4952e16e8a0d608365836f59`
