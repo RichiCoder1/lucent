@@ -38,11 +38,15 @@ The generator emits only through `AddSource`. Removed or invalid `.lui` input ca
 
 Paths normalize to project-relative logical identity. Files outside the project root require explicit inclusion. Duplicate logical paths/components, generated-input recursion, malformed identifiers/literals, and collisions fail closed. Parsing/lowering never executes user code.
 
+Every bound, lowered, mapped, or editor result carries one freshness identity: workspace/project epoch, evaluated project identity, logical document identity/version, compiler options/language version, and generated hint/map identity. Publishing compares that identity to the current snapshot and drops stale work; cancellation is cleanup, not the commit guard. Removal and host disposal release owned work.
+
 ## Source maps and project authority
 
 Build and editor use the actual Roslyn `Compilation`, global usings, analyzer options, references, defines, language version, nullability, and `.lui` items. The editor evaluates the real project through `MSBuildWorkspace`; there is no custom `.csproj` parser or approximate reference resolver.
 
 Generated C# uses enhanced `#line` spans for compiler/debugger mapping and `#line hidden` for scaffolding. The compiler's deterministic map retains source/generated document identity and exact spans in both directions. Tests use `GetMappedLineSpan` and map round trips rather than prose claims.
+
+Map entries support one-to-many and many-to-one spans, distinguish symbol/expression/structure/scaffolding kinds, mark hidden synthetic output, and sort deterministically. Rename/references use symbol provenance plus the current map identity; `#line` alone is not a bidirectional map.
 
 ## Editor and CLI
 
@@ -51,6 +55,8 @@ The first complete editor target is VS Code. A separate .NET 10 LSP process cons
 Before `.lui` is preferred, tooling covers every frozen construct: components, parameters, overloads, enums, literals, expression islands, named/default content, styles, tokens, variants, conditionals, keyed loops, namespaces/usings, locals, and XML documentation. It provides completion, hover, diagnostics, semantic navigation, cross-language rename/references, stable formatting, generated navigation, and mapped expression breakpoints/exceptions. Unsafe or ambiguous rename is refused rather than partially applied.
 
 One formatter implementation serves editor document/range formatting, a repository CLI, and optional check-only CI/MSBuild integration. Builds never rewrite source. Hot reload, markup stepping, and a visual designer are follow-ups; initial DevX requires correct incremental build and fast restart.
+
+The first formatter preserves Roslyn expression-island token text rather than independently formatting C#. Document, range, CLI, and check surfaces share that policy and cover malformed trees, comments at recovery boundaries, significant text, CRLF/LF, and source-map stability.
 
 ## Evidence and budgets
 
@@ -66,4 +72,3 @@ Before the first app conversion:
 The Filter Bar prototype establishes an honest editor baseline. Budgets are frozen before optimization for cold project load, warm completion, edit-to-diagnostic, rename, formatting, incremental no-op, and one-file invalidation. The Issue Row/keyed slice must pass those budgets before application cutover.
 
 Review occurs once at each meaningful boundary: runtime primitives; syntax/recovery; binding/lowering/maps; SDK/incrementality; Filter Bar parity; Issue Row parity; editor/cutover. Only blocker/high/medium findings block the boundary. Full runtime/NativeAOT gates run when runtime evidence is invalidated and once at final M7 closure, not after every parser-only edit.
-

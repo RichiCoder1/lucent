@@ -28,6 +28,17 @@ public component FilterBar(Query Query, Action Clear) {
 
 A component lowers to a partial static C# recipe whose supported entry point is `Compose(CompositionContext, ...)`. Default accessibility is `internal`; `public` is explicit. An adjacent `FilterBar.lui.cs` may provide matching partial static helpers using normal project symbol semantics. The first release has no local state declaration, component instance, generic `.lui` declaration, method body, statement block, or embedded `code` block.
 
+Handwritten and generated recipes mount through one public atomic C# operation shaped as:
+
+```csharp
+composition.Mount(parent, context => FilterBar.Compose(context, query, clear));
+context.Mount(parent, childContent);
+```
+
+The exact names are sealed in #46, but the behavior is fixed: root and nested invocation share the same operation; each recipe/content call creates exactly one root; creation and commit are scope-owned; failures roll back all provisional structure and resources; disposing the mounted root retires the recipe scope. A content value is an in-process `Func<CompositionContext, Element>` capability, not a runtime template object or serializable value.
+
+Ordinary parameters are construction-time values. Live inputs are explicit signal-bearing models or typed readers such as `Func<T>` consumed inside a binding or retained region. Generated code never turns an arbitrary value parameter into a live binding by rerunning a component.
+
 C# component recipes opt in with `[LuiComponent]`. Content factories use explicit `[LuiContent]` metadata with an optional name and exactly one possible default. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
 
 ## Elements, parameters, and content
@@ -55,7 +66,7 @@ Roslyn parses expression islands. The initial allowlist includes literals, membe
 
 Expressions use ordinary C# conversions. Text body literals are the sole markup-specific primitive convenience. Future color/string or `bind:` sugar must lower at compile time to the same typed APIs and diagnostics; there is no implicit runtime string conversion.
 
-Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValue` values under Lucent's runtime tracking. A component recipe establishes retained structure once. Only the property, conditional, or keyed region that reads a changed dependency updates; there is no component rerender.
+Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValue` values under Lucent's runtime tracking. A component recipe establishes retained structure once. Live property expressions lower to the same public, scope-owned typed binding operation used by C#, shaped as `element.Bind(property, () => expression)`. The operation preserves author/variant precedence and provenance, commits on the UI thread, invalidates the affected layout/paint/semantic projection, and cannot commit after disposal. Composition exposes one portable coalescible invalidation notification; Windows turns it into an SDL wake/frame request so idle async completion is visible. There is no compiler-only setter, hidden dependency table, component rerender, or virtual-tree diff.
 
 ## Structural regions
 
@@ -90,7 +101,6 @@ style PrimaryButton {
         Background: Colors.PrimaryHover
     }
 
-    transition Background 120ms
 }
 
 <Button Style={PrimaryButton with {
@@ -98,7 +108,7 @@ style PrimaryButton {
 }} OnInvoke={Save}>Save</Button>
 ```
 
-`with` is the sole initial style composition syntax. Evaluation is left to right and the rightmost assignment wins. It lowers to existing ordered `Style.Compose`, `Style.When`, and `Transition` APIs. Named styles are file/component-private initially; shared styles are ordinary public C# symbols. Keyframes and additional animation syntax require framework-owned scheduler primitives first.
+`with` is the sole initial style composition syntax. Evaluation is left to right and the rightmost assignment wins. It lowers to existing ordered `Style.Compose` and `Style.When` APIs. Named styles are file/component-private initially; shared styles are ordinary public C# symbols. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
 
 The Lucent SDK may supply opt-out ordinary global/static C# usings for author-facing property groups so style names work without repetitive imports. Those remain real symbols and participate in completion, rename, references, and diagnostics.
 
@@ -110,11 +120,15 @@ The compiler targets the framework contracts rather than defining them:
 - immutable closed `Brush` with solid and bounded linear-gradient variants;
 - safe implicit `Color -> Brush` and `LinearGradient -> Brush` conversions;
 - two to sixteen finite ordered gradient stops and premultiplied linear-sRGB interpolation;
-- four-edge `Insets` and `Padding` that constrain child content while background covers the arranged box;
+- physical logical-pixel four-edge `Insets` (`Left`, `Top`, `Right`, `Bottom`), finite and nonnegative, and `Padding` that constrains child content while background covers the arranged box;
 - composited subtree `Opacity`; opacity zero does not change layout, hit testing, focus, or semantics;
 - separate `Clip`; no image, background layers, border, radius, blend mode, repeating/radial/conic gradient, or runtime textual color parser in `.lui`.
 
 Future `.lui` color literals parse at compile time. A shared golden corpus keeps compile-time conversion identical to public `Color.Parse`/`TryParse` behavior.
+
+Padding participates in Lucent's own bounded algorithm: intrinsic outer size includes the insets; explicit/min/max constraints apply to the outer box; child layout uses an inner box clamped to zero when insets exceed available space; text/caret/selection origins and row/column alignment use that same inner box; scrolling and clipping use explicit tested inner/outer extents; fixed virtual row height is the row's total outer extent; realization uses the viewport's inner height. Shared outer/inner edges round independently at each declared scale without cumulative drift.
+
+Brush equality/hash/dumps are canonical. Gradient stops are finite, ordered, and box-relative; nested opacity multiplies and one group covers background, text, and descendants, including visible overflow when clipping is disabled. Brush alpha affects only that paint. Dumps contain no renderer object/cache identity.
 
 ## Diagnostics, recovery, and formatting
 
@@ -122,7 +136,7 @@ Stable diagnostic categories begin immediately: parse (`LUI1xxx`), symbol/type (
 
 The parser recovers at component, element, attribute, style, and structural-region boundaries. Missing tokens remain explicit syntax nodes so one error does not suppress diagnostics or completion for the rest of the file. Invalid components do not emit; valid sibling components may emit deterministically.
 
-One deterministic formatter owns document and range formatting plus CLI/check surfaces. It preserves comments and runtime-significant text, not arbitrary whitespace. The build never rewrites source automatically. Initial lints are objective only: unstable/missing keys, duplicate or impossible content, unused private styles, and unsupported constructs.
+One deterministic formatter owns document and range formatting plus CLI/check surfaces. Initially it formats `.lui` structure while preserving C# expression-island token text verbatim, comments, line endings under the selected formatter policy, and runtime-significant text. The build never rewrites source automatically. Initial lints are objective only: unstable/missing keys, duplicate or impossible content, unused private styles, and unsupported constructs.
 
 ## Generated identity and source maps
 
@@ -138,3 +152,4 @@ Enhanced `#line` directives map compiler/debugger diagnostics and C# expression 
 
 Deferred work includes local state sugar, broader C# islands, two-way binding shorthand, textual color sugar, exported `.lui` styles, generic declarations, general element references, implicit/unkeyed dynamic loops, service injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
 
+Source-copied components are ordinary project `.lui`/C# inputs with normal namespaces, metadata, maps, formatting, review, and ownership. Updates are manual file changes initially; no registry, installer, updater, manifest, or compatibility layer exists.
