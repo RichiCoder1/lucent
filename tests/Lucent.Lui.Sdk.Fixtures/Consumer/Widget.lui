@@ -1,1 +1,1 @@
-probe
+internal component Widget() { <Row /> }

@@ -8,6 +8,7 @@
   <Project Path="src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
   <Project Path="tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj" />
   <Project Path="tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj" />
+  <Project Path="tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj" />
   <Project Path="tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj" />
   <Project Path="tests/Lucent.M6.Verifier/Lucent.M6.Verifier.csproj" />
   <Project Path="tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj" />

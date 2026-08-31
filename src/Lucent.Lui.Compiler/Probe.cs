@@ -50,7 +50,7 @@ public sealed class LuiDocumentIdentity : IEquatable<LuiDocumentIdentity>
     }
 }
 
-/// <summary>Deliberately grammar-free source used only to prove deterministic generator loading.</summary>
+/// <summary>Deterministic grammar-free output retained until lowering is implemented.</summary>
 public static class LuiProbeEmitter
 {
     public static string HintName(LuiDocumentIdentity document) => "Lucent.Lui." + document.StableId + ".g.cs";

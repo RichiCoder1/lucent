@@ -65,10 +65,10 @@ try {
     $before = Get-ChildItem (Join-Path $matrix 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs'
     if ($before.Count -ne 1) { throw 'Baseline did not produce exactly one generated document.' }
     $beforeText = Get-Content $before[0].FullName -Raw
-    Set-Content (Join-Path $matrix 'Added.lui') 'added'
+    Set-Content (Join-Path $matrix 'Added.lui') 'internal component Added() { <Row /> }'
     Invoke-Dotnet @('build', $matrixProject, '--no-restore', '-t:Rebuild', '-warnaserror')
     if ((Get-ChildItem (Join-Path $matrix 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs').Count -ne 2) { throw 'Adding a .lui did not add one generated source.' }
-    Set-Content (Join-Path $matrix 'Widget.lui') 'changed'
+    Set-Content (Join-Path $matrix 'Widget.lui') 'internal component Widget() { <Row Name="changed" /> }'
     Invoke-Dotnet @('build', $matrixProject, '--no-restore', '-t:Rebuild', '-warnaserror')
     $after = Get-ChildItem (Join-Path $matrix 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' | Where-Object Name -eq $before[0].Name
     if (!$after -or (Get-Content $after.FullName -Raw) -eq $beforeText) { throw 'Changing a .lui did not update generated source.' }
@@ -85,7 +85,7 @@ try {
     $excluded = Join-Path $artifacts 'excluded'
     Write-Project $excluded 'Excluded' '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.1.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles><EnableDefaultLuiItems>false</EnableDefaultLuiItems></PropertyGroup><ItemGroup><AdditionalFiles Include="Widget.lui" LucentLuiLogicalPath="explicit/Widget.lui" /><AdditionalFiles Include="one/Widget.lui" /><AdditionalFiles Include="two/Widget.lui" /></ItemGroup></Project>'
     New-Item (Join-Path $excluded 'one'), (Join-Path $excluded 'two') -ItemType Directory -Force | Out-Null
-    Set-Content (Join-Path $excluded 'Widget.lui') 'explicit'; Set-Content (Join-Path $excluded 'one/Widget.lui') 'one'; Set-Content (Join-Path $excluded 'two/Widget.lui') 'two'
+    Set-Content (Join-Path $excluded 'Widget.lui') 'internal component Explicit() { <Row /> }'; Set-Content (Join-Path $excluded 'one/Widget.lui') 'internal component One() { <Row /> }'; Set-Content (Join-Path $excluded 'two/Widget.lui') 'internal component Two() { <Row /> }'
     Invoke-Dotnet @('restore', (Join-Path $excluded 'Excluded.csproj'), '--configfile', (Join-Path $excluded 'NuGet.config'))
     $explicitItems = (& $dotnet 'msbuild' (Join-Path $excluded 'Excluded.csproj') '-getItem:AdditionalFiles') -join "`n"
     if ($LASTEXITCODE -or $explicitItems -notmatch 'explicit/Widget\.lui' -or $explicitItems -notmatch 'one[\\/]Widget\.lui' -or $explicitItems -notmatch 'two[\\/]Widget\.lui' -or $explicitItems -match 'Consumer|obj|bin') { throw 'Explicit AdditionalFiles did not retain or receive project-relative logical paths.' }
@@ -96,7 +96,7 @@ try {
 
     $multi = Join-Path $artifacts 'multi'
     Write-Project $multi 'Multi' '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.1.0"><PropertyGroup><TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles></PropertyGroup></Project>'
-    Set-Content (Join-Path $multi 'Widget.lui') 'multi'
+    Set-Content (Join-Path $multi 'Widget.lui') 'internal component Widget() { <Row /> }'
     Invoke-Dotnet @('restore', (Join-Path $multi 'Multi.csproj'), '--configfile', (Join-Path $multi 'NuGet.config'))
     Invoke-Dotnet @('build', (Join-Path $multi 'Multi.csproj'), '--no-restore', '-f', 'net10.0', '-warnaserror')
     Invoke-Dotnet @('build', (Join-Path $multi 'Multi.csproj'), '--no-restore', '-f', 'net10.0-windows', '-warnaserror')
@@ -105,17 +105,17 @@ try {
 
     $invalid = Join-Path $artifacts 'invalid'
     Write-Project $invalid 'Invalid' '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.1.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles></PropertyGroup></Project>'
-    Set-Content (Join-Path $invalid 'Widget.lui') 'valid'
+    Set-Content (Join-Path $invalid 'Widget.lui') 'internal component Widget() { <Row /> }'
     Invoke-Dotnet @('restore', (Join-Path $invalid 'Invalid.csproj'), '--configfile', (Join-Path $invalid 'NuGet.config'))
     Invoke-Dotnet @('build', (Join-Path $invalid 'Invalid.csproj'), '--no-restore', '-warnaserror')
     if (!(Get-ChildItem (Join-Path $invalid 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' -ErrorAction Ignore)) { throw 'Valid input did not produce generated inspection output.' }
     [IO.File]::WriteAllText((Join-Path $invalid 'Widget.lui'), '')
-    Expected-Failure @('build', (Join-Path $invalid 'Invalid.csproj'), '--no-restore') 'LUI4001' | Out-Null
+    Expected-Failure @('build', (Join-Path $invalid 'Invalid.csproj'), '--no-restore') 'LUI1003' | Out-Null
     if (Get-ChildItem (Join-Path $invalid 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' -ErrorAction Ignore) { throw 'Invalid input produced generated source.' }
 
     $duplicate = Join-Path $artifacts 'duplicate'
     Write-Project $duplicate 'Duplicate' '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.1.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EnableDefaultLuiItems>false</EnableDefaultLuiItems><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles></PropertyGroup><ItemGroup><AdditionalFiles Include="One.lui" LucentLuiLogicalPath="same/Main.lui" /><AdditionalFiles Include="Two.lui" LucentLuiLogicalPath="same/Main.lui" /></ItemGroup></Project>'
-    Set-Content (Join-Path $duplicate 'One.lui') 'one'; Set-Content (Join-Path $duplicate 'Two.lui') 'two'
+    Set-Content (Join-Path $duplicate 'One.lui') 'internal component One() { <Row /> }'; Set-Content (Join-Path $duplicate 'Two.lui') 'internal component Two() { <Row /> }'
     Invoke-Dotnet @('restore', (Join-Path $duplicate 'Duplicate.csproj'), '--configfile', (Join-Path $duplicate 'NuGet.config'))
     Expected-Failure @('build', (Join-Path $duplicate 'Duplicate.csproj'), '--no-restore') 'LUI4002' | Out-Null
     if (Get-ChildItem (Join-Path $duplicate 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' -ErrorAction Ignore) { throw 'Duplicate logical paths produced generated source.' }
