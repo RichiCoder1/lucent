@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion>
+    <IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <PackageId>Lucent.Lui.Sdk</PackageId><Version>0.1.0</Version><Authors>Lucent</Authors>
+    <Description>Additive .lui generator SDK proof.</Description><IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoPackageAnalysis>true</NoPackageAnalysis>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <None Include="Sdk/Sdk.props" Pack="true" PackagePath="Sdk/Sdk.props" />
+    <None Include="Sdk/Sdk.targets" Pack="true" PackagePath="Sdk/Sdk.targets" />
+    <None Include="../Lucent.Lui.Generator/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Generator.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="../Lucent.Lui.Compiler/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Compiler.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+  </ItemGroup>
+</Project>

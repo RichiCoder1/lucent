@@ -1,0 +1,26 @@
+<Project>
+  <Target Name="ValidateLucentLuiLangVersion" BeforeTargets="CoreCompile" Condition="'$(LucentEnableLui)' != 'false'">
+    <Error Condition="'$(LucentLuiLangVersion)' != 'preview'" Text="LucentLuiLangVersion must be 'preview' for this SDK proof." />
+  </Target>
+  <ItemGroup Condition="'$(LucentEnableLui)' != 'false'">
+    <AdditionalFiles Update="@(AdditionalFiles)">
+      <LucentLuiLogicalPath Condition="'%(AdditionalFiles.LucentLuiLogicalPath)' == ''">$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)', '%(AdditionalFiles.FullPath)'))</LucentLuiLogicalPath>
+    </AdditionalFiles>
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="LucentLuiLogicalPath" />
+    <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Compiler.dll" />
+    <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Generator.dll" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(LucentLuiImplicitUsings)' == 'true'">
+    <Using Include="Lucent.Core" />
+    <Using Include="Lucent.Core.LayoutProperties" Static="true" />
+    <Using Include="Lucent.Core.VisualProperties" Static="true" />
+    <Using Include="Lucent.Core.TypographyProperties" Static="true" />
+    <Using Include="Lucent.Core.InputProperties" Static="true" />
+  </ItemGroup>
+  <Target Name="CleanLucentLuiGeneratedFiles" AfterTargets="CoreClean" Condition="'$(EmitCompilerGeneratedFiles)' == 'true'">
+    <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Lucent.Lui.Generator" />
+  </Target>
+  <Target Name="ResetLucentLuiGeneratedFiles" BeforeTargets="PrepareForBuild" Condition="'$(EmitCompilerGeneratedFiles)' == 'true'">
+    <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Lucent.Lui.Generator" />
+  </Target>
+</Project>

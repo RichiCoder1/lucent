@@ -4,6 +4,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
     <PackageVersion Include="Microsoft.Windows.CsWin32" Version="0.3.321" />
     <PackageVersion Include="SDL3-CS" Version="3.4.14.1" />
     <PackageVersion Include="SDL3-CS.Windows" Version="3.4.14.1" />
