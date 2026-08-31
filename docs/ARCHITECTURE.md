@@ -153,6 +153,10 @@ No direct-dependency registration API is frozen. M7 may add one narrow generated
 
 The preferred `.lui` experience requires C#-quality completion, hover and XML documentation, diagnostics, rename/references, formatting, exact source maps, inspectable generated output, no implementation-name leakage, and no editor dead spots.
 
+M7 first separates author-facing properties from projection internals. `LayoutProperties` owns bounded geometry, spacing, padding, clipping, and scrolling; `VisualProperties` owns `Background : Brush` and subtree `Opacity`; `TypographyProperties` owns inherited color and typography. SDK-provided ordinary global/static C# usings may make these symbols implicit, but the compiler owns no alias table. Raw text, caret, selection, virtualization, scene, renderer, and transport values remain internal compiler-excluded state.
+
+The accepted `.lui` language and build/editor boundaries are specified in [`.lui` language contract](LUI-LANGUAGE.md), [`.lui` SDK and tooling contract](LUI-SDK-TOOLING.md), and [ADR 0002](adr/0002-lui-authoring-surface.md). A reusable compiler, thin incremental generator, and additive MSBuild SDK lower JSX-like structure and Roslyn-bound C# expressions to partial static component recipes. A later standalone LSP uses the same compiler and project-context model; runtime applications contain none of those build/editor dependencies.
+
 ## NativeAOT
 
 .NET 10 LTS is the required baseline. NativeAOT and trimming analyzers are enabled from the first implementation commit. Runtime code generation, dynamic assembly loading, reflection-based discovery, built-in runtime COM marshalling, and unbounded metadata scanning are excluded. Use direct calls or generated/static registration tables.

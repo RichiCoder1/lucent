@@ -126,6 +126,18 @@ A miss triggers diagnosis and optimization first. Changing hardware, scope, or a
 
 Design `.lui` as the preferred opinionated authoring surface over the frozen framework model. Lower to ordinary supported C# APIs where practical and to narrow generated dependency/registration calls only for measured optimization. Generated readability is useful but secondary because output remains an implementation detail.
 
+Execute in independently gated order:
+
+1. split author-facing layout/visual/typography properties from scene internals and add `Color`, solid/linear-gradient `Brush`, four-edge `Insets`/`Padding`, and composited subtree `Opacity`;
+2. prove the compiler/generator can load in the pinned .NET 10 SDK/editor host and package an additive MSBuild SDK;
+3. implement recoverable JSX-like syntax, C# expression islands, deterministic formatting, stable diagnostics, and `foreach (...) keyed by ...`;
+4. bind through Roslyn and lower directly to component recipes, typed styles/behaviors/content, retained regions, generated C#, and exact source maps;
+5. prove Filter Bar C#/`.lui` parity under NativeAOT, then freeze tooling performance budgets;
+6. prove virtualized Issue Row/keyed parity plus incremental add/change/delete/rename and stale-output rejection;
+7. deliver the shared-model LSP/VS Code matrix, cut the application over to `.lui`, and delete superseded composition code.
+
+The first language version is `preview`. Named styles are private and tokens/shared components remain C# or source-copied application assets initially. Local state sugar, broader C# islands, bind/color shorthand, exported styles, generic declarations, service injection, hot reload, keyframes, a visual designer, and shared component-copy tooling follow only from measured need.
+
 **Gate:** equivalent C# and `.lui` produce identical framework behavior and dumps; warning-clean NativeAOT; exact bidirectional source maps; C#-quality completion, XML documentation hover, diagnostics, rename/references, formatting, and generated-code navigation; no implementation-name leakage or editor dead spots.
 
 **Stop:** `.lui` requires a parallel runtime, reflection fallback, runtime parser, compatibility bridge to archived behavior, or lower-quality language tooling than the declared matrix.

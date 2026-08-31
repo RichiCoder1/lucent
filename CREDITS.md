@@ -24,6 +24,21 @@ These sources were consulted on 2026-08-27. They are conceptual references only;
 | [Design Tokens Community Group](https://github.com/design-tokens/community-group/tree/16c902d9327c18290e956a21130c445f1b88c40f) | `16c902d9327c18290e956a21130c445f1b88c40f`; Format Module 2025.10 | Community Group report, not a W3C Standard | Potential build-time token interchange; never executable runtime input |
 | [Windows UI Automation SDK](https://learn.microsoft.com/windows/win32/winauto/uiauto-serversideprovider) | Windows SDK `10.0.26100.0` `UIAutomationCore.idl` and `UIAutomationCoreApi.h`, consulted 2026-08-29 | Windows SDK platform contract; no copied source | Exact UIA provider IIDs, vtable slots, HRESULT, VARIANT and SAFEARRAY ownership |
 
+## M7 language, compiler, and authoring references
+
+These sources were consulted on 2026-08-30 for the `.lui` design. They are conceptual/tooling references only unless separately listed as an adopted package dependency. Detailed findings are in [`docs/research`](docs/research/).
+
+| Source | Consulted identity | License or status | Influence |
+| --- | --- | --- | --- |
+| [Roslyn](https://github.com/dotnet/roslyn/tree/e79586494f629704a0fd18b7afb840144fd5e673) / `Microsoft.CodeAnalysis.CSharp` | commit `e79586494f629704a0fd18b7afb840144fd5e673`; package API `4.14.0` | MIT | Incremental generator, `AdditionalText`, diagnostics, C# expression binding, generated spans |
+| [Razor](https://github.com/dotnet/razor/tree/58ec96978ef4e5823b54e960b9fd64cff45d7e68) | commit `58ec96978ef4e5823b54e960b9fd64cff45d7e68`; ASP.NET Core 9/10 docs | MIT | Partial C# components, typed content, generated inspection, cohosted project semantics, source mapping lessons |
+| [Mobile Blazor Bindings](https://github.com/dotnet/MobileBlazorBindings/tree/6b2d767a44fff94eb90489649889c66a399c00ec) | final archived commit `6b2d767a44fff94eb90489649889c66a399c00ec`; package `0.5.50-preview` | MIT; archived experiment | Native component markup and caution against a parallel platform/runtime abstraction |
+| [GPUIX](https://github.com/remorses/gpuix/tree/09e0caeb1812eece10a3a8a7200ef18567610267) | commit `09e0caeb1812eece10a3a8a7200ef18567610267` | Apache-2.0 | JSX-shaped GPUI authoring and compile-time lowering inspiration; no hooks/runtime adoption |
+| [QML](https://doc.qt.io/qt-6.11/qtqml-syntax-basics.html) | Qt 6.11 object-declaration documentation | LGPL/GPL/commercial framework terms; no dependency | Concise typed property-block syntax and warning against dynamic runtime object semantics |
+| [CSSWG](https://github.com/w3c/csswg-drafts/tree/f89f7a1a0138b072051e65323f49c737152880fb) | commit `f89f7a1a0138b072051e65323f49c737152880fb` | W3C specification terms | Familiar vocabulary plus evidence that flex, background layers, overflow, and alignment semantics must not be implied by names alone |
+
+The M7 design also revisited the already-recorded GPUI, Avalonia, Compose, Flutter, Slint, StyleX, Panda CSS, shadcn/ui, and DTCG identities above. No source is copied. Exact implementation package versions and NativeAOT/editor-host compatibility must be rechecked before package references are added.
+
 Before adding a dependency or adopting a new architectural reference:
 
 1. Add it here or to the active roadmap's reference ledger.

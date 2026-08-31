@@ -31,3 +31,19 @@ _Avoid_: Control subclass, event bundle, style
 **Composition**:
 The authored structure and ownership of elements and supplied content. Composition is distinct from both visual styling and interactive behavior.
 _Avoid_: Template expansion, render tree, layout
+
+**Component recipe**:
+A typed static composition entry point that creates ordinary Lucent elements, styles, behaviors, and owned regions. `.lui` components lower to component recipes; they are not runtime template instances.
+_Avoid_: Template, widget class, render function
+
+**Brush**:
+An immutable box-local visual value. The initial closed set is solid color and bounded linear gradient. A brush does not imply image layers, borders, clipping, opacity, or layout.
+_Avoid_: CSS background, renderer paint object, `IBrush`
+
+**Project context**:
+The authoritative evaluated C# project inputs used consistently by build and editor tooling: compilation, references, options, global usings, and `.lui` documents.
+_Avoid_: Workspace approximation, project manifest
+
+**Source map**:
+The deterministic bidirectional relationship between `.lui` spans and generated C# constructs used by build and editor tooling. It has no runtime role.
+_Avoid_: Debug table, runtime metadata
