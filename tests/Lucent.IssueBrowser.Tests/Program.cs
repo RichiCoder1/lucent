@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Lucent.Core;
 using Lucent.Renderer.Skia;
 using Lucent.IssueBrowser;
@@ -12,6 +13,7 @@ try
     FixtureIdentity();
     RecipeEvidence();
     DirectRootParity();
+    ReactiveFilterBarParity();
     AsyncBrowserStates();
     DensityRestyle();
     OptimisticStatusMutations();
@@ -55,12 +57,107 @@ static void DirectRootParity()
 {
     var issue = IssueFixture.Issues[0];
     var generatedFilter = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser), issue);
-    var handwrittenFilter = DirectRootEvidence(Lucent.IssueBrowser.Components.FilterBarHandwrittenParity, issue);
+    var generatedFilterNullStyle = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser, null), issue);
+    var handwrittenFilter = DirectRootEvidence(browser => FilterBarHandwrittenParityFixture.Create(browser), issue);
     var generatedRow = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.IssueRow(browser, issue), issue);
-    var handwrittenRow = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.IssueRowHandwrittenParity(browser, issue), issue);
-    Assert(generatedFilter == handwrittenFilter && generatedRow == handwrittenRow, "Generated .lui direct roots diverged from the retained handwritten C# parity fixtures.");
+    var handwrittenRow = DirectRootEvidence(browser => FilterBarHandwrittenParityFixture.CreateRow(browser, issue), issue);
+    Assert(generatedFilter == generatedFilterNullStyle && generatedFilter == handwrittenFilter && generatedRow == handwrittenRow, "Generated .lui direct roots diverged from the retained handwritten C# parity fixtures or null root style changed the default.");
+    Assert(FilterBarInputEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser)) == FilterBarInputEvidence(browser => FilterBarHandwrittenParityFixture.Create(browser)), "Generated and handwritten Filter Bars diverged after ordinary retained text input.");
     var evidence = generatedFilter.Dump + generatedFilter.Semantics + generatedRow.Dump + generatedRow.Semantics;
     Assert(Hash(evidence) == "f8a08b14e5f17e4f8d15b75ecaca943ec2b1b71495754bb8c619ca05ec8c167d", "Approved direct-root #48 parity rebaseline changed: " + Hash(evidence));
+}
+
+static void ReactiveFilterBarParity()
+{
+    var generated = ReactiveFilterBarEvidence((browser, style) => Lucent.IssueBrowser.Components.FilterBar(browser, style));
+    var handwritten = ReactiveFilterBarEvidence(FilterBarHandwrittenParityFixture.Create);
+    Assert(generated == handwritten, $"Generated Filter Bar diverged from the test-owned handwritten fixture after an idle reactive style completion: beforeDump={generated.BeforeDump == handwritten.BeforeDump} afterDump={generated.AfterDump == handwritten.AfterDump} beforeSemantics={generated.BeforeSemantics == handwritten.BeforeSemantics} afterSemantics={generated.AfterSemantics == handwritten.AfterSemantics} beforeScene={generated.BeforeScene == handwritten.BeforeScene} afterScene={generated.AfterScene == handwritten.AfterScene} beforePixels={generated.BeforePixels == handwritten.BeforePixels} afterPixels={generated.AfterPixels == handwritten.AfterPixels}.");
+    Assert(generated.BeforeDump == generated.AfterDump && generated.BeforeSemantics == generated.AfterSemantics && generated.RootId == generated.AfterRootId,
+        "Reactive Filter Bar completion changed retained structure, semantics, or identity.");
+    Assert(generated.AfterScene.Contains("brush=solid(#123456FF)", StringComparison.Ordinal) && generated.AfterScene.Contains("opacity=0.5", StringComparison.Ordinal) && generated.BeforePixels != generated.AfterPixels,
+        "Reactive Filter Bar did not publish the expected Background, Padding, Opacity, and pixels.");
+}
+
+static ReactiveFilterEvidence ReactiveFilterBarEvidence(Func<IssueBrowserState, Style?, ComponentRecipe> recipe)
+{
+    var graph = new ReactiveGraph();
+    using var composition = new Composition(graph, "filter-bar-reactive-parity");
+    using var theme = new ThemeContext(composition.Root.Scope, new Theme("filter-bar-reactive-parity"));
+    using var client = new HttpClient(new DeferredGitHubHandler()) { BaseAddress = new Uri("https://api.github.local/") };
+    var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
+    var completion = new TaskCompletionSource<FilterBarAppearance>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var initial = new FilterBarAppearance(Color.Parse("#000000"), Insets.Zero, 1f);
+    AsyncValue<FilterBarAppearance>? appearance = null;
+    var host = ComponentRecipe.Create("filter-bar-reactive-host", (context, root) =>
+    {
+        appearance = root.Scope.Async(_ => completion.Task, initial, "filter-bar-reactive-appearance");
+        context.Mount(root, recipe(browser, Style.Empty
+            .Background(() => appearance!.Value.Background)
+            .Padding(() => appearance!.Value.Padding)
+            .Opacity(() => appearance!.Value.Opacity)));
+    });
+    var hostRoot = composition.Mount(composition.Root, theme, host);
+    var filterRoot = hostRoot.Children.Single();
+    graph.Drain();
+    Assert(graph.Dump().Contains("name=\"filter-bar-reactive-appearance\"", StringComparison.Ordinal) && graph.Dump().Contains("name=\"filter-bar-reactive-appearance\" scope=2 deps=[] dirty=false generation=1 pending=true", StringComparison.Ordinal), "Filter Bar style bindings did not start their live async source.");
+    var beforeDump = composition.Dump();
+    var beforeSemantics = SemanticEvidence(composition.SemanticSnapshot()!);
+    using var renderer = new SkiaSceneRenderer();
+    var beforeScene = SceneLayout.Project(composition, new(800, 80, 1), renderer);
+    var beforePixels = Pixels(renderer, beforeScene, 800, 80);
+    var wakes = 0;
+    Action wake = () => Interlocked.Increment(ref wakes);
+    graph.WorkAvailable += wake;
+    try
+    {
+        Task.Run(() => completion.SetResult(new(Color.Parse("#123456"), Insets.Uniform(2), .5f))).GetAwaiter().GetResult();
+        Assert(SpinWait.SpinUntil(() => Volatile.Read(ref wakes) == 1, 2_000), "Idle reactive completion did not raise its work notification.");
+        var frame = composition.Flush();
+        var idle = composition.Flush();
+        Assert(wakes == 1 && frame && !idle, $"Idle reactive completion did not coalesce to exactly one wake and frame: wakes={wakes} frame={frame} idle={idle}.");
+    }
+    finally { graph.WorkAvailable -= wake; }
+    var afterDump = composition.Dump();
+    var afterSemantics = SemanticEvidence(composition.SemanticSnapshot()!);
+    var afterScene = SceneLayout.Project(composition, new(800, 80, 1), renderer);
+    var afterPixels = Pixels(renderer, afterScene, 800, 80);
+    Assert(filterRoot.Resolve(VisualProperties.Background).Value.Equals((Brush)Color.Parse("#123456")) && filterRoot.Resolve(LayoutProperties.Padding).Value == Insets.Uniform(2) && filterRoot.Resolve(VisualProperties.Opacity).Value == .5f,
+        $"Reactive Filter Bar bindings did not resolve through the public style seam: background={filterRoot.Resolve(VisualProperties.Background).Value} padding={filterRoot.Resolve(LayoutProperties.Padding).Value} opacity={filterRoot.Resolve(VisualProperties.Opacity).Value}.");
+    Assert(filterRoot.Children.Count == 3, "Reactive Filter Bar completion changed its retained child structure.");
+
+    AssertDisposedReactiveFilterBar(recipe);
+
+    return new(filterRoot.Id, filterRoot.Id, beforeDump, afterDump, beforeSemantics, afterSemantics, SceneEvidence(beforeScene), SceneEvidence(afterScene), beforePixels, afterPixels);
+}
+
+static void AssertDisposedReactiveFilterBar(Func<IssueBrowserState, Style?, ComponentRecipe> recipe)
+{
+    var graph = new ReactiveGraph();
+    using var composition = new Composition(graph, "filter-bar-disposal-parity");
+    using var theme = new ThemeContext(composition.Root.Scope, new Theme("filter-bar-disposal-parity"));
+    using var client = new HttpClient(new DeferredGitHubHandler()) { BaseAddress = new Uri("https://api.github.local/") };
+    var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
+    var completion = new TaskCompletionSource<FilterBarAppearance>();
+    var initial = new FilterBarAppearance(Color.Parse("#000000"), Insets.Zero, 1f);
+    var host = ComponentRecipe.Create("filter-bar-disposed-host", (context, root) =>
+    {
+        var source = root.Scope.Async(_ => completion.Task, initial, "filter-bar-disposed-appearance");
+        context.Mount(root, recipe(browser, Style.Empty.Background(() => source.Value.Background).Padding(() => source.Value.Padding).Opacity(() => source.Value.Opacity)));
+    });
+    var hostRoot = composition.Mount(composition.Root, theme, host);
+    graph.Drain();
+    var wakes = 0;
+    Action wake = () => Interlocked.Increment(ref wakes);
+    graph.WorkAvailable += wake;
+    try
+    {
+        hostRoot.Dispose();
+        var producer = new Thread(() => completion.SetResult(new(Color.Parse("#abcdef"), Insets.Uniform(3), .25f)));
+        producer.Start();
+        Assert(producer.Join(2_000), "Disposed Filter Bar completion did not reach its bounded producer barrier.");
+        Assert(wakes == 0 && !composition.Flush() && composition.Root.Children.Count == 0, "Disposed Filter Bar scope accepted a late async style completion.");
+    }
+    finally { graph.WorkAvailable -= wake; }
 }
 
 static (string Dump, string Semantics) DirectRootEvidence(Func<IssueBrowserState, ComponentRecipe> recipe, BrowserIssue issue)
@@ -76,6 +173,30 @@ static (string Dump, string Semantics) DirectRootEvidence(Func<IssueBrowserState
     var start = dump.LastIndexOf("element " + root.Id + " ", StringComparison.Ordinal);
     var semantic = Flatten(composition.SemanticSnapshot()!).Single(snapshot => snapshot.Identity.ElementId == root.Id);
     return (dump.Substring(start), SemanticEvidence(semantic));
+}
+
+static (string State, string Dump, string Semantics) FilterBarInputEvidence(Func<IssueBrowserState, ComponentRecipe> recipe)
+{
+    var graph = new ReactiveGraph();
+    using var composition = new Composition(graph, "filter-bar-input-parity");
+    using var theme = new ThemeContext(composition.Root.Scope, new Theme("filter-bar-input-parity"));
+    using var client = new HttpClient(new DeferredGitHubHandler()) { BaseAddress = new Uri("https://api.github.local/") };
+    var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
+    var root = composition.Mount(composition.Root, theme, recipe(browser));
+    graph.Drain();
+    using var renderer = new SkiaSceneRenderer();
+    Assert(composition.Input.SetScene(SceneLayout.Project(composition, new(800, 80, 1), renderer)), "Filter Bar input scene was rejected.");
+    var rootSemantic = Flatten(composition.SemanticSnapshot()!).Single(snapshot => snapshot.Identity.ElementId == root.Id);
+    var fields = Flatten(rootSemantic).Where(snapshot => snapshot.Role == SemanticRole.TextField).ToDictionary(snapshot => snapshot.Name, StringComparer.Ordinal);
+    foreach (var (label, value) in new[] { ("Search issues", "native"), ("Status: all, open, closed", "closed"), ("Assignee: all, marta, devin, joel", "marta") })
+    {
+        Assert(fields.TryGetValue(label, out var field) && composition.ExecuteSemanticCommand(field.Identity, new(SemanticCommandKind.SetValue, value)) == SemanticCommandResult.Applied,
+            "Filter Bar rejected ordinary retained text input for " + label + ".");
+        graph.Drain();
+    }
+    Assert(browser.Search == "native" && browser.Status == "closed" && browser.Assignee == "marta", "Filter Bar onChange handlers did not update all browser filters.");
+    rootSemantic = Flatten(composition.SemanticSnapshot()!).Single(snapshot => snapshot.Identity.ElementId == root.Id);
+    return (browser.Search + "|" + browser.Status + "|" + browser.Assignee, composition.Dump(), SemanticEvidence(rootSemantic));
 }
 
 static string SemanticEvidence(SemanticSnapshot snapshot) => snapshot.Role + "|" + snapshot.Name + "|" + snapshot.Value + "|" + snapshot.Enabled + "|" + snapshot.Focused + "|" + snapshot.Selected + "|" + snapshot.Actions + "[" + string.Join(",", snapshot.Children.Select(SemanticEvidence)) + "]";
@@ -306,6 +427,18 @@ static bool HasRetry(Composition composition) => Flatten(composition.SemanticSna
 
 static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
+static string Pixels(SkiaSceneRenderer renderer, RetainedScene scene, int width, int height)
+{
+    using var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+    using var canvas = new SKCanvas(bitmap);
+    canvas.Clear(SKColors.Transparent);
+    renderer.Render(scene, canvas);
+    using var pixels = bitmap.PeekPixels();
+    return Convert.ToHexString(SHA256.HashData(pixels.GetPixelSpan()));
+}
+
+static string SceneEvidence(RetainedScene scene) => Regex.Replace(Regex.Replace(scene.Dump(), @"epoch=\d+", "epoch=*"), @"inputSignature=[^ ]+", "inputSignature=*");
+
 static void Assert(bool value, string message)
 {
     if (!value) throw new InvalidOperationException(message);
@@ -352,3 +485,38 @@ sealed class DeferredStatusSource : IIssueStatusSource
 }
 
 readonly record struct TopVisibleRow(int Number, float Relative, float Height, SemanticSnapshot Semantic);
+readonly record struct FilterBarAppearance(Brush Background, Insets Padding, float Opacity)
+{
+    public FilterBarAppearance(Color background, Insets padding, float opacity) : this((Brush)background, padding, opacity) { }
+}
+readonly record struct ReactiveFilterEvidence(long RootId, long AfterRootId, string BeforeDump, string AfterDump, string BeforeSemantics, string AfterSemantics, string BeforeScene, string AfterScene, string BeforePixels, string AfterPixels);
+
+internal static class FilterBarHandwrittenParityFixture
+{
+    private static readonly Style FilterBarStyle = Style.Empty.Width(800f).Height(IssueBrowserStructure.DensityFilterHeight).Spacing(IssueBrowserStructure.DensitySpacing);
+    private static readonly Style TextFieldStyle = Style.Empty.Width(250f).Height(24f);
+
+    internal static ComponentRecipe Create(IssueBrowserState browser, Style? style = null)
+    {
+        ArgumentNullException.ThrowIfNull(browser);
+        return Lucent.Core.Components.Row([
+            Lucent.Core.Components.TextField(onChange: browser.SetSearch, style: TextFieldStyle, label: "Search issues").Named("issue-browser.search"),
+            Lucent.Core.Components.TextField(onChange: browser.SetStatus, style: TextFieldStyle, label: "Status: all, open, closed").Named("issue-browser.status"),
+            Lucent.Core.Components.TextField(onChange: browser.SetAssignee, style: TextFieldStyle, label: "Assignee: all, marta, devin, joel").Named("issue-browser.assignee")
+        ], FilterBarStyle.With(style));
+    }
+
+    internal static ComponentRecipe CreateRow(IssueBrowserState browser, BrowserIssue issue)
+    {
+        ArgumentNullException.ThrowIfNull(browser); ArgumentNullException.ThrowIfNull(issue);
+        var style = Style.Empty.Width(800f).Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f).Spacing(IssueBrowserStructure.DensitySpacing).FontSize(IssueBrowserStructure.DensityFontSize).Background(IssueBrowserStructure.RowSurface)
+            .When(VariantState.FocusVisible, Style.Empty.Background(IssueBrowserStructure.FocusSurface).TextColor(IssueBrowserStructure.FocusForeground));
+        return Lucent.Core.Components.Selectable(() => Label(browser, issue), () => browser.IsSelected(issue.Number), () => browser.Select(issue.Number), style);
+    }
+
+    private static string Label(IssueBrowserState browser, BrowserIssue issue)
+    {
+        var current = browser.Issues.First(candidate => candidate.Number == issue.Number);
+        return $"#{current.Number} {current.Title} — {current.Status} · {current.Assignee}";
+    }
+}

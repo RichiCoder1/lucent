@@ -535,7 +535,9 @@ public static class LuiCompiler
         }
         private void StyleWith(LuiStyleWithSyntax style, List<LuiDiagnostic> diagnostics)
         {
-            Write("global::Lucent.Core.Style.Empty.With("); Mapped(style.Name.Text, style.Name.Span, LuiMapKind.Symbol); Write(").With(global::Lucent.Core.Style.Empty"); foreach (var member in style.Members) { if (member is LuiStyleAssignmentSyntax normal) Assignment(normal, true); else { var variant = (LuiVariantGroupSyntax)member; Write(".When("); Variant(variant, diagnostics); Write(", global::Lucent.Core.Style.Empty"); foreach (var variantAssignment in variant.Assignments) Assignment(variantAssignment, true); Write(")"); Mark(variant.WhenKeyword.Span, LuiMapKind.Structure); Mark(variant.OpenBrace.Span, LuiMapKind.Structure); Mark(variant.CloseBrace.Span, LuiMapKind.Structure); } } Write(")");
+            Write("global::Lucent.Core.Style.Empty.With("); Mapped(style.Name.Text, style.Name.Span, LuiMapKind.Symbol); Write(")");
+            if (style.Tail is { } tail) { Write(".With("); Mapped(tail.Text, tail.Span, LuiMapKind.Symbol); Write(")"); return; }
+            Write(".With(global::Lucent.Core.Style.Empty"); foreach (var member in style.Members) { if (member is LuiStyleAssignmentSyntax normal) Assignment(normal, true); else { var variant = (LuiVariantGroupSyntax)member; Write(".When("); Variant(variant, diagnostics); Write(", global::Lucent.Core.Style.Empty"); foreach (var variantAssignment in variant.Assignments) Assignment(variantAssignment, true); Write(")"); Mark(variant.WhenKeyword.Span, LuiMapKind.Structure); Mark(variant.OpenBrace.Span, LuiMapKind.Structure); Mark(variant.CloseBrace.Span, LuiMapKind.Structure); } } Write(")");
         }
         private void Variant(LuiVariantGroupSyntax variant, List<LuiDiagnostic> diagnostics)
         {

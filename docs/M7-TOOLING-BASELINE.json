@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "issue": 50,
+  "frozenBeforeOptimization": true,
+  "environment": {
+    "runtime": ".NET SDK 10.0.400",
+    "os": "Microsoft Windows NT 10.0.26200.0",
+    "cpu": "AMD Ryzen 9 9900X 12-Core Processor",
+    "ramGiB": 61.6,
+    "configuration": "Release build; Debug contract corpora"
+  },
+  "operations": {
+    "coldProjectLoad": {
+      "command": "dotnet build apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj -c Release --no-restore -t:Rebuild -warnaserror",
+      "baselineMilliseconds": 7278,
+      "budgetMilliseconds": 30000
+    },
+    "warmCompilerCorpus": {
+      "command": "dotnet run --project tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj --no-build",
+      "baselineMilliseconds": 3685,
+      "budgetMilliseconds": 15000
+    },
+    "formattingCorpus": {
+      "command": "dotnet run --project tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj --no-build",
+      "baselineMilliseconds": 3455,
+      "budgetMilliseconds": 15000,
+      "scope": "The existing compiler corpus owns formatter document/range/idempotence checks; no standalone formatter CLI exists yet."
+    },
+    "incrementalNoOpAndOneFileInvalidation": {
+      "command": "dotnet run --project tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj --no-build",
+      "baselineMilliseconds": 4056,
+      "budgetMilliseconds": 15000,
+      "scope": "The existing generator corpus asserts cached no-op and one-document invalidation through Roslyn tracked steps."
+    }
+  },
+  "deferred": [
+    {
+      "measure": "warmCompletion",
+      "reason": "Deferred: the LSP is owned by later editor work; no completion implementation exists."
+    },
+    {
+      "measure": "editToDiagnostic",
+      "reason": "Deferred: the LSP/editor diagnostic loop is not implemented."
+    },
+    {
+      "measure": "rename",
+      "reason": "Deferred: cross-language rename is owned by later editor work and must not be simulated."
+    }
+  ]
+}

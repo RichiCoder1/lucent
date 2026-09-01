@@ -352,23 +352,6 @@ public static partial class Components
     private static Style IssueRowStyle(IssueBrowserState browser) => Style.Empty.Width(800f).Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f).Spacing(IssueBrowserStructure.DensitySpacing).FontSize(IssueBrowserStructure.DensityFontSize).Background(IssueBrowserStructure.RowSurface)
         .When(VariantState.FocusVisible, Style.Empty.Background(IssueBrowserStructure.FocusSurface).TextColor(IssueBrowserStructure.FocusForeground));
 
-    // #48 direct-root C# parity fixtures; production continues to call only generated FilterBar/IssueRow.
-    internal static ComponentRecipe FilterBarHandwrittenParity(IssueBrowserState browser)
-    {
-        ArgumentNullException.ThrowIfNull(browser);
-        return Lucent.Core.Components.Row([
-            Lucent.Core.Components.TextField(onChange: browser.SetSearch, style: TextFieldStyle, label: "Search issues").Named("issue-browser.search"),
-            Lucent.Core.Components.TextField(onChange: browser.SetStatus, style: TextFieldStyle, label: "Status: all, open, closed").Named("issue-browser.status"),
-            Lucent.Core.Components.TextField(onChange: browser.SetAssignee, style: TextFieldStyle, label: "Assignee: all, marta, devin, joel").Named("issue-browser.assignee")
-        ], FilterBarStyle);
-    }
-
-    internal static ComponentRecipe IssueRowHandwrittenParity(IssueBrowserState browser, BrowserIssue issue)
-    {
-        ArgumentNullException.ThrowIfNull(browser); ArgumentNullException.ThrowIfNull(issue);
-        return Lucent.Core.Components.Selectable(() => Label(browser, issue), () => browser.IsSelected(issue.Number), () => browser.Select(issue.Number), IssueRowStyle(browser));
-    }
-
     private static ComponentRecipe Header(IssueBrowserState browser) => ComponentRecipe.Create("issue-browser.header", (context, root) => context.Mount(root, Lucent.Core.Components.Column([
         Lucent.Core.Components.Text("Issues", Style.Empty.Height(24f).FontSize(IssueBrowserStructure.DensityTitleFontSize)).Named("issue-browser.title"),
         FilterBar(browser).Named("issue-browser.filters"),

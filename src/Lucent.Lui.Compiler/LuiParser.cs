@@ -212,8 +212,18 @@ LuiStyleWithSyntax? style; if (styleContext && TryInlineStyle(span, open, close,
 private bool TryInlineStyle(LuiSpan span, LuiToken outerOpen, LuiToken outerClose, int contentStart, string content, out LuiStyleWithSyntax? style)
         {
             style = null; var tokens = SyntaxFactory.ParseTokens(content).Where(token => !token.IsKind(SyntaxKind.EndOfFileToken)).ToArray(); var with = Array.FindIndex(tokens, token => token.ValueText == "with");
-            if (with <= 0 || with + 1 >= tokens.Length || !tokens[with + 1].IsKind(SyntaxKind.OpenBraceToken) || !tokens[tokens.Length - 1].IsKind(SyntaxKind.CloseBraceToken)) return false;
+            if (with <= 0 || with + 1 >= tokens.Length) return false;
             var baseText = content.Substring(0, tokens[with].SpanStart).Trim(); if (!ValidName(baseText)) return false;
+            if (!tokens[with + 1].IsKind(SyntaxKind.OpenBraceToken))
+            {
+                var tailText = content.Substring(tokens[with + 1].SpanStart).Trim();
+                if (with + 2 != tokens.Length || !ValidName(tailText)) return false;
+                var tailStart = content.IndexOf(tailText, tokens[with + 1].SpanStart, StringComparison.Ordinal);
+                var tailBaseStart = content.IndexOf(baseText, StringComparison.Ordinal);
+                style = new LuiStyleWithSyntax(span, outerOpen, new LuiToken(baseText, new LuiSpan(contentStart + tailBaseStart, baseText.Length), false), new LuiToken("with", new LuiSpan(contentStart + tokens[with].SpanStart, tokens[with].Span.Length), false), new LuiToken("{", new LuiSpan(contentStart + tokens[with].Span.End, 0), true), [], new LuiToken("}", new LuiSpan(contentStart + tailStart + tailText.Length, 0), true), outerClose, new LuiToken(tailText, new LuiSpan(contentStart + tailStart, tailText.Length), false));
+                return true;
+            }
+            if (!tokens[tokens.Length - 1].IsKind(SyntaxKind.CloseBraceToken)) return false;
             var members = new List<LuiStyleMemberSyntax>(); var p = tokens[with + 1].Span.End; var close = tokens[tokens.Length - 1].SpanStart;
             while (p < close)
             {
