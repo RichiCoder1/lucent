@@ -7,6 +7,8 @@ $contracts = Join-Path $root 'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj'
 $issueContracts = Join-Path $root 'tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj'
 $rendererContracts = Join-Path $root 'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj'
 $platformContracts = Join-Path $root 'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj'
+$compilerContracts = Join-Path $root 'tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj'
+$generatorContracts = Join-Path $root 'tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj'
 $appExe = Join-Path $root 'apps/Lucent.IssueBrowser/bin/Release/net10.0-windows10.0.26100.0/win-x64/publish/Lucent.IssueBrowser.exe'
 $platformExe = Join-Path $root 'tests/Lucent.Platform.Windows.Tests/bin/Release/net10.0-windows10.0.26100.0/win-x64/publish/Lucent.Platform.Windows.Tests.exe'
 function Invoke-IsolatedPwsh([string] $script, [string[]] $arguments, [int] $timeoutSeconds = 180) {
@@ -30,6 +32,8 @@ Write-Output 'Core compiled runtime-discovery/property-model scan: PASS'
 & $dotnet run --project $rendererContracts --no-build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet run --project $platformContracts --no-build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet run --project $issueContracts --no-build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+& $dotnet run --project $compilerContracts --no-build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+& $dotnet run --project $generatorContracts --no-build; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet publish $contracts -c Release -r win-x64 --self-contained true --no-restore -p:PublishAot=true -p:PublishTrimmed=true -warnaserror; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & (Join-Path $root 'tests/Lucent.Core.Tests/bin/Release/net10.0/win-x64/publish/Lucent.Core.Tests.exe'); if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet publish $rendererContracts -c Release -r win-x64 --self-contained true --no-restore -p:PublishAot=true -p:PublishTrimmed=true -warnaserror; if ($LASTEXITCODE) { exit $LASTEXITCODE }

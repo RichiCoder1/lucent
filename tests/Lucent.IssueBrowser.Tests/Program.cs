@@ -1153,9 +1153,9 @@ static void StartupStaysFrameworkOwned()
                     && !source.Contains("test mode", StringComparison.OrdinalIgnoreCase)
                     && !source.Contains("IssueRowHandwritten", StringComparison.Ordinal)
                     && !Regex.IsMatch(source, @"\bComponentRecipe\s+IssueRow\s*\(")
-                    && source.Contains(
-                        "VirtualizedList(() => browser.VisibleIssues, issue => issue.Number, issue => IssueRow(browser, issue)",
-                        StringComparison.Ordinal
+                    && Regex.IsMatch(
+                        source,
+                        @"\bVirtualizedList\s*\(\s*\(\)\s*=>\s*browser\.VisibleIssues\s*,\s*issue\s*=>\s*issue\.Number\s*,\s*issue\s*=>\s*IssueRow\s*\(\s*browser\s*,\s*issue\s*\)"
                     )
                     && issueRow.Contains("public component IssueRow", StringComparison.Ordinal)
                     && !issueRow.Contains("VirtualizedList", StringComparison.Ordinal),

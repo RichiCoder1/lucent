@@ -6,6 +6,7 @@
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
     <SelfContained>true</SelfContained>
+    <AllowedReferenceRelatedFileExtensions>.pdb</AllowedReferenceRelatedFileExtensions>
     <LucentLuiLangVersion>preview</LucentLuiLangVersion>
     <LucentLuiProjectIdentity>$(MSBuildProjectFullPath)</LucentLuiProjectIdentity>
     <LucentLuiProjectEpoch>$(MSBuildProjectFullPath)|$(TargetFramework)|$(Configuration)|$(MSBuildProjectExtensionsPath)|$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiProjectEpoch>
