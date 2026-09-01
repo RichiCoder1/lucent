@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" />
     <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" />
+    <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
   </ItemGroup>
 </Project>

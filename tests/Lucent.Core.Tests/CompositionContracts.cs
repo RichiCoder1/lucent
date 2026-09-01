@@ -7,6 +7,7 @@ internal static class CompositionContracts
         try
         {
             ConditionalIdentityAndCleanup();
+            SwitchReplacementIsTransactional();
             KeyedIdentityRollbackAndCleanup();
             DepartedFacetsAndLateAsync();
             FailureAndDisposalSafety();
@@ -91,6 +92,24 @@ internal static class CompositionContracts
         rows.Value = ["a"];
         graph.Drain();
         Assert(c.IsDisposed && cleanup.GetValueOrDefault("c") == 1 && cleanup.GetValueOrDefault("d") == 1, "Departed keyed entries were not cleaned once.");
+    }
+
+    private static void SwitchReplacementIsTransactional()
+    {
+        var graph = new ReactiveGraph();
+        var branch = graph.Signal(1, "switch-branch");
+        using var composition = new Composition(graph, "switch-root");
+        var keptCleanup = 0; var failedCleanup = 0;
+        var keptRecipe = ComponentRecipe.Create("switch-kept", (_, root) => root.Scope.OnDispose(() => keptCleanup++));
+        var failingRecipe = ComponentRecipe.Create("switch-failed", (_, root) => { root.Scope.OnDispose(() => failedCleanup++); throw new InvalidOperationException("switch factory"); });
+        var region = composition.Switch(composition.Root, "switch-region", () => branch.Value == 1 ? new ConditionalChoice(1, keptRecipe) : new ConditionalChoice(2, failingRecipe));
+        graph.Drain();
+        var kept = region.Active!; var dump = composition.Dump(); var topology = graph.Dump();
+        branch.Value = 2;
+        ExpectAggregate(graph.Drain);
+        Assert(ReferenceEquals(region.Active, kept) && !kept.IsDisposed && region.Region.Children.SequenceEqual([kept]) &&
+            composition.Dump() == dump && graph.Dump() == topology && keptCleanup == 0 && failedCleanup == 1,
+            "A failed switch replacement changed the retained branch or leaked provisional cleanup.");
     }
 
     private static void UnrelatedSemanticRefreshKeepsIdentityCurrent()
@@ -616,10 +635,27 @@ internal static class CompositionContracts
     {
         AssertPublicFactoryGuard(false, "child", composition => composition.Child(composition.Root, "escaped-child"));
         AssertPublicFactoryGuard(false, "when", composition => composition.When(composition.Root, "escaped-when", () => false, context => context.Element("escaped-when-child")));
+        AssertPublicFactoryGuard(false, "switch", composition => composition.Switch(composition.Root, "escaped-switch", () => default));
         AssertPublicFactoryGuard(false, "foreach", composition => composition.ForEach(composition.Root, "escaped-foreach", Array.Empty<int>, value => value, (_, context) => context.Element("escaped-foreach-child")));
         AssertPublicFactoryGuard(true, "child", composition => composition.Child(composition.Root, "escaped-child"));
         AssertPublicFactoryGuard(true, "when", composition => composition.When(composition.Root, "escaped-when", () => false, context => context.Element("escaped-when-child")));
+        AssertPublicFactoryGuard(true, "switch", composition => composition.Switch(composition.Root, "escaped-switch", () => default));
         AssertPublicFactoryGuard(true, "foreach", composition => composition.ForEach(composition.Root, "escaped-foreach", Array.Empty<int>, value => value, (_, context) => context.Element("escaped-foreach-child")));
+
+        var graph = new ReactiveGraph();
+        var active = graph.Signal(false, "switch-foreign-active");
+        using var composition = new Composition(graph, "switch-foreign-root");
+        var foreign = composition.Child(composition.Root, "switch-foreign-parent");
+        var region = composition.When(composition.Root, "switch-foreign-region", () => active.Value, context =>
+        {
+            var root = context.Element("switch-provisional-root");
+            Expect<ArgumentException>(() => context.Switch(foreign, "escaped-context-switch", () => default));
+            return root;
+        });
+        graph.Drain();
+        active.Value = true;
+        graph.Drain();
+        Assert(region.Active is not null && foreign.Children.Count == 0, "A provisional context attached a switch below a foreign parent.");
     }
 
     private static void AssertPublicFactoryGuard(bool keyed, string api, Action<Composition> bypass)

@@ -66,6 +66,14 @@ public sealed class ContentRecipe
         return new ContentRecipe((context, parent) => _ = context.When(parent, name, active, content.Mount));
     }
 
+    /// <summary>Creates one retained branch selected by one reactive evaluation.</summary>
+    public static ContentRecipe Switch(string name, Func<ConditionalChoice> select)
+    {
+        ReactiveGraph.ValidateName(name, nameof(name));
+        ArgumentNullException.ThrowIfNull(select);
+        return new ContentRecipe((context, parent) => _ = context.Switch(parent, name, select));
+    }
+
     /// <summary>Creates a retained keyed contribution.</summary>
     public static ContentRecipe ForEach<TKey, TItem>(string name, Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key, Func<TItem, ComponentRecipe> content) where TKey : notnull
@@ -84,6 +92,9 @@ public sealed class ContentRecipe
 
     internal void Mount(CompositionContext context, Element parent) => _mount(context, parent);
 }
+
+/// <summary>The selected retained conditional branch and its recipe.</summary>
+public readonly record struct ConditionalChoice(int Branch, ComponentRecipe? Recipe);
 
 /// <summary>An immutable ordered group of content contributions.</summary>
 [CollectionBuilder(typeof(ComponentContent), nameof(Create))]

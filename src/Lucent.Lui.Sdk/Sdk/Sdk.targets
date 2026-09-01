@@ -1,4 +1,9 @@
 <Project>
+  <PropertyGroup>
+    <LucentLuiProjectEpoch Condition="'$(LucentLuiProjectEpoch)' == ''">$(MSBuildProjectFullPath)|$(TargetFramework)|$(Configuration)</LucentLuiProjectEpoch>
+    <LucentLuiCompilerOptions Condition="'$(LucentLuiCompilerOptions)' == ''">LangVersion=$(LangVersion)|Nullable=$(Nullable)|ImplicitUsings=$(ImplicitUsings)|Optimize=$(Optimize)|WarningLevel=$(WarningLevel)|TreatWarningsAsErrors=$(TreatWarningsAsErrors)</LucentLuiCompilerOptions>
+    <LucentLuiDefines Condition="'$(LucentLuiDefines)' == ''">$(DefineConstants)</LucentLuiDefines>
+  </PropertyGroup>
   <Target Name="ValidateLucentLuiLangVersion" BeforeTargets="CoreCompile" Condition="'$(LucentEnableLui)' != 'false'">
     <Error Condition="'$(LucentLuiLangVersion)' != 'preview'" Text="LucentLuiLangVersion must be 'preview' for this SDK proof." />
   </Target>
@@ -7,11 +12,18 @@
       <LucentLuiLogicalPath Condition="'%(AdditionalFiles.LucentLuiLogicalPath)' == ''">$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)', '%(AdditionalFiles.FullPath)'))</LucentLuiLogicalPath>
     </AdditionalFiles>
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="LucentLuiLogicalPath" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="LucentLuiDocumentVersion" />
+    <CompilerVisibleProperty Include="LucentLuiProjectIdentity" />
+    <CompilerVisibleProperty Include="LucentLuiProjectEpoch" />
+    <CompilerVisibleProperty Include="LucentLuiLangVersion" />
+    <CompilerVisibleProperty Include="LucentLuiCompilerOptions" />
+    <CompilerVisibleProperty Include="LucentLuiDefines" />
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Compiler.dll" />
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Generator.dll" />
   </ItemGroup>
   <ItemGroup Condition="'$(LucentLuiImplicitUsings)' == 'true'">
     <Using Include="Lucent.Core" />
+    <Using Include="Lucent.Core.Components" Static="true" />
     <Using Include="Lucent.Core.LayoutProperties" Static="true" />
     <Using Include="Lucent.Core.VisualProperties" Static="true" />
     <Using Include="Lucent.Core.TypographyProperties" Static="true" />

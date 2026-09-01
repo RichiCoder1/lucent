@@ -3,7 +3,8 @@
     <LucentEnableLui Condition="'$(LucentEnableLui)' == ''">true</LucentEnableLui>
     <EnableDefaultLuiItems Condition="'$(EnableDefaultLuiItems)' == ''">true</EnableDefaultLuiItems>
     <LucentLuiLangVersion Condition="'$(LucentLuiLangVersion)' == ''">preview</LucentLuiLangVersion>
-    <LucentLuiImplicitUsings Condition="'$(LucentLuiImplicitUsings)' == ''">false</LucentLuiImplicitUsings>
+    <LucentLuiProjectIdentity Condition="'$(LucentLuiProjectIdentity)' == ''">$(MSBuildProjectFullPath)</LucentLuiProjectIdentity>
+    <LucentLuiImplicitUsings Condition="'$(LucentLuiImplicitUsings)' == ''">true</LucentLuiImplicitUsings>
   </PropertyGroup>
   <ItemGroup Condition="'$(LucentEnableLui)' != 'false' and '$(EnableDefaultLuiItems)' != 'false'">
     <AdditionalFiles Include="**/*.lui" Exclude="$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder);**/bin/**;**/obj/**;**/.*/**;**/*.g.lui;**/*.generated.lui" LucentLuiLogicalPath="%(RecursiveDir)%(Filename)%(Extension)" />

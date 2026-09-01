@@ -169,6 +169,10 @@ public sealed class IssueBrowserState
     public string Status { get => _status.Value; set => _status.Value = Normalize(value, "all"); }
     public string Assignee { get => _assignee.Value; set => _assignee.Value = Normalize(value, "all"); }
 
+    public void SetSearch(string value) => Search = value;
+    public void SetStatus(string value) => Status = value;
+    public void SetAssignee(string value) => Assignee = value;
+
     public void Retry() => _retry.Value++;
     public void Select(int number) => _selectedNumber.Value = Issues.Any(issue => issue.Number == number) ? number : null;
     public void ToggleDensity() => Density = Density == IssueDensity.Comfortable ? IssueDensity.Compact : IssueDensity.Comfortable;
@@ -324,7 +328,7 @@ public static class IssueBrowserStructure
 }
 
 /// <summary>Ordinary C# recipes for the reference application's composition.</summary>
-public static class Components
+public static partial class Components
 {
     [LucentComponent]
     public static ComponentRecipe IssueBrowser(IssueBrowserState browser)
@@ -343,28 +347,26 @@ public static class Components
         ], Style.Empty.Width(800f).Height(500f).Background(IssueBrowserStructure.PageSurface).TextColor(IssueBrowserStructure.PageForeground).Clip(true))));
     }
 
-    [LucentComponent]
-    public static ComponentRecipe FilterBar(IssueBrowserState browser)
+    private static readonly Style FilterBarStyle = Style.Empty.Width(800f).Height(IssueBrowserStructure.DensityFilterHeight).Spacing(IssueBrowserStructure.DensitySpacing);
+    private static readonly Style TextFieldStyle = Style.Empty.Width(250f).Height(24f);
+    private static Style IssueRowStyle(IssueBrowserState browser) => Style.Empty.Width(800f).Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f).Spacing(IssueBrowserStructure.DensitySpacing).FontSize(IssueBrowserStructure.DensityFontSize).Background(IssueBrowserStructure.RowSurface)
+        .When(VariantState.FocusVisible, Style.Empty.Background(IssueBrowserStructure.FocusSurface).TextColor(IssueBrowserStructure.FocusForeground));
+
+    // #48 direct-root C# parity fixtures; production continues to call only generated FilterBar/IssueRow.
+    internal static ComponentRecipe FilterBarHandwrittenParity(IssueBrowserState browser)
     {
         ArgumentNullException.ThrowIfNull(browser);
-        return ComponentRecipe.Create("issue-browser.filter-bar", (context, root) => context.Mount(root, Lucent.Core.Components.Row([
-            Lucent.Core.Components.TextField(onChange: value => browser.Search = value, style: Style.Empty.Width(250f).Height(24f), label: "Search issues").Named("issue-browser.search"),
-            Lucent.Core.Components.TextField(onChange: value => browser.Status = value, style: Style.Empty.Width(250f).Height(24f), label: "Status: all, open, closed").Named("issue-browser.status"),
-            Lucent.Core.Components.TextField(onChange: value => browser.Assignee = value, style: Style.Empty.Width(250f).Height(24f), label: "Assignee: all, marta, devin, joel").Named("issue-browser.assignee")
-        ], Style.Empty.Width(800f).Height(IssueBrowserStructure.DensityFilterHeight).Spacing(IssueBrowserStructure.DensitySpacing))));
+        return Lucent.Core.Components.Row([
+            Lucent.Core.Components.TextField(onChange: browser.SetSearch, style: TextFieldStyle, label: "Search issues").Named("issue-browser.search"),
+            Lucent.Core.Components.TextField(onChange: browser.SetStatus, style: TextFieldStyle, label: "Status: all, open, closed").Named("issue-browser.status"),
+            Lucent.Core.Components.TextField(onChange: browser.SetAssignee, style: TextFieldStyle, label: "Assignee: all, marta, devin, joel").Named("issue-browser.assignee")
+        ], FilterBarStyle);
     }
 
-    [LucentComponent]
-    public static ComponentRecipe IssueRow(IssueBrowserState browser, BrowserIssue issue)
+    internal static ComponentRecipe IssueRowHandwrittenParity(IssueBrowserState browser, BrowserIssue issue)
     {
         ArgumentNullException.ThrowIfNull(browser); ArgumentNullException.ThrowIfNull(issue);
-        return ComponentRecipe.Create("issue-browser.issue-row", (context, root) =>
-        {
-            context.Mount(root, Lucent.Core.Components.Selectable(
-                () => Label(browser, issue), () => browser.IsSelected(issue.Number), () => browser.Select(issue.Number),
-                Style.Empty.Width(800f).Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f).Spacing(IssueBrowserStructure.DensitySpacing).FontSize(IssueBrowserStructure.DensityFontSize).Background(IssueBrowserStructure.RowSurface)
-                    .When(VariantState.FocusVisible, Style.Empty.Background(IssueBrowserStructure.FocusSurface).TextColor(IssueBrowserStructure.FocusForeground))));
-        });
+        return Lucent.Core.Components.Selectable(() => Label(browser, issue), () => browser.IsSelected(issue.Number), () => browser.Select(issue.Number), IssueRowStyle(browser));
     }
 
     private static ComponentRecipe Header(IssueBrowserState browser) => ComponentRecipe.Create("issue-browser.header", (context, root) => context.Mount(root, Lucent.Core.Components.Column([

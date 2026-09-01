@@ -100,6 +100,15 @@ public sealed class Composition : IDisposable
         return new ConditionalRegion(this, parent, name, active, content);
     }
 
+    /// <summary>Creates one retained branch selected by a single reactive recipe evaluation.</summary>
+public ConditionalRegion Switch(Element parent, string name, Func<ConditionalChoice> select)
+{
+ThrowIfFactoryCreation();
+ThrowIfDisposed();
+ArgumentNullException.ThrowIfNull(parent); ArgumentNullException.ThrowIfNull(select);
+return new ConditionalRegion(this, parent, name, select);
+}
+
     /// <summary>
     /// Creates a keyed structural region whose source is tracked by the reactive graph.
     /// Keys must keep stable, side-effect-free equality and hash behavior while mounted.
@@ -886,6 +895,15 @@ public sealed class CompositionContext : IDisposable
         return new ConditionalRegion(_composition, parent, name, active, content, this, Theme);
     }
 
+public ConditionalRegion Switch(Element parent, string name, Func<ConditionalChoice> select)
+{
+ThrowIfActiveFactory();
+ArgumentNullException.ThrowIfNull(parent);
+ArgumentNullException.ThrowIfNull(select);
+if (!Root.IsAncestorOf(parent)) throw new ArgumentException("A content factory can only add regions below its provisional root.", nameof(parent));
+return new ConditionalRegion(_composition, parent, name, select, this, Theme);
+}
+
     /// <summary>Creates a retained keyed region below a provisional element.</summary>
     public KeyedRegion<TKey, TItem> ForEach<TKey, TItem>(Element parent, string name, Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content) where TKey : notnull
@@ -1004,6 +1022,8 @@ public sealed class ConditionalRegion : IDisposable
     private readonly Composition _composition;
     private Func<bool>? _active;
     private Func<CompositionContext, Element>? _content;
+    private Func<ConditionalChoice>? _select;
+    private int _branch = Int32.MinValue;
     private readonly ReactiveEffect _effect;
     private Element? _child;
     private bool _updating;
@@ -1020,6 +1040,13 @@ public sealed class ConditionalRegion : IDisposable
         _effect = Region.Scope.Effect(Refresh, name + ".condition");
     }
 
+    internal ConditionalRegion(Composition composition, Element parent, string name, Func<ConditionalChoice> select,
+        CompositionContext? factory = null, ThemeContext? theme = null)
+        : this(composition, parent, name, static () => false, static _ => throw new InvalidOperationException(), factory, theme)
+    {
+        _select = select;
+    }
+
     public Element Region { get; }
     public Element? Active => _child;
     public bool IsDisposed { get; private set; }
@@ -1031,7 +1058,7 @@ public sealed class ConditionalRegion : IDisposable
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
         _composition.RejectForeignFactory(Region);
-        Update(_active!());
+        if (_select is not null) Update(_select()); else Update(_active!());
     }
 
     public void Update(bool active)
@@ -1055,22 +1082,7 @@ public sealed class ConditionalRegion : IDisposable
                 return;
             }
 
-            var context = new CompositionContext(_composition, Region, Theme);
-            Element created;
-            try
-            {
-                created = context.Run(() => _content!(context));
-                if (IsDisposed || Region.IsDisposed) throw new ObjectDisposedException(nameof(ConditionalRegion));
-                context.Commit(created);
-            }
-            catch (Exception error)
-            {
-                var errors = new List<Exception> { error };
-                try { context.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); }
-                Composition.ThrowAll(errors, "Conditional region factory failed.");
-                return;
-            }
-            context.Dispose();
+            var created = Create(_content!);
             _child = created;
             created.OnDisposed(() =>
             {
@@ -1079,6 +1091,49 @@ public sealed class ConditionalRegion : IDisposable
             Region.ReplaceChildren([created]);
         }
         finally { _updating = false; }
+    }
+
+    private void Update(ConditionalChoice choice)
+    {
+        var recipe = choice.Recipe;
+        if (recipe is null) { Update(false); _branch = choice.Branch; return; }
+        if (_branch == choice.Branch && _child is not null) return;
+        if (_updating) throw new InvalidOperationException("A conditional region cannot update reentrantly.");
+        _updating = true;
+        try
+        {
+            var created = Create(recipe.Mount);
+            var prior = _child;
+            _child = created;
+            _branch = choice.Branch;
+            created.OnDisposed(() =>
+            {
+                if (ReferenceEquals(_child, created)) _child = null;
+            });
+            Region.ReplaceChildren([created]);
+            prior?.Dispose();
+        }
+        finally { _updating = false; }
+    }
+
+    private Element Create(Func<CompositionContext, Element> content)
+    {
+        var context = new CompositionContext(_composition, Region, Theme);
+        try
+        {
+            var created = context.Run(() => content(context));
+            if (IsDisposed || Region.IsDisposed) throw new ObjectDisposedException(nameof(ConditionalRegion));
+            context.Commit(created);
+            context.Dispose();
+            return created;
+        }
+        catch (Exception error)
+        {
+            var errors = new List<Exception> { error };
+            try { context.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); }
+            Composition.ThrowAll(errors, "Conditional region factory failed.");
+            throw;
+        }
     }
 
     public void Dispose()
@@ -1096,6 +1151,7 @@ public sealed class ConditionalRegion : IDisposable
         try { departed?.Dispose(); } catch (Exception exception) { (errors ??= []).Add(exception); }
         _active = null!;
         _content = null!;
+        _select = null;
         Region.Scope.Detach(this);
         Composition.ThrowAll(errors, "Conditional region cleanup failed.");
     }

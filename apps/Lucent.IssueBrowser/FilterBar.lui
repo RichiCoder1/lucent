@@ -1,0 +1,12 @@
+namespace Lucent.IssueBrowser;
+
+using Lucent.Core;
+using static Lucent.Core.Components;
+
+public component FilterBar(IssueBrowserState browser) {
+    <Row style={FilterBarStyle}>
+        <TextField name="issue-browser.search" onChange={browser.SetSearch} style={TextFieldStyle} label="Search issues" />
+        <TextField name="issue-browser.status" onChange={browser.SetStatus} style={TextFieldStyle} label="Status: all, open, closed" />
+        <TextField name="issue-browser.assignee" onChange={browser.SetAssignee} style={TextFieldStyle} label="Assignee: all, marta, devin, joel" />
+    </Row>
+}

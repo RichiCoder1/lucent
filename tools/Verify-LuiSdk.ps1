@@ -23,6 +23,8 @@ function Expected-Failure([string[]]$arguments, [string]$mustContain) {
 function Write-Project([string]$directory, [string]$name, [string]$body) {
     New-Item $directory -ItemType Directory -Force | Out-Null
     $body = $body.Replace('</Project>', '<PropertyGroup><OutputType>Exe</OutputType><IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer></PropertyGroup></Project>')
+    $core = Join-Path $root 'src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll'
+    $body = $body.Replace('</Project>', ('<ItemGroup><Reference Include="Lucent.Core"><HintPath>' + $core + '</HintPath></Reference></ItemGroup></Project>'))
     Set-Content (Join-Path $directory "$name.csproj") $body
     Set-Content (Join-Path $directory 'NuGet.config') ('<configuration><packageSources><clear /><add key="local" value="' + $feed + '" /></packageSources></configuration>')
     Set-Content (Join-Path $directory 'Program.cs') 'Console.WriteLine("lui sdk consumer");'
@@ -68,7 +70,7 @@ try {
     Set-Content (Join-Path $matrix 'Added.lui') 'internal component Added() { <Row /> }'
     Invoke-Dotnet @('build', $matrixProject, '--no-restore', '-t:Rebuild', '-warnaserror')
     if ((Get-ChildItem (Join-Path $matrix 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs').Count -ne 2) { throw 'Adding a .lui did not add one generated source.' }
-    Set-Content (Join-Path $matrix 'Widget.lui') 'internal component Widget() { <Row Name="changed" /> }'
+    Set-Content (Join-Path $matrix 'Widget.lui') 'internal component Widget() { <Row name="changed" /> }'
     Invoke-Dotnet @('build', $matrixProject, '--no-restore', '-t:Rebuild', '-warnaserror')
     $after = Get-ChildItem (Join-Path $matrix 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' | Where-Object Name -eq $before[0].Name
     if (!$after -or (Get-Content $after.FullName -Raw) -eq $beforeText) { throw 'Changing a .lui did not update generated source.' }
@@ -120,20 +122,20 @@ try {
     Expected-Failure @('build', (Join-Path $duplicate 'Duplicate.csproj'), '--no-restore') 'LUI4002' | Out-Null
     if (Get-ChildItem (Join-Path $duplicate 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' -ErrorAction Ignore) { throw 'Duplicate logical paths produced generated source.' }
 
-    # Author imports remain ordinary C# ambiguities when SDK implicit usings are enabled.
+    # Default author imports remain ordinary C# ambiguities; explicit opt-out remains available.
     $using = Join-Path $artifacts 'using'
     $core = (Join-Path $root 'src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll')
     if (!(Test-Path $core)) { throw 'Build Lucent.Core before running this proof.' }
-    $usingProject = '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.1.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LucentLuiImplicitUsings>true</LucentLuiImplicitUsings></PropertyGroup><ItemGroup><Reference Include="Lucent.Core"><HintPath>' + $core + '</HintPath></Reference></ItemGroup></Project>'
+    $usingProject = '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.1.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><Reference Include="Lucent.Core"><HintPath>' + $core + '</HintPath></Reference></ItemGroup></Project>'
     Write-Project $using 'Using' $usingProject
     Set-Content (Join-Path $using 'Author.cs') 'namespace Author; public readonly struct Color { public static Color Parse(string value) => default; } public static class Theme { public static int TextColor => 0; }'
     Set-Content (Join-Path $using 'Program.cs') 'using Author; using static Author.Theme; var color = Color.Parse("#010203"); var property = TextColor; Console.WriteLine(color); Console.WriteLine(property);'
     Invoke-Dotnet @('restore', (Join-Path $using 'Using.csproj'), '--configfile', (Join-Path $using 'NuGet.config'))
     $evaluatedUsings = (& $dotnet 'msbuild' (Join-Path $using 'Using.csproj') '-getItem:Using') -join "`n"
-    if ($LASTEXITCODE -or $evaluatedUsings -notmatch 'Lucent.Core.LayoutProperties' -or $evaluatedUsings -notmatch 'Lucent.Core.TypographyProperties' -or $evaluatedUsings -notmatch 'Static') { throw 'Opt-in Lucent global/static using items were not evaluated.' }
+    if ($LASTEXITCODE -or $evaluatedUsings -notmatch 'Lucent.Core.Components' -or $evaluatedUsings -notmatch 'Lucent.Core.LayoutProperties' -or $evaluatedUsings -notmatch 'Lucent.Core.TypographyProperties' -or $evaluatedUsings -notmatch 'Static') { throw 'Default Lucent global/static using items were not evaluated.' }
     $ambiguity = Expected-Failure @('build', (Join-Path $using 'Using.csproj'), '--no-restore') 'CS0104'
     if ($ambiguity -notmatch 'CS0229') { throw 'Implicit static TextColor did not retain its ordinary C# ambiguity.' }
-    (Get-Content (Join-Path $using 'Using.csproj') -Raw).Replace('<LucentLuiImplicitUsings>true</LucentLuiImplicitUsings>', '<LucentLuiImplicitUsings>false</LucentLuiImplicitUsings>') | Set-Content (Join-Path $using 'Using.csproj')
+    (Get-Content (Join-Path $using 'Using.csproj') -Raw).Replace('</PropertyGroup>', '<LucentLuiImplicitUsings>false</LucentLuiImplicitUsings></PropertyGroup>') | Set-Content (Join-Path $using 'Using.csproj')
     Invoke-Dotnet @('build', (Join-Path $using 'Using.csproj'), '--no-restore', '-warnaserror')
 
     # Publish/run is the runtime-asset boundary proof; analyzers must not enter the app.

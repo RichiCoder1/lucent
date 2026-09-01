@@ -11,6 +11,7 @@ try
 {
     FixtureIdentity();
     RecipeEvidence();
+    DirectRootParity();
     AsyncBrowserStates();
     DensityRestyle();
     OptimisticStatusMutations();
@@ -47,8 +48,37 @@ static void RecipeEvidence()
         Flatten(composition.SemanticSnapshot()!).Any(node => node.Role == SemanticRole.TextField && node.Name == "Search issues") &&
         Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem) <= 9,
         "C# Filter Bar or virtual Issue Row recipe structure regressed.");
-    Assert(Hash(dump + semantics) == "7cbf8fdd2ff5aceb786d5be56a4b1ee7b95cef093e33edb65747a7f41777b25b", "C# recipe composition/semantic evidence changed: " + Hash(dump + semantics));
+    Assert(Hash(dump + semantics) == "5ab48000a6b4ef599cd1f839dab51bda3f8865d8be7ecfa19729c3aabea44fd6", "Direct-root Filter Bar/Issue Row composition/semantic evidence changed: " + Hash(dump + semantics));
 }
+
+static void DirectRootParity()
+{
+    var issue = IssueFixture.Issues[0];
+    var generatedFilter = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser), issue);
+    var handwrittenFilter = DirectRootEvidence(Lucent.IssueBrowser.Components.FilterBarHandwrittenParity, issue);
+    var generatedRow = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.IssueRow(browser, issue), issue);
+    var handwrittenRow = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.IssueRowHandwrittenParity(browser, issue), issue);
+    Assert(generatedFilter == handwrittenFilter && generatedRow == handwrittenRow, "Generated .lui direct roots diverged from the retained handwritten C# parity fixtures.");
+    var evidence = generatedFilter.Dump + generatedFilter.Semantics + generatedRow.Dump + generatedRow.Semantics;
+    Assert(Hash(evidence) == "f8a08b14e5f17e4f8d15b75ecaca943ec2b1b71495754bb8c619ca05ec8c167d", "Approved direct-root #48 parity rebaseline changed: " + Hash(evidence));
+}
+
+static (string Dump, string Semantics) DirectRootEvidence(Func<IssueBrowserState, ComponentRecipe> recipe, BrowserIssue issue)
+{
+    var graph = new ReactiveGraph();
+    using var handler = new DeferredGitHubHandler();
+    using var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.github.local/") };
+    using var composition = IssueBrowserStructure.Create(graph, new GitHubIssueSource(client), out var browser, out var theme);
+    graph.Drain(); handler.ReplyJson(0); graph.Drain();
+    var root = composition.Mount(composition.Root, theme, recipe(browser));
+    graph.Drain();
+    var dump = composition.Dump();
+    var start = dump.LastIndexOf("element " + root.Id + " ", StringComparison.Ordinal);
+    var semantic = Flatten(composition.SemanticSnapshot()!).Single(snapshot => snapshot.Identity.ElementId == root.Id);
+    return (dump.Substring(start), SemanticEvidence(semantic));
+}
+
+static string SemanticEvidence(SemanticSnapshot snapshot) => snapshot.Role + "|" + snapshot.Name + "|" + snapshot.Value + "|" + snapshot.Enabled + "|" + snapshot.Focused + "|" + snapshot.Selected + "|" + snapshot.Actions + "[" + string.Join(",", snapshot.Children.Select(SemanticEvidence)) + "]";
 
 static void AsyncBrowserStates()
 {

@@ -67,10 +67,13 @@ public static class LuiParser
             for (var i = 0; i < list.Parameters.Count; i++)
             {
                 var parameter = list.Parameters[i];
+                var parameterStart = start + Math.Max(0, parameter.SpanStart - 1);
+                if (parameter.AttributeLists.Count != 0 || parameter.Modifiers.Any(modifier => modifier.IsKind(SyntaxKind.RefKeyword) || modifier.IsKind(SyntaxKind.OutKeyword) || modifier.IsKind(SyntaxKind.InKeyword) || modifier.IsKind(SyntaxKind.ParamsKeyword)))
+                    Error("LUI3004", "Component parameters cannot have attributes, ref, out, in, or params modifiers.", new LuiSpan(parameterStart, parameter.Span.Length));
                 var type = parameter.Type!; var typeStart = start + Math.Max(0, type.SpanStart - 1); var nameStart = start + Math.Max(0, parameter.Identifier.SpanStart - 1);
                 var separator = i < list.Parameters.SeparatorCount ? list.Parameters.GetSeparator(i) : default;
                 var comma = separator.RawKind == 0 ? Missing(",") : new LuiToken(",", new LuiSpan(start + separator.SpanStart - 1, separator.Span.Length), false);
-                result.Add(new LuiParameterSyntax(new LuiSpan(typeStart, parameter.Span.Length), text.Substring(typeStart, type.Span.Length), new LuiToken(parameter.Identifier.Text, new LuiSpan(nameStart, parameter.Identifier.Span.Length), false), comma));
+                result.Add(new LuiParameterSyntax(new LuiSpan(parameterStart, parameter.Span.Length), text.Substring(typeStart, type.Span.Length), text.Substring(parameterStart, parameter.Span.Length), new LuiToken(parameter.Identifier.Text, new LuiSpan(nameStart, parameter.Identifier.Span.Length), false), comma));
             }
             return result;
         }
@@ -87,7 +90,7 @@ public static class LuiParser
             while (!End && Current != end && !TopLevelStart())
             {
                 White(); if (Current == end || End || TopLevelStart()) break; var start = position;
-                if (Word("when")) { var when = Token("when", start, 4); var variantName = Name("variant name"); var whenOpen = Expect('{'); if (!whenOpen.IsMissing && EnterNesting()) { var inner = StyleMembers('}').OfType<LuiStyleAssignmentSyntax>().ToArray(); var whenClose = Expect('}'); ExitNesting(); result.Add(new LuiVariantGroupSyntax(LuiSpan.From(start, position), when, variantName, whenOpen, inner, whenClose)); } else if (!whenOpen.IsMissing) SkipBalancedBrace(); continue; }
+                if (Word("when")) { var when = Token("when", start, 4); var variant = VariantCondition(); var whenOpen = Expect('{'); if (!whenOpen.IsMissing && EnterNesting()) { var inner = StyleMembers('}').OfType<LuiStyleAssignmentSyntax>().ToArray(); var whenClose = Expect('}'); ExitNesting(); result.Add(new LuiVariantGroupSyntax(LuiSpan.From(start, position), when, variant, whenOpen, inner, whenClose)); } else if (!whenOpen.IsMissing) SkipBalancedBrace(); continue; }
                 var property = Name("style property"); var colon = Expect(':');
                 if (property.IsMissing) { RecoverTo(end, ';'); continue; }
                 var valueStart = position; var valueEnd = IslandScanner.StyleEnd(text, position); position = valueEnd;
@@ -97,6 +100,15 @@ public static class LuiParser
                 if (terminator.IsMissing && !colon.IsMissing && !AtStyleBoundary()) Error("LUI1015", "Expected ';' after style assignment.", terminator.Span);
             }
             return result;
+        }
+
+        private LuiToken VariantCondition()
+        {
+            White(); var start = position;
+            while (!End && Current != '{') position++;
+            var value = text.Substring(start, position - start).Trim(); var leading = text.Substring(start, position - start).IndexOf(value, StringComparison.Ordinal);
+            if (value.Length == 0) { Error("LUI1014", "Expected variant condition.", new LuiSpan(start, 0)); return Missing(""); }
+            return new LuiToken(value, new LuiSpan(start + leading, value.Length), false);
         }
 
         private IReadOnlyList<LuiBodySyntax> Body(char end, bool stopTopLevel = false)
@@ -184,7 +196,7 @@ public static class LuiParser
                 var quote = position++; var end = text.IndexOf('"', position); if (end < 0) { Error("LUI1010", "Unterminated attribute string.", new LuiSpan(quote, text.Length - quote)); end = text.Length; position = end; } else position = end + 1;
                 value = new LuiScalarSyntax(new LuiSpan(quote, position - quote), text.Substring(quote + 1, Math.Max(0, position - quote - (end == text.Length ? 1 : 2))), Token("\"", quote, 1), end == text.Length ? Missing("\"") : Token("\"", end, 1));
             }
-            else if (Current == '{') value = BracedValue(name.Text == "Style");
+            else if (Current == '{') value = BracedValue(name.Text == "style" || name.Text == "Style");
             else { Error("LUI1011", "Expected quoted scalar or expression attribute value.", new LuiSpan(position, 0)); value = new LuiScalarSyntax(new LuiSpan(position, 0), "", Missing("\""), Missing("\"")); }
             return new LuiAttributeSyntax(LuiSpan.From(start, position), name, equals, value);
         }
@@ -202,18 +214,31 @@ private bool TryInlineStyle(LuiSpan span, LuiToken outerOpen, LuiToken outerClos
             style = null; var tokens = SyntaxFactory.ParseTokens(content).Where(token => !token.IsKind(SyntaxKind.EndOfFileToken)).ToArray(); var with = Array.FindIndex(tokens, token => token.ValueText == "with");
             if (with <= 0 || with + 1 >= tokens.Length || !tokens[with + 1].IsKind(SyntaxKind.OpenBraceToken) || !tokens[tokens.Length - 1].IsKind(SyntaxKind.CloseBraceToken)) return false;
             var baseText = content.Substring(0, tokens[with].SpanStart).Trim(); if (!ValidName(baseText)) return false;
-            var assignments = new List<(int Start, LuiToken Property, int ExpressionStart, int ExpressionEnd, LuiToken Terminator)>(); var p = tokens[with + 1].Span.End; var close = tokens[tokens.Length - 1].SpanStart;
+            var members = new List<LuiStyleMemberSyntax>(); var p = tokens[with + 1].Span.End; var close = tokens[tokens.Length - 1].SpanStart;
             while (p < close)
             {
-                Skip(content, ref p); if (p >= close) break; var assignmentStart = p; if (!TryLocalName(content, ref p, contentStart, out var property)) return false; Skip(content, ref p);
-                if (p >= close || content[p] != ':') return false; p++; var expressionStart = p; var expressionEnd = IslandScanner.StyleEnd(content, p); if (expressionEnd > close) expressionEnd = close; p = expressionEnd;
-                var terminator = p < close && content[p] == ';' ? new LuiToken(";", new LuiSpan(contentStart + p++, 1), false) : new LuiToken(";", new LuiSpan(contentStart + p, 0), true);
-                if (expressionEnd == expressionStart) return false;
-                assignments.Add((assignmentStart, property, expressionStart, expressionEnd, terminator));
+                Skip(content, ref p); if (p >= close) break;
+                if (content.AsSpan(p).StartsWith("when ".AsSpan(), StringComparison.Ordinal))
+                {
+                    var groupStart = p; p += 4; Skip(content, ref p); var variantStart = p; while (p < close && content[p] != '{') p++; var variantText = content.Substring(variantStart, p - variantStart).Trim(); var variantLeading = content.Substring(variantStart, p - variantStart).IndexOf(variantText, StringComparison.Ordinal); if (variantText.Length == 0 || p >= close || content[p++] != '{') return false; var variant = new LuiToken(variantText, new LuiSpan(contentStart + variantStart + variantLeading, variantText.Length), false);
+                    var groupOpen = new LuiToken("{", new LuiSpan(contentStart + p - 1, 1), false); var assignments = new List<LuiStyleAssignmentSyntax>();
+                    while (p < close) { Skip(content, ref p); if (p < close && content[p] == '}') break; if (!InlineAssignment(content, contentStart, close, ref p, out var assignment)) return false; assignments.Add(assignment); }
+                    if (p >= close || content[p++] != '}') return false;
+                    members.Add(new LuiVariantGroupSyntax(new LuiSpan(contentStart + groupStart, p - groupStart), new LuiToken("when", new LuiSpan(contentStart + groupStart, 4), false), variant, groupOpen, assignments, new LuiToken("}", new LuiSpan(contentStart + p - 1, 1), false))); continue;
+                }
+                if (!InlineAssignment(content, contentStart, close, ref p, out var normal)) return false; members.Add(normal);
             }
-            if (assignments.Count == 0) return false;
-            var result = new List<LuiStyleAssignmentSyntax>(); foreach (var assignment in assignments) result.Add(new LuiStyleAssignmentSyntax(new LuiSpan(contentStart + assignment.Start, assignment.Terminator.Span.End - contentStart - assignment.Start), assignment.Property, new LuiToken(":", new LuiSpan(contentStart + assignment.ExpressionStart - 1, 1), false), Expression(new LuiSpan(contentStart + assignment.ExpressionStart, assignment.ExpressionEnd - assignment.ExpressionStart), content.Substring(assignment.ExpressionStart, assignment.ExpressionEnd - assignment.ExpressionStart)), assignment.Terminator));
-var baseStart = content.IndexOf(baseText, StringComparison.Ordinal); style = new LuiStyleWithSyntax(span, outerOpen, new LuiToken(baseText, new LuiSpan(contentStart + baseStart, baseText.Length), false), new LuiToken("with", new LuiSpan(contentStart + tokens[with].SpanStart, tokens[with].Span.Length), false), new LuiToken("{", new LuiSpan(contentStart + tokens[with + 1].SpanStart, 1), false), result, new LuiToken("}", new LuiSpan(contentStart + tokens[tokens.Length - 1].SpanStart, 1), false), outerClose); return true;
+            if (members.Count == 0) return false;
+            var baseStart = content.IndexOf(baseText, StringComparison.Ordinal); style = new LuiStyleWithSyntax(span, outerOpen, new LuiToken(baseText, new LuiSpan(contentStart + baseStart, baseText.Length), false), new LuiToken("with", new LuiSpan(contentStart + tokens[with].SpanStart, tokens[with].Span.Length), false), new LuiToken("{", new LuiSpan(contentStart + tokens[with + 1].SpanStart, 1), false), members, new LuiToken("}", new LuiSpan(contentStart + tokens[tokens.Length - 1].SpanStart, 1), false), outerClose); return true;
+        }
+
+        private bool InlineAssignment(string content, int contentStart, int close, ref int p, out LuiStyleAssignmentSyntax result)
+        {
+                var assignmentStart = p; if (!TryLocalName(content, ref p, contentStart, out var property)) { result = null!; return false; } Skip(content, ref p);
+                if (p >= close || content[p] != ':') { result = null!; return false; } p++; var expressionStart = p; var expressionEnd = IslandScanner.StyleEnd(content, p); if (expressionEnd > close) expressionEnd = close; p = expressionEnd;
+                var terminator = p < close && content[p] == ';' ? new LuiToken(";", new LuiSpan(contentStart + p++, 1), false) : new LuiToken(";", new LuiSpan(contentStart + p, 0), true);
+                if (expressionEnd == expressionStart) { result = null!; return false; }
+                result = new LuiStyleAssignmentSyntax(new LuiSpan(contentStart + assignmentStart, terminator.Span.End - contentStart - assignmentStart), property, new LuiToken(":", new LuiSpan(contentStart + expressionStart - 1, 1), false), Expression(new LuiSpan(contentStart + expressionStart, expressionEnd - expressionStart), content.Substring(expressionStart, expressionEnd - expressionStart)), terminator); return true;
         }
 
         private LuiExpressionSyntax IslandExpression(params char[] stops)

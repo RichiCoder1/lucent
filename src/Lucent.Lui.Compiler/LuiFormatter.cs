@@ -47,7 +47,7 @@ public static class LuiFormatter
     private static void Component(StringBuilder output, LuiComponentSyntax node, string nl)
     {
         output.Append(node.Accessibility.IsMissing ? "internal" : node.Accessibility.Text).Append(" component ").Append(node.Name.Text).Append('(');
-        for (var i = 0; i < node.Parameters.Count; i++) { if (i != 0) output.Append(", "); output.Append(node.Parameters[i].TypeText).Append(' ').Append(node.Parameters[i].Name.Text); }
+        for (var i = 0; i < node.Parameters.Count; i++) { if (i != 0) output.Append(", "); output.Append(node.Parameters[i].DeclarationText); }
         output.Append(") {").Append(nl); Body(output, node.Body, 1, nl); output.Append('}').Append(nl);
     }
     private static void Body(StringBuilder output, IReadOnlyList<LuiBodySyntax> body, int indent, string nl)
@@ -72,11 +72,11 @@ public static class LuiFormatter
     private static void Style(StringBuilder output, LuiStyleSyntax style, int indent, string nl)
     {
         Pad(output, indent); output.Append("style ").Append(style.Name.Text).Append(" {").Append(nl);
-        foreach (var member in style.Members) { if (member is LuiStyleAssignmentSyntax styleAssignment) Assignment(output, styleAssignment, indent + 1, nl); else { var group = (LuiVariantGroupSyntax)member; Pad(output, indent + 1); output.Append("when ").Append(group.Name.Text).Append(" {").Append(nl); foreach (var groupAssignment in group.Assignments) Assignment(output, groupAssignment, indent + 2, nl); Pad(output, indent + 1); output.Append('}').Append(nl); } }
+        foreach (var member in style.Members) { if (member is LuiStyleAssignmentSyntax styleAssignment) Assignment(output, styleAssignment, indent + 1, nl); else { var group = (LuiVariantGroupSyntax)member; Pad(output, indent + 1); output.Append("when ").Append(group.Condition.Text).Append(" {").Append(nl); foreach (var groupAssignment in group.Assignments) Assignment(output, groupAssignment, indent + 2, nl); Pad(output, indent + 1); output.Append('}').Append(nl); } }
         Pad(output, indent); output.Append('}').Append(nl);
     }
     private static void Assignment(StringBuilder output, LuiStyleAssignmentSyntax assignment, int indent, string nl) { Pad(output, indent); output.Append(assignment.Property.Text).Append(": ").Append(assignment.Expression.Text).Append(';').Append(nl); }
-    private static void Value(StringBuilder output, LuiValueSyntax value) { if (value is LuiScalarSyntax scalar) output.Append('"').Append(scalar.Value).Append('"'); else if (value is LuiExpressionSyntax expression) output.Append('{').Append(expression.Text).Append('}'); else if (value is LuiStyleWithSyntax style) { output.Append('{').Append(style.Name.Text).Append(" with { "); for (var i = 0; i < style.Assignments.Count; i++) { if (i != 0) output.Append("; "); output.Append(style.Assignments[i].Property.Text).Append(": ").Append(style.Assignments[i].Expression.Text); } output.Append(" }}"); } }
+    private static void Value(StringBuilder output, LuiValueSyntax value) { if (value is LuiScalarSyntax scalar) output.Append('"').Append(scalar.Value).Append('"'); else if (value is LuiExpressionSyntax expression) output.Append('{').Append(expression.Text).Append('}'); else if (value is LuiStyleWithSyntax style) { output.Append('{').Append(style.Name.Text).Append(" with { "); for (var i = 0; i < style.Members.Count; i++) { if (i != 0) output.Append(' '); if (style.Members[i] is LuiStyleAssignmentSyntax assignment) output.Append(assignment.Property.Text).Append(": ").Append(assignment.Expression.Text).Append(';'); else { var group = (LuiVariantGroupSyntax)style.Members[i]; output.Append("when ").Append(group.Condition.Text).Append(" { "); for (var j = 0; j < group.Assignments.Count; j++) { if (j != 0) output.Append("; "); output.Append(group.Assignments[j].Property.Text).Append(": ").Append(group.Assignments[j].Expression.Text); } output.Append(" }"); } } output.Append(" }}"); } }
     private static void Pad(StringBuilder output, int count) { output.Append(' ', count * 4); }
     private static IEnumerable<LuiSyntaxNode> Nodes(LuiDocumentSyntax document)
     {

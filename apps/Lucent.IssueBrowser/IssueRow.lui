@@ -1,0 +1,8 @@
+namespace Lucent.IssueBrowser;
+
+using Lucent.Core;
+using static Lucent.Core.Components;
+
+public component IssueRow(IssueBrowserState browser, BrowserIssue issue) {
+    <Selectable content={() => Label(browser, issue)} selected={() => browser.IsSelected(issue.Number)} onSelect={() => browser.Select(issue.Number)} style={IssueRowStyle(browser)} />
+}
