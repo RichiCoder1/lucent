@@ -9,7 +9,18 @@ using HbBuffer = HarfBuzzSharp.Buffer;
 
 namespace Lucent.Renderer.Skia;
 
-/// <summary>CPU Skia/HarfBuzz shaper. Itemization is deliberately bounded: common LTR and Arabic/Hebrew RTL only; full Unicode bidi is deferred.</summary>
+/// <summary>Shapes Core text with HarfBuzz and paints retained scenes through Skia.</summary>
+/// <remarks>
+/// The renderer owns its bounded 256-entry shape cache and the typeface fingerprints used to
+/// verify that cached glyph data still identifies the face that produced it. Shape results are
+/// immutable Core values and do not retain Skia resources. Itemization supports common left-to-right
+/// text and Arabic/Hebrew right-to-left text; full Unicode bidirectional reordering is not provided.
+///
+/// An instance is confined to the managed thread that created it. Call <see cref="Shape"/>,
+/// <see cref="Render"/>, and <see cref="Dispose"/> from that thread; instances are not
+/// synchronized for concurrent use. Dispose the renderer after the final frame to release its
+/// cache and fingerprint data.
+/// </remarks>
 public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 {
     // Pinned SKShaper encodes HarfBuzz positions against this source constant.
@@ -22,9 +33,16 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private bool _disposed;
     private int _liveTextBlobs;
 
-    /// <summary>Current renderer-owned text blobs; all paint blobs are disposed before a frame completes.</summary>
+    /// <summary>Gets the number of temporary text blobs currently held while a frame is being painted.</summary>
+    /// <remarks>The value should return to zero when <see cref="Render"/> returns; it does not count cached shaping results.</remarks>
     public int LiveTextBlobCount => _liveTextBlobs;
 
+    /// <summary>Shapes a Core text request into immutable logical-pixel glyph runs.</summary>
+    /// <param name="request">Font, language, direction, text, and scale values to shape.</param>
+    /// <returns>A cached or newly shaped result whose glyph IDs, clusters, advances, and metrics can be retained by Core.</returns>
+    /// <exception cref="ArgumentException"><paramref name="request"/> contains a missing, nonpositive, or nonfinite required value.</exception>
+    /// <exception cref="InvalidOperationException">The owner thread is not calling the renderer, or no installed font can shape the requested text.</exception>
+    /// <exception cref="ObjectDisposedException">The renderer has been disposed.</exception>
     public ShapedText Shape(TextMeasureRequest request)
     {
         CheckThread();
@@ -165,6 +183,18 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         return Cache(request, new ShapedText(Identity(request, runs), origin, height, runs));
     }
 
+    /// <summary>Paints a retained Core scene into a caller-owned Skia canvas.</summary>
+    /// <param name="scene">Immutable scene whose logical viewport scale and renderer nodes define the frame.</param>
+    /// <param name="canvas">Destination canvas; its existing state is preserved, and the canvas remains owned by the caller.</param>
+    /// <remarks>
+    /// The renderer applies <see cref="RetainedScene.Viewport"/>.Scale exactly once, then paints
+    /// solid and gradient boxes, clipped subtrees, composited opacity groups, and shaped text.
+    /// Temporary Skia paints, fonts, typefaces, and text blobs are released before this method
+    /// returns. The scene and canvas must be used on the renderer's owner thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="scene"/> or <paramref name="canvas"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The owner thread is not calling the renderer, or a scene face cannot be recreated for painting.</exception>
+    /// <exception cref="ObjectDisposedException">The renderer has been disposed.</exception>
     public void Render(RetainedScene scene, SKCanvas canvas)
     {
         CheckThread();
@@ -381,6 +411,9 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         return fallback;
     }
 
+    /// <summary>Releases the renderer's shape cache and face-fingerprint data.</summary>
+    /// <remarks>Disposal is idempotent, must occur on the owner thread, and does not dispose Core scenes or caller-owned canvases.</remarks>
+    /// <exception cref="InvalidOperationException">The call is made from a thread other than the one that created the renderer.</exception>
     public void Dispose()
     {
         CheckThread();

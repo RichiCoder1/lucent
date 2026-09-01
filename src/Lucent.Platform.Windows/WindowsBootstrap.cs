@@ -7,13 +7,35 @@ using Windows.Win32.Foundation;
 
 namespace Lucent.Platform.Windows;
 
-/// <summary>Owns the Windows SDL frame loop: Windows DPI supplies scale, SDL supplies backing pixels, and Core stays logical.</summary>
+/// <summary>Runs a Lucent composition in the Windows SDL host.</summary>
+/// <remarks>
+/// This is the Windows adapter boundary: Windows Per-Monitor V2 supplies the authoritative DPI,
+/// SDL supplies the window and backing pixels, Skia paints the retained scene, and Core continues
+/// to use logical coordinates. The host is intended for a Windows application entry point and
+/// executes its event, input, accessibility, rendering, and disposal work on one STA owner thread.
+///
+/// Startup validates the supported Windows version and the SDL, Skia, HarfBuzz, and Visual C++
+/// native assets needed by a NativeAOT deployment before creating the window. The method owns
+/// host-side adapters and native window resources for the duration of the loop, tears them down
+/// before SDL shutdown, and returns only after a close event. The supplied composition remains
+/// caller-owned; Core itself has no Windows or renderer dependency.
+/// </remarks>
 public static class WindowsBootstrap
 {
     private const int InitialLogicalWidth = 800;
     private const int InitialLogicalHeight = 500;
     private const int InstallAttempts = 3;
 
+    /// <summary>Creates the Windows host, runs frames until the window closes, and performs ordered teardown.</summary>
+    /// <param name="title">Nonblank title shown in the SDL-created top-level window.</param>
+    /// <param name="composition">Composition to project, present, route input to, and expose through UI Automation.</param>
+    /// <param name="theme">Optional theme context whose settings are initialized and refreshed from Windows.</param>
+    /// <returns>Zero after the host observes a normal close or quit event.</returns>
+    /// <exception cref="ArgumentException"><paramref name="title"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="composition"/> is <see langword="null"/>.</exception>
+    /// <exception cref="PlatformNotSupportedException">The process is not running on the supported Windows version.</exception>
+    /// <exception cref="FileNotFoundException">A NativeAOT-published SDL, Skia, HarfBuzz, or Visual C++ runtime asset is missing beside the application.</exception>
+    /// <exception cref="InvalidOperationException">Windows DPI setup, SDL initialization, window creation, rendering, input projection, or native presentation fails.</exception>
     [STAThread]
     public static int Run(string title, Composition composition, ThemeContext? theme = null)
     {
