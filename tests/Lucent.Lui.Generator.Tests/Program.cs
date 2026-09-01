@@ -122,6 +122,82 @@ var parameterSiblingIsolation = Run(
     new TextFile("C:/consumer/Good.lui", Valid, "Good.lui"),
     new TextFile("C:/consumer/Bad.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Bad([Obsolete] ref string value, params int[] values) { <Row /> }", "Bad.lui"));
 Assert(parameterSiblingIsolation.Diagnostics.Count(diagnostic => diagnostic.Id == "LUI3004") == 2 && parameterSiblingIsolation.Results.Single().GeneratedSources.Length == 1 && parameterSiblingIsolation.Results.Single().GeneratedSources.Single().SourceText.ToString().Contains("Widget", StringComparison.Ordinal), "unsupported parameters were indexed or suppressed a valid sibling.");
+var trackedA = new TextFile("C:/consumer/A.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component A(string value = \"one\") { <Row /> }", "A.lui");
+var trackedB = new TextFile("C:/consumer/B.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component B() { <A /> }", "B.lui");
+var trackedCompilation = CSharpCompilation.Create("tracked", [CSharpSyntaxTree.ParseText("internal class C {}", new CSharpParseOptions(LanguageVersion.Preview))], References());
+GeneratorDriver tracked = CSharpGeneratorDriver.Create([new LuiGenerator().AsSourceGenerator()], [trackedA, trackedB], optionsProvider: new OptionsProvider([trackedA, trackedB], null), driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, true, null));
+tracked = tracked.RunGenerators(trackedCompilation).RunGenerators(trackedCompilation);
+Assert(StepReasons(tracked.GetRunResult(), "LuiDocumentOutput").All(reason => reason == IncrementalStepRunReason.Cached), "unchanged inputs recomputed document output.");
+var body = new TextFile("C:/consumer/A.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component A(string value = \"one\") { <Row name=\"changed\" /> }", "A.lui");
+tracked = tracked.ReplaceAdditionalText(trackedA, body).RunGenerators(trackedCompilation);
+Assert(StepReasons(tracked.GetRunResult(), "LuiDocumentOutput").Count(reason => reason != IncrementalStepRunReason.Cached) == 1, "body edit invalidated a sibling.");
+Assert(StepReasons(tracked.GetRunResult(), "LuiPublication").Count(reason => reason != IncrementalStepRunReason.Cached) == 1, "body edit republished a sibling.");
+var beforeDefault = Source(tracked.GetRunResult(), "B");
+var defaultEdit = new TextFile("C:/consumer/A.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component A(string value = \"two\") { <Row /> }", "A.lui");
+tracked = tracked.ReplaceAdditionalText(body, defaultEdit).RunGenerators(trackedCompilation);
+Assert(StepReasons(tracked.GetRunResult(), "LuiDocumentOutput").Count(reason => reason != IncrementalStepRunReason.Cached) == 2 && Source(tracked.GetRunResult(), "B") != beforeDefault, "parameter default edit did not invalidate sibling output.");
+Assert(StepReasons(tracked.GetRunResult(), "LuiPublication").Count(reason => reason != IncrementalStepRunReason.Cached) == 2, "index edit did not republish the full component set.");
+var named = new TextFile("C:/consumer/B.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component B() { <A value=\"ok\" /> }", "B.lui");
+tracked = tracked.ReplaceAdditionalText(trackedB, named).RunGenerators(trackedCompilation);
+var nameEdit = new TextFile("C:/consumer/A.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component A(string renamed = \"two\") { <Row /> }", "A.lui");
+tracked = tracked.ReplaceAdditionalText(defaultEdit, nameEdit).RunGenerators(trackedCompilation);
+Assert(StepReasons(tracked.GetRunResult(), "LuiDocumentOutput").Count(reason => reason != IncrementalStepRunReason.Cached) == 2 && tracked.GetRunResult().Results.Single().GeneratedSources.Length == 1 && tracked.GetRunResult().Results.Single().GeneratedSources.All(source => !source.SourceText.ToString().Contains("value:", StringComparison.Ordinal)), "parameter name edit retained stale named output.");
+var moved = new TextFile("C:/consumer/Bad.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Bad(MissingType value) { <Row /> }", "Bad.lui", "v1");
+GeneratorDriver diagnosticDriver = CSharpGeneratorDriver.Create([new LuiGenerator().AsSourceGenerator()], [moved], optionsProvider: new OptionsProvider([moved], null), driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, true, null));
+diagnosticDriver = diagnosticDriver.RunGenerators(trackedCompilation); var first = diagnosticDriver.GetRunResult().Diagnostics.Single(diagnostic => diagnostic.Id == "LUI4005");
+var movedVersion = new TextFile("C:/consumer/Bad.lui", "\n\nnamespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Bad(MissingType value) { <Row /> }", "Bad.lui", "v2");
+diagnosticDriver = diagnosticDriver.ReplaceAdditionalText(moved, movedVersion).RunGenerators(trackedCompilation); var second = diagnosticDriver.GetRunResult().Diagnostics.Single(diagnostic => diagnostic.Id == "LUI4005");
+Assert(first.GetMessage() == second.GetMessage() && second.Location.SourceSpan.Start > first.Location.SourceSpan.Start, "moved index diagnostic reused its stale location.");
+var staleCompilation = CSharpCompilation.Create("stale", [CSharpSyntaxTree.ParseText("internal class C {}", new CSharpParseOptions(LanguageVersion.Preview))], References());
+var stale = LuiCompiler.Compile(LuiParser.Parse(Valid), staleCompilation, new LuiFreshnessIdentity("stale", "stale", new LuiDocumentIdentity("Stale.lui"), "v1", "preview"));
+var current = LuiCompiler.Snapshot(new LuiFreshnessIdentity("stale", "stale", new LuiDocumentIdentity("Stale.lui"), "v2", "preview"), staleCompilation);
+Assert(stale.Success && !LuiGenerator.ShouldPublish(stale, current), "stale result published without cancellation.");
+var restoredA = new TextFile("C:/consumer/A.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component A(string value = \"two\") { <Row /> }", "A.lui");
+tracked = tracked.ReplaceAdditionalText(nameEdit, restoredA).RunGenerators(trackedCompilation);
+Assert(GeneratedCount(tracked) == 2, "restoring a valid signature left stale output.");
+var added = new TextFile("C:/consumer/C.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component C() { <Row /> }", "C.lui");
+tracked = tracked.AddAdditionalTexts([added]).RunGenerators(trackedCompilation);
+Assert(GeneratedCount(tracked) == 3 && ModifiedCount(tracked) == 3, "adding a document did not update the whole component set.");
+tracked = tracked.RemoveAdditionalTexts([added]).RunGenerators(trackedCompilation);
+Assert(GeneratedCount(tracked) == 2 && StepReasons(tracked.GetRunResult(), "LuiDocumentOutput").Any(), "deleting a document left stale output.");
+var renamed = new TextFile("C:/consumer/Renamed.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component B() { <A value=\"ok\" /> }", "Renamed.lui");
+tracked = tracked.RemoveAdditionalTexts([named]).AddAdditionalTexts([renamed]).RunGenerators(trackedCompilation);
+Assert(GeneratedCount(tracked) == 2 && Generated(tracked).Any(source => source.Contains("Renamed.lui", StringComparison.Ordinal)), "rename left stale document identity.");
+var duplicateDocument = new TextFile("C:/consumer/Duplicate.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component A(string value = \"two\") { <Row /> }", "Duplicate.lui");
+tracked = tracked.AddAdditionalTexts([duplicateDocument]).RunGenerators(trackedCompilation);
+Assert(tracked.GetRunResult().Diagnostics.Count(diagnostic => diagnostic.Id == "LUI4004") == 2 && GeneratedCount(tracked) == 0, "duplicate declaration retained generated output.");
+tracked = tracked.RemoveAdditionalTexts([duplicateDocument]).RunGenerators(trackedCompilation);
+var unreadableA = new TextFile("C:/consumer/A.lui", null, "A.lui");
+tracked = tracked.ReplaceAdditionalText(restoredA, unreadableA).RunGenerators(trackedCompilation);
+Assert(tracked.GetRunResult().Diagnostics.Any(diagnostic => diagnostic.Id == "LUI4001") && GeneratedCount(tracked) == 0, "failed input retained generated output.");
+tracked = tracked.ReplaceAdditionalText(unreadableA, restoredA).RunGenerators(trackedCompilation);
+var invalidA = new TextFile("C:/consumer/A.lui", "", "A.lui");
+tracked = tracked.ReplaceAdditionalText(restoredA, invalidA).RunGenerators(trackedCompilation);
+Assert(tracked.GetRunResult().Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1003") && GeneratedCount(tracked) == 0, "invalid input retained generated output.");
+tracked = tracked.ReplaceAdditionalText(invalidA, restoredA).RunGenerators(trackedCompilation);
+var beforeOptions = Source(tracked.GetRunResult(), "B");
+tracked = tracked.WithUpdatedAnalyzerConfigOptions(new OptionsProvider([restoredA, renamed], new Dictionary<string, string> { ["build_property.LucentLuiCompilerOptions"] = "nullable:enable", ["build_property.LucentLuiDefines"] = "ONE" })).RunGenerators(trackedCompilation);
+Assert(ModifiedCount(tracked) == 2 && Source(tracked.GetRunResult(), "B") != beforeOptions, "project options did not invalidate retained output.");
+tracked = tracked.WithUpdatedAnalyzerConfigOptions(new OptionsProvider([restoredA, renamed], new Dictionary<string, string> { ["build_property.LucentLuiCompilerOptions"] = "nullable:enable", ["build_property.LucentLuiDefines"] = "TWO" })).RunGenerators(trackedCompilation);
+Assert(ModifiedCount(tracked) == 2, "project defines did not invalidate retained output.");
+var oldTree = trackedCompilation.SyntaxTrees.Single();
+trackedCompilation = trackedCompilation.RemoveSyntaxTrees(oldTree).AddSyntaxTrees(CSharpSyntaxTree.ParseText("global using System; internal class C {}", new CSharpParseOptions(LanguageVersion.Preview)));
+tracked = tracked.RunGenerators(trackedCompilation);
+Assert(ModifiedCount(tracked) == 2, "global using change did not invalidate retained output.");
+using var referenceImage = new MemoryStream();
+var referenceCompilation = CSharpCompilation.Create("tracked-reference", [CSharpSyntaxTree.ParseText("public sealed class TrackedReference {}", new CSharpParseOptions(LanguageVersion.Preview))], References(), new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+Assert(referenceCompilation.Emit(referenceImage).Success, "reference fixture did not compile.");
+tracked = tracked.RunGenerators(trackedCompilation.AddReferences(MetadataReference.CreateFromImage(referenceImage.ToArray())));
+Assert(ModifiedCount(tracked) == 2, "reference semantic change did not invalidate retained output.");
+var cancelledA = new TextFile("C:/consumer/A.lui", "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component A(string value = \"cancelled\") { <Row /> }", "A.lui");
+tracked = tracked.ReplaceAdditionalText(restoredA, cancelledA);
+try { _ = tracked.RunGenerators(trackedCompilation, new CancellationToken(true)); throw new InvalidOperationException("cancelled input completed generation."); }
+catch (OperationCanceledException) { }
+tracked = tracked.ReplaceAdditionalText(cancelledA, restoredA).RunGenerators(trackedCompilation);
+var releaseDriver = RemovedTextDriver(trackedCompilation, out var released);
+for (var attempt = 0; released.IsAlive && attempt < 3; attempt++) { GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect(); }
+GC.KeepAlive(releaseDriver);
+Assert(!released.IsAlive, "removed document remained retained by a converged live driver.");
 return 0;
 
 static GeneratorDriverRunResult Run(params AdditionalText[] texts)
@@ -144,6 +220,18 @@ static GeneratorDriverRunResult RunWithSource(string source, params AdditionalTe
     return driver.RunGenerators(compilation).GetRunResult();
 }
 static string Source(GeneratorDriverRunResult result, string component) => result.Results.Single().GeneratedSources.Single(source => source.SourceText.ToString().Contains(" " + component + "(", StringComparison.Ordinal)).SourceText.ToString();
+static IEnumerable<IncrementalStepRunReason> StepReasons(GeneratorDriverRunResult result, string name) => result.Results.Single().TrackedSteps[name].SelectMany(step => step.Outputs).Select(output => output.Reason);
+static int ModifiedCount(GeneratorDriver driver) => StepReasons(driver.GetRunResult(), "LuiDocumentOutput").Count(reason => reason != IncrementalStepRunReason.Cached);
+static int GeneratedCount(GeneratorDriver driver) => driver.GetRunResult().Results.Single().GeneratedSources.Length;
+static string[] Generated(GeneratorDriver driver) => driver.GetRunResult().Results.Single().GeneratedSources.Select(source => source.SourceText.ToString()).ToArray();
+static GeneratorDriver RemovedTextDriver(Compilation compilation, out WeakReference released)
+{
+    var removed = new TextFile("C:/consumer/Removed.lui", Valid, "Removed.lui");
+    released = new WeakReference(removed);
+    GeneratorDriver driver = CSharpGeneratorDriver.Create([new LuiGenerator().AsSourceGenerator()], [removed], optionsProvider: new OptionsProvider([removed], null), driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, true, null));
+    driver = driver.RunGenerators(compilation).RemoveAdditionalTexts([removed]).WithUpdatedAnalyzerConfigOptions(new OptionsProvider([], null)).RunGenerators(compilation);
+    return driver.RunGenerators(compilation);
+}
 
 static void Assert(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 static MetadataReference[] References() => ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator).Select(path => MetadataReference.CreateFromFile(path)).Append(MetadataReference.CreateFromFile(Path.Combine(AppContext.BaseDirectory, "Lucent.Core.dll"))).ToArray();

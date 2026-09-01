@@ -23,44 +23,95 @@ public sealed class LuiGenerator : IIncrementalGenerator
         var inputs = context.AdditionalTextsProvider
             .Where(static text => text.Path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
             .Combine(context.AnalyzerConfigOptionsProvider)
-            .Select(static (input, cancellationToken) => ParseInput.Read(input.Left, input.Right.GetOptions(input.Left), cancellationToken));
-        var project = context.AnalyzerConfigOptionsProvider.Select(static (options, _) => ProjectInput.Read(options.GlobalOptions));
-        context.RegisterSourceOutput(context.CompilationProvider.Combine(inputs.Collect()).Combine(project), static (production, input) => Emit(production, input.Left.Left, input.Left.Right, input.Right));
+            .Select(static (input, cancellationToken) => ParseInput.Read(input.Left, input.Right.GetOptions(input.Left), cancellationToken))
+            .WithTrackingName("LuiParse");
+        var project = context.AnalyzerConfigOptionsProvider
+            .Select(static (options, _) => ProjectInput.Read(options.GlobalOptions))
+            .WithTrackingName("LuiProjectContext");
+        var index = context.CompilationProvider.Combine(inputs.Collect())
+            .Select(static (input, cancellationToken) => ComponentIndex.Build(input.Left, input.Right, cancellationToken))
+            .WithTrackingName("LuiComponentIndex");
+        var documents = inputs.Combine(index);
+        var environment = context.CompilationProvider.Combine(project);
+        var results = documents.Combine(environment)
+            .Select(static (input, cancellationToken) => new Publication(
+                Lower(input.Left.Left, input.Left.Right, input.Right.Left, input.Right.Right, cancellationToken),
+                Current(input.Left.Left, input.Left.Right, input.Right.Left, input.Right.Right, cancellationToken)))
+            .WithTrackingName("LuiDocumentOutput");
+
+        context.RegisterSourceOutput(inputs, static (production, input) => ReportInputDiagnostics(production, input));
+        context.RegisterSourceOutput(index, static (production, value) => value.ReportDiagnostics(production));
+        context.RegisterSourceOutput(results.Select(static (input, _) => input).WithTrackingName("LuiPublication"),
+            static (production, input) => Publish(production, input.Lowered, input.Current));
     }
 
-    private static void Emit(SourceProductionContext production, Compilation compilation, ImmutableArray<ParseInput> inputs, ProjectInput project)
+    private static void ReportInputDiagnostics(SourceProductionContext production, ParseInput input)
     {
-        foreach (var input in inputs.Where(input => !input.IsReadable)) production.ReportDiagnostic(Diagnostic.Create(InvalidInput, Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()), input.Path));
-        foreach (var input in inputs.Where(input => !input.IsLogicalPathValid)) production.ReportDiagnostic(Diagnostic.Create(InvalidLogicalPath, Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()), input.Path, input.LogicalPath));
-        foreach (var input in inputs.Where(input => input.IsReadable && input.IsLogicalPathValid)) foreach (var diagnostic in input.Document!.Diagnostics) production.ReportDiagnostic(Diagnostic.Create(ParseDescriptor(diagnostic), input.Location(diagnostic.Span), diagnostic.Message));
-        var duplicates = inputs.Where(input => input.IsReadable && input.IsLogicalPathValid).GroupBy(input => input.LogicalPath, StringComparer.Ordinal).Where(group => group.Count() > 1).SelectMany(group => group);
-        var duplicatePaths = new System.Collections.Generic.HashSet<string>(duplicates.Select(input => input.Path), StringComparer.Ordinal);
-        foreach (var input in inputs.Where(input => duplicatePaths.Contains(input.Path))) production.ReportDiagnostic(Diagnostic.Create(DuplicateInput, Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()), input.Path, input.LogicalPath));
-        var candidates = inputs.Where(input => input.IsReadable && input.IsLogicalPathValid && input.Document!.Diagnostics.Count == 0 && !duplicatePaths.Contains(input.Path) && input.Document!.Component is not null).ToArray();
-        var parseOptions = (CSharpParseOptions?)compilation.SyntaxTrees.FirstOrDefault()?.Options ?? CSharpParseOptions.Default;
-        var indexed = candidates.Select(input => new IndexedDeclaration(input, CSharpSyntaxTree.ParseText(Declaration(input), parseOptions, input.Path + ".lui.index.g.cs"))).ToArray();
-        var indexCompilation = indexed.Length == 0 ? compilation : compilation.AddSyntaxTrees(indexed.Select(item => item.Tree));
-        foreach (var declaration in indexed)
+        if (!input.IsReadable) production.ReportDiagnostic(Diagnostic.Create(InvalidInput, Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()), input.Path));
+        else if (!input.IsLogicalPathValid) production.ReportDiagnostic(Diagnostic.Create(InvalidLogicalPath, Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()), input.Path, input.LogicalPath));
+        else foreach (var diagnostic in input.Document!.Diagnostics) production.ReportDiagnostic(Diagnostic.Create(ParseDescriptor(diagnostic), input.Location(diagnostic.Span), diagnostic.Message));
+    }
+
+    private static DocumentResult Lower(ParseInput input, ComponentIndex index, Compilation compilation, ProjectInput project, System.Threading.CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!index.TryGet(input.Path, out var declaration)) return new DocumentResult(input, null);
+        var siblings = index.Declarations.Where(other => other.Input.Path != input.Path).Select(other => other.Tree).ToArray();
+        var augmented = siblings.Length == 0 ? compilation : compilation.AddSyntaxTrees(siblings);
+        var identity = CurrentIdentity(input, index, augmented, project);
+        var result = LuiCompiler.Compile(input.Document!, augmented, identity);
+        cancellationToken.ThrowIfCancellationRequested();
+        return new DocumentResult(input, result);
+    }
+
+    private static CurrentDocument Current(ParseInput input, ComponentIndex index, Compilation compilation, ProjectInput project, System.Threading.CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!index.TryGet(input.Path, out _)) return new CurrentDocument(input, null);
+        var siblings = index.Declarations.Where(other => other.Input.Path != input.Path).Select(other => other.Tree).ToArray();
+        var augmented = siblings.Length == 0 ? compilation : compilation.AddSyntaxTrees(siblings);
+        return new CurrentDocument(input, CurrentIdentity(input, index, augmented, project));
+    }
+
+    private static LuiFreshnessIdentity CurrentIdentity(ParseInput input, ComponentIndex index, Compilation compilation, ProjectInput project)
+    {
+        var document = new LuiDocumentIdentity(input.LogicalPath);
+        return LuiCompiler.Snapshot(new LuiFreshnessIdentity(project.Epoch, String.IsNullOrEmpty(project.Identity) ? compilation.AssemblyName ?? "" : project.Identity, document, input.DocumentVersion, "", index.Generation, project.LanguageVersion, "", "", "", project.Options, project.Defines), compilation);
+    }
+
+    private static void Publish(SourceProductionContext production, DocumentResult lowered, CurrentDocument current)
+    {
+        production.CancellationToken.ThrowIfCancellationRequested();
+        if (lowered.Result is null || current.Identity is null) return;
+        foreach (var diagnostic in lowered.Result.Diagnostics)
         {
-            declaration.Bind(indexCompilation);
-            if (!declaration.Valid) production.ReportDiagnostic(Diagnostic.Create(InvalidSibling, declaration.Input.Location(declaration.Input.Document!.Component!.Name.Span), declaration.Input.Document.Component.Name.Text));
+            production.CancellationToken.ThrowIfCancellationRequested();
+            production.ReportDiagnostic(Diagnostic.Create(ParseDescriptor(diagnostic), lowered.Input.Location(diagnostic.Span), diagnostic.Message));
         }
-        var duplicateComponents = indexed.Where(declaration => declaration.Valid).GroupBy(declaration => declaration.Identity, StringComparer.Ordinal).Where(group => group.Count() > 1).SelectMany(group => group).ToArray();
-        foreach (var declaration in duplicateComponents) production.ReportDiagnostic(Diagnostic.Create(DuplicateComponent, declaration.Input.Location(declaration.Input.Document!.Component!.Name.Span), declaration.Identity));
-        var duplicateComponentPaths = new System.Collections.Generic.HashSet<string>(duplicateComponents.Select(declaration => declaration.Input.Path), StringComparer.Ordinal);
-        var declarations = indexed.Where(declaration => declaration.Valid && !duplicateComponentPaths.Contains(declaration.Input.Path)).ToArray();
-        var siblingIndexGeneration = LuiDocumentIdentity.Hash(String.Join("\n", declarations.OrderBy(declaration => declaration.Input.LogicalPath, StringComparer.Ordinal).Select(declaration => declaration.Input.LogicalPath + "\0" + declaration.Freshness)));
-        foreach (var declaration in declarations)
-        {
-            var input = declaration.Input;
-            var document = new LuiDocumentIdentity(input.LogicalPath);
-            var siblings = declarations.Where(other => other.Input.Path != input.Path).Select(other => other.Tree).ToArray();
-            var augmented = siblings.Length == 0 ? compilation : compilation.AddSyntaxTrees(siblings);
-            var identity = LuiCompiler.Snapshot(new LuiFreshnessIdentity(project.Epoch, String.IsNullOrEmpty(project.Identity) ? compilation.AssemblyName ?? "" : project.Identity, document, input.DocumentVersion, "", siblingIndexGeneration, project.LanguageVersion, "", "", "", project.Options, project.Defines), augmented);
-            var result = LuiCompiler.Compile(input.Document!, augmented, identity);
-            foreach (var diagnostic in result.Diagnostics) production.ReportDiagnostic(Diagnostic.Create(ParseDescriptor(diagnostic), input.Location(diagnostic.Span), diagnostic.Message));
-            if (result.Success && result.Identity.CanPublishTo(identity)) production.AddSource(identity.HintName, result.Source!);
-        }
+        if (ShouldPublish(lowered.Result, current.Identity)) production.AddSource(current.Identity.HintName, lowered.Result.Source!);
+    }
+
+    internal static bool ShouldPublish(LuiCompilationResult result, LuiFreshnessIdentity current) => result.Success && result.Identity.CanPublishTo(current);
+
+    private sealed class Publication
+    {
+        internal Publication(DocumentResult lowered, CurrentDocument current) { Lowered = lowered; Current = current; }
+        internal DocumentResult Lowered { get; }
+        internal CurrentDocument Current { get; }
+    }
+
+    private sealed class DocumentResult
+    {
+        internal DocumentResult(ParseInput input, LuiCompilationResult? result) { Input = input; Result = result; }
+        internal ParseInput Input { get; }
+        internal LuiCompilationResult? Result { get; }
+    }
+
+    private sealed class CurrentDocument
+    {
+        internal CurrentDocument(ParseInput input, LuiFreshnessIdentity? identity) { Input = input; Identity = identity; }
+        internal ParseInput Input { get; }
+        internal LuiFreshnessIdentity? Identity { get; }
     }
 
     private static string Declaration(ParseInput input)
@@ -79,26 +130,109 @@ public sealed class LuiGenerator : IIncrementalGenerator
 
     private static DiagnosticDescriptor ParseDescriptor(LuiDiagnostic diagnostic) => new DiagnosticDescriptor(diagnostic.Id, "Invalid .lui syntax", "{0}", "Lucent.Lui", DiagnosticSeverity.Error, true);
 
-    private sealed class IndexedDeclaration
+    private sealed class ComponentIndex : IEquatable<ComponentIndex>
     {
-        internal IndexedDeclaration(ParseInput input, SyntaxTree tree) { Input = input; Tree = tree; }
+        private ComponentIndex(ImmutableArray<IndexedDeclaration> declarations, ImmutableArray<IndexDiagnostic> diagnostics)
+        {
+            Declarations = declarations;
+            Diagnostics = diagnostics;
+            Generation = LuiDocumentIdentity.Hash(String.Join("\n", declarations.OrderBy(declaration => declaration.Input.LogicalPath, StringComparer.Ordinal).Select(declaration => declaration.Input.LogicalPath + "\0" + declaration.Fingerprint)));
+        }
+
+        internal ImmutableArray<IndexedDeclaration> Declarations { get; }
+        private ImmutableArray<IndexDiagnostic> Diagnostics { get; }
+        internal string Generation { get; }
+
+        internal static ComponentIndex Build(Compilation compilation, ImmutableArray<ParseInput> inputs, System.Threading.CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var duplicatePaths = new System.Collections.Generic.HashSet<string>(inputs.Where(input => input.IsReadable && input.IsLogicalPathValid).GroupBy(input => input.LogicalPath, StringComparer.Ordinal).Where(group => group.Count() > 1).SelectMany(group => group).Select(input => input.Path), StringComparer.Ordinal);
+            var candidates = inputs.Where(input => input.IsReadable && input.IsLogicalPathValid && input.Document!.Diagnostics.Count == 0 && !duplicatePaths.Contains(input.Path) && input.Document.Component is not null).ToArray();
+            var parseOptions = (CSharpParseOptions?)compilation.SyntaxTrees.FirstOrDefault()?.Options ?? CSharpParseOptions.Default;
+            var unbound = candidates.Select(input => new IndexedDeclaration(input, CSharpSyntaxTree.ParseText(Declaration(input), parseOptions, input.Path + ".lui.index.g.cs"))).ToArray();
+            var indexCompilation = unbound.Length == 0 ? compilation : compilation.AddSyntaxTrees(unbound.Select(item => item.Tree));
+            var indexed = unbound.Select(item => item.Bind(indexCompilation)).ToArray();
+            var duplicateComponents = indexed.Where(declaration => declaration.Valid).GroupBy(declaration => declaration.Identity, StringComparer.Ordinal).Where(group => group.Count() > 1).SelectMany(group => group).Select(declaration => declaration.Input.Path).ToImmutableHashSet(StringComparer.Ordinal);
+            var declarations = indexed.Where(declaration => declaration.Valid && !duplicateComponents.Contains(declaration.Input.Path)).ToImmutableArray();
+            var diagnostics = ImmutableArray.CreateBuilder<IndexDiagnostic>();
+            foreach (var input in inputs.Where(input => duplicatePaths.Contains(input.Path))) diagnostics.Add(new IndexDiagnostic(DuplicateInput, input, input.LogicalPath, new LuiSpan(0, 0)));
+            foreach (var declaration in indexed.Where(declaration => !declaration.Valid)) diagnostics.Add(new IndexDiagnostic(InvalidSibling, declaration.Input, declaration.Input.Document!.Component!.Name.Text, declaration.Input.Document.Component.Name.Span));
+            foreach (var declaration in indexed.Where(declaration => duplicateComponents.Contains(declaration.Input.Path))) diagnostics.Add(new IndexDiagnostic(DuplicateComponent, declaration.Input, declaration.Identity, declaration.Input.Document!.Component!.Name.Span));
+            cancellationToken.ThrowIfCancellationRequested();
+            return new ComponentIndex(declarations, diagnostics.ToImmutable());
+        }
+
+        internal bool TryGet(string path, out IndexedDeclaration declaration)
+        {
+            var found = Declarations.FirstOrDefault(item => StringComparer.Ordinal.Equals(item.Input.Path, path));
+            declaration = found!;
+            return found is not null;
+        }
+
+        internal void ReportDiagnostics(SourceProductionContext production)
+        {
+            foreach (var diagnostic in Diagnostics)
+            {
+                production.CancellationToken.ThrowIfCancellationRequested();
+                var location = diagnostic.Input.Location(diagnostic.Span);
+                production.ReportDiagnostic(diagnostic.Descriptor == DuplicateInput
+                    ? Diagnostic.Create(diagnostic.Descriptor, location, diagnostic.Input.Path, diagnostic.Value)
+                    : Diagnostic.Create(diagnostic.Descriptor, location, diagnostic.Value));
+            }
+        }
+
+        public bool Equals(ComponentIndex? other) => other is not null && Declarations.SequenceEqual(other.Declarations) && Diagnostics.SequenceEqual(other.Diagnostics);
+        public override bool Equals(object? obj) => Equals(obj as ComponentIndex);
+        public override int GetHashCode()
+        {
+            var hash = 17;
+            foreach (var declaration in Declarations) hash = hash * 31 + declaration.GetHashCode();
+            foreach (var diagnostic in Diagnostics) hash = hash * 31 + diagnostic.GetHashCode();
+            return hash;
+        }
+    }
+
+    private sealed class IndexedDeclaration : IEquatable<IndexedDeclaration>
+    {
+        internal IndexedDeclaration(ParseInput input, SyntaxTree tree, string identity = "", string fingerprint = "", bool valid = false) { Input = input; Tree = tree; Identity = identity; Fingerprint = fingerprint; Valid = valid; }
         internal ParseInput Input { get; }
         internal SyntaxTree Tree { get; }
-        internal string Identity { get; private set; } = "";
-        internal string Freshness { get; private set; } = "";
-        internal bool Valid { get; private set; }
+        internal string Identity { get; }
+        internal string Fingerprint { get; }
+        internal bool Valid { get; }
 
-        internal void Bind(Compilation compilation)
+        internal IndexedDeclaration Bind(Compilation compilation)
         {
             var method = Tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>().SingleOrDefault();
             var symbol = method is null ? null : compilation.GetSemanticModel(Tree).GetDeclaredSymbol(method);
-            if (symbol is null || ContainsErrorType(symbol.ReturnType) || symbol.Parameters.Any(parameter => ContainsErrorType(parameter.Type))) return;
-            Identity = symbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + symbol.MetadataName;
-            Freshness = Identity + "(" + string.Join(",", symbol.Parameters.Select(parameter => parameter.RefKind + ":" + parameter.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))) + ")";
-            Valid = true;
+            if (symbol is null || ContainsErrorType(symbol.ReturnType) || symbol.Parameters.Any(parameter => ContainsErrorType(parameter.Type))) return this;
+            var identity = symbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) + "." + symbol.MetadataName;
+            return new IndexedDeclaration(Input, Tree, identity, DeclarationFingerprint(Tree), true);
+        }
+
+        private static string DeclarationFingerprint(SyntaxTree tree)
+        {
+            var root = tree.GetRoot();
+            var method = root.DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>().Single();
+            return root.ReplaceNode(method, method.WithBody(null).WithExpressionBody(null).WithSemicolonToken(default)).NormalizeWhitespace().ToFullString();
         }
 
         private static bool ContainsErrorType(ITypeSymbol type) => type.TypeKind == TypeKind.Error || type is IArrayTypeSymbol array && ContainsErrorType(array.ElementType) || type is IPointerTypeSymbol pointer && ContainsErrorType(pointer.PointedAtType) || type is INamedTypeSymbol named && named.TypeArguments.Any(ContainsErrorType);
+        public bool Equals(IndexedDeclaration? other) => other is not null && Valid == other.Valid && StringComparer.Ordinal.Equals(Input.Path, other.Input.Path) && StringComparer.Ordinal.Equals(Input.LogicalPath, other.Input.LogicalPath) && StringComparer.Ordinal.Equals(Identity, other.Identity) && StringComparer.Ordinal.Equals(Fingerprint, other.Fingerprint);
+        public override bool Equals(object? obj) => Equals(obj as IndexedDeclaration);
+        public override int GetHashCode() => (Input.Path + "\0" + Input.LogicalPath + "\0" + Identity + "\0" + Fingerprint + "\0" + Valid).GetHashCode();
+    }
+
+    private sealed class IndexDiagnostic : IEquatable<IndexDiagnostic>
+    {
+        internal IndexDiagnostic(DiagnosticDescriptor descriptor, ParseInput input, string value, LuiSpan span) { Descriptor = descriptor; Input = input; Value = value; Span = span; }
+        internal DiagnosticDescriptor Descriptor { get; }
+        internal ParseInput Input { get; }
+        internal string Value { get; }
+        internal LuiSpan Span { get; }
+        public bool Equals(IndexDiagnostic? other) => other is not null && Descriptor.Id == other.Descriptor.Id && StringComparer.Ordinal.Equals(Input.Path, other.Input.Path) && StringComparer.Ordinal.Equals(Input.DocumentVersion, other.Input.DocumentVersion) && Span.Equals(other.Span) && StringComparer.Ordinal.Equals(Value, other.Value);
+        public override bool Equals(object? obj) => Equals(obj as IndexDiagnostic);
+        public override int GetHashCode() => (Descriptor.Id + "\0" + Input.Path + "\0" + Input.DocumentVersion + "\0" + Span.Start + "\0" + Span.Length + "\0" + Value).GetHashCode();
     }
 
     private sealed class ParseInput : IEquatable<ParseInput>
