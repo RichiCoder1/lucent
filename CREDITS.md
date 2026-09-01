@@ -41,6 +41,12 @@ These sources were consulted on 2026-08-30 for the `.lui` design. They are conce
 
 The M7 design also revisited the already-recorded GPUI, Avalonia, Compose, Flutter, Slint, StyleX, Panda CSS, shadcn/ui, and DTCG identities above. No source is copied. Exact implementation package versions and NativeAOT/editor-host compatibility must be rechecked before package references are added.
 
+## Development tooling
+
+| Tool | Exact identity | License | Use |
+| --- | --- | --- | --- |
+| [CSharpier](https://github.com/belav/csharpier/tree/1.3.0) | .NET tool `csharpier` `1.3.0` | MIT | Repository-local, build-time-only formatting of authored C# and project files. Generated files remain excluded by the tool's normal generated-code boundary; no CSharpier asset ships with Lucent applications. |
+
 Before adding a dependency or adopting a new architectural reference:
 
 1. Add it here or to the active roadmap's reference ledger.
