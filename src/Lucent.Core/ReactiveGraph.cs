@@ -6,6 +6,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>A UI-thread-owned reactive graph for all Lucent authoring surfaces.</summary>
+/// <remarks>Read and mutation operations belong to the creating thread. Worker completion is queued and becomes observable only when the owner calls <see cref="Drain"/>.</remarks>
 public sealed class ReactiveGraph
 {
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
@@ -23,6 +24,7 @@ public sealed class ReactiveGraph
     /// <summary>Raised once when worker-posted work changes from empty to nonempty.</summary>
     public event Action? WorkAvailable;
 
+    /// <summary>Creates a root lifetime scope on the UI thread. Disposing it releases every owned node and child scope.</summary>
     public ReactiveScope CreateScope(string name)
     {
         CheckThread();
@@ -30,6 +32,7 @@ public sealed class ReactiveGraph
         return new ReactiveScope(this, null, name);
     }
 
+    /// <summary>Creates writable graph state that notifies dependent nodes when its value changes.</summary>
     public Signal<T> Signal<T>(T value, string name)
     {
         CheckThread();
@@ -37,6 +40,7 @@ public sealed class ReactiveGraph
         return new Signal<T>(this, value, name, null);
     }
 
+    /// <summary>Creates a lazy memoized value whose dependencies are discovered during each evaluation.</summary>
     public Derived<T> Derived<T>(Func<T> compute, string name)
     {
         CheckThread();
@@ -45,6 +49,7 @@ public sealed class ReactiveGraph
         return new Derived<T>(this, compute, name, null);
     }
 
+    /// <summary>Creates an immediately scheduled callback that reruns after values it reads change.</summary>
     public ReactiveEffect Effect(Action callback, string name)
     {
         CheckThread();
@@ -53,6 +58,7 @@ public sealed class ReactiveGraph
         return new ReactiveEffect(this, callback, name, null);
     }
 
+    /// <summary>Creates latest-generation asynchronous state; only the current generation may commit on <see cref="Drain"/>.</summary>
     public AsyncValue<T> Async<T>(Func<CancellationToken, Task<T>> load, string name)
     {
         CheckThread();
@@ -61,6 +67,7 @@ public sealed class ReactiveGraph
         return new AsyncValue<T>(this, load, default!, false, name, null);
     }
 
+    /// <summary>Creates latest-generation asynchronous state with a value retained until its replacement commits.</summary>
     public AsyncValue<T> Async<T>(Func<CancellationToken, Task<T>> load, T staleValue, string name)
     {
         CheckThread();

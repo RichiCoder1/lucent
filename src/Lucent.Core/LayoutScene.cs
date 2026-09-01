@@ -7,30 +7,55 @@ namespace Lucent.Core;
 /// <summary>The finite arrangement values resolved by the existing typed presentation model.</summary>
 public static class LayoutProperties
 {
+    /// <summary>Selects horizontal or vertical main-axis layout; the default is a column.</summary>
     public static readonly Property<LayoutAxis> Axis = new("layout-axis", LayoutAxis.Column);
+
+    /// <summary>Sets an optional fixed logical-pixel width.</summary>
     public static readonly Property<float?> Width = new("layout-width", null);
+
+    /// <summary>Sets an optional fixed logical-pixel height.</summary>
     public static readonly Property<float?> Height = new("layout-height", null);
+
+    /// <summary>Sets a nonnegative minimum logical-pixel width.</summary>
     public static readonly Property<float> MinWidth = new("layout-min-width", 0);
+
+    /// <summary>Sets a nonnegative minimum logical-pixel height.</summary>
     public static readonly Property<float> MinHeight = new("layout-min-height", 0);
+
+    /// <summary>Sets a maximum logical-pixel width; infinity leaves it unbounded.</summary>
     public static readonly Property<float> MaxWidth = new(
         "layout-max-width",
         float.PositiveInfinity
     );
+
+    /// <summary>Sets a maximum logical-pixel height; infinity leaves it unbounded.</summary>
     public static readonly Property<float> MaxHeight = new(
         "layout-max-height",
         float.PositiveInfinity
     );
+
+    /// <summary>Sets nonnegative logical-pixel gaps between arranged children.</summary>
     public static readonly Property<float> Spacing = new("layout-spacing", 0);
+
+    /// <summary>Aligns children along the main axis after sizing.</summary>
     public static readonly Property<LayoutAlignment> MainAlignment = new(
         "layout-main-alignment",
         LayoutAlignment.Start
     );
+
+    /// <summary>Aligns children across the main axis after sizing.</summary>
     public static readonly Property<LayoutAlignment> CrossAlignment = new(
         "layout-cross-alignment",
         LayoutAlignment.Stretch
     );
+
+    /// <summary>Insets the content box by finite logical pixels.</summary>
     public static readonly Property<Insets> Padding = new("layout-padding", Insets.Zero);
+
+    /// <summary>Clips descendants to this element's layout bounds when true.</summary>
     public static readonly Property<bool> Clip = new("layout-clip", false);
+
+    /// <summary>Offsets laid-out content by nonnegative logical pixels.</summary>
     public static readonly Property<ScrollOffset> Scroll = new("layout-scroll", default);
     internal static readonly Property<float?> VirtualRowHeight = new(
         "layout-virtual-row-height",
@@ -43,10 +68,13 @@ public static class LayoutProperties
 /// <summary>The minimal renderer-facing visual values; they are ordinary typed properties, not a second style model.</summary>
 public static class VisualProperties
 {
+    /// <summary>Sets the box-local background brush.</summary>
     public static readonly Property<Brush> Background = new(
         "visual-background",
         Brush.Solid(default)
     );
+
+    /// <summary>Sets box opacity in the inclusive zero-to-one range.</summary>
     public static readonly Property<float> Opacity = new(
         "visual-opacity",
         1,
@@ -54,29 +82,39 @@ public static class VisualProperties
     );
 }
 
+/// <summary>Typed text presentation properties consumed by the portable shaping request.</summary>
 public static class TypographyProperties
 {
+    /// <summary>Sets the inherited text color.</summary>
     public static readonly Property<Color> TextColor = new(
         "typography-text-color",
         Color.FromRgb(0, 0, 0),
         inherits: true,
         transition: TransitionKind.Color
     );
+
+    /// <summary>Sets the inherited font family.</summary>
     public static readonly Property<string> FontFamily = new(
         "typography-font-family",
         "Segoe UI",
         inherits: true
     );
+
+    /// <summary>Sets the inherited positive logical-pixel font size.</summary>
     public static readonly Property<float> FontSize = new(
         "typography-font-size",
         14,
         inherits: true
     );
+
+    /// <summary>Sets the inherited shaping language tag.</summary>
     public static readonly Property<string> Language = new(
         "typography-language",
         "en",
         inherits: true
     );
+
+    /// <summary>Sets the inherited explicit text-shaping direction.</summary>
     public static readonly Property<TextDirection> Direction = new(
         "typography-direction",
         global::Lucent.Core.TextDirection.LeftToRight,
@@ -98,29 +136,46 @@ internal static class ProjectionProperties
     internal static readonly Property<int?> TextCaret = new("projection-text-caret", null);
 }
 
+/// <summary>The main axis used to arrange a container's retained children.</summary>
 public enum LayoutAxis
 {
+    /// <summary>Uses horizontal main-axis arrangement.</summary>
     Row,
+
+    /// <summary>Uses vertical main-axis arrangement.</summary>
     Column,
 }
 
+/// <summary>How children align on an arrangement axis after sizing.</summary>
 public enum LayoutAlignment
 {
+    /// <summary>Places content at the leading edge.</summary>
     Start,
+
+    /// <summary>Centers content in available space.</summary>
     Center,
+
+    /// <summary>Places content at the trailing edge.</summary>
     End,
+
+    /// <summary>Expands eligible children across available space.</summary>
     Stretch,
 }
 
+/// <summary>The explicit writing direction supplied to text shaping.</summary>
 public enum TextDirection
 {
+    /// <summary>Shapes clusters in increasing logical order.</summary>
     LeftToRight,
+
+    /// <summary>Shapes clusters in decreasing logical order.</summary>
     RightToLeft,
 }
 
 /// <summary>Immutable physical logical-pixel space around an element's content box.</summary>
 public readonly struct Insets : IEquatable<Insets>
 {
+    /// <summary>Initializes finite, nonnegative logical-pixel inset edges.</summary>
     public Insets(float left, float top, float right, float bottom)
     {
         if (
@@ -143,28 +198,45 @@ public readonly struct Insets : IEquatable<Insets>
         Bottom = bottom == 0 ? 0 : bottom;
     }
 
+    /// <summary>Gets the nonnegative left inset in logical pixels.</summary>
     public float Left { get; }
+
+    /// <summary>Gets the nonnegative top inset in logical pixels.</summary>
     public float Top { get; }
+
+    /// <summary>Gets the nonnegative right inset in logical pixels.</summary>
     public float Right { get; }
+
+    /// <summary>Gets the nonnegative bottom inset in logical pixels.</summary>
     public float Bottom { get; }
+
+    /// <summary>Gets zero inset on every edge.</summary>
     public static Insets Zero => default;
 
+    /// <summary>Creates equal finite, nonnegative insets on all edges.</summary>
     public static Insets Uniform(float value) => new(value, value, value, value);
 
+    /// <summary>Creates equal horizontal and equal vertical logical-pixel insets.</summary>
     public static Insets Symmetric(float horizontal, float vertical) =>
         new(horizontal, vertical, horizontal, vertical);
 
+    /// <summary>Compares the complete value representation for equality.</summary>
     public bool Equals(Insets other) =>
         Left == other.Left && Top == other.Top && Right == other.Right && Bottom == other.Bottom;
 
+    /// <summary>Compares the complete value representation for equality.</summary>
     public override bool Equals(object? obj) => obj is Insets other && Equals(other);
 
+    /// <summary>Returns a hash code based on the complete value representation.</summary>
     public override int GetHashCode() => HashCode.Combine(Left, Top, Right, Bottom);
 
+    /// <summary>Compares the complete value representation for equality.</summary>
     public static bool operator ==(Insets left, Insets right) => left.Equals(right);
 
+    /// <summary>Compares the complete value representation for equality.</summary>
     public static bool operator !=(Insets left, Insets right) => !left.Equals(right);
 
+    /// <summary>Returns the canonical diagnostic representation of this value.</summary>
     public override string ToString() =>
         "insets("
         + Format(Left)
@@ -190,8 +262,10 @@ public readonly struct Insets : IEquatable<Insets>
         value == 0 ? "0" : value.ToString("R", CultureInfo.InvariantCulture);
 }
 
+/// <summary>The logical viewport presented to layout. Width and height are logical pixels; scale is device pixels per logical pixel.</summary>
 public readonly record struct LayoutViewport(float Width, float Height, float Scale)
 {
+    /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
     {
         if (
@@ -209,6 +283,7 @@ public readonly record struct LayoutViewport(float Width, float Height, float Sc
     }
 }
 
+/// <summary>An immutable logical-pixel scroll offset in the horizontal and vertical axes.</summary>
 public readonly record struct ScrollOffset(float X, float Y)
 {
     internal void Validate()
@@ -218,6 +293,7 @@ public readonly record struct ScrollOffset(float X, float Y)
     }
 }
 
+/// <summary>An immutable logical-pixel rectangle used consistently for layout, input, and retained scene bounds.</summary>
 public readonly record struct LayoutRect(float X, float Y, float Width, float Height)
 {
     internal static LayoutRect Round(float x, float y, float width, float height, float scale)
@@ -249,8 +325,10 @@ public readonly record struct LayoutRect(float X, float Y, float Width, float He
     }
 }
 
+/// <summary>Composition-local identity for a retained element.</summary>
 public readonly record struct ElementIdentity(long CompositionEpoch, long ElementId);
 
+/// <summary>Complete portable text-shaping input; font size and scale must be positive.</summary>
 public readonly record struct TextMeasureRequest(
     string Text,
     string FontFamily,
@@ -260,6 +338,7 @@ public readonly record struct TextMeasureRequest(
     float Scale
 )
 {
+    /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
     {
         if (
@@ -278,6 +357,7 @@ public readonly record struct TextMeasureRequest(
     }
 }
 
+/// <summary>One shaped glyph with logical-pixel position, advance, and offsets.</summary>
 public readonly record struct ShapedGlyph(
     uint GlyphId,
     uint Cluster,
@@ -293,6 +373,7 @@ public sealed class ShapedRun
 {
     private readonly IReadOnlyList<ShapedGlyph> _glyphs;
 
+    /// <summary>Initializes an immutable validated shaped-font run in logical pixels.</summary>
     public ShapedRun(
         string identity,
         string family,
@@ -370,14 +451,31 @@ public sealed class ShapedRun
         _glyphs = Array.AsReadOnly(copy);
     }
 
+    /// <summary>Gets the stable identity supplied by the producer.</summary>
     public string Identity { get; }
+
+    /// <summary>Gets the resolved font family.</summary>
     public string Family { get; }
+
+    /// <summary>Gets the resolved font weight.</summary>
     public int Weight { get; }
+
+    /// <summary>Gets the logical-pixel width.</summary>
     public int Width { get; }
+
+    /// <summary>Gets the resolved font slant.</summary>
     public int Slant { get; }
+
+    /// <summary>Gets the shaper-provided font fingerprint.</summary>
     public string Fingerprint { get; }
+
+    /// <summary>Gets the face index in the font collection.</summary>
     public int CollectionIndex { get; }
+
+    /// <summary>Gets the shaper-provided font source identity.</summary>
     public string SourceIdentity { get; }
+
+    /// <summary>Gets the family, weight, width, and slant diagnostic identity.</summary>
     public string TypefaceIdentity =>
         Family
         + ":"
@@ -386,21 +484,41 @@ public sealed class ShapedRun
         + Width.ToString(CultureInfo.InvariantCulture)
         + ":"
         + Slant.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Gets the shaping direction used for this run.</summary>
     public TextDirection Direction { get; }
+
+    /// <summary>Gets the language tag used for shaping.</summary>
     public string Language { get; }
+
+    /// <summary>Gets the positive logical-pixel font size.</summary>
     public float FontSize { get; }
+
+    /// <summary>Gets the logical-pixel horizontal run origin.</summary>
     public float OriginX { get; }
+
+    /// <summary>Gets the logical-pixel baseline.</summary>
     public float Baseline { get; }
+
+    /// <summary>Gets the logical-pixel ascent.</summary>
     public float Ascent { get; }
+
+    /// <summary>Gets the logical-pixel descent.</summary>
     public float Descent { get; }
+
+    /// <summary>Gets the nonnegative logical-pixel advance width.</summary>
     public float RunWidth { get; }
+
+    /// <summary>Gets the immutable ordered glyph sequence.</summary>
     public IReadOnlyList<ShapedGlyph> Glyphs => _glyphs;
 }
 
+/// <summary>An immutable text-shaping result shared by layout, scene projection, and renderer adapters.</summary>
 public sealed class ShapedText
 {
     private readonly IReadOnlyList<ShapedRun> _runs;
 
+    /// <summary>Initializes immutable shaped text metrics and ordered runs.</summary>
     public ShapedText(string identity, float width, float height, IReadOnlyList<ShapedRun> runs)
     {
         ArgumentNullException.ThrowIfNull(identity);
@@ -421,11 +539,19 @@ public sealed class ShapedText
         _runs = Array.AsReadOnly(copy);
     }
 
+    /// <summary>Gets the stable identity supplied by the producer.</summary>
     public string Identity { get; }
+
+    /// <summary>Gets the logical-pixel width.</summary>
     public float Width { get; }
+
+    /// <summary>Gets the logical-pixel height.</summary>
     public float Height { get; }
+
+    /// <summary>Gets the immutable ordered shaped runs.</summary>
     public IReadOnlyList<ShapedRun> Runs => _runs;
 
+    /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate(TextMeasureRequest request)
     {
         if (
@@ -498,9 +624,11 @@ public sealed class ShapedText
 /// <summary>Implemented by the renderer; Core owns only this portable request/result contract.</summary>
 public interface ITextShaper
 {
+    /// <summary>Shapes a validated request into an immutable result whose metrics and glyph coordinates are logical pixels.</summary>
     ShapedText Shape(TextMeasureRequest request);
 }
 
+/// <summary>Laid-out bounds and optional shaped text for one retained element.</summary>
 public readonly record struct LayoutBox(
     ElementIdentity Identity,
     LayoutRect Bounds,
@@ -519,30 +647,50 @@ public readonly record struct RetainedInputElement(
     string Signature
 );
 
+/// <summary>The finite renderer operation represented by a retained scene node.</summary>
 public enum SceneNodeKind
 {
+    /// <summary>Paints a box-local brush.</summary>
     Paint,
+
+    /// <summary>Paints shaped text.</summary>
     Text,
+
+    /// <summary>Paints a selection highlight.</summary>
     Selection,
+
+    /// <summary>Paints a text caret.</summary>
     Caret,
+
+    /// <summary>Clips a child scene group.</summary>
     Clip,
+
+    /// <summary>Composites a child group with opacity.</summary>
     Opacity,
 }
 
+/// <summary>Identity of a renderer operation belonging to a retained element.</summary>
 public readonly record struct SceneNodeIdentity(ElementIdentity Element, SceneNodeKind Kind);
 
+/// <summary>The portable renderer-facing base for one retained scene operation.</summary>
 public abstract class SceneNode(SceneNodeIdentity identity, LayoutRect bounds)
 {
+    /// <summary>Gets the stable identity supplied by the producer.</summary>
     public SceneNodeIdentity Identity { get; } = identity;
+
+    /// <summary>Gets the logical-pixel bounds of this scene operation.</summary>
     public LayoutRect Bounds { get; } = bounds;
 }
 
+/// <summary>A box-local brush paint operation in a retained scene.</summary>
 public sealed class PaintSceneNode(SceneNodeIdentity identity, LayoutRect bounds, Brush brush)
     : SceneNode(identity, bounds)
 {
+    /// <summary>Gets the box-local brush to paint.</summary>
     public Brush Brush { get; } = brush ?? throw new ArgumentNullException(nameof(brush));
 }
 
+/// <summary>A shaped text paint operation in a retained scene.</summary>
 public sealed class TextSceneNode(
     SceneNodeIdentity identity,
     LayoutRect bounds,
@@ -550,14 +698,19 @@ public sealed class TextSceneNode(
     ShapedText text
 ) : SceneNode(identity, bounds)
 {
+    /// <summary>Gets the text color used for painting.</summary>
     public Color Color { get; } = color;
+
+    /// <summary>Gets the shaped text to paint.</summary>
     public ShapedText Text { get; } = text ?? throw new ArgumentNullException(nameof(text));
 }
 
+/// <summary>A retained group clipped once to its bounds before its children are painted.</summary>
 public sealed class ClipSceneNode : SceneNode
 {
     private readonly IReadOnlyList<SceneNode> _children;
 
+    /// <summary>Initializes an immutable clipped scene group with copied children.</summary>
     public ClipSceneNode(
         SceneNodeIdentity identity,
         LayoutRect bounds,
@@ -570,6 +723,7 @@ public sealed class ClipSceneNode : SceneNode
         );
     }
 
+    /// <summary>Gets the immutable copied child scene nodes.</summary>
     public IReadOnlyList<SceneNode> Children => _children;
 
     internal static SceneNode Clone(SceneNode node) =>
@@ -598,6 +752,7 @@ public sealed class OpacitySceneNode : SceneNode
 {
     private readonly IReadOnlyList<SceneNode> _children;
 
+    /// <summary>Initializes an immutable opacity group; opacity must be in [0,1].</summary>
     public OpacitySceneNode(
         SceneNodeIdentity identity,
         LayoutRect bounds,
@@ -618,7 +773,10 @@ public sealed class OpacitySceneNode : SceneNode
         );
     }
 
+    /// <summary>Gets the group opacity in the inclusive zero-to-one range.</summary>
     public float Opacity { get; }
+
+    /// <summary>Gets the immutable copied child scene nodes.</summary>
     public IReadOnlyList<SceneNode> Children => _children;
 }
 
@@ -643,14 +801,23 @@ public sealed class RetainedScene
 
     /// <summary>Monotonic composition-local identity; routers reject older snapshots.</summary>
     public long Generation { get; }
+
+    /// <summary>Gets the logical viewport used to produce the scene.</summary>
     public LayoutViewport Viewport { get; }
+
+    /// <summary>Gets the immutable layout boxes for the scene generation.</summary>
     public IReadOnlyList<LayoutBox> Boxes { get; }
+
+    /// <summary>Gets the immutable renderer operations for the scene generation.</summary>
     public IReadOnlyList<SceneNode> Nodes { get; }
 
     /// <summary>Retained hit/focus metadata matched to this scene generation.</summary>
     public IReadOnlyList<RetainedInputElement> Input { get; }
+
+    /// <summary>Gets the deterministic signature of the scene input projection.</summary>
     public string InputSignature { get; }
 
+    /// <summary>Returns a deterministic, value-free snapshot suitable for diagnostics and contract comparison.</summary>
     public string Dump()
     {
         var output = new StringBuilder("scene generation=")
@@ -847,5 +1014,3 @@ public sealed class RetainedScene
         return Convert.ToHexString(SHA256.HashData(stream.ToArray()));
     }
 }
-
-/// <summary>Finite row/column layout: invalid values fail; fixed over-constraint is retained and bounded by an explicit clip.</summary>

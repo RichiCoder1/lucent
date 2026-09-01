@@ -4,8 +4,10 @@ using System.Text;
 
 namespace Lucent.Core;
 
+/// <summary>Projects a retained composition into immutable layout, scene, and input data.</summary>
 public static class SceneLayout
 {
+    /// <summary>Lays out the current composition and returns a fresh retained scene; callers install it in the input router.</summary>
     public static RetainedScene Project(
         Composition composition,
         LayoutViewport viewport,

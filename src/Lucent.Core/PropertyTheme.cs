@@ -3,8 +3,10 @@ using System.Text;
 
 namespace Lucent.Core;
 
+/// <summary>Names a typed presentation value, its fallback, inheritance rule, and optional fixed transition channel.</summary>
 public sealed class Property<T> : IProperty, IPropertyDump
 {
+    /// <summary>Creates a property definition. Names are diagnostic identities and transition channels must match <typeparamref name="T"/>.</summary>
     public Property(
         string name,
         T defaultValue,
@@ -29,9 +31,16 @@ public sealed class Property<T> : IProperty, IPropertyDump
             );
     }
 
+    /// <summary>Gets the stable diagnostic name used in deterministic dumps.</summary>
     public string Name { get; }
+
+    /// <summary>Gets the value used when no applicable style or inherited value supplies this property.</summary>
     public T DefaultValue { get; }
+
+    /// <summary>Gets whether an unset value is inherited from the nearest presented ancestor.</summary>
     public bool Inherits { get; }
+
+    /// <summary>Gets the only transition channel permitted for this property.</summary>
     public TransitionKind Transition { get; }
     object? IProperty.DefaultValue => DefaultValue;
 
@@ -61,46 +70,81 @@ internal sealed record ResolutionDump(
     PropertyProvenance? Suppressed
 );
 
+/// <summary>Interpolation channels supported by the bounded presentation timeline.</summary>
 public enum TransitionKind
 {
+    /// <summary>Disallows transition sampling.</summary>
     None,
+
+    /// <summary>Allows color interpolation.</summary>
     Color,
+
+    /// <summary>Allows opacity interpolation.</summary>
     Opacity,
+
+    /// <summary>Reserves transform interpolation.</summary>
     Transform,
+
+    /// <summary>Reserves focus-ring interpolation.</summary>
     FocusRing,
 }
 
+/// <summary>Interaction-state bits used to select conditional style assignments.</summary>
 [Flags]
 public enum VariantState
 {
+    /// <summary>Applies no interaction variant.</summary>
     None = 0,
+
+    /// <summary>Applies while pointer hover is active.</summary>
     Hover = 1,
+
+    /// <summary>Applies while keyboard-visible focus is active.</summary>
     FocusVisible = 2,
+
+    /// <summary>Applies while selected.</summary>
     Selected = 4,
+
+    /// <summary>Applies during an active press.</summary>
     Pressed = 8,
+
+    /// <summary>Applies when a control is invalid.</summary>
     Invalid = 16,
+
+    /// <summary>Applies when input is disabled.</summary>
     Disabled = 32,
 }
 
+/// <summary>System color-scheme choices observed by a theme context.</summary>
 public enum ThemeColorScheme
 {
+    /// <summary>Selects light-surface appearance.</summary>
     Light,
+
+    /// <summary>Selects dark-surface appearance.</summary>
     Dark,
 }
 
+/// <summary>System contrast choices observed by a theme context.</summary>
 public enum ThemeContrast
 {
+    /// <summary>Selects ordinary contrast.</summary>
     Normal,
+
+    /// <summary>Selects high-contrast appearance.</summary>
     High,
 }
 
+/// <summary>Portable color-scheme and contrast preference used to choose theme values.</summary>
 public readonly record struct ThemeAppearance(ThemeColorScheme ColorScheme, ThemeContrast Contrast)
 {
+    /// <summary>Provides the standard light, normal-contrast appearance.</summary>
     public static readonly ThemeAppearance Light = new(
         ThemeColorScheme.Light,
         ThemeContrast.Normal
     );
 
+    /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
     {
         if (!Enum.IsDefined(ColorScheme) || !Enum.IsDefined(Contrast))
@@ -110,8 +154,10 @@ public readonly record struct ThemeAppearance(ThemeColorScheme ColorScheme, Them
     }
 }
 
+/// <summary>Names an immutable themed value with a fallback used when the active theme does not assign it.</summary>
 public sealed class Token<T>
 {
+    /// <summary>Initializes a named token and its fallback value.</summary>
     public Token(string name, T fallback)
     {
         ReactiveGraph.ValidateName(name, nameof(name));
@@ -119,14 +165,19 @@ public sealed class Token<T>
         Fallback = fallback;
     }
 
+    /// <summary>Gets the stable diagnostic name.</summary>
     public string Name { get; }
+
+    /// <summary>Gets the value used when the active theme does not assign the token.</summary>
     public T Fallback { get; }
 }
 
+/// <summary>A named mutable collection of typed token assignments, observed through a <see cref="ThemeContext"/>.</summary>
 public sealed class Theme
 {
     private readonly Dictionary<object, object?> _values;
 
+    /// <summary>Initializes an immutable named theme with no token assignments.</summary>
     public Theme(string name)
         : this(name, []) { }
 
@@ -137,8 +188,10 @@ public sealed class Theme
         _values = values;
     }
 
+    /// <summary>Gets the stable diagnostic name.</summary>
     public string Name { get; }
 
+    /// <summary>Returns a new theme with the supplied token assignment.</summary>
     public Theme Set<T>(Token<T> token, T value)
     {
         ArgumentNullException.ThrowIfNull(token);
@@ -165,6 +218,7 @@ public sealed class ThemeContext : IDisposable
     internal ReactiveScope Scope => _scope;
     internal int TokenCount => _tokens.Count;
 
+    /// <summary>Initializes scope-owned reactive theme, motion, and appearance state.</summary>
     public ThemeContext(
         ReactiveScope scope,
         Theme theme,
@@ -184,6 +238,7 @@ public sealed class ThemeContext : IDisposable
         scope.Own(this);
     }
 
+    /// <summary>Gets or changes the active theme; changing it reactively updates token readers.</summary>
     public Theme Theme
     {
         get => _theme.Value;
@@ -196,6 +251,8 @@ public sealed class ThemeContext : IDisposable
                 slot.Update(theme);
         }
     }
+
+    /// <summary>Gets or changes the motion preference observed by presentation transitions.</summary>
     public bool ReducedMotion
     {
         get => _reducedMotion.Value;
@@ -256,6 +313,7 @@ public sealed class ThemeContext : IDisposable
         }
     }
 
+    /// <summary>Disposes token signals owned by this context; the containing scope also owns this context.</summary>
     public void Dispose()
     {
         _scope.CheckMutationGuard();

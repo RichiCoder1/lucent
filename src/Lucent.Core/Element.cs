@@ -43,10 +43,19 @@ public sealed class Element : IDisposable
         Scope.OnElementDispose(Dispose);
     }
 
+    /// <summary>Gets the stable identifier assigned at creation.</summary>
     public long Id { get; }
+
+    /// <summary>Gets the diagnostic name assigned at creation.</summary>
     public string Name { get; }
+
+    /// <summary>Gets the child reactive scope owned by this element.</summary>
     public ReactiveScope Scope { get; }
+
+    /// <summary>Gets the immutable current child sequence.</summary>
     public IReadOnlyList<Element> Children => _childrenView;
+
+    /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
     internal Composition Composition { get; }
     internal Element? Parent => _parent;
@@ -126,6 +135,7 @@ public sealed class Element : IDisposable
         ).SetVariants(variants);
     }
 
+    /// <summary>Resolves a presentation property from the current retained style and theme.</summary>
     public ResolvedProperty<T> Resolve<T>(Property<T> property)
     {
         Composition.CheckThread();
@@ -542,6 +552,7 @@ public sealed class Element : IDisposable
             );
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public void Dispose()
     {
         Composition.CheckThread();

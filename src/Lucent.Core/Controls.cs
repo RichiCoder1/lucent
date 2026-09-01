@@ -33,6 +33,7 @@ public static class ControlThemes
         Color.Parse("#94a3b8")
     );
 
+    /// <summary>Gets the built-in light control palette.</summary>
     public static Theme Light { get; } =
         Palette(
             "controls-light",
@@ -45,6 +46,8 @@ public static class ControlThemes
             Color.Parse("#000000"),
             Color.Parse("#94a3b8")
         );
+
+    /// <summary>Gets the built-in dark control palette.</summary>
     public static Theme Dark { get; } =
         Palette(
             "controls-dark",
@@ -57,6 +60,8 @@ public static class ControlThemes
             Color.Parse("#000000"),
             Color.Parse("#64748b")
         );
+
+    /// <summary>Gets the built-in high-contrast control palette.</summary>
     public static Theme HighContrast { get; } =
         Palette(
             "controls-high-contrast",

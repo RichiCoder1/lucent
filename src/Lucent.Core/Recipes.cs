@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 namespace Lucent.Core;
 
 /// <summary>A reusable capability that creates one retained root when mounted.</summary>
+/// <remarks>Each mount owns exactly one stable root. A recipe is neither a runtime template instance nor a rerender function; use <see cref="ContentRecipe"/> when contributing below an existing root.</remarks>
 public sealed class ComponentRecipe
 {
     private readonly Action<CompositionContext, Element> _content;
@@ -55,6 +56,7 @@ public sealed class ComponentRecipe
 }
 
 /// <summary>A reusable contribution of zero or more retained entries below an existing root.</summary>
+/// <remarks>Content recipes are immutable. A <see cref="ComponentContent"/> group commits them in declaration order without adding a wrapper element.</remarks>
 public sealed class ContentRecipe
 {
     private readonly Action<CompositionContext, Element> _mount;
@@ -126,7 +128,11 @@ public sealed class ComponentContent : IReadOnlyList<ContentRecipe>
 
     /// <summary>An empty content group.</summary>
     public static ComponentContent Empty { get; } = new([]);
+
+    /// <summary>Gets the number of ordered content contributions.</summary>
     public int Count => _recipes.Length;
+
+    /// <summary>Gets the content contribution at the specified declaration-order index.</summary>
     public ContentRecipe this[int index] => _recipes[index];
 
     /// <summary>Snapshots ordered content for C# collection expressions.</summary>
@@ -137,6 +143,7 @@ public sealed class ComponentContent : IReadOnlyList<ContentRecipe>
         return recipes.Length == 0 ? Empty : new ComponentContent(recipes.ToArray());
     }
 
+    /// <summary>Returns an enumerator over content contributions in declaration order.</summary>
     public IEnumerator<ContentRecipe> GetEnumerator() =>
         ((IEnumerable<ContentRecipe>)_recipes).GetEnumerator();
 

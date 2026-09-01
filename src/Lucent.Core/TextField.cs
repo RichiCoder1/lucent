@@ -4,13 +4,20 @@ using System.Text;
 
 namespace Lucent.Core;
 
+/// <summary>Portable IME and committed-text operations routed to a text field.</summary>
 public enum TextInputKind
 {
+    /// <summary>Inserts committed text and ends IME composition.</summary>
     Commit,
+
+    /// <summary>Updates uncommitted IME text and selection.</summary>
     Preedit,
+
+    /// <summary>Cancels IME composition without editing committed text.</summary>
     Cancel,
 }
 
+/// <summary>Committed or IME preedit text; preedit offsets are Unicode-scalar positions.</summary>
 public readonly record struct TextInputCommand(
     TextInputKind Kind,
     string Text,
@@ -22,6 +29,7 @@ public readonly record struct TextInputCommand(
     public static bool TryNormalizeSingleLine(string? text, out string normalized) =>
         TextFieldState.TryNormalizeSingleLine(text, out normalized);
 
+    /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
     {
         if (
@@ -46,10 +54,16 @@ public readonly record struct TextInputCommand(
     }
 }
 
+/// <summary>Clipboard operations requested by a focused text field.</summary>
 public enum TextClipboardOperation
 {
+    /// <summary>Requests selected text without changing the field.</summary>
     Copy,
+
+    /// <summary>Requests selected text then deletes it after successful completion.</summary>
     Cut,
+
+    /// <summary>Requests text to insert at the current selection.</summary>
     Paste,
 }
 
@@ -62,7 +76,10 @@ public sealed class TextClipboardRequest
         Text = text;
     }
 
+    /// <summary>Gets the requested clipboard operation.</summary>
     public TextClipboardOperation Operation { get; }
+
+    /// <summary>Gets selected text for copy or cut, or null for paste.</summary>
     public string? Text { get; }
 }
 

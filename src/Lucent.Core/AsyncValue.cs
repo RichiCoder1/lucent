@@ -34,6 +34,8 @@ public sealed class AsyncValue<T> : ReactiveNode
     }
 
     internal override string Kind => "async";
+
+    /// <summary>Gets the latest successfully committed value, or the supplied stale value while a reload is pending.</summary>
     public T? Value
     {
         get
@@ -44,6 +46,8 @@ public sealed class AsyncValue<T> : ReactiveNode
             return _value;
         }
     }
+
+    /// <summary>Gets whether <see cref="Value"/> currently represents a committed or stale value.</summary>
     public bool HasValue
     {
         get
@@ -54,6 +58,8 @@ public sealed class AsyncValue<T> : ReactiveNode
             return _hasValue;
         }
     }
+
+    /// <summary>Gets whether the current generation is awaiting its producer; reading it participates in reactivity.</summary>
     public bool IsPending
     {
         get
@@ -64,6 +70,8 @@ public sealed class AsyncValue<T> : ReactiveNode
             return _pending;
         }
     }
+
+    /// <summary>Gets whether the current generation was cancelled before it could commit.</summary>
     public bool IsCancelled
     {
         get
@@ -74,6 +82,8 @@ public sealed class AsyncValue<T> : ReactiveNode
             return _cancelled;
         }
     }
+
+    /// <summary>Gets the current generation failure without throwing it; a later invalidation may replace it.</summary>
     public Exception? Error
     {
         get
@@ -212,6 +222,7 @@ public sealed class AsyncValue<T> : ReactiveNode
         ReactiveGraph.ThrowCombined(error, changedError, "Async invalidation failed.");
     }
 
+    /// <summary>Cancels the active generation and releases graph ownership; late producer completion is ignored.</summary>
     public override void Dispose()
     {
         Graph.CheckThread();

@@ -27,9 +27,16 @@ public sealed class ReactiveScope : IDisposable
         parent?._owned.Add(this);
     }
 
+    /// <summary>Gets the stable identifier assigned at creation.</summary>
     public int Id { get; }
+
+    /// <summary>Gets the diagnostic name assigned at creation.</summary>
     public string Name { get; }
+
+    /// <summary>Gets the parent lifetime scope, or null for a root scope.</summary>
     public ReactiveScope? Parent => _parent;
+
+    /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
     internal ReactiveGraph Graph => _graph;
 
@@ -41,6 +48,7 @@ public sealed class ReactiveScope : IDisposable
         return false;
     }
 
+    /// <summary>Creates a child scope disposed with this scope.</summary>
     public ReactiveScope CreateChild(string name)
     {
         CheckActive();
@@ -55,6 +63,7 @@ public sealed class ReactiveScope : IDisposable
         return new ReactiveScope(_graph, this, name);
     }
 
+    /// <summary>Creates writable scope-owned state that notifies dependents when it changes.</summary>
     public Signal<T> Signal<T>(T value, string name)
     {
         CheckActive();
@@ -69,6 +78,7 @@ public sealed class ReactiveScope : IDisposable
         return OwnElement(new Signal<T>(_graph, value, name, this));
     }
 
+    /// <summary>Creates lazy scope-owned state with dependencies discovered on evaluation.</summary>
     public Derived<T> Derived<T>(Func<T> compute, string name)
     {
         CheckActive();
@@ -77,6 +87,7 @@ public sealed class ReactiveScope : IDisposable
         return Own(new Derived<T>(_graph, compute, name, this));
     }
 
+    /// <summary>Creates a scope-owned effect that reruns after tracked reads change.</summary>
     public ReactiveEffect Effect(Action callback, string name)
     {
         CheckActive();
@@ -85,6 +96,7 @@ public sealed class ReactiveScope : IDisposable
         return Own(new ReactiveEffect(_graph, callback, name, this));
     }
 
+    /// <summary>Creates latest-generation scope-owned asynchronous state.</summary>
     public AsyncValue<T> Async<T>(Func<CancellationToken, Task<T>> load, string name)
     {
         CheckActive();
@@ -93,6 +105,7 @@ public sealed class ReactiveScope : IDisposable
         return Own(new AsyncValue<T>(_graph, load, default!, false, name, this));
     }
 
+    /// <summary>Creates latest-generation scope-owned asynchronous state.</summary>
     public AsyncValue<T> Async<T>(Func<CancellationToken, Task<T>> load, T staleValue, string name)
     {
         CheckActive();
@@ -101,6 +114,7 @@ public sealed class ReactiveScope : IDisposable
         return Own(new AsyncValue<T>(_graph, load, staleValue, true, name, this));
     }
 
+    /// <summary>Transfers a disposable resource into this scope lifetime.</summary>
     public T Own<T>(T value)
         where T : IDisposable
     {
@@ -110,6 +124,7 @@ public sealed class ReactiveScope : IDisposable
         return value;
     }
 
+    /// <summary>Registers cleanup that runs when this scope is disposed.</summary>
     public void OnDispose(Action cleanup)
     {
         ArgumentNullException.ThrowIfNull(cleanup);
@@ -122,6 +137,7 @@ public sealed class ReactiveScope : IDisposable
         OwnElement(new Cleanup(cleanup));
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public void Dispose()
     {
         _graph.CheckThread();

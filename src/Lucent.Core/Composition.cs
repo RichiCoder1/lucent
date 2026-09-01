@@ -6,6 +6,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>Owns a retained structural tree and the scopes of its mounted elements.</summary>
+/// <remarks>Use one composition on its graph's UI thread. Mounts are transactional, and disposing the composition disposes the root, all regions, and their reactive ownership.</remarks>
 public sealed class Composition : IDisposable
 {
     private static long _nextEpoch;
@@ -24,6 +25,7 @@ public sealed class Composition : IDisposable
     private readonly List<Element> _ownedCleanup = [];
     private int _factoryRollbackDepth;
 
+    /// <summary>Initializes a composition with a stable root on the graph UI thread.</summary>
     public Composition(ReactiveGraph graph, string name)
     {
         _graph = graph ?? throw new ArgumentNullException(nameof(graph));
@@ -34,10 +36,14 @@ public sealed class Composition : IDisposable
 
     /// <summary>The stable root element for this composition.</summary>
     public Element Root { get; }
+
+    /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
 
     /// <summary>Monotonic notification token for retained semantic changes; it contains no platform transport.</summary>
     public long SemanticRevision => _semanticRevision;
+
+    /// <summary>Raised after the retained semantic tree changes and consumers should request a fresh snapshot.</summary>
     public event Action? SemanticsChanged;
 
     /// <summary>Composition-owned portable input, focus, and capture router.</summary>
@@ -577,6 +583,7 @@ public sealed class Composition : IDisposable
             throw new InvalidOperationException("Behaviors cannot create structure.");
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public void Dispose()
     {
         _graph.CheckThread();

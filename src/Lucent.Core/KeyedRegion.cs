@@ -41,8 +41,13 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
         _effect = Region.Scope.Effect(Refresh, name + ".items");
     }
 
+    /// <summary>Gets the persistent region element that owns mounted content.</summary>
     public Element Region { get; }
+
+    /// <summary>Gets the currently mounted keyed item roots in source order.</summary>
     public IReadOnlyList<Element> Items => Region.Children;
+
+    /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
     private ThemeContext? Theme { get; }
 
@@ -55,6 +60,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
         Update(_source!());
     }
 
+    /// <summary>Reconciles the retained region with the supplied current source.</summary>
     public void Update(IEnumerable<TItem> items)
     {
         _composition.CheckThread();
@@ -188,6 +194,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
             _entries.Remove(key);
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public void Dispose()
     {
         _composition.CheckThread();

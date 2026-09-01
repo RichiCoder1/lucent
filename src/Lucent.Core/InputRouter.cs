@@ -36,6 +36,7 @@ public sealed class InputRouter
         _composition = composition ?? throw new ArgumentNullException(nameof(composition));
     }
 
+    /// <summary>Gets the currently focused retained identity, if its installed scene still has one.</summary>
     public ElementIdentity? FocusedElement
     {
         get
@@ -44,6 +45,8 @@ public sealed class InputRouter
             return _focused?.Identity;
         }
     }
+
+    /// <summary>Gets the modality that last established focus-visible state.</summary>
     public InputModality Modality
     {
         get
@@ -53,6 +56,7 @@ public sealed class InputRouter
         }
     }
 
+    /// <summary>Installs a newer retained scene and reconciles capture and focus against its current identities.</summary>
     public bool SetScene(RetainedScene scene)
     {
         Enter();
@@ -127,6 +131,7 @@ public sealed class InputRouter
         }
     }
 
+    /// <summary>Hit-tests and routes a portable pointer command through the installed retained scene.</summary>
     public InputDispatchResult DispatchPointer(PointerCommand command)
     {
         Enter();
@@ -164,6 +169,7 @@ public sealed class InputRouter
         }
     }
 
+    /// <summary>Routes a portable key command from the current focus target.</summary>
     public InputDispatchResult DispatchKey(KeyCommand command)
     {
         Enter();
@@ -202,6 +208,7 @@ public sealed class InputRouter
         }
     }
 
+    /// <summary>Routes a portable IME or committed text command to the current focus target.</summary>
     public InputDispatchResult DispatchText(TextInputCommand command)
     {
         Enter();
@@ -343,6 +350,7 @@ public sealed class InputRouter
         }
     }
 
+    /// <summary>Moves focus to the next or previous current tab stop.</summary>
     public bool MoveFocus(FocusTraversalDirection direction)
     {
         Enter();
@@ -455,6 +463,7 @@ public sealed class InputRouter
         );
     }
 
+    /// <summary>Returns a deterministic diagnostic snapshot without application values.</summary>
     public string Dump()
     {
         Check();

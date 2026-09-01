@@ -49,8 +49,13 @@ public abstract class ReactiveNode : IDisposable
         Id = graph.Register(this);
     }
 
+    /// <summary>Gets the stable identifier assigned at creation.</summary>
     public int Id { get; }
+
+    /// <summary>Gets the diagnostic name assigned at creation.</summary>
     public string Name { get; }
+
+    /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
     internal long Version { get; private set; }
     internal ReactiveGraph Graph { get; }
@@ -58,6 +63,7 @@ public abstract class ReactiveNode : IDisposable
     internal IReadOnlyList<ReactiveNode> Dependencies => _dependencies;
     internal abstract string Kind { get; }
 
+    /// <summary>Records a dependency when a reactive value is read.</summary>
     protected void Read()
     {
         ThrowIfDisposed();
@@ -90,6 +96,7 @@ public abstract class ReactiveNode : IDisposable
         _dependencies.AddRange(next);
     }
 
+    /// <summary>Invalidates dependents after this node changes.</summary>
     protected void Changed()
     {
         Version++;
@@ -115,11 +122,13 @@ public abstract class ReactiveNode : IDisposable
 
     internal virtual void AppendDump(StringBuilder dump) { }
 
+    /// <summary>Throws when callers use a disposed reactive node.</summary>
     protected void ThrowIfDisposed()
     {
         ObjectDisposedException.ThrowIf(IsDisposed, this);
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public virtual void Dispose()
     {
         Graph.CheckThread();
@@ -158,6 +167,7 @@ public abstract class ReactiveNode : IDisposable
 
     private void RemoveDependency(ReactiveNode dependency) => _dependencies.Remove(dependency);
 
+    /// <summary>Rejects mutation during a protected scope operation.</summary>
     protected void CheckScopeMutationGuard() => _scope?.CheckMutationGuard();
 }
 
@@ -174,6 +184,7 @@ public sealed class Signal<T> : ReactiveNode
 
     internal override string Kind => "signal";
 
+    /// <summary>Gets the current reactive value.</summary>
     public T Value
     {
         get
@@ -194,6 +205,7 @@ public sealed class Signal<T> : ReactiveNode
         }
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public override void Dispose()
     {
         Graph.CheckThread();
@@ -219,6 +231,7 @@ public sealed class Derived<T> : ReactiveNode
 
     internal override string Kind => "derived";
 
+    /// <summary>Gets the current reactive value.</summary>
     public T Value
     {
         get
@@ -255,6 +268,7 @@ public sealed class Derived<T> : ReactiveNode
     internal override void AppendDump(StringBuilder dump) =>
         dump.Append(" dirty=").Append(_dirty ? "true" : "false");
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public override void Dispose()
     {
         Graph.CheckThread();
@@ -292,6 +306,7 @@ public sealed class ReactiveEffect : ReactiveNode
 
     internal void Dequeue() => QueueNode = null;
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public override void Dispose()
     {
         Graph.CheckThread();

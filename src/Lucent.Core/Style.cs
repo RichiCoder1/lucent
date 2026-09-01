@@ -3,16 +3,20 @@ using System.Text;
 
 namespace Lucent.Core;
 
+/// <summary>An immutable set of typed assignments for an element's arrangement and visual representation; it owns no interaction, semantics, lifecycle, or content.</summary>
 public sealed class Style
 {
     private readonly Node[] _nodes;
 
     private Style(Node[] nodes) => _nodes = nodes;
 
+    /// <summary>Gets the identity style with no assignments.</summary>
     public static Style Empty { get; } = new([]);
 
+    /// <summary>Returns a new style that assigns a direct value; later assignments win during resolution.</summary>
     public Style Set<T>(Property<T> property, T value) => Add(new Assignment<T>(property, value));
 
+    /// <summary>Returns a new style that resolves the assignment from the active theme token.</summary>
     public Style Set<T>(Property<T> property, Token<T> token) =>
         Add(new Assignment<T>(property, token));
 
@@ -23,6 +27,7 @@ public sealed class Style
     /// <summary>Appends optional assignments; later assignments win.</summary>
     public Style With(Style? style) => style is null ? this : new([.. _nodes, .. style._nodes]);
 
+    /// <summary>Returns a new style whose nested assignments participate only while all requested variants are active.</summary>
     public Style When(VariantState when, Style style)
     {
         VariantStates.Validate(when, nameof(when), false);
@@ -30,6 +35,7 @@ public sealed class Style
         return new([.. _nodes, new VariantNode(when, style)]);
     }
 
+    /// <summary>Combines styles in argument order; assignments from later styles override earlier candidates.</summary>
     public static Style Compose(params Style[] styles)
     {
         ArgumentNullException.ThrowIfNull(styles);
@@ -81,8 +87,11 @@ public sealed class Transition
     }
 
     internal IProperty Property { get; }
+
+    /// <summary>Gets the bounded transition duration in milliseconds.</summary>
     public int DurationMilliseconds { get; }
 
+    /// <summary>Creates a transition for an eligible property; duration must be from 1 through 500 milliseconds.</summary>
     public static Transition For<T>(Property<T> property, int durationMilliseconds)
     {
         ArgumentNullException.ThrowIfNull(property);
@@ -97,6 +106,7 @@ public sealed class Transition
     }
 }
 
+/// <summary>Resolved presentation value with the winning and overridden style assignments.</summary>
 public sealed record ResolvedProperty<T>(
     T Value,
     PropertyProvenance Winner,
@@ -104,6 +114,7 @@ public sealed record ResolvedProperty<T>(
     PropertyProvenance? SuppressedTransition = null
 );
 
+/// <summary>Diagnostic origin of a style assignment participating in property resolution.</summary>
 public sealed record PropertyProvenance(
     string Source,
     int Ordinal,

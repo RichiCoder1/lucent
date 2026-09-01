@@ -3,6 +3,7 @@ namespace Lucent.Core;
 /// <summary>Built-in component recipes for ordinary typed composition.</summary>
 public static class Components
 {
+    /// <summary>Creates one retained horizontal container that owns and mounts the supplied ordered content.</summary>
     [LucentComponent]
     public static ComponentRecipe Row(
         [DefaultContent] ComponentContent content,
@@ -20,6 +21,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates one retained vertical container that owns and mounts the supplied ordered content.</summary>
     [LucentComponent]
     public static ComponentRecipe Column(
         [DefaultContent] ComponentContent content,
@@ -37,6 +39,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates immutable text content for one retained text element.</summary>
     [LucentComponent]
     public static ComponentRecipe Text([DefaultContent] string content, Style? style = null)
     {
@@ -47,6 +50,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates reactive text content; the reader is tracked and updates the retained element without remounting it.</summary>
     [LucentComponent]
     public static ComponentRecipe Text([DefaultContent] Func<string> content, Style? style = null)
     {
@@ -72,6 +76,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates an invokable retained button whose callback runs only after its behavior accepts an input route.</summary>
     [LucentComponent]
     public static ComponentRecipe Button(
         [DefaultContent] string content,
@@ -86,6 +91,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a scope-owned single-line editor. The change callback observes committed text rather than IME preedit state.</summary>
     [LucentComponent]
     public static ComponentRecipe TextField(
         string initialValue = "",
@@ -121,6 +127,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a selectable retained item with fixed text and list-owned selection semantics.</summary>
     [LucentComponent]
     public static ComponentRecipe Selectable(
         [DefaultContent] string content,
@@ -135,6 +142,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a selectable item whose text and selected state are read reactively without replacing its retained root.</summary>
     [LucentComponent]
     public static ComponentRecipe Selectable(
         [DefaultContent] Func<string> content,
@@ -169,6 +177,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a clipped retained viewport that owns its scroll offset and supplied content.</summary>
     [LucentComponent]
     public static ComponentRecipe ScrollViewport(
         [DefaultContent] ComponentContent content,
@@ -188,6 +197,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a fixed-row-height keyed list. Only the viewport window and two rows of overscan stay mounted.</summary>
     [LucentComponent]
     public static ComponentRecipe VirtualizedList<TKey, TItem>(
         Func<IEnumerable<TItem>> source,
@@ -255,6 +265,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a noninteractive status element with immutable text.</summary>
     [LucentComponent]
     public static ComponentRecipe Status([DefaultContent] string content, Style? style = null)
     {
@@ -265,6 +276,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a noninteractive status element whose text updates reactively.</summary>
     [LucentComponent]
     public static ComponentRecipe Status([DefaultContent] Func<string> content, Style? style = null)
     {
@@ -283,6 +295,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a progress element with a fixed value in the inclusive zero-to-one range.</summary>
     [LucentComponent]
     public static ComponentRecipe Progress(
         [DefaultContent] string label,
@@ -298,6 +311,7 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a progress element whose inclusive zero-to-one value is read reactively.</summary>
     [LucentComponent]
     public static ComponentRecipe Progress(
         [DefaultContent] string label,

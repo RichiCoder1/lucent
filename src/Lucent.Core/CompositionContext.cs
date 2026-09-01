@@ -112,6 +112,7 @@ public sealed class CompositionContext : IDisposable
         return new ConditionalRegion(_composition, parent, name, active, content, this, Theme);
     }
 
+    /// <summary>Creates a retained branch region selected by one reactive evaluation.</summary>
     public ConditionalRegion Switch(Element parent, string name, Func<ConditionalChoice> select)
     {
         ThrowIfActiveFactory();
@@ -232,6 +233,7 @@ public sealed class CompositionContext : IDisposable
         }
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public void Dispose()
     {
         _composition.CheckThread();

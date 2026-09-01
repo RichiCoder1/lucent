@@ -57,8 +57,13 @@ public sealed class ConditionalRegion : IDisposable
         _select = select;
     }
 
+    /// <summary>Gets the persistent region element that owns mounted content.</summary>
     public Element Region { get; }
+
+    /// <summary>Gets the currently mounted conditional child, if active.</summary>
     public Element? Active => _child;
+
+    /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
     private ThemeContext? Theme { get; }
 
@@ -74,6 +79,7 @@ public sealed class ConditionalRegion : IDisposable
             Update(_active!());
     }
 
+    /// <summary>Reconciles the retained region with the supplied current source.</summary>
     public void Update(bool active)
     {
         _composition.CheckThread();
@@ -178,6 +184,7 @@ public sealed class ConditionalRegion : IDisposable
         }
     }
 
+    /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
     public void Dispose()
     {
         _composition.CheckThread();

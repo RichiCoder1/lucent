@@ -3,123 +3,252 @@ using System.Text;
 
 namespace Lucent.Core;
 
+/// <summary>Typed presentation properties that determine whether an element participates in routing and scene input.</summary>
 public static class InputProperties
 {
+    /// <summary>Controls whether an element accepts input and participates in focus routing.</summary>
     public static readonly Property<bool> Enabled = new("input-enabled", true);
+
+    /// <summary>Controls whether an element participates in hit testing and scene input.</summary>
     public static readonly Property<bool> Visible = new("input-visible", true);
 }
 
+/// <summary>The portable phases of one pointer sequence.</summary>
 public enum PointerCommandKind
 {
+    /// <summary>Starts a pointer sequence.</summary>
     Down,
+
+    /// <summary>Updates an active pointer position.</summary>
     Move,
+
+    /// <summary>Ends a pointer sequence normally.</summary>
     Up,
+
+    /// <summary>Ends a pointer sequence without activation.</summary>
     Cancel,
 }
 
+/// <summary>The button carried only by a pointer-down command.</summary>
 public enum PointerButton
 {
+    /// <summary>Carries no button outside pointer down.</summary>
     None,
+
+    /// <summary>Identifies the primary pointing button.</summary>
     Primary,
+
+    /// <summary>Identifies the secondary pointing button.</summary>
     Secondary,
+
+    /// <summary>Identifies the middle pointing button.</summary>
     Middle,
 }
 
+/// <summary>Portable modifier bits accompanying a key command.</summary>
 [Flags]
 public enum KeyModifiers
 {
+    /// <summary>Carries no modifier keys.</summary>
     None = 0,
+
+    /// <summary>Carries Shift.</summary>
     Shift = 1,
+
+    /// <summary>Carries Control.</summary>
     Control = 2,
+
+    /// <summary>Carries Alt.</summary>
     Alt = 4,
+
+    /// <summary>Carries the platform Meta key.</summary>
     Meta = 8,
 }
 
+/// <summary>The portable press and release phases of a key.</summary>
 public enum KeyCommandKind
 {
+    /// <summary>Starts a key press.</summary>
     Down,
+
+    /// <summary>Ends a key press.</summary>
     Up,
 }
 
+/// <summary>The bounded portable key set handled by Core controls.</summary>
 public enum Key
 {
+    /// <summary>Moves focus to the next tab stop.</summary>
     Tab,
+
+    /// <summary>Activates the focused control.</summary>
     Enter,
+
+    /// <summary>Activates the focused control.</summary>
     Space,
+
+    /// <summary>Cancels the current operation.</summary>
     Escape,
+
+    /// <summary>Moves left.</summary>
     Left,
+
+    /// <summary>Moves right.</summary>
     Right,
+
+    /// <summary>Moves up.</summary>
     Up,
+
+    /// <summary>Moves down.</summary>
     Down,
+
+    /// <summary>Moves to the start.</summary>
     Home,
+
+    /// <summary>Moves to the end.</summary>
     End,
+
+    /// <summary>Deletes the preceding grapheme.</summary>
     Backspace,
+
+    /// <summary>Deletes the following grapheme.</summary>
     Delete,
+
+    /// <summary>Select-all shortcut key.</summary>
     A,
+
+    /// <summary>Copy shortcut key.</summary>
     C,
+
+    /// <summary>Paste shortcut key.</summary>
     V,
+
+    /// <summary>Cut shortcut key.</summary>
     X,
+
+    /// <summary>Redo shortcut key.</summary>
     Y,
+
+    /// <summary>Undo shortcut key.</summary>
     Z,
 }
 
+/// <summary>The direction used when moving among retained tab stops.</summary>
 public enum FocusTraversalDirection
 {
+    /// <summary>Moves to the next tab stop.</summary>
     Next,
+
+    /// <summary>Moves to the previous tab stop.</summary>
     Previous,
 }
 
+/// <summary>The input source that established the current focus-visible state.</summary>
 public enum InputModality
 {
+    /// <summary>No modality has established focus.</summary>
     None,
+
+    /// <summary>Pointer input established focus.</summary>
     Pointer,
+
+    /// <summary>Keyboard input established focus.</summary>
     Keyboard,
 }
 
+/// <summary>Why the router changed retained focus.</summary>
 public enum FocusChangeReason
 {
+    /// <summary>A pointer route requested focus.</summary>
     Pointer,
+
+    /// <summary>A keyboard route requested focus.</summary>
     Keyboard,
+
+    /// <summary>Tab traversal selected the target.</summary>
     Traversal,
+
+    /// <summary>The target was disposed.</summary>
     Disposed,
+
+    /// <summary>The target became disabled.</summary>
     Disabled,
+
+    /// <summary>The target became hidden.</summary>
     Hidden,
+
+    /// <summary>The target lost its retained position.</summary>
     Reordered,
+
+    /// <summary>The installed scene no longer contains the target.</summary>
     SceneChanged,
 }
 
+/// <summary>Whether a focus route announces gaining or losing focus.</summary>
 public enum FocusCommandKind
 {
+    /// <summary>Notifies a target that it gained focus.</summary>
     Gained,
+
+    /// <summary>Notifies a target that it lost focus.</summary>
     Lost,
 }
 
+/// <summary>Why the router revoked a pointer capture.</summary>
 public enum PointerCaptureLossReason
 {
+    /// <summary>The pointer sequence ended normally.</summary>
     Released,
+
+    /// <summary>The pointer sequence was cancelled.</summary>
     Cancelled,
+
+    /// <summary>The capture owner was disposed.</summary>
     Disposed,
+
+    /// <summary>The capture owner became disabled.</summary>
     Disabled,
+
+    /// <summary>The capture owner became hidden.</summary>
     Hidden,
+
+    /// <summary>The installed scene invalidated the owner.</summary>
     SceneChanged,
 }
 
+/// <summary>Whether a portable command reached a current retained route.</summary>
 public enum InputDispatchStatus
 {
+    /// <summary>A current eligible route received the command.</summary>
     Delivered,
+
+    /// <summary>No behavior callback was invoked.</summary>
     Rejected,
 }
 
+/// <summary>Why the router rejected a command without invoking behavior callbacks.</summary>
 public enum InputRejection
 {
+    /// <summary>No rejection applies.</summary>
     None,
+
+    /// <summary>No scene is installed.</summary>
     NoScene,
+
+    /// <summary>The command refers to an older scene.</summary>
     StaleScene,
+
+    /// <summary>Hit testing or focus found no target.</summary>
     NoTarget,
+
+    /// <summary>The target is disabled, hidden, or ineligible.</summary>
     Ineligible,
+
+    /// <summary>Nested dispatch was refused.</summary>
     Reentrant,
 }
 
+/// <summary>A pointer phase with finite logical-pixel coordinates; only down commands carry a button.</summary>
 public readonly record struct PointerCommand(
     PointerCommandKind Kind,
     int PointerId,
@@ -128,6 +257,7 @@ public readonly record struct PointerCommand(
     PointerButton Button = PointerButton.None
 )
 {
+    /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
     {
         if (
@@ -145,6 +275,7 @@ public readonly record struct PointerCommand(
     }
 }
 
+/// <summary>A portable key press or release; repeat is valid only for a key down.</summary>
 public readonly record struct KeyCommand(
     KeyCommandKind Kind,
     Key Key,
@@ -152,6 +283,7 @@ public readonly record struct KeyCommand(
     bool IsRepeat = false
 )
 {
+    /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
     {
         if (
@@ -171,18 +303,21 @@ public readonly record struct KeyCommand(
     }
 }
 
+/// <summary>A retained focus transition and the modality that established it.</summary>
 public readonly record struct FocusCommand(
     FocusCommandKind Kind,
     FocusChangeReason Reason,
     InputModality Modality
 );
 
+/// <summary>Reason a pointer owner lost capture for one pointer identifier.</summary>
 public readonly record struct PointerCaptureLoss(
     int PointerId,
     PointerCaptureLossReason Reason,
     ElementIdentity Owner
 );
 
+/// <summary>The deterministic result of routing one portable input command.</summary>
 public sealed class InputDispatchResult
 {
     internal InputDispatchResult(
@@ -200,13 +335,23 @@ public sealed class InputDispatchResult
         Handled = handled;
     }
 
+    /// <summary>Gets whether dispatch reached a route or was rejected.</summary>
     public InputDispatchStatus Status { get; }
+
+    /// <summary>Gets the reason no callback ran when dispatch was rejected.</summary>
     public InputRejection Rejection { get; }
+
+    /// <summary>Gets the hit-tested or focused target, when one was found.</summary>
     public ElementIdentity? Target { get; }
+
+    /// <summary>Gets the immutable propagation path from target to root.</summary>
     public IReadOnlyList<ElementIdentity> Route { get; }
+
+    /// <summary>Gets whether a route callback handled the command.</summary>
     public bool Handled { get; }
 }
 
+/// <summary>The per-callback view of a routed pointer command.</summary>
 public sealed class PointerRoute
 {
     private readonly InputRouter _router;
@@ -231,9 +376,16 @@ public sealed class PointerRoute
         Route = Array.AsReadOnly(route.ToArray());
     }
 
+    /// <summary>Gets the portable command being delivered.</summary>
     public PointerCommand Command { get; }
+
+    /// <summary>Gets the hit-tested or focused target, when one was found.</summary>
     public ElementIdentity Target { get; }
+
+    /// <summary>Gets the element whose callback is currently running.</summary>
     public ElementIdentity CurrentTarget { get; }
+
+    /// <summary>Gets the immutable propagation path from target to root.</summary>
     public IReadOnlyList<ElementIdentity> Route { get; }
 
     /// <summary>Whether this callback's retained element contains the pointer coordinates.</summary>
@@ -245,6 +397,8 @@ public sealed class PointerRoute
             return _router.Contains(CurrentTarget, Command.X, Command.Y);
         }
     }
+
+    /// <summary>Gets or sets whether this callback handled the command before it expires.</summary>
     public bool Handled
     {
         get
@@ -259,6 +413,7 @@ public sealed class PointerRoute
         }
     }
 
+    /// <summary>Attempts capture for this pointer; succeeds only during a pointer-down callback.</summary>
     public bool Capture()
     {
         Check();
@@ -269,6 +424,7 @@ public sealed class PointerRoute
         );
     }
 
+    /// <summary>Requests pointer-established focus for the current callback target.</summary>
     public void Focus()
     {
         Check();
@@ -290,6 +446,7 @@ public sealed class PointerRoute
     }
 }
 
+/// <summary>The per-callback view of a routed key command.</summary>
 public sealed class KeyRoute
 {
     private readonly InputRouter _router;
@@ -311,10 +468,19 @@ public sealed class KeyRoute
         Route = Array.AsReadOnly(route.ToArray());
     }
 
+    /// <summary>Gets the portable command being delivered.</summary>
     public KeyCommand Command { get; }
+
+    /// <summary>Gets the hit-tested or focused target, when one was found.</summary>
     public ElementIdentity Target { get; }
+
+    /// <summary>Gets the element whose callback is currently running.</summary>
     public ElementIdentity CurrentTarget { get; }
+
+    /// <summary>Gets the immutable propagation path from target to root.</summary>
     public IReadOnlyList<ElementIdentity> Route { get; }
+
+    /// <summary>Gets or sets whether this callback handled the command before it expires.</summary>
     public bool Handled
     {
         get
@@ -329,18 +495,21 @@ public sealed class KeyRoute
         }
     }
 
+    /// <summary>Scrolls the current target by finite logical-pixel deltas.</summary>
     public bool ScrollBy(float horizontal, float vertical)
     {
         Check();
         return _router.ScrollBy(CurrentTarget, horizontal, vertical);
     }
 
+    /// <summary>Scrolls the current target to its minimum offset.</summary>
     public bool ScrollToStart()
     {
         Check();
         return _router.ScrollTo(CurrentTarget, default);
     }
 
+    /// <summary>Scrolls the current target to its maximum offset.</summary>
     public bool ScrollToEnd()
     {
         Check();
@@ -362,6 +531,7 @@ public sealed class KeyRoute
     }
 }
 
+/// <summary>The per-callback view of a retained focus change.</summary>
 public sealed class FocusRoute
 {
     internal FocusRoute(FocusCommand command, ElementIdentity target)
@@ -370,10 +540,14 @@ public sealed class FocusRoute
         Target = target;
     }
 
+    /// <summary>Gets the portable command being delivered.</summary>
     public FocusCommand Command { get; }
+
+    /// <summary>Gets the hit-tested or focused target, when one was found.</summary>
     public ElementIdentity Target { get; }
 }
 
+/// <summary>The per-callback view of one portable text input command.</summary>
 public sealed class TextRoute
 {
     private bool _active = true;
@@ -385,8 +559,13 @@ public sealed class TextRoute
         Target = target;
     }
 
+    /// <summary>Gets the portable command being delivered.</summary>
     public TextInputCommand Command { get; }
+
+    /// <summary>Gets the hit-tested or focused target, when one was found.</summary>
     public ElementIdentity Target { get; }
+
+    /// <summary>Gets or sets whether this callback handled the command before it expires.</summary>
     public bool Handled
     {
         get
