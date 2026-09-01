@@ -8,9 +8,63 @@ Status: Accepted design for the first `0.2` implementation
 
 The first implementation converts the Issue Browser Filter Bar, then one virtualized Issue Row. Equivalent C# and `.lui` must produce identical behavior, ownership, diagnostics, and deterministic dumps before the application cuts over and superseded composition code is deleted.
 
+## C# recipe contract
+
+Typed C# is the canonical, pleasant authoring surface. `.lui` removes ceremony but has no privileged runtime operation. The ordinary C# vocabulary is:
+
+- `ComponentRecipe`: a reusable in-process capability that creates exactly one retained root per mount;
+- `ContentRecipe`: a capability that contributes zero or more retained entries below an existing root;
+- `ComponentContent`: an immutable ordered collection of `ContentRecipe` values with C# collection-expression support.
+
+A `ComponentRecipe` converts safely to one `ContentRecipe`. Retained `When` and `ForEach` helpers return `ContentRecipe`, so ordinary components and structural regions compose in one `ComponentContent`. These values are not component instances, virtual nodes, serializable templates, or rerender objects. Each mount owns independent retained structure and scope resources.
+
+The framework allocates every recipe root. Advanced control authors use `ComponentRecipe.Create(kind, (context, root) => ...)`; they cannot omit the root, create two roots, attach to a foreign parent, or bypass rollback. Lucent's built-ins use the same public operation. Ordinary component authors compose existing recipes and do not handle `CompositionContext`, `Element`, or mounted state handles.
+
+```csharp
+using static Lucent.Core.Components;
+
+public static partial class Components
+{
+    private static readonly Style FilterBarStyle = Style.Empty
+        .Axis(LayoutAxis.Row)
+        .Spacing(8)
+        .Padding(Insets.Symmetric(12, 8));
+
+    [LucentComponent]
+    public static ComponentRecipe FilterBar(Query query, Action clear, Style? style = null) =>
+        Row(
+            [
+                TextField(initialValue: query.Text, onChange: query.SetText),
+                Button("Clear", onInvoke: clear)
+            ],
+            style: FilterBarStyle.With(style))
+        .Named("filters");
+}
+```
+
+`[LucentComponent]` marks an ordinary static method returning `ComponentRecipe`; `[DefaultContent]` marks its scalar or `ComponentContent` body parameter. The metadata is framework-wide rather than `.lui`-specific. Handwritten recipes may live in any static class; `Components` is the convention and SDKs or applications may opt into ordinary `global using static` imports. Generated `.lui` methods live in the declared namespace's partial static `Components` class.
+
+`ComponentRecipe.Named` is the first universal composition trait. An explicit name is a stable local diagnostic and evidence label, not a DOM identifier, semantic name, element reference, or keyed-collection key. Unnamed recipes receive a deterministic kind-and-parent-local-ordinal name shared by C# and `.lui`; it may change when siblings are reordered. Similar universal accessibility or interaction traits require a proven cross-component contract before they are added.
+
+`ComponentContent` accepts zero or more entries, validates and snapshots them when the owning recipe is created, and mounts them transactionally below that recipe's root. A component still creates exactly one stable root. Named slots reuse this content capability later, after a real compositional control proves their interface; the first implementation has default content only.
+
+The initial author-facing built-ins are `Row`, `Column`, `Text`, `Button`, `TextField`, `Selectable`, `ScrollViewport`, `VirtualizedList`, `Status`, and `Progress`. Redundant `Panel`, styled `Loading`, styled `Error`, mounted state handles, and duplicate public configurator overloads are not part of the ordinary recipe interface. The underlying element, presentation, behavior, and composition primitives remain the advanced custom-control seam.
+
+Ordinary parameters are validated and captured when a recipe is created. They are construction-time values unless their declared type is explicitly live. Common static-or-live inputs may expose focused `T` and `Func<T>` overloads; inherently live inputs use `Func<T>` directly. There is no `ReactiveValue<T>` wrapper or combinatorial overload matrix. Each mounted reader uses the existing scope-owned reactive graph and is released on disposal. Programmatic controlled text synchronization remains deferred.
+
+Styles are immutable recipe inputs. Standard properties have typed fluent methods over `Style.Set`/`Bind`; custom properties retain those universal methods. `Style.With(Style?)` composes left-to-right, treats null as no additional override, and lets an intentionally styleable component forward caller overrides. A component exposes `Style? style` only when its declared interface supports root restyling; the compiler adds no magical style parameter.
+
+Handwritten and generated recipes mount through the same atomic operation:
+
+```csharp
+composition.Mount(parent, theme, FilterBar(query, clear));
+```
+
+Root mount receives `ThemeContext` explicitly. Creation, child content, retained regions, commit, rollback, and scope disposal form one owned transaction. Disposing the mounted root retires the complete recipe scope.
+
 ## Documents and components
 
-A document uses standard C# namespace and using syntax and initially declares exactly one explicit component. Multiple declarations are grammatically reserved for a later real compositional-family use case.
+A document uses standard C# namespace and using syntax and initially declares exactly one explicit component. Multiple declarations are reserved for a later real compositional-family use case.
 
 ```lui
 namespace Lucent.IssueBrowser;
@@ -18,54 +72,49 @@ namespace Lucent.IssueBrowser;
 using Lucent.Core;
 using static Lucent.IssueBrowser.Theme;
 
-public component FilterBar(Query Query, Action Clear) {
-    <Row Name="filter-bar" Style={Panel}>
-        <TextField Name="search" InitialValue={Query.Text} OnChange={Query.SetText} />
-        <Button Name="clear" OnInvoke={Clear}>Clear</Button>
+style FilterBarStyle {
+    Axis: LayoutAxis.Row
+    Spacing: 8f
+    Padding: Insets.Symmetric(12, 8)
+}
+
+public component FilterBar(Query query, Action clear, Style? style = null) {
+    <Row name="filters" style={FilterBarStyle with style}>
+        <TextField initialValue={query.Text} onChange={query.SetText} />
+        <Button onInvoke={clear}>Clear</Button>
     </Row>
 }
 ```
 
-A component lowers to a partial static C# recipe whose supported entry point is `Compose(CompositionContext, ...)`. Default accessibility is `internal`; `public` is explicit. An adjacent `FilterBar.lui.cs` may provide matching partial static helpers using normal project symbol semantics. The first release has no local state declaration, component instance, generic `.lui` declaration, method body, statement block, or embedded `code` block.
+A component lowers to a `[LucentComponent]` method returning `ComponentRecipe` in the namespace's partial static `Components` class. Default accessibility is `internal`; `public` is explicit. An adjacent C# partial may provide normal helpers. The first release has no local state declaration, component instance, generic `.lui` declaration, method body, statement block, or embedded `code` block.
 
-Handwritten and generated recipes mount through one public atomic C# operation shaped as:
+Component parameters use normal C# types, nullability, camel-case names, and constant default values. `ref`, `out`, `in`, `params`, generic declarations, parameter attributes, and destructuring are deferred. Ordinary parameters are construction-time values. Explicitly live component inputs use signal-bearing models or typed readers such as `Func<T>`; `.lui` supplies an actual target-typed lambda rather than silently wrapping an ordinary expression. Generated code never reruns a component to make values reactive.
 
-```csharp
-composition.Mount(parent, theme, context => FilterBar.Compose(context, query, clear));
-context.Mount(parent, childContent);
-```
-
-The exact names are sealed in #45/#46, but the behavior is fixed: root and nested invocation share the same operation; root mount receives `ThemeContext` explicitly and nested contexts expose it read-only; each recipe/element-content call creates exactly one root; creation and commit are scope-owned; failures roll back all provisional structure and resources; disposing the mounted root retires the recipe scope. `CompositionContext` exposes transactional nested `Mount`, `When`, and `ForEach` operations so generated structure never escapes to inaccessible `Composition` internals. An element-content value is an in-process `Func<CompositionContext, Element>` capability, not a runtime template object or serializable value.
-
-Ordinary parameters are construction-time values. Live inputs are explicit signal-bearing models or typed readers such as `Func<T>` consumed inside a binding or retained region. Generated code never turns an arbitrary value parameter into a live binding by rerunning a component.
-
-C# component recipes opt in with `[LuiComponent]`, return the created root `Element`, and use exact named parameters. Existing controls expose thin annotated element-creating recipes over their current configurators. The initial TextField recipe owns `Name`, construction-time `InitialValue`, and `OnChange`; programmatic two-way synchronization remains deferred. The Button recipe owns `Name`, scalar default `Label`, and `OnInvoke`. Every element initially requires the compiler intrinsic `Name`, which is the stable structural/dump identity and is distinct from semantic `Label`/text content. Generated `.lui` components expose equivalent metadata. There is no duck-typed recipe scan or string registry.
-
-Default scalar string or exactly-one-root element-factory content uses explicit `[LuiContent(IsDefault = true)]` metadata and must type-check. Named content parameters and multi-component documents are reserved but not implemented until a real compositional family proves the need.
+Every component body has one component-element root for its mounted lifetime. A caller may choose between recipes from construction-time C# or place a component inside a retained `if`; reactively replacing the component document's own root is deferred. There is no duck-typed recipe scan or string registry.
 
 ## Elements, parameters, and content
 
-Tags resolve normal C# symbols. Parameter names and casing are exact C# names. Attribute order is irrelevant; duplicate, inaccessible, unknown, missing, and ambiguous parameters are errors. Normal Roslyn overload resolution applies to annotated C# components; `.lui` component declarations cannot overload initially.
+Tags resolve normal C# symbols. Tag/component names are PascalCase; exact C# parameter and attribute names are camelCase. Attribute order is irrelevant; duplicate, inaccessible, unknown, missing, and ambiguous parameters are errors. Normal Roslyn overload resolution applies to annotated C# components; `.lui` component declarations cannot overload initially.
 
-Unwrapped children map only to the declared default scalar or element-factory content parameter. Named child blocks are reserved and rejected initially:
+Unwrapped children map only to the declared `[DefaultContent]` scalar or `ComponentContent` parameter. Named child blocks are reserved and rejected initially:
 
 ```lui
-<Button Name="save" OnInvoke={Save}>Save</Button>
+<Button name="save" onInvoke={save}>Save</Button>
 ```
 
-Simple body text is a trimmed string literal whose internal characters are preserved. Formatting-only whitespace around elements is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Mixed text does not implicitly stringify expressions initially:
+Quoted attributes are string literals; all other element expression islands use braces. Bare Boolean attributes, spread attributes, directive prefixes, and implicit string conversion are deferred. Simple body text is a trimmed string literal whose internal characters are preserved. Formatting-only whitespace around component children is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Mixed text does not implicitly stringify expressions initially:
 
 ```lui
-<Text Name="issue-count" Content={$"{State.Count} issues"} />
+<Text content={"  exact\ntext  "} />
 ```
 
 ## C# expressions and reactivity
 
 Roslyn parses expression islands. The initial allowlist includes literals, member access, calls to resolved methods, simple operators, object/collection construction needed by target APIs, method groups, and short target-typed lambdas. Statements, declarations, awaiting bodies, local functions, arbitrary blocks, reflection evaluation, and runtime compilation are excluded. Complex logic moves to a named C# helper.
 
-Expressions use ordinary C# conversions. Text body literals are the sole markup-specific primitive convenience. Future color/string or `bind:` sugar must lower at compile time to the same typed APIs and diagnostics; there is no implicit runtime string conversion.
+Expressions use ordinary C# conversions. Text body literals are the sole markup-specific primitive convenience. Future color/string, live-reader, spread, or directive sugar must lower at compile time to the same typed APIs and diagnostics; there is no implicit runtime string conversion.
 
-Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValue` values under Lucent's runtime tracking. A component recipe establishes retained structure once. Live property expressions lower to the same public operation used by C#, shaped as `Style.Bind(property, () => expression)`. When presented, each binding becomes an element-scope effect and retains that style candidate's component/author source, variant condition, and ordinal. It commits on the UI thread, participates in ordinary precedence/provenance, triggers current scene reprojection, and cannot commit after disposal. Live variants therefore need no control-channel override or compiler-only setter.
+Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValue` values under Lucent's runtime tracking. A component recipe establishes retained structure once. Inline style expressions lower through the same public typed `Style.Bind`/fluent-lambda operation used by C# and therefore track automatically. Ordinary component parameters remain construction-time unless their C# type is explicitly live. Each binding becomes an element-scope effect and retains that style candidate's component/author source, variant condition, and ordinal. It commits on the UI thread, participates in ordinary precedence/provenance, triggers current scene reprojection, and cannot commit after disposal. Live variants therefore need no control-channel override or compiler-only setter.
 
 `ReactiveGraph.WorkAvailable` is edge-triggered when posted work changes from empty to nonempty, including worker-thread async completion. Windows translates that notification only into a registered SDL wake event; the UI thread drains, projects, and presents. Reset/recheck is lost-wake-safe, bursts coalesce, and no polling or worker-thread Core mutation is permitted. Zero queued work schedules no frames.
 
@@ -74,16 +123,16 @@ Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValu
 Conditionals are C#-shaped compile-time constructs lowering to retained `When` regions:
 
 ```lui
-if (State.Error is { } error) {
-    <ErrorState Error={error} OnRetry={State.Retry} />
+if (state.Error is { } error) {
+    <ErrorState error={error} onRetry={state.Retry} />
 }
 ```
 
 Dynamic collections initially require explicit identity and lower to `ForEach`:
 
 ```lui
-foreach (var issue in State.Issues) keyed by issue.Id {
-    <IssueRow Issue={issue} />
+foreach (var issue in state.Issues) keyed by issue.Id {
+    <IssueRow issue={issue} />
 }
 ```
 
@@ -101,17 +150,16 @@ style PrimaryButton {
     when Hover {
         Background: Colors.PrimaryHover
     }
-
 }
 
-<Button Name="save" Style={PrimaryButton with {
+<Button name="save" style={PrimaryButton with {
     Padding: Insets.Symmetric(horizontal: 12, vertical: 8)
-}} OnInvoke={Save}>Save</Button>
+}} onInvoke={save}>Save</Button>
 ```
 
-`with` is the sole initial style composition syntax. Evaluation is left to right and the rightmost assignment wins. It lowers to existing ordered `Style.Compose` and `Style.When` APIs. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are file/component-private initially; shared styles are ordinary public C# symbols. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
+`with` is the sole initial style composition syntax. It accepts named style values, nullable style parameters, and inline bodies; evaluation is left to right and the rightmost assignment wins. It lowers to ordered `Style.With` and `Style.When` calls. Compound variants use the real finite flags expression, for example `when Selected | FocusVisible`. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are internal to the document initially. `public style` is reserved as the fast-follow export syntax; shared styles remain ordinary public C# symbols until cross-document component binding/maps prove that feature. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
 
-The Lucent SDK may supply opt-out ordinary global/static C# usings for author-facing property groups so style names work without repetitive imports. Those remain real symbols and participate in completion, rename, references, and diagnostics.
+The Lucent SDK supplies opt-out ordinary namespace/static C# usings for `Components` and author-facing style fluency so common recipe and property names work without repetitive imports. Application and third-party component modules may publish their own ordinary global static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics.
 
 ## Color, brush, padding, and opacity
 
@@ -172,7 +220,7 @@ One deterministic formatter owns document and range formatting plus CLI/check su
 
 Component identity is resolved namespace plus declared name. Stable generated hint names add a project-relative path hash only for collision resistance; absolute paths, declaration order, and syntax offsets never define identity.
 
-Generated sources live under Roslyn/`obj`, are inspectable on demand, and are not checked in. Only the declared component symbol and supported `Compose` entry point are callable contracts. Helpers and maps are generated implementation details hidden from completion where practical.
+Generated sources live under Roslyn/`obj`, are inspectable on demand, and are not checked in. Only the declared `[LucentComponent]` method on the namespace's partial static `Components` class is a callable contract. Helpers and maps are generated implementation details hidden from completion where practical.
 
 Enhanced `#line` directives map compiler/debugger diagnostics and C# expression spans. A compact deterministic compiler-owned map covers every syntax and generated construct bidirectionally for completion, hover, diagnostics, rename/references, formatting, semantic navigation, and generated-code navigation. There is no runtime mapping service.
 
@@ -180,7 +228,7 @@ Enhanced `#line` directives map compiler/debugger diagnostics and C# expression 
 
 `<LucentLuiLangVersion>` defaults to `preview` from the installed SDK. Unknown/newer versions fail clearly. Numeric versions begin only when Lucent intentionally retains an older syntax contract.
 
-Deferred work includes local state sugar, broader C# islands, two-way binding shorthand, textual color sugar, exported `.lui` styles, generic declarations, general element references, implicit/unkeyed dynamic loops, service injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
+Deferred work includes local state sugar, broader C# islands, relaxed live-reader sugar, two-way binding shorthand, textual color sugar, `public style`, named slots, generic declarations, general element references, reactive component-root switching, implicit/unkeyed dynamic loops, spread/directive syntax, service injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
 
 Control-owned values outrank every component/author style candidate, including a binding. This preserves existing control-state authority for text, scroll, selection, and similar properties; dumps retain the overridden binding candidate and provenance.
 

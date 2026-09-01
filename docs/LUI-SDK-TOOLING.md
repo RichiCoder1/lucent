@@ -23,14 +23,14 @@ The compiler and generator target `netstandard2.0`, the documented analyzer-comp
 - an opt-out project-relative `**/*.lui` item excluding `bin`, `obj`, hidden/generated output, and removed files;
 - Roslyn `AdditionalFiles` metadata and the generator analyzer asset;
 - `<LucentLuiLangVersion>` with SDK default `preview`;
-- optional ordinary C# `<Using>`/global-static-using items for author-facing Lucent property groups;
+- default-enabled, opt-out ordinary C# `<Using>`/global-static-using items for the built-in `Components` module and author-facing style fluency/property groups;
 - validation, generated inspection, formatting check, and clean integration.
 
 Projects may disable the default glob and list files explicitly. `.lui` never enters `Compile`. Evaluated items/imports are tested with `dotnet msbuild -preprocess`; broad or duplicate globs fail tests. Build props/targets do not mutate restore-driving framework/package properties.
 
 ## Compiler and generator
 
-The compiler has three bounded layers: immutable recoverable syntax nodes with exact spans; a Roslyn-bound semantic model containing resolved symbols/types; and direct C# lowering with map entries. It has no generalized runtime UI IR, serializer, plugin pipeline, optimizer framework, or filesystem discovery.
+The compiler has three bounded layers: immutable recoverable syntax nodes with exact spans; a Roslyn-bound semantic model containing resolved symbols/types; and direct C# lowering with map entries. Lowering targets `[LucentComponent]` methods returning `ComponentRecipe`, immutable `ComponentContent`, retained `ContentRecipe` helpers, and typed style fluency. It never creates elements, factory contexts, mounted state handles, or a parallel component runtime directly. It has no generalized runtime UI IR, serializer, plugin pipeline, optimizer framework, or filesystem discovery.
 
 The generator filters `AdditionalTextsProvider` before parsing, parses documents independently, carries cancellation, and projects small immutable/equatable results. Whole-set collection exists only for the cross-document component index. Build/editor adapters map inputs into one shared immutable project-context model; neither parses project files independently.
 
@@ -44,7 +44,7 @@ Every bound, lowered, mapped, or editor result carries one freshness identity: w
 
 ## Source maps and project authority
 
-Build and editor use the actual Roslyn `Compilation`, global usings, analyzer options, references, defines, language version, nullability, and `.lui` items. The editor evaluates the real project through `MSBuildWorkspace`; there is no custom `.csproj` parser or approximate reference resolver.
+Build and editor use the actual Roslyn `Compilation`, global/static usings, analyzer options, references, defines, language version, nullability, and `.lui` items. Component tags resolve `[LucentComponent]` methods by normal C# accessibility, overload, exact camel-case parameter, conversion, default-value, and `[DefaultContent]` rules. The editor evaluates the real project through `MSBuildWorkspace`; there is no custom `.csproj` parser or approximate reference resolver.
 
 Generated C# uses enhanced `#line` spans for compiler/debugger mapping and `#line hidden` for scaffolding. The compiler's deterministic map retains source/generated document identity and exact spans in both directions. Tests use `GetMappedLineSpan` and map round trips rather than prose claims.
 
@@ -69,7 +69,8 @@ Before the first app conversion:
 - generated C# and bidirectional maps have focused goldens;
 - add/change/delete/rename, cleanup, stale-output rejection, and unchanged-input incrementality pass;
 - a temporary SDK consumer proves default glob, opt-out, multi-targeting, clean, failure, generated inspection, and evaluated items;
-- managed and NativeAOT C#/`.lui` behavior and dumps match.
+- the recipe-first C# Filter Bar and one virtualized Issue Row establish frozen semantic/dump baselines before lowering;
+- managed and NativeAOT C#/`.lui` behavior and dumps match those baselines.
 
 The Filter Bar prototype establishes an honest editor baseline. Budgets are frozen before optimization for cold project load, warm completion, edit-to-diagnostic, rename, formatting, incremental no-op, and one-file invalidation. The Issue Row/keyed slice must pass those budgets before application cutover.
 

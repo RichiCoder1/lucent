@@ -68,7 +68,7 @@ Async cancellation is resource cleanup, not the correctness mechanism. Generatio
 
 Composition creates stable retained elements and explicit structural regions. Conditional and keyed collection operations own identity and disposal; there is no virtual DOM or general reconciliation pass. Keyed identity follows the normal .NET dictionary contract: equality and hash behavior must remain stable and side-effect-free while an item is mounted. Supporting mutable or composition-mutating key comparisons is outside the `0.1` contract.
 
-For `0.1`, source-owned C# component recipes accept explicit content or child factories. General control templates and named `.lui` slot syntax are deferred until the C# framework surface is frozen.
+The canonical C# authoring interface uses reusable `ComponentRecipe` values for exactly-one-root components, `ContentRecipe` for zero-or-more structural contributions, and immutable ordered `ComponentContent` for transactional default content. The framework allocates every recipe root through the same public `ComponentRecipe.Create` seam used by built-ins and external custom-control authors. These capabilities are not component instances, virtual nodes, serializable templates, or rerender objects. General control templates and named `.lui` slots remain deferred until a real compositional control proves them.
 
 ### Styles and behaviors
 
@@ -140,14 +140,14 @@ Typed C# composition is the first supported authoring surface. APIs remain unsta
 
 `.lui` begins only after the complete C# reference application and two frozen feature changes validate the framework surface. It lowers to the same supported composition, style, and behavior APIs wherever practical, with narrow generated registration or direct-dependency calls only for measured optimization. Generated readability is useful for diagnosis but remains secondary to correctness and source mapping.
 
-The Milestone 5 compiler-facing contract is:
+The Milestone 7 compiler-facing contract is:
 
-- structure lowers to `Composition.Child`, `When`, and `ForEach`, `CompositionContext` factories, and bounded `Controls` recipes including `VirtualizedList`;
-- presentation lowers to typed `Property<T>`, `Style.Set`/`Bind`/`When`/`Compose`, `Token<T>`, `Theme`/`ThemeContext`, and `Element.Present` or the equivalent `Controls` recipe; manual C# transition samples are not an initial compiler target;
-- behavior references lower to precompiled `Behavior` instances attached with `Element.AttachBehaviors`; custom behavior bodies and `BehaviorContext` registration remain authored C# rather than generated `.lui` code;
+- structure lowers to `[LucentComponent]` methods returning `ComponentRecipe`, `ComponentContent` collection expressions, and retained `When`/`ForEach` content recipes. Generated and handwritten components mount through the same atomic recipe operation; the compiler does not call `Composition.Child` or construct factory contexts directly;
+- presentation lowers to typed fluent style methods over `Property<T>` and `Style.Set`/`Bind`/`When`/`With`, plus `Token<T>` and `Theme`/`ThemeContext`. Inline style expressions use the public live-binding seam; ordinary component values remain construction-time unless their C# type is explicitly live. Manual C# transition samples are not an initial compiler target;
+- behavior ownership remains encapsulated by `[LucentComponent]` recipes. `.lui` does not generate behavior bodies, call `Element.AttachBehaviors`, or register through `BehaviorContext`; a future universal interaction trait must first be proved as a public recipe operation;
 - reactive expressions use ordinary `Signal`, `Derived`, `Effect`, and `AsyncValue` reads under runtime dependency tracking;
-- generated structure and resources belong to their `Element.Scope` or `CompositionContext`, so generated code adds no parallel lifetime or synchronization loop;
-- dynamic fixed-height list density may call the supported `VirtualizedRegion.SetRowHeight` seam while the author preserves its application scroll anchor.
+- generated structure and resources belong to their recipe-owned element scope, so generated code adds no parallel lifetime or synchronization loop;
+- dynamic fixed-height list density is an explicitly live `VirtualizedList` recipe input, for example a target-typed `Func<float>`; compiler output does not retain or call `VirtualizedRegion` handles.
 
 No direct-dependency registration API is frozen. M7 may add one narrow generated-only seam only after measurement proves runtime tracking insufficient. Manual region refresh/update/realization, `InputRouter`, semantic snapshots and commands, diagnostic dumps, `SceneLayout`, retained-scene internals, renderer types, and platform transport are not compiler targets. Public visibility before 1.0 does not promote any excluded API into this contract.
 
@@ -155,7 +155,7 @@ The preferred `.lui` experience requires C#-quality completion, hover and XML do
 
 M7 first separates author-facing properties from projection internals. `LayoutProperties` owns bounded geometry, spacing, padding, clipping, and scrolling; `VisualProperties` owns `Background : Brush` and subtree `Opacity`; `TypographyProperties` owns inherited color and typography. SDK-provided ordinary global/static C# usings may make these symbols implicit, but the compiler owns no alias table. Raw text, caret, selection, virtualization, scene, renderer, and transport values remain internal compiler-excluded state.
 
-Generated and handwritten C# share a scope-owned typed reactive assignment operation and one atomic root/nested static-recipe mount/content operation. Live assignment preserves style precedence/provenance and emits a portable coalescible composition invalidation; the Windows host wakes and requests a frame without polling. Component value parameters are construction-time unless their declared type is explicitly reactive. Recipe/content failure rolls back provisional structure and scope resources. `.lui` does not expose declarative transitions until the framework owns automatic transition scheduling rather than manual samples.
+Generated and handwritten C# share one recipe vocabulary and one scope-owned typed reactive assignment operation. A `ComponentRecipe` has exactly one stable root per mount; `ContentRecipe` and immutable `ComponentContent` own zero-or-more child structure. `ComponentRecipe.Create` allocates the root and owns naming, child content, commit, rollback, and disposal. Live assignment preserves style precedence/provenance and emits a portable coalescible composition invalidation; the Windows host wakes and requests a frame without polling. Component value parameters are construction-time unless their declared type is explicitly live. Recipe/content failure rolls back provisional structure and scope resources. `.lui` does not expose declarative transitions until the framework owns automatic transition scheduling rather than manual samples.
 
 The accepted `.lui` language and build/editor boundaries are specified in [`.lui` language contract](LUI-LANGUAGE.md), [`.lui` SDK and tooling contract](LUI-SDK-TOOLING.md), and [ADR 0002](adr/0002-lui-authoring-surface.md). A reusable compiler, thin incremental generator, and additive MSBuild SDK lower JSX-like structure and Roslyn-bound C# expressions to partial static component recipes. A later standalone LSP uses the same compiler and project-context model; runtime applications contain none of those build/editor dependencies.
 

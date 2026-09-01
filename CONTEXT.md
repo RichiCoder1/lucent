@@ -33,8 +33,12 @@ The authored structure and ownership of elements and supplied content. Compositi
 _Avoid_: Template expansion, render tree, layout
 
 **Component recipe**:
-A typed static composition entry point that creates ordinary Lucent elements, styles, behaviors, and owned regions. `.lui` components lower to component recipes; they are not runtime template instances.
+A reusable typed C# capability returned by a `[LucentComponent]` method. Each mount creates and owns exactly one stable retained root; the value is not a runtime template instance, virtual node, component object, or rerender function. `.lui` components lower to the same `ComponentRecipe` interface used by handwritten C#.
 _Avoid_: Template, widget class, render function
+
+**Content recipe**:
+A typed capability that contributes zero or more retained components or structural regions below an existing component root. Immutable ordered `ComponentContent` groups content recipes transactionally; an ordinary component recipe converts safely to one content recipe.
+_Avoid_: Fragment element, child template, virtual children
 
 **Brush**:
 An immutable box-local visual value. The initial closed set is solid color and bounded linear gradient. A brush does not imply image layers, borders, clipping, opacity, or layout.
