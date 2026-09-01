@@ -66,6 +66,8 @@ public sealed class ThemeContext : IDisposable
     private readonly Dictionary<object, ITokenSlot> _tokens = [];
     private bool _disposed;
     internal ReactiveGraph Graph { get; }
+    internal ReactiveScope Scope => _scope;
+    internal int TokenCount => _tokens.Count;
     public ThemeContext(ReactiveScope scope, Theme theme, bool reducedMotion = false, ThemeAppearance? appearance = null)
     {
         ArgumentNullException.ThrowIfNull(scope); ArgumentNullException.ThrowIfNull(theme);
@@ -86,10 +88,32 @@ public sealed class ThemeContext : IDisposable
     internal T Token<T>(Token<T> token) => Slot(token).State.Value;
     internal bool IsThemed<T>(Token<T> token) => Slot(token).State.Themed;
     private TokenSlot<T> Slot<T>(Token<T> token) => _tokens.TryGetValue(token, out var slot) ? (TokenSlot<T>)slot : Add(token);
-    private TokenSlot<T> Add<T>(Token<T> token) { var slot = new TokenSlot<T>(_scope.Signal(new TokenState<T>(_theme.Value.Resolve(token), _theme.Value.Has(token)), "token." + token.Name), token); _tokens.Add(token, slot); return slot; }
-    public void Dispose() { _scope.CheckMutationGuard(); if (_disposed) return; _disposed = true; _tokens.Clear(); _appearance.Dispose(); _reducedMotion.Dispose(); _theme.Dispose(); }
-    private interface ITokenSlot { void Update(Theme theme); }
-    private sealed class TokenSlot<T>(Signal<TokenState<T>> signal, Token<T> token) : ITokenSlot { internal TokenState<T> State => signal.Value; public void Update(Theme theme) => signal.Value = new(theme.Resolve(token), theme.Has(token)); }
+    private TokenSlot<T> Add<T>(Token<T> token)
+    {
+        var slot = new TokenSlot<T>(_scope, _scope.SignalForFramework(new TokenState<T>(_theme.Value.Resolve(token), _theme.Value.Has(token)), "token." + token.Name), token);
+        _tokens.Add(token, slot);
+        _scope.RegisterFactoryRollback(() => Remove(token, slot));
+        return slot;
+    }
+    private void Remove<T>(Token<T> token, TokenSlot<T> slot)
+    {
+        if (_tokens.TryGetValue(token, out var current) && ReferenceEquals(current, slot)) { _tokens.Remove(token); slot.Dispose(); }
+    }
+    public void Dispose()
+    {
+        _scope.CheckMutationGuard();
+        if (_disposed) return;
+        _disposed = true;
+        foreach (var slot in _tokens.Values) slot.Dispose();
+        _tokens.Clear(); _appearance.Dispose(); _reducedMotion.Dispose(); _theme.Dispose();
+    }
+    private interface ITokenSlot : IDisposable { void Update(Theme theme); }
+    private sealed class TokenSlot<T>(ReactiveScope scope, Signal<TokenState<T>> signal, Token<T> token) : ITokenSlot
+    {
+        internal TokenState<T> State => signal.Value;
+        public void Update(Theme theme) => signal.Value = new(theme.Resolve(token), theme.Has(token));
+        public void Dispose() { scope.Detach(signal); signal.Dispose(); }
+    }
 }
 
 internal readonly record struct TokenState<T>(T Value, bool Themed);
@@ -103,6 +127,8 @@ public sealed class Style
     public Style Set<T>(Property<T> property, Token<T> token) => Add(new Assignment<T>(property, token));
     /// <summary>Reads a live value when this candidate's variant is active on a presented element.</summary>
     public Style Bind<T>(Property<T> property, Func<T> read) => Add(new BindingAssignment<T>(property, read));
+    /// <summary>Appends optional assignments; later assignments win.</summary>
+    public Style With(Style? style) => style is null ? this : new([.. _nodes, .. style._nodes]);
     public Style When(VariantState when, Style style) { VariantStates.Validate(when, nameof(when), false); ArgumentNullException.ThrowIfNull(style); return new([.. _nodes, new VariantNode(when, style)]); }
     public static Style Compose(params Style[] styles)
     {

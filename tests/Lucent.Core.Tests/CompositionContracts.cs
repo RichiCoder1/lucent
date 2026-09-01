@@ -15,6 +15,9 @@ internal static class CompositionContracts
             ManualScopeDisposalRetiresEntries();
             KeyedFactoryTransactionsAndReentrancy();
             RecipeMountsAndMetadataSurface();
+            ComponentRecipeContracts();
+            FactoryMutationContainment();
+            BuiltinRecipeContracts();
             NestedFactoryIsolationAndVirtualRows();
             var first = EquivalentDump();
             Assert(first == EquivalentDump(), "Composition dumps differ for equivalent active trees.");
@@ -116,9 +119,9 @@ internal static class CompositionContracts
             Assert(ReferenceEquals(context.Theme, theme), "Root recipe did not receive its explicit theme.");
             var panel = context.Element("recipe-panel");
             Controls.Panel(panel, context.Theme, "Recipe panel");
-            _ = context.Mount(panel, child => { Assert(ReferenceEquals(child.Theme, theme), "Nested mount lost its root theme."); return Controls.Row(child, "recipe-row", row => Controls.TextField(row, "recipe-field", "initial", changes.Add)); });
-            _ = context.When(panel, "recipe-when", () => active.Value, child => { Assert(ReferenceEquals(child.Theme, theme), "Conditional recipe lost its root theme."); return Controls.Button(child, "recipe-button", "Invoke", () => invoked++); });
-            _ = context.ForEach(panel, "recipe-items", () => items.Value, value => value, (value, child) => { Assert(ReferenceEquals(child.Theme, theme), "Keyed recipe lost its root theme."); return Controls.Text(child, "recipe-text-" + value, "Item " + value); });
+            _ = context.Mount(panel, child => { Assert(ReferenceEquals(child.Theme, theme), "Nested mount lost its root theme."); var row = child.Element("recipe-row"); Controls.Row(row, child.Theme, "recipe-row"); var field = child.Child(row, "recipe-field"); var state = Controls.TextField(field, child.Theme, "recipe-field", "initial"); var prior = state.Value; _ = field.Scope.Effect(() => { var value = state.Value; if (value != prior) { prior = value; changes.Add(value); } }, "recipe-field.on-change"); return row; });
+            _ = context.When(panel, "recipe-when", () => active.Value, child => { Assert(ReferenceEquals(child.Theme, theme), "Conditional recipe lost its root theme."); var button = child.Element("recipe-button"); Controls.Button(button, child.Theme, "Invoke", () => invoked++); return button; });
+            _ = context.ForEach(panel, "recipe-items", () => items.Value, value => value, (value, child) => { Assert(ReferenceEquals(child.Theme, theme), "Keyed recipe lost its root theme."); var text = child.Element("recipe-text-" + value); Controls.Text(text, child.Theme, "Item " + value); return text; });
             return panel;
         });
         graph.Drain();
@@ -140,10 +143,216 @@ internal static class CompositionContracts
         Assert(composition.Dump() == before && !root.IsDisposed, "Invalid recipe root did not roll back atomically.");
         Expect<AggregateException>(() => composition.Mount(composition.Root, theme, context => { var failed = context.Element("cleanup-failure"); failed.Scope.OnDispose(() => throw new InvalidOperationException("nested-cleanup")); throw new InvalidOperationException("nested-factory"); }));
         Assert(composition.Dump() == before, "Nested factory cleanup failure leaked provisional structure.");
-        Expect<ArgumentException>(() => composition.Mount(composition.Root, theme, context => { var escaped = context.Element("escaped"); _ = context.Mount(composition.Root, child => Controls.Text(child, "escape", "Escape")); return escaped; }));
+        Expect<ArgumentException>(() => composition.Mount(composition.Root, theme, context => { var escaped = context.Element("escaped"); _ = context.Mount(composition.Root, child => { var text = child.Element("escape"); Controls.Text(text, child.Theme, "Escape"); return text; }); return escaped; }));
         Assert(composition.Dump() == before, "Nested recipe escaped its factory parent.");
         root.Dispose();
         Assert(root.IsDisposed && !composition.Dump().Contains("recipe-panel", StringComparison.Ordinal), "Mounted recipe disposal retained its scope-owned tree.");
+    }
+
+    private static void ComponentRecipeContracts()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "component-recipe-root");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var cleanup = 0;
+        var leaf = ComponentRecipe.Create("leaf", (context, element) =>
+        {
+            Controls.Text(element, context.Theme, "Leaf");
+            element.Scope.OnDispose(() => cleanup++);
+        });
+        var conditional = ComponentRecipe.Create("conditional-leaf", (context, element) => Controls.Text(element, context.Theme, "Conditional"));
+        var rows = graph.Signal(new[] { 1, 2 }, "component-recipe-items");
+        var active = graph.Signal(true, "component-recipe-active");
+        ComponentContent content = [leaf, leaf.Named("named-leaf"), ContentRecipe.When("recipe-condition", () => active.Value, conditional),
+            ContentRecipe.ForEach("recipe-items", () => rows.Value, item => item, item => ComponentRecipe.Create("row", (context, element) => Controls.Text(element, context.Theme, item.ToString())))];
+        var container = ComponentRecipe.Create("container", (context, element) =>
+        {
+            Controls.Panel(element, context.Theme, "Container");
+            context.Mount(element, content);
+        });
+
+        var first = composition.Mount(composition.Root, theme, container);
+        var second = composition.Mount(composition.Root, theme, container);
+        graph.Drain();
+        Assert(first.Name == "container-1" && second.Name == "container-2" && first.Children.Count == 4 && second.Children.Count == 4 &&
+            first.Children[0].Name == "leaf-1" && first.Children[1].Name == "named-leaf" && first.Children.All(child => child.Name != "fragment"),
+            "Recipe names, repeated mounts, or content mounting changed the retained tree.");
+        Assert(!ReferenceEquals(first, second) && !ReferenceEquals(first.Children[0], second.Children[0]), "Repeated recipe mounts reused a root or scope.");
+
+        active.Value = false; rows.Value = [2, 3]; graph.Drain();
+        var keyed = first.Children.Single(child => child.Name == "recipe-items");
+        Assert(first.Children.Count == 4 && keyed.Children.Count == 2 && keyed.Children[0].Name == "row-2" && keyed.Children[1].Name == "row-3",
+            "Conditional or keyed content did not retain existing region identity.");
+
+        var empty = ComponentRecipe.Create("empty", (context, element) => context.Mount(element, ComponentContent.Empty));
+        var emptyRoot = composition.Mount(composition.Root, theme, empty);
+        Assert(emptyRoot.Children.Count == 0, "Empty content created a synthetic element.");
+        var contentCleanup = 0;
+        ComponentContent failingContent = [ComponentRecipe.Create("provisional", (_, child) => child.Scope.OnDispose(() => contentCleanup++)),
+            ComponentRecipe.Create("throwing", (_, _) => throw new InvalidOperationException("content failure"))];
+        var contentFailure = ComponentRecipe.Create("content-failure", (context, element) =>
+        {
+            context.Mount(element, failingContent);
+        });
+        var beforeFailure = composition.Dump();
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, contentFailure));
+        Assert(composition.Dump() == beforeFailure && contentCleanup == 1, "Failed content did not roll back its mounted entries exactly once.");
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, ComponentRecipe.Create("failed", (context, element) =>
+        {
+            element.Scope.OnDispose(() => cleanup++);
+            throw new InvalidOperationException("recipe failure");
+        })));
+        Assert(!composition.Dump().Contains("failed-", StringComparison.Ordinal), "Failed recipe mount left a root attached.");
+        first.Dispose(); second.Dispose();
+        Assert(cleanup == 5, "Recipe roots did not dispose owned scopes exactly once.");
+        Expect<ArgumentException>(() => ComponentRecipe.Create("", (_, _) => { }));
+        Expect<ArgumentNullException>(() => ComponentRecipe.Create("null-callback", null!));
+    }
+
+    private static void BuiltinRecipeContracts()
+    {
+        Expect<ArgumentException>(() => Components.Text(" "));
+        Expect<ArgumentException>(() => Components.TextField("bad\nvalue"));
+        Expect<ArgumentOutOfRangeException>(() => Components.Progress("Progress", 2f));
+        Expect<ArgumentNullException>(() => Components.Row(null!));
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "built-in-recipes");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var source = graph.Signal("Live", "recipe-text");
+        var selected = graph.Signal(false, "recipe-selected");
+        var height = graph.Signal(10f, "recipe-row-height");
+        ContentRecipe[] entries = [Components.Text("Snapshot")];
+        var row = Components.Row(ComponentContent.Create(entries), Style.Empty.Width(100f).Height(20f));
+        entries[0] = Components.Text("Changed");
+        var mounted = composition.Mount(composition.Root, theme, row);
+        var live = composition.Mount(composition.Root, theme, Components.Text(() => source.Value));
+        _ = composition.Mount(composition.Root, theme, Components.Button("Button"));
+        _ = composition.Mount(composition.Root, theme, Components.TextField("value"));
+        _ = composition.Mount(composition.Root, theme, Components.Selectable("Selectable"));
+        var liveSelectable = composition.Mount(composition.Root, theme, Components.Selectable(() => source.Value, () => selected.Value));
+        _ = composition.Mount(composition.Root, theme, Components.ScrollViewport([Components.Text("Viewport")], style: Style.Empty.Width(100f).Height(20f)));
+        _ = composition.Mount(composition.Root, theme, Components.Status("Ready"));
+        _ = composition.Mount(composition.Root, theme, Components.Status(() => source.Value));
+        _ = composition.Mount(composition.Root, theme, Components.Progress("Static", .5f));
+        _ = composition.Mount(composition.Root, theme, Components.Progress("Live", () => .75f));
+        var list = composition.Mount(composition.Root, theme, Components.VirtualizedList(() => new[] { 1, 2 }, value => value, value => Components.Text(value.ToString()), () => height.Value, style: Style.Empty.Width(100f).Height(20f)));
+        graph.Drain(); _ = SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper());
+        Assert(mounted.Children.Count == 1 && mounted.Children[0].Resolve(ProjectionProperties.Text).Value == "Snapshot" && mounted.Children.All(child => child.Name != "fragment") &&
+            live.Resolve(ProjectionProperties.Text).Value == "Live" && list.Children.Single().Children.Count > 0,
+            "Built-in recipes did not use the ordinary recipe/content transaction.");
+        source.Value = "Changed"; height.Value = 12f; graph.Drain();
+        selected.Value = true; graph.Drain();
+        Assert(live.Resolve(ProjectionProperties.Text).Value == "Changed" && liveSelectable.Resolve(ProjectionProperties.Text).Value == "Changed" &&
+            Descendants(composition.SemanticSnapshot()!).Single(node => node.Identity.ElementId == liveSelectable.Id).Selected && list.Children.Single().Resolve(LayoutProperties.VirtualRowHeight).Value == 12f,
+            "Live built-in recipe inputs did not update their retained roots.");
+
+        var textSource = graph.Signal("Text", "cached-text-source"); var selectableSource = graph.Signal("Selectable", "cached-selectable-source");
+        var selectedSource = graph.Signal(false, "cached-selected-source"); var statusSource = graph.Signal("Status", "cached-status-source"); var progressSource = graph.Signal(.25f, "cached-progress-source"); var heightSource = graph.Signal(10f, "cached-height-source"); var fragileSource = graph.Signal("Fragile", "cached-fragile-source");
+        var textReads = 0; var selectableReads = 0; var selectedReads = 0; var statusReads = 0; var progressReads = 0; var heightReads = 0; var fragileReads = 0;
+        var cachedText = composition.Mount(composition.Root, theme, Components.Text(() => { textReads++; return textSource.Value; }));
+        var cachedSelectable = composition.Mount(composition.Root, theme, Components.Selectable(() => { selectableReads++; return selectableSource.Value; }, () => { selectedReads++; return selectedSource.Value; }));
+        var cachedStatus = composition.Mount(composition.Root, theme, Components.Status(() => { statusReads++; return statusSource.Value; }));
+        var cachedProgress = composition.Mount(composition.Root, theme, Components.Progress("Cached", () => { progressReads++; return progressSource.Value; }));
+        var cachedList = composition.Mount(composition.Root, theme, Components.VirtualizedList(() => Array.Empty<int>(), value => value, value => Components.Text(value.ToString()), () => { heightReads++; return heightSource.Value; }, style: Style.Empty.Width(100f).Height(20f)));
+        _ = composition.Mount(composition.Root, theme, Components.Text(() => { if (++fragileReads > 1) throw new InvalidOperationException("second live read"); return fragileSource.Value; }));
+        graph.Drain(); graph.Drain();
+        Assert(textReads == 1 && selectableReads == 1 && selectedReads == 1 && statusReads == 1 && progressReads == 1 && heightReads == 1 && fragileReads == 1,
+            "Live recipes evaluated again during their first effect drain.");
+        textSource.Value = "Text 2"; selectableSource.Value = "Selectable 2"; selectedSource.Value = true; statusSource.Value = "Status 2"; progressSource.Value = .5f; heightSource.Value = 12f;
+        graph.Drain();
+        Assert(textReads == 2 && selectableReads == 2 && selectedReads == 2 && statusReads == 2 && progressReads == 2 && heightReads == 2,
+            "Live recipe readers did not evaluate exactly once per source invalidation.");
+        cachedText.Dispose(); cachedSelectable.Dispose(); cachedStatus.Dispose(); cachedProgress.Dispose(); cachedList.Dispose();
+        textSource.Value = "Detached"; selectableSource.Value = "Detached"; selectedSource.Value = false; statusSource.Value = "Detached"; progressSource.Value = .75f; heightSource.Value = 14f;
+        graph.Drain();
+        Assert(textReads == 2 && selectableReads == 2 && selectedReads == 2 && statusReads == 2 && progressReads == 2 && heightReads == 2,
+            "Disposed live recipe readers remained attached.");
+        var reads = 0;
+        var detached = composition.Mount(composition.Root, theme, Components.Text(() => { reads++; return source.Value; }));
+        graph.Drain(); var beforeDispose = reads; detached.Dispose(); source.Value = "Detached"; graph.Drain();
+        Assert(reads == beforeDispose, "Disposed live recipe reader remained attached.");
+
+        var atomicLabel = graph.Signal("Atomic", "atomic-selectable-label");
+        var atomicSelected = graph.Signal(false, "atomic-selectable-selected");
+        var throwSelected = false;
+        var atomic = composition.Mount(composition.Root, theme, Components.Selectable(() => atomicLabel.Value, () =>
+        {
+            var selectedValue = atomicSelected.Value;
+            if (throwSelected) throw new InvalidOperationException("atomic selected failure");
+            return selectedValue;
+        }));
+        graph.Drain();
+        var beforeText = atomic.Resolve(ProjectionProperties.Text).Value;
+        var beforeSemantic = Descendants(composition.SemanticSnapshot()!).Single(node => node.Identity.ElementId == atomic.Id);
+        atomicLabel.Value = "Rejected"; atomicSelected.Value = true; throwSelected = true;
+        ExpectAggregate(graph.Drain);
+        var rejectedSemantic = Descendants(composition.SemanticSnapshot()!).Single(node => node.Identity.ElementId == atomic.Id);
+        Assert(atomic.Resolve(ProjectionProperties.Text).Value == beforeText && rejectedSemantic.Name == beforeSemantic.Name && rejectedSemantic.Selected == beforeSemantic.Selected,
+            "A failed live selectable reader committed label, semantics, or selection before both values resolved.");
+        throwSelected = false; atomicSelected.Value = false; atomicSelected.Value = true; graph.Drain();
+        var recoveredSemantic = Descendants(composition.SemanticSnapshot()!).Single(node => node.Identity.ElementId == atomic.Id);
+        Assert(atomic.Resolve(ProjectionProperties.Text).Value == "Rejected" && recoveredSemantic.Name == "Rejected" && recoveredSemantic.Selected,
+            "Recovered live selectable readers did not commit label, semantics, and selection together.");
+    }
+
+    private static void FactoryMutationContainment()
+    {
+        AssertFactoryMutationGuard("present", (_, theme) => _.Present(theme));
+        AssertFactoryMutationGuard("behavior", (element, _) => element.AttachBehaviors(new PassiveBehavior()));
+        AssertFactoryMutationGuard("variants", (element, _) => element.SetVariants(VariantState.Pressed), (element, theme) => element.Present(theme));
+        AssertFactoryMutationGuard("scope-child", (element, _) => element.Scope.CreateChild("foreign-child"));
+        AssertFactoryMutationGuard("scope-signal", (element, _) => element.Scope.Signal(1, "foreign-signal"));
+        Signal<int>? foreignSignal = null;
+        AssertFactoryMutationGuard("signal-write", (_, _) => foreignSignal!.Value = 1, (element, _) => foreignSignal = element.Scope.Signal(0, "foreign-value"));
+        AssertFactoryMutationGuard("scope-derived", (element, _) => element.Scope.Derived(() => 1, "foreign-derived"));
+        AssertFactoryMutationGuard("scope-effect", (element, _) => element.Scope.Effect(() => { }, "foreign-effect"));
+        AssertFactoryMutationGuard("scope-async", (element, _) => element.Scope.Async(token => Task.FromResult(1), "foreign-async"));
+        AssertFactoryMutationGuard("scope-own", (element, _) => element.Scope.Own(new ProbeDisposable()));
+        AssertFactoryMutationGuard("scope-cleanup", (element, _) => element.Scope.OnDispose(() => { }));
+        AssertFactoryMutationGuard("scope-dispose", (element, _) => element.Scope.Dispose());
+        AssertFactoryMutationGuard("dispose", (element, _) => element.Dispose(), (element, _) => { element.Composition.Child(element, "foreign-descendant"); });
+
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "provisional-mutation-root");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var mounted = composition.Mount(composition.Root, theme, context =>
+        {
+            var root = context.Element("provisional-root");
+            root.Present(theme); root.SetVariants(VariantState.Pressed); root.AttachBehaviors(new PassiveBehavior());
+            var child = context.Child(root, "provisional-child");
+            child.Present(theme); _ = child.Scope.Signal(1, "provisional-signal");
+            var scope = child.Scope.CreateChild("provisional-scope");
+            _ = scope.Derived(() => 1, "provisional-derived"); _ = scope.Effect(() => { }, "provisional-effect");
+            _ = scope.Async(token => Task.FromResult(1), "provisional-async"); scope.Own(new ProbeDisposable()); scope.OnDispose(() => { }); scope.Dispose();
+            return root;
+        });
+        graph.Drain();
+        Assert(!mounted.IsDisposed && mounted.Children.Single().HasPresentation, "Provisional element mutations or descendant scopes were rejected.");
+    }
+
+    private static void AssertFactoryMutationGuard(string name, Action<Element, ThemeContext> mutation, Action<Element, ThemeContext>? setup = null)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "factory-mutation-" + name);
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var foreign = composition.Child(composition.Root, "foreign");
+        setup?.Invoke(foreign, theme);
+        var cleanup = 0;
+        foreign.Scope.OnDispose(() => cleanup++);
+        var active = graph.Signal(false, "factory-mutation-active");
+        var region = composition.When(composition.Root, "factory-mutation-region", () => active.Value, context =>
+        {
+            var provisional = context.Element("provisional");
+            mutation(foreign, theme);
+            return provisional;
+        });
+        graph.Drain();
+        var dump = composition.Dump(); var topology = graph.Dump(); var children = composition.Root.Children.ToArray();
+        active.Value = true;
+        ExpectAggregate(graph.Drain);
+        Assert(composition.Dump() == dump && graph.Dump() == topology && composition.Root.Children.SequenceEqual(children) &&
+            !foreign.IsDisposed && cleanup == 0 && region.Active is null && region.Region.Children.Count == 0,
+            "Foreign " + name + " mutation changed presentation, graph, or lifetime state after factory rollback.");
     }
 
     private static void NestedFactoryIsolationAndVirtualRows()
@@ -175,7 +384,7 @@ internal static class CompositionContracts
         var themed = Controls.VirtualizedList(viewport, theme, "themed-rows", "Rows", () => { virtualReads++; return new[] { 1 }; }, value => value, (value, context) =>
         {
             Assert(ReferenceEquals(context.Theme, theme), "Virtualized row lost its source theme.");
-            return Controls.Text(context, "themed-row", "Row " + value);
+            var row = context.Element("themed-row"); Controls.Text(row, context.Theme, "Row " + value); return row;
         }, 10f);
         graph.Drain(); themed.Realize(new(10, 10, 1));
         Assert(themed.Items.Count == 1 && themed.Items.Single().Resolve(ProjectionProperties.Text).Value == "Row 1", "Annotated virtualized row did not mount through its themed context.");
@@ -274,16 +483,20 @@ internal static class CompositionContracts
         var disposalGraph = new ReactiveGraph();
         var trigger = disposalGraph.Signal(false, "dispose-during-factory");
         var disposal = new Composition(disposalGraph, "dispose-root");
+        var disposalCleanup = 0;
         _ = disposal.When(disposal.Root, "dispose-region", () => trigger.Value, context =>
         {
             var child = context.Element("dispose-child");
+            child.Scope.OnDispose(() => disposalCleanup++);
             disposal.Dispose();
             return child;
         });
         disposalGraph.Drain();
         trigger.Value = true;
         ExpectAggregate(disposalGraph.Drain);
-        Assert(disposal.IsDisposed, "Disposal during a factory left the composition active.");
+        Assert(disposal.IsDisposed && disposal.Root.IsDisposed && disposalCleanup == 1 &&
+            !disposalGraph.Dump().Contains("dispose-root", StringComparison.Ordinal) && !disposalGraph.Dump().Contains("dispose-region", StringComparison.Ordinal) && !disposalGraph.Dump().Contains("dispose-child", StringComparison.Ordinal),
+            "Disposal during a factory did not retire composition-owned scopes/nodes exactly once.");
     }
 
     private static void FactoryGuardsAndJointFailures()
@@ -517,13 +730,10 @@ internal static class CompositionContracts
         var before = composition.Dump();
         rows.Value = [1, 2, 3];
         ExpectAggregate(graph.Drain);
-        Assert(composition.Dump() == before && region.Items.Count == 0 && region.Region.Children.Count == 0 && cleanup == 3,
+        Assert(composition.Dump() == before && region.Items.Count == 0 && region.Region.Children.Count == 0 && cleanup == 2,
             "Later keyed factories left a disposed provisional root or descendant, or leaked rollback cleanup.");
 
-        var probe = RetainedEntryRollback();
-        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-        Assert(!probe.Retained.IsAlive && !probe.Provisional.IsAlive, "Failed keyed rollback retained an entry or provisional root.");
-        GC.KeepAlive(probe.Root);
+        RetainedEntryRollback();
 
         var orderingProbe = KeyedOrderingRollback();
         GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
@@ -548,37 +758,31 @@ internal static class CompositionContracts
         Assert(ReferenceEquals(remounted, reentrant.Items.Single()), "An old disposed entry removed its same-key remount.");
     }
 
-    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static KeyedRollbackProbe RetainedEntryRollback()
+    private static void RetainedEntryRollback()
     {
         var graph = new ReactiveGraph();
         var rows = graph.Signal(new[] { 1 }, "keyed-retained-rows");
-        var composition = new Composition(graph, "keyed-retained-root");
+        using var composition = new Composition(graph, "keyed-retained-root");
         Element? retained = null;
-        WeakReference? retainedWeak = null;
-        WeakReference? provisionalWeak = null;
         var region = composition.ForEach(composition.Root, "keyed-retained-region", () => rows.Value, value => value, (value, context) =>
         {
             var root = context.Element("keyed-retained-child");
             if (value == 1)
             {
                 retained = root;
-                retainedWeak = new WeakReference(root);
             }
             else
             {
-                provisionalWeak = new WeakReference(root);
                 retained!.Scope.Dispose();
-                retained = null;
             }
             return root;
         });
         graph.Drain();
+        var dump = composition.Dump(); var topology = graph.Dump();
         rows.Value = [1, 2];
         ExpectAggregate(graph.Drain);
-        Assert(region.Items.Count == 0 && region.Region.Children.Count == 0 &&
-            !composition.Dump().Contains("keyed-retained-child", StringComparison.Ordinal), "Disposed retained entry or provisional root remained live after rollback.");
-        return new KeyedRollbackProbe(retainedWeak!, provisionalWeak!, composition);
+        Assert(region.Items.Count == 1 && ReferenceEquals(region.Items.Single(), retained) && !retained!.IsDisposed &&
+            composition.Dump() == dump && graph.Dump() == topology, "Foreign retained-entry disposal changed keyed state after rollback.");
     }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -732,12 +936,27 @@ internal static class CompositionContracts
     private sealed record PayloadProbe(IReadOnlyList<WeakReference> Payloads, object Root);
     private sealed record IdentityProbe(WeakReference Element, WeakReference Conditional, WeakReference Keyed, object Root);
     private sealed record ScopeProbe(WeakReference Payload, object Root);
-    private sealed record KeyedRollbackProbe(WeakReference Retained, WeakReference Provisional, object Root);
     private sealed record KeyPreparationProbe(IReadOnlyList<WeakReference> Payloads, object Root);
     private sealed class MutableKey(int hash)
     {
         internal int Hash { get; set; } = hash;
         public override int GetHashCode() => Hash;
     }
+    private sealed class EmptyShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            if (request.Text.Length == 0) return new("empty", 0, 0, []);
+            var glyph = new ShapedGlyph(1, 0, 0, 0, request.Text.Length, 0, 0);
+            var run = new ShapedRun("recipe", "recipe", 400, 5, 0, "recipe", 0, "recipe#0", request.Direction, request.Language, request.FontSize, 0, request.FontSize, -request.FontSize, 0, request.Text.Length, [glyph]);
+            return new("recipe", request.Text.Length, request.FontSize, [run]);
+        }
+    }
+    private sealed class PassiveBehavior : Behavior
+    {
+        public override string Name => "passive";
+        public override void Attach(BehaviorContext context) { }
+    }
+    private sealed class ProbeDisposable : IDisposable { public void Dispose() { } }
     private sealed class Payload;
 }

@@ -24,7 +24,7 @@ public static class ControlThemes
 }
 
 /// <summary>Scope-owned mutable state for a single control recipe.</summary>
-public sealed class ControlState
+internal sealed class ControlState
 {
     private readonly ReactiveScope _scope;
     private readonly Signal<string> _label;
@@ -48,7 +48,7 @@ public sealed class ControlState
 }
 
 /// <summary>Scope-owned offset for a bounded scroll viewport.</summary>
-public sealed class ScrollViewportState
+internal sealed class ScrollViewportState
 {
     private readonly ReactiveScope _scope;
     private readonly Signal<ScrollOffset> _offset;
@@ -57,7 +57,7 @@ public sealed class ScrollViewportState
 }
 
 /// <summary>Bounded component recipes. Structure stays authored by callers; recipes configure one retained element at a time.</summary>
-public static class Controls
+internal static class Controls
 {
     private static readonly Style TextStyle = Style.Empty.Set(TypographyProperties.TextColor, ControlThemes.Foreground);
     private static readonly Style PanelStyle = Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column).Set(VisualProperties.Background, ControlThemes.Surface);
@@ -75,56 +75,6 @@ public static class Controls
         .When(VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, ControlThemes.Focus).Set(TypographyProperties.TextColor, ControlThemes.FocusForeground))
         .When(VariantState.Selected | VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, ControlThemes.Focus).Set(TypographyProperties.TextColor, ControlThemes.FocusForeground))
         .When(VariantState.Disabled, Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled));
-
-    /// <summary>Creates an explicit content factory; the callback may add only children below its supplied root.</summary>
-    public static Func<CompositionContext, Element> Recipe(string name, Action<CompositionContext, Element> content)
-    {
-        ReactiveGraph.ValidateName(name, nameof(name)); ArgumentNullException.ThrowIfNull(content);
-        return context => { ArgumentNullException.ThrowIfNull(context); var element = context.Element(name); content(context, element); return element; };
-    }
-
-    [LuiComponent]
-    public static Element Text(CompositionContext context, string Name, [LuiContent(IsDefault = true)] string Content, Style? Style = null)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        var element = context.Element(Name);
-        Text(element, context.Theme, Content, Style);
-        return element;
-    }
-
-    [LuiComponent]
-    public static Element Row(CompositionContext context, string Name, [LuiContent(IsDefault = true)] Func<CompositionContext, Element> Content, Style? Style = null)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(Content);
-        var element = context.Element(Name);
-        Row(element, context.Theme, Name, Style);
-        _ = context.Mount(element, Content);
-        return element;
-    }
-
-    [LuiComponent]
-    public static Element TextField(CompositionContext context, string Name, string InitialValue = "", Action<string>? OnChange = null, Style? Style = null)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        var element = context.Element(Name);
-        var state = TextField(element, context.Theme, Name, InitialValue, Style);
-        if (OnChange is not null)
-        {
-            var prior = state.Value;
-            _ = element.Scope.Effect(() => { var value = state.Value; if (value != prior) { prior = value; OnChange(value); } }, element.Name + ".on-change");
-        }
-        return element;
-    }
-
-    [LuiComponent]
-    public static Element Button(CompositionContext context, string Name, [LuiContent(IsDefault = true)] string Label, Action? OnInvoke = null, Style? Style = null)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        var element = context.Element(Name);
-        Button(element, context.Theme, Label, OnInvoke, Style);
-        return element;
-    }
 
     public static void Text(Element element, ThemeContext theme, string text, Style? style = null) => ConfigureSemantic(element, theme, TextStyle.Set(ProjectionProperties.Text, Required(text, nameof(text))), style, new(SemanticRole.Text, text));
     public static void Panel(Element element, ThemeContext theme, string name, Style? style = null) => ConfigureSemantic(element, theme, PanelStyle, style, new(SemanticRole.Group, Required(name, nameof(name))));

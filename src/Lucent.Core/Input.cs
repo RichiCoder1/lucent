@@ -674,7 +674,7 @@ public sealed class InputRouter
 public readonly record struct SemanticScrollState(ScrollOffset Offset, ScrollOffset Maximum, LayoutRect Viewport);
 
 /// <summary>Reusable selectable action; selection is behavior state, not application-side routing state.</summary>
-public sealed class RowActionBehavior(string name, SemanticDeclaration semantics, Action? activate = null, ControlState? state = null) : Behavior
+internal sealed class RowActionBehavior(string name, SemanticDeclaration semantics, Action? activate = null, ControlState? state = null) : Behavior
 {
     public override string Name => name;
     public override BehaviorOwnership Ownership => BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
@@ -711,7 +711,7 @@ public sealed class RowActionBehavior(string name, SemanticDeclaration semantics
 }
 
 /// <summary>Reusable invoke action for buttons; unlike selectable rows it has no selection state.</summary>
-public sealed class ButtonBehavior(string name, SemanticDeclaration semantics, Action? activate = null) : Behavior
+internal sealed class ButtonBehavior(string name, SemanticDeclaration semantics, Action? activate = null) : Behavior
 {
     public override string Name => name;
     public override BehaviorOwnership Ownership => BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
@@ -732,7 +732,7 @@ public sealed class ButtonBehavior(string name, SemanticDeclaration semantics, A
 }
 
 /// <summary>Bounded key-driven scrolling for a clipped retained viewport.</summary>
-public sealed class ScrollViewportBehavior(string name, ScrollViewportState state) : Behavior
+internal sealed class ScrollViewportBehavior(string name, ScrollViewportState state) : Behavior
 {
     public override string Name => name;
     public override BehaviorOwnership Ownership => BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;

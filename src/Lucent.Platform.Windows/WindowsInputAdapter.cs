@@ -110,7 +110,7 @@ internal sealed class WindowsInputAdapter : IDisposable
         if (!_windowFocused) return false;
         if (command.Kind is TextInputKind.Commit or TextInputKind.Preedit)
         {
-            if (!TextFieldState.TryNormalizeSingleLine(command.Text, out var text)) return false;
+            if (!TextInputCommand.TryNormalizeSingleLine(command.Text, out var text)) return false;
             command = command with { Text = text };
         }
         try { var result = _router.DispatchText(command); _repaintRequested |= result.Handled; return result.Handled; }

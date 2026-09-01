@@ -1,5 +1,6 @@
 using Lucent.Core;
 using Lucent.Platform.Windows;
+using Lucent.IssueBrowser;
 
 try
 {

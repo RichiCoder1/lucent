@@ -41,30 +41,27 @@ return violations.Count == 0 ? 0 : 1;
 
 static void VerifyLuiMetadata(MetadataReader metadata, TypeNameProvider provider, List<string> violations)
 {
-    var controls = metadata.TypeDefinitions.FirstOrDefault(handle => provider.Name(metadata, metadata.GetTypeDefinition(handle).Namespace, metadata.GetTypeDefinition(handle).Name) == "Lucent.Core.Controls");
-    if (controls.IsNil) { violations.Add("Missing Controls metadata."); return; }
-    foreach (var expected in new[]
+    var definitions = metadata.TypeDefinitions.ToArray();
+    if (definitions.Any(handle => TypeDefinitionName(metadata, handle) is "Lucent.Core.LuiComponentAttribute" or "Lucent.Core.LuiContentAttribute")) violations.Add("Legacy LUI metadata remains.");
+    foreach (var retired in new[] { "Lucent.Core.Controls", "Lucent.Core.ControlState", "Lucent.Core.ScrollViewportState", "Lucent.Core.TextFieldState", "Lucent.Core.VirtualizedRegion`2" })
+        if (definitions.FirstOrDefault(handle => TypeDefinitionName(metadata, handle) == retired) is var handle && !handle.IsNil && (metadata.GetTypeDefinition(handle).Attributes & TypeAttributes.VisibilityMask) == TypeAttributes.Public)
+            violations.Add("Retired Controls surface remains public: " + retired);
+    var components = definitions.FirstOrDefault(handle => TypeDefinitionName(metadata, handle) == "Lucent.Core.Components");
+    if (components.IsNil) { violations.Add("Missing Components metadata."); return; }
+    var recipes = metadata.GetTypeDefinition(components).GetMethods().Select(metadata.GetMethodDefinition).ToArray();
+    var publicMethods = recipes.Where(method => (method.Attributes & (MethodAttributes.Public | MethodAttributes.Static)) == (MethodAttributes.Public | MethodAttributes.Static)).ToArray();
+    var annotated = publicMethods.Where(method => HasAttribute(metadata, method.GetCustomAttributes(), "Lucent.Core.LucentComponentAttribute")).ToArray();
+    if (annotated.Length != publicMethods.Length) violations.Add("Components exposes an unannotated public method.");
+    var expected = new Dictionary<string, int> { ["Row"] = 1, ["Column"] = 1, ["Text"] = 2, ["Button"] = 1, ["TextField"] = 1, ["Selectable"] = 2, ["ScrollViewport"] = 1, ["VirtualizedList"] = 1, ["Status"] = 2, ["Progress"] = 2 };
+    if (!annotated.GroupBy(method => metadata.GetString(method.Name)).ToDictionary(group => group.Key, group => group.Count()).OrderBy(pair => pair.Key).SequenceEqual(expected.OrderBy(pair => pair.Key)))
+        violations.Add("Components catalog metadata changed.");
+    foreach (var recipe in annotated)
     {
-        new Recipe("Text", ["context", "Name", "Content", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.String", "Lucent.Core.Style"], ["-", "-", "-", "null"], "Content"),
-        new Recipe("Row", ["context", "Name", "Content", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.Func`2|Lucent.Core.CompositionContext|Lucent.Core.Element", "Lucent.Core.Style"], ["-", "-", "-", "null"], "Content"),
-        new Recipe("TextField", ["context", "Name", "InitialValue", "OnChange", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.String", "System.Action`1|System.String", "Lucent.Core.Style"], ["-", "-", "", "null", "null"], null),
-        new Recipe("Button", ["context", "Name", "Label", "OnInvoke", "Style"], ["Lucent.Core.CompositionContext", "System.String", "System.String", "System.Action", "Lucent.Core.Style"], ["-", "-", "-", "null", "null"], "Label")
-    })
-    {
-        var recipes = metadata.GetTypeDefinition(controls).GetMethods().Select(metadata.GetMethodDefinition)
-            .Where(method => metadata.GetString(method.Name) == expected.Name && HasAttribute(metadata, method.GetCustomAttributes(), "Lucent.Core.LuiComponentAttribute") &&
-                (method.Attributes & (MethodAttributes.Public | MethodAttributes.Static)) == (MethodAttributes.Public | MethodAttributes.Static) && method.DecodeSignature(provider, null).ReturnType == "Lucent.Core.Element").ToArray();
-        if (recipes.Length != 1) { violations.Add($"Missing exact [LuiComponent] recipe: {expected.Name}"); continue; }
-        var recipe = recipes[0];
         var signature = recipe.DecodeSignature(provider, null);
-        var parameters = recipe.GetParameters().Select(metadata.GetParameter).Where(parameter => parameter.SequenceNumber != 0).ToArray();
-        if (!parameters.Select(parameter => metadata.GetString(parameter.Name)).SequenceEqual(expected.ParameterNames) || !signature.ParameterTypes.SequenceEqual(expected.ParameterTypes) ||
-            !parameters.Select(parameter => DefaultValue(metadata, parameter)).SequenceEqual(expected.Defaults))
-            violations.Add($"Unexpected [LuiComponent] signature: {expected.Name}");
-        var contents = parameters.Where(parameter => HasAttribute(metadata, parameter.GetCustomAttributes(), "Lucent.Core.LuiContentAttribute")).Select(parameter => metadata.GetString(parameter.Name)).ToArray();
-        var defaults = parameters.Where(parameter => HasDefaultContent(metadata, parameter.GetCustomAttributes())).Select(parameter => metadata.GetString(parameter.Name)).ToArray();
-        if (!(expected.DefaultContent is null ? contents.Length == 0 && defaults.Length == 0 : contents.SequenceEqual([expected.DefaultContent]) && defaults.SequenceEqual([expected.DefaultContent])))
-            violations.Add($"Unexpected default [LuiContent] metadata: {expected.Name}");
+        if (signature.ReturnType != "Lucent.Core.ComponentRecipe" || signature.ParameterTypes.Any(type => type.Contains("Lucent.Core.Element", StringComparison.Ordinal) || type.Contains("ControlState", StringComparison.Ordinal) || type.Contains("ScrollViewportState", StringComparison.Ordinal) || type.Contains("VirtualizedRegion", StringComparison.Ordinal) || type.Contains("TextFieldState", StringComparison.Ordinal)))
+            violations.Add("Components leaked a mounted handle: " + metadata.GetString(recipe.Name));
+        var content = recipe.GetParameters().Select(metadata.GetParameter).Where(parameter => parameter.SequenceNumber != 0 && HasAttribute(metadata, parameter.GetCustomAttributes(), "Lucent.Core.DefaultContentAttribute")).ToArray();
+        if (content.Length > 1 || content.Any(parameter => metadata.GetString(parameter.Name) is not ("content" or "label"))) violations.Add("Unexpected [DefaultContent] metadata: " + metadata.GetString(recipe.Name));
     }
 }
 
@@ -91,28 +88,6 @@ static void VerifyPropertySurface(MetadataReader metadata, TypeNameProvider prov
         foreach (var field in expected.Value)
             if (fields[field.Key].DecodeSignature(provider, null) != field.Value) violations.Add($"Unexpected property type: {expected.Key}.{field.Key}");
     }
-}
-
-static string DefaultValue(MetadataReader metadata, Parameter parameter)
-{
-    if (!parameter.Attributes.HasFlag(ParameterAttributes.HasDefault)) return "-";
-    var constant = metadata.GetConstant(parameter.GetDefaultValue());
-    if (constant.TypeCode == ConstantTypeCode.NullReference) return "null";
-    if (constant.TypeCode != ConstantTypeCode.String) return "?";
-    var value = metadata.GetBlobReader(constant.Value);
-    return value.ReadUTF16(value.Length);
-}
-
-static bool HasDefaultContent(MetadataReader metadata, CustomAttributeHandleCollection attributes)
-{
-    foreach (var handle in attributes)
-    {
-        var attribute = metadata.GetCustomAttribute(handle);
-        if (AttributeName(metadata, attribute.Constructor) != "Lucent.Core.LuiContentAttribute") continue;
-        var value = metadata.GetBlobReader(attribute.Value);
-        return value.ReadUInt16() == 1 && value.ReadUInt16() == 1 && value.ReadByte() == 0x54 && value.ReadByte() == 0x02 && value.ReadSerializedString() == "IsDefault" && value.ReadByte() == 1;
-    }
-    return false;
 }
 
 static bool HasAttribute(MetadataReader metadata, CustomAttributeHandleCollection attributes, string name)
@@ -230,5 +205,3 @@ internal sealed class TypeNameProvider : ISignatureTypeProvider<string, object?>
     }
     public string GetTypeFromSpecification(MetadataReader reader, object? genericContext, TypeSpecificationHandle handle, byte rawTypeKind) => reader.GetTypeSpecification(handle).DecodeSignature(this, genericContext);
 }
-
-internal sealed record Recipe(string Name, string[] ParameterNames, string[] ParameterTypes, string[] Defaults, string? DefaultContent);

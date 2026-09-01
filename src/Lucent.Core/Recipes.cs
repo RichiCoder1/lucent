@@ -1,0 +1,110 @@
+using System.Collections;
+using System.Runtime.CompilerServices;
+
+namespace Lucent.Core;
+
+/// <summary>A reusable capability that creates one retained root when mounted.</summary>
+public sealed class ComponentRecipe
+{
+    private readonly Action<CompositionContext, Element> _content;
+    private readonly string? _name;
+
+    private ComponentRecipe(string kind, Action<CompositionContext, Element> content, string? name = null)
+    {
+        Kind = kind;
+        _content = content;
+        _name = name;
+    }
+
+    /// <summary>The diagnostic kind used by unnamed mounts.</summary>
+    public string Kind { get; }
+
+    /// <summary>Creates a recipe whose root is allocated by the framework.</summary>
+    public static ComponentRecipe Create(string kind, Action<CompositionContext, Element> content)
+    {
+        ReactiveGraph.ValidateName(kind, nameof(kind));
+        ArgumentNullException.ThrowIfNull(content);
+        return new ComponentRecipe(kind, content);
+    }
+
+    /// <summary>Returns this recipe with an explicit local diagnostic name.</summary>
+    public ComponentRecipe Named(string name)
+    {
+        ReactiveGraph.ValidateName(name, nameof(name));
+        return new ComponentRecipe(Kind, _content, name);
+    }
+
+    /// <summary>Converts one root recipe into one content contribution.</summary>
+    public static implicit operator ContentRecipe(ComponentRecipe recipe)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        return new ContentRecipe((context, parent) => context.Mount(parent, recipe));
+    }
+
+    internal Element Mount(CompositionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var root = context.RecipeElement(Kind, _name);
+        _content(context, root);
+        return root;
+    }
+}
+
+/// <summary>A reusable contribution of zero or more retained entries below an existing root.</summary>
+public sealed class ContentRecipe
+{
+    private readonly Action<CompositionContext, Element> _mount;
+
+    internal ContentRecipe(Action<CompositionContext, Element> mount) => _mount = mount;
+
+    /// <summary>Creates a retained conditional contribution.</summary>
+    public static ContentRecipe When(string name, Func<bool> active, ComponentRecipe content)
+    {
+        ReactiveGraph.ValidateName(name, nameof(name));
+        ArgumentNullException.ThrowIfNull(active);
+        ArgumentNullException.ThrowIfNull(content);
+        return new ContentRecipe((context, parent) => _ = context.When(parent, name, active, content.Mount));
+    }
+
+    /// <summary>Creates a retained keyed contribution.</summary>
+    public static ContentRecipe ForEach<TKey, TItem>(string name, Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key, Func<TItem, ComponentRecipe> content) where TKey : notnull
+    {
+        ReactiveGraph.ValidateName(name, nameof(name));
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(content);
+        return new ContentRecipe((context, parent) => _ = context.ForEach(parent, name, source, key, (item, child) =>
+        {
+            var recipe = content(item);
+            ArgumentNullException.ThrowIfNull(recipe);
+            return recipe.Mount(child);
+        }));
+    }
+
+    internal void Mount(CompositionContext context, Element parent) => _mount(context, parent);
+}
+
+/// <summary>An immutable ordered group of content contributions.</summary>
+[CollectionBuilder(typeof(ComponentContent), nameof(Create))]
+public sealed class ComponentContent : IReadOnlyList<ContentRecipe>
+{
+    private readonly ContentRecipe[] _recipes;
+
+    private ComponentContent(ContentRecipe[] recipes) => _recipes = recipes;
+
+    /// <summary>An empty content group.</summary>
+    public static ComponentContent Empty { get; } = new([]);
+    public int Count => _recipes.Length;
+    public ContentRecipe this[int index] => _recipes[index];
+
+    /// <summary>Snapshots ordered content for C# collection expressions.</summary>
+    public static ComponentContent Create(ReadOnlySpan<ContentRecipe> recipes)
+    {
+        foreach (var recipe in recipes) ArgumentNullException.ThrowIfNull(recipe);
+        return recipes.Length == 0 ? Empty : new ComponentContent(recipes.ToArray());
+    }
+
+    public IEnumerator<ContentRecipe> GetEnumerator() => ((IEnumerable<ContentRecipe>)_recipes).GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}

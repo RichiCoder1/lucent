@@ -72,7 +72,7 @@ internal static class ControlsContracts
         var progress = composition.Child(composition.Root, "progress"); Controls.Progress(progress, theme, "Progress", .5f, Style.Empty.Set(LayoutProperties.Height, 10f));
         var error = composition.Child(composition.Root, "error"); Controls.Error(error, theme, "Failed", Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column).Set(LayoutProperties.Height, 30f));
         var retry = composition.Child(error, "retry"); Controls.Button(retry, theme, "Retry", () => calls.Retry++, Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 20f));
-        var conditional = composition.When(composition.Root, "recipe", () => true, Controls.Recipe("recipe-child", (context, element) => Controls.Text(element, theme, "Recipe")));
+        var conditional = composition.When(composition.Root, "recipe", () => true, context => { var recipe = context.Element("recipe-child"); Controls.Text(recipe, theme, "Recipe"); return recipe; });
         graph.Drain();
         Assert(conditional.Active is not null, "Explicit recipe did not create its supplied root.");
         fixture = new(graph, composition, theme, button, selectable, retry, calls);

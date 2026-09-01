@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using Lucent.Core;
 
+namespace Lucent.IssueBrowser;
+
 public sealed record BrowserIssue(int Number, string Title, string Status, string Assignee, string Labels, string Updated, string Body);
 
 /// <summary>Frozen, local issue data used by the reference application and its deterministic transport contract.</summary>
@@ -265,17 +267,17 @@ public sealed class IssueBrowserState
 
 public static class IssueBrowserStructure
 {
-    private static readonly Token<Brush> PageSurface = new("page-surface", Color.Parse("#f8fafc"));
-    private static readonly Token<Color> PageForeground = new("page-foreground", Color.Parse("#0f172a"));
-    private static readonly Token<Brush> HeaderSurface = new("header-surface", Color.Parse("#e2e8f0"));
-    private static readonly Token<Brush> RowSurface = new("row-surface", Color.Parse("#ffffff"));
-    private static readonly Token<Brush> FocusSurface = new("focus-surface", Color.Parse("#ffff00"));
-    private static readonly Token<Color> FocusForeground = new("focus-foreground", Color.Parse("#0f172a"));
-    private static readonly Token<float?> DensityHeaderHeight = new("issue-density-header-height", 84f);
-    private static readonly Token<float?> DensityFilterHeight = new("issue-density-filter-height", 28f);
-    private static readonly Token<float> DensitySpacing = new("issue-density-spacing", 8f);
-    private static readonly Token<float> DensityFontSize = new("issue-density-font-size", 14f);
-    private static readonly Token<float> DensityTitleFontSize = new("issue-density-title-font-size", 18f);
+    internal static readonly Token<Brush> PageSurface = new("page-surface", Color.Parse("#f8fafc"));
+    internal static readonly Token<Color> PageForeground = new("page-foreground", Color.Parse("#0f172a"));
+    internal static readonly Token<Brush> HeaderSurface = new("header-surface", Color.Parse("#e2e8f0"));
+    internal static readonly Token<Brush> RowSurface = new("row-surface", Color.Parse("#ffffff"));
+    internal static readonly Token<Brush> FocusSurface = new("focus-surface", Color.Parse("#ffff00"));
+    internal static readonly Token<Color> FocusForeground = new("focus-foreground", Color.Parse("#0f172a"));
+    internal static readonly Token<float?> DensityHeaderHeight = new("issue-density-header-height", 84f);
+    internal static readonly Token<float?> DensityFilterHeight = new("issue-density-filter-height", 28f);
+    internal static readonly Token<float> DensitySpacing = new("issue-density-spacing", 8f);
+    internal static readonly Token<float> DensityFontSize = new("issue-density-font-size", 14f);
+    internal static readonly Token<float> DensityTitleFontSize = new("issue-density-title-font-size", 18f);
 
     public static Composition Create(ReactiveGraph graph) => Create(graph, out _);
     public static Composition Create(ReactiveGraph graph, out ThemeContext theme)
@@ -304,71 +306,9 @@ public static class IssueBrowserStructure
             themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000") : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? Color.Parse("#111827") : Color.Parse("#ffffff"),
             themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#ffff00") : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark ? Color.Parse("#facc15") : Color.Parse("#ffff00"),
             themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000") : Color.Parse("#0f172a"), browser.Density), "issue-browser-appearance");
-        Controls.Column(composition.Root, themeContext, "Issue Browser", Style.Empty.Set(VisualProperties.Background, PageSurface).Set(TypographyProperties.TextColor, PageForeground).Set(LayoutProperties.Clip, true));
-
-        var header = composition.Child(composition.Root, "issue-browser.header");
-        Controls.Panel(header, themeContext, "Issue Browser header", Style.Empty.Set<float?>(LayoutProperties.Height, DensityHeaderHeight).Set(LayoutProperties.Width, 800f).Set(VisualProperties.Background, HeaderSurface));
-        var title = composition.Child(header, "issue-browser.title");
-        Controls.Text(title, themeContext, "Issues", Style.Empty.Set(LayoutProperties.Height, 24f).Set<float>(TypographyProperties.FontSize, DensityTitleFontSize));
-        var filters = composition.Child(header, "issue-browser.filters");
-        Controls.Row(filters, themeContext, "Issue filters", Style.Empty.Set(LayoutProperties.Width, 800f).Set<float?>(LayoutProperties.Height, DensityFilterHeight).Set<float>(LayoutProperties.Spacing, DensitySpacing));
-        BindFilter(composition.Child(filters, "issue-browser.search"), themeContext, "Search issues", value => browser.Search = value);
-        BindFilter(composition.Child(filters, "issue-browser.status"), themeContext, "Status: all, open, closed", value => browser.Status = value);
-        BindFilter(composition.Child(filters, "issue-browser.assignee"), themeContext, "Assignee: all, marta, devin, joel", value => browser.Assignee = value);
-        Controls.Button(composition.Child(header, "issue-browser.density"), themeContext, "Density: Comfortable/Compact", browser.ToggleDensity, Style.Empty.Set(LayoutProperties.Width, 250f).Set<float?>(LayoutProperties.Height, DensityFilterHeight));
-
-        _ = composition.When(composition.Root, "issue-browser.loading-region", () => browser.IsLoading,
-            Controls.Recipe("issue-browser.loading", (context, element) => Controls.Loading(element, themeContext, browser.IsStale ? "Refreshing issues" : "Loading issues", Style.Empty.Set(LayoutProperties.Height, 28f))));
-        _ = composition.When(composition.Root, "issue-browser.error-region", () => browser.Error is not null,
-            Controls.Recipe("issue-browser.error", (context, element) =>
-            {
-                Controls.Error(element, themeContext, browser.Error!, Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column));
-                Controls.Button(context.Child(element, "issue-browser.retry"), themeContext, "Retry", browser.Retry, Style.Empty.Set(LayoutProperties.Height, 30f));
-            }));
-
-        var viewport = composition.Child(composition.Root, "issue-browser.scroll-viewport");
-        var scroll = Controls.ScrollViewport(viewport, themeContext, "Issues", style: Style.Empty.Set(LayoutProperties.Width, 800f).Set(LayoutProperties.Height, 60f));
-        var list = Controls.VirtualizedList(viewport, themeContext, "issue-browser.issue-list", "Issues", () => browser.VisibleIssues, issue => issue.Number, (issue, context) =>
-        {
-            var row = context.Element("issue-browser.issue-row");
-            var selectable = Controls.Selectable(row, themeContext, $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}", () => browser.Select(issue.Number), Style.Empty.Set(LayoutProperties.Width, 800f).Set<float>(LayoutProperties.Spacing, DensitySpacing).Set<float>(TypographyProperties.FontSize, DensityFontSize).Set(VisualProperties.Background, RowSurface)
-                .When(VariantState.FocusVisible, Style.Empty.Set(VisualProperties.Background, FocusSurface).Set(TypographyProperties.TextColor, FocusForeground)));
-            _ = row.Scope.Effect(() => { var current = browser.Issues.First(candidate => candidate.Number == issue.Number); selectable.Label = $"#{current.Number} {current.Title} — {current.Status} · {current.Assignee}"; selectable.Selected = browser.IsSelected(issue.Number); }, row.Name + ".selection");
-            return row;
-        }, 30f);
-        var rowHeight = 30f;
-        _ = composition.Root.Scope.Effect(() =>
-        {
-            var next = browser.Density == IssueDensity.Comfortable ? 30f : 22f;
-            if (next == rowHeight) return;
-            var previous = rowHeight;
-            var index = MathF.Floor(scroll.Offset.Y / previous);
-            var relative = scroll.Offset.Y - index * previous;
-            rowHeight = next;
-            list.SetRowHeight(next);
-            scroll.Offset = new(scroll.Offset.X, index * next + relative);
-        }, "issue-browser-density-anchor");
-        _ = composition.ForEach(composition.Root, "issue-browser.details-region", () => browser.SelectedIssue is { } issue ? [issue] : Array.Empty<BrowserIssue>(), issue => issue.Number, (issue, context) =>
-        {
-            var element = context.Element("issue-browser.details");
-            Controls.Panel(element, themeContext, "Issue details", Style.Empty.Set(LayoutProperties.Width, 800f).Set<float>(LayoutProperties.Spacing, DensitySpacing).Set<float>(TypographyProperties.FontSize, DensityFontSize));
-            Controls.Text(context.Child(element, "issue-browser.details-title"), themeContext, $"#{issue.Number} {issue.Title}");
-            var status = Controls.Loading(context.Child(element, "issue-browser.details-status"), themeContext, issue.Status);
-            Controls.Text(context.Child(element, "issue-browser.details-body"), themeContext, issue.Body);
-            Controls.Button(context.Child(element, "issue-browser.status-action"), themeContext, "Open/Close", browser.ToggleSelectedStatus, Style.Empty.Set<float?>(LayoutProperties.Height, DensityFilterHeight));
-            _ = element.Scope.Effect(() => status.Label = browser.SelectedIssue is { } selected && selected.Number == issue.Number ? selected.Status + (browser.SelectedMutationMessage is { } message ? " · " + message : "") : issue.Status, element.Name + ".status");
-            return element;
-        });
-        _ = composition.When(composition.Root, "issue-browser.details-retry-region", () => browser.SelectedIssue is not null && browser.CanRetrySelected,
-            Controls.Recipe("issue-browser.details-retry", (context, element) => Controls.Button(element, themeContext, "Retry", browser.RetrySelected, Style.Empty.Set<float?>(LayoutProperties.Height, DensityFilterHeight))));
+        _ = composition.Mount(composition.Root, themeContext, Components.IssueBrowser(browser).Named("Issue Browser"));
         state = browser;
         return composition;
-    }
-
-    private static void BindFilter(Element element, ThemeContext theme, string name, Action<string> set)
-    {
-        var input = Controls.TextField(element, theme, name, style: Style.Empty.Set(LayoutProperties.Width, 250f).Set(LayoutProperties.Height, 24f));
-        _ = element.Scope.Effect(() => set(input.Value), element.Name + ".binding");
     }
 
     private static Theme Palette(Theme controls, Color surface, Color foreground, Color header, Color row, Color focus, Color focusForeground, IssueDensity density) => controls
@@ -381,4 +321,73 @@ public static class IssueBrowserStructure
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(IssueFixture.Json, Encoding.UTF8, "application/json") });
     }
+}
+
+/// <summary>Ordinary C# recipes for the reference application's composition.</summary>
+public static class Components
+{
+    [LucentComponent]
+    public static ComponentRecipe IssueBrowser(IssueBrowserState browser)
+    {
+        ArgumentNullException.ThrowIfNull(browser);
+        return ComponentRecipe.Create("issue-browser", (context, root) => context.Mount(root, Lucent.Core.Components.Column([
+            Header(browser).Named("issue-browser.header"),
+            ContentRecipe.When("issue-browser.loading-region", () => browser.IsLoading, Loading(browser).Named("issue-browser.loading")),
+            ContentRecipe.When("issue-browser.error-region", () => browser.Error is not null, Error(browser).Named("issue-browser.error")),
+            Lucent.Core.Components.VirtualizedList(() => browser.VisibleIssues, issue => issue.Number, issue => IssueRow(browser, issue).Named("issue-browser.issue-row"),
+                () => browser.Density == IssueDensity.Comfortable ? 30f : 22f, "Issues", Style.Empty.Width(800f).Height(60f)).Named("issue-browser.scroll-viewport"),
+            ContentRecipe.ForEach("issue-browser.details-region", () => browser.SelectedIssue is { } issue ? [issue] : Array.Empty<BrowserIssue>(), issue => issue.Number,
+                issue => Details(browser, issue).Named("issue-browser.details")),
+            ContentRecipe.When("issue-browser.details-retry-region", () => browser.SelectedIssue is not null && browser.CanRetrySelected,
+                Lucent.Core.Components.Button("Retry", browser.RetrySelected, Style.Empty.Height(IssueBrowserStructure.DensityFilterHeight)).Named("issue-browser.details-retry"))
+        ], Style.Empty.Width(800f).Height(500f).Background(IssueBrowserStructure.PageSurface).TextColor(IssueBrowserStructure.PageForeground).Clip(true))));
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe FilterBar(IssueBrowserState browser)
+    {
+        ArgumentNullException.ThrowIfNull(browser);
+        return ComponentRecipe.Create("issue-browser.filter-bar", (context, root) => context.Mount(root, Lucent.Core.Components.Row([
+            Lucent.Core.Components.TextField(onChange: value => browser.Search = value, style: Style.Empty.Width(250f).Height(24f), label: "Search issues").Named("issue-browser.search"),
+            Lucent.Core.Components.TextField(onChange: value => browser.Status = value, style: Style.Empty.Width(250f).Height(24f), label: "Status: all, open, closed").Named("issue-browser.status"),
+            Lucent.Core.Components.TextField(onChange: value => browser.Assignee = value, style: Style.Empty.Width(250f).Height(24f), label: "Assignee: all, marta, devin, joel").Named("issue-browser.assignee")
+        ], Style.Empty.Width(800f).Height(IssueBrowserStructure.DensityFilterHeight).Spacing(IssueBrowserStructure.DensitySpacing))));
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe IssueRow(IssueBrowserState browser, BrowserIssue issue)
+    {
+        ArgumentNullException.ThrowIfNull(browser); ArgumentNullException.ThrowIfNull(issue);
+        return ComponentRecipe.Create("issue-browser.issue-row", (context, root) =>
+        {
+            context.Mount(root, Lucent.Core.Components.Selectable(
+                () => Label(browser, issue), () => browser.IsSelected(issue.Number), () => browser.Select(issue.Number),
+                Style.Empty.Width(800f).Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f).Spacing(IssueBrowserStructure.DensitySpacing).FontSize(IssueBrowserStructure.DensityFontSize).Background(IssueBrowserStructure.RowSurface)
+                    .When(VariantState.FocusVisible, Style.Empty.Background(IssueBrowserStructure.FocusSurface).TextColor(IssueBrowserStructure.FocusForeground))));
+        });
+    }
+
+    private static ComponentRecipe Header(IssueBrowserState browser) => ComponentRecipe.Create("issue-browser.header", (context, root) => context.Mount(root, Lucent.Core.Components.Column([
+        Lucent.Core.Components.Text("Issues", Style.Empty.Height(24f).FontSize(IssueBrowserStructure.DensityTitleFontSize)).Named("issue-browser.title"),
+        FilterBar(browser).Named("issue-browser.filters"),
+        Lucent.Core.Components.Button("Density: Comfortable/Compact", browser.ToggleDensity, Style.Empty.Width(250f).Height(IssueBrowserStructure.DensityFilterHeight)).Named("issue-browser.density")
+    ], Style.Empty.Width(800f).Height(IssueBrowserStructure.DensityHeaderHeight).Background(IssueBrowserStructure.HeaderSurface))));
+
+    private static ComponentRecipe Loading(IssueBrowserState browser) => Lucent.Core.Components.Status(() => browser.IsStale ? "Refreshing issues" : "Loading issues", Style.Empty.Height(28f));
+    private static ComponentRecipe Error(IssueBrowserState browser) => ComponentRecipe.Create("issue-browser.error", (context, root) => context.Mount(root, Lucent.Core.Components.Column([
+        Lucent.Core.Components.Status(() => browser.Error ?? "", Style.Empty.Axis(LayoutAxis.Column)),
+        Lucent.Core.Components.Button("Retry", browser.Retry, Style.Empty.Height(30f)).Named("issue-browser.retry")
+    ])));
+    private static ComponentRecipe Details(IssueBrowserState browser, BrowserIssue issue) => ComponentRecipe.Create("issue-browser.details", (context, root) => context.Mount(root, Lucent.Core.Components.Column([
+        Lucent.Core.Components.Text(() => Detail(browser, issue, selected => "#" + selected.Number + " " + selected.Title)).Named("issue-browser.details-title"),
+        Lucent.Core.Components.Status(() => Detail(browser, issue, selected => selected.Status + (browser.SelectedMutationMessage is { } message ? " · " + message : ""))).Named("issue-browser.details-status"),
+        Lucent.Core.Components.Text(() => Detail(browser, issue, selected => selected.Body)).Named("issue-browser.details-body"),
+        Lucent.Core.Components.Button("Open/Close", browser.ToggleSelectedStatus, Style.Empty.Height(IssueBrowserStructure.DensityFilterHeight)).Named("issue-browser.status-action")
+    ], Style.Empty.Width(800f).Spacing(IssueBrowserStructure.DensitySpacing).FontSize(IssueBrowserStructure.DensityFontSize))));
+    private static string Label(IssueBrowserState browser, BrowserIssue issue)
+    {
+        var current = browser.Issues.First(candidate => candidate.Number == issue.Number);
+        return $"#{current.Number} {current.Title} — {current.Status} · {current.Assignee}";
+    }
+    private static string Detail(IssueBrowserState browser, BrowserIssue issue, Func<BrowserIssue, string> read) => browser.SelectedIssue is { } selected && selected.Number == issue.Number ? read(selected) : read(issue);
 }

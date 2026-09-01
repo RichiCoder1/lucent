@@ -1,0 +1,174 @@
+namespace Lucent.Core;
+
+/// <summary>Built-in component recipes for ordinary typed composition.</summary>
+public static class Components
+{
+    [LucentComponent]
+    public static ComponentRecipe Row([DefaultContent] ComponentContent content, Style? style = null)
+    {
+        content = Content(content);
+        return ComponentRecipe.Create("row", (context, root) => { Controls.Row(root, context.Theme, "Row", style); context.Mount(root, content); });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Column([DefaultContent] ComponentContent content, Style? style = null)
+    {
+        content = Content(content);
+        return ComponentRecipe.Create("column", (context, root) => { Controls.Column(root, context.Theme, "Column", style); context.Mount(root, content); });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Text([DefaultContent] string content, Style? style = null)
+    {
+        content = Required(content, nameof(content));
+        return ComponentRecipe.Create("text", (context, root) => Controls.Text(root, context.Theme, content, style));
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Text([DefaultContent] Func<string> content, Style? style = null)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return ComponentRecipe.Create("text", (context, root) =>
+        {
+            var value = root.Scope.Derived(() => Required(content(), nameof(content)), root.Name + ".text-read");
+            Controls.Text(root, context.Theme, value.Value, style);
+            _ = root.Scope.Effect(() =>
+            {
+                root.UpdateControl(ProjectionProperties.Text, value.Value);
+                root.UpdateControlSemantics(new(SemanticRole.Text, value.Value));
+            }, root.Name + ".text");
+        });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Button([DefaultContent] string content, Action? onInvoke = null, Style? style = null)
+    {
+        content = Required(content, nameof(content));
+        return ComponentRecipe.Create("button", (context, root) => Controls.Button(root, context.Theme, content, onInvoke, style));
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe TextField(string initialValue = "", Action<string>? onChange = null, Style? style = null, string label = "Text field")
+    {
+        TextFieldState.ValidateText(initialValue); label = Required(label, nameof(label));
+        return ComponentRecipe.Create("text-field", (context, root) =>
+        {
+            var state = Controls.TextField(root, context.Theme, label, initialValue, style);
+            if (onChange is not null)
+            {
+                var prior = state.Value;
+                _ = root.Scope.Effect(() => { var value = state.Value; if (value != prior) { prior = value; onChange(value); } }, root.Name + ".on-change");
+            }
+        });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Selectable([DefaultContent] string content, Action? onSelect = null, Style? style = null)
+    {
+        content = Required(content, nameof(content));
+        return ComponentRecipe.Create("selectable", (context, root) => Controls.Selectable(root, context.Theme, content, onSelect, style));
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Selectable([DefaultContent] Func<string> content, Func<bool> selected, Action? onSelect = null, Style? style = null)
+    {
+        ArgumentNullException.ThrowIfNull(content); ArgumentNullException.ThrowIfNull(selected);
+        return ComponentRecipe.Create("selectable", (context, root) =>
+        {
+            var label = root.Scope.Derived(() => Required(content(), nameof(content)), root.Name + ".selectable-label");
+            var isSelected = root.Scope.Derived(selected, root.Name + ".selectable-selected");
+            var state = Controls.Selectable(root, context.Theme, label.Value, onSelect, style);
+            _ = root.Scope.Effect(() => { var nextLabel = label.Value; var nextSelected = isSelected.Value; state.Label = nextLabel; state.Selected = nextSelected; }, root.Name + ".selectable");
+        });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe ScrollViewport([DefaultContent] ComponentContent content, string label = "Scroll viewport", Style? style = null)
+    {
+        content = Content(content); label = Required(label, nameof(label));
+        return ComponentRecipe.Create("scroll-viewport", (context, root) => { Controls.ScrollViewport(root, context.Theme, label, style: style); context.Mount(root, content); });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe VirtualizedList<TKey, TItem>(Func<IEnumerable<TItem>> source, Func<TItem, TKey> key, Func<TItem, ComponentRecipe> row, Func<float> rowHeight, string label = "Items", Style? style = null) where TKey : notnull
+    {
+        ArgumentNullException.ThrowIfNull(source); ArgumentNullException.ThrowIfNull(key); ArgumentNullException.ThrowIfNull(row); ArgumentNullException.ThrowIfNull(rowHeight); label = Required(label, nameof(label));
+        return ComponentRecipe.Create("virtualized-list", (context, root) =>
+        {
+            var rowHeightValue = root.Scope.Derived(() => RowHeight(rowHeight), root.Name + ".row-height-read");
+            var height = rowHeightValue.Value;
+            var scroll = Controls.ScrollViewport(root, context.Theme, label, style: style);
+            var region = context.Virtualize(root, "rows", source, key, (item, child) =>
+            {
+                var recipe = row(item);
+                ArgumentNullException.ThrowIfNull(recipe);
+                return recipe.Mount(child);
+            }, height);
+            try { Controls.List(region.Region, context.Theme, label); region.Configure(); }
+            catch { region.Dispose(); throw; }
+            _ = root.Scope.Effect(() =>
+            {
+                var next = rowHeightValue.Value;
+                if (next == height) return;
+                var index = MathF.Floor(scroll.Offset.Y / height);
+                var relative = scroll.Offset.Y - index * height;
+                height = next;
+                region.SetRowHeight(next);
+                scroll.Offset = new(scroll.Offset.X, index * next + relative);
+            }, root.Name + ".row-height");
+        });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Status([DefaultContent] string content, Style? style = null)
+    {
+        content = Required(content, nameof(content));
+        return ComponentRecipe.Create("status", (context, root) => Controls.Loading(root, context.Theme, content, style));
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Status([DefaultContent] Func<string> content, Style? style = null)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return ComponentRecipe.Create("status", (context, root) =>
+        {
+            var value = root.Scope.Derived(() => Required(content(), nameof(content)), root.Name + ".status-read");
+            var state = Controls.Loading(root, context.Theme, value.Value, style);
+            _ = root.Scope.Effect(() => state.Label = value.Value, root.Name + ".status");
+        });
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Progress([DefaultContent] string label, float value, Style? style = null)
+    {
+        label = Required(label, nameof(label)); ControlState.ValidateProgress(value);
+        return ComponentRecipe.Create("progress", (context, root) => Controls.Progress(root, context.Theme, label, value, style));
+    }
+
+    [LucentComponent]
+    public static ComponentRecipe Progress([DefaultContent] string label, Func<float> value, Style? style = null)
+    {
+        label = Required(label, nameof(label)); ArgumentNullException.ThrowIfNull(value);
+        return ComponentRecipe.Create("progress", (context, root) =>
+        {
+            var progress = root.Scope.Derived(() => ProgressValue(value), root.Name + ".progress-read");
+            var state = Controls.Progress(root, context.Theme, label, progress.Value, style);
+            _ = root.Scope.Effect(() => state.Progress = progress.Value, root.Name + ".progress");
+        });
+    }
+
+    private static ComponentContent Content(ComponentContent content) => content ?? throw new ArgumentNullException(nameof(content));
+    private static string Required(string value, string parameter) => ControlState.Required(value, parameter);
+    private static float RowHeight(Func<float> read)
+    {
+        var value = read();
+        if (!float.IsFinite(value) || value <= 0) throw new ArgumentOutOfRangeException(nameof(read));
+        return value;
+    }
+    private static float ProgressValue(Func<float> read)
+    {
+        var result = read();
+        ControlState.ValidateProgress(result);
+        return result;
+    }
+}

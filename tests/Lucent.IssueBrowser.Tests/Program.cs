@@ -1,13 +1,16 @@
 using System.Net;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text;
 using Lucent.Core;
 using Lucent.Renderer.Skia;
+using Lucent.IssueBrowser;
 using SkiaSharp;
 
 try
 {
     FixtureIdentity();
+    RecipeEvidence();
     AsyncBrowserStates();
     DensityRestyle();
     OptimisticStatusMutations();
@@ -29,6 +32,22 @@ static void FixtureIdentity()
     IssueFixture.AssertIntegrity();
     Assert(IssueFixture.Issues.Count == IssueFixture.TotalCount && IssueFixture.Issues.Count(issue => issue.Status == "open") == IssueFixture.OpenCount && IssueFixture.Issues.Count(issue => issue.Status == "closed") == IssueFixture.ClosedCount,
         "Frozen issue fixture identity or counts changed.");
+}
+
+static void RecipeEvidence()
+{
+    var graph = new ReactiveGraph();
+    using var composition = IssueBrowserStructure.Create(graph, out _);
+    graph.Drain();
+    using var renderer = new SkiaSceneRenderer();
+    _ = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+    var semantics = composition.SemanticDump();
+    var dump = composition.Dump();
+    Assert(dump.Contains("name=\"issue-browser.filters\"", StringComparison.Ordinal) && dump.Contains("name=\"issue-browser.issue-row\"", StringComparison.Ordinal) &&
+        Flatten(composition.SemanticSnapshot()!).Any(node => node.Role == SemanticRole.TextField && node.Name == "Search issues") &&
+        Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem) <= 9,
+        "C# Filter Bar or virtual Issue Row recipe structure regressed.");
+    Assert(Hash(dump + semantics) == "7cbf8fdd2ff5aceb786d5be56a4b1ee7b95cef093e33edb65747a7f41777b25b", "C# recipe composition/semantic evidence changed: " + Hash(dump + semantics));
 }
 
 static void AsyncBrowserStates()
@@ -254,6 +273,8 @@ static TopVisibleRow TopRow(RetainedScene scene, Composition composition, string
 }
 
 static bool HasRetry(Composition composition) => Flatten(composition.SemanticSnapshot()!).Any(node => node.Role == SemanticRole.Button && node.Name == "Retry");
+
+static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
 static void Assert(bool value, string message)
 {

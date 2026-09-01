@@ -21,6 +21,8 @@ public sealed class Composition : IDisposable
     private long _nextSceneGeneration;
     private long _interactionVisualGeneration;
     private long _semanticRevision;
+    private readonly List<Element> _ownedCleanup = [];
+    private int _factoryRollbackDepth;
 
     public Composition(ReactiveGraph graph, string name)
     {
@@ -76,8 +78,16 @@ public sealed class Composition : IDisposable
         if (!ReferenceEquals(parent.Composition, this)) throw new ArgumentException("The parent belongs to another composition.", nameof(parent));
         parent.ThrowIfDisposed();
         if (!ReferenceEquals(theme.Graph, _graph)) throw new ArgumentException("Theme context belongs to another reactive graph.", nameof(theme));
+        if (!theme.Scope.DescendsFrom(Root.Scope)) throw new ArgumentException("Theme context must be owned by this composition.", nameof(theme));
         theme.ValidateLive();
         return MountCore(parent, theme, content);
+    }
+
+    /// <summary>Atomically mounts one reusable component recipe below <paramref name="parent"/>.</summary>
+    public Element Mount(Element parent, ThemeContext theme, ComponentRecipe recipe)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        return Mount(parent, theme, recipe.Mount);
     }
 
     /// <summary>Creates a zero-or-one structural region whose content follows <paramref name="active"/>.</summary>
@@ -201,9 +211,9 @@ public sealed class Composition : IDisposable
         ReactiveGraph.ValidateName(name, nameof(name));
         if (!ReferenceEquals(parent.Composition, this)) throw new ArgumentException("The parent belongs to another composition.", nameof(parent));
         parent.ThrowIfDisposed();
-        var scope = parent.Scope.CreateChild(name);
+        var scope = parent.Scope.CreateElementChild(name);
         var element = new Element(this, parent, scope, NextId(), name);
-        parent.Scope.Own(element);
+        parent.Scope.OwnElement(element);
         if (attach) parent.Attach(element);
         factory?.Record(element);
         return element;
@@ -273,9 +283,42 @@ public sealed class Composition : IDisposable
     internal void RejectForeignFactory(Element parent)
     {
         _graph.CheckThread();
-        if (_factory is not null && !_factory.Contains(parent))
+        if (_factoryRollbackDepth == 0 && _factory is not null && !_factory.Contains(parent) && !IsOwnedCleanup(parent))
             throw new InvalidOperationException("Structural regions cannot update outside the active provisional root.");
     }
+
+    internal void ValidateFactoryMutation(Element element)
+    {
+        _graph.CheckThread();
+        if (_factoryRollbackDepth == 0 && _factory is not null && !_factory.Contains(element) && !IsOwnedCleanup(element))
+            throw new InvalidOperationException("Element mutations must remain below the active provisional root.");
+    }
+
+    internal void RegisterFactoryRollback(Action cleanup)
+    {
+        _graph.CheckThread();
+        ArgumentNullException.ThrowIfNull(cleanup);
+        _factory?.RegisterRollback(cleanup);
+    }
+
+    internal void RunOwnedCleanup(Element root, Action cleanup)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(cleanup);
+        _ownedCleanup.Add(root);
+        try { cleanup(); }
+        finally { _ownedCleanup.RemoveAt(_ownedCleanup.Count - 1); }
+    }
+
+    internal void RunFactoryRollback(Action cleanup)
+    {
+        ArgumentNullException.ThrowIfNull(cleanup);
+        _factoryRollbackDepth++;
+        try { cleanup(); }
+        finally { _factoryRollbackDepth--; }
+    }
+
+    private bool IsOwnedCleanup(Element element) => _ownedCleanup.Any(root => root.IsAncestorOf(element));
 
     internal void ThrowIfBehaviorAttachment()
     {
@@ -331,9 +374,12 @@ public sealed class Composition : IDisposable
         ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
         List<Exception>? errors = null;
-        try { _input?.Cleanup(); } catch (Exception exception) { errors = [exception]; }
         IsDisposed = true;
-        try { Root.Dispose(); } catch (Exception exception) { (errors ??= []).Add(exception); }
+        RunOwnedCleanup(Root, () =>
+        {
+            try { _input?.Cleanup(); } catch (Exception exception) { errors = [exception]; }
+            try { Root.Dispose(); } catch (Exception exception) { (errors ??= []).Add(exception); }
+        });
         ThrowAll(errors, "Composition cleanup failed.");
     }
 
@@ -398,6 +444,7 @@ public sealed class Element : IDisposable
     private long _semanticGeneration;
     private bool _inputDisabled;
     private EffectiveSemanticState? _effectiveSemanticState;
+    private long _nextRecipeOrdinal;
 
     internal Element(Composition composition, Element? parent, ReactiveScope scope, long id, string name)
     {
@@ -406,9 +453,11 @@ public sealed class Element : IDisposable
         _childrenView = _children.AsReadOnly();
         Scope = scope;
         Scope.SetMutationGuard(composition.ThrowIfBehaviorAttachment);
+        Scope.SetFactoryGuard(() => composition.ValidateFactoryMutation(this));
+        Scope.SetFactoryRollback(composition.RegisterFactoryRollback);
         Id = id;
         Name = name;
-        Scope.OnDispose(Dispose);
+        Scope.OnElementDispose(Dispose);
     }
 
     public long Id { get; }
@@ -419,6 +468,7 @@ public sealed class Element : IDisposable
     internal Composition Composition { get; }
     internal Element? Parent => _parent;
     internal ElementPresentation? Presentation => _presentation;
+    internal bool HasPresentation => _presentation is not null;
     internal bool HasSemantics => _semantics is not null;
     internal IEnumerable<IProperty> AncestorProperties()
     {
@@ -438,10 +488,12 @@ public sealed class Element : IDisposable
     internal void ValidatePresentation(ThemeContext theme, Style? component = null, Style? author = null, params Transition[] transitions)
     {
         Composition.CheckThread();
+        Composition.ValidateFactoryMutation(this);
         Composition.ThrowIfBehaviorAttachment();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(theme);
         if (!ReferenceEquals(theme.Graph, Composition.Graph)) throw new ArgumentException("Theme context belongs to another reactive graph.", nameof(theme));
+        if (!theme.Scope.DescendsFrom(Composition.Root.Scope)) throw new ArgumentException("Theme context must be owned by this composition.", nameof(theme));
         theme.ValidateLive();
         ArgumentNullException.ThrowIfNull(transitions);
         if (_presentation is not null) throw new InvalidOperationException("An element has one presentation model.");
@@ -453,6 +505,7 @@ public sealed class Element : IDisposable
     public void SetVariants(VariantState variants)
     {
         Composition.CheckThread();
+        Composition.ValidateFactoryMutation(this);
         ThrowIfDisposed();
         (_presentation ?? throw new InvalidOperationException("An element needs a presentation before it can have variants.")).SetVariants(variants);
     }
@@ -475,6 +528,7 @@ public sealed class Element : IDisposable
     public void AttachBehaviors(params Behavior[] behaviors)
     {
         Composition.CheckThread();
+        Composition.ValidateFactoryMutation(this);
         Composition.ThrowIfBehaviorAttachment();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(behaviors);
@@ -524,6 +578,7 @@ public sealed class Element : IDisposable
     internal BehaviorOwnership ValidateBehaviorAttachment(params Behavior[] behaviors)
     {
         Composition.CheckThread();
+        Composition.ValidateFactoryMutation(this);
         Composition.ThrowIfBehaviorAttachment();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(behaviors);
@@ -569,6 +624,8 @@ public sealed class Element : IDisposable
         return false;
     }
 
+    internal long NextRecipeOrdinal() => checked(++_nextRecipeOrdinal);
+
     internal void ThrowIfDisposed()
     {
         if (IsDisposed) throw new ObjectDisposedException(Name);
@@ -605,6 +662,7 @@ public sealed class Element : IDisposable
     public void StartTransition<T>(Property<T> property, T value)
     {
         Composition.CheckThread();
+        Composition.ValidateFactoryMutation(this);
         Composition.ThrowIfBehaviorAttachment();
         ThrowIfDisposed();
         (_presentation ?? throw new InvalidOperationException("An element needs a presentation before transition samples can start.")).Start(property, value);
@@ -715,6 +773,7 @@ public sealed class Element : IDisposable
     public void Dispose()
     {
         Composition.CheckThread();
+        Composition.ValidateFactoryMutation(this);
         Composition.ThrowIfBehaviorAttachment();
         if (IsDisposed) return;
         IsDisposed = true;
@@ -730,11 +789,11 @@ public sealed class Element : IDisposable
             try { children[index].Dispose(); }
             catch (Exception exception) { (errors ??= []).Add(exception); }
         }
+        try { Scope.Dispose(); }
+        catch (Exception exception) { (errors ??= []).Add(exception); }
         _parent?.Scope.Detach(this);
         _parent?.Detach(this);
         _parent = null;
-        try { Scope.Dispose(); }
-        catch (Exception exception) { (errors ??= []).Add(exception); }
         var disposed = _disposed;
         _disposed = null;
         try { disposed?.Invoke(); }
@@ -756,6 +815,7 @@ public sealed class CompositionContext : IDisposable
     private readonly List<Element> _created = [];
     private bool _committed;
     private bool _disposed;
+    private List<Action>? _rollback;
 
     internal CompositionContext(Composition composition, Element parent, ThemeContext? theme = null)
     {
@@ -798,6 +858,23 @@ public sealed class CompositionContext : IDisposable
         return _composition.MountCore(parent, Theme, content);
     }
 
+    /// <summary>Mounts one reusable component recipe below a provisional element.</summary>
+    public Element Mount(Element parent, ComponentRecipe recipe)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        return Mount(parent, recipe.Mount);
+    }
+
+    /// <summary>Mounts ordered content below a provisional element without adding a wrapper element.</summary>
+    public void Mount(Element parent, ComponentContent content)
+    {
+        ThrowIfActiveFactory();
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(content);
+        if (!Root.IsAncestorOf(parent)) throw new ArgumentException("A content factory can only mount below its provisional root.", nameof(parent));
+        foreach (var recipe in content) recipe.Mount(this, parent);
+    }
+
     /// <summary>Creates a retained conditional region below a provisional element.</summary>
     public ConditionalRegion When(Element parent, string name, Func<bool> active, Func<CompositionContext, Element> content)
     {
@@ -822,9 +899,19 @@ public sealed class CompositionContext : IDisposable
         return new KeyedRegion<TKey, TItem>(_composition, parent, name, source, key, content, this, Theme);
     }
 
+    internal VirtualizedRegion<TKey, TItem> Virtualize<TKey, TItem>(Element viewport, string name, Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight) where TKey : notnull
+    {
+        ThrowIfActiveFactory();
+        ArgumentNullException.ThrowIfNull(viewport); ArgumentNullException.ThrowIfNull(source); ArgumentNullException.ThrowIfNull(key); ArgumentNullException.ThrowIfNull(content);
+        if (!Root.IsAncestorOf(viewport)) throw new ArgumentException("A content factory can only add regions below its provisional root.", nameof(viewport));
+        return new VirtualizedRegion<TKey, TItem>(_composition, viewport, name, source, key, content, rowHeight, Theme, this);
+    }
+
     internal Element Commit(Element created)
     {
         var root = Validate(created);
+        PromoteRollback();
         _committed = true;
         return root;
     }
@@ -840,7 +927,7 @@ public sealed class CompositionContext : IDisposable
         return root;
     }
 
-    internal void Complete() => _committed = true;
+    internal void Complete() { PromoteRollback(); _committed = true; }
     internal bool IsCommitted => _committed;
 
     internal Element Root
@@ -858,7 +945,15 @@ public sealed class CompositionContext : IDisposable
         _composition.ThrowIfBehaviorAttachment();
         if (_disposed) return;
         _disposed = true;
-        if (!_committed) _root?.Dispose();
+        if (_committed) { _rollback = null; return; }
+        List<Exception>? errors = null;
+        try { if (_root is not null) _composition.RunOwnedCleanup(_root, _root.Dispose); }
+        catch (Exception exception) { errors = [exception]; }
+        if (_rollback is not null)
+            foreach (var cleanup in _rollback.AsEnumerable().Reverse())
+                try { _composition.RunFactoryRollback(cleanup); } catch (Exception exception) { (errors ??= []).Add(exception); }
+        _rollback = null;
+        Composition.ThrowAll(errors, "Composition factory rollback failed.");
     }
 
     internal T Run<T>(Func<T> factory)
@@ -868,6 +963,25 @@ public sealed class CompositionContext : IDisposable
     }
 
     internal void Record(Element element) => _created.Add(element);
+    internal void RegisterRollback(Action cleanup)
+    {
+        ArgumentNullException.ThrowIfNull(cleanup);
+        if (!_committed && !_disposed) (_rollback ??= []).Add(cleanup);
+    }
+    private void PromoteRollback()
+    {
+        if (_rollback is null) return;
+        foreach (var cleanup in _rollback) _composition.RegisterFactoryRollback(cleanup);
+        _rollback = null;
+    }
+    internal Element RecipeElement(string kind, string? name)
+    {
+        ThrowIfActiveFactory();
+        if (_root is not null) throw new InvalidOperationException("A content factory creates exactly one root element.");
+        var ordinal = _parent.NextRecipeOrdinal();
+        _root = _composition.Create(_parent, name ?? kind + "-" + ordinal.ToString(CultureInfo.InvariantCulture), attach: false, this);
+        return _root;
+    }
     internal Element Parent => _parent;
     internal bool Contains(Element parent) => _root is not null && _root.IsAncestorOf(parent);
 
@@ -1147,7 +1261,7 @@ internal interface IVirtualizedRegion
 }
 
 /// <summary>A fixed-height keyed region that owns only the visible rows plus two rows of overscan on each side.</summary>
-public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRegion where TKey : notnull
+internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRegion where TKey : notnull
 {
     private const int Overscan = 2;
     private readonly Composition _composition;
@@ -1162,12 +1276,12 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
     private bool _updating;
 
     internal VirtualizedRegion(Composition composition, Element viewport, string name, Func<IEnumerable<TItem>> source,
-        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight, ThemeContext theme)
+        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight, ThemeContext theme, CompositionContext? factory = null)
     {
         if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
         _composition = composition;
         _viewport = viewport ?? throw new ArgumentNullException(nameof(viewport));
-        Region = composition.Child(viewport, name);
+        Region = factory is null ? composition.Child(viewport, name) : factory.Child(viewport, name);
         _source = source; _key = key; _content = content; Theme = theme ?? throw new ArgumentNullException(nameof(theme)); RowHeight = rowHeight;
         Region.Scope.Own(this);
         _composition.Register(this);
@@ -1263,6 +1377,7 @@ public sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRe
                     provisional.Add((_keys[index], null!, context));
                     var entry = context.Run(() => _content!(_items[index], context));
                     context.Validate(entry);
+                    if (!entry.HasPresentation) entry.Present(Theme);
                     entry.UpdateControl(LayoutProperties.Height, RowHeight);
                     entry.UpdateControl(LayoutProperties.VirtualRowIndex, index);
                     provisional[^1] = (_keys[index], entry, context);

@@ -140,7 +140,7 @@ internal static class WindowsHostContracts
         {
             var row = context.Element("row"); Controls.Selectable(row, theme, "row " + value); return row;
         }, 30f);
-        _ = composition.When(composition.Root, "loading", () => !loaded.Value, Controls.Recipe("loading", (context, element) => Controls.Loading(element, theme, "Loading", Style.Empty.Set(LayoutProperties.Height, 20f))));
+        _ = composition.When(composition.Root, "loading", () => !loaded.Value, context => { var loading = context.Element("loading"); Controls.Loading(loading, theme, "Loading", Style.Empty.Set(LayoutProperties.Height, 20f)); return loading; });
         _ = WindowsBootstrap.ProjectAndInstall(composition, new(100, 100, 1), renderer);
         _ = composition.SemanticSnapshot();
         values.Value = Enumerable.Range(1, 10_000).ToArray();

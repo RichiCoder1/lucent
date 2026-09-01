@@ -7,6 +7,9 @@ namespace Lucent.Core;
 public enum TextInputKind { Commit, Preedit, Cancel }
 public readonly record struct TextInputCommand(TextInputKind Kind, string Text, int Start = 0, int Length = 0)
 {
+    /// <summary>Rejects newline and control input; valid text is returned as scalar-normalized UTF-16.</summary>
+    public static bool TryNormalizeSingleLine(string? text, out string normalized) => TextFieldState.TryNormalizeSingleLine(text, out normalized);
+
     public void Validate()
     {
         if (!Enum.IsDefined(Kind) || Text is null || (Kind != TextInputKind.Preedit && (Start != 0 || Length != 0))) throw new ArgumentException("Text input commands are finite and explicit.");
@@ -27,7 +30,7 @@ public sealed class TextClipboardRequest
 }
 
 /// <summary>Scope-owned, single-line Unicode text state. Positions are UTF-16 offsets constrained to grapheme boundaries.</summary>
-public sealed class TextFieldState
+internal sealed class TextFieldState
 {
     private const int UndoLimit = 64;
     private readonly ReactiveScope _scope;
@@ -175,7 +178,7 @@ public sealed class TextFieldState
 }
 
 /// <summary>Text behavior bridges portable key/text commands to scope-owned field state; pointer down focuses but intentionally does not place a caret.</summary>
-public sealed class TextFieldBehavior(TextFieldState state, string name) : Behavior
+internal sealed class TextFieldBehavior(TextFieldState state, string name) : Behavior
 {
     public override string Name => name;
     public override BehaviorOwnership Ownership => BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;

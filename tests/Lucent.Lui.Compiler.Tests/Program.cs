@@ -6,11 +6,11 @@ const string Complete = """
 namespace Sample.Ui;
 using System;
 public component Card(System.Collections.Generic.Dictionary<string, (int x, int y)> values, Action save) {
-    <Controls.Row Name="card" Style={Panel with { Padding: Insets.All(4) }} P={recordValue with { Value = 2 }}>
+    <Components.Row Name="card" Style={Panel with { Padding: Insets.All(4) }} P={recordValue with { Value = 2 }}>
         {/* comment } stays a comment */}
         if (values.Any(x => x is { x: > 0 })) { <Text Name="title"> Hello </Text> } else { }
         foreach (var item in Items.Where(x => x != "}")) keyed by item.Id { <Row Name="item" /> }
-    </Controls.Row>
+    </Components.Row>
 }
 style Panel { Padding: Insets.All(2); when Hover { Opacity: .5; } }
 """;
@@ -18,7 +18,7 @@ style Panel { Padding: Insets.All(2); when Hover { Opacity: .5; } }
 var document = LuiParser.Parse(Complete);
 Assert(document.Diagnostics.Count == 0, "complete document diagnostics: " + Diagnostics(document));
 var root = (LuiElementSyntax)document.Component!.Body.Single();
-Assert(root.Name.Text == "Controls.Row" && root.Name.Span.Start == Complete.IndexOf("Controls.Row", StringComparison.Ordinal), "qualified element name/span changed.");
+Assert(root.Name.Text == "Components.Row" && root.Name.Span.Start == Complete.IndexOf("Components.Row", StringComparison.Ordinal), "qualified element name/span changed.");
 Assert(root.Attributes.Single(attribute => attribute.Name.Text == "Style").Value is LuiStyleWithSyntax, "colon inline style was not retained.");
 Assert(root.Attributes.Single(attribute => attribute.Name.Text == "P").Value is LuiExpressionSyntax, "ordinary C# with expression was not retained.");
 var conditional = root.Children.OfType<LuiIfSyntax>().Single();
@@ -28,7 +28,7 @@ Assert(conditional.Condition.Span.Start == Complete.IndexOf("values.Any", String
 foreach (var source in new[]
 {
     "internal component X() { <A / > }",
-    "internal component X() { <Controls.Row /> }",
+    "internal component X() { <Components.Row /> }",
     "internal component X() { <A>{/* } */}</A> }",
     "internal component X() { <A P={\"escape\\} /> }",
     "internal component X() { <A P={new[] { @\"}\", \"\"\"raw } text\"\"\", $\"value {x}\", '}' }.Length} /> }",

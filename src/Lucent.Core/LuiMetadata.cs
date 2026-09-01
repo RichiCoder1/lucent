@@ -1,12 +1,9 @@
 namespace Lucent.Core;
 
-/// <summary>Marks a static element recipe available to compile-time LUI lowering.</summary>
+/// <summary>Marks a static component recipe available to compile-time lowering.</summary>
 [AttributeUsage(AttributeTargets.Method, Inherited = false)]
-public sealed class LuiComponentAttribute : Attribute { }
+public sealed class LucentComponentAttribute : Attribute { }
 
-/// <summary>Marks a component parameter as content; only one default content parameter is supported initially.</summary>
+/// <summary>Marks the one parameter that receives unwrapped component content.</summary>
 [AttributeUsage(AttributeTargets.Parameter, Inherited = false)]
-public sealed class LuiContentAttribute : Attribute
-{
-    public bool IsDefault { get; init; }
-}
+public sealed class DefaultContentAttribute : Attribute { }

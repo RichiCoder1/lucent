@@ -10,6 +10,7 @@ internal static class PresentationContracts
     private static readonly Token<int> Accent = new("accent", 10);
     private static readonly Token<int> AccentB = new("accent-b", 20);
     private static readonly Token<int> FallbackAccent = new("fallback-accent", 10);
+    private static readonly Token<int> FactoryAccent = new("factory-accent", 10);
     private static readonly Token<int> MaliciousToken = new("bad\r\n:#[]", 1);
     private static readonly Property<int> FallbackValue = new("fallback-value", 0);
 
@@ -18,6 +19,8 @@ internal static class PresentationContracts
         try
         {
             StylesTransitionsAndDependencies();
+            TokenFactoryRollback();
+            FluentStylesAndComposition();
             TypographyInheritanceScale();
             BindingsRespectVariantsAndControlAuthority();
             BindingRowScaleLifecycle();
@@ -108,6 +111,94 @@ internal static class PresentationContracts
         Expect<ArgumentException>(() => new Property<Brush>("brush-color-transition", Brush.Solid(default), transition: TransitionKind.Color));
         Expect<ArgumentException>(() => new SemanticDeclaration((SemanticRole)99, "bad"));
         Expect<ArgumentException>(() => new SemanticDeclaration(SemanticRole.Text, "bad", actions: (SemanticAction)32));
+    }
+
+    private static void TokenFactoryRollback()
+    {
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "token-factory");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("token-factory-theme"));
+        using var unrelatedScope = graph.CreateScope("unrelated-theme-scope");
+        var unrelatedTheme = new ThemeContext(unrelatedScope, new Theme("unrelated-token-theme"));
+        Expect<ArgumentException>(() => composition.Mount(composition.Root, unrelatedTheme, ComponentRecipe.Create("foreign-theme", (_, _) => { })));
+        var baseline = graph.Dump();
+        Expect<ArgumentException>(() => composition.Mount(composition.Root, theme, context =>
+        {
+            var failed = context.Element("captured-foreign-theme");
+            failed.Present(unrelatedTheme, author: Style.Empty.Set(TokenAValue, FactoryAccent));
+            return failed;
+        }));
+        Assert(unrelatedTheme.TokenCount == 0 && graph.Dump() == baseline, "Element presentation accepted a captured theme outside its composition.");
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, context =>
+        {
+            var failed = context.Element("failed-token");
+            failed.Present(theme, author: Style.Empty.Set(TokenAValue, FactoryAccent));
+            throw new InvalidOperationException("token factory failure");
+        }));
+        Assert(theme.TokenCount == 0 && graph.Dump() == baseline, "Failed first token resolution retained a shared slot or graph signal.");
+
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, theme, outer =>
+        {
+            var root = outer.Element("failed-outer-token");
+            _ = outer.Mount(root, inner =>
+            {
+                var nested = inner.Element("failed-nested-token");
+                nested.Present(theme, author: Style.Empty.Set(TokenAValue, AccentB));
+                return nested;
+            });
+            throw new InvalidOperationException("outer token factory failure");
+        }));
+        Assert(theme.TokenCount == 0 && graph.Dump() == baseline, "Nested token rollback was not promoted to its enclosing recipe transaction.");
+
+        var childTheme = new ThemeContext(composition.Root.Scope.CreateChild("child-theme-scope"), new Theme("child-token-theme"));
+        var childBaseline = graph.Dump();
+        Expect<InvalidOperationException>(() => composition.Mount(composition.Root, childTheme, context =>
+        {
+            var failed = context.Element("failed-child-token");
+            failed.Present(childTheme, author: Style.Empty.Set(TokenAValue, AccentB));
+            throw new InvalidOperationException("child token factory failure");
+        }));
+        Assert(childTheme.TokenCount == 0 && graph.Dump() == childBaseline, "Child-scope theme did not inherit recipe rollback registration.");
+
+        var retained = composition.Mount(composition.Root, theme, context =>
+        {
+            var element = context.Element("retained-token");
+            element.Present(theme, author: Style.Empty.Set(TokenAValue, FactoryAccent));
+            return element;
+        });
+        var reads = 0;
+        var value = composition.Root.Scope.Derived(() => { reads++; return retained.Resolve(TokenAValue).Value; }, "retained-token-reader");
+        Assert(theme.TokenCount == 1 && value.Value == 10 && reads == 1, "Committed token resolution did not retain exactly one shared slot.");
+        theme.Theme = theme.Theme.Set(FactoryAccent, 11); graph.Drain();
+        Assert(theme.TokenCount == 1 && value.Value == 11 && reads == 2, "Committed token slot did not persist or invalidate on its theme update.");
+    }
+
+    private static void FluentStylesAndComposition()
+    {
+        var graph = new ReactiveGraph(); using var composition = new Composition(graph, "fluent-styles");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("fluent"));
+        var color = Color.Parse("#123456");
+        var element = composition.Child(composition.Root, "all-properties");
+        element.Present(theme, author: Style.Empty.Axis(LayoutAxis.Row).Width(10f).Height(11f).MinWidth(1f).MinHeight(2f).MaxWidth(20f).MaxHeight(21f)
+            .Spacing(3f).MainAlignment(LayoutAlignment.Center).CrossAlignment(LayoutAlignment.End).Padding(Insets.Uniform(4f)).Clip(true).Scroll(new ScrollOffset(1, 2))
+            .Background((Brush)color).Opacity(.5f).TextColor(color).FontFamily("Fluent").FontSize(12f).Language("fr").Direction(TextDirection.RightToLeft).Enabled(false).Visible(false));
+        Assert(element.Resolve(LayoutProperties.Axis).Value == LayoutAxis.Row && element.Resolve(LayoutProperties.Width).Value == 10f && element.Resolve(LayoutProperties.Height).Value == 11f &&
+            element.Resolve(LayoutProperties.MinWidth).Value == 1f && element.Resolve(LayoutProperties.MinHeight).Value == 2f && element.Resolve(LayoutProperties.MaxWidth).Value == 20f && element.Resolve(LayoutProperties.MaxHeight).Value == 21f &&
+            element.Resolve(LayoutProperties.Spacing).Value == 3f && element.Resolve(LayoutProperties.MainAlignment).Value == LayoutAlignment.Center && element.Resolve(LayoutProperties.CrossAlignment).Value == LayoutAlignment.End &&
+            element.Resolve(LayoutProperties.Padding).Value == Insets.Uniform(4f) && element.Resolve(LayoutProperties.Clip).Value && element.Resolve(LayoutProperties.Scroll).Value == new ScrollOffset(1, 2) &&
+            element.Resolve(VisualProperties.Background).Value.Color == color && element.Resolve(VisualProperties.Opacity).Value == .5f && element.Resolve(TypographyProperties.TextColor).Value == color &&
+            element.Resolve(TypographyProperties.FontFamily).Value == "Fluent" && element.Resolve(TypographyProperties.FontSize).Value == 12f && element.Resolve(TypographyProperties.Language).Value == "fr" && element.Resolve(TypographyProperties.Direction).Value == TextDirection.RightToLeft &&
+            !element.Resolve(InputProperties.Enabled).Value && !element.Resolve(InputProperties.Visible).Value, "Typed fluent static properties changed their Style.Set mapping.");
+
+        var live = composition.Root.Scope.Signal(.6f, "fluent-live");
+        var precedence = composition.Child(composition.Root, "fluent-precedence");
+        precedence.Present(theme, Style.Empty.Opacity(.1f).When(VariantState.Hover, Style.Empty.Opacity(.2f)),
+            Style.Empty.Opacity(.3f).With(null).With(Style.Empty.Opacity(.4f)).When(VariantState.Hover, Style.Empty.Opacity(() => live.Value)));
+        graph.Drain();
+        Assert(precedence.Resolve(VisualProperties.Opacity) is { Value: .4f, Winner: { Source: "author", Condition: VariantState.None } }, "Style.With did not preserve rightmost static precedence.");
+        precedence.SetVariants(VariantState.Hover); graph.Drain();
+        Assert(precedence.Resolve(VisualProperties.Opacity) is { Value: .6f, Winner: { Source: "author", Condition: VariantState.Hover } }, "Fluent live variant lost author provenance.");
+        live.Value = .7f; graph.Drain();
+        Assert(precedence.Resolve(VisualProperties.Opacity).Value == .7f, "Fluent live property did not track its reader.");
     }
 
     private static void BehaviorIsolationAndRollback()
