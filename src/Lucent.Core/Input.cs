@@ -165,7 +165,7 @@ public sealed class InputRouter
                 if (SameStructuralPath(capture.Value.Owner, priorInput)) _captures[capture.Key] = capture.Value with { Generation = scene.Generation };
                 else Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
             SyncAvailability(errors);
-            if (_focused is { } focus && (!Eligible(focus.Identity) || !_input.TryGetValue(focus.Identity.ElementId, out var retained) || retained.Order != focus.Order || !Path(focus.Identity).SequenceEqual(focus.Path)))
+            if (_focused is { } focus && (!Eligible(focus.Identity) || !_input.ContainsKey(focus.Identity.ElementId) || !Path(focus.Identity).SequenceEqual(focus.Path)))
                 RequestFocus(null, FocusChangeReason.Reordered, errors);
             if (_composition.InteractionVisualGeneration != visualGeneration)
             {

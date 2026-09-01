@@ -22,11 +22,8 @@ internal static class VirtualizationFixture
         Controls.Column(composition.Root, context, "Fixture", Style.Empty.Set(LayoutProperties.Width, 400f).Set(LayoutProperties.Height, 500f).Set(LayoutProperties.Clip, true));
         var search = composition.Child(composition.Root, "search"); Controls.TextField(search, context, "Search", style: Style.Empty.Set(LayoutProperties.Width, 400f).Set(LayoutProperties.Height, 24f));
         var values = composition.Root.Scope.Signal(Enumerable.Range(1, 10_000).Reverse().ToArray(), "virtualization.rows");
-        var viewport = composition.Child(composition.Root, "viewport"); Controls.ScrollViewport(viewport, context, "Issues", style: Style.Empty.Set(LayoutProperties.Width, 400f).Set(LayoutProperties.Height, 180f));
-        _ = Controls.VirtualizedList(viewport, context, "rows", "Issues", () => values.Value, value => value, (value, factory) =>
-        {
-            var row = factory.Element("row"); Controls.Selectable(row, context, "Issue " + value); return row;
-        }, 30f);
+        _ = composition.Mount(composition.Root, context, Components.VirtualizedList(() => values.Value, value => value,
+            value => Components.Selectable("Issue " + value), () => 30f, "Issues", Style.Empty.Set(LayoutProperties.Width, 400f).Set(LayoutProperties.Height, 180f)));
         var reorder = composition.Child(composition.Root, "reorder");
         Controls.Button(reorder, context, "Reorder", () =>
         {

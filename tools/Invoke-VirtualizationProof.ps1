@@ -285,7 +285,8 @@ function Invoke-FixtureProof {
         $first.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select(); Start-Sleep -Milliseconds 100
         $reorder.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until { (Rows $list)[0].Current.Name -eq 'Issue 9999' } 'Keyed reorder did not converge.'
-        Assert-True (((Find-Node $root 'Issue 10000' ([System.Windows.Automation.ControlType]::ListItem)).GetRuntimeId() -join ',') -eq $runtime) 'Keyed move changed the realized row runtime ID.'
+        $reordered = Find-Node $root 'Issue 10000' ([System.Windows.Automation.ControlType]::ListItem)
+        Assert-True ((($reordered.GetRuntimeId() -join ',') -eq $runtime) -and $reordered.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) 'Keyed move changed the realized row runtime ID or selection.'
         $remove.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Wait-Until { $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, 'Issue 10000'))) -eq $null } 'Removed virtual row remained realized.'
         $stale = $false

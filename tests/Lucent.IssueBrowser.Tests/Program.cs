@@ -13,6 +13,7 @@ try
     FixtureIdentity();
     RecipeEvidence();
     DirectRootParity();
+    VirtualizedIssueRowParity();
     ReactiveFilterBarParity();
     AsyncBrowserStates();
     DensityRestyle();
@@ -58,19 +59,89 @@ static void DirectRootParity()
     var issue = IssueFixture.Issues[0];
     var generatedFilter = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser), issue);
     var generatedFilterNullStyle = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser, null), issue);
-    var handwrittenFilter = DirectRootEvidence(browser => FilterBarHandwrittenParityFixture.Create(browser), issue);
+    var handwrittenFilter = DirectRootEvidence(browser => HandwrittenParityFixture.Create(browser), issue);
     var generatedRow = DirectRootEvidence(browser => Lucent.IssueBrowser.Components.IssueRow(browser, issue), issue);
-    var handwrittenRow = DirectRootEvidence(browser => FilterBarHandwrittenParityFixture.CreateRow(browser, issue), issue);
+    var handwrittenRow = DirectRootEvidence(browser => HandwrittenParityFixture.CreateRow(browser, issue), issue);
     Assert(generatedFilter == generatedFilterNullStyle && generatedFilter == handwrittenFilter && generatedRow == handwrittenRow, "Generated .lui direct roots diverged from the retained handwritten C# parity fixtures or null root style changed the default.");
-    Assert(FilterBarInputEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser)) == FilterBarInputEvidence(browser => FilterBarHandwrittenParityFixture.Create(browser)), "Generated and handwritten Filter Bars diverged after ordinary retained text input.");
+    Assert(FilterBarInputEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser)) == FilterBarInputEvidence(browser => HandwrittenParityFixture.Create(browser)), "Generated and handwritten Filter Bars diverged after ordinary retained text input.");
     var evidence = generatedFilter.Dump + generatedFilter.Semantics + generatedRow.Dump + generatedRow.Semantics;
     Assert(Hash(evidence) == "f8a08b14e5f17e4f8d15b75ecaca943ec2b1b71495754bb8c619ca05ec8c167d", "Approved direct-root #48 parity rebaseline changed: " + Hash(evidence));
+}
+
+static void VirtualizedIssueRowParity()
+{
+    var generated = VirtualizedIssueRowEvidence(Lucent.IssueBrowser.Components.IssueRow);
+    var handwritten = VirtualizedIssueRowEvidence(HandwrittenParityFixture.CreateRow);
+    Assert(generated == handwritten,
+        $"Generated virtual Issue Rows diverged from the test-owned C# fixture: dump={generated.Dump == handwritten.Dump} semantics={generated.Semantics == handwritten.Semantics} scene={generated.Scene == handwritten.Scene} pixels={generated.Pixels == handwritten.Pixels} identity={generated.ReorderedElementId == handwritten.ReorderedElementId}.");
+    Assert(generated.InitialRows <= 6 && generated.RemainingRows <= 6 && generated.ReorderedElementId != 0,
+        "The 10,000-row generated Issue Row list exceeded its realization bound or lost keyed identity.");
+}
+
+static VirtualizedIssueRowEvidence VirtualizedIssueRowEvidence(Func<IssueBrowserState, BrowserIssue, ComponentRecipe> row)
+{
+    var graph = new ReactiveGraph();
+    using var composition = new Composition(graph, "issue-row-virtual-parity");
+    using var theme = new ThemeContext(composition.Root.Scope, new Theme("issue-row-virtual-parity"));
+    using var handler = new DeferredGitHubHandler();
+    using var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.github.local/") };
+    var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
+    var values = composition.Root.Scope.Signal<IReadOnlyList<BrowserIssue>>(Array.Empty<BrowserIssue>(), "issue-row-virtual-parity.values");
+    _ = composition.Mount(composition.Root, theme, Lucent.Core.Components.VirtualizedList(() => values.Value, issue => issue.Number,
+        issue => row(browser, issue).Named("issue-browser.issue-row"), () => 30f, "Issues", Style.Empty.Width(800f).Height(60f)));
+    values.Value = browser.VisibleIssues; graph.Drain(); handler.ReplyJson(0); graph.Drain();
+    values.Value = browser.VisibleIssues; graph.Drain();
+    Assert(values.Value.Count == IssueFixture.TotalCount, "The virtual Issue Row parity fixture did not load all 10,000 issues.");
+
+    using var renderer = new SkiaSceneRenderer();
+    var scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
+    Assert(composition.Input.SetScene(scene), "The virtual Issue Row parity scene was rejected.");
+    var initialRows = Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem);
+    var initial = IssueRow(composition, 10_000, "initial");
+    var dump = composition.Dump();
+    var semantics = SemanticEvidence(composition.SemanticSnapshot()!);
+    var sceneEvidence = SceneEvidence(scene);
+    var pixels = Pixels(renderer, scene, 800, 60);
+
+    Assert(composition.ExecuteSemanticCommand(initial.Identity, new(SemanticCommandKind.Select)) == SemanticCommandResult.Applied && composition.Input.FocusSemantic(new(initial.Identity.CompositionEpoch, initial.Identity.ElementId)),
+        "The generated virtual Issue Row did not accept semantic selection and focus.");
+    graph.Drain();
+    scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
+    Assert(composition.Input.SetScene(scene), "The selected virtual Issue Row scene was rejected.");
+    var selected = IssueRow(composition, 10_000, "selected");
+    Assert(selected.Selected && composition.Input.FocusedElement?.ElementId == selected.Identity.ElementId && composition.IsCurrent(selected.Identity),
+        "The selected virtual Issue Row did not retain current focus and selection semantics.");
+
+    var reorderedValues = values.Value.ToArray();
+    (reorderedValues[0], reorderedValues[1]) = (reorderedValues[1], reorderedValues[0]);
+    values.Value = reorderedValues; graph.Drain();
+    scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
+    Assert(composition.Input.SetScene(scene), "The reordered virtual Issue Row scene was rejected.");
+    var reordered = IssueRow(composition, 10_000, "reordered");
+    Assert(reordered.Identity.ElementId == selected.Identity.ElementId && reordered.Selected && composition.Input.FocusedElement?.ElementId == selected.Identity.ElementId && composition.IsCurrent(selected.Identity),
+        "Keyed virtual Issue Row reorder changed runtime identity, focus, selection, or current semantics.");
+
+    values.Value = values.Value.Skip(2).ToArray(); graph.Drain();
+    scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
+    Assert(composition.Input.SetScene(scene), "The removed virtual Issue Row scene was rejected.");
+    var remainingRows = Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem);
+    Assert(!Flatten(composition.SemanticSnapshot()!).Any(node => node.Name.StartsWith("#10000 ", StringComparison.Ordinal)) && !composition.IsCurrent(reordered.Identity) &&
+        composition.ExecuteSemanticCommand(reordered.Identity, new(SemanticCommandKind.Select)) == SemanticCommandResult.Stale && composition.Input.FocusedElement?.ElementId != reordered.Identity.ElementId,
+        "Removed virtual Issue Row retained current, focus, or semantic command access.");
+    return new(sceneEvidence, dump, semantics, pixels, initialRows, remainingRows, reordered.Identity.ElementId);
+}
+
+static SemanticSnapshot IssueRow(Composition composition, int number, string phase)
+{
+    var row = Flatten(composition.SemanticSnapshot()!).SingleOrDefault(node => node.Role == SemanticRole.ListItem && node.Name.StartsWith("#" + number + " ", StringComparison.Ordinal));
+    if (row is null) throw new InvalidOperationException("The " + phase + " virtual Issue Row was not realized.");
+    return row;
 }
 
 static void ReactiveFilterBarParity()
 {
     var generated = ReactiveFilterBarEvidence((browser, style) => Lucent.IssueBrowser.Components.FilterBar(browser, style));
-    var handwritten = ReactiveFilterBarEvidence(FilterBarHandwrittenParityFixture.Create);
+    var handwritten = ReactiveFilterBarEvidence(HandwrittenParityFixture.Create);
     Assert(generated == handwritten, $"Generated Filter Bar diverged from the test-owned handwritten fixture after an idle reactive style completion: beforeDump={generated.BeforeDump == handwritten.BeforeDump} afterDump={generated.AfterDump == handwritten.AfterDump} beforeSemantics={generated.BeforeSemantics == handwritten.BeforeSemantics} afterSemantics={generated.AfterSemantics == handwritten.AfterSemantics} beforeScene={generated.BeforeScene == handwritten.BeforeScene} afterScene={generated.AfterScene == handwritten.AfterScene} beforePixels={generated.BeforePixels == handwritten.BeforePixels} afterPixels={generated.AfterPixels == handwritten.AfterPixels}.");
     Assert(generated.BeforeDump == generated.AfterDump && generated.BeforeSemantics == generated.AfterSemantics && generated.RootId == generated.AfterRootId,
         "Reactive Filter Bar completion changed retained structure, semantics, or identity.");
@@ -397,7 +468,12 @@ static void StartupStaysFrameworkOwned()
         if (Directory.Exists(app))
         {
             var source = string.Join('\n', Directory.EnumerateFiles(app, "*.cs").Select(File.ReadAllText));
-            Assert(!source.Contains(".Drain(", StringComparison.Ordinal) && !source.Contains("test mode", StringComparison.OrdinalIgnoreCase), "Application startup owns framework synchronization or a test mode.");
+            var issueRow = File.ReadAllText(Path.Combine(app, "IssueRow.lui"));
+            Assert(!source.Contains(".Drain(", StringComparison.Ordinal) && !source.Contains("test mode", StringComparison.OrdinalIgnoreCase) &&
+                !source.Contains("IssueRowHandwritten", StringComparison.Ordinal) && !Regex.IsMatch(source, @"\bComponentRecipe\s+IssueRow\s*\(") &&
+                source.Contains("VirtualizedList(() => browser.VisibleIssues, issue => issue.Number, issue => IssueRow(browser, issue)", StringComparison.Ordinal) &&
+                issueRow.Contains("public component IssueRow", StringComparison.Ordinal) && !issueRow.Contains("VirtualizedList", StringComparison.Ordinal),
+                "Production Issue Row no longer uses the generated static row factory owned by the C# virtualized list.");
             return;
         }
         directory = directory.Parent;
@@ -490,8 +566,9 @@ readonly record struct FilterBarAppearance(Brush Background, Insets Padding, flo
     public FilterBarAppearance(Color background, Insets padding, float opacity) : this((Brush)background, padding, opacity) { }
 }
 readonly record struct ReactiveFilterEvidence(long RootId, long AfterRootId, string BeforeDump, string AfterDump, string BeforeSemantics, string AfterSemantics, string BeforeScene, string AfterScene, string BeforePixels, string AfterPixels);
+readonly record struct VirtualizedIssueRowEvidence(string Scene, string Dump, string Semantics, string Pixels, int InitialRows, int RemainingRows, long ReorderedElementId);
 
-internal static class FilterBarHandwrittenParityFixture
+internal static class HandwrittenParityFixture
 {
     private static readonly Style FilterBarStyle = Style.Empty.Width(800f).Height(IssueBrowserStructure.DensityFilterHeight).Spacing(IssueBrowserStructure.DensitySpacing);
     private static readonly Style TextFieldStyle = Style.Empty.Width(250f).Height(24f);

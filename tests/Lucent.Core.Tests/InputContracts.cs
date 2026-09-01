@@ -74,7 +74,11 @@ internal static class InputContracts
             "Stale reordered scene routed input or retained focus.");
         Assert(router.SetScene(SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())), "Reordered scene rejected.");
         Assert(router.MoveFocus(FocusTraversalDirection.Next) && router.FocusedElement?.ElementId == region.Items[0].Id, "Traversal did not use retained reordered composition order.");
-        region.Items[0].Dispose();
+        var focused = region.Items[0];
+        rows.Value = [1, 2]; graph.Drain();
+        Assert(router.SetScene(SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())) && router.FocusedElement?.ElementId == focused.Id,
+            "A current keyed row lost focus when its order changed in a replacement scene.");
+        focused.Dispose();
         Assert(router.FocusedElement is null && failures == 0, "Disposed focus owner remained active or invoked unrelated capture loss.");
     }
 
