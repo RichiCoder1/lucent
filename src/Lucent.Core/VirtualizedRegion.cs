@@ -1,5 +1,5 @@
-using System.Globalization;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text;
 
@@ -11,7 +11,8 @@ internal interface IVirtualizedRegion
 }
 
 /// <summary>A fixed-height keyed region that owns only the visible rows plus two rows of overscan on each side.</summary>
-internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRegion where TKey : notnull
+internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualizedRegion
+    where TKey : notnull
 {
     private const int Overscan = 2;
     private readonly Composition _composition;
@@ -25,14 +26,30 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
     private Dictionary<TKey, Element> _entries = [];
     private bool _updating;
 
-    internal VirtualizedRegion(Composition composition, Element viewport, string name, Func<IEnumerable<TItem>> source,
-        Func<TItem, TKey> key, Func<TItem, CompositionContext, Element> content, float rowHeight, ThemeContext theme, CompositionContext? factory = null)
+    internal VirtualizedRegion(
+        Composition composition,
+        Element viewport,
+        string name,
+        Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key,
+        Func<TItem, CompositionContext, Element> content,
+        float rowHeight,
+        ThemeContext theme,
+        CompositionContext? factory = null
+    )
     {
-        if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
+        if (!float.IsFinite(rowHeight) || rowHeight <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rowHeight));
         _composition = composition;
         _viewport = viewport ?? throw new ArgumentNullException(nameof(viewport));
-        Region = factory is null ? composition.Child(viewport, name) : factory.Child(viewport, name);
-        _source = source; _key = key; _content = content; Theme = theme ?? throw new ArgumentNullException(nameof(theme)); RowHeight = rowHeight;
+        Region = factory is null
+            ? composition.Child(viewport, name)
+            : factory.Child(viewport, name);
+        _source = source;
+        _key = key;
+        _content = content;
+        Theme = theme ?? throw new ArgumentNullException(nameof(theme));
+        RowHeight = rowHeight;
         Region.Scope.Own(this);
         _composition.Register(this);
         _effect = Region.Scope.Effect(Refresh, name + ".items");
@@ -58,11 +75,14 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
         _composition.RejectForeignFactory(Region);
-        if (!float.IsFinite(rowHeight) || rowHeight <= 0) throw new ArgumentOutOfRangeException(nameof(rowHeight));
-        if (IsDisposed || RowHeight == rowHeight) return;
+        if (!float.IsFinite(rowHeight) || rowHeight <= 0)
+            throw new ArgumentOutOfRangeException(nameof(rowHeight));
+        if (IsDisposed || RowHeight == rowHeight)
+            return;
         RowHeight = rowHeight;
         Region.UpdateControl(LayoutProperties.VirtualRowHeight, rowHeight);
-        foreach (var entry in _entries.Values) entry.UpdateControl(LayoutProperties.Height, rowHeight);
+        foreach (var entry in _entries.Values)
+            entry.UpdateControl(LayoutProperties.Height, rowHeight);
     }
 
     /// <summary>Re-evaluates the source. Normal callers let the owned reactive effect invoke this.</summary>
@@ -81,32 +101,52 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         _composition.ThrowIfBehaviorAttachment();
         _composition.RejectForeignFactory(Region);
         ArgumentNullException.ThrowIfNull(items);
-        if (IsDisposed) return;
-        var next = items.ToArray(); var keys = new TKey[next.Length]; var unique = new HashSet<TKey>();
+        if (IsDisposed)
+            return;
+        var next = items.ToArray();
+        var keys = new TKey[next.Length];
+        var unique = new HashSet<TKey>();
         for (var index = 0; index < next.Length; index++)
         {
             var key = _key!(next[index]);
-            if (!unique.Add(key)) throw new ArgumentException("Virtualized region keys must be unique.", nameof(items));
+            if (!unique.Add(key))
+                throw new ArgumentException(
+                    "Virtualized region keys must be unique.",
+                    nameof(items)
+                );
             keys[index] = key;
         }
-        _items = next; _keys = keys;
+        _items = next;
+        _keys = keys;
         Region.UpdateControl(LayoutProperties.VirtualItemCount, next.Length);
     }
 
     void IVirtualizedRegion.Realize(LayoutViewport viewport) => Realize(viewport);
+
     public void Realize(LayoutViewport viewport)
     {
         _composition.CheckThread();
         _composition.RejectForeignFactory(Region);
-        if (IsDisposed) return;
+        if (IsDisposed)
+            return;
         viewport.Validate();
-        if (_updating) throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
+        if (_updating)
+            throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
         var outerWidth = _viewport.Resolve(LayoutProperties.Width).Value ?? viewport.Width;
         var outerHeight = _viewport.Resolve(LayoutProperties.Height).Value ?? viewport.Height;
-        var viewportHeight = SceneLayout.ContentBounds(LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale), _viewport.Resolve(LayoutProperties.Padding).Value, viewport.Scale).Height;
+        var viewportHeight = SceneLayout
+            .ContentBounds(
+                LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale),
+                _viewport.Resolve(LayoutProperties.Padding).Value,
+                viewport.Scale
+            )
+            .Height;
         var offset = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
         var first = Math.Max(0, (int)MathF.Floor(offset / RowHeight) - Overscan);
-        var last = Math.Min(_items.Length, (int)MathF.Ceiling((offset + viewportHeight) / RowHeight) + Overscan);
+        var last = Math.Min(
+            _items.Length,
+            (int)MathF.Ceiling((offset + viewportHeight) / RowHeight) + Overscan
+        );
         Realize(first, last);
     }
 
@@ -122,12 +162,14 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
             {
                 for (var index = first; index < last; index++)
                 {
-                    if (retained.ContainsKey(_keys[index])) continue;
+                    if (retained.ContainsKey(_keys[index]))
+                        continue;
                     var context = new CompositionContext(_composition, Region, Theme);
                     provisional.Add((_keys[index], null!, context));
                     var entry = context.Run(() => _content!(_items[index], context));
                     context.Validate(entry);
-                    if (!entry.HasPresentation) entry.Present(Theme);
+                    if (!entry.HasPresentation)
+                        entry.Present(Theme);
                     entry.UpdateControl(LayoutProperties.Height, RowHeight);
                     entry.UpdateControl(LayoutProperties.VirtualRowIndex, index);
                     provisional[^1] = (_keys[index], entry, context);
@@ -137,7 +179,14 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
             {
                 var errors = new List<Exception> { error };
                 foreach (var entry in provisional)
-                    try { entry.Context.Dispose(); } catch (Exception cleanup) { errors.Add(cleanup); }
+                    try
+                    {
+                        entry.Context.Dispose();
+                    }
+                    catch (Exception cleanup)
+                    {
+                        errors.Add(cleanup);
+                    }
                 Composition.ThrowAll(errors, "Virtualized region factory failed.");
                 throw;
             }
@@ -147,21 +196,41 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
             for (var index = first; index < last; index++)
             {
                 var key = _keys[index];
-                var entry = retained.TryGetValue(key, out var current) ? current : provisional.Single(value => EqualityComparer<TKey>.Default.Equals(value.Key, key)).Element;
+                var entry = retained.TryGetValue(key, out var current)
+                    ? current
+                    : provisional
+                        .Single(value => EqualityComparer<TKey>.Default.Equals(value.Key, key))
+                        .Element;
                 entry.UpdateControl(LayoutProperties.VirtualRowIndex, index);
-                next.Add(key, entry); ordered.Add(entry);
+                next.Add(key, entry);
+                ordered.Add(entry);
             }
-            foreach (var entry in provisional) entry.Context.Complete();
-            var departed = _entries.Where(pair => !wanted.Contains(pair.Key)).Select(pair => pair.Value).ToArray();
+            foreach (var entry in provisional)
+                entry.Context.Complete();
+            var departed = _entries
+                .Where(pair => !wanted.Contains(pair.Key))
+                .Select(pair => pair.Value)
+                .ToArray();
             _entries = next;
             Region.ReplaceChildren(ordered);
-            foreach (var entry in provisional) entry.Context.Dispose();
+            foreach (var entry in provisional)
+                entry.Context.Dispose();
             List<Exception>? cleanupErrors = null;
             foreach (var entry in departed)
-                try { entry.Dispose(); } catch (Exception error) { (cleanupErrors ??= []).Add(error); }
+                try
+                {
+                    entry.Dispose();
+                }
+                catch (Exception error)
+                {
+                    (cleanupErrors ??= []).Add(error);
+                }
             Composition.ThrowAll(cleanupErrors, "Virtualized region cleanup failed.");
         }
-        finally { _updating = false; }
+        finally
+        {
+            _updating = false;
+        }
     }
 
     public void Dispose()
@@ -169,15 +238,37 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         _composition.CheckThread();
         _composition.ThrowIfBehaviorAttachment();
         _composition.RejectForeignFactory(Region);
-        if (IsDisposed) return;
-        IsDisposed = true; _composition.Unregister(this);
+        if (IsDisposed)
+            return;
+        IsDisposed = true;
+        _composition.Unregister(this);
         List<Exception>? errors = null;
-        try { _effect.Dispose(); } catch (Exception error) { errors = [error]; }
-        var entries = _entries.Values.ToArray(); _entries.Clear();
-        if (!Region.IsDisposed) Region.ReplaceChildren([]);
+        try
+        {
+            _effect.Dispose();
+        }
+        catch (Exception error)
+        {
+            errors = [error];
+        }
+        var entries = _entries.Values.ToArray();
+        _entries.Clear();
+        if (!Region.IsDisposed)
+            Region.ReplaceChildren([]);
         foreach (var entry in entries.Reverse())
-            try { entry.Dispose(); } catch (Exception error) { (errors ??= []).Add(error); }
-        _source = null; _key = null; _content = null; _items = []; _keys = [];
+            try
+            {
+                entry.Dispose();
+            }
+            catch (Exception error)
+            {
+                (errors ??= []).Add(error);
+            }
+        _source = null;
+        _key = null;
+        _content = null;
+        _items = [];
+        _keys = [];
         Region.Scope.Detach(this);
         Composition.ThrowAll(errors, "Virtualized region cleanup failed.");
     }

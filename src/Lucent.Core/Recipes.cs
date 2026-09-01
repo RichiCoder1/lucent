@@ -9,7 +9,11 @@ public sealed class ComponentRecipe
     private readonly Action<CompositionContext, Element> _content;
     private readonly string? _name;
 
-    private ComponentRecipe(string kind, Action<CompositionContext, Element> content, string? name = null)
+    private ComponentRecipe(
+        string kind,
+        Action<CompositionContext, Element> content,
+        string? name = null
+    )
     {
         Kind = kind;
         _content = content;
@@ -63,7 +67,9 @@ public sealed class ContentRecipe
         ReactiveGraph.ValidateName(name, nameof(name));
         ArgumentNullException.ThrowIfNull(active);
         ArgumentNullException.ThrowIfNull(content);
-        return new ContentRecipe((context, parent) => _ = context.When(parent, name, active, content.Mount));
+        return new ContentRecipe(
+            (context, parent) => _ = context.When(parent, name, active, content.Mount)
+        );
     }
 
     /// <summary>Creates one retained branch selected by one reactive evaluation.</summary>
@@ -75,19 +81,33 @@ public sealed class ContentRecipe
     }
 
     /// <summary>Creates a retained keyed contribution.</summary>
-    public static ContentRecipe ForEach<TKey, TItem>(string name, Func<IEnumerable<TItem>> source,
-        Func<TItem, TKey> key, Func<TItem, ComponentRecipe> content) where TKey : notnull
+    public static ContentRecipe ForEach<TKey, TItem>(
+        string name,
+        Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key,
+        Func<TItem, ComponentRecipe> content
+    )
+        where TKey : notnull
     {
         ReactiveGraph.ValidateName(name, nameof(name));
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(content);
-        return new ContentRecipe((context, parent) => _ = context.ForEach(parent, name, source, key, (item, child) =>
-        {
-            var recipe = content(item);
-            ArgumentNullException.ThrowIfNull(recipe);
-            return recipe.Mount(child);
-        }));
+        return new ContentRecipe(
+            (context, parent) =>
+                _ = context.ForEach(
+                    parent,
+                    name,
+                    source,
+                    key,
+                    (item, child) =>
+                    {
+                        var recipe = content(item);
+                        ArgumentNullException.ThrowIfNull(recipe);
+                        return recipe.Mount(child);
+                    }
+                )
+        );
     }
 
     internal void Mount(CompositionContext context, Element parent) => _mount(context, parent);
@@ -112,10 +132,13 @@ public sealed class ComponentContent : IReadOnlyList<ContentRecipe>
     /// <summary>Snapshots ordered content for C# collection expressions.</summary>
     public static ComponentContent Create(ReadOnlySpan<ContentRecipe> recipes)
     {
-        foreach (var recipe in recipes) ArgumentNullException.ThrowIfNull(recipe);
+        foreach (var recipe in recipes)
+            ArgumentNullException.ThrowIfNull(recipe);
         return recipes.Length == 0 ? Empty : new ComponentContent(recipes.ToArray());
     }
 
-    public IEnumerator<ContentRecipe> GetEnumerator() => ((IEnumerable<ContentRecipe>)_recipes).GetEnumerator();
+    public IEnumerator<ContentRecipe> GetEnumerator() =>
+        ((IEnumerable<ContentRecipe>)_recipes).GetEnumerator();
+
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

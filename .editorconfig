@@ -20,3 +20,52 @@ end_of_line = lf
 [*.{css,json,jsonc,yml,yaml}]
 indent_style = space
 indent_size = 2
+
+# Intentional public vocabulary and abstraction-oriented contracts; keep APIs stable.
+[src/Lucent.Core/PropertyTheme.cs]
+dotnet_diagnostic.CA1716.severity = none
+[src/Lucent.Core/Input.cs]
+dotnet_diagnostic.CA1720.severity = none
+
+# Internal collection abstractions are deliberate; avoid concrete-type churn.
+[src/Lucent.Core/{InputRouter.cs,SceneLayout.cs}]
+dotnet_diagnostic.CA1859.severity = none
+[src/Lucent.Lui.Compiler/{LuiCompiler.cs,LuiParser.cs}]
+dotnet_diagnostic.CA1859.severity = none
+
+# Helpers intentionally remain instance members for the surrounding parser/composition contract.
+[src/Lucent.Core/Composition.cs]
+dotnet_diagnostic.CA1822.severity = none
+[src/Lucent.Lui.Compiler/LuiParser.cs]
+dotnet_diagnostic.CA1822.severity = none
+
+# AsyncLease owns cancellation explicitly; it intentionally has no public IDisposable lifecycle.
+[src/Lucent.Core/AsyncValue.cs]
+dotnet_diagnostic.CA1001.severity = none
+
+# WindowsFrameContract keeps its formatting helper instance-shaped for the internal contract.
+[src/Lucent.Platform.Windows/WindowsFrameContract.cs]
+dotnet_diagnostic.CA1822.severity = none
+
+# Request completion ownership is explicit in WindowsUiaDispatcher; no public IDisposable API.
+[src/Lucent.Platform.Windows/WindowsUiaDispatcher.cs]
+dotnet_diagnostic.CA1001.severity = none
+
+# The fixture factory deliberately returns the abstraction used by its consumers.
+[apps/Lucent.IssueBrowser/IssueFixture.cs]
+dotnet_diagnostic.CA1859.severity = none
+
+# This one-shot seed array is intentionally not a shared mutable static.
+[tests/Lucent.Platform.Windows.Tests/UiaFixture.cs]
+dotnet_diagnostic.CA1861.severity = none
+
+# Test contract fixtures intentionally exercise construction failures and compact arrays; these
+# are assertions, not production hot paths, so analyzer suggestions add noise without value.
+[tests/Lucent.Core.Tests/{Program.cs,CompositionContracts.cs,InputContracts.cs,LayoutSceneContracts.cs,PresentationContracts.cs,ControlsContracts.cs,ReactiveContracts.cs}]
+dotnet_diagnostic.CA1806.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.CA1859.severity = none
+[tests/Lucent.Lui.Compiler.Tests/Program.cs]
+dotnet_diagnostic.CA1861.severity = none

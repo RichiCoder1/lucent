@@ -11,7 +11,8 @@ internal sealed unsafe partial class WindowsSettingsListener : IDisposable
     private const uint WM_THEMECHANGED = 0x031A;
     private const uint WM_NCDESTROY = 0x0082;
     private static long _nextId;
-    private static readonly nint Procedure = (nint)(delegate* unmanaged[Stdcall]<nint, uint, nint, nint, nuint, nint, nint>)&SubclassProc;
+    private static readonly nint Procedure = (nint)
+        (delegate* unmanaged[Stdcall]<nint, uint, nint, nint, nuint, nint, nint>)&SubclassProc;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly nint _window;
     private readonly nuint _id = checked((nuint)Interlocked.Increment(ref _nextId));
@@ -22,7 +23,7 @@ internal sealed unsafe partial class WindowsSettingsListener : IDisposable
 
     internal WindowsSettingsListener(nint window)
     {
-        if (window == 0) throw new ArgumentOutOfRangeException(nameof(window));
+        ArgumentOutOfRangeException.ThrowIfZero(window, nameof(window));
         _window = window;
         _handle = GCHandle.Alloc(this);
         if (!SetWindowSubclass(window, Procedure, _id, GCHandle.ToIntPtr(_handle)))
@@ -43,16 +44,25 @@ internal sealed unsafe partial class WindowsSettingsListener : IDisposable
     public void Dispose()
     {
         CheckThread();
-        if (_disposed) return;
+        if (_disposed)
+            return;
         _disposed = true;
-        if (_destroyed) return;
+        if (_destroyed)
+            return;
         if (!RemoveWindowSubclass(_window, Procedure, _id))
             throw new InvalidOperationException("RemoveWindowSubclass(settings listener) failed.");
         ReleaseHandle();
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
-    private static nint SubclassProc(nint window, uint message, nint wParam, nint lParam, nuint id, nint data)
+    private static nint SubclassProc(
+        nint window,
+        uint message,
+        nint wParam,
+        nint lParam,
+        nuint id,
+        nint data
+    )
     {
         WindowsSettingsListener? listener = null;
         try
@@ -68,10 +78,20 @@ internal sealed unsafe partial class WindowsSettingsListener : IDisposable
         catch { }
 
         nint result;
-        try { result = DefSubclassProc(window, message, wParam, lParam); }
-        catch { result = 0; }
+        try
+        {
+            result = DefSubclassProc(window, message, wParam, lParam);
+        }
+        catch
+        {
+            result = 0;
+        }
         if (message == WM_NCDESTROY && listener is not null)
-            try { listener.Destroyed(); } catch { }
+            try
+            {
+                listener.Destroyed();
+            }
+            catch { }
         return result;
     }
 
@@ -83,13 +103,16 @@ internal sealed unsafe partial class WindowsSettingsListener : IDisposable
 
     private void ReleaseHandle()
     {
-        if (_handle.IsAllocated) _handle.Free();
+        if (_handle.IsAllocated)
+            _handle.Free();
     }
 
     private void CheckThread()
     {
         if (Environment.CurrentManagedThreadId != _ownerThread)
-            throw new InvalidOperationException("Windows settings listener access must remain on its owner thread.");
+            throw new InvalidOperationException(
+                "Windows settings listener access must remain on its owner thread."
+            );
     }
 
     [LibraryImport("comctl32.dll", SetLastError = true)]
@@ -101,5 +124,10 @@ internal sealed unsafe partial class WindowsSettingsListener : IDisposable
     private static partial bool RemoveWindowSubclass(nint window, nint procedure, nuint id);
 
     [LibraryImport("comctl32.dll")]
-    private static partial nint DefSubclassProc(nint window, uint message, nint wParam, nint lParam);
+    private static partial nint DefSubclassProc(
+        nint window,
+        uint message,
+        nint wParam,
+        nint lParam
+    );
 }

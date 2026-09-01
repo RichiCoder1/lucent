@@ -17,6 +17,9 @@ internal static partial class WindowsDpi
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool AreDpiAwarenessContextsEqual(nint left, nint right);
 
-    internal static bool IsPerMonitorV2() => AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), PerMonitorV2);
-    internal static bool EnsurePerMonitorV2() => SetProcessDpiAwarenessContext(PerMonitorV2) || IsPerMonitorV2();
+    internal static bool IsPerMonitorV2() =>
+        AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(), PerMonitorV2);
+
+    internal static bool EnsurePerMonitorV2() =>
+        SetProcessDpiAwarenessContext(PerMonitorV2) || IsPerMonitorV2();
 }

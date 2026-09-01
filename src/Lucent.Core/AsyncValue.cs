@@ -18,7 +18,15 @@ public sealed class AsyncValue<T> : ReactiveNode
     private bool _hasValue;
     private long _generation;
 
-    internal AsyncValue(ReactiveGraph graph, Func<CancellationToken, Task<T>> load, T? staleValue, bool hasValue, string name, ReactiveScope? scope) : base(graph, name, scope)
+    internal AsyncValue(
+        ReactiveGraph graph,
+        Func<CancellationToken, Task<T>> load,
+        T? staleValue,
+        bool hasValue,
+        string name,
+        ReactiveScope? scope
+    )
+        : base(graph, name, scope)
     {
         _load = load;
         _value = staleValue;
@@ -26,15 +34,61 @@ public sealed class AsyncValue<T> : ReactiveNode
     }
 
     internal override string Kind => "async";
-    public T? Value { get { Graph.CheckThread(); Read(); EnsureStarted(); return _value; } }
-    public bool HasValue { get { Graph.CheckThread(); Read(); EnsureStarted(); return _hasValue; } }
-    public bool IsPending { get { Graph.CheckThread(); Read(); EnsureStarted(); return _pending; } }
-    public bool IsCancelled { get { Graph.CheckThread(); Read(); EnsureStarted(); return _cancelled; } }
-    public Exception? Error { get { Graph.CheckThread(); Read(); EnsureStarted(); return _error; } }
+    public T? Value
+    {
+        get
+        {
+            Graph.CheckThread();
+            Read();
+            EnsureStarted();
+            return _value;
+        }
+    }
+    public bool HasValue
+    {
+        get
+        {
+            Graph.CheckThread();
+            Read();
+            EnsureStarted();
+            return _hasValue;
+        }
+    }
+    public bool IsPending
+    {
+        get
+        {
+            Graph.CheckThread();
+            Read();
+            EnsureStarted();
+            return _pending;
+        }
+    }
+    public bool IsCancelled
+    {
+        get
+        {
+            Graph.CheckThread();
+            Read();
+            EnsureStarted();
+            return _cancelled;
+        }
+    }
+    public Exception? Error
+    {
+        get
+        {
+            Graph.CheckThread();
+            Read();
+            EnsureStarted();
+            return _error;
+        }
+    }
 
     private void EnsureStarted()
     {
-        if (!_dirty) return;
+        if (!_dirty)
+            return;
         CheckScopeMutationGuard();
         Exception? stopError = StopCurrent();
         var lease = _lease = new AsyncLease<T>(this, ++_generation);
@@ -55,8 +109,14 @@ public sealed class AsyncValue<T> : ReactiveNode
                 return;
             }
             Exception? completeError = null;
-            try { Complete(lease, default, exception, false); }
-            catch (Exception completionException) { completeError = completionException; }
+            try
+            {
+                Complete(lease, default, exception, false);
+            }
+            catch (Exception completionException)
+            {
+                completeError = completionException;
+            }
             ReactiveGraph.ThrowCombined(stopError, completeError, "Async start failed.");
             return;
         }
@@ -64,8 +124,19 @@ public sealed class AsyncValue<T> : ReactiveNode
         if (evaluation.Value is null)
         {
             Exception? completeError = null;
-            try { Complete(lease, default, new InvalidOperationException("Async loader returned null task."), false); }
-            catch (Exception completionException) { completeError = completionException; }
+            try
+            {
+                Complete(
+                    lease,
+                    default,
+                    new InvalidOperationException("Async loader returned null task."),
+                    false
+                );
+            }
+            catch (Exception completionException)
+            {
+                completeError = completionException;
+            }
             ReactiveGraph.ThrowCombined(stopError, completeError, "Async start failed.");
             return;
         }
@@ -73,39 +144,71 @@ public sealed class AsyncValue<T> : ReactiveNode
         Exception? transitionError = null;
         try
         {
-            evaluation.Value.ContinueWith(completed => lease.Post(completed), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-            if (evaluation.ChangedDuringRun) DependencyChanged();
+            evaluation.Value.ContinueWith(
+                completed => lease.Post(completed),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default
+            );
+            if (evaluation.ChangedDuringRun)
+                DependencyChanged();
         }
-        catch (Exception exception) { transitionError = exception; }
+        catch (Exception exception)
+        {
+            transitionError = exception;
+        }
         ReactiveGraph.ThrowCombined(stopError, transitionError, "Async transition failed.");
     }
 
     internal void Complete(AsyncLease<T> lease, T? value, Exception? error, bool cancelled)
     {
         Graph.CheckThread();
-        if (IsDisposed || !ReferenceEquals(lease, _lease)) { lease.ReleasePosted(); return; }
+        if (IsDisposed || !ReferenceEquals(lease, _lease))
+        {
+            lease.ReleasePosted();
+            return;
+        }
         _lease = null;
         var releaseError = lease.Finish();
         _pending = false;
-        if (cancelled) _cancelled = true;
-        else if (error is null) { _value = value; _hasValue = true; }
-        else _error = error;
+        if (cancelled)
+            _cancelled = true;
+        else if (error is null)
+        {
+            _value = value;
+            _hasValue = true;
+        }
+        else
+            _error = error;
         Exception? changedError = null;
-        try { Changed(); }
-        catch (Exception exception) { changedError = exception; }
+        try
+        {
+            Changed();
+        }
+        catch (Exception exception)
+        {
+            changedError = exception;
+        }
         ReactiveGraph.ThrowCombined(releaseError, changedError, "Async completion failed.");
     }
 
     internal override void DependencyChanged()
     {
-        if (IsDisposed) return;
+        if (IsDisposed)
+            return;
         _dirty = true;
         _pending = false;
         _cancelled = true;
         var error = StopCurrent();
         Exception? changedError = null;
-        try { Changed(); }
-        catch (Exception exception) { changedError = exception; }
+        try
+        {
+            Changed();
+        }
+        catch (Exception exception)
+        {
+            changedError = exception;
+        }
         ReactiveGraph.ThrowCombined(error, changedError, "Async invalidation failed.");
     }
 
@@ -113,22 +216,40 @@ public sealed class AsyncValue<T> : ReactiveNode
     {
         Graph.CheckThread();
         CheckScopeMutationGuard();
-        if (IsDisposed) return;
+        if (IsDisposed)
+            return;
         var error = StopCurrent();
         _load = null;
         _value = default;
         _error = null;
         _pending = false;
         _hasValue = false;
-        try { base.Dispose(); }
-        catch (Exception exception) { ReactiveGraph.ThrowCombined(error, exception, "Async disposal failed."); return; }
-        if (error is not null) ExceptionDispatchInfo.Capture(error).Throw();
+        try
+        {
+            base.Dispose();
+        }
+        catch (Exception exception)
+        {
+            ReactiveGraph.ThrowCombined(error, exception, "Async disposal failed.");
+            return;
+        }
+        if (error is not null)
+            ExceptionDispatchInfo.Capture(error).Throw();
     }
 
-    internal override void AppendDump(StringBuilder dump) => dump.Append(" dirty=").Append(_dirty ? "true" : "false")
-        .Append(" generation=").Append(_generation.ToString(CultureInfo.InvariantCulture)).Append(" pending=").Append(_pending ? "true" : "false")
-        .Append(" cancelled=").Append(_cancelled ? "true" : "false").Append(" hasValue=").Append(_hasValue ? "true" : "false")
-        .Append(" hasError=").Append(_error is null ? "false" : "true");
+    internal override void AppendDump(StringBuilder dump) =>
+        dump.Append(" dirty=")
+            .Append(_dirty ? "true" : "false")
+            .Append(" generation=")
+            .Append(_generation.ToString(CultureInfo.InvariantCulture))
+            .Append(" pending=")
+            .Append(_pending ? "true" : "false")
+            .Append(" cancelled=")
+            .Append(_cancelled ? "true" : "false")
+            .Append(" hasValue=")
+            .Append(_hasValue ? "true" : "false")
+            .Append(" hasError=")
+            .Append(_error is null ? "false" : "true");
 
     private Exception? StopCurrent()
     {
@@ -145,7 +266,12 @@ internal sealed class AsyncLease<T>
     private CancellationTokenSource? _cancellation = new();
     private AsyncPosted<T>? _posted;
 
-    internal AsyncLease(AsyncValue<T> owner, long generation) { _owner = owner; Generation = generation; }
+    internal AsyncLease(AsyncValue<T> owner, long generation)
+    {
+        _owner = owner;
+        Generation = generation;
+    }
+
     internal long Generation { get; }
     internal CancellationToken Token => _cancellation?.Token ?? CancellationToken.None;
 
@@ -155,7 +281,8 @@ internal sealed class AsyncLease<T>
         ReactiveGraph graph;
         lock (_gate)
         {
-            if (_owner is null) return;
+            if (_owner is null)
+                return;
             graph = _owner.Graph;
             var cancelled = task.IsCanceled;
             var error = cancelled ? null : task.Exception?.GetBaseException();
@@ -191,9 +318,17 @@ internal sealed class AsyncLease<T>
             _cancellation = null;
             _posted = null;
         }
-        if (cancellation is null) return null;
-        try { cancellation.Dispose(); return null; }
-        catch (Exception exception) { return exception; }
+        if (cancellation is null)
+            return null;
+        try
+        {
+            cancellation.Dispose();
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception;
+        }
     }
 
     internal bool Commit(AsyncPosted<T> posted, T? value, Exception? error, bool cancelled)
@@ -201,13 +336,28 @@ internal sealed class AsyncLease<T>
         AsyncValue<T>? owner;
         lock (_gate)
         {
-            if (!ReferenceEquals(_posted, posted)) { posted.Release(); return false; }
+            if (!ReferenceEquals(_posted, posted))
+            {
+                posted.Release();
+                return false;
+            }
             _posted = null;
             owner = _owner;
         }
-        if (owner is null) { posted.Release(); return false; }
-        try { owner.Complete(this, value, error, cancelled); return true; }
-        finally { posted.Release(); }
+        if (owner is null)
+        {
+            posted.Release();
+            return false;
+        }
+        try
+        {
+            owner.Complete(this, value, error, cancelled);
+            return true;
+        }
+        finally
+        {
+            posted.Release();
+        }
     }
 
     internal void ReleasePosted()
@@ -221,17 +371,37 @@ internal sealed class AsyncLease<T>
 
     private static Exception? CancelAndDispose(CancellationTokenSource? cancellation)
     {
-        if (cancellation is null) return null;
+        if (cancellation is null)
+            return null;
         Exception? cancelError = null;
-        try { cancellation.Cancel(); }
-        catch (Exception exception) { cancelError = exception; }
-        try { cancellation.Dispose(); }
-        catch (Exception exception) { return cancelError is null ? exception : new AggregateException("Async cancellation failed.", cancelError, exception); }
+        try
+        {
+            cancellation.Cancel();
+        }
+        catch (Exception exception)
+        {
+            cancelError = exception;
+        }
+        try
+        {
+            cancellation.Dispose();
+        }
+        catch (Exception exception)
+        {
+            return cancelError is null
+                ? exception
+                : new AggregateException("Async cancellation failed.", cancelError, exception);
+        }
         return cancelError;
     }
 }
 
-internal sealed class AsyncPosted<T>(AsyncLease<T> lease, T? value, Exception? error, bool cancelled) : IPosted
+internal sealed class AsyncPosted<T>(
+    AsyncLease<T> lease,
+    T? value,
+    Exception? error,
+    bool cancelled
+) : IPosted
 {
     private AsyncLease<T>? _lease = lease;
     private T? _value = value;
@@ -241,7 +411,8 @@ internal sealed class AsyncPosted<T>(AsyncLease<T> lease, T? value, Exception? e
     public bool Commit()
     {
         var lease = Interlocked.Exchange(ref _lease, null);
-        if (lease is null) return false;
+        if (lease is null)
+            return false;
         var value = _value;
         var error = _error;
         _value = default;

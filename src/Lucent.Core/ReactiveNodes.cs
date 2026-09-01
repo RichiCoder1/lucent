@@ -5,24 +5,32 @@ using System.Text;
 
 namespace Lucent.Core;
 
-internal interface IPosted { bool Commit(); }
+internal interface IPosted
+{
+    bool Commit();
+}
+
 internal readonly record struct Evaluation<T>(T Value, bool ChangedDuringRun);
 
 internal sealed class ReactiveCollector
 {
     private readonly List<(ReactiveNode Node, long Version)> _reads = [];
     internal IEnumerable<ReactiveNode> Nodes => _reads.Select(read => read.Node);
+
     internal void Add(ReactiveNode node)
     {
-        if (_reads.All(read => !ReferenceEquals(read.Node, node))) _reads.Add((node, node.Version));
+        if (_reads.All(read => !ReferenceEquals(read.Node, node)))
+            _reads.Add((node, node.Version));
     }
+
     internal bool Changed() => _reads.Any(read => read.Node.Version != read.Version);
 }
 
 /// <summary>Reports a reactive evaluation cycle using author-provided node names.</summary>
 public sealed class ReactiveCycleException : InvalidOperationException
 {
-    internal ReactiveCycleException(IEnumerable<string> names) : base("Reactive cycle: " + string.Join(" -> ", names)) { }
+    internal ReactiveCycleException(IEnumerable<string> names)
+        : base("Reactive cycle: " + string.Join(" -> ", names)) { }
 }
 
 /// <summary>Base type for graph-owned state; disposal removes all dependency links and graph registration.</summary>
@@ -58,15 +66,26 @@ public abstract class ReactiveNode : IDisposable
 
     internal void ApplyDependencies(ReactiveCollector collector, bool succeeded)
     {
-        if (IsDisposed) return;
+        if (IsDisposed)
+            return;
         var next = succeeded ? collector.Nodes : _dependencies.Concat(collector.Nodes);
         ReplaceDependencies(next.Distinct().ToArray());
     }
 
     private void ReplaceDependencies(ReactiveNode[] next)
     {
-        foreach (var dependency in _dependencies.Where(dependency => !next.Contains(dependency)).ToArray()) dependency._dependents.Remove(this);
-        foreach (var dependency in next.Where(dependency => !ReferenceEquals(dependency, this) && !_dependencies.Contains(dependency))) dependency._dependents.Add(this);
+        foreach (
+            var dependency in _dependencies
+                .Where(dependency => !next.Contains(dependency))
+                .ToArray()
+        )
+            dependency._dependents.Remove(this);
+        foreach (
+            var dependency in next.Where(dependency =>
+                !ReferenceEquals(dependency, this) && !_dependencies.Contains(dependency)
+            )
+        )
+            dependency._dependents.Add(this);
         _dependencies.Clear();
         _dependencies.AddRange(next);
     }
@@ -77,25 +96,36 @@ public abstract class ReactiveNode : IDisposable
         List<Exception>? errors = null;
         foreach (var dependent in _dependents.OrderBy(dependent => dependent.Id).ToArray())
         {
-            try { dependent.DependencyChanged(); }
-            catch (Exception exception) { (errors ??= []).Add(exception); }
+            try
+            {
+                dependent.DependencyChanged();
+            }
+            catch (Exception exception)
+            {
+                (errors ??= []).Add(exception);
+            }
         }
-        if (errors is { Count: > 0 }) throw new AggregateException("Reactive invalidation failed.", errors);
+        if (errors is { Count: > 0 })
+            throw new AggregateException("Reactive invalidation failed.", errors);
     }
 
     internal virtual void DependencyChanged() { }
+
     internal virtual void EvaluationFailed() { }
+
     internal virtual void AppendDump(StringBuilder dump) { }
+
     protected void ThrowIfDisposed()
     {
-        if (IsDisposed) throw new ObjectDisposedException(Name);
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
     }
 
     public virtual void Dispose()
     {
         Graph.CheckThread();
         CheckScopeMutationGuard();
-        if (IsDisposed) return;
+        if (IsDisposed)
+            return;
         IsDisposed = true;
         List<Exception>? errors = null;
         try
@@ -104,8 +134,14 @@ public abstract class ReactiveNode : IDisposable
             foreach (var dependent in _dependents.OrderBy(dependent => dependent.Id).ToArray())
             {
                 dependent.RemoveDependency(this);
-                try { dependent.DependencyChanged(); }
-                catch (Exception exception) { (errors ??= []).Add(exception); }
+                try
+                {
+                    dependent.DependencyChanged();
+                }
+                catch (Exception exception)
+                {
+                    (errors ??= []).Add(exception);
+                }
             }
             _dependents.Clear();
         }
@@ -114,11 +150,14 @@ public abstract class ReactiveNode : IDisposable
             _scope?.Detach(this);
             _scope = null;
             Graph.Unregister(this);
+            GC.SuppressFinalize(this);
         }
-        if (errors is { Count: > 0 }) throw new AggregateException("Reactive node disposal failed.", errors);
+        if (errors is { Count: > 0 })
+            throw new AggregateException("Reactive node disposal failed.", errors);
     }
 
     private void RemoveDependency(ReactiveNode dependency) => _dependencies.Remove(dependency);
+
     protected void CheckScopeMutationGuard() => _scope?.CheckMutationGuard();
 }
 
@@ -126,24 +165,42 @@ public abstract class ReactiveNode : IDisposable
 public sealed class Signal<T> : ReactiveNode
 {
     private T _value;
-    internal Signal(ReactiveGraph graph, T value, string name, ReactiveScope? scope) : base(graph, name, scope) { _value = value; }
+
+    internal Signal(ReactiveGraph graph, T value, string name, ReactiveScope? scope)
+        : base(graph, name, scope)
+    {
+        _value = value;
+    }
+
     internal override string Kind => "signal";
 
     public T Value
     {
-        get { Graph.CheckThread(); Read(); return _value; }
+        get
+        {
+            Graph.CheckThread();
+            Read();
+            return _value;
+        }
         set
         {
             Graph.CheckThread();
             CheckScopeMutationGuard();
             ThrowIfDisposed();
-            if (EqualityComparer<T>.Default.Equals(_value, value)) return;
+            if (EqualityComparer<T>.Default.Equals(_value, value))
+                return;
             _value = value;
             Changed();
         }
     }
 
-    public override void Dispose() { Graph.CheckThread(); CheckScopeMutationGuard(); _value = default!; base.Dispose(); }
+    public override void Dispose()
+    {
+        Graph.CheckThread();
+        CheckScopeMutationGuard();
+        _value = default!;
+        base.Dispose();
+    }
 }
 
 /// <summary>A lazy, memoized value with runtime-tracked dependencies.</summary>
@@ -154,7 +211,12 @@ public sealed class Derived<T> : ReactiveNode
     private bool _dirty = true;
     private bool _failed;
 
-    internal Derived(ReactiveGraph graph, Func<T> compute, string name, ReactiveScope? scope) : base(graph, name, scope) { _compute = compute; }
+    internal Derived(ReactiveGraph graph, Func<T> compute, string name, ReactiveScope? scope)
+        : base(graph, name, scope)
+    {
+        _compute = compute;
+    }
+
     internal override string Kind => "derived";
 
     public T Value
@@ -170,7 +232,8 @@ public sealed class Derived<T> : ReactiveNode
                 _value = evaluation.Value;
                 _dirty = false;
                 _failed = false;
-                if (evaluation.ChangedDuringRun) DependencyChanged();
+                if (evaluation.ChangedDuringRun)
+                    DependencyChanged();
             }
             return _value!;
         }
@@ -178,24 +241,37 @@ public sealed class Derived<T> : ReactiveNode
 
     internal override void DependencyChanged()
     {
-        if (IsDisposed) return;
+        if (IsDisposed)
+            return;
         var notify = !_dirty || _failed;
         _dirty = true;
         _failed = false;
-        if (notify) Changed();
+        if (notify)
+            Changed();
     }
 
     internal override void EvaluationFailed() => _failed = true;
 
-    internal override void AppendDump(StringBuilder dump) => dump.Append(" dirty=").Append(_dirty ? "true" : "false");
-    public override void Dispose() { Graph.CheckThread(); CheckScopeMutationGuard(); _compute = null; _value = default; base.Dispose(); }
+    internal override void AppendDump(StringBuilder dump) =>
+        dump.Append(" dirty=").Append(_dirty ? "true" : "false");
+
+    public override void Dispose()
+    {
+        Graph.CheckThread();
+        CheckScopeMutationGuard();
+        _compute = null;
+        _value = default;
+        base.Dispose();
+    }
 }
 
 /// <summary>An explicitly scheduled reactive callback. Effects are the graph's only subscriber mechanism.</summary>
 public sealed class ReactiveEffect : ReactiveNode
 {
     private Action? _callback;
-    internal ReactiveEffect(ReactiveGraph graph, Action callback, string name, ReactiveScope? scope) : base(graph, name, scope)
+
+    internal ReactiveEffect(ReactiveGraph graph, Action callback, string name, ReactiveScope? scope)
+        : base(graph, name, scope)
     {
         _callback = callback;
         graph.Schedule(this);
@@ -203,15 +279,19 @@ public sealed class ReactiveEffect : ReactiveNode
 
     internal LinkedListNode<ReactiveEffect>? QueueNode { get; set; }
     internal override string Kind => "effect";
+
     internal override void DependencyChanged() => Graph.Schedule(this);
+
     internal void Run()
     {
         CheckScopeMutationGuard();
         var changed = Graph.Collect(this, _callback!);
-        if (changed) Graph.Schedule(this);
+        if (changed)
+            Graph.Schedule(this);
     }
 
     internal void Dequeue() => QueueNode = null;
+
     public override void Dispose()
     {
         Graph.CheckThread();

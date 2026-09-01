@@ -7,4 +7,12 @@ using Lucent.Core;
 
 namespace Lucent.IssueBrowser;
 
-public sealed record BrowserIssue(int Number, string Title, string Status, string Assignee, string Labels, string Updated, string Body);
+public sealed record BrowserIssue(
+    int Number,
+    string Title,
+    string Status,
+    string Assignee,
+    string Labels,
+    string Updated,
+    string Body
+);

@@ -22,6 +22,7 @@ function Invoke-IsolatedPwsh([string] $script, [string[]] $arguments, [int] $tim
 }
 
 & $dotnet restore $solution --locked-mode; if ($LASTEXITCODE) { exit $LASTEXITCODE }
+& (Join-Path $PSScriptRoot 'Verify-Formatting.ps1'); if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet build $solution --no-restore -warnaserror; if ($LASTEXITCODE) { exit $LASTEXITCODE }
 & $dotnet (Join-Path $root 'tests/Lucent.Core.Tests/bin/Debug/net10.0/Lucent.Core.Tests.dll') (Join-Path $root 'src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll'); if ($LASTEXITCODE) { exit $LASTEXITCODE }
 Write-Output 'Core compiled runtime-discovery/property-model scan: PASS'

@@ -20,24 +20,40 @@ public static class WindowsBootstrap
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(composition);
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 14393))
-            throw new PlatformNotSupportedException("M2 requires Windows 10 version 1607 or later.");
+            throw new PlatformNotSupportedException(
+                "M2 requires Windows 10 version 1607 or later."
+            );
         EnablePerMonitorV2();
         RequireNativeAssets();
         if (!SDL.SetHint("SDL_IME_IMPLEMENTED_UI", "composition"))
             throw new InvalidOperationException("SDL_IME_IMPLEMENTED_UI hint was not accepted.");
-        if (!SDL.Init(SDL.InitFlags.Video)) throw new InvalidOperationException($"SDL_Init: {SDL.GetError()}");
+        if (!SDL.Init(SDL.InitFlags.Video))
+            throw new InvalidOperationException($"SDL_Init: {SDL.GetError()}");
 
         nint window = 0;
         nint sdlRenderer = 0;
         try
         {
-            window = SDL.CreateWindow(title, InitialLogicalWidth, InitialLogicalHeight, SDL.WindowFlags.Resizable | SDL.WindowFlags.HighPixelDensity);
-            if (window == 0) throw new InvalidOperationException($"SDL_CreateWindow: {SDL.GetError()}");
+            window = SDL.CreateWindow(
+                title,
+                InitialLogicalWidth,
+                InitialLogicalHeight,
+                SDL.WindowFlags.Resizable | SDL.WindowFlags.HighPixelDensity
+            );
+            if (window == 0)
+                throw new InvalidOperationException($"SDL_CreateWindow: {SDL.GetError()}");
             sdlRenderer = SDL.CreateRenderer(window, null);
-            if (sdlRenderer == 0) throw new InvalidOperationException($"SDL_CreateRenderer: {SDL.GetError()}");
-            if (!SDL.SetRenderVSync(sdlRenderer, WindowsPresentationContract.VsyncInterval)) throw new InvalidOperationException($"SDL_SetRenderVSync: {SDL.GetError()}");
-            var hwnd = SDL.GetPointerProperty(SDL.GetWindowProperties(window), SDL.Props.WindowWin32HWNDPointer, 0);
-            if (hwnd == 0) throw new InvalidOperationException("SDL window did not expose an HWND.");
+            if (sdlRenderer == 0)
+                throw new InvalidOperationException($"SDL_CreateRenderer: {SDL.GetError()}");
+            if (!SDL.SetRenderVSync(sdlRenderer, WindowsPresentationContract.VsyncInterval))
+                throw new InvalidOperationException($"SDL_SetRenderVSync: {SDL.GetError()}");
+            var hwnd = SDL.GetPointerProperty(
+                SDL.GetWindowProperties(window),
+                SDL.Props.WindowWin32HWNDPointer,
+                0
+            );
+            if (hwnd == 0)
+                throw new InvalidOperationException("SDL window did not expose an HWND.");
 
             using var uiaDispatcher = new WindowsUiaDispatcher();
             using var uiaProvider = new WindowsUiaProvider(hwnd, composition, uiaDispatcher);
@@ -63,36 +79,64 @@ public static class WindowsBootstrap
                 var refreshSettings = false;
                 if (scheduler.ShouldWaitForEvent)
                 {
-                    if (!SDL.WaitEvent(out var @event)) throw new InvalidOperationException($"SDL_WaitEvent: {SDL.GetError()}");
+                    if (!SDL.WaitEvent(out var @event))
+                        throw new InvalidOperationException($"SDL_WaitEvent: {SDL.GetError()}");
                     refreshSettings |= Observe(scheduler, input, workDispatcher, @event);
                 }
-                while (SDL.PollEvent(out var @event)) refreshSettings |= Observe(scheduler, input, workDispatcher, @event);
+                while (SDL.PollEvent(out var @event))
+                    refreshSettings |= Observe(scheduler, input, workDispatcher, @event);
                 uiaDispatcher.SetOwnerPhase("dispatch");
-                if (uiaDispatcher.Process() != 0) scheduler.Request();
-                if (!scheduler.IsOpen) break;
+                if (uiaDispatcher.Process() != 0)
+                    scheduler.Request();
+                if (!scheduler.IsOpen)
+                    break;
                 refreshSettings |= settingsListener.TakePending();
                 if (refreshSettings)
                 {
-                    if (ApplySettings(composition, settings, theme)) scheduler.Request();
+                    if (ApplySettings(composition, settings, theme))
+                        scheduler.Request();
                     diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
                 }
 
                 var viewport = GetViewport(window, sdlRenderer);
-                if (!scheduler.TryBegin(viewport)) continue;
+                if (!scheduler.TryBegin(viewport))
+                    continue;
                 uiaDispatcher.SetOwnerPhase("frame");
                 uiaDispatcher.RecordFrame();
                 var started = Stopwatch.GetTimestamp();
-                var scene = ProjectAndInstall(composition, new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale), sceneRenderer);
+                var scene = ProjectAndInstall(
+                    composition,
+                    new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
+                    sceneRenderer
+                );
                 uiaProvider.Refresh(scene);
                 input.RefreshTextInput();
                 var projected = Stopwatch.GetTimestamp();
                 var phase = presenter.Present(scene, viewport, sceneRenderer);
-                var timing = FrameTiming.FromTimestamps(started, projected, phase.Rasterized, phase.Uploaded, phase.Presented);
+                var timing = FrameTiming.FromTimestamps(
+                    started,
+                    projected,
+                    phase.Rasterized,
+                    phase.Uploaded,
+                    phase.Presented
+                );
                 scheduler.Complete(timing);
-                m6Diagnostics.Record(scheduler.CurrentRequest.Complete(phase.Presented), timing, presenter, sceneRenderer, uiaProvider);
+                m6Diagnostics.Record(
+                    scheduler.CurrentRequest.Complete(phase.Presented),
+                    timing,
+                    presenter,
+                    sceneRenderer,
+                    uiaProvider
+                );
                 if (!recordedM6Baseline)
                 {
-                    m6Diagnostics.RecordResources("pre", presenter.LiveSurfaceCount, presenter.LiveTextureCount, sceneRenderer.LiveTextBlobCount, uiaProvider.CacheCount);
+                    m6Diagnostics.RecordResources(
+                        "pre",
+                        presenter.LiveSurfaceCount,
+                        presenter.LiveTextureCount,
+                        sceneRenderer.LiveTextBlobCount,
+                        uiaProvider.CacheCount
+                    );
                     recordedM6Baseline = true;
                 }
             }
@@ -101,59 +145,114 @@ public static class WindowsBootstrap
             uiaProvider.Dispose();
             presenter.Dispose();
             sceneRenderer.Dispose();
-            m6Diagnostics.RecordPostGcResources(presenter.LiveSurfaceCount, presenter.LiveTextureCount, sceneRenderer.LiveTextBlobCount, uiaProvider.CacheCount);
+            m6Diagnostics.RecordPostGcResources(
+                presenter.LiveSurfaceCount,
+                presenter.LiveTextureCount,
+                sceneRenderer.LiveTextBlobCount,
+                uiaProvider.CacheCount
+            );
             return 0;
         }
         finally
         {
-            if (sdlRenderer != 0) SDL.DestroyRenderer(sdlRenderer);
-            if (window != 0) SDL.DestroyWindow(window);
+            if (sdlRenderer != 0)
+                SDL.DestroyRenderer(sdlRenderer);
+            if (window != 0)
+                SDL.DestroyWindow(window);
             SDL.Quit();
         }
     }
 
     private static WindowsViewport GetViewport(nint window, nint renderer)
     {
-        var hwnd = SDL.GetPointerProperty(SDL.GetWindowProperties(window), SDL.Props.WindowWin32HWNDPointer, 0);
+        var hwnd = SDL.GetPointerProperty(
+            SDL.GetWindowProperties(window),
+            SDL.Props.WindowWin32HWNDPointer,
+            0
+        );
         var dpi = hwnd == 0 ? 0U : PInvoke.GetDpiForWindow(new HWND(hwnd));
         if (dpi == 0 || !SDL.GetRenderOutputSize(renderer, out var width, out var height))
             throw new InvalidOperationException($"Windows viewport: {SDL.GetError()}");
         return new(width, height, dpi / 96F);
     }
 
-    private static bool Observe(WindowsFrameScheduler scheduler, WindowsInputAdapter input, WindowsWorkDispatcher workDispatcher, SDL.Event @event)
+    private static bool Observe(
+        WindowsFrameScheduler scheduler,
+        WindowsInputAdapter input,
+        WindowsWorkDispatcher workDispatcher,
+        SDL.Event @event
+    )
     {
-        if (workDispatcher.IsWakeEvent(@event)) { if (workDispatcher.Process()) scheduler.Request(); return false; }
+        if (workDispatcher.IsWakeEvent(@event))
+        {
+            if (workDispatcher.Process())
+                scheduler.Request();
+            return false;
+        }
         var timestamp = Stopwatch.GetTimestamp();
         var type = (SDL.EventType)@event.Type;
-        try { if (input.Dispatch(@event)) scheduler.Request(FrameOperation.Input, timestamp); }
-        finally { if (input.ConsumeRepaintRequest()) scheduler.Request(FrameOperation.Input, timestamp); }
+        try
+        {
+            if (input.Dispatch(@event))
+                scheduler.Request(FrameOperation.Input, timestamp);
+        }
+        finally
+        {
+            if (input.ConsumeRepaintRequest())
+                scheduler.Request(FrameOperation.Input, timestamp);
+        }
         switch (type)
         {
             case SDL.EventType.Quit:
-            case SDL.EventType.WindowCloseRequested: scheduler.Observe(WindowsFrameEvent.Closed); return false;
-            case SDL.EventType.WindowMinimized: scheduler.Observe(WindowsFrameEvent.Minimized); return false;
-            case SDL.EventType.WindowRestored: scheduler.Observe(WindowsFrameEvent.Restored); return false;
-            case SDL.EventType.WindowExposed: scheduler.Observe(WindowsFrameEvent.Exposed); return false;
-            case SDL.EventType.WindowResized: scheduler.Observe(WindowsFrameEvent.Resized, timestamp); return false;
-            case SDL.EventType.WindowPixelSizeChanged: scheduler.Observe(WindowsFrameEvent.PixelSizeChanged, timestamp); return false;
-            case SDL.EventType.WindowDisplayChanged: scheduler.Observe(WindowsFrameEvent.DisplayChanged, timestamp); return false;
-            case SDL.EventType.WindowDisplayScaleChanged: scheduler.Observe(WindowsFrameEvent.DisplayScaleChanged, timestamp); return false;
-            default: return false;
+            case SDL.EventType.WindowCloseRequested:
+                scheduler.Observe(WindowsFrameEvent.Closed);
+                return false;
+            case SDL.EventType.WindowMinimized:
+                scheduler.Observe(WindowsFrameEvent.Minimized);
+                return false;
+            case SDL.EventType.WindowRestored:
+                scheduler.Observe(WindowsFrameEvent.Restored);
+                return false;
+            case SDL.EventType.WindowExposed:
+                scheduler.Observe(WindowsFrameEvent.Exposed);
+                return false;
+            case SDL.EventType.WindowResized:
+                scheduler.Observe(WindowsFrameEvent.Resized, timestamp);
+                return false;
+            case SDL.EventType.WindowPixelSizeChanged:
+                scheduler.Observe(WindowsFrameEvent.PixelSizeChanged, timestamp);
+                return false;
+            case SDL.EventType.WindowDisplayChanged:
+                scheduler.Observe(WindowsFrameEvent.DisplayChanged, timestamp);
+                return false;
+            case SDL.EventType.WindowDisplayScaleChanged:
+                scheduler.Observe(WindowsFrameEvent.DisplayScaleChanged, timestamp);
+                return false;
+            default:
+                return false;
         }
     }
 
-    internal static bool ApplySettings(Composition composition, WindowsSettings settings, ThemeContext? theme)
+    internal static bool ApplySettings(
+        Composition composition,
+        WindowsSettings settings,
+        ThemeContext? theme
+    )
     {
         ArgumentNullException.ThrowIfNull(composition);
         ArgumentNullException.ThrowIfNull(settings);
-        if (!settings.Apply(theme)) return false;
+        if (!settings.Apply(theme))
+            return false;
         composition.Flush();
         return true;
     }
 
     /// <summary>Projects only a scene accepted by Core input; reconciliation may require a bounded reprojection.</summary>
-    internal static RetainedScene ProjectAndInstall(Composition composition, LayoutViewport viewport, ITextShaper shaper)
+    internal static RetainedScene ProjectAndInstall(
+        Composition composition,
+        LayoutViewport viewport,
+        ITextShaper shaper
+    )
     {
         ArgumentNullException.ThrowIfNull(composition);
         ArgumentNullException.ThrowIfNull(shaper);
@@ -161,15 +260,23 @@ public static class WindowsBootstrap
         {
             composition.Flush();
             var scene = SceneLayout.Project(composition, viewport, shaper);
-            if (composition.Input.SetScene(scene)) return scene;
+            if (composition.Input.SetScene(scene))
+                return scene;
         }
-        throw new InvalidOperationException($"Core input rejected {InstallAttempts} consecutive projected scenes.");
+        throw new InvalidOperationException(
+            $"Core input rejected {InstallAttempts} consecutive projected scenes."
+        );
     }
 
-    internal static WindowsSettingsDiagnostic ReportDiagnostics(WindowsSettings settings, WindowsSettingsDiagnostic prior, Action<string>? output)
+    internal static WindowsSettingsDiagnostic ReportDiagnostics(
+        WindowsSettings settings,
+        WindowsSettingsDiagnostic prior,
+        Action<string>? output
+    )
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (settings.Diagnostics == prior) return prior;
+        if (settings.Diagnostics == prior)
+            return prior;
         output?.Invoke("Lucent Windows settings diagnostics: " + settings.DiagnosticStatus);
         return settings.Diagnostics;
     }
@@ -177,12 +284,22 @@ public static class WindowsBootstrap
     private static void EnablePerMonitorV2()
     {
         if (!WindowsDpi.EnsurePerMonitorV2())
-            throw new InvalidOperationException("SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) failed.");
+            throw new InvalidOperationException(
+                "SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2) failed."
+            );
     }
 
     private static void RequireNativeAssets()
     {
-        foreach (var asset in new[] { "SDL3.dll", "libSkiaSharp.dll", "libHarfBuzzSharp.dll", "vcruntime140.dll" })
+        foreach (
+            var asset in new[]
+            {
+                "SDL3.dll",
+                "libSkiaSharp.dll",
+                "libHarfBuzzSharp.dll",
+                "vcruntime140.dll",
+            }
+        )
             if (!File.Exists(Path.Combine(AppContext.BaseDirectory, asset)))
                 throw new FileNotFoundException($"Required native asset missing: {asset}.");
     }
