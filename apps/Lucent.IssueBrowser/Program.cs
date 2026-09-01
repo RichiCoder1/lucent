@@ -1,4 +1,3 @@
-using Lucent.Core;
 using Lucent.IssueBrowser;
 using Lucent.Platform.Windows;
 

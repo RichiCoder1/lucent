@@ -18,6 +18,7 @@ try
     AsyncBrowserStates();
     DensityRestyle();
     OptimisticStatusMutations();
+    GeneratedMutationSemantics();
     SourceExceptionsBecomeTransientFailures();
     VisualSurface();
     DisposedRequestCannotCommit();
@@ -63,9 +64,8 @@ static void RecipeEvidence()
     );
     Assert(
         Hash(dump + semantics)
-            == "5ab48000a6b4ef599cd1f839dab51bda3f8865d8be7ecfa19729c3aabea44fd6",
-        "Direct-root Filter Bar/Issue Row composition/semantic evidence changed: "
-            + Hash(dump + semantics)
+            == "307d21bd80059fc5a25690653b0f621cc09b15dd417a737ffdc037079aaf6389",
+        "Issue Browser composition/semantic evidence changed: " + Hash(dump + semantics)
     );
 }
 
@@ -109,7 +109,7 @@ static void DirectRootParity()
         + generatedRow.Dump
         + generatedRow.Semantics;
     Assert(
-        Hash(evidence) == "f8a08b14e5f17e4f8d15b75ecaca943ec2b1b71495754bb8c619ca05ec8c167d",
+        Hash(evidence) == "d48b9c8d8865a14594924ae7da5818d8ae680ad129245b906b8c2bdf006f5d39",
         "Approved direct-root #48 parity rebaseline changed: " + Hash(evidence)
     );
 }
@@ -1013,6 +1013,44 @@ static void OptimisticStatusMutations()
     );
 }
 
+static void GeneratedMutationSemantics()
+{
+    using var transport = new DeferredGitHubHandler();
+    using var client = new HttpClient(transport)
+    {
+        BaseAddress = new Uri("https://api.github.local/"),
+    };
+    var graph = new ReactiveGraph();
+    using var composition = IssueBrowserStructure.Create(
+        graph,
+        new GitHubIssueSource(client),
+        new FixtureIssueStatusSource(),
+        out var browser,
+        out _
+    );
+    graph.Drain();
+    transport.ReplyJson(0);
+    graph.Drain();
+    browser.Select(10_000);
+    graph.Drain();
+    var action = Flatten(composition.SemanticSnapshot()!)
+        .Single(node => node.Role == SemanticRole.Button && node.Name == "Open/Close");
+    Assert(
+        composition.ExecuteSemanticCommand(action.Identity, new(SemanticCommandKind.Invoke))
+            == SemanticCommandResult.Applied,
+        "Generated Details rejected its ordinary semantic status action."
+    );
+    graph.Drain();
+    var semantics = Flatten(composition.SemanticSnapshot()!);
+    Assert(
+        semantics.Any(node =>
+            node.Role == SemanticRole.Status
+            && node.Name == "closed · Not synced: Fixture source is temporarily unavailable."
+        ) && semantics.Any(node => node.Role == SemanticRole.Button && node.Name == "Retry"),
+        "Generated Details did not publish transient status and Retry semantics."
+    );
+}
+
 static void SourceExceptionsBecomeTransientFailures()
 {
     using var transport = new DeferredGitHubHandler();
@@ -1148,18 +1186,27 @@ static void StartupStaysFrameworkOwned()
                 Directory.EnumerateFiles(app, "*.cs").Select(File.ReadAllText)
             );
             var issueRow = File.ReadAllText(Path.Combine(app, "IssueRow.lui"));
+            var issueBrowser = File.ReadAllText(Path.Combine(app, "IssueBrowser.lui"));
             Assert(
                 !source.Contains(".Drain(", StringComparison.Ordinal)
                     && !source.Contains("test mode", StringComparison.OrdinalIgnoreCase)
                     && !source.Contains("IssueRowHandwritten", StringComparison.Ordinal)
                     && !Regex.IsMatch(source, @"\bComponentRecipe\s+IssueRow\s*\(")
-                    && Regex.IsMatch(
-                        source,
-                        @"\bVirtualizedList\s*\(\s*\(\)\s*=>\s*browser\.VisibleIssues\s*,\s*issue\s*=>\s*issue\.Number\s*,\s*issue\s*=>\s*IssueRow\s*\(\s*browser\s*,\s*issue\s*\)"
-                    )
                     && issueRow.Contains("public component IssueRow", StringComparison.Ordinal)
-                    && !issueRow.Contains("VirtualizedList", StringComparison.Ordinal),
-                "Production Issue Row no longer uses the generated static row factory owned by the C# virtualized list."
+                    && !issueRow.Contains("VirtualizedList", StringComparison.Ordinal)
+                    && issueBrowser.Contains(
+                        "public component IssueBrowser",
+                        StringComparison.Ordinal
+                    )
+                    && issueBrowser.Contains(
+                        "<VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, issue).Named(\"issue-browser.issue-row\")}",
+                        StringComparison.Ordinal
+                    )
+                    && issueBrowser.Contains(
+                        "foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number",
+                        StringComparison.Ordinal
+                    ),
+                "Production Issue Browser no longer owns its generated virtual row factory and keyed detail region in .lui."
             );
             return;
         }
@@ -1350,8 +1397,8 @@ internal static class HandwrittenParityFixture
 {
     private static readonly Style FilterBarStyle = Style
         .Empty.Width(800f)
-        .Height(IssueBrowserStructure.DensityFilterHeight)
-        .Spacing(IssueBrowserStructure.DensitySpacing);
+        .Height(Tokens.DensityFilterHeight)
+        .Spacing(Tokens.DensitySpacing);
     private static readonly Style TextFieldStyle = Style.Empty.Width(250f).Height(24f);
 
     internal static ComponentRecipe Create(IssueBrowserState browser, Style? style = null)
@@ -1391,15 +1438,15 @@ internal static class HandwrittenParityFixture
         ArgumentNullException.ThrowIfNull(issue);
         var style = Style
             .Empty.Width(800f)
-            .Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f)
-            .Spacing(IssueBrowserStructure.DensitySpacing)
-            .FontSize(IssueBrowserStructure.DensityFontSize)
-            .Background(IssueBrowserStructure.RowSurface)
+            .Spacing(Tokens.DensitySpacing)
+            .FontSize(Tokens.DensityFontSize)
+            .Background(Tokens.RowSurface)
             .When(
                 VariantState.FocusVisible,
-                Style
-                    .Empty.Background(IssueBrowserStructure.FocusSurface)
-                    .TextColor(IssueBrowserStructure.FocusForeground)
+                Style.Empty.Background(Tokens.FocusSurface).TextColor(Tokens.FocusForeground)
+            )
+            .With(
+                Style.Empty.Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f)
             );
         return Lucent.Core.Components.Selectable(
             () => Label(browser, issue),

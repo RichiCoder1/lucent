@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj" />
+    <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" />
+  </ItemGroup>
+</Project>

@@ -14,6 +14,25 @@ namespace Lucent.Lui.Compiler;
 /// <remarks>Use from build or editor tooling only. The output source and map have no runtime dependency or runtime role.</remarks>
 public static class LuiCompiler
 {
+    private static readonly string[] ImplicitStylePropertyTypes =
+    [
+        "Lucent.Core.LayoutProperties",
+        "Lucent.Core.VisualProperties",
+        "Lucent.Core.TypographyProperties",
+        "Lucent.Core.InputProperties",
+    ];
+    private static readonly SymbolDisplayFormat FullyQualifiedNullableFormat =
+        SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
+            SymbolDisplayFormat.FullyQualifiedFormat.MiscellaneousOptions
+                | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier
+        );
+    private static readonly SymbolDisplayFormat FullyQualifiedMemberFormat = SymbolDisplayFormat
+        .FullyQualifiedFormat.WithMemberOptions(SymbolDisplayMemberOptions.IncludeContainingType)
+        .WithMiscellaneousOptions(
+            SymbolDisplayFormat.FullyQualifiedFormat.MiscellaneousOptions
+                | SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers
+        );
+
     /// <summary>Binds a parsed document against a Roslyn compilation and produces generated C# only when diagnostics are absent.</summary>
     /// <param name="document">Recovered syntax whose spans identify the authored <c>.lui</c> text.</param>
     /// <param name="compilation">Current Roslyn compilation used for component and expression binding.</param>
@@ -33,8 +52,9 @@ public static class LuiCompiler
         if (identity is null)
             throw new ArgumentNullException(nameof(identity));
         identity = Snapshot(identity, compilation);
+        var rootTokens = RootTokens(compilation, identity.RootNamespace);
         var diagnostics = new List<LuiDiagnostic>(document.Diagnostics);
-        var writer = new Writer(document, identity, null);
+        var writer = new Writer(document, identity, null, []);
         if (diagnostics.Count == 0 && document.Component is not null)
             writer.Document(diagnostics);
         if (diagnostics.Count != 0)
@@ -52,9 +72,98 @@ public static class LuiCompiler
         var probeCompilation = compilation.AddSyntaxTrees(probeTree);
         var probeModel = probeCompilation.GetSemanticModel(probeTree);
         var probeMap = new LuiSourceMap(identity, writer.Entries);
+        var componentWriter = new Writer(document, identity, null, ["Lucent.Core.Components"]);
+        componentWriter.Document(diagnostics);
+        var componentTree = CSharpSyntaxTree.ParseText(
+            componentWriter.Text,
+            parseOptions,
+            identity.HintName + ".components.g.cs"
+        );
+        var componentCompilation = compilation.AddSyntaxTrees(componentTree);
+        var componentModel = componentCompilation.GetSemanticModel(componentTree);
+        var componentMap = new LuiSourceMap(identity, componentWriter.Entries);
+        var propertyWriter = new Writer(document, identity, null, ImplicitStylePropertyTypes);
+        propertyWriter.Document(diagnostics);
+        var propertyTree = CSharpSyntaxTree.ParseText(
+            propertyWriter.Text,
+            parseOptions,
+            identity.HintName + ".properties.g.cs"
+        );
+        var propertyCompilation = compilation.AddSyntaxTrees(propertyTree);
+        var propertyModel = propertyCompilation.GetSemanticModel(propertyTree);
+        var propertyMap = new LuiSourceMap(identity, propertyWriter.Entries);
+        IReadOnlyDictionary<int, StyleValuePlan> styleValues =
+            new Dictionary<int, StyleValuePlan>();
+        var tokenExpressions = new HashSet<int>();
+        if (rootTokens is not null)
+        {
+            var tokenWriter = new Writer(document, identity, null, [rootTokens.ToDisplayString()]);
+            tokenWriter.Document(diagnostics);
+            var tokenTree = CSharpSyntaxTree.ParseText(
+                tokenWriter.Text,
+                parseOptions,
+                identity.HintName + ".tokens.g.cs"
+            );
+            var tokenCompilation = compilation.AddSyntaxTrees(tokenTree);
+            var tokenModel = tokenCompilation.GetSemanticModel(tokenTree);
+            var tokenMap = new LuiSourceMap(identity, tokenWriter.Entries);
+            styleValues = StyleValuePlans(
+                tokenModel,
+                tokenTree,
+                tokenMap,
+                tokenWriter,
+                rootTokens,
+                tokenExpressions
+            );
+            TokenAmbiguityDiagnostics(
+                tokenModel,
+                tokenTree,
+                tokenMap,
+                tokenWriter,
+                rootTokens,
+                diagnostics
+            );
+        }
+        var contentPlans = ContentPlans(
+                probeModel,
+                probeTree,
+                probeMap,
+                writer,
+                document,
+                identity,
+                diagnostics
+            )
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var implicitComponentDiagnostics = new List<LuiDiagnostic>();
+        foreach (
+            var pair in ContentPlans(
+                componentModel,
+                componentTree,
+                componentMap,
+                componentWriter,
+                document,
+                identity,
+                implicitComponentDiagnostics
+            )
+        )
+            contentPlans[pair.Key] = pair.Value;
+        foreach (
+            var diagnostic in implicitComponentDiagnostics.Where(candidate =>
+                !diagnostics.Any(existing =>
+                    existing.Id == candidate.Id
+                    && existing.Span.Start == candidate.Span.Start
+                    && existing.Span.Length == candidate.Span.Length
+                    && existing.Message == candidate.Message
+                )
+            )
+        )
+            diagnostics.Add(diagnostic);
         var plans = new BindingPlans(
-            ContentPlans(probeModel, probeTree, probeMap, writer, document, identity, diagnostics),
-            PropertyPlans(probeModel, probeTree, probeMap, writer),
+            ComponentPlans(componentModel, componentTree, componentMap, componentWriter),
+            contentPlans,
+            PropertyPlans(propertyModel, propertyTree, propertyMap, propertyWriter),
+            styleValues,
+            tokenExpressions,
             NullChecks(probeModel, probeTree, document)
         );
         if (diagnostics.Count != 0)
@@ -64,7 +173,7 @@ public static class LuiCompiler
                 probeMap,
                 diagnostics.OrderBy(item => item.Span.Start).ToArray()
             );
-        writer = new Writer(document, identity, plans);
+        writer = new Writer(document, identity, plans, []);
         writer.Document(diagnostics);
         var map = new LuiSourceMap(identity, writer.Entries);
         if (diagnostics.Count != 0)
@@ -90,12 +199,13 @@ public static class LuiCompiler
             );
             if (mapped is null)
                 continue;
-            var method = model.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
-            if (method is null || !IsComponent(method))
+            if (ComponentMethods(model, invocation).Length == 0)
                 diagnostics.Add(
                     new LuiDiagnostic(
                         "LUI2001",
-                        "Element tags must resolve to an accessible static [LucentComponent] method returning ComponentRecipe.",
+                        "Element tag '"
+                            + invocation.Expression
+                            + "' must resolve to an accessible static [LucentComponent] method returning ComponentRecipe.",
                         mapped.Source
                     )
                 );
@@ -280,12 +390,21 @@ public static class LuiCompiler
             LuiDocumentIdentity.Hash(String.Join("\n", trees) + "\0" + compilation.Options),
             identity.SiblingIndexGeneration,
             parse.LanguageVersion.ToString(),
-            typeof(Compilation).Assembly.GetName().Version?.ToString() ?? "unknown",
+            typeof(LuiCompiler).Assembly.GetName().Version?.ToString() ?? "unknown",
             LuiDocumentIdentity.Hash(String.Join("\n", references)),
             LuiDocumentIdentity.Hash(String.Join("\n", globals)),
             identity.Options,
-            identity.Defines
+            identity.Defines,
+            identity.RootNamespace
         );
+    }
+
+    private static INamedTypeSymbol? RootTokens(Compilation compilation, string rootNamespace)
+    {
+        if (String.IsNullOrWhiteSpace(rootNamespace))
+            return null;
+        var tokens = compilation.GetTypeByMetadataName(rootNamespace + ".Tokens");
+        return tokens is { IsStatic: true } ? tokens : null;
     }
 
     private static string ParseOptionsIdentity(ParseOptions options)
@@ -385,6 +504,85 @@ public static class LuiCompiler
                 == "Lucent.Core.LucentComponentAttribute"
             );
 
+    private static IMethodSymbol[] ComponentMethods(
+        SemanticModel model,
+        InvocationExpressionSyntax invocation
+    )
+    {
+        var info = model.GetSymbolInfo(invocation);
+        return new[] { info.Symbol as IMethodSymbol }
+            .Concat(info.CandidateSymbols.OfType<IMethodSymbol>())
+            .Concat(model.GetMemberGroup(invocation.Expression).OfType<IMethodSymbol>())
+            .Concat(
+                invocation.Expression is IdentifierNameSyntax identifier
+                    ? model
+                        .LookupSymbols(
+                            invocation.Expression.SpanStart,
+                            name: identifier.Identifier.ValueText
+                        )
+                        .OfType<IMethodSymbol>()
+                    : Enumerable.Empty<IMethodSymbol>()
+            )
+            .Concat(
+                invocation.Expression is IdentifierNameSyntax builtIn
+                    ? model
+                        .Compilation.GetTypeByMetadataName("Lucent.Core.Components")
+                        ?.GetMembers(builtIn.Identifier.ValueText)
+                        .OfType<IMethodSymbol>()
+                        ?? Enumerable.Empty<IMethodSymbol>()
+                    : Enumerable.Empty<IMethodSymbol>()
+            )
+            .Where(method => method is not null && IsComponent(method!))
+            .Cast<IMethodSymbol>()
+            .GroupBy(
+                method => method.ToDisplayString(FullyQualifiedNullableFormat),
+                StringComparer.Ordinal
+            )
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static string ComponentName(IMethodSymbol method)
+    {
+        var name = method.Name;
+        if (
+            SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None
+            || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None
+        )
+            name = "@" + name;
+        return method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            + "."
+            + name;
+    }
+
+    private static IReadOnlyDictionary<int, string> ComponentPlans(
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        Writer writer
+    )
+    {
+        var plans = new Dictionary<int, string>();
+        foreach (
+            var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+        )
+        {
+            var mapped = map.FromGenerated(
+                    new LuiSpan(invocation.Expression.SpanStart, invocation.Expression.Span.Length)
+                )
+                .FirstOrDefault(entry => writer.ElementNames.Contains(entry.Source.Start));
+            if (mapped is null)
+                continue;
+            var names = ComponentMethods(model, invocation)
+                .Select(ComponentName)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (names.Length == 1)
+                plans[mapped.Source.Start] = names[0];
+        }
+        return plans;
+    }
+
     private static IReadOnlyDictionary<int, ContentPlan> ContentPlans(
         SemanticModel model,
         SyntaxTree tree,
@@ -412,6 +610,8 @@ public static class LuiCompiler
                 .Where(method => method is not null && IsComponent(method!))
                 .Cast<IMethodSymbol>()
                 .ToArray();
+            if (methods.Length == 0)
+                methods = ComponentMethods(model, invocation);
             if (methods.Length == 0)
                 continue;
             var defaults = new List<IParameterSymbol>();
@@ -515,10 +715,14 @@ public static class LuiCompiler
             document,
             identity,
             new BindingPlans(
-                new Dictionary<int, ContentPlan> { [elementStart] = candidate },
                 new Dictionary<int, string>(),
+                new Dictionary<int, ContentPlan> { [elementStart] = candidate },
+                new Dictionary<int, StylePropertyPlan>(),
+                new Dictionary<int, StyleValuePlan>(),
+                new HashSet<int>(),
                 new HashSet<int>()
-            )
+            ),
+            [parameter.ContainingSymbol.ContainingType.ToDisplayString()]
         );
         var diagnostics = new List<LuiDiagnostic>();
         writer.Document(diagnostics);
@@ -566,14 +770,14 @@ public static class LuiCompiler
             );
     }
 
-    private static IReadOnlyDictionary<int, string> PropertyPlans(
+    private static IReadOnlyDictionary<int, StylePropertyPlan> PropertyPlans(
         SemanticModel model,
         SyntaxTree tree,
         LuiSourceMap map,
         Writer writer
     )
     {
-        var plans = new Dictionary<int, string>();
+        var plans = new Dictionary<int, StylePropertyPlan>();
         foreach (var name in tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>())
         {
             if (
@@ -588,12 +792,12 @@ public static class LuiCompiler
                 && candidate.Generated.End >= name.Span.End
             );
             if (entry is not null)
-                plans[entry.Source.Start] =
-                    property.ContainingType.ToDisplayString(
-                        SymbolDisplayFormat.FullyQualifiedFormat
-                    )
-                    + "."
-                    + property.Name;
+                plans[entry.Source.Start] = new StylePropertyPlan(
+                    property.ToDisplayString(FullyQualifiedMemberFormat),
+                    ((INamedTypeSymbol)property.Type)
+                        .TypeArguments[0]
+                        .ToDisplayString(FullyQualifiedNullableFormat)
+                );
         }
         return plans;
     }
@@ -606,6 +810,140 @@ public static class LuiCompiler
             && type.Arity == 1
             && type.ContainingNamespace.ToDisplayString() == "Lucent.Core";
     }
+
+    private static IReadOnlyDictionary<int, StyleValuePlan> StyleValuePlans(
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        Writer writer,
+        INamedTypeSymbol? rootTokens,
+        HashSet<int> tokenExpressions
+    )
+    {
+        var plans = new Dictionary<int, StyleValuePlan>();
+        if (rootTokens is null)
+            return plans;
+        foreach (var lambda in tree.GetRoot().DescendantNodes().OfType<LambdaExpressionSyntax>())
+        {
+            if (lambda.Body is not ExpressionSyntax body || !IsToken(model.GetTypeInfo(body).Type!))
+                continue;
+            var source = Translate(map, new LuiSpan(body.SpanStart, body.Span.Length));
+            if (
+                source is { } span
+                && writer.StyleExpressionSpans.Any(style =>
+                    style.Start <= span.Start && style.End >= span.End
+                )
+            )
+                tokenExpressions.Add(span.Start);
+        }
+        foreach (var name in tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            if (name.Parent is MemberAccessExpressionSyntax member && member.Name == name)
+                continue;
+            var symbol = model.GetSymbolInfo(name).Symbol;
+            var type = symbol switch
+            {
+                IFieldSymbol field when field.IsStatic => field.Type,
+                IPropertySymbol property when property.IsStatic => property.Type,
+                _ => null,
+            };
+            if (
+                type is null
+                || !IsToken(type)
+                || symbol!.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    != rootTokens.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            )
+                continue;
+            var translated = Translate(map, new LuiSpan(name.SpanStart, name.Span.Length));
+            if (
+                translated is not { } source
+                || !writer.StyleExpressionSpans.Any(span =>
+                    span.Start <= source.Start && span.End >= source.End
+                )
+            )
+                continue;
+            plans[source.Start] = new StyleValuePlan(
+                source,
+                symbol!.ToDisplayString(FullyQualifiedMemberFormat)
+            );
+        }
+        return plans;
+    }
+
+    private static void TokenAmbiguityDiagnostics(
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        Writer writer,
+        INamedTypeSymbol rootTokens,
+        List<LuiDiagnostic> diagnostics
+    )
+    {
+        foreach (
+            var diagnostic in model
+                .Compilation.GetDiagnostics()
+                .Where(item =>
+                    item.Location.SourceTree == tree && (item.Id == "CS0104" || item.Id == "CS0229")
+                )
+        )
+        {
+            var name = tree.GetRoot()
+                .FindNode(diagnostic.Location.SourceSpan)
+                .FirstAncestorOrSelf<IdentifierNameSyntax>();
+            if (
+                name is null
+                || !model
+                    .GetSymbolInfo(name)
+                    .CandidateSymbols.Any(candidate => IsRootTokenMember(candidate, rootTokens))
+            )
+                continue;
+            var source = Translate(
+                map,
+                new LuiSpan(
+                    diagnostic.Location.SourceSpan.Start,
+                    diagnostic.Location.SourceSpan.Length
+                )
+            );
+            if (
+                source is not { } span
+                || !writer.StyleExpressionSpans.Any(style =>
+                    style.Start <= span.Start && style.End >= span.End
+                )
+            )
+                continue;
+            diagnostics.Add(
+                new LuiDiagnostic(
+                    "LUI2000",
+                    diagnostic.GetMessage(CultureInfo.InvariantCulture),
+                    span
+                )
+            );
+        }
+    }
+
+    private static bool IsRootTokenMember(ISymbol symbol, INamedTypeSymbol rootTokens)
+    {
+        var type = symbol switch
+        {
+            IFieldSymbol field when field.IsStatic => field.Type,
+            IPropertySymbol property when property.IsStatic => property.Type,
+            _ => null,
+        };
+        return type is not null
+            && IsToken(type)
+            && symbol.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                == rootTokens.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+    }
+
+    private static bool IsToken(ITypeSymbol symbol) =>
+        symbol
+            is INamedTypeSymbol
+            {
+                Name: "Token",
+                Arity: 1,
+                ContainingNamespace: { } containingNamespace,
+            }
+        && containingNamespace.ToDisplayString() == "Lucent.Core";
 
     private static HashSet<int> NullChecks(
         SemanticModel model,
@@ -654,21 +992,54 @@ public static class LuiCompiler
         internal bool IsCollection { get; }
     }
 
+    private sealed class StylePropertyPlan
+    {
+        internal StylePropertyPlan(string name, string valueType)
+        {
+            Name = name;
+            ValueType = valueType;
+        }
+
+        internal string Name { get; }
+        internal string ValueType { get; }
+    }
+
+    private sealed class StyleValuePlan
+    {
+        internal StyleValuePlan(LuiSpan source, string name)
+        {
+            Source = source;
+            Name = name;
+        }
+
+        internal LuiSpan Source { get; }
+        internal string Name { get; }
+    }
+
     private sealed class BindingPlans
     {
         internal BindingPlans(
+            IReadOnlyDictionary<int, string> components,
             IReadOnlyDictionary<int, ContentPlan> content,
-            IReadOnlyDictionary<int, string> properties,
+            IReadOnlyDictionary<int, StylePropertyPlan> properties,
+            IReadOnlyDictionary<int, StyleValuePlan> values,
+            HashSet<int> tokenExpressions,
             HashSet<int> nullChecks
         )
         {
+            Components = components;
             Content = content;
             Properties = properties;
+            Values = values;
+            TokenExpressions = tokenExpressions;
             NullChecks = nullChecks;
         }
 
+        internal IReadOnlyDictionary<int, string> Components { get; }
         internal IReadOnlyDictionary<int, ContentPlan> Content { get; }
-        internal IReadOnlyDictionary<int, string> Properties { get; }
+        internal IReadOnlyDictionary<int, StylePropertyPlan> Properties { get; }
+        internal IReadOnlyDictionary<int, StyleValuePlan> Values { get; }
+        internal HashSet<int> TokenExpressions { get; }
         internal HashSet<int> NullChecks { get; }
     }
 
@@ -678,19 +1049,24 @@ public static class LuiCompiler
         private readonly LuiFreshnessIdentity identity;
         private readonly StringBuilder text = new StringBuilder();
         private readonly BindingPlans? plans;
+        private readonly IReadOnlyList<string> implicitStaticTypes;
+        private int regionOrdinal;
         internal readonly List<LuiMapEntry> Entries = new List<LuiMapEntry>();
         internal readonly HashSet<int> ElementNames = new HashSet<int>();
         internal readonly HashSet<int> StylePropertyNames = new HashSet<int>();
+        internal readonly List<LuiSpan> StyleExpressionSpans = new List<LuiSpan>();
 
         internal Writer(
             LuiDocumentSyntax document,
             LuiFreshnessIdentity identity,
-            BindingPlans? plans
+            BindingPlans? plans,
+            IReadOnlyList<string> implicitStaticTypes
         )
         {
             this.document = document;
             this.identity = identity;
             this.plans = plans;
+            this.implicitStaticTypes = implicitStaticTypes;
         }
 
         internal string Text => text.ToString();
@@ -728,6 +1104,8 @@ public static class LuiCompiler
                     + identity.MapIdentity
                     + "\n#nullable enable\n#line hidden\n"
             );
+            foreach (var type in implicitStaticTypes)
+                Hidden("using static global::" + type + ";\n");
             var namespaceWritten = false;
             foreach (var node in document.TopLevel)
             {
@@ -780,7 +1158,9 @@ public static class LuiCompiler
         private void Component(LuiComponentSyntax component, List<LuiDiagnostic> diagnostics)
         {
             Hidden(
-                "    [global::System.CodeDom.Compiler.GeneratedCodeAttribute(\"Lucent.Lui.Generator\", \"0.2.0\")]\n    [global::Lucent.Core.LucentComponentAttribute]\n    "
+                "    [global::System.CodeDom.Compiler.GeneratedCodeAttribute(\"Lucent.Lui.Generator\", \""
+                    + typeof(LuiCompiler).Assembly.GetName().Version
+                    + "\")]\n    [global::Lucent.Core.LucentComponentAttribute]\n    "
             );
             if (component.Accessibility.IsMissing)
                 Hidden("internal");
@@ -861,7 +1241,12 @@ public static class LuiCompiler
                         group.First().Name.Span
                     )
                 );
-            Mapped(name, element.Name.Span, LuiMapKind.Symbol);
+            var component =
+                plans is not null
+                && plans.Components.TryGetValue(element.Name.Span.Start, out var resolvedComponent)
+                    ? resolvedComponent
+                    : name;
+            Mapped(component, element.Name.Span, LuiMapKind.Symbol);
             Write("(");
             var arguments = new List<Action>();
             foreach (var attribute in element.Attributes)
@@ -1002,9 +1387,7 @@ public static class LuiCompiler
             if (thenElement is null)
                 return;
             Write("global::Lucent.Core.ContentRecipe.Switch(\"if-");
-            Write(
-                conditional.Span.Start.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            );
+            Write((regionOrdinal++).ToString(System.Globalization.CultureInfo.InvariantCulture));
             Write("\", () => { if (");
             Expression(conditional.Condition);
             Write(") return new global::Lucent.Core.ConditionalChoice(1, ");
@@ -1044,7 +1427,7 @@ public static class LuiCompiler
             if (body is null)
                 return;
             Write("global::Lucent.Core.ContentRecipe.ForEach(\"foreach-");
-            Write(loop.Span.Start.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Write((regionOrdinal++).ToString(System.Globalization.CultureInfo.InvariantCulture));
             Write("\", () => ");
             Expression(loop.Source);
             Write(", ");
@@ -1222,15 +1605,26 @@ public static class LuiCompiler
         private void Assignment(LuiStyleAssignmentSyntax assignment, bool live)
         {
             StylePropertyNames.Add(assignment.Property.Span.Start);
+            StyleExpressionSpans.Add(assignment.Expression.Span);
+            var leading =
+                assignment.Expression.Text.Length - assignment.Expression.Text.TrimStart().Length;
+            var expression = new LuiSpan(
+                assignment.Expression.Span.Start + leading,
+                assignment.Expression.Text.Trim().Length
+            );
+            var bind = live && plans?.TokenExpressions.Contains(expression.Start) != true;
             var property =
                 plans is not null
                 && plans.Properties.TryGetValue(assignment.Property.Span.Start, out var resolved)
                     ? resolved
-                    : assignment.Property.Text;
-            Write(live ? ".Bind(" : ".Set(");
-            Mapped(property, assignment.Property.Span, LuiMapKind.Symbol);
+                    : new StylePropertyPlan(assignment.Property.Text, "");
+            Write(bind ? ".Bind" : ".Set");
+            if (bind && property.ValueType.Length != 0)
+                Write("<" + property.ValueType + ">");
+            Write("(");
+            Mapped(property.Name, assignment.Property.Span, LuiMapKind.Symbol);
             Write(", ");
-            if (live)
+            if (bind)
                 Write("() => ");
             Expression(assignment.Expression);
             Write(")");
@@ -1258,7 +1652,40 @@ public static class LuiCompiler
                 + identity.Document.LogicalPath.Replace("\\", "\\\\").Replace("\"", "\\\"")
                 + "\"\n";
             Hidden(directive);
-            Mapped(value, source, LuiMapKind.Expression);
+            var values =
+                plans
+                    ?.Values.Values.Where(plan =>
+                        plan.Source.Start >= source.Start && plan.Source.End <= source.End
+                    )
+                    .OrderBy(plan => plan.Source.Start)
+                    .ToArray()
+                ?? Array.Empty<StyleValuePlan>();
+            var offset = source.Start;
+            foreach (var plan in values)
+            {
+                if (plan.Source.Start > offset)
+                {
+                    var segment = new LuiSpan(offset, plan.Source.Start - offset);
+                    Mapped(
+                        document.Source.Substring(segment.Start, segment.Length),
+                        segment,
+                        LuiMapKind.Expression
+                    );
+                }
+                Mapped(plan.Name, plan.Source, LuiMapKind.Symbol);
+                offset = plan.Source.End;
+            }
+            if (offset < source.End)
+            {
+                var segment = new LuiSpan(offset, source.End - offset);
+                Mapped(
+                    document.Source.Substring(segment.Start, segment.Length),
+                    segment,
+                    LuiMapKind.Expression
+                );
+            }
+            else if (values.Length == 0)
+                Mapped(value, source, LuiMapKind.Expression);
             Hidden("\n#line hidden\n");
             Mark(expression.OpenBrace.Span, LuiMapKind.Structure);
             Mark(expression.CloseBrace.Span, LuiMapKind.Structure);

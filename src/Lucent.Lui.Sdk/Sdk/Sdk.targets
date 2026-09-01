@@ -18,16 +18,12 @@
     <CompilerVisibleProperty Include="LucentLuiLangVersion" />
     <CompilerVisibleProperty Include="LucentLuiCompilerOptions" />
     <CompilerVisibleProperty Include="LucentLuiDefines" />
+    <CompilerVisibleProperty Include="RootNamespace" />
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Compiler.dll" />
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Generator.dll" />
   </ItemGroup>
   <ItemGroup Condition="'$(LucentLuiImplicitUsings)' == 'true'">
     <Using Include="Lucent.Core" />
-    <Using Include="Lucent.Core.Components" Static="true" />
-    <Using Include="Lucent.Core.LayoutProperties" Static="true" />
-    <Using Include="Lucent.Core.VisualProperties" Static="true" />
-    <Using Include="Lucent.Core.TypographyProperties" Static="true" />
-    <Using Include="Lucent.Core.InputProperties" Static="true" />
   </ItemGroup>
   <Target Name="CleanLucentLuiGeneratedFiles" AfterTargets="CoreClean" Condition="'$(EmitCompilerGeneratedFiles)' == 'true'">
     <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Lucent.Lui.Generator" />

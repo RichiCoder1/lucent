@@ -3,11 +3,13 @@
   <Project Path="src/Lucent.Core/Lucent.Core.csproj" />
   <Project Path="src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" />
   <Project Path="src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" />
+  <Project Path="src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj" />
   <Project Path="src/Lucent.Lui.Sdk/Lucent.Lui.Sdk.csproj" />
   <Project Path="src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
   <Project Path="src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
   <Project Path="tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj" />
   <Project Path="tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj" />
+  <Project Path="tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj" />
   <Project Path="tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj" />
   <Project Path="tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj" />
   <Project Path="tests/Lucent.M6.Verifier/Lucent.M6.Verifier.csproj" />

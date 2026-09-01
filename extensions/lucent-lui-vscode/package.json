@@ -1,0 +1,33 @@
+{
+  "name": "lucent-lui",
+  "displayName": "Lucent .lui",
+  "version": "0.2.0",
+  "publisher": "lucent",
+  "engines": { "vscode": "^1.95.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onLanguage:lui"],
+  "contributes": {
+    "languages": [{
+      "id": "lui",
+      "aliases": ["Lucent LUI", "lui"],
+      "extensions": [".lui"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "lui",
+      "scopeName": "source.lui",
+      "path": "./syntaxes/lui.tmLanguage.json"
+    }],
+    "configuration": {
+      "title": "Lucent .lui",
+      "properties": {
+        "lucentLui.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the separately installed Lucent.Lui.LanguageServer.dll."
+        }
+        ,"lucentLui.projectPath": { "type": "string", "default": "", "description": "Evaluated .csproj owned by this LUI host." }
+      }
+    }
+  }
+}

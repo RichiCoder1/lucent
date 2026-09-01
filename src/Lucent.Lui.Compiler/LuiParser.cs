@@ -356,7 +356,7 @@ public static class LuiParser
                         terminator
                     )
                 );
-                if (terminator.IsMissing && !colon.IsMissing && !AtStyleBoundary())
+                if (terminator.IsMissing && !colon.IsMissing)
                     Error("LUI1015", "Expected ';' after style assignment.", terminator.Span);
             }
             return result;
@@ -546,7 +546,7 @@ public static class LuiParser
             var varKeyword = ExpectWord("var");
             var variable = Name("foreach variable");
             var inKeyword = ExpectWord("in");
-            var source = IslandExpression(')', '{', '<', '}');
+            var source = ForEachSourceExpression();
             var closeHeader = Expect(')');
             var keyedKeyword = ExpectWord("keyed");
             var byKeyword = ExpectWord("by");
@@ -987,6 +987,8 @@ public static class LuiParser
                 ),
                 terminator
             );
+            if (terminator.IsMissing)
+                Error("LUI1015", "Expected ';' after style assignment.", terminator.Span);
             return true;
         }
 
@@ -994,6 +996,14 @@ public static class LuiParser
         {
             var start = position;
             var end = IslandScanner.End(text, position, stops);
+            position = end;
+            return Expression(new LuiSpan(start, end - start), text.Substring(start, end - start));
+        }
+
+        private LuiExpressionSyntax ForEachSourceExpression()
+        {
+            var start = position;
+            var end = IslandScanner.End(text, position, true, ')');
             position = end;
             return Expression(new LuiSpan(start, end - start), text.Substring(start, end - start));
         }
@@ -1420,32 +1430,6 @@ public static class LuiParser
             }
         }
 
-        private bool AtStyleBoundary()
-        {
-            var save = position;
-            White();
-            var newline = false;
-            for (var p = save - 1; p >= 0 && char.IsWhiteSpace(text[p]); p--)
-                newline |= text[p] == '\r' || text[p] == '\n';
-            var result =
-                Current == '}'
-                || (newline && (PeekWord("when") || TopLevelStart() || LooksLikeStyleAssignment()));
-            position = save;
-            return result;
-        }
-
-        private bool LooksLikeStyleAssignment()
-        {
-            var save = position;
-            var valid = TryReadName(text, position, out var length);
-            if (valid)
-                position += length;
-            White();
-            var result = valid && Current == ':';
-            position = save;
-            return result;
-        }
-
         private static bool TryReadName(string source, int start, out int length)
         {
             var end = 0;
@@ -1553,17 +1537,30 @@ public static class LuiParser
             return source.Length;
         }
 
-        internal static int End(string source, int start, params char[] stops)
+        internal static int End(string source, int start, params char[] stops) =>
+            End(source, start, false, stops);
+
+        internal static int End(string source, int start, bool stopAtKeyed, params char[] stops)
         {
             var parens = 0;
             var brackets = 0;
             var braces = 0;
-            foreach (var token in SyntaxFactory.ParseTokens(source.Substring(start)))
+            var tokens = SyntaxFactory.ParseTokens(source.Substring(start)).ToArray();
+            for (var index = 0; index < tokens.Length; index++)
             {
+                var token = tokens[index];
                 if (token.IsKind(SyntaxKind.EndOfFileToken))
                     return source.Length;
                 var kind = token.Kind();
                 var atTop = parens == 0 && brackets == 0 && braces == 0;
+                if (
+                    stopAtKeyed
+                    && atTop
+                    && token.ValueText == "keyed"
+                    && index + 1 < tokens.Length
+                    && tokens[index + 1].ValueText == "by"
+                )
+                    return start + token.SpanStart;
                 if (
                     atTop
                     && (

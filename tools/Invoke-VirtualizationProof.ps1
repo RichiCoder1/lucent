@@ -81,13 +81,21 @@ function Invoke-NodeEventually([System.Windows.Automation.AutomationElement] $ro
     } "$name did not accept Invoke after its semantic snapshot was observed."
 }
 function Invoke-MutationProof([System.Windows.Automation.AutomationElement] $root, [System.Windows.Automation.AutomationElement] $list) {
+    $separator = [char]0x00b7
     Select-Issue $root $list 10000
     Assert-True ($null -eq (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))) 'Retry was available before the selected issue had a transient outcome.'
     Invoke-NodeEventually $root 'Open/Close'
-    Wait-Until {
-        $status = Find-OptionalNode $root 'closed · Not synced: Fixture source is temporarily unavailable.' ([System.Windows.Automation.ControlType]::StatusBar)
-        $null -ne $status -and $null -ne (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
-    } 'Transient fixture mutation did not publish Not synced and Retry.'
+    try {
+        Wait-Until {
+            $status = Find-OptionalNode $root "closed $separator Not synced: Fixture source is temporarily unavailable." ([System.Windows.Automation.ControlType]::StatusBar)
+            $null -ne $status -and $null -ne (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
+        } 'Transient fixture mutation did not publish Not synced and Retry.'
+    }
+    catch {
+        $statuses = @($root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::StatusBar } | ForEach-Object { $_.Current.Name })
+        $hasRetry = $null -ne (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
+        throw "Transient fixture mutation did not publish Not synced and Retry; statuses=$($statuses -join ' | '); retry=$hasRetry."
+    }
     Invoke-NodeEventually $root 'Retry'
     Wait-Until {
         $status = Find-OptionalNode $root 'closed' ([System.Windows.Automation.ControlType]::StatusBar)
@@ -97,7 +105,7 @@ function Invoke-MutationProof([System.Windows.Automation.AutomationElement] $roo
     Select-Issue $root $list 9999
     Invoke-NodeEventually $root 'Open/Close'
     Wait-Until {
-        $status = Find-OptionalNode $root 'closed · Rejected: Fixture policy rejected this change.' ([System.Windows.Automation.ControlType]::StatusBar)
+        $status = Find-OptionalNode $root "closed $separator Rejected: Fixture policy rejected this change." ([System.Windows.Automation.ControlType]::StatusBar)
         $null -ne $status -and $null -eq (Find-OptionalNode $root 'Retry' ([System.Windows.Automation.ControlType]::Button))
     } 'Rejected fixture mutation did not roll back, publish its reason, or retire Retry.'
 

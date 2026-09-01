@@ -61,6 +61,7 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
             referencesGeneration,
             globalUsingsGeneration,
             options,
+            "",
             ""
         ) { }
 
@@ -78,6 +79,38 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
         string globalUsingsGeneration,
         string options,
         string defines
+    )
+        : this(
+            projectEpoch,
+            projectIdentity,
+            document,
+            documentVersion,
+            compilationGeneration,
+            siblingIndexGeneration,
+            languageVersion,
+            compilerVersion,
+            referencesGeneration,
+            globalUsingsGeneration,
+            options,
+            defines,
+            ""
+        ) { }
+
+    /// <summary>Creates the complete immutable identity including the evaluated C# root namespace used by style token binding.</summary>
+    public LuiFreshnessIdentity(
+        string projectEpoch,
+        string projectIdentity,
+        LuiDocumentIdentity document,
+        string documentVersion,
+        string compilationGeneration,
+        string siblingIndexGeneration,
+        string languageVersion,
+        string compilerVersion,
+        string referencesGeneration,
+        string globalUsingsGeneration,
+        string options,
+        string defines,
+        string rootNamespace
     )
     {
         ProjectEpoch = projectEpoch ?? throw new ArgumentNullException(nameof(projectEpoch));
@@ -102,6 +135,7 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
             ?? throw new ArgumentNullException(nameof(globalUsingsGeneration));
         Options = options ?? throw new ArgumentNullException(nameof(options));
         Defines = defines ?? throw new ArgumentNullException(nameof(defines));
+        RootNamespace = rootNamespace ?? throw new ArgumentNullException(nameof(rootNamespace));
     }
 
     /// <summary>Host generation identifying the evaluated project state.</summary>
@@ -140,6 +174,9 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
     /// <summary>Effective conditional-compilation symbols identity.</summary>
     public string Defines { get; }
 
+    /// <summary>Evaluated C# root namespace whose optional <c>Tokens</c> type is visible only to style values.</summary>
+    public string RootNamespace { get; }
+
     /// <summary>Deterministic generated C# hint name for <see cref="Document"/>.</summary>
     public string HintName => "Lucent.Lui." + Document.StableId + ".g.cs";
 
@@ -169,6 +206,8 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
                 + Options
                 + "\0"
                 + Defines
+                + "\0"
+                + RootNamespace
         );
 
     /// <summary>Compares every freshness input through the deterministic map identity.</summary>

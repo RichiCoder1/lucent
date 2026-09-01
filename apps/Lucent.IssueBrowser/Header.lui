@@ -1,0 +1,26 @@
+namespace Lucent.IssueBrowser;
+
+
+style HeaderStyle {
+    Width: 800;
+    Height: DensityHeaderHeight;
+    Background: HeaderSurface;
+}
+
+style HeaderTitleStyle {
+    Height: 24;
+    FontSize: DensityTitleFontSize;
+}
+
+style DensityButtonStyle {
+    Width: 250;
+    Height: DensityFilterHeight;
+}
+
+public component Header(IssueBrowserState browser) {
+    <Column style={HeaderStyle}>
+        <Text style={HeaderTitleStyle} name="issue-browser.title">Issues</Text>
+        <FilterBar browser={browser} name="issue-browser.filters" />
+        <Button onInvoke={browser.ToggleDensity} style={DensityButtonStyle} name="issue-browser.density">Density: Comfortable/Compact</Button>
+    </Column>
+}

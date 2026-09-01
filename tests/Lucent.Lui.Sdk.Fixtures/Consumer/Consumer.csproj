@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.1.0">
+<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.2.0">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles></PropertyGroup>
   <ItemGroup><Reference Include="Lucent.Core"><HintPath>../../../src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll</HintPath></Reference></ItemGroup>
 </Project>

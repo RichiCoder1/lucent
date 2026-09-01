@@ -9,7 +9,7 @@ const string Complete = """
 namespace Sample.Ui;
 using System;
 public component Card(System.Collections.Generic.Dictionary<string, (int x, int y)> values, Action save) {
-    <Components.Row Name="card" Style={Panel with { Padding: Insets.All(4) }} P={recordValue with { Value = 2 }}>
+    <Components.Row Name="card" Style={Panel with { Padding: Insets.All(4); }} P={recordValue with { Value = 2 }}>
         {/* comment } stays a comment */}
         if (values.Any(x => x is { x: > 0 })) { <Text Name="title"> Hello </Text> } else { }
         foreach (var item in Items.Where(x => x != "}")) keyed by item.Id { <Row Name="item" /> }
@@ -134,6 +134,26 @@ Assert(
         && !tokenStyle.Assignments.Single().Terminator.IsMissing,
     "structural token ownership is incomplete."
 );
+var recursivePatternLoop = LuiParser.Parse(
+    "internal component X() { <Root>foreach (var x in selected is { } value ? [value] : Array.Empty<Item>()) keyed by x.Id { <A /> }</Root> }"
+);
+Assert(
+    recursivePatternLoop.Diagnostics.Count == 0
+        && ((LuiElementSyntax)recursivePatternLoop.Component!.Body.Single())
+            .Children.OfType<LuiForEachSyntax>()
+            .Single()
+            .Source.Text == "selected is { } value ? [value] : Array.Empty<Item>()",
+    "keyed foreach source stopped at a recursive pattern or generic type."
+);
+var missingLoopClose = LuiParser.Parse(
+    "internal component X() { <Root>foreach (var x in xs keyed by x.Id { <A /> } <B /> </Root> }"
+);
+Assert(
+    ((LuiElementSyntax)missingLoopClose.Component!.Body.Single())
+        .Children.OfType<LuiElementSyntax>()
+        .Any(element => element.Name.Text == "B"),
+    "a missing keyed foreach ')' consumed a later sibling."
+);
 
 var missingOpen = LuiParser.Parse("internal component X() { if (ok) <A /> <B /> }");
 Assert(
@@ -231,8 +251,17 @@ Assert(
 );
 var styleNewlines = LuiParser.Parse("internal component X() { <A /> } style S { P: X\nQ: Y; }");
 Assert(
-    styleNewlines.Diagnostics.Count == 0 && styleNewlines.Styles.Single().Assignments.Count == 2,
-    "newline-delimited style assignments were not retained."
+    styleNewlines.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1015")
+        && styleNewlines.Styles.Single().Assignments.Count == 2
+        && styleNewlines.Styles.Single().Assignments[1].Property.Text == "Q",
+    "missing style semicolon did not report and recover at the next assignment."
+);
+var inlineStyleSemicolon = LuiParser.Parse(
+    "internal component X() { <A style={Base with { P: X }} /> }"
+);
+Assert(
+    inlineStyleSemicolon.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1015"),
+    "missing inline style semicolon was accepted."
 );
 var adjacentStyles = LuiParser.Parse("internal component X() { <A /> } style S { P: X Q: Y; }");
 Assert(
@@ -396,7 +425,7 @@ Assert(
     "simple interpolation was rejected."
 );
 var conditionalStyle = LuiParser.Parse(
-    "internal component X() { <A /> } style S { P: ok ? X : Y }"
+    "internal component X() { <A /> } style S { P: ok ? X : Y; }"
 );
 Assert(
     conditionalStyle.Diagnostics.Count == 0
@@ -417,7 +446,7 @@ Assert(
             "when Selected | FocusVisible { P: count",
             StringComparison.Ordinal
         ) == false
-        && formatterSemantic.Contains("when Selected | FocusVisible { Q: label; R: count }")
+        && formatterSemantic.Contains("when Selected | FocusVisible { Q: label; R: count; }")
         && (
             (LuiStyleWithSyntax)
                 ((LuiElementSyntax)formatterSemanticDocument.Component!.Body.Single())
@@ -518,8 +547,10 @@ var lowered = LuiCompiler.Compile(
 Assert(
     lowered.Success
         && lowered.Source!.Contains(".Named(\"root\")")
-        && lowered.Source.Contains("Row(style:")
-        && lowered.Source.Contains("content: [Text(content: \"Hello\")]")
+        && lowered.Source.Contains("global::Lucent.Core.Components.Row(style:")
+        && lowered.Source.Contains(
+            "content: [global::Lucent.Core.Components.Text(content: \"Hello\")]"
+        )
         && lowered.Source.Contains("#line"),
     "recipe lowering failed: "
         + string.Join(" | ", lowered.Diagnostics.Select(diagnostic => diagnostic.Message))
@@ -571,7 +602,7 @@ using static Lucent.Core.Components;
 using static Lucent.Core.LayoutProperties;
 using static Lucent.Core.VisualProperties;
 public component Matrix(bool show, float spacing, IEnumerable<string> items, Style? style = null) {
-    <Column name="matrix" style={style with { Spacing: spacing }}>
+    <Column name="matrix" style={style with { Spacing: spacing; }}>
         <Text>Start</Text>
         if (show) { <Text>Visible</Text> } else { <Text>Hidden</Text> }
         foreach (var item in items) keyed by item { <Text content={item} /> }
@@ -600,8 +631,12 @@ Assert(
         )
         && matrix.Source.Contains("ContentRecipe.Switch")
         && matrix.Source.Contains("ContentRecipe.ForEach")
+        && matrix.Source.Contains("ContentRecipe.Switch(\"if-0\"")
+        && matrix.Source.Contains("ContentRecipe.ForEach(\"foreach-1\"")
         && matrix.Source.Contains(".When(global::Lucent.Core.VariantState.Hover")
-        && matrix.Source.Contains(".Bind(global::Lucent.Core.LayoutProperties.Spacing, () =>"),
+        && matrix.Source.Contains(
+            ".Bind<float>(global::Lucent.Core.LayoutProperties.Spacing, () =>"
+        ),
     "structural/style matrix did not lower static/live values: "
         + string.Join(" | ", matrix.Diagnostics.Select(diagnostic => diagnostic.Message))
         + "\n"
@@ -754,7 +789,9 @@ var genericContent = LuiCompiler.Compile(
 );
 Assert(
     genericContent.Success
-        && genericContent.Source!.Contains("Group(children: [Label(value: \"ok\")])"),
+        && genericContent.Source!.Contains(
+            "global::Sample.Custom.Group(children: [global::Sample.Custom.Label(value: \"ok\")])"
+        ),
     "[DefaultContent] metadata did not determine scalar/collection parameter names."
 );
 var genericEmpty = LuiCompiler.Compile(
@@ -838,8 +875,13 @@ var collectionOverload = LuiCompiler.Compile(
 );
 Assert(
     collectionOverload.Success
-        && collectionOverload.Source!.Contains("Differing(children: [Label(value: \"text\")])"),
-    "ComponentContent [DefaultContent] overload did not bind through its actual parameter."
+        && collectionOverload.Source!.Contains(
+            "global::Sample.Custom.Differing(children: [global::Sample.Custom.Label(value: \"text\")])"
+        ),
+    "ComponentContent [DefaultContent] overload did not bind through its actual parameter:\n"
+        + string.Join(" | ", collectionOverload.Diagnostics.Select(item => item.Message))
+        + "\n"
+        + collectionOverload.Source
 );
 var unannotatedNamed = LuiCompiler.Compile(
     LuiParser.Parse(
@@ -878,7 +920,7 @@ Assert(
     "an instance [LucentComponent] method was accepted."
 );
 var inlineSource =
-    "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Lucent.Core.LayoutProperties; using static Lucent.Core.VisualProperties; internal component Inline(Style baseStyle, Signal<float> signal) { <Text style={baseStyle with { Spacing: signal.Value; when Hover { Opacity: signal.Value; } }}>live</Text> }";
+    "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Lucent.Core.LayoutProperties; using static Lucent.Core.VisualProperties; internal component Inline(Style baseStyle, Signal<float> signal) { <Text style={baseStyle with { Width: 800f; Spacing: signal.Value; when Hover { Opacity: signal.Value; } }}>live</Text> }";
 var inline = LuiCompiler.Compile(
     LuiParser.Parse(inlineSource),
     CSharpCompilation.Create(
@@ -895,9 +937,14 @@ var inline = LuiCompiler.Compile(
 );
 Assert(
     inline.Success
-        && inline.Source!.Contains(".Bind(global::Lucent.Core.LayoutProperties.Spacing, () =>")
+        && inline.Source!.Contains(
+            ".Bind<float?>(global::Lucent.Core.LayoutProperties.Width, () =>"
+        )
         && inline.Source.Contains(
-            ".When(global::Lucent.Core.VariantState.Hover, global::Lucent.Core.Style.Empty.Bind(global::Lucent.Core.VisualProperties.Opacity, () =>"
+            ".Bind<float>(global::Lucent.Core.LayoutProperties.Spacing, () =>"
+        )
+        && inline.Source.Contains(
+            ".When(global::Lucent.Core.VariantState.Hover, global::Lucent.Core.Style.Empty.Bind<float>(global::Lucent.Core.VisualProperties.Opacity, () =>"
         ),
     "inline assignments or live variants did not lower through public bindings."
 );
@@ -941,10 +988,10 @@ Assert(
     "named/nullable style composition was not parsed, lowered, or formatted."
 );
 var customPropertyApi =
-    "namespace Sample; using Lucent.Core; public static class Props { public static readonly Property<int> Custom = new(\"custom\", 0); }";
+    "namespace Sample; using Lucent.Core; public static class Props { public static readonly Property<int> Custom = new(\"custom\", 0); public static readonly Property<string?> Optional = new(\"optional\", null); }";
 var customProperty = LuiCompiler.Compile(
     LuiParser.Parse(
-        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Sample.Props; internal component CustomStyle(int value) { <Text style={Style.Empty with { Custom: value }}>ok</Text> }"
+        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Sample.Props; internal component CustomStyle(int value, string? optional) { <Text style={Style.Empty with { Custom: value; Optional: optional; }}>ok</Text> }"
     ),
     CSharpCompilation.Create(
         "custom-property",
@@ -966,12 +1013,405 @@ var customProperty = LuiCompiler.Compile(
 );
 Assert(
     customProperty.Success
-        && customProperty.Source!.Contains(".Bind(global::Sample.Props.Custom, () =>"),
+        && customProperty.Source!.Contains(".Bind<int>(global::Sample.Props.Custom, () =>")
+        && customProperty.Source.Contains(".Bind<string?>(global::Sample.Props.Optional, () =>"),
     "custom Property<T> did not lower through public Style.Bind."
+);
+var implicitTokensApi =
+    "namespace App; using Lucent.Core; internal static class Tokens { internal static readonly Token<float> DensitySpacing = new(\"density-spacing\", 8f); internal static readonly Token<float> @class = new(\"class-spacing\", 6f); internal static Token<float> @event { get; } = new(\"event-font-size\", 12f); internal static readonly Property<float> Rogue = new(\"rogue\", 0f); internal static readonly string Label = \"not-style\"; internal static readonly float NonTokenSpacing = 6f; }";
+var implicitTokensSource =
+    "namespace App.Views; using Lucent.Core; internal component ImplicitTokens() { <Row style={Style.Empty with { Spacing: DensitySpacing; }} /> }";
+var implicitTokensDocument = LuiParser.Parse(implicitTokensSource);
+var implicitTokens = LuiCompiler.Compile(
+    implicitTokensDocument,
+    CSharpCompilation.Create(
+        "implicit-tokens",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "implicit-tokens",
+        new LuiDocumentIdentity("ImplicitTokens.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+var tokenStart = implicitTokensSource.IndexOf("DensitySpacing", StringComparison.Ordinal);
+Assert(
+    implicitTokens.Success
+        && implicitTokens.Source!.Contains("global::App.Tokens.DensitySpacing")
+        && !implicitTokens.Source.Contains("using static global::App.Tokens")
+        && implicitTokens
+            .Map.FromSource(new LuiSpan(tokenStart, "DensitySpacing".Length))
+            .Any(entry =>
+                entry.Kind == LuiMapKind.Symbol
+                && implicitTokens.Source.Substring(entry.Generated.Start, entry.Generated.Length)
+                    == "global::App.Tokens.DensitySpacing"
+            ),
+    "root Tokens were not confined to style binding and lowered as an exact symbol: "
+        + string.Join(" | ", implicitTokens.Diagnostics.Select(diagnostic => diagnostic.Message))
+        + "\n"
+        + implicitTokens.Source
+);
+var escapedTokens = LuiCompiler.Compile(
+    LuiParser.Parse(
+        "namespace App.Views; using Lucent.Core; internal component EscapedTokens() { <Row style={S} /> } style S { Spacing: @class; FontSize: @event; }"
+    ),
+    CSharpCompilation.Create(
+        "escaped-tokens",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "escaped-tokens",
+        new LuiDocumentIdentity("EscapedTokens.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(
+    escapedTokens.Success
+        && escapedTokens.Source!.Contains("global::App.Tokens.@class")
+        && escapedTokens.Source.Contains("global::App.Tokens.@event"),
+    "escaped root token field/property identifiers did not lower as valid C#: "
+        + string.Join(" | ", escapedTokens.Diagnostics.Select(diagnostic => diagnostic.Message))
+);
+var parenthesizedToken = LuiCompiler.Compile(
+    LuiParser.Parse(implicitTokensSource.Replace("DensitySpacing;", "(DensitySpacing);")),
+    CSharpCompilation.Create(
+        "parenthesized-token",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "parenthesized-token",
+        new LuiDocumentIdentity("ParenthesizedToken.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(
+    parenthesizedToken.Success
+        && parenthesizedToken.Source!.Contains(".Set(global::Lucent.Core.LayoutProperties.Spacing,")
+        && parenthesizedToken.Source.Contains("(global::App.Tokens.DensitySpacing)")
+        && !parenthesizedToken.Source.Contains(
+            ".Bind<float>(global::Lucent.Core.LayoutProperties.Spacing"
+        ),
+    "parenthesized root Token<T> did not retain static token semantics: "
+        + string.Join(
+            " | ",
+            parenthesizedToken.Diagnostics.Select(diagnostic => diagnostic.Message)
+        )
+);
+var propertyLeak = LuiCompiler.Compile(
+    LuiParser.Parse(
+        "namespace App.Views; using Lucent.Core; using static Lucent.Core.Components; internal component Leak() { <Row style={S} /> } style S { Rogue: 1; }"
+    ),
+    CSharpCompilation.Create(
+        "property-leak",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "property-leak",
+        new LuiDocumentIdentity("PropertyLeak.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(
+    !propertyLeak.Success && propertyLeak.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2000"),
+    "root Tokens leaked a style property name into the implicit scope."
+);
+var ambiguousTokenApi =
+    "namespace Other; using Lucent.Core; internal static class Tokens { internal static readonly Token<float> DensitySpacing = new(\"other-spacing\", 4f); }";
+var ambiguousToken = LuiCompiler.Compile(
+    LuiParser.Parse("using static Other.Tokens; " + implicitTokensSource),
+    CSharpCompilation.Create(
+        "ambiguous-token",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+            CSharpSyntaxTree.ParseText(
+                ambiguousTokenApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "ambiguous-token",
+        new LuiDocumentIdentity("AmbiguousToken.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(
+    !ambiguousToken.Success
+        && ambiguousToken.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI2000"
+            && diagnostic.Message.Contains("ambigu", StringComparison.OrdinalIgnoreCase)
+        ),
+    "ambiguous root and authored token imports did not fail closed: "
+        + string.Join(" | ", ambiguousToken.Diagnostics.Select(diagnostic => diagnostic.Message))
+);
+var namespaceTokenWins = LuiCompiler.Compile(
+    LuiParser.Parse(
+        implicitTokensSource.Replace(
+            "namespace App.Views;",
+            "namespace App.Views; using static Other.Tokens;"
+        )
+    ),
+    CSharpCompilation.Create(
+        "namespace-token-wins",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+            CSharpSyntaxTree.ParseText(
+                ambiguousTokenApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "namespace-token-wins",
+        new LuiDocumentIdentity("NamespaceTokenWins.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(namespaceTokenWins.Success, "ordinary namespace-scoped token precedence was rejected.");
+var nonTokenConflictApi =
+    "namespace Other; internal static class Values { internal static readonly float NonTokenSpacing = 4f; }";
+var nonTokenConflict = LuiCompiler.Compile(
+    LuiParser.Parse(
+        "using static Other.Values; "
+            + implicitTokensSource.Replace("DensitySpacing;", "NonTokenSpacing;")
+    ),
+    CSharpCompilation.Create(
+        "non-token-conflict",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+            CSharpSyntaxTree.ParseText(
+                nonTokenConflictApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "non-token-conflict",
+        new LuiDocumentIdentity("NonTokenConflict.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(nonTokenConflict.Success, "non-token root member participated in implicit ambiguity.");
+var missingImplicitTokens = LuiCompiler.Compile(
+    implicitTokensDocument,
+    CSharpCompilation.Create(
+        "missing-implicit-tokens",
+        [
+            CSharpSyntaxTree.ParseText(
+                "internal class C {}",
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "missing-implicit-tokens",
+        new LuiDocumentIdentity("MissingImplicitTokens.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(
+    !missingImplicitTokens.Success
+        && missingImplicitTokens.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2000"),
+    "missing root Tokens did not fail through ordinary compilation."
+);
+var leakedToken = LuiCompiler.Compile(
+    LuiParser.Parse(
+        "namespace App.Views; using Lucent.Core; using static Lucent.Core.Components; internal component Leaked() { <Text content={Label} /> }"
+    ),
+    CSharpCompilation.Create(
+        "leaked-token",
+        [
+            CSharpSyntaxTree.ParseText(
+                implicitTokensApi,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "48",
+        "leaked-token",
+        new LuiDocumentIdentity("LeakedToken.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(
+    !leakedToken.Success && leakedToken.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2000"),
+    "root Tokens leaked into component expressions."
+);
+var leakedProperty = LuiCompiler.Compile(
+    LuiParser.Parse(
+        "namespace App.Views; using Lucent.Core; using static Lucent.Core.Components; internal component LeakedProperty() { <Text content={Width} /> }"
+    ),
+    CSharpCompilation.Create("leaked-property", references: References()),
+    new LuiFreshnessIdentity(
+        "48",
+        "leaked-property",
+        new LuiDocumentIdentity("LeakedProperty.lui"),
+        "v1",
+        "",
+        "",
+        "preview",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "App"
+    )
+);
+Assert(
+    !leakedProperty.Success
+        && leakedProperty.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2000"),
+    "framework style properties leaked into component expressions."
+);
+var leakedComponent = LuiCompiler.Compile(
+    LuiParser.Parse(
+        "namespace App.Views; using Lucent.Core; internal component LeakedComponent() { <Text content={Row} /> }"
+    ),
+    CSharpCompilation.Create("leaked-component", references: References()),
+    new LuiFreshnessIdentity(
+        "48",
+        "leaked-component",
+        new LuiDocumentIdentity("LeakedComponent.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    !leakedComponent.Success
+        && leakedComponent.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2000"),
+    "built-in Components leaked into component expressions."
 );
 var variants = LuiCompiler.Compile(
     LuiParser.Parse(
-        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Lucent.Core.VisualProperties; internal component Variants() { <Text style={Style.Empty with { when Selected | FocusVisible { Opacity: .5f; } }}>ok</Text> }"
+        "namespace Sample; using Lucent.Core; internal component Variants() { <Text style={Style.Empty with { when Selected | FocusVisible { Opacity: .5f; } }}>ok</Text> }"
     ),
     CSharpCompilation.Create(
         "variants",
@@ -999,7 +1439,7 @@ Assert(
     "compound VariantState condition did not lower."
 );
 var duplicateVariantSource =
-    "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Lucent.Core.VisualProperties; internal component DuplicateVariants() { <Text style={Style.Empty with { when Hover | Hover { Opacity: .5f; } }}>ok</Text> }";
+    "namespace Sample; using Lucent.Core; internal component DuplicateVariants() { <Text style={Style.Empty with { when Hover | Hover { Opacity: .5f; } }}>ok</Text> }";
 var duplicateVariants = LuiCompiler.Compile(
     LuiParser.Parse(duplicateVariantSource),
     CSharpCompilation.Create(
@@ -1039,7 +1479,7 @@ Assert(
 );
 var invalidVariant = LuiCompiler.Compile(
     LuiParser.Parse(
-        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component InvalidVariant() { <Text style={Style.Empty with { when Selected | 1 { Opacity: .5f; } }}>ok</Text> }"
+        "namespace Sample; using Lucent.Core; internal component InvalidVariant() { <Text style={Style.Empty with { when Selected | 1 { Opacity: .5f; } }}>ok</Text> }"
     ),
     CSharpCompilation.Create(
         "invalid-variant",

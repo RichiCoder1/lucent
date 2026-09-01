@@ -23,7 +23,8 @@ The compiler and generator target `netstandard2.0`, the documented analyzer-comp
 - an opt-out project-relative `**/*.lui` item excluding `bin`, `obj`, hidden/generated output, and removed files;
 - Roslyn `AdditionalFiles` metadata and the generator analyzer asset;
 - `<LucentLuiLangVersion>` with SDK default `preview`;
-- default-enabled, opt-out ordinary C# `<Using>`/global-static-using items for the built-in `Components` module and author-facing style fluency/property groups;
+- evaluated C# `$(RootNamespace)` as style-token binding and freshness authority;
+- default-enabled, opt-out ordinary C# `Lucent.Core` namespace using only; built-in components, properties, and variants remain tag/LHS/`when` scoped;
 - validation, generated inspection, formatting check, and clean integration.
 
 Projects may disable the default glob and list files explicitly. `.lui` never enters `Compile`. Evaluated items/imports are tested with `dotnet msbuild -preprocess`; broad or duplicate globs fail tests. Build props/targets do not mutate restore-driving framework/package properties.
@@ -42,6 +43,8 @@ Paths normalize to project-relative logical identity. Files outside the project 
 
 Every bound, lowered, mapped, or editor result carries one freshness identity: workspace/project epoch, evaluated project identity, logical document identity/version, compiler options/language version, and generated hint/map identity. Publishing compares that identity to the current snapshot and drops stale work; cancellation is cleanup, not the commit guard. Removal and host disposal release owned work.
 
+The evaluated `RootNamespace` participates in that freshness identity. If an accessible static `<RootNamespace>.Tokens` type exists, its `Token<T>` fields and properties participate in normal C# lookup only for style-value expressions. Generated code uses fully qualified symbols and emits no implicit static import. Editor completion, hover, navigation, references, and rename expose the real C# token symbols only in that scope.
+
 ## Source maps and project authority
 
 Build and editor use the actual Roslyn `Compilation`, global/static usings, analyzer options, references, defines, language version, nullability, and `.lui` items. Component tags resolve `[LucentComponent]` methods by normal C# accessibility, overload, exact camel-case parameter, conversion, default-value, and `[DefaultContent]` rules. The editor evaluates the real project through `MSBuildWorkspace`; there is no custom `.csproj` parser or approximate reference resolver.
@@ -53,6 +56,8 @@ Map entries support one-to-many and many-to-one spans, distinguish symbol/expres
 ## Editor and CLI
 
 The first complete editor target is VS Code. A separate .NET 10 LSP process consumes `Lucent.Lui.Compiler` and the shared project model. The extension remains a thin protocol/client layer.
+
+The initial host loads one configured evaluated `.csproj` through `MSBuildWorkspace`; it does not parse project files or resolve references itself. Its bounded proof supports source-to-generated and generated-to-source definition navigation for `.lui` maps. Project/document replacements and disposal increment the same freshness epoch carried by compiler results, so obsolete work is dropped before publication. The VS Code host starts the separately installed server named by `lucentLui.serverPath`; neither host nor server is a runtime package asset.
 
 Before `.lui` is preferred, tooling covers every frozen construct: components, parameters, overloads, enums, literals, expression islands, default content, styles, tokens, variants, conditionals, keyed loops, namespaces/usings, locals, and XML documentation. It provides completion, signature help, document symbols, hover, diagnostics, semantic navigation, cross-language rename/references, stable formatting, generated navigation, and mapped expression breakpoints/exceptions. Unsafe or ambiguous rename is refused rather than partially applied.
 

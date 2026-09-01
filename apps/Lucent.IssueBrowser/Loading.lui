@@ -1,0 +1,10 @@
+namespace Lucent.IssueBrowser;
+
+
+style LoadingStyle {
+    Height: 28;
+}
+
+public component Loading(IssueBrowserState browser) {
+    <Status content={() => browser.IsStale ? "Refreshing issues" : "Loading issues"} style={LoadingStyle} />
+}

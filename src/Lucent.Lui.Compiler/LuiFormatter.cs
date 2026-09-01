@@ -275,11 +275,12 @@ public static class LuiFormatter
                     for (var j = 0; j < group.Assignments.Count; j++)
                     {
                         if (j != 0)
-                            output.Append("; ");
+                            output.Append(' ');
                         output
                             .Append(group.Assignments[j].Property.Text)
                             .Append(": ")
-                            .Append(group.Assignments[j].Expression.Text);
+                            .Append(group.Assignments[j].Expression.Text)
+                            .Append(';');
                     }
                     output.Append(" }");
                 }

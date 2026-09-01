@@ -231,6 +231,19 @@ Assert(
             != definesTwo.Results.Single().GeneratedSources.Single().SourceText.ToString(),
     "compiler options or defines change did not prevent stale publication."
 );
+var rootNamespaceOne = RunWithGlobal(
+    new Dictionary<string, string> { ["build_property.RootNamespace"] = "Sample.One" },
+    new TextFile("C:/consumer/Root.lui", Valid, "Root.lui")
+);
+var rootNamespaceTwo = RunWithGlobal(
+    new Dictionary<string, string> { ["build_property.RootNamespace"] = "Sample.Two" },
+    new TextFile("C:/consumer/Root.lui", Valid, "Root.lui")
+);
+Assert(
+    rootNamespaceOne.Results.Single().GeneratedSources.Single().SourceText.ToString()
+        != rootNamespaceTwo.Results.Single().GeneratedSources.Single().SourceText.ToString(),
+    "RootNamespace change did not invalidate generated map identity."
+);
 var versionOne = RunWithGlobal(
     new Dictionary<string, string> { ["build_property.LucentLuiProjectEpoch"] = "epoch-3" },
     new TextFile("C:/consumer/Version.lui", Valid, "Version.lui", "v1")

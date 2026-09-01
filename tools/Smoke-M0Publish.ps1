@@ -97,8 +97,8 @@ function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Clie
 }
 
 function Assert-KeyboardFocusPixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
-    if (-not [M0Window]::PostMessage($Hwnd, 0x0100, [UIntPtr]0x09, [IntPtr]::Zero) -or
-        -not [M0Window]::PostMessage($Hwnd, 0x0101, [UIntPtr]0x09, [IntPtr]::Zero)) {
+    if (-not [M0Window]::PostMessage($Hwnd, 0x0100, [UIntPtr]::new(0x09), [IntPtr]::Zero) -or
+        -not [M0Window]::PostMessage($Hwnd, 0x0101, [UIntPtr]::new(0x09), [IntPtr]::Zero)) {
         throw "Iteration $Iteration could not post ordinary Tab input."
     }
     $deadline = [Environment]::TickCount64 + 5000

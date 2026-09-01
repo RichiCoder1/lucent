@@ -10,5 +10,6 @@
     <IsAotCompatible>true</IsAotCompatible>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <LucentLuiToolingVersion>0.2.0</LucentLuiToolingVersion>
   </PropertyGroup>
 </Project>

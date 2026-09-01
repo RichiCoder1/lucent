@@ -1,0 +1,111 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Lucent LUI",
+  "scopeName": "source.lui",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#expressions" },
+    { "include": "#declarations" },
+    { "include": "#tags" },
+    { "include": "#style-properties" },
+    { "include": "#keywords" },
+    { "include": "#numbers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.lui", "match": "//.*$" },
+        {
+          "name": "comment.block.lui",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.lui",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.lui", "match": "\\\\." }]
+        }
+      ]
+    },
+    "expressions": {
+      "patterns": [
+        {
+          "name": "meta.embedded.expression.cs",
+          "begin": "(?<==)\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.lui" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.embedded.end.lui" } },
+          "patterns": [{ "include": "source.cs" }]
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(namespace|using)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.control.import.lui" },
+            "2": { "name": "entity.name.namespace.lui" }
+          }
+        },
+        {
+          "match": "\\b(component|style)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.lui" },
+            "2": { "name": "entity.name.type.lui" }
+          }
+        }
+      ]
+    },
+    "tags": {
+      "patterns": [
+        {
+          "match": "(</?)([A-Za-z_][A-Za-z0-9_.]*)(?=[\\s/>])",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.lui" },
+            "2": { "name": "entity.name.tag.lui" }
+          }
+        },
+        {
+          "name": "entity.other.attribute-name.lui",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=)"
+        },
+        { "name": "punctuation.definition.tag.lui", "match": "/?>" }
+      ]
+    },
+    "style-properties": {
+      "patterns": [
+        {
+          "name": "variable.other.property.lui",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.lui",
+          "match": "\\b(public|internal|if|else|foreach|keyed|by|when|with)\\b"
+        },
+        {
+          "name": "constant.language.lui",
+          "match": "\\b(true|false|null|default)\\b"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.lui",
+          "match": "(?<![A-Za-z0-9_])(?:0[xX][0-9A-Fa-f]+|\\d+(?:\\.\\d+)?)(?![A-Za-z0-9_])"
+        }
+      ]
+    }
+  }
+}

@@ -54,6 +54,8 @@ Ordinary parameters are validated and captured when a recipe is created. They ar
 
 Styles are immutable recipe inputs. Standard properties have typed fluent methods over `Style.Set`/`Bind`; custom properties retain those universal methods. `Style.With(Style?)` composes left-to-right, treats null as no additional override, and lets an intentionally styleable component forward caller overrides. A component exposes `Style? style` only when its declared interface supports root restyling; the compiler adds no magical style parameter.
 
+The SDK supplies an ordinary project-wide `Lucent.Core` namespace import. Built-in `Components` methods are implicit only as `.lui` element tags; `LayoutProperties`, `VisualProperties`, `TypographyProperties`, and `InputProperties` members are implicit only as style property names; and `VariantState` members are implicit only in `when` conditions. None enters component expressions, style value expressions, or project-wide static C# imports. Lowering resolves each name as its real Roslyn symbol and emits the fully qualified member. Custom components and properties continue to use ordinary C# imports; handwritten C# prefers component methods plus typed style fluency or explicitly qualified keys.
+
 Handwritten and generated recipes mount through the same atomic operation:
 
 ```csharp
@@ -68,14 +70,10 @@ A document uses standard C# namespace and using syntax and initially declares ex
 
 ```lui
 namespace Lucent.IssueBrowser;
-
-using Lucent.Core;
-using static Lucent.IssueBrowser.Theme;
-
 style FilterBarStyle {
-    Axis: LayoutAxis.Row
-    Spacing: 8f
-    Padding: Insets.Symmetric(12, 8)
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    Padding: Insets.Symmetric(12, 8);
 }
 
 public component FilterBar(Query query, Action clear, Style? style = null) {
@@ -144,22 +142,33 @@ Named and inline styles use one typed body grammar. Style property names resolve
 
 ```lui
 style PrimaryButton {
-    Background: Colors.Primary
-    TextColor: Colors.OnPrimary
+    Background: Colors.Primary;
+    TextColor: Colors.OnPrimary;
 
     when Hover {
-        Background: Colors.PrimaryHover
+        Background: Colors.PrimaryHover;
     }
 }
 
 <Button name="save" style={PrimaryButton with {
-    Padding: Insets.Symmetric(horizontal: 12, vertical: 8)
+    Padding: Insets.Symmetric(horizontal: 12, vertical: 8);
 }} onInvoke={save}>Save</Button>
 ```
 
+### Authoring conventions
+
+- End every named, inline, and variant style assignment with `;`. A missing terminator is a recoverable parse error so later assignments remain available to diagnostics and editor features.
+- Prefer bare numeric literals when ordinary C# conversion is unambiguous. Use a suffix only when it is needed to select a type, overload, or arithmetic behavior.
+- Put literal text and component/default content between tags. Keep dynamic scalar values as named attributes until expression children are added.
+- Application theme keys conventionally live in an accessible top-level static `<RootNamespace>.Tokens` class. Its `Token<T>` fields and properties are implicitly available only inside named, inline, and variant style-value expressions. The compiler resolves them through ordinary C# rules and lowers fully qualified symbols; component parameters and structural expressions receive no implicit token scope. Runtime `ThemeContext` state remains composition-owned; token declarations are not mutable global theme state.
+
 `with` is the sole initial style composition syntax. It accepts named style values, nullable style parameters, and inline bodies; evaluation is left to right and the rightmost assignment wins. It lowers to ordered `Style.With` and `Style.When` calls. Compound variants use the real finite flags expression, for example `when Selected | FocusVisible`. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are internal to the document initially. `public style` is reserved as the fast-follow export syntax; shared styles remain ordinary public C# symbols until cross-document component binding/maps prove that feature. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
 
-The Lucent SDK supplies opt-out ordinary namespace/static C# usings for `Components` and author-facing style fluency so common recipe and property names work without repetitive imports. Application and third-party component modules may publish their own ordinary global static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics.
+The Lucent SDK supplies an opt-out ordinary `Lucent.Core` namespace using only. Built-in `Components` are tag-only, framework properties are style-left-hand-side-only, and `VariantState` is `when`-only; application and third-party modules may publish ordinary static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics.
+
+Source-copied components become application-owned and therefore bind unqualified style tokens against the consuming project's `<RootNamespace>.Tokens`. Missing tokens are ordinary compilation errors. Components requiring a fixed token contract qualify their own token class explicitly.
+
+An explicit `Style? style` component parameter is the initial styleability capability: it declares that callers may override the component root. Lucent does not define layout/text/input traits or concrete-control style targets. If real invalid property/component combinations later justify applicability checks, property metadata may declare inferred requirements; no syntax or public trait contract is reserved yet.
 
 ## Color, brush, padding, and opacity
 

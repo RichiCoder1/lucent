@@ -1,0 +1,17 @@
+namespace Lucent.IssueBrowser;
+
+
+style ErrorStatusStyle {
+    Axis: LayoutAxis.Column;
+}
+
+style ErrorRetryStyle {
+    Height: 30;
+}
+
+public component Error(IssueBrowserState browser) {
+    <Column>
+        <Status content={() => browser.Error ?? ""} style={ErrorStatusStyle} />
+        <Button onInvoke={browser.Retry} style={ErrorRetryStyle} name="issue-browser.retry">Retry</Button>
+    </Column>
+}

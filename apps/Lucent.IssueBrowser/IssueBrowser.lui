@@ -1,0 +1,38 @@
+namespace Lucent.IssueBrowser;
+
+
+style IssueBrowserStyle {
+    Width: 800;
+    Height: 500;
+    Background: PageSurface;
+    TextColor: PageForeground;
+    Clip: true;
+}
+
+style VirtualizedListStyle {
+    Width: 800;
+    Height: 60;
+}
+
+style BrowserStatusActionStyle {
+    Height: DensityFilterHeight;
+}
+
+public component IssueBrowser(IssueBrowserState browser) {
+    <Column style={IssueBrowserStyle}>
+        <Header browser={browser} name="issue-browser.header" />
+        if (browser.IsLoading) {
+            <Loading browser={browser} name="issue-browser.loading" />
+        }
+        if (browser.Error is not null) {
+            <Error browser={browser} name="issue-browser.error" />
+        }
+        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, issue).Named("issue-browser.issue-row")} rowHeight={() => browser.Density == IssueDensity.Comfortable ? 30 : 22} label="Issues" style={VirtualizedListStyle} name="issue-browser.scroll-viewport" />
+        foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number {
+            <Details browser={browser} issue={issue} name="issue-browser.details" />
+        }
+        if (browser.SelectedIssue is not null && browser.CanRetrySelected) {
+            <Button onInvoke={browser.RetrySelected} style={BrowserStatusActionStyle} name="issue-browser.details-retry">Retry</Button>
+        }
+    </Column>
+}
