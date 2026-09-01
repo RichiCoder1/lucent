@@ -9,6 +9,8 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace Lucent.Lui.Generator;
 
+/// <summary>Build-time incremental generator that lowers <c>.lui</c> additional files into Lucent component recipe C#.</summary>
+/// <remarks>The analyzer runs only during compilation, honors cancellation and freshness checks, reports authored diagnostics, and adds no runtime dependency to consuming applications.</remarks>
 [Generator]
 public sealed class LuiGenerator : IIncrementalGenerator
 {
@@ -53,6 +55,8 @@ public sealed class LuiGenerator : IIncrementalGenerator
         true
     );
 
+    /// <summary>Registers incremental parsing, sibling indexing, binding, diagnostics, and stale-output-safe publication steps.</summary>
+    /// <param name="context">Roslyn initialization context supplied during analyzer setup.</param>
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var inputs = context

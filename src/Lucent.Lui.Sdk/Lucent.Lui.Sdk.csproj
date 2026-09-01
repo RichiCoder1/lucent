@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion>
+    <TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion><GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer>
     <PackageId>Lucent.Lui.Sdk</PackageId><Version>0.1.0</Version><Authors>Lucent</Authors>
     <Description>Additive .lui generator SDK proof.</Description><IncludeBuildOutput>false</IncludeBuildOutput>

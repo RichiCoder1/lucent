@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion><IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer><IncludeBuildOutput>false</IncludeBuildOutput><EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules></PropertyGroup>
+  <PropertyGroup><TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion><GenerateDocumentationFile>true</GenerateDocumentationFile><IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer><IncludeBuildOutput>false</IncludeBuildOutput><EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules></PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />

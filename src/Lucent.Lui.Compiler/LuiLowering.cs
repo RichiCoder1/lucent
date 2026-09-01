@@ -9,9 +9,11 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace Lucent.Lui.Compiler;
 
-/// <summary>Identity required to publish a bound/lowered document.</summary>
+/// <summary>Immutable freshness inputs required before publishing bound or lowered output.</summary>
+/// <remarks>Build and editor hosts compare this value with their current snapshot to reject stale generated source; it has no runtime role.</remarks>
 public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
 {
+    /// <summary>Creates an identity for hosts that provide only project, document, and option generations.</summary>
     public LuiFreshnessIdentity(
         string projectEpoch,
         string projectIdentity,
@@ -33,6 +35,7 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
             options
         ) { }
 
+    /// <summary>Creates an identity with explicit project, sibling-index, language, compiler, reference, and global-using generations.</summary>
     public LuiFreshnessIdentity(
         string projectEpoch,
         string projectIdentity,
@@ -61,6 +64,7 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
             ""
         ) { }
 
+    /// <summary>Creates the complete immutable identity used for generated-source and source-map freshness checks.</summary>
     public LuiFreshnessIdentity(
         string projectEpoch,
         string projectIdentity,
@@ -100,19 +104,46 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
         Defines = defines ?? throw new ArgumentNullException(nameof(defines));
     }
 
+    /// <summary>Host generation identifying the evaluated project state.</summary>
     public string ProjectEpoch { get; }
+
+    /// <summary>Stable identity of the evaluated project.</summary>
     public string ProjectIdentity { get; }
+
+    /// <summary>Logical identity of the authored <c>.lui</c> document.</summary>
     public LuiDocumentIdentity Document { get; }
+
+    /// <summary>Host generation for the document content.</summary>
     public string DocumentVersion { get; }
+
+    /// <summary>Generation of the Roslyn compilation inputs.</summary>
     public string CompilationGeneration { get; }
+
+    /// <summary>Generation of indexed sibling component declarations.</summary>
     public string SiblingIndexGeneration { get; }
+
+    /// <summary>Effective C# language-version identity.</summary>
     public string LanguageVersion { get; }
+
+    /// <summary>Compiler implementation version identity.</summary>
     public string CompilerVersion { get; }
+
+    /// <summary>Generation of metadata references.</summary>
     public string ReferencesGeneration { get; }
+
+    /// <summary>Generation of global using directives.</summary>
     public string GlobalUsingsGeneration { get; }
+
+    /// <summary>Effective compiler-options identity.</summary>
     public string Options { get; }
+
+    /// <summary>Effective conditional-compilation symbols identity.</summary>
     public string Defines { get; }
+
+    /// <summary>Deterministic generated C# hint name for <see cref="Document"/>.</summary>
     public string HintName => "Lucent.Lui." + Document.StableId + ".g.cs";
+
+    /// <summary>Deterministic hash covering every freshness input used by equality and publication.</summary>
     public string MapIdentity =>
         LuiDocumentIdentity.Hash(
             ProjectEpoch
@@ -140,27 +171,40 @@ public sealed class LuiFreshnessIdentity : IEquatable<LuiFreshnessIdentity>
                 + Defines
         );
 
+    /// <summary>Compares every freshness input through the deterministic map identity.</summary>
     public bool Equals(LuiFreshnessIdentity? other) =>
         other is not null && MapIdentity == other.MapIdentity;
 
+    /// <inheritdoc />
     public override bool Equals(object? obj) => Equals(obj as LuiFreshnessIdentity);
 
+    /// <inheritdoc />
     public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(MapIdentity);
 
+    /// <summary>Returns whether this result identity still matches the host's current identity.</summary>
     public bool CanPublishTo(LuiFreshnessIdentity current) => Equals(current);
 }
 
+/// <summary>Role of a source-map relation between authored <c>.lui</c> and generated C# spans.</summary>
 public enum LuiMapKind
 {
+    /// <summary>Generated structure corresponding to authored markup or control-flow structure.</summary>
     Structure,
+
+    /// <summary>Generated symbol corresponding to an authored identifier.</summary>
     Symbol,
+
+    /// <summary>Generated expression corresponding to an authored C# island.</summary>
     Expression,
+
+    /// <summary>Compiler-added generated text without a directly visible authored construct.</summary>
     Scaffolding,
 }
 
 /// <summary>A compact source/generated relation. A source span may deliberately occur more than once.</summary>
 public sealed class LuiMapEntry
 {
+    /// <summary>Creates one immutable relation between authored and generated spans.</summary>
     public LuiMapEntry(LuiSpan source, LuiSpan generated, LuiMapKind kind, bool hidden)
     {
         Source = source;
@@ -169,14 +213,24 @@ public sealed class LuiMapEntry
         Hidden = hidden;
     }
 
+    /// <summary>Authored <c>.lui</c> range measured against the parsed document source.</summary>
     public LuiSpan Source { get; }
+
+    /// <summary>Generated C# range measured against the compilation result source.</summary>
     public LuiSpan Generated { get; }
+
+    /// <summary>Semantic role of this correspondence.</summary>
     public LuiMapKind Kind { get; }
+
+    /// <summary>Whether tooling should hide this generated relation from ordinary source navigation.</summary>
     public bool Hidden { get; }
 }
 
+/// <summary>Deterministic immutable bidirectional map between one <c>.lui</c> document and its generated C#.</summary>
+/// <remarks>Source and generated spans are in different texts. Queries return all intersections because lowering can map one source range to several generated ranges.</remarks>
 public sealed class LuiSourceMap
 {
+    /// <summary>Creates and deterministically orders source/generated relations for one freshness identity.</summary>
     public LuiSourceMap(LuiFreshnessIdentity identity, IReadOnlyList<LuiMapEntry> entries)
     {
         Identity = identity;
@@ -190,12 +244,21 @@ public sealed class LuiSourceMap
             .ToArray();
     }
 
+    /// <summary>Freshness identity of both mapped texts.</summary>
     public LuiFreshnessIdentity Identity { get; }
+
+    /// <summary>Immutable entries sorted deterministically by source and generated span.</summary>
     public IReadOnlyList<LuiMapEntry> Entries { get; }
 
+    /// <summary>Finds every generated relation whose authored source span intersects <paramref name="span"/>.</summary>
+    /// <param name="span">Half-open range in the <c>.lui</c> source text.</param>
+    /// <returns>All matching relations in deterministic order.</returns>
     public IReadOnlyList<LuiMapEntry> FromSource(LuiSpan span) =>
         Entries.Where(entry => Intersects(entry.Source, span)).ToArray();
 
+    /// <summary>Finds every authored relation whose generated C# span intersects <paramref name="span"/>.</summary>
+    /// <param name="span">Half-open range in the generated C# source text.</param>
+    /// <returns>All matching relations in deterministic order.</returns>
     public IReadOnlyList<LuiMapEntry> FromGenerated(LuiSpan span) =>
         Entries.Where(entry => Intersects(entry.Generated, span)).ToArray();
 
@@ -215,8 +278,11 @@ public sealed class LuiSourceMap
     }
 }
 
+/// <summary>Immutable lowering outcome consumed by build or editor tooling.</summary>
+/// <remarks>Publish <see cref="Source"/> only when <see cref="Success"/> is true and <see cref="Identity"/> still matches the current host snapshot.</remarks>
 public sealed class LuiCompilationResult
 {
+    /// <summary>Creates a lowering outcome with generated source when binding succeeds and diagnostics otherwise.</summary>
     public LuiCompilationResult(
         LuiFreshnessIdentity identity,
         string? source,
@@ -230,11 +296,18 @@ public sealed class LuiCompilationResult
         Diagnostics = diagnostics;
     }
 
+    /// <summary>Freshness snapshot used to reject obsolete output.</summary>
     public LuiFreshnessIdentity Identity { get; }
 
     /// <summary>Null when binding failed; callers must never publish stale output.</summary>
     public string? Source { get; }
+
+    /// <summary>Bidirectional map between the document's authored spans and generated C# spans.</summary>
     public LuiSourceMap Map { get; }
+
+    /// <summary>Immutable parser, binding, and lowering diagnostics measured against authored spans.</summary>
     public IReadOnlyList<LuiDiagnostic> Diagnostics { get; }
+
+    /// <summary>Whether generated source is available with no diagnostics; callers must still perform freshness validation.</summary>
     public bool Success => Source is not null && Diagnostics.Count == 0;
 }

@@ -10,9 +10,16 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace Lucent.Lui.Compiler;
 
-/// <summary>Roslyn-bound direct lowering to the public recipe surface.</summary>
+/// <summary>Roslyn-bound lowering from recovered <c>.lui</c> syntax to generated C# recipe code.</summary>
+/// <remarks>Use from build or editor tooling only. The output source and map have no runtime dependency or runtime role.</remarks>
 public static class LuiCompiler
 {
+    /// <summary>Binds a parsed document against a Roslyn compilation and produces generated C# only when diagnostics are absent.</summary>
+    /// <param name="document">Recovered syntax whose spans identify the authored <c>.lui</c> text.</param>
+    /// <param name="compilation">Current Roslyn compilation used for component and expression binding.</param>
+    /// <param name="identity">Host freshness inputs; the compiler snapshots the actual Roslyn state before publication.</param>
+    /// <returns>Generated source, source map, diagnostics, and the identity that must match before publishing.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
     public static LuiCompilationResult Compile(
         LuiDocumentSyntax document,
         Compilation compilation,
@@ -231,7 +238,10 @@ public static class LuiCompiler
         return false;
     }
 
-    /// <summary>Returns a generation from the actual Roslyn snapshot, never host strings masquerading as one.</summary>
+    /// <summary>Derives a freshness identity from the actual Roslyn snapshot rather than host-provided generation strings.</summary>
+    /// <param name="identity">Host-provided document and project identity inputs.</param>
+    /// <param name="compilation">Compilation whose trees, references, options, and global usings are fingerprinted.</param>
+    /// <returns>An immutable identity suitable for stale-output rejection.</returns>
     public static LuiFreshnessIdentity Snapshot(
         LuiFreshnessIdentity identity,
         Compilation compilation

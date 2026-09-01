@@ -5,16 +5,27 @@ using System.Text;
 
 namespace Lucent.Lui.Compiler;
 
+/// <summary>Line-ending policy used when formatting structurally valid <c>.lui</c> text.</summary>
 public enum LuiLineEnding
 {
+    /// <summary>Reuse CRLF when present in the source; otherwise use LF.</summary>
     Preserve,
+
+    /// <summary>Write LF line endings.</summary>
     Lf,
+
+    /// <summary>Write CRLF line endings.</summary>
     CrLf,
 }
 
-/// <summary>Canonical structural formatter. C# island text is never reformatted.</summary>
+/// <summary>Canonical structural formatter for <c>.lui</c> documents.</summary>
+/// <remarks>C# island text is never reformatted; invalid input and ranges without a complete node are returned unchanged.</remarks>
 public static class LuiFormatter
 {
+    /// <summary>Formats a structurally valid document, preserving its C# island text and applying the requested line endings.</summary>
+    /// <param name="source">Complete <c>.lui</c> source text.</param>
+    /// <param name="lineEnding">Line-ending policy for rewritten structure.</param>
+    /// <returns>Formatted text, or the original text when parsing reports diagnostics.</returns>
     public static string Format(string source, LuiLineEnding lineEnding = LuiLineEnding.Preserve)
     {
         var document = LuiParser.Parse(source);
@@ -45,6 +56,12 @@ public static class LuiFormatter
         return output.ToString();
     }
 
+    /// <summary>Formats the largest complete syntax node contained by an authored source range.</summary>
+    /// <param name="source">Complete <c>.lui</c> source text.</param>
+    /// <param name="range">Half-open source range measured against <paramref name="source"/>.</param>
+    /// <param name="lineEnding">Line-ending policy for rewritten structure.</param>
+    /// <returns>Text with the selected node replaced, or the original text when invalid or unselectable.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="range"/> is outside <paramref name="source"/>.</exception>
     public static string FormatRange(
         string source,
         LuiSpan range,

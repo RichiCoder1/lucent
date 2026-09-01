@@ -7,9 +7,14 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Lucent.Lui.Compiler;
 
-/// <summary>Bounded parser for the preview .lui surface. C# islands are lexed by Roslyn.</summary>
+/// <summary>Bounded parser for the preview <c>.lui</c> authoring surface.</summary>
+/// <remarks>C# islands are lexed by Roslyn. Parsing returns an immutable recovered tree and diagnostics rather than throwing for malformed syntax.</remarks>
 public static class LuiParser
 {
+    /// <summary>Parses source text into a span-preserving recovered syntax tree.</summary>
+    /// <param name="source">Exact <c>.lui</c> text to parse.</param>
+    /// <returns>An immutable document whose spans are measured against <paramref name="source"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is <see langword="null"/>.</exception>
     public static LuiDocumentSyntax Parse(string source)
     {
         if (source == null)
