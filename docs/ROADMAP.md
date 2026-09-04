@@ -160,7 +160,7 @@ The automated Issue Browser cutover record is maintained in [M7 evidence](M7-EVI
 - Prefer meaningful integration and E2E tests; add small unit tests only for nontrivial algorithms and sharp contracts.
 - Keep application code free of proof orchestration. External harnesses use ordinary diagnostics, automation, and input seams.
 - Use deterministic realistic mock data for acceptance; network access is optional functionality.
-- Run core tests, the walkthrough, and one NativeAOT smoke on every PR. Reserve larger performance, clean-machine packaging, and manual visual/accessibility/IME work for local or milestone execution and economical scheduled CI.
+- After M7, follow the [pre-release verification policy](agents/verification.md): run affected contracts and add NativeAOT, UI, package, or performance checks when the changed behavior reaches them. Reserve full milestone and broad manual walkthroughs for release decisions or risks that focused automation cannot cover.
 - Store proof scripts and compact summaries in Git. Store screenshots, binaries, traces, and large sample arrays as CI artifacts.
 - Diagnostic dumps are authoritative. OpenTelemetry export is optional, app-owned, and never automatic.
 - Review after every milestone. Implementation fixes invalidate prior review verdicts.

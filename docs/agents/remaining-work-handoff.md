@@ -1,5 +1,18 @@
 # Handoff: seal M7 and prepare the next roadmap
 
+## Completed — 2026-09-04
+
+This handoff is complete. The sections below retain the original execution instructions as history; do not restart their completed gates.
+
+- M7 sealed in `06d50c8` / `56e6434`; #55 and #41 are closed. [M7 evidence](../M7-EVIDENCE.md) records fresh automation and the owner's explicit waiver of the remaining broad manual walkthroughs.
+- Resize #60 completed in `ea19dde`; roadmap #26 is closed.
+- Scalar expression children #58 completed in `426a62b`, including mapped editor operations and the SDK/NativeAOT consumer proof.
+- Application lifecycle #59 completed in `287d577`, including published startup/close/resize/pixels, external UIA, and the explicit STA entrypoint.
+- The installed language server was refreshed from #58 and its 201-file inventory matched. A fresh isolated VS Code smoke against `287d577` passed scalar-body navigation, type diagnostics/recovery, and existing editor operations without changing source files.
+- Follow-up [#61](https://github.com/RichiCoder1/lucent/issues/61) is filed in Lucent Native Project 4. It captures documentation cleanup and test modernization as independent tracks; implementation has not begun.
+
+Future work follows the [pre-release verification policy](verification.md). Use issue closure comments for detailed commands/results, and choose new work from #61 rather than repeating this handoff.
+
 ## Mission
 
 Finish and seal the current M7 `.lui` editor remediation, then complete the two open Native QoL issues and leave a clean, issue-driven base for choosing the next roadmap.

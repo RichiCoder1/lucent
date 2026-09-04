@@ -1,5 +1,7 @@
 # Remaining-work execution refinements
 
+Status: the M7, resize, #58, and #59 slices below were completed on 2026-09-04. These are the execution refinements used for that work. Future cleanup/testing execution is tracked in [#61](https://github.com/RichiCoder1/lucent/issues/61); use the current [verification policy](verification.md).
+
 These notes refine `remaining-work-handoff.md`; GitHub issue acceptance remains authoritative. Complete M7 before implementing resizing, #58, and #59 in that order. File the cleanup/testing issue afterward. These are implementation directions, not claims of completion. After M7, apply the [pre-release verification policy](verification.md) instead of the original full-gate-per-issue requirement.
 
 ## Resize: prove viewport coverage before choosing a sizing API
