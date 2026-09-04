@@ -1086,7 +1086,8 @@ internal sealed class LuiProjectContext : IDisposable
         RenameSnapshot snapshot,
         Uri uri,
         int offset,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool expandOwnerDeclarations = true
     )
     {
         if (
@@ -1102,15 +1103,20 @@ internal sealed class LuiProjectContext : IDisposable
                 .GetRoot(cancellationToken)
                 .FindToken(Math.Clamp(offset, 0, Math.Max(0, csharpTree.Length - 1)));
             var symbol = SymbolForToken(model, token);
-            return symbol is null
+            var target = symbol is null
                 ? null
                 : new RenameTarget(
                     csharpUri,
                     new LuiSpan(token.SpanStart, token.Span.Length),
-                    symbol,
+                    [symbol],
                     null
                 );
+            return target is null || !expandOwnerDeclarations
+                ? target
+                : await ExpandOwnerComponentTargetAsync(snapshot, target, cancellationToken)
+                    .ConfigureAwait(false);
         }
+        var ownerTargets = new List<(RenameTarget Target, bool IsComponentDeclaration)>();
         foreach (var pair in snapshot.Generated)
         {
             if (!SameFile(pair.Value.Uri.LocalPath, uri))
@@ -1165,13 +1171,13 @@ internal sealed class LuiProjectContext : IDisposable
                     new RenameTarget(
                         pair.Value.Uri,
                         span.Value,
-                        symbol,
+                        [symbol],
                         LocalDeclarationFor(snapshot, symbol)
                     )
                 );
             }
             var target = targets[0];
-            return target.LocalDeclaration is { } local
+            var ownerTarget = target.LocalDeclaration is { } local
                 ? targets.All(candidate => candidate.LocalDeclaration?.Equals(local) == true)
                     ? target
                     : null
@@ -1181,8 +1187,92 @@ internal sealed class LuiProjectContext : IDisposable
                 )
                     ? target
                     : null;
+            if (ownerTarget is null)
+                return null;
+            ownerTargets.Add(
+                (
+                    ownerTarget,
+                    pair.Value.Syntax.Component is { } component
+                        && component.Name.Span.Equals(ownerTarget.Span)
+                )
+            );
         }
-        return null;
+        if (ownerTargets.Count == 0)
+            return null;
+        var first = ownerTargets[0].Target;
+        if (
+            ownerTargets.Any(candidate =>
+                candidate.Target.Uri != first.Uri
+                || !candidate.Target.Span.Equals(first.Span)
+                || candidate.Target.LocalDeclaration != first.LocalDeclaration
+            )
+        )
+            return null;
+        var symbols = ownerTargets.Select(candidate => candidate.Target.Symbol).ToArray();
+        if (
+            first.LocalDeclaration is null
+            && !ownerTargets.All(candidate => candidate.IsComponentDeclaration)
+            && !symbols.All(symbol => SameSymbol(symbol, first.Symbol))
+        )
+            return null;
+        var resolved = new RenameTarget(first.Uri, first.Span, symbols, first.LocalDeclaration);
+        return !expandOwnerDeclarations
+            ? resolved
+            : await ExpandOwnerComponentTargetAsync(snapshot, resolved, cancellationToken)
+                .ConfigureAwait(false);
+    }
+
+    private static async Task<RenameTarget?> ExpandOwnerComponentTargetAsync(
+        RenameSnapshot snapshot,
+        RenameTarget target,
+        CancellationToken cancellationToken
+    )
+    {
+        if (
+            target.Symbols.Count != 1
+            || target.LocalDeclaration is not null
+            || target.Symbol is not IMethodSymbol method
+            || !IsComponent(method)
+        )
+            return target;
+        var definition = await SymbolFinder
+            .FindSourceDefinitionAsync(target.Symbol, snapshot.Solution, cancellationToken)
+            .ConfigureAwait(false);
+        if (definition is null)
+            return target;
+        foreach (var location in definition.Locations.Where(location => location.IsInSource))
+        {
+            if (location.SourceTree is null)
+                continue;
+            if (!TryGenerated(snapshot, location.SourceTree, out var generated))
+                continue;
+            var component = generated.Syntax.Component;
+            if (component is null)
+                return null;
+            var token = location
+                .SourceTree.GetRoot(cancellationToken)
+                .FindToken(location.SourceSpan.Start);
+            var spans = RenameSourceSpans(generated, token);
+            if (spans.Length != 1 || !spans[0].Equals(component.Name.Span))
+                return null;
+            var owners = await ResolveRenameTargetAsync(
+                    snapshot,
+                    generated.Uri,
+                    component.Name.Span.Start,
+                    cancellationToken,
+                    expandOwnerDeclarations: false
+                )
+                .ConfigureAwait(false);
+            return owners is null
+                ? null
+                : new RenameTarget(
+                    target.Uri,
+                    target.Span,
+                    owners.Symbols,
+                    target.LocalDeclaration
+                );
+        }
+        return target;
     }
 
     private static async Task<SemanticModel?> SemanticModelAsync(
@@ -1264,29 +1354,33 @@ internal sealed class LuiProjectContext : IDisposable
         }
         else
         {
-            var definition = await SymbolFinder
-                .FindSourceDefinitionAsync(target.Symbol, snapshot.Solution, cancellationToken)
-                .ConfigureAwait(false);
-            if (definition is null || !definition.Locations.Any(location => location.IsInSource))
+            foreach (var targetSymbol in target.Symbols)
             {
-                return null;
-            }
-            var references = await SymbolFinder
-                .FindReferencesAsync(definition, snapshot.Solution, cancellationToken)
-                .ConfigureAwait(false);
-            foreach (var reference in references)
-            {
-                if (includeDeclaration)
+                var definition = await SymbolFinder
+                    .FindSourceDefinitionAsync(targetSymbol, snapshot.Solution, cancellationToken)
+                    .ConfigureAwait(false);
+                if (
+                    definition is null
+                    || !definition.Locations.Any(location => location.IsInSource)
+                )
+                    return null;
+                var references = await SymbolFinder
+                    .FindReferencesAsync(definition, snapshot.Solution, cancellationToken)
+                    .ConfigureAwait(false);
+                foreach (var reference in references)
+                {
+                    if (includeDeclaration)
+                        locations.AddRange(
+                            reference
+                                .Definition.Locations.Where(location => location.IsInSource)
+                                .Select(location => (location, reference.Definition))
+                        );
                     locations.AddRange(
-                        reference
-                            .Definition.Locations.Where(location => location.IsInSource)
-                            .Select(location => (location, reference.Definition))
+                        reference.Locations.Select(location =>
+                            (location.Location, reference.Definition)
+                        )
                     );
-                locations.AddRange(
-                    reference.Locations.Select(location =>
-                        (location.Location, reference.Definition)
-                    )
-                );
+                }
             }
         }
         var result = new List<RenameOccurrence>();
@@ -1479,7 +1573,8 @@ internal sealed class LuiProjectContext : IDisposable
 
     internal async Task<bool> IsCurrentAsync(
         LuiCompilationResult result,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        Func<Task>? beforeFreshnessSnapshot = null
     )
     {
         SnapshotEpoch? captured;
@@ -1492,7 +1587,8 @@ internal sealed class LuiProjectContext : IDisposable
             )
                 return false;
         }
-        return await IsCurrentAsync(captured.Freshness, cancellationToken).ConfigureAwait(false);
+        return await IsCurrentAsync(captured.Freshness, cancellationToken, beforeFreshnessSnapshot)
+            .ConfigureAwait(false);
     }
 
     private void Track(LuiCompilationResult result, Snapshot snapshot) =>
@@ -1500,7 +1596,8 @@ internal sealed class LuiProjectContext : IDisposable
 
     private async Task<bool> IsCurrentAsync(
         LuiFreshnessTarget freshness,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        Func<Task>? beforeSnapshot = null
     )
     {
         try
@@ -1517,6 +1614,8 @@ internal sealed class LuiProjectContext : IDisposable
                 )
                     return false;
             }
+            if (beforeSnapshot is not null)
+                await beforeSnapshot().ConfigureAwait(false);
             var current = await SnapshotAsync(freshness.ProjectId, freshness.Uri, cancellationToken)
                 .ConfigureAwait(false);
             return current.Freshness.ProjectId == freshness.ProjectId
@@ -1524,6 +1623,10 @@ internal sealed class LuiProjectContext : IDisposable
                 && current.Identity.Equals(freshness.Identity);
         }
         catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
         {
             return false;
         }
@@ -3033,13 +3136,14 @@ internal sealed class RenameSnapshot(
 internal sealed class RenameTarget(
     Uri uri,
     LuiSpan span,
-    ISymbol symbol,
+    IReadOnlyList<ISymbol> symbols,
     LuiLocalProvenance? localDeclaration
 )
 {
     internal Uri Uri { get; } = uri;
     internal LuiSpan Span { get; } = span;
-    internal ISymbol Symbol { get; } = symbol;
+    internal IReadOnlyList<ISymbol> Symbols { get; } = symbols;
+    internal ISymbol Symbol => Symbols[0];
     internal LuiLocalProvenance? LocalDeclaration { get; } = localDeclaration;
 }
 

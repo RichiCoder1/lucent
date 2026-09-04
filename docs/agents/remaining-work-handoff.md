@@ -11,11 +11,13 @@ Work in this order:
 3. implement [#58](https://github.com/RichiCoder1/lucent/issues/58), then [#59](https://github.com/RichiCoder1/lucent/issues/59);
 4. create one follow-up issue for repository-document cleanup and test-harness modernization.
 
+Before the resize and QoL steps, read [execution refinements](remaining-work-plan.md) for the concrete test matrix and unresolved sizing/lifecycle seams.
+
 Do not reconfigure the Oracle model. Follow `AGENTS.md`, `CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and the issue bodies. Use affected checks while iterating and the full gate at issue or milestone closure.
 
 ## Starting point
 
-The checkpoint commit containing this document is intentionally **not a sealed M7 release**. Its parent is `68fe69f` (`Complete cross-project LUI navigation`). The checkpoint contains unsealed cross-project LSP/compiler remediation. Inspect the actual commit and working tree before editing:
+This handoff began at checkpoint `62aacb1`, whose parent is `68fe69f` (`Complete cross-project LUI navigation`). That checkpoint is intentionally **not a sealed M7 release** and contains unsealed cross-project LSP/compiler remediation. Subsequent fixes do not imply sealing; current evidence must identify the accepted source. Inspect the actual commit and working tree before editing:
 
 ```powershell
 git status --short
@@ -57,7 +59,7 @@ Then run at least:
 node --test extensions/lucent-lui-vscode/extension.test.cjs
 pwsh tools/Verify-LuiSdk.ps1
 pwsh tools/Measure-LuiTooling.ps1 -Verify
-./.dotnet/dotnet.exe csharpier check .
+pwsh -NoProfile -File tools/Verify-Formatting.ps1
 git diff --check
 ```
 

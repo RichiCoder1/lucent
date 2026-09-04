@@ -289,7 +289,16 @@ try
                 && location.Span.Equals(new LuiSpan(helper, "Format".Length))
             )
             && expressionReferences.Locations.All(location => location.Uri.Scheme != "lucent-lui"),
-        "cross-language references did not return exact mapped component, property, and expression spans."
+        "cross-language references did not return exact mapped component, property, and expression spans: component="
+            + (componentReferences is null ? "null" : "present")
+            + " componentWithoutDeclaration="
+            + (componentReferencesWithoutDeclaration is null ? "null" : "present")
+            + " property="
+            + (propertyReferences is null ? "null" : "present")
+            + " visual="
+            + (visualPropertyReferences is null ? "null" : "present")
+            + " expression="
+            + (expressionReferences is null ? "null" : "present")
     );
     var pairedSource = source.Replace(
         "<Card content={Helpers.Format(count)} name=\"widget\" />",
@@ -2319,6 +2328,18 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
                         )
                     )
             );
+        var survivedReloadRace = await context.IsCurrentAsync(
+            published.Result,
+            CancellationToken.None,
+            async () =>
+            {
+                await context.ReloadIfRelevantAsync(new Uri(hostProject), CancellationToken.None);
+            }
+        );
+        Assert(
+            !survivedReloadRace,
+            "a project reload between freshness selection and snapshot publication was not rejected."
+        );
         Assert(
             context.ProjectDirectories().Contains(referencedRoot, StringComparer.OrdinalIgnoreCase),
             "evaluated project references did not contribute watched project directories."
@@ -2601,7 +2622,7 @@ static async Task RunDiamondProjectGraphRegressionAsync(string core)
             String.Format(CultureInfo.InvariantCulture, branchProject, "Right")
         );
         var branchSource =
-            "namespace {0}; using static Shared.Components; public component {0}Widget() {{ <SharedWidget /> }}";
+            "namespace {0}; using static Shared.Components; using static Linked.Components; public component {0}Widget() {{ <Row><SharedWidget /><LinkedWidget /></Row> }}";
         await File.WriteAllTextAsync(
             leftLui,
             String.Format(CultureInfo.InvariantCulture, branchSource, "Left")
@@ -2625,7 +2646,12 @@ static async Task RunDiamondProjectGraphRegressionAsync(string core)
             StringComparison.Ordinal
         );
         var leftSource = await File.ReadAllTextAsync(leftLui);
+        var rightSource = await File.ReadAllTextAsync(rightLui);
         var leftShared = leftSource.IndexOf("SharedWidget", StringComparison.Ordinal);
+        var linkedSource = await File.ReadAllTextAsync(linkedLui);
+        var linkedName = linkedSource.IndexOf("LinkedWidget", StringComparison.Ordinal);
+        var leftLinked = leftSource.IndexOf("LinkedWidget", StringComparison.Ordinal);
+        var rightLinked = rightSource.IndexOf("LinkedWidget", StringComparison.Ordinal);
         var hostName = hostSource.IndexOf("LeftWidget", StringComparison.Ordinal);
         var hostReferences = await context.ReferencesAsync(
             new Uri(hostLui),
@@ -2637,6 +2663,35 @@ static async Task RunDiamondProjectGraphRegressionAsync(string core)
             new Uri(leftLui),
             leftShared,
             true,
+            CancellationToken.None
+        );
+        var linkedReferences = await context.ReferencesAsync(
+            new Uri(linkedLui),
+            linkedName,
+            true,
+            CancellationToken.None
+        );
+        var linkedRename = await context.RenameAsync(
+            new Uri(linkedLui),
+            linkedName,
+            "RenamedLinkedWidget",
+            CancellationToken.None
+        );
+        var linkedUsageReferences = await context.ReferencesAsync(
+            new Uri(leftLui),
+            leftLinked,
+            true,
+            CancellationToken.None
+        );
+        var linkedUsageRename = await context.RenameAsync(
+            new Uri(leftLui),
+            leftLinked,
+            "RenamedLinkedWidget",
+            CancellationToken.None
+        );
+        var linkedUsagePrepareRename = await context.PrepareRenameAsync(
+            new Uri(leftLui),
+            leftLinked,
             CancellationToken.None
         );
         Assert(
@@ -2681,6 +2736,101 @@ static async Task RunDiamondProjectGraphRegressionAsync(string core)
                             sharedReferences.Locations.Select(location => location.Uri)
                         )
                 )
+        );
+        Assert(
+            linkedReferences is not null
+                && linkedReferences.Locations.Any(location =>
+                    location.Uri == new Uri(linkedLui)
+                    && location.Span.Equals(new LuiSpan(linkedName, "LinkedWidget".Length))
+                )
+                && linkedReferences.Locations.Any(location =>
+                    location.Uri == new Uri(leftLui)
+                    && location.Span.Equals(new LuiSpan(leftLinked, "LinkedWidget".Length))
+                )
+                && linkedReferences.Locations.Any(location =>
+                    location.Uri == new Uri(rightLui)
+                    && location.Span.Equals(new LuiSpan(rightLinked, "LinkedWidget".Length))
+                )
+                && linkedRename is not null
+                && linkedRename.Edits.Any(edit =>
+                    edit.Uri == new Uri(linkedLui)
+                    && edit.Spans.Contains(new LuiSpan(linkedName, "LinkedWidget".Length))
+                )
+                && linkedRename.Edits.Any(edit =>
+                    edit.Uri == new Uri(leftLui)
+                    && edit.Spans.Contains(new LuiSpan(leftLinked, "LinkedWidget".Length))
+                )
+                && linkedRename.Edits.Any(edit =>
+                    edit.Uri == new Uri(rightLui)
+                    && edit.Spans.Contains(new LuiSpan(rightLinked, "LinkedWidget".Length))
+                )
+                && linkedUsageReferences is not null
+                && linkedUsageReferences.Locations.Any(location =>
+                    location.Uri == new Uri(linkedLui)
+                    && location.Span.Equals(new LuiSpan(linkedName, "LinkedWidget".Length))
+                )
+                && linkedUsageReferences.Locations.Any(location =>
+                    location.Uri == new Uri(rightLui)
+                    && location.Span.Equals(new LuiSpan(rightLinked, "LinkedWidget".Length))
+                )
+                && linkedUsageRename is not null
+                && linkedUsageRename.Edits.Any(edit =>
+                    edit.Uri == new Uri(linkedLui)
+                    && edit.Spans.Contains(new LuiSpan(linkedName, "LinkedWidget".Length))
+                )
+                && linkedUsageRename.Edits.Any(edit =>
+                    edit.Uri == new Uri(rightLui)
+                    && edit.Spans.Contains(new LuiSpan(rightLinked, "LinkedWidget".Length))
+                )
+                && linkedUsagePrepareRename is not null
+                && linkedUsagePrepareRename.Uri == new Uri(leftLui)
+                && linkedUsagePrepareRename.Span.Equals(
+                    new LuiSpan(leftLinked, "LinkedWidget".Length)
+                ),
+            "references or rename from a multiply owned linked .lui declaration or owner usage omitted an owning project."
+        );
+        LuiCompilationResult UnmappableLinkedDeclaration(LuiCompilationResult result)
+        {
+            if (
+                result.Identity.Document.LogicalPath != "Linked.lui"
+                || !String.Equals(
+                    result.Identity.ProjectIdentity,
+                    leftProject,
+                    StringComparison.Ordinal
+                )
+            )
+                return result;
+            var generatedName = GeneratedTokenSpan(result, linkedName, "LinkedWidget");
+            return WithMap(
+                result,
+                result.Map.Entries.Where(entry => !Intersects(entry.Generated, generatedName))
+            );
+        }
+        var unmappableUsageReferences = await context.ReferencesAsync(
+            new Uri(leftLui),
+            leftLinked,
+            false,
+            CancellationToken.None,
+            transformGenerated: UnmappableLinkedDeclaration
+        );
+        var unmappableUsageRename = await context.RenameAsync(
+            new Uri(leftLui),
+            leftLinked,
+            "RenamedLinkedWidget",
+            CancellationToken.None,
+            transformGenerated: UnmappableLinkedDeclaration
+        );
+        var unmappableUsagePrepareRename = await context.PrepareRenameAsync(
+            new Uri(leftLui),
+            leftLinked,
+            CancellationToken.None,
+            UnmappableLinkedDeclaration
+        );
+        Assert(
+            unmappableUsageReferences is null
+                && unmappableUsageRename is null
+                && unmappableUsagePrepareRename is null,
+            "an owner usage published tooling when its generated component declaration map was incomplete."
         );
         var linkedEdit = "// shifted\n" + await File.ReadAllTextAsync(linkedLui);
         context.ReplaceText(new Uri(linkedLui), linkedEdit);
