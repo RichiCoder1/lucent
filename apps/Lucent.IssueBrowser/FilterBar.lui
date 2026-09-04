@@ -1,16 +1,11 @@
 namespace Lucent.IssueBrowser;
-style FilterBarStyle {
-    Height: DensityFilterHeight;
-    Spacing: DensitySpacing;
-}
-
 style TextFieldStyle {
     Width: 250;
     Height: 24;
 }
 
 public component FilterBar(IssueBrowserState browser, Style? style = null) {
-    <Row style={FilterBarStyle with style}>
+    <Row style={Style.Empty.Height(() => browser.Density == IssueDensity.Comfortable ? 28f : 22f).Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f).With(style)}>
         <TextField name="issue-browser.search" onChange={browser.SetSearch} style={TextFieldStyle} label="Search issues" />
         <TextField name="issue-browser.status" onChange={browser.SetStatus} style={TextFieldStyle} label="Status: all, open, closed" />
         <TextField name="issue-browser.assignee" onChange={browser.SetAssignee} style={TextFieldStyle} label="Assignee: all, marta, devin, joel" />

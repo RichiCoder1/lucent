@@ -7,7 +7,8 @@ using Lucent.Core;
 if (args.Length == 0)
 {
     if (
-        ReactiveContracts.Run() != 0
+        ApplicationContracts.Run() != 0
+        || ReactiveContracts.Run() != 0
         || CompositionContracts.Run() != 0
         || LayoutSceneContracts.Run() != 0
         || InputContracts.Run() != 0

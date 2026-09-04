@@ -1,7 +1,5 @@
 namespace Lucent.IssueBrowser;
 style IssueRowStyle {
-    Spacing: DensitySpacing;
-    FontSize: DensityFontSize;
     Background: RowSurface;
     when FocusVisible {
         Background: FocusSurface;
@@ -10,5 +8,5 @@ style IssueRowStyle {
 }
 
 public component IssueRow(IssueBrowserState browser, BrowserIssue issue) {
-    <Selectable content={() => Label(browser, issue)} selected={() => browser.IsSelected(issue.Number)} onSelect={() => browser.Select(issue.Number)} style={IssueRowStyle with { Height: browser.Density == IssueDensity.Comfortable ? 30 : 22; }} />
+    <Selectable content={() => Label(browser, issue)} selected={() => browser.IsSelected(issue.Number)} onSelect={() => browser.Select(issue.Number)} style={IssueRowStyle with { Spacing: browser.Density == IssueDensity.Comfortable ? 8f : 4f; FontSize: browser.Density == IssueDensity.Comfortable ? 14f : 12f; Height: browser.Density == IssueDensity.Comfortable ? 30f : 22f; }} />
 }

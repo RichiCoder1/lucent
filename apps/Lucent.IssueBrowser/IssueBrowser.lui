@@ -10,10 +10,6 @@ style VirtualizedListStyle {
     Height: 60;
 }
 
-style BrowserStatusActionStyle {
-    Height: DensityFilterHeight;
-}
-
 public component IssueBrowser(IssueBrowserState browser) {
     <Column style={IssueBrowserStyle}>
         <Header browser={browser} name="issue-browser.header" />
@@ -28,7 +24,7 @@ public component IssueBrowser(IssueBrowserState browser) {
             <Details browser={browser} issue={issue} name="issue-browser.details" />
         }
         if (browser.SelectedIssue is not null && browser.CanRetrySelected) {
-            <Button onInvoke={browser.RetrySelected} style={BrowserStatusActionStyle} name="issue-browser.details-retry">Retry</Button>
+            <Button onInvoke={browser.RetrySelected} style={Style.Empty with { Height: browser.Density == IssueDensity.Comfortable ? 28f : 22f; }} name="issue-browser.details-retry">Retry</Button>
         }
     </Column>
 }

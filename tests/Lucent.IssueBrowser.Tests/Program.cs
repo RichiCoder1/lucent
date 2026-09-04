@@ -11,6 +11,7 @@ using SkiaSharp;
 try
 {
     FixtureIdentity();
+    ApplicationLifecycleEntryPoint();
     RecipeEvidence();
     DirectRootParity();
     VirtualizedIssueRowParity();
@@ -45,6 +46,30 @@ static void FixtureIdentity()
     );
 }
 
+static void ApplicationLifecycleEntryPoint()
+{
+    var host = new ApplicationHostProbe();
+    var result = LucentApplication
+        .CreateBuilder()
+        .UseHost(host)
+        .SetTitle("Issue Browser Probe")
+        .SetTheme(AppTheme.Create)
+        .Build()
+        .Run(IssueBrowserStructure.Create());
+    Assert(result == 23, "The public Issue Browser application recipe lost the host exit code.");
+    Assert(
+        host.Title == "Issue Browser Probe",
+        "The Issue Browser application title was not hosted."
+    );
+    Assert(
+        host.ObservedApplicationRoot,
+        "The public application recipe did not mount its fill root and generated browser."
+    );
+    Assert(
+        host.CompositionDisposed,
+        "The public Issue Browser composition was not released after hosting."
+    );
+}
 static void RecipeEvidence()
 {
     var graph = new ReactiveGraph();
@@ -65,7 +90,7 @@ static void RecipeEvidence()
     );
     Assert(
         Hash(dump + semantics)
-            == "d463da4068fdb91c15d3235a0d58d4c2c0936393e6da9df04188debcb0a57a4c",
+            == "7797152d92b3bb3a67cea0fcd9ba1ebba5bf25c71cc8f847c1f26371210563a3",
         "Issue Browser composition/semantic evidence changed: " + Hash(dump + semantics)
     );
 }
@@ -110,7 +135,7 @@ static void DirectRootParity()
         + generatedRow.Dump
         + generatedRow.Semantics;
     Assert(
-        Hash(evidence) == "4ecec261eec35d98a07e2d4c6d32d0f71f6b9cea0b115c7ac41231e25c4a35d5",
+        Hash(evidence) == "f7130f88147e7f4d1809533240fcd990cfd59df317654ca8883b7e96615c4e85",
         "Approved direct-root #48 parity rebaseline changed: " + Hash(evidence)
     );
 }
@@ -1325,10 +1350,25 @@ static void StartupStaysFrameworkOwned()
                 '\n',
                 Directory.EnumerateFiles(app, "*.cs").Select(File.ReadAllText)
             );
+            var program = File.ReadAllText(Path.Combine(app, "Program.cs"));
+            var structure = File.ReadAllText(Path.Combine(app, "IssueBrowserStructure.cs"));
             var issueRow = File.ReadAllText(Path.Combine(app, "IssueRow.lui"));
             var issueBrowser = File.ReadAllText(Path.Combine(app, "IssueBrowser.lui"));
             Assert(
                 !source.Contains(".Drain(", StringComparison.Ordinal)
+                    && program.Contains("[STAThread]", StringComparison.Ordinal)
+                    && program.Contains(".UseWindows()", StringComparison.Ordinal)
+                    && program.Contains(
+                        ".Run(IssueBrowserStructure.Create())",
+                        StringComparison.Ordinal
+                    )
+                    && !program.Contains("ReactiveGraph", StringComparison.Ordinal)
+                    && !program.Contains("Composition", StringComparison.Ordinal)
+                    && !program.Contains("WindowsBootstrap", StringComparison.Ordinal)
+                    && structure.Contains(
+                        "public static ComponentRecipe Create()",
+                        StringComparison.Ordinal
+                    )
                     && !source.Contains("test mode", StringComparison.OrdinalIgnoreCase)
                     && !source.Contains("IssueRowHandwritten", StringComparison.Ordinal)
                     && !Regex.IsMatch(source, @"\bComponentRecipe\s+IssueRow\s*\(")
@@ -1533,11 +1573,32 @@ readonly record struct VirtualizedIssueRowEvidence(
     long ReorderedElementId
 );
 
+internal sealed class ApplicationHostProbe : IApplicationHost
+{
+    private Composition? _composition;
+
+    internal string? Title { get; private set; }
+    internal bool ObservedApplicationRoot { get; private set; }
+    internal bool CompositionDisposed => _composition?.IsDisposed == true;
+
+    public int Run(string title, Composition composition, ThemeContext theme)
+    {
+        Title = title;
+        _composition = composition;
+
+        var applicationRoot = composition.Root.Children.Single();
+
+        ObservedApplicationRoot =
+            applicationRoot.Name.StartsWith("issue-browser-application", StringComparison.Ordinal)
+            && applicationRoot.Resolve(LayoutProperties.MainGrow).Value == 1f
+            && applicationRoot.Children.Single().Name == "Issue Browser"
+            && theme.Theme.Name == ControlThemes.Light.Name;
+        return 23;
+    }
+}
+
 internal static class HandwrittenParityFixture
 {
-    private static readonly Style FilterBarStyle = Style
-        .Empty.Height(Tokens.DensityFilterHeight)
-        .Spacing(Tokens.DensitySpacing);
     private static readonly Style TextFieldStyle = Style.Empty.Width(250f).Height(24f);
 
     internal static ComponentRecipe Create(IssueBrowserState browser, Style? style = null)
@@ -1567,7 +1628,10 @@ internal static class HandwrittenParityFixture
                     )
                     .Named("issue-browser.assignee"),
             ],
-            FilterBarStyle.With(style)
+            Style
+                .Empty.Height(() => browser.Density == IssueDensity.Comfortable ? 28f : 22f)
+                .Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f)
+                .With(style)
         );
     }
 
@@ -1576,15 +1640,16 @@ internal static class HandwrittenParityFixture
         ArgumentNullException.ThrowIfNull(browser);
         ArgumentNullException.ThrowIfNull(issue);
         var style = Style
-            .Empty.Spacing(Tokens.DensitySpacing)
-            .FontSize(Tokens.DensityFontSize)
-            .Background(Tokens.RowSurface)
+            .Empty.Background(Tokens.RowSurface)
             .When(
                 VariantState.FocusVisible,
                 Style.Empty.Background(Tokens.FocusSurface).TextColor(Tokens.FocusForeground)
             )
             .With(
-                Style.Empty.Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f)
+                Style
+                    .Empty.Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f)
+                    .FontSize(() => browser.Density == IssueDensity.Comfortable ? 14f : 12f)
+                    .Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f)
             );
         return Lucent.Core.Components.Selectable(
             () => Label(browser, issue),

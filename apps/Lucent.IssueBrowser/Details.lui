@@ -1,18 +1,9 @@
 namespace Lucent.IssueBrowser;
-style DetailsStyle {
-    Spacing: DensitySpacing;
-    FontSize: DensityFontSize;
-}
-
-style DetailsStatusActionStyle {
-    Height: DensityFilterHeight;
-}
-
 public component Details(IssueBrowserState browser, BrowserIssue issue) {
-    <Column style={DetailsStyle}>
+    <Column style={Style.Empty with { Spacing: browser.Density == IssueDensity.Comfortable ? 8f : 4f; FontSize: browser.Density == IssueDensity.Comfortable ? 14f : 12f; }}>
         <Text content={() => Detail(browser, issue, selected => "#" + selected.Number + " " + selected.Title)} name="issue-browser.details-title" />
         <Status content={() => Detail(browser, issue, selected => selected.Status + (browser.SelectedMutationMessage is { } message ? " · " + message : ""))} name="issue-browser.details-status" />
         <Text content={() => Detail(browser, issue, selected => selected.Body)} name="issue-browser.details-body" />
-        <Button onInvoke={browser.ToggleSelectedStatus} style={DetailsStatusActionStyle} name="issue-browser.status-action">Open/Close</Button>
+        <Button onInvoke={browser.ToggleSelectedStatus} style={Style.Empty with { Height: browser.Density == IssueDensity.Comfortable ? 28f : 22f; }} name="issue-browser.status-action">Open/Close</Button>
     </Column>
 }

@@ -1,19 +1,31 @@
 using System.Net;
-using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace Lucent.IssueBrowser;
 
 public static class IssueBrowserStructure
 {
-    public static Composition Create(ReactiveGraph graph) => Create(graph, out _);
+    public static ComponentRecipe Create() =>
+        Create(scope =>
+        {
+            IssueFixture.AssertIntegrity();
+            var client = scope.Own(
+                new HttpClient(new FixtureHttpHandler())
+                {
+                    BaseAddress = new Uri("https://api.github.local/"),
+                }
+            );
+            return new(new GitHubIssueSource(client), new FixtureIssueStatusSource());
+        });
 
-    public static Composition Create(ReactiveGraph graph, out ThemeContext theme)
+    internal static Composition Create(ReactiveGraph graph) => Create(graph, out _);
+
+    internal static Composition Create(ReactiveGraph graph, out ThemeContext theme)
     {
-        var handler = new FixtureHttpHandler();
-        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.github.local/") };
+        var client = new HttpClient(new FixtureHttpHandler())
+        {
+            BaseAddress = new Uri("https://api.github.local/"),
+        };
         return Create(
             graph,
             new GitHubIssueSource(client),
@@ -24,14 +36,14 @@ public static class IssueBrowserStructure
         );
     }
 
-    public static Composition Create(
+    internal static Composition Create(
         ReactiveGraph graph,
         GitHubIssueSource source,
         out IssueBrowserState state,
         out ThemeContext theme
     ) => Create(graph, source, new FixtureIssueStatusSource(), null, out state, out theme);
 
-    public static Composition Create(
+    internal static Composition Create(
         ReactiveGraph graph,
         GitHubIssueSource source,
         IIssueStatusSource statusSource,
@@ -52,67 +64,76 @@ public static class IssueBrowserStructure
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(statusSource);
         IssueFixture.AssertIntegrity();
+        IssueBrowserState? capturedState = null;
         var composition = new Composition(graph, "issue-browser");
-        if (transport is not null)
-            composition.Root.Scope.Own(transport);
-        var browser = new IssueBrowserState(composition.Root.Scope, source, statusSource);
         var themeContext = new ThemeContext(
             composition.Root.Scope,
-            AppTheme.Create(
-                ControlThemes.Light,
-                Color.Parse("#f8fafc"),
-                Color.Parse("#0f172a"),
-                Color.Parse("#e2e8f0"),
-                Color.Parse("#ffffff"),
-                Color.Parse("#ffff00"),
-                Color.Parse("#0f172a"),
-                IssueDensity.Comfortable
-            )
+            AppTheme.Create(ThemeAppearance.Light)
         );
         theme = themeContext;
-        _ = composition.Root.Scope.Effect(
-            () =>
-                themeContext.Theme = AppTheme.Create(
-                    themeContext.Appearance.Contrast == ThemeContrast.High
-                            ? ControlThemes.HighContrast
-                        : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark
-                            ? ControlThemes.Dark
-                        : ControlThemes.Light,
-                    themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000")
-                        : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark
-                            ? Color.Parse("#0f172a")
-                        : Color.Parse("#f8fafc"),
-                    themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#ffffff")
-                        : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark
-                            ? Color.Parse("#f8fafc")
-                        : Color.Parse("#0f172a"),
-                    themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000")
-                        : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark
-                            ? Color.Parse("#1e293b")
-                        : Color.Parse("#e2e8f0"),
-                    themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#000000")
-                        : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark
-                            ? Color.Parse("#111827")
-                        : Color.Parse("#ffffff"),
-                    themeContext.Appearance.Contrast == ThemeContrast.High ? Color.Parse("#ffff00")
-                        : themeContext.Appearance.ColorScheme == ThemeColorScheme.Dark
-                            ? Color.Parse("#facc15")
-                        : Color.Parse("#ffff00"),
-                    themeContext.Appearance.Contrast == ThemeContrast.High
-                        ? Color.Parse("#000000")
-                        : Color.Parse("#0f172a"),
-                    browser.Density
-                ),
-            "issue-browser-appearance"
-        );
+        InstallAppearanceTheme(composition, themeContext);
         _ = composition.Mount(
             composition.Root,
             themeContext,
-            Components.IssueBrowser(browser).Named("Issue Browser")
+            Create(
+                scope =>
+                {
+                    if (transport is not null)
+                        scope.Own(transport);
+                    return new(source, statusSource);
+                },
+                browser => capturedState = browser
+            )
         );
-        state = browser;
+        state =
+            capturedState
+            ?? throw new InvalidOperationException(
+                "Issue Browser state was not created during mount."
+            );
         return composition;
     }
+
+    private static ComponentRecipe Create(
+        Func<ReactiveScope, BrowserDependencies> dependencies,
+        Action<IssueBrowserState>? created = null
+    ) =>
+        ComponentRecipe.Create(
+            "issue-browser-application",
+            (context, root) =>
+            {
+                root.Present(context.Theme, author: Style.Empty.MainGrow(1));
+                var configured = dependencies(root.Scope);
+                var browser = new IssueBrowserState(
+                    root.Scope,
+                    configured.Issues,
+                    configured.Statuses
+                );
+                created?.Invoke(browser);
+                _ = context.Mount(root, Components.IssueBrowser(browser).Named("Issue Browser"));
+            }
+        );
+
+    private static void InstallAppearanceTheme(Composition composition, ThemeContext theme)
+    {
+        var appliedAppearance = theme.Appearance;
+        _ = composition.Root.Scope.Effect(
+            () =>
+            {
+                var appearance = theme.Appearance;
+                if (appearance == appliedAppearance)
+                    return;
+                var next = AppTheme.Create(appearance);
+                appliedAppearance = appearance;
+                theme.Theme = next;
+            },
+            "issue-browser-appearance"
+        );
+    }
+
+    private readonly record struct BrowserDependencies(
+        GitHubIssueSource Issues,
+        IIssueStatusSource Statuses
+    );
 
     private sealed class FixtureHttpHandler : HttpMessageHandler
     {

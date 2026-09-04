@@ -1,14 +1,26 @@
-using Lucent.IssueBrowser;
 using Lucent.Platform.Windows;
 
-try
+namespace Lucent.IssueBrowser;
+
+internal static class Program
 {
-    var graph = new ReactiveGraph();
-    using var composition = IssueBrowserStructure.Create(graph, out var theme);
-    return WindowsBootstrap.Run("Lucent Issue Browser", composition, theme);
-}
-catch (Exception exception)
-{
-    Console.Error.WriteLine($"Lucent M0 startup failed: {exception.Message}");
-    return 1;
+    [STAThread]
+    private static int Main()
+    {
+        try
+        {
+            return LucentApplication
+                .CreateBuilder()
+                .UseWindows()
+                .SetTitle("Lucent Issue Browser")
+                .SetTheme(AppTheme.Create)
+                .Build()
+                .Run(IssueBrowserStructure.Create());
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Lucent M0 startup failed: {exception.Message}");
+            return 1;
+        }
+    }
 }

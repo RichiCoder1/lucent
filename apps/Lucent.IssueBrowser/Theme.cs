@@ -20,33 +20,52 @@ internal static class Tokens
         "focus-foreground",
         Color.Parse("#0f172a")
     );
-    internal static readonly Token<float?> DensityHeaderHeight = new(
-        "issue-density-header-height",
-        84f
-    );
-    internal static readonly Token<float?> DensityFilterHeight = new(
-        "issue-density-filter-height",
-        28f
-    );
-    internal static readonly Token<float> DensitySpacing = new("issue-density-spacing", 8f);
-    internal static readonly Token<float> DensityFontSize = new("issue-density-font-size", 14f);
-    internal static readonly Token<float> DensityTitleFontSize = new(
-        "issue-density-title-font-size",
-        18f
-    );
 }
 
 internal static class AppTheme
 {
-    internal static Theme Create(
+    internal static Theme Create(ThemeAppearance appearance)
+    {
+        appearance.Validate();
+        if (appearance.Contrast == ThemeContrast.High)
+            return Apply(
+                ControlThemes.HighContrast,
+                Color.Parse("#000000"),
+                Color.Parse("#ffffff"),
+                Color.Parse("#000000"),
+                Color.Parse("#000000"),
+                Color.Parse("#ffff00"),
+                Color.Parse("#000000")
+            );
+        return appearance.ColorScheme == ThemeColorScheme.Dark
+            ? Apply(
+                ControlThemes.Dark,
+                Color.Parse("#0f172a"),
+                Color.Parse("#f8fafc"),
+                Color.Parse("#1e293b"),
+                Color.Parse("#111827"),
+                Color.Parse("#facc15"),
+                Color.Parse("#0f172a")
+            )
+            : Apply(
+                ControlThemes.Light,
+                Color.Parse("#f8fafc"),
+                Color.Parse("#0f172a"),
+                Color.Parse("#e2e8f0"),
+                Color.Parse("#ffffff"),
+                Color.Parse("#ffff00"),
+                Color.Parse("#0f172a")
+            );
+    }
+
+    private static Theme Apply(
         Theme controls,
         Color surface,
         Color foreground,
         Color header,
         Color row,
         Color focus,
-        Color focusForeground,
-        IssueDensity density
+        Color focusForeground
     ) =>
         controls
             .Set(Tokens.PageSurface, surface)
@@ -54,10 +73,5 @@ internal static class AppTheme
             .Set(Tokens.HeaderSurface, header)
             .Set(Tokens.RowSurface, row)
             .Set(Tokens.FocusSurface, focus)
-            .Set(Tokens.FocusForeground, focusForeground)
-            .Set(Tokens.DensityHeaderHeight, density == IssueDensity.Comfortable ? 84f : 68f)
-            .Set(Tokens.DensityFilterHeight, density == IssueDensity.Comfortable ? 28f : 22f)
-            .Set(Tokens.DensitySpacing, density == IssueDensity.Comfortable ? 8f : 4f)
-            .Set(Tokens.DensityFontSize, density == IssueDensity.Comfortable ? 14f : 12f)
-            .Set(Tokens.DensityTitleFontSize, density == IssueDensity.Comfortable ? 18f : 16f);
+            .Set(Tokens.FocusForeground, focusForeground);
 }

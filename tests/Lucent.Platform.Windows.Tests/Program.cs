@@ -1,3 +1,4 @@
+using Lucent.Core;
 using Lucent.Platform.Windows;
 
 if (args is ["--listener-proof"])
@@ -9,6 +10,7 @@ if (args is ["--virtualization-fixture"])
 
 try
 {
+    WindowsBuilderContract();
     DpiAndResourceMatrix();
     DpiAwarenessContract();
     FrameSchedulingMatrix();
@@ -35,6 +37,22 @@ catch (Exception error)
     return 1;
 }
 
+static void WindowsBuilderContract()
+{
+    var builder = LucentApplication.CreateBuilder();
+    Assert(
+        ReferenceEquals(builder.UseWindows(), builder),
+        "UseWindows did not retain the builder."
+    );
+    _ = builder.Build();
+    LucentApplicationBuilder? missing = null;
+    try
+    {
+        _ = missing!.UseWindows();
+        throw new InvalidOperationException("UseWindows accepted a null builder.");
+    }
+    catch (ArgumentNullException) { }
+}
 static void DpiAndResourceMatrix()
 {
     foreach (

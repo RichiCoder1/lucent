@@ -70,6 +70,12 @@ Composition creates stable retained elements and explicit structural regions. Co
 
 The canonical C# authoring interface uses reusable `ComponentRecipe` values for exactly-one-root components, `ContentRecipe` for zero-or-more structural contributions, and immutable ordered `ComponentContent` for transactional default content. The framework allocates every recipe root through the same public `ComponentRecipe.Create` seam used by built-ins and external custom-control authors. These capabilities are not component instances, virtual nodes, serializable templates, or rerender objects. General control templates and named `.lui` slots remain deferred until a real compositional control proves them.
 
+### Application lifecycle
+
+Applications use `LucentApplication.CreateBuilder()` to snapshot a title, appearance-oriented theme factory, and explicit platform host. `Build()` allocates no runtime state. A built application is one-shot: `Run(ComponentRecipe)` creates exactly one reactive graph, composition, and theme context, mounts the recipe, synchronously delegates to `IApplicationHost`, then releases the composition before returning or propagating failures. If hosting and cleanup both fail, both errors remain observable.
+
+Core defines the portable host boundary without discovering a platform. The Windows adapter is selected explicitly with `UseWindows()` and delegates the caller-owned composition and theme to the Windows host. Platform settings update `ThemeContext.Appearance` and `ReducedMotion`; the application lifecycle is the sole writer that maps appearance to the effective theme.
+
 ### Styles and behaviors
 
 Style values are typed, immutable, and composed in authored order. Styles own arrangement and visual representation. Behaviors separately own input, focus, and semantics; they register resources and cleanup into the composition-owned scope rather than owning lifetime independently. Composition owns structure, supplied content, and lifetime.
