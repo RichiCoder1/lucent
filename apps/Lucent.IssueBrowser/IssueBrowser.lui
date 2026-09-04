@@ -1,14 +1,12 @@
 namespace Lucent.IssueBrowser;
 style IssueBrowserStyle {
-    Width: 800;
-    Height: 500;
+    MainGrow: 1;
     Background: PageSurface;
     TextColor: PageForeground;
     Clip: true;
 }
 
 style VirtualizedListStyle {
-    Width: 800;
     Height: 60;
 }
 

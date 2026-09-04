@@ -37,6 +37,9 @@ public static class LayoutProperties
     /// <summary>Sets the gap between adjacent children.</summary>
     public static readonly Property<float> Spacing = new("layout-spacing", 0);
 
+    /// <summary>Sets the proportional share of positive unused space this element receives along its parent's main axis.</summary>
+    public static readonly Property<float> MainGrow = new("layout-main-grow", 0);
+
     /// <summary>Places children at the start, center, or end of the direction selected by <see cref="Axis"/>.</summary>
     public static readonly Property<LayoutAlignment> MainAlignment = new(
         "layout-main-alignment",

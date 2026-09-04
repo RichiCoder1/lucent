@@ -445,6 +445,7 @@ internal static class PresentationContracts
                 .MaxWidth(20f)
                 .MaxHeight(21f)
                 .Spacing(3f)
+                .MainGrow(4f)
                 .MainAlignment(LayoutAlignment.Center)
                 .CrossAlignment(LayoutAlignment.End)
                 .Padding(Insets.Uniform(4f))
@@ -469,6 +470,7 @@ internal static class PresentationContracts
                 && element.Resolve(LayoutProperties.MaxWidth).Value == 20f
                 && element.Resolve(LayoutProperties.MaxHeight).Value == 21f
                 && element.Resolve(LayoutProperties.Spacing).Value == 3f
+                && element.Resolve(LayoutProperties.MainGrow).Value == 4f
                 && element.Resolve(LayoutProperties.MainAlignment).Value == LayoutAlignment.Center
                 && element.Resolve(LayoutProperties.CrossAlignment).Value == LayoutAlignment.End
                 && element.Resolve(LayoutProperties.Padding).Value == Insets.Uniform(4f)

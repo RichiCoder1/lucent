@@ -1,6 +1,5 @@
 namespace Lucent.IssueBrowser;
 style IssueRowStyle {
-    Width: 800;
     Spacing: DensitySpacing;
     FontSize: DensityFontSize;
     Background: RowSurface;

@@ -1,6 +1,5 @@
 namespace Lucent.IssueBrowser;
 style HeaderStyle {
-    Width: 800;
     Height: DensityHeaderHeight;
     Background: HeaderSurface;
 }

@@ -1,6 +1,5 @@
 namespace Lucent.IssueBrowser;
 style FilterBarStyle {
-    Width: 800;
     Height: DensityFilterHeight;
     Spacing: DensitySpacing;
 }

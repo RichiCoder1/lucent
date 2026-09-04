@@ -12,6 +12,7 @@ internal static class LayoutSceneContracts
             InsetsAndPadding();
             OpacityGroups();
             RowsColumnsClipsAndRounding();
+            MainGrowth();
             InvalidBoundsFail();
             ExplicitZeroAndOverflow();
             CrossAxisIntrinsicAndMalformedRuns();
@@ -587,6 +588,80 @@ internal static class LayoutSceneContracts
         Assert(
             !firstScene.Dump().Contains("ffi", StringComparison.Ordinal) && shaper.Requests == 6,
             "Scene dump leaked text or layout did not share shaped results: " + shaper.Requests
+        );
+    }
+
+    private static void MainGrowth()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "main-growth");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("main-growth"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Axis, LayoutAxis.Row)
+                .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)
+        );
+        var changingGrow = graph.Signal(0f, "changing-grow");
+        var intrinsic = composition.Child(composition.Root, "intrinsic");
+        intrinsic.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Width, 10f)
+                .Set(LayoutProperties.Height, 5f)
+                .Bind(LayoutProperties.MainGrow, () => changingGrow.Value)
+        );
+        var capped = composition.Child(composition.Root, "capped");
+        capped.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Width, 20f)
+                .Set(LayoutProperties.Height, 5f)
+                .Set(LayoutProperties.MainGrow, 1f)
+                .Set(LayoutProperties.MaxWidth, 30f)
+        );
+        var remaining = composition.Child(composition.Root, "remaining");
+        remaining.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Width, 10f)
+                .Set(LayoutProperties.Height, 5f)
+                .Set(LayoutProperties.MainGrow, 1f)
+        );
+
+        var expanded = SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper());
+        var boxes = expanded.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);
+        Assert(
+            boxes[intrinsic.Id] is { X: 0, Width: 10 }
+                && boxes[capped.Id] is { X: 10, Width: 30 }
+                && boxes[remaining.Id] is { X: 40, Width: 60 },
+            "Positive main-axis remainder was not redistributed after a grown child reached its maximum."
+        );
+        var constrained = SceneLayout.Project(composition, new(35, 20, 1), new ProbeShaper());
+        boxes = constrained.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);
+        Assert(
+            boxes[intrinsic.Id].Width == 10
+                && boxes[capped.Id].Width == 20
+                && boxes[remaining.Id].Width == 10,
+            "Main growth changed intrinsic or explicit bases when the parent had no positive remainder."
+        );
+
+        var unchangedSignature = SceneLayout.InputSignature(intrinsic);
+        changingGrow.Value = 1f;
+        graph.Drain();
+        Assert(
+            SceneLayout.InputSignature(intrinsic) != unchangedSignature,
+            "Main growth did not participate in retained input freshness."
+        );
+        changingGrow.Value = float.NaN;
+        graph.Drain();
+        Expect<ArgumentOutOfRangeException>(() =>
+            SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper())
+        );
+        changingGrow.Value = -1f;
+        graph.Drain();
+        Expect<ArgumentOutOfRangeException>(() =>
+            SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper())
         );
     }
 

@@ -13,6 +13,7 @@ public static class M0Window {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
@@ -96,6 +97,50 @@ function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Clie
     throw ("Iteration {0} SDL/Skia {4} capture failed: header=0x{1:X6} page=0x{2:X6} at scale={3}." -f $Iteration, $header, $page, $scale, $Appearance.Name)
 }
 
+function Assert-ResizePixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $OriginalClient, $Appearance, [int] $Iteration) {
+    $window = [M0Window+RECT]::new()
+    if (-not [M0Window]::GetWindowRect($Hwnd, [ref]$window)) { throw "Iteration $Iteration could not read the original window rectangle." }
+    $originalWidth = $window.Right - $window.Left
+    $originalHeight = $window.Bottom - $window.Top
+    if (-not [M0Window]::SetWindowPos($Hwnd, [IntPtr]::Zero, 0, 0, $originalWidth + 320, $originalHeight + 240, 0x0016)) {
+        throw "Iteration $Iteration could not enlarge the published window."
+    }
+    try {
+        $scale = $Dpi / 96.0
+        $deadline = [Environment]::TickCount64 + 5000
+        do {
+            Start-Sleep -Milliseconds 100
+            $expanded = [M0Window+RECT]::new()
+            if (-not [M0Window]::GetClientRect($Hwnd, [ref]$expanded)) { continue }
+            if ($expanded.Right -le $OriginalClient.Right -or $expanded.Bottom -le $OriginalClient.Bottom) { continue }
+            if ($Appearance.Name -eq 'high-contrast') {
+                return "expanded/restored client geometry; edge-color coverage skipped because authored high-contrast surfaces are both black"
+            }
+            $header = Get-WindowPixel $Hwnd ($expanded.Right - 8) ([Math]::Round(12 * $scale))
+            $page = Get-WindowPixel $Hwnd ($expanded.Right - 8) ($expanded.Bottom - 8)
+            if ($header -eq $Appearance.Header -and $page -eq $Appearance.Page) {
+                return "expanded right/bottom surfaces and restored window geometry"
+            }
+        } until ([Environment]::TickCount64 -ge $deadline)
+        throw ("Iteration {0} resized edge capture failed: header=0x{1:X6} page=0x{2:X6}." -f $Iteration, $header, $page)
+    }
+    finally {
+        if (-not [M0Window]::SetWindowPos($Hwnd, [IntPtr]::Zero, 0, 0, $originalWidth, $originalHeight, 0x0016)) {
+            throw "Iteration $Iteration could not restore the published window size."
+        }
+        $deadline = [Environment]::TickCount64 + 5000
+        do {
+            Start-Sleep -Milliseconds 100
+            $restored = [M0Window+RECT]::new()
+            if ([M0Window]::GetClientRect($Hwnd, [ref]$restored) -and
+                $restored.Right -eq $OriginalClient.Right -and
+                $restored.Bottom -eq $OriginalClient.Bottom) { break }
+        } until ([Environment]::TickCount64 -ge $deadline)
+        if ($restored.Right -ne $OriginalClient.Right -or $restored.Bottom -ne $OriginalClient.Bottom) {
+            throw "Iteration $Iteration did not restore its original client geometry."
+        }
+    }
+}
 function Assert-KeyboardFocusPixels([IntPtr] $Hwnd, [uint32] $Dpi, [M0Window+RECT] $Client, $Appearance, [int] $Iteration) {
     if (-not [M0Window]::PostMessage($Hwnd, 0x0100, [UIntPtr]::new(0x09), [IntPtr]::Zero) -or
         -not [M0Window]::PostMessage($Hwnd, 0x0101, [UIntPtr]::new(0x09), [IntPtr]::Zero)) {
@@ -148,6 +193,7 @@ try {
             $dpi = [M0Window]::GetDpiForWindow($process.MainWindowHandle)
             if ($dpi -lt 96) { throw "Iteration $iteration did not expose a usable Per-Monitor V2 DPI." }
             $appearance = Get-EffectiveAppearance
+            $resize = Assert-ResizePixels $process.MainWindowHandle $dpi $client $appearance $iteration
             $pixels = Assert-ScenePixels $process.MainWindowHandle $dpi $client $appearance $iteration
             $listener = Assert-SettingsListener $process.MainWindowHandle $dpi $client $appearance $iteration
             $keyboard = Assert-KeyboardFocusPixels $process.MainWindowHandle $dpi $client $appearance $iteration
@@ -155,7 +201,7 @@ try {
             if (-not [M0Window]::PostMessage($process.MainWindowHandle, 0x0010, [UIntPtr]::Zero, [IntPtr]::Zero)) { throw "Iteration $iteration ordinary WM_CLOSE request failed." }
             if (-not $process.WaitForExit(10000)) { throw "Iteration $iteration exceeded teardown timeout." }
             if ($process.ExitCode -ne 0) { throw "Iteration $iteration exited $($process.ExitCode)." }
-            $observations += [ordered]@{ iteration = $iteration; hwnd = $hwnd; client = @($client.Right, $client.Bottom); dpi = $dpi; appearance = $appearance.Name; presenter = 'persistent CPU Skia to SDL streaming texture'; pixels = $pixels; listener = $listener; keyboard = $keyboard; exitCode = $process.ExitCode }
+            $observations += [ordered]@{ iteration = $iteration; hwnd = $hwnd; client = @($client.Right, $client.Bottom); dpi = $dpi; appearance = $appearance.Name; presenter = 'persistent CPU Skia to SDL streaming texture'; pixels = $pixels; resize = $resize; listener = $listener; keyboard = $keyboard; exitCode = $process.ExitCode }
         }
         finally { Stop-LaunchedProcess $process }
         Start-Sleep -Milliseconds 250

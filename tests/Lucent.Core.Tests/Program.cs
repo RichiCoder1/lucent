@@ -208,6 +208,7 @@ static void VerifyPropertySurface(
                 ["MaxWidth"] = "Lucent.Core.Property`1|System.Single",
                 ["MaxHeight"] = "Lucent.Core.Property`1|System.Single",
                 ["Spacing"] = "Lucent.Core.Property`1|System.Single",
+                ["MainGrow"] = "Lucent.Core.Property`1|System.Single",
                 ["MainAlignment"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAlignment",
                 ["CrossAlignment"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAlignment",
                 ["Padding"] = "Lucent.Core.Property`1|Lucent.Core.Insets",

@@ -99,6 +99,18 @@ public static class StyleFluency
     public static Style Spacing(this Style style, Func<float> read) =>
         style.Bind(LayoutProperties.Spacing, read);
 
+    /// <summary>Returns a style that sets the proportional share of positive unused parent space received along the main axis.</summary>
+    public static Style MainGrow(this Style style, float value) =>
+        style.Set(LayoutProperties.MainGrow, value);
+
+    /// <summary>Returns a style that gets main-axis growth from the active theme token.</summary>
+    public static Style MainGrow(this Style style, Token<float> value) =>
+        style.Set(LayoutProperties.MainGrow, value);
+
+    /// <summary>Returns a style that gets main-axis growth from a live reader.</summary>
+    public static Style MainGrow(this Style style, Func<float> read) =>
+        style.Bind(LayoutProperties.MainGrow, read);
+
     /// <summary>Returns a style that sets child alignment along the container direction to <paramref name="value"/>.</summary>
     public static Style MainAlignment(this Style style, LayoutAlignment value) =>
         style.Set(LayoutProperties.MainAlignment, value);

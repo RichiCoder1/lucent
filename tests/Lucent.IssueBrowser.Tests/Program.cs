@@ -21,6 +21,7 @@ try
     GeneratedMutationSemantics();
     SourceExceptionsBecomeTransientFailures();
     VisualSurface();
+    ResponsiveVisualSurface();
     DisposedRequestCannotCommit();
     StartupStaysFrameworkOwned();
     Console.WriteLine("Lucent.IssueBrowser async/data contract: PASS");
@@ -64,7 +65,7 @@ static void RecipeEvidence()
     );
     Assert(
         Hash(dump + semantics)
-            == "307d21bd80059fc5a25690653b0f621cc09b15dd417a737ffdc037079aaf6389",
+            == "d463da4068fdb91c15d3235a0d58d4c2c0936393e6da9df04188debcb0a57a4c",
         "Issue Browser composition/semantic evidence changed: " + Hash(dump + semantics)
     );
 }
@@ -109,7 +110,7 @@ static void DirectRootParity()
         + generatedRow.Dump
         + generatedRow.Semantics;
     Assert(
-        Hash(evidence) == "d48b9c8d8865a14594924ae7da5818d8ae680ad129245b906b8c2bdf006f5d39",
+        Hash(evidence) == "4ecec261eec35d98a07e2d4c6d32d0f71f6b9cea0b115c7ac41231e25c4a35d5",
         "Approved direct-root #48 parity rebaseline changed: " + Hash(evidence)
     );
 }
@@ -1173,6 +1174,145 @@ static void VisualSurface()
     );
 }
 
+static void ResponsiveVisualSurface()
+{
+    static IEnumerable<Element> Descendants(Element root)
+    {
+        foreach (var child in root.Children)
+        {
+            yield return child;
+            foreach (var descendant in Descendants(child))
+                yield return descendant;
+        }
+    }
+
+    static int IssueNumber(SemanticSnapshot row) =>
+        int.Parse(
+            row.Name.Split(' ')[0].TrimStart('#'),
+            System.Globalization.CultureInfo.InvariantCulture
+        );
+
+    using var transport = new DeferredGitHubHandler();
+    using var client = new HttpClient(transport)
+    {
+        BaseAddress = new Uri("https://api.github.local/"),
+    };
+    var graph = new ReactiveGraph();
+    using var composition = IssueBrowserStructure.Create(
+        graph,
+        new GitHubIssueSource(client),
+        out var browser,
+        out _
+    );
+    graph.Drain();
+    transport.ReplyJson(0);
+    graph.Drain();
+    using var renderer = new SkiaSceneRenderer();
+    var router = composition.Input;
+    var originalViewport = new LayoutViewport(800, 500, 1.25f);
+    var original = SceneLayout.Project(composition, originalViewport, renderer);
+    Assert(router.SetScene(original), "Original resize-proof scene did not install.");
+    var row = Flatten(composition.SemanticSnapshot()!)
+        .First(node => node.Role == SemanticRole.ListItem);
+    Assert(
+        composition.ExecuteSemanticCommand(row.Identity, new(SemanticCommandKind.Select))
+            == SemanticCommandResult.Applied
+            && router.FocusSemantic(new(row.Identity.CompositionEpoch, row.Identity.ElementId)),
+        "Resize proof could not select and focus its retained issue row."
+    );
+    graph.Drain();
+    original = SceneLayout.Project(composition, originalViewport, renderer);
+    Assert(router.SetScene(original), "Selected resize-proof scene did not install.");
+
+    var app = composition.Root.Children.Single();
+    var header = Descendants(app).Single(element => element.Name == "issue-browser.header");
+    var list = Descendants(app).Single(element => element.Name == "issue-browser.scroll-viewport");
+    var details = Descendants(app).Single(element => element.Name == "issue-browser.details");
+    var fields = Flatten(composition.SemanticSnapshot()!)
+        .Where(node => node.Role == SemanticRole.TextField)
+        .Select(node => new ElementIdentity(
+            node.Identity.CompositionEpoch,
+            node.Identity.ElementId
+        ))
+        .ToArray();
+    var retained = new[] { app.Id, header.Id, list.Id, details.Id, row.Identity.ElementId };
+    var focused = router.FocusedElement;
+
+    var expandedViewport = new LayoutViewport(1040, 680, 1.25f);
+    var expanded = SceneLayout.Project(composition, expandedViewport, renderer);
+    Assert(router.SetScene(expanded), "Expanded resize-proof scene did not install.");
+    var expandedBoxes = expanded.Boxes.ToDictionary(
+        box => box.Identity.ElementId,
+        box => box.Bounds
+    );
+    Assert(
+        expandedBoxes[app.Id] is { Width: 1040, Height: 680 }
+            && expandedBoxes[header.Id].Width == 1040
+            && expandedBoxes[list.Id] is { Width: 1040, Height: 60 }
+            && expandedBoxes[row.Identity.ElementId].Width == 1040
+            && expandedBoxes[details.Id].Width == 1040
+            && fields.All(identity =>
+                MathF.Abs(expandedBoxes[identity.ElementId].Width - 250)
+                <= 1 / expandedViewport.Scale
+            ),
+        "Expanded Issue Browser root or retained child widths did not follow the viewport while fixed control sizes stayed stable: app="
+            + expandedBoxes[app.Id]
+            + " header="
+            + expandedBoxes[header.Id]
+            + " list="
+            + expandedBoxes[list.Id]
+            + " row="
+            + expandedBoxes[row.Identity.ElementId]
+            + " details="
+            + expandedBoxes[details.Id]
+            + " fields="
+            + string.Join(",", fields.Select(identity => expandedBoxes[identity.ElementId]))
+    );
+    Assert(
+        browser.SelectedIssue?.Number == IssueNumber(row)
+            && router.FocusedElement == focused
+            && retained.All(id => expandedBoxes.ContainsKey(id))
+            && Flatten(composition.SemanticSnapshot()!)
+                .Count(node => node.Role == SemanticRole.ListItem) <= 9,
+        "Expanded Issue Browser lost selection, focus, identity, or bounded realization."
+    );
+    using (var bitmap = new SKBitmap(1300, 850, SKColorType.Rgba8888, SKAlphaType.Premul))
+    {
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Transparent);
+        renderer.Render(expanded, canvas);
+        Assert(
+            bitmap.GetPixel(1275, 12) == new SKColor(0xe2, 0xe8, 0xf0, 0xff)
+                && bitmap.GetPixel(1275, 837) == new SKColor(0xf8, 0xfa, 0xfc, 0xff),
+            "Expanded right or bottom surface was not painted with the authored header/page colors."
+        );
+    }
+
+    var restoredViewport = new LayoutViewport(800, 500, 1.5f);
+    var restored = SceneLayout.Project(composition, restoredViewport, renderer);
+    Assert(router.SetScene(restored), "Restored resize-proof scene did not install.");
+    var restoredBoxes = restored.Boxes.ToDictionary(
+        box => box.Identity.ElementId,
+        box => box.Bounds
+    );
+    Assert(
+        restoredBoxes[app.Id] is { Width: 800, Height: 500 }
+            && restoredBoxes[header.Id].Width == 800
+            && restoredBoxes[list.Id] is { Width: 800, Height: 60 }
+            && restoredBoxes[row.Identity.ElementId].Width == 800
+            && restoredBoxes[details.Id].Width == 800
+            && fields.All(identity =>
+                MathF.Abs(restoredBoxes[identity.ElementId].Width - 250)
+                <= 1 / restoredViewport.Scale
+            )
+            && browser.SelectedIssue?.Number == IssueNumber(row)
+            && router.FocusedElement == focused
+            && retained.All(id => restoredBoxes.ContainsKey(id))
+            && Flatten(composition.SemanticSnapshot()!)
+                .Count(node => node.Role == SemanticRole.ListItem) <= 9,
+        "Restored Issue Browser lost viewport sizing, fixed control sizes, state, identity, focus, or bounded realization at a different DPI."
+    );
+}
 static void StartupStaysFrameworkOwned()
 {
     var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
@@ -1396,8 +1536,7 @@ readonly record struct VirtualizedIssueRowEvidence(
 internal static class HandwrittenParityFixture
 {
     private static readonly Style FilterBarStyle = Style
-        .Empty.Width(800f)
-        .Height(Tokens.DensityFilterHeight)
+        .Empty.Height(Tokens.DensityFilterHeight)
         .Spacing(Tokens.DensitySpacing);
     private static readonly Style TextFieldStyle = Style.Empty.Width(250f).Height(24f);
 
@@ -1437,8 +1576,7 @@ internal static class HandwrittenParityFixture
         ArgumentNullException.ThrowIfNull(browser);
         ArgumentNullException.ThrowIfNull(issue);
         var style = Style
-            .Empty.Width(800f)
-            .Spacing(Tokens.DensitySpacing)
+            .Empty.Spacing(Tokens.DensitySpacing)
             .FontSize(Tokens.DensityFontSize)
             .Background(Tokens.RowSurface)
             .When(

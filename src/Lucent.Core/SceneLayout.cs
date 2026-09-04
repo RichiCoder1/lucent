@@ -30,6 +30,7 @@ public static class SceneLayout
             boxes,
             shapes,
             null,
+            false,
             false
         );
         var byId = boxes.ToDictionary(box => box.Identity.ElementId);
@@ -66,7 +67,8 @@ public static class SceneLayout
         List<LayoutBox> boxes,
         Dictionary<long, ShapedText?> shapes,
         LayoutAxis? parentAxis,
-        bool crossAllotted
+        bool crossAllotted,
+        bool mainAllotted
     )
     {
         var style = Read(element);
@@ -87,6 +89,10 @@ public static class SceneLayout
             height = Constrain(allotted.Height, style.MinHeight, style.MaxHeight);
         if (crossAllotted && parentAxis == LayoutAxis.Column && style.Width is null)
             width = Constrain(allotted.Width, style.MinWidth, style.MaxWidth);
+        if (mainAllotted && parentAxis == LayoutAxis.Row)
+            width = Constrain(allotted.Width, style.MinWidth, style.MaxWidth);
+        if (mainAllotted && parentAxis == LayoutAxis.Column)
+            height = Constrain(allotted.Height, style.MinHeight, style.MaxHeight);
         if (element.Parent is null)
         {
             width = allotted.Width;
@@ -106,10 +112,10 @@ public static class SceneLayout
                     Measure(child, axis, crossLimit, viewport.Scale, shaper, shapes)
                 )
                 .ToArray();
-            var total = 0f;
-            foreach (var item in measured)
-                total = Finite(total + item.Main);
-            total = Finite(total + Finite(style.Spacing * (element.Children.Count - 1)));
+            var spacing = Finite(style.Spacing * (element.Children.Count - 1));
+            var total = Finite(measured.Sum(item => item.Main) + spacing);
+            GrowMain(measured, Math.Max(0, mainLimit - total));
+            total = Finite(measured.Sum(item => item.Main) + spacing);
             var cursor = style.MainAlignment switch
             {
                 LayoutAlignment.Center => Math.Max(0, (mainLimit - total) / 2),
@@ -153,7 +159,8 @@ public static class SceneLayout
                         boxes,
                         shapes,
                         axis,
-                        style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross
+                        style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross,
+                        item.MainGrow > 0
                     )
                 );
                 if (style.VirtualRowHeight is null)
@@ -272,7 +279,7 @@ public static class SceneLayout
         return new(left, top, Math.Max(0, visibleRight - left), Math.Max(0, visibleBottom - top));
     }
 
-    private static (Element Element, float Main, float Cross, bool AutoCross) Measure(
+    private static Measurement Measure(
         Element element,
         LayoutAxis parentAxis,
         float crossLimit,
@@ -287,8 +294,56 @@ public static class SceneLayout
         var width = Constrain(style.Width ?? intrinsic.Width, style.MinWidth, style.MaxWidth);
         var height = Constrain(style.Height ?? intrinsic.Height, style.MinHeight, style.MaxHeight);
         return parentAxis == LayoutAxis.Row
-            ? (element, width, height, style.Height is null)
-            : (element, height, width, style.Width is null);
+            ? new(
+                element,
+                width,
+                height,
+                style.Height is null,
+                style.MainGrow,
+                style.MinWidth,
+                style.MaxWidth
+            )
+            : new(
+                element,
+                height,
+                width,
+                style.Width is null,
+                style.MainGrow,
+                style.MinHeight,
+                style.MaxHeight
+            );
+    }
+
+    private static void GrowMain(Measurement[] measured, float available)
+    {
+        if (available <= 0 || !measured.Any(item => item.MainGrow > 0))
+            return;
+        for (var pass = 0; pass <= measured.Length && available > 0; pass++)
+        {
+            var eligible = measured
+                .Select((item, index) => (Item: item, Index: index))
+                .Where(value => value.Item.MainGrow > 0 && value.Item.Main < value.Item.MaxMain)
+                .ToArray();
+            if (eligible.Length == 0)
+                return;
+            var scale = eligible.Max(value => value.Item.MainGrow);
+            var normalizedTotal = eligible.Sum(value => value.Item.MainGrow / scale);
+            var consumed = 0f;
+            foreach (var value in eligible)
+            {
+                var share = Finite(available * (value.Item.MainGrow / scale) / normalizedTotal);
+                var next = Constrain(
+                    Finite(value.Item.Main + share),
+                    value.Item.MinMain,
+                    value.Item.MaxMain
+                );
+                consumed = Finite(consumed + next - value.Item.Main);
+                measured[value.Index] = value.Item with { Main = next };
+            }
+            if (consumed <= 0)
+                return;
+            available = Math.Max(0, Finite(available - consumed));
+        }
     }
 
     private static (float Width, float Height) Intrinsic(
@@ -425,6 +480,7 @@ public static class SceneLayout
             element.Resolve(LayoutProperties.MaxWidth).Value,
             element.Resolve(LayoutProperties.MaxHeight).Value,
             element.Resolve(LayoutProperties.Spacing).Value,
+            element.Resolve(LayoutProperties.MainGrow).Value,
             element.Resolve(LayoutProperties.MainAlignment).Value,
             element.Resolve(LayoutProperties.CrossAlignment).Value,
             element.Resolve(LayoutProperties.Clip).Value,
@@ -452,6 +508,8 @@ public static class SceneLayout
             || !Enum.IsDefined(values.Direction)
             || !float.IsFinite(values.Spacing)
             || values.Spacing < 0
+            || !float.IsFinite(values.MainGrow)
+            || values.MainGrow < 0
             || !float.IsFinite(values.Opacity)
             || values.Opacity < 0
             || values.Opacity > 1
@@ -473,6 +531,16 @@ public static class SceneLayout
         return values;
     }
 
+    private readonly record struct Measurement(
+        Element Element,
+        float Main,
+        float Cross,
+        bool AutoCross,
+        float MainGrow,
+        float MinMain,
+        float MaxMain
+    );
+
     private readonly record struct Values(
         LayoutAxis Axis,
         float? Width,
@@ -482,6 +550,7 @@ public static class SceneLayout
         float MaxWidth,
         float MaxHeight,
         float Spacing,
+        float MainGrow,
         LayoutAlignment MainAlignment,
         LayoutAlignment CrossAlignment,
         bool Clip,
@@ -580,6 +649,7 @@ public static class SceneLayout
             writer.Write(value.MaxWidth);
             writer.Write(value.MaxHeight);
             writer.Write(value.Spacing);
+            writer.Write(value.MainGrow);
             writer.Write((int)value.MainAlignment);
             writer.Write((int)value.CrossAlignment);
             writer.Write(value.Clip);
