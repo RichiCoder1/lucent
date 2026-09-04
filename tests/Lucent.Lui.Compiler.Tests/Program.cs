@@ -1950,6 +1950,21 @@ Assert(
     replacementOne.ReferencesGeneration != replacementTwo.ReferencesGeneration,
     "same-path metadata replacement did not invalidate reference freshness."
 );
+var relocatedImage = ReplacementImage("public class Relocated { }");
+var relocatedOne = SnapshotWithReference(
+    MetadataReference.CreateFromImage(relocatedImage, filePath: "C:/sdk-one/relocated.dll")
+);
+var relocatedTwoReference = MetadataReference.CreateFromImage(
+    relocatedImage,
+    filePath: "D:/sdk-two/relocated.dll"
+);
+var relocatedTwo = SnapshotWithReference(relocatedTwoReference);
+var embeddedInterop = SnapshotWithReference(relocatedTwoReference.WithEmbedInteropTypes(true));
+Assert(
+    relocatedOne.ReferencesGeneration == relocatedTwo.ReferencesGeneration
+        && relocatedTwo.ReferencesGeneration != embeddedInterop.ReferencesGeneration,
+    "reference freshness used installation paths or ignored embedded-interop semantics."
+);
 var parseOptionsOne = CSharpParseOptions.Default.WithPreprocessorSymbols("ONE");
 var parseOptionsTwo = CSharpParseOptions.Default.WithPreprocessorSymbols("TWO");
 var parseTreeText = "#if ONE\ninternal class Defined {}\n#endif";
@@ -2022,7 +2037,12 @@ static LuiFreshnessIdentity SnapshotWithReference(MetadataReference reference) =
             References().Append(reference)
         )
     );
-static MetadataReference ReplacementReference(string source)
+static MetadataReference ReplacementReference(string source) =>
+    MetadataReference.CreateFromImage(
+        ReplacementImage(source),
+        filePath: "C:/consumer/replaced.dll"
+    );
+static byte[] ReplacementImage(string source)
 {
     var compilation = CSharpCompilation.Create(
         "replacement",
@@ -2032,10 +2052,7 @@ static MetadataReference ReplacementReference(string source)
     );
     using var stream = new MemoryStream();
     Assert(compilation.Emit(stream).Success, "replacement assembly did not emit.");
-    return MetadataReference.CreateFromImage(
-        stream.ToArray(),
-        filePath: "C:/consumer/replaced.dll"
-    );
+    return stream.ToArray();
 }
 static void Assert(bool condition, string message)
 {

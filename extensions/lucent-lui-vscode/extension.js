@@ -231,6 +231,11 @@ async function activate(context) {
     catch (error) { stop.dispose(); throw error; }
     rpc.notify("initialized", {});
     const isLucentDocument = document => document.languageId === "lui" || document.languageId === "csharp";
+    const rename = async (document, position, newName) => toWorkspaceEdit(
+        await rpc.request("textDocument/rename", {
+            textDocument: { uri: document.uri.toString() }, position, newName
+        })
+    );
     const update = document => isLucentDocument(document) && rpc.notify("textDocument/didChange", {
         textDocument: { uri: document.uri.toString(), version: document.version }, contentChanges: [{ text: document.getText() }]
     });
@@ -257,7 +262,7 @@ async function activate(context) {
                 );
             }
         }),
-        vscode.languages.registerRenameProvider(crossLanguageSelector, {
+        vscode.languages.registerRenameProvider("lui", {
             prepareRename: async (document, position) => {
                 const result = await rpc.request("textDocument/prepareRename", {
                     textDocument: { uri: document.uri.toString() }, position
@@ -269,13 +274,9 @@ async function activate(context) {
                     result.range.end.character
                 );
             },
-            provideRenameEdits: async (document, position, newName) => toWorkspaceEdit(
-                await rpc.request("textDocument/rename", {
-                    textDocument: { uri: document.uri.toString() }, position, newName
-                })
-            )
+            provideRenameEdits: rename
         }),
-        vscode.languages.registerReferenceProvider(crossLanguageSelector, {
+        vscode.languages.registerReferenceProvider("lui", {
             provideReferences: async (document, position, context) => {
                 const result = await rpc.request("textDocument/references", {
                     textDocument: { uri: document.uri.toString() }, position,
@@ -291,6 +292,16 @@ async function activate(context) {
                     )
                 ));
             }
+        }),
+        vscode.commands.registerCommand("lucentLui.rename", async (document, position, newName) => {
+            const editor = vscode.window.activeTextEditor;
+            document = document || editor?.document;
+            position = position || editor?.selection.active;
+            if (!document || !position || !isLucentDocument(document)) return;
+            newName = newName || await vscode.window.showInputBox({ prompt: "New Lucent symbol name" });
+            if (!newName) return;
+            const edit = await rename(document, position, newName);
+            return edit && vscode.workspace.applyEdit(edit);
         }),
         vscode.languages.registerDocumentFormattingEditProvider("lui", {
             provideDocumentFormattingEdits: async document => toTextEdits(

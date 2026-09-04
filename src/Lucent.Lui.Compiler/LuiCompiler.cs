@@ -505,8 +505,8 @@ public static class LuiCompiler
                 + ParseOptionsIdentity(tree.Options)
             );
         var references = compilation
-            .References.OrderBy(reference => reference.Display, StringComparer.Ordinal)
-            .Select(reference => ReferenceIdentity(compilation, reference));
+            .References.Select(reference => ReferenceIdentity(compilation, reference))
+            .OrderBy(identity => identity, StringComparer.Ordinal);
         var globals = compilation
             .SyntaxTrees.SelectMany(tree =>
                 tree.GetRoot().DescendantNodes().OfType<UsingDirectiveSyntax>()
@@ -572,14 +572,14 @@ public static class LuiCompiler
             IModuleSymbol module => module.Name + "\0" + MetadataVersion(reference),
             _ => "unresolved",
         };
-        return (reference.Display ?? "")
-            + "\0"
-            + reference.Properties.Kind
+        return reference.Properties.Kind
             + "\0"
             + String.Join(
                 ",",
                 reference.Properties.Aliases.OrderBy(alias => alias, StringComparer.Ordinal)
             )
+            + "\0"
+            + reference.Properties.EmbedInteropTypes
             + "\0"
             + semanticIdentity;
     }

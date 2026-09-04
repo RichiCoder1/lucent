@@ -155,7 +155,7 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Compilation,
             snapshot.Identity
         );
-        Track(result, snapshot.Epoch);
+        Track(result, snapshot);
         if (!result.Success)
             return null;
         var published = new PublishedDocument(
@@ -171,7 +171,8 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Index,
             snapshot.Compilation,
             snapshot.Epoch,
-            snapshot.Document.Syntax
+            snapshot.Document.Syntax,
+            snapshot.Freshness
         );
         if (!await IsCurrentAsync(result, cancellationToken).ConfigureAwait(false))
             return null;
@@ -298,7 +299,7 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Compilation,
             snapshot.Identity
         );
-        Track(result, snapshot.Epoch);
+        Track(result, snapshot);
         if (result.ProjectionSource is null)
             return [];
         var options =
@@ -545,8 +546,26 @@ internal sealed class LuiProjectContext : IDisposable
             symbol is null
             || !await CanPublishAsync(semantic!.Document, cancellationToken).ConfigureAwait(false)
         )
-            return null;
+            return await GraphHoverAsync(uri, offset, cancellationToken).ConfigureAwait(false);
         return new LuiHover(SymbolText(symbol), Documentation(symbol));
+    }
+
+    private async Task<LuiHover?> GraphHoverAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var snapshot = await RenameSnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        var target = snapshot is null
+            ? null
+            : await ResolveRenameTargetAsync(snapshot, uri, offset, cancellationToken)
+                .ConfigureAwait(false);
+        return
+            target is null
+            || !await CanPublishAsync(snapshot!, cancellationToken).ConfigureAwait(false)
+            ? null
+            : new LuiHover(SymbolText(target.Symbol), Documentation(target.Symbol));
     }
 
     internal async Task<LuiSignatureHelp?> SignatureHelpAsync(
@@ -625,7 +644,8 @@ internal sealed class LuiProjectContext : IDisposable
                 .ConfigureAwait(false);
         var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
         if (semantic is null)
-            return null;
+            return await CSharpDefinitionAsync(uri, offset, cancellationToken)
+                .ConfigureAwait(false);
         var symbol = SymbolAt(semantic);
         var target = symbol is null ? null : DeclarationTarget(semantic.Document, symbol);
         if (target is not null)
@@ -644,12 +664,15 @@ internal sealed class LuiProjectContext : IDisposable
                 ? mapped
                 : null;
         if (!semantic.Document.Result.Success)
-            return null;
-        return
-            symbol is null
-            || !await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
-            ? null
-            : DeclarationTarget(semantic.Document, symbol);
+            return await CSharpDefinitionAsync(uri, offset, cancellationToken)
+                .ConfigureAwait(false);
+        if (
+            symbol is not null
+            && await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+            && DeclarationTarget(semantic.Document, symbol) is { } declaration
+        )
+            return declaration;
+        return await CSharpDefinitionAsync(uri, offset, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<LuiNavigationTarget?> CSharpDefinitionAsync(
@@ -894,7 +917,7 @@ internal sealed class LuiProjectContext : IDisposable
         var sourceByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var generatedDocuments = new List<(DocumentId Id, RenameGeneratedDocument Document)>();
         var renameSolution = project.Solution;
-        foreach (var graphProject in ProjectGraph(project).Reverse())
+        foreach (var graphProject in ProjectGraph(project))
         {
             var current = renameSolution.GetProject(graphProject.Id);
             var compilation = current is null
@@ -964,7 +987,7 @@ internal sealed class LuiProjectContext : IDisposable
                     index.Augment(compilation, document.Path),
                     identity
                 );
-                if (transformGenerated is not null && current.Id == project.Id)
+                if (transformGenerated is not null)
                     result = transformGenerated(result);
                 if (!result.Success || result.ProjectionSource is null)
                     return null;
@@ -985,8 +1008,10 @@ internal sealed class LuiProjectContext : IDisposable
                     (
                         documentId,
                         new RenameGeneratedDocument(
+                            current.Id,
                             new Uri(document.Path),
                             document.Source,
+                            document.Syntax,
                             result.Map,
                             result.Identity
                         )
@@ -1034,7 +1059,7 @@ internal sealed class LuiProjectContext : IDisposable
             csharp,
             sourceByPath,
             trees,
-            generated.Values.Select(document => document.Identity).ToArray()
+            generated.Values.Select(document => document.Freshness).ToArray()
         );
     }
 
@@ -1049,9 +1074,9 @@ internal sealed class LuiProjectContext : IDisposable
         CancellationToken cancellationToken
     )
     {
-        foreach (var identity in snapshot.GeneratedIdentities)
+        foreach (var freshness in snapshot.GeneratedFreshness)
         {
-            if (!await IsCurrentAsync(identity, cancellationToken).ConfigureAwait(false))
+            if (!await IsCurrentAsync(freshness, cancellationToken).ConfigureAwait(false))
                 return false;
         }
         return RenameSnapshotCurrent(snapshot);
@@ -1409,7 +1434,20 @@ internal sealed class LuiProjectContext : IDisposable
                     candidates.Add(new LuiSpan(start, token.Span.Length));
             }
         }
-        return candidates.Distinct().ToArray();
+        var spans = candidates.Distinct().ToArray();
+        if (spans.Length <= 1)
+            return spans;
+        return Elements(document.Syntax)
+            .Any(element =>
+                !element.CloseName.IsMissing
+                && element.Name.Text == element.CloseName.Text
+                && spans.Length == 2
+                && spans.All(span =>
+                    span.Equals(element.Name.Span) || span.Equals(element.CloseName.Span)
+                )
+            )
+            ? spans
+            : [];
     }
 
     private static bool AddRenameEdit(Dictionary<Uri, List<LuiSpan>> edits, Uri uri, LuiSpan span)
@@ -1444,58 +1482,46 @@ internal sealed class LuiProjectContext : IDisposable
         CancellationToken cancellationToken
     )
     {
+        SnapshotEpoch? captured;
         lock (gate)
         {
             if (
-                resultEpochs.TryGetValue(result, out var captured)
-                && (disposed || captured.Value != epoch)
+                !resultEpochs.TryGetValue(result, out captured)
+                || disposed
+                || captured.Value != epoch
             )
                 return false;
         }
-        return await IsCurrentAsync(result.Identity, cancellationToken).ConfigureAwait(false);
+        return await IsCurrentAsync(captured.Freshness, cancellationToken).ConfigureAwait(false);
     }
 
-    private void Track(LuiCompilationResult result, long captured) =>
-        resultEpochs.Add(result, new SnapshotEpoch(captured));
+    private void Track(LuiCompilationResult result, Snapshot snapshot) =>
+        resultEpochs.Add(result, new SnapshotEpoch(snapshot.Epoch, snapshot.Freshness));
 
     private async Task<bool> IsCurrentAsync(
-        LuiFreshnessIdentity identity,
+        LuiFreshnessTarget freshness,
         CancellationToken cancellationToken
     )
     {
         try
         {
-            Uri uri;
-            Project? identityProject;
-            TextDocument? identityDocument;
             lock (gate)
             {
                 if (disposed || reloadFailed)
                     return false;
-                var match = ProjectGraph(Project())
-                    .SelectMany(project =>
-                        project.AdditionalDocuments.Select(document => (project, document))
+                if (
+                    solution.GetProject(freshness.ProjectId) is not { } project
+                    || !project.AdditionalDocuments.Any(document =>
+                        SameFile(document.FilePath, freshness.Uri)
                     )
-                    .FirstOrDefault(item =>
-                        (
-                            LuiDocumentIdentity.TryCreate(
-                                LogicalPath(item.project, item.document),
-                                out var documentIdentity
-                            )
-                                ? documentIdentity!
-                                : new LuiDocumentIdentity(Path.GetFileName(item.document.FilePath!))
-                        ).Equals(identity.Document)
-                    );
-                if (match.document is null)
+                )
                     return false;
-                identityProject = match.project;
-                identityDocument = match.document;
-                uri = new Uri(match.document.FilePath!, UriKind.Absolute);
             }
-            var text = await GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
-            return text is not null
-                && identity.DocumentVersion
-                    == DocumentVersion(identityProject!, identityDocument!, text);
+            var current = await SnapshotAsync(freshness.ProjectId, freshness.Uri, cancellationToken)
+                .ConfigureAwait(false);
+            return current.Freshness.ProjectId == freshness.ProjectId
+                && current.Freshness.Uri == freshness.Uri
+                && current.Identity.Equals(freshness.Identity);
         }
         catch (InvalidOperationException)
         {
@@ -1505,7 +1531,7 @@ internal sealed class LuiProjectContext : IDisposable
 
     private async Task<bool> CanPublishAsync(Snapshot snapshot, CancellationToken cancellationToken)
     {
-        if (!await IsCurrentAsync(snapshot.Identity, cancellationToken).ConfigureAwait(false))
+        if (!await IsCurrentAsync(snapshot.Freshness, cancellationToken).ConfigureAwait(false))
             return false;
         lock (gate)
             return !disposed && epoch == snapshot.Epoch;
@@ -1516,9 +1542,7 @@ internal sealed class LuiProjectContext : IDisposable
         CancellationToken cancellationToken
     )
     {
-        if (
-            !await IsCurrentAsync(document.Result.Identity, cancellationToken).ConfigureAwait(false)
-        )
+        if (!await IsCurrentAsync(document.Freshness, cancellationToken).ConfigureAwait(false))
             return false;
         lock (gate)
             return !disposed && epoch == document.Epoch;
@@ -1538,7 +1562,7 @@ internal sealed class LuiProjectContext : IDisposable
         {
             TextDocument? document;
             lock (gate)
-                document = FindTextDocument(Project(), uri);
+                document = FindTextDocuments(Project(), uri).FirstOrDefault();
             return document is null
                 ? null
                 : (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString();
@@ -1572,15 +1596,16 @@ internal sealed class LuiProjectContext : IDisposable
                 ThrowIfDisposed();
                 foreach (var (path, text) in overlays)
                 {
-                    var document = FindTextDocument(project, new Uri(path));
-                    if (document is not null)
+                    var documents = FindTextDocuments(project, new Uri(path)).ToArray();
+                    var next = project.Solution;
+                    foreach (var document in documents)
                     {
-                        var next =
+                        next =
                             document is AdditionalDocument
-                                ? project.Solution.WithAdditionalDocumentText(document.Id, text)
-                                : project.Solution.WithDocumentText(document.Id, text);
-                        project = next.GetProject(project.Id)!;
+                                ? next.WithAdditionalDocumentText(document.Id, text)
+                                : next.WithDocumentText(document.Id, text);
                     }
+                    project = next.GetProject(project.Id)!;
                 }
                 var previous = workspace;
                 workspace = reloaded;
@@ -1635,7 +1660,7 @@ internal sealed class LuiProjectContext : IDisposable
     internal bool CanEdit(Uri uri)
     {
         lock (gate)
-            return !disposed && !reloadFailed && FindTextDocument(Project(), uri) is not null;
+            return !disposed && FindTextDocuments(Project(), uri).Any();
     }
 
     internal void Close(Uri uri)
@@ -1650,17 +1675,18 @@ internal sealed class LuiProjectContext : IDisposable
         lock (gate)
         {
             ThrowIfDisposed();
-            var document =
-                FindTextDocument(Project(), uri)
-                ?? throw new ArgumentException("An evaluated document is required.", nameof(uri));
-            solution =
-                document is AdditionalDocument
-                    ? solution.WithAdditionalDocumentText(document.Id, text)
-                    : solution.WithDocumentText(document.Id, text);
+            var documents = FindTextDocuments(Project(), uri).ToArray();
+            if (documents.Length == 0)
+                throw new ArgumentException("An evaluated document is required.", nameof(uri));
+            foreach (var document in documents)
+                solution =
+                    document is AdditionalDocument
+                        ? solution.WithAdditionalDocumentText(document.Id, text)
+                        : solution.WithDocumentText(document.Id, text);
             if (overlay)
-                overlays[document.FilePath!] = text;
+                overlays[FilePath(uri)] = text;
             else
-                overlays.Remove(document.FilePath!);
+                overlays.Remove(FilePath(uri));
             epoch++;
             generated.Clear();
         }
@@ -1716,23 +1742,32 @@ internal sealed class LuiProjectContext : IDisposable
             .Where(project => project.FilePath is not null)
             .Select(project => Path.GetDirectoryName(Path.GetFullPath(project.FilePath!))!);
 
-    private static IEnumerable<Project> ProjectGraph(Project project)
+    private static List<Project> ProjectGraph(Project project)
     {
         var visited = new HashSet<ProjectId>();
-        var pending = new Stack<Project>();
-        pending.Push(project);
-        while (pending.TryPop(out var current))
+        var ordered = new List<Project>();
+        void Visit(Project current)
         {
             if (!visited.Add(current.Id))
-                continue;
-            yield return current;
-            foreach (var reference in current.ProjectReferences)
+                return;
+            foreach (
+                var reference in current.ProjectReferences.OrderBy(
+                    reference =>
+                        current.Solution.GetProject(reference.ProjectId)?.FilePath
+                        ?? current.Solution.GetProject(reference.ProjectId)?.Name
+                        ?? "",
+                    StringComparer.OrdinalIgnoreCase
+                )
+            )
             {
                 var referenced = current.Solution.GetProject(reference.ProjectId);
                 if (referenced is not null)
-                    pending.Push(referenced);
+                    Visit(referenced);
             }
+            ordered.Add(current);
         }
+        Visit(project);
+        return ordered;
     }
 
     private bool IsProjectAncestor(string directory)
@@ -1748,7 +1783,14 @@ internal sealed class LuiProjectContext : IDisposable
         return false;
     }
 
-    private async Task<Snapshot> SnapshotAsync(Uri uri, CancellationToken cancellationToken)
+    private Task<Snapshot> SnapshotAsync(Uri uri, CancellationToken cancellationToken) =>
+        SnapshotAsync(null, uri, cancellationToken);
+
+    private async Task<Snapshot> SnapshotAsync(
+        ProjectId? exactProjectId,
+        Uri uri,
+        CancellationToken cancellationToken
+    )
     {
         Project project;
         long captured;
@@ -1757,17 +1799,20 @@ internal sealed class LuiProjectContext : IDisposable
             ThrowIfDisposed();
             if (reloadFailed)
                 throw new InvalidOperationException("The evaluated project reload failed.");
-            project =
-                ProjectGraph(Project())
+            var candidate = exactProjectId is null
+                ? ProjectGraph(Project())
                     .FirstOrDefault(project =>
                         project.AdditionalDocuments.Any(document =>
                             SameFile(document.FilePath, uri)
                         )
                     )
-                ?? throw new ArgumentException(
-                    "An evaluated .lui document is required.",
-                    nameof(uri)
-                );
+                : solution.GetProject(exactProjectId);
+            if (
+                candidate is null
+                || !candidate.AdditionalDocuments.Any(document => SameFile(document.FilePath, uri))
+            )
+                throw new ArgumentException("An evaluated .lui document is required.", nameof(uri));
+            project = candidate;
             captured = epoch;
         }
         var current = FindDocument(project, uri);
@@ -1863,7 +1908,8 @@ internal sealed class LuiProjectContext : IDisposable
             await current.GetTextAsync(cancellationToken).ConfigureAwait(false),
             uri,
             index,
-            metadataDiagnostic
+            metadataDiagnostic,
+            new LuiFreshnessTarget(project.Id, uri, identity)
         );
     }
 
@@ -1920,16 +1966,16 @@ internal sealed class LuiProjectContext : IDisposable
                 )
             );
 
-    private static TextDocument? FindTextDocument(Project project, Uri uri) =>
+    private static IEnumerable<TextDocument> FindTextDocuments(Project project, Uri uri) =>
         !uri.IsFile
-            ? null
+            ? []
             : ProjectGraph(project)
                 .SelectMany(graphProject =>
                     graphProject
                         .Documents.Cast<TextDocument>()
                         .Concat(graphProject.AdditionalDocuments)
                 )
-                .FirstOrDefault(document => SameFile(document.FilePath, uri));
+                .Where(document => SameFile(document.FilePath, uri));
 
     private static LuiNavigationTarget? DeclarationTarget(
         PublishedDocument document,
@@ -1994,7 +2040,7 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Compilation,
             snapshot.Identity
         );
-        Track(result, snapshot.Epoch);
+        Track(result, snapshot);
         if (
             result.ProjectionSource is null
             || !await IsCurrentAsync(result, cancellationToken).ConfigureAwait(false)
@@ -2013,7 +2059,8 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Index,
             snapshot.Compilation,
             snapshot.Epoch,
-            snapshot.Document.Syntax
+            snapshot.Document.Syntax,
+            snapshot.Freshness
         );
         if (result.Success)
         {
@@ -2788,7 +2835,8 @@ internal sealed class LuiProjectContext : IDisposable
         SourceText text,
         Uri uri,
         LuiProjectComponentIndex index,
-        LuiDiagnostic? metadataDiagnostic
+        LuiDiagnostic? metadataDiagnostic,
+        LuiFreshnessTarget freshness
     )
     {
         internal long Epoch { get; } = epoch;
@@ -2799,6 +2847,7 @@ internal sealed class LuiProjectContext : IDisposable
         internal Uri Uri { get; } = uri;
         internal LuiProjectComponentIndex Index { get; } = index;
         internal LuiDiagnostic? MetadataDiagnostic { get; } = metadataDiagnostic;
+        internal LuiFreshnessTarget Freshness { get; } = freshness;
     }
 
     internal sealed class PublishedDocument(
@@ -2809,7 +2858,8 @@ internal sealed class LuiProjectContext : IDisposable
         LuiProjectComponentIndex index,
         Compilation compilation,
         long epoch,
-        LuiDocumentSyntax syntax
+        LuiDocumentSyntax syntax,
+        LuiFreshnessTarget freshness
     )
     {
         internal LuiCompilationResult Result { get; } = result;
@@ -2821,6 +2871,7 @@ internal sealed class LuiProjectContext : IDisposable
         internal Compilation Compilation { get; } = compilation;
         internal long Epoch { get; } = epoch;
         internal LuiDocumentSyntax Syntax { get; } = syntax;
+        internal LuiFreshnessTarget Freshness { get; } = freshness;
     }
 
     private sealed class GeneratedDocument
@@ -2874,9 +2925,10 @@ internal sealed class LuiProjectContext : IDisposable
         internal LuiMapEntry? Entry { get; } = entry;
     }
 
-    private sealed class SnapshotEpoch(long value)
+    private sealed class SnapshotEpoch(long value, LuiFreshnessTarget freshness)
     {
         internal long Value { get; } = value;
+        internal LuiFreshnessTarget Freshness { get; } = freshness;
     }
 }
 
@@ -2938,16 +2990,21 @@ internal sealed class LuiFormatResult(LuiSpan span, string newText)
 }
 
 internal sealed class RenameGeneratedDocument(
+    ProjectId projectId,
     Uri uri,
     string source,
+    LuiDocumentSyntax syntax,
     LuiSourceMap map,
     LuiFreshnessIdentity identity
 )
 {
+    internal ProjectId ProjectId { get; } = projectId;
     internal Uri Uri { get; } = uri;
     internal string Source { get; } = source;
+    internal LuiDocumentSyntax Syntax { get; } = syntax;
     internal LuiSourceMap Map { get; } = map;
     internal LuiFreshnessIdentity Identity { get; } = identity;
+    internal LuiFreshnessTarget Freshness { get; } = new(projectId, uri, identity);
 }
 
 internal sealed class RenameSnapshot(
@@ -2958,7 +3015,7 @@ internal sealed class RenameSnapshot(
     IReadOnlyDictionary<SyntaxTree, Uri> csharp,
     IReadOnlyDictionary<string, string> sourceByPath,
     IReadOnlyDictionary<SyntaxTree, ProjectId> trees,
-    IReadOnlyList<LuiFreshnessIdentity>? generatedIdentities = null
+    IReadOnlyList<LuiFreshnessTarget>? generatedFreshness = null
 )
 {
     internal long Epoch { get; } = epoch;
@@ -2966,8 +3023,8 @@ internal sealed class RenameSnapshot(
     internal ProjectId ProjectId { get; } = projectId;
     internal IReadOnlyDictionary<SyntaxTree, RenameGeneratedDocument> Generated { get; } =
         generated;
-    internal IReadOnlyList<LuiFreshnessIdentity> GeneratedIdentities { get; } =
-        generatedIdentities ?? generated.Values.Select(document => document.Identity).ToArray();
+    internal IReadOnlyList<LuiFreshnessTarget> GeneratedFreshness { get; } =
+        generatedFreshness ?? generated.Values.Select(document => document.Freshness).ToArray();
     internal IReadOnlyDictionary<SyntaxTree, Uri> CSharp { get; } = csharp;
     internal IReadOnlyDictionary<string, string> SourceByPath { get; } = sourceByPath;
     internal IReadOnlyDictionary<SyntaxTree, ProjectId> Trees { get; } = trees;
@@ -2987,6 +3044,12 @@ internal sealed class RenameTarget(
 }
 
 internal readonly record struct LuiLocalProvenance(Uri Uri, LuiSpan Span);
+
+internal readonly record struct LuiFreshnessTarget(
+    ProjectId ProjectId,
+    Uri Uri,
+    LuiFreshnessIdentity Identity
+);
 
 internal sealed class RenameOccurrence(
     Uri uri,

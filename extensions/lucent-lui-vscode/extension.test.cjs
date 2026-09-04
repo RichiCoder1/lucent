@@ -62,6 +62,9 @@ test("activation preserves current diagnostics and clears closed documents", asy
     let referenceSelector;
     let renameProvider;
     let renameSelector;
+    let lucentRename;
+    const competingCsharpProvider = { provideRenameEdits: () => "csharp-edit" };
+    const renameProviders = [{ selector: "csharp", provider: competingCsharpProvider }];
     let spawnOptions;
     const process = new MockProcess();
     const openDocument = {
@@ -109,12 +112,15 @@ test("activation preserves current diagnostics and clears closed documents", asy
             registerRenameProvider: (selector, provider) => {
                 renameSelector = selector;
                 renameProvider = provider;
+                renameProviders.push({ selector, provider });
                 return disposable();
             },
             registerSignatureHelpProvider: disposable
         },
-        window: { showErrorMessage() {} },
+        commands: { registerCommand: (_name, command) => { lucentRename = command; return disposable(); } },
+        window: { showErrorMessage() {}, showInputBox: async () => "Renamed" },
         workspace: {
+            applyEdit: async () => true,
             createFileSystemWatcher: () => ({ onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable, dispose() {} }),
             getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
             onDidChangeTextDocument: disposable,
@@ -142,12 +148,14 @@ test("activation preserves current diagnostics and clears closed documents", asy
     assert.deepEqual(diagnostics.deleted, ["file:///missing.lui"]);
     assert.ok(patterns.some(([base]) => base === "referenced"));
     assert.ok(referenceProvider);
-    assert.deepEqual(JSON.parse(JSON.stringify(referenceSelector)), [
-        { language: "lui" }, { language: "csharp", scheme: "file" }
-    ]);
-    assert.deepEqual(JSON.parse(JSON.stringify(renameSelector)), [
-        { language: "lui" }, { language: "csharp", scheme: "file" }
-    ]);
+    assert.equal(referenceSelector, "lui");
+    assert.equal(renameSelector, "lui");
+    assert.ok(lucentRename);
+    assert.equal(
+        renameProviders.filter(provider => provider.selector === "csharp").length,
+        1
+    );
+    assert.equal(competingCsharpProvider.provideRenameEdits(), "csharp-edit");
     const references = await referenceProvider.provideReferences(
         { uri: { toString: () => "file:///Widget.lui" } },
         { line: 0, character: 0 },
@@ -166,6 +174,8 @@ test("activation preserves current diagnostics and clears closed documents", asy
         { line: 0, character: 0 },
         "Renamed"
     ), undefined);
+    assert.equal(process.lastRequest.params.textDocument.uri, "file:///Helpers.cs");
+    await lucentRename(csharpDocument, { line: 0, character: 0 }, "Renamed");
     assert.equal(process.lastRequest.params.textDocument.uri, "file:///Helpers.cs");
     assert.deepEqual(Array.from(semanticLegend.types), ["keyword", "type", "property", "enumMember"]);
     const tokens = await semanticProvider.provideDocumentSemanticTokens({

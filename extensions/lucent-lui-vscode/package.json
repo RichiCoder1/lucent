@@ -18,6 +18,10 @@
       "scopeName": "source.lui",
       "path": "./syntaxes/lui.tmLanguage.json"
     }],
+    "commands": [{
+      "command": "lucentLui.rename",
+      "title": "Lucent: Rename Cross-Language Symbol"
+    }],
     "configuration": {
       "title": "Lucent .lui",
       "properties": {

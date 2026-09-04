@@ -323,6 +323,49 @@ try
                 .Spans.Count(span => span.Start == pairedOpen || span.Start == pairedClose) == 2,
         "paired tag references or rename omitted an authored tag name."
     );
+    var pairedWithUnrelatedMap = pairedSource + "\r\n// Card";
+    context.ReplaceText(sourceUri, pairedWithUnrelatedMap);
+    var unrelatedCard = pairedWithUnrelatedMap.LastIndexOf("Card", StringComparison.Ordinal);
+    Func<LuiCompilationResult, LuiCompilationResult> unrelatedPairedMap = result =>
+    {
+        if (result.Identity.Document.LogicalPath != "nested/screens/Widget.lui")
+            return result;
+        var token = result
+            .Map.FromSource(new LuiSpan(pairedOpen, 0))
+            .Where(entry => !entry.Hidden && entry.Kind == LuiMapKind.Symbol)
+            .Select(entry => entry.Generated)
+            .First();
+        return WithMap(
+            result,
+            result.Map.Entries.Append(
+                new LuiMapEntry(
+                    new LuiSpan(unrelatedCard, "Card".Length),
+                    token,
+                    LuiMapKind.Symbol,
+                    false
+                )
+            )
+        );
+    };
+    Assert(
+        await context.ReferencesAsync(
+            sourceUri,
+            pairedOpen,
+            true,
+            CancellationToken.None,
+            transformGenerated: unrelatedPairedMap
+        )
+            is null
+            && await context.RenameAsync(
+                sourceUri,
+                pairedOpen,
+                "Panel",
+                CancellationToken.None,
+                transformGenerated: unrelatedPairedMap
+            )
+                is null,
+        "an unrelated disjoint same-symbol source-map candidate was accepted for rename."
+    );
     var localSource = source.Replace(
         "<Card content={Helpers.Format(count)} name=\"widget\" />",
         "<Row>foreach (var item in new[] { count }) keyed by item { <Card content={item.ToString()} /> }</Row>",
@@ -1408,6 +1451,66 @@ try
                 && !restoredText.Contains(" Opened(", StringComparison.Ordinal),
             "didClose did not restore the evaluated disk document:\n" + restoredText
         );
+        var lspProjectText = await File.ReadAllTextAsync(projectPath);
+        var recoveryText = source.Replace("Widget", "Recovered", StringComparison.Ordinal);
+        await lsp.NotifyAsync(
+            "textDocument/didOpen",
+            new
+            {
+                textDocument = new
+                {
+                    uri = lspSourceUri,
+                    version = 3,
+                    text = source.Replace("Widget", "Opened", StringComparison.Ordinal),
+                },
+            }
+        );
+        await File.WriteAllTextAsync(projectPath, "not xml");
+        await lsp.NotifyAsync(
+            "workspace/didChangeWatchedFiles",
+            new { changes = new[] { new { uri = projectUri, type = 2 } } }
+        );
+        await lsp.NotifyAsync(
+            "textDocument/didChange",
+            new
+            {
+                textDocument = new { uri = lspSourceUri, version = 4 },
+                contentChanges = new[] { new { text = recoveryText } },
+            }
+        );
+        await File.WriteAllTextAsync(projectPath, lspProjectText);
+        await lsp.NotifyAsync(
+            "workspace/didChangeWatchedFiles",
+            new { changes = new[] { new { uri = projectUri, type = 2 } } }
+        );
+        var recoveryPosition = Position(
+            recoveryText,
+            recoveryText.IndexOf("Card", StringComparison.Ordinal)
+        );
+        using var recoveredDefinition = await lsp.RequestAsync(
+            "textDocument/definition",
+            new
+            {
+                textDocument = new { uri = lspSourceUri },
+                position = new
+                {
+                    line = recoveryPosition.Line,
+                    character = recoveryPosition.Character,
+                },
+            }
+        );
+        Assert(
+            recoveredDefinition.RootElement.TryGetProperty("result", out var recoveryResult)
+                && recoveryResult.ValueKind == JsonValueKind.Object
+                && recoveryResult.GetProperty("uri").GetString()
+                    == new Uri(siblingPath).AbsoluteUri,
+            "an open overlay was not resynchronized after a transient project reload failure: "
+                + recoveredDefinition.RootElement.GetRawText()
+        );
+        await lsp.NotifyAsync(
+            "textDocument/didClose",
+            new { textDocument = new { uri = lspSourceUri } }
+        );
         await lsp.RequestAsync("shutdown", new { });
         using var afterShutdown = await lsp.RequestAsync(
             "lucent/generatedText",
@@ -1435,6 +1538,8 @@ try
     await RunInvalidLogicalSiblingAsync(core);
     await RunAncestorInputReloadAsync(core);
     await RunFreshnessAndProjectGraphRegressionsAsync(core);
+    await RunDiamondProjectGraphRegressionAsync(core);
+    await RunExactFreshnessIdentityRegressionAsync(core);
 }
 finally
 {
@@ -2313,11 +2418,17 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
             importedDeclaration,
             CancellationToken.None
         );
+        var importedHostDefinition = await context.DefinitionAsync(
+            uri,
+            imported,
+            CancellationToken.None
+        );
         var importedHover = await context.HoverAsync(
             new Uri(referencedLui),
             importedDeclaration,
             CancellationToken.None
         );
+        var importedHostHover = await context.HoverAsync(uri, imported, CancellationToken.None);
         var importedPublished = await context.CompileAsync(
             new Uri(referencedLui),
             CancellationToken.None
@@ -2339,6 +2450,9 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
                 )
                 && importedDefinition is not null
                 && importedHover is not null
+                && importedHostDefinition is { Uri: var definitionUri }
+                && definitionUri == new Uri(referencedLui)
+                && importedHostHover is not null
                 && importedPublished is not null,
             "referenced-project .lui source did not provide exact graph tooling: refs="
                 + (importedReferences is null ? "null" : "present")
@@ -2348,6 +2462,10 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
                 + (importedDefinition is null ? "null" : "present")
                 + " hover="
                 + (importedHover is null ? "null" : "present")
+                + " hostDefinition="
+                + importedHostDefinition?.Uri
+                + " hostHover="
+                + (importedHostHover is null ? "null" : "present")
                 + " compile="
                 + (importedPublished is null ? "null" : "present")
         );
@@ -2423,6 +2541,313 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
             await context.ReloadIfRelevantAsync(new Uri(hostProject), CancellationToken.None)
                 && !await context.IsCurrentAsync(published.Result, CancellationToken.None),
             "removed AdditionalFiles documents threw or remained fresh."
+        );
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task RunDiamondProjectGraphRegressionAsync(string core)
+{
+    var root = Path.Combine(Path.GetTempPath(), "lucent-diamond-" + Guid.NewGuid());
+    var sharedRoot = Path.Combine(root, "shared");
+    var leftRoot = root;
+    var rightRoot = root;
+    var hostRoot = Path.Combine(root, "host");
+    var linkedRoot = root;
+    Directory.CreateDirectory(sharedRoot);
+    Directory.CreateDirectory(leftRoot);
+    Directory.CreateDirectory(rightRoot);
+    Directory.CreateDirectory(hostRoot);
+    Directory.CreateDirectory(linkedRoot);
+    var sharedProject = Path.Combine(sharedRoot, "Shared.csproj");
+    var sharedLui = Path.Combine(sharedRoot, "Shared.lui");
+    var leftProject = Path.Combine(leftRoot, "Left.csproj");
+    var leftLui = Path.Combine(leftRoot, "Left.lui");
+    var rightProject = Path.Combine(rightRoot, "Right.csproj");
+    var rightLui = Path.Combine(rightRoot, "Right.lui");
+    var hostProject = Path.Combine(hostRoot, "Host.csproj");
+    var hostLui = Path.Combine(hostRoot, "Host.lui");
+    var linkedLui = Path.Combine(linkedRoot, "Linked.lui");
+    try
+    {
+        await File.WriteAllTextAsync(
+            sharedProject,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                + core
+                + "\" /><AdditionalFiles Include=\"Shared.lui\" /></ItemGroup></Project>"
+        );
+        await File.WriteAllTextAsync(
+            sharedLui,
+            "namespace Shared; using static Lucent.Core.Components; public component SharedWidget() { <Row /> }"
+        );
+        await File.WriteAllTextAsync(
+            linkedLui,
+            "namespace Linked; using static Lucent.Core.Components; internal component LinkedWidget() { <Row /> }"
+        );
+        var branchProject =
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
+            + core
+            + "\" /><ProjectReference Include=\"shared/Shared.csproj\" /><AdditionalFiles Include=\""
+            + "{0}.lui\" /><AdditionalFiles Include=\"Linked.lui\" /></ItemGroup></Project>";
+        await File.WriteAllTextAsync(
+            leftProject,
+            String.Format(CultureInfo.InvariantCulture, branchProject, "Left")
+        );
+        await File.WriteAllTextAsync(
+            rightProject,
+            String.Format(CultureInfo.InvariantCulture, branchProject, "Right")
+        );
+        var branchSource =
+            "namespace {0}; using static Shared.Components; public component {0}Widget() {{ <SharedWidget /> }}";
+        await File.WriteAllTextAsync(
+            leftLui,
+            String.Format(CultureInfo.InvariantCulture, branchSource, "Left")
+        );
+        await File.WriteAllTextAsync(
+            rightLui,
+            String.Format(CultureInfo.InvariantCulture, branchSource, "Right")
+        );
+        await File.WriteAllTextAsync(
+            hostProject,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                + core
+                + "\" /><ProjectReference Include=\"../Left.csproj\" /><ProjectReference Include=\"../Right.csproj\" /><AdditionalFiles Include=\"Host.lui\" /></ItemGroup></Project>"
+        );
+        var hostSource =
+            "namespace Host; using static Left.Components; internal component Host() { <LeftWidget /> }";
+        await File.WriteAllTextAsync(hostLui, hostSource);
+        using var context = await LuiProjectContext.LoadAsync(hostProject, CancellationToken.None);
+        var sharedName = (await File.ReadAllTextAsync(sharedLui)).IndexOf(
+            "SharedWidget",
+            StringComparison.Ordinal
+        );
+        var leftSource = await File.ReadAllTextAsync(leftLui);
+        var leftShared = leftSource.IndexOf("SharedWidget", StringComparison.Ordinal);
+        var hostName = hostSource.IndexOf("LeftWidget", StringComparison.Ordinal);
+        var hostReferences = await context.ReferencesAsync(
+            new Uri(hostLui),
+            hostName,
+            true,
+            CancellationToken.None
+        );
+        var sharedReferences = await context.ReferencesAsync(
+            new Uri(leftLui),
+            leftShared,
+            true,
+            CancellationToken.None
+        );
+        Assert(
+            hostReferences is not null
+                && hostReferences.Locations.Any(location =>
+                    location.Uri == new Uri(hostLui)
+                    && location.Span.Equals(new LuiSpan(hostName, "LeftWidget".Length))
+                )
+                && hostReferences.Locations.Any(location =>
+                    location.Uri == new Uri(leftLui)
+                    && location.Span.Equals(
+                        new LuiSpan(
+                            leftSource.IndexOf("LeftWidget", StringComparison.Ordinal),
+                            "LeftWidget".Length
+                        )
+                    )
+                )
+                && sharedReferences is not null
+                && sharedReferences.Locations.Any(location =>
+                    location.Uri == new Uri(leftLui)
+                    && location.Span.Equals(new LuiSpan(leftShared, "SharedWidget".Length))
+                )
+                && sharedReferences.Locations.Any(location =>
+                    location.Uri == new Uri(sharedLui)
+                    && location.Span.Equals(new LuiSpan(sharedName, "SharedWidget".Length))
+                ),
+            "a diamond ProjectReference graph did not bind the shared .lui generated projection dependency-first: host="
+                + (
+                    hostReferences is null
+                        ? "null"
+                        : String.Join(
+                            ",",
+                            hostReferences.Locations.Select(location => location.Uri)
+                        )
+                )
+                + " shared="
+                + (
+                    sharedReferences is null
+                        ? "null"
+                        : String.Join(
+                            ",",
+                            sharedReferences.Locations.Select(location => location.Uri)
+                        )
+                )
+        );
+        var linkedEdit = "// shifted\n" + await File.ReadAllTextAsync(linkedLui);
+        context.ReplaceText(new Uri(linkedLui), linkedEdit);
+        var dirtyVersions = new List<(string Project, string Version)>();
+        var dirtyReferences = await context.ReferencesAsync(
+            new Uri(hostLui),
+            hostName,
+            true,
+            CancellationToken.None,
+            transformGenerated: result =>
+            {
+                if (result.Identity.Document.LogicalPath == "Linked.lui")
+                    dirtyVersions.Add(
+                        (result.Identity.ProjectIdentity, result.Identity.DocumentVersion)
+                    );
+                return result;
+            }
+        );
+        var hostProjectText = await File.ReadAllTextAsync(hostProject);
+        await File.WriteAllTextAsync(hostProject, "not xml");
+        await context.ReloadIfRelevantAsync(new Uri(hostProject), CancellationToken.None);
+        await File.WriteAllTextAsync(hostProject, hostProjectText);
+        await context.ReloadIfRelevantAsync(new Uri(hostProject), CancellationToken.None);
+        var recoveredVersions = new List<(string Project, string Version)>();
+        var recoveredReferences = await context.ReferencesAsync(
+            new Uri(hostLui),
+            hostName,
+            true,
+            CancellationToken.None,
+            transformGenerated: result =>
+            {
+                if (result.Identity.Document.LogicalPath == "Linked.lui")
+                    recoveredVersions.Add(
+                        (result.Identity.ProjectIdentity, result.Identity.DocumentVersion)
+                    );
+                return result;
+            }
+        );
+        var linkedVersion = LuiDocumentIdentity.Hash(linkedEdit);
+        Assert(
+            dirtyReferences is not null
+                && recoveredReferences is not null
+                && dirtyVersions.Count == 2
+                && recoveredVersions.Count == 2
+                && dirtyVersions.All(item => item.Version == linkedVersion)
+                && recoveredVersions.All(item => item.Version == linkedVersion)
+                && dirtyVersions.Select(item => item.Project).Distinct().Count() == 2
+                && recoveredVersions.Select(item => item.Project).Distinct().Count() == 2,
+            "a dirty linked .lui overlay did not fan out across both project snapshots and reload recovery."
+        );
+    }
+    finally
+    {
+        Directory.Delete(root, recursive: true);
+    }
+}
+
+static async Task RunExactFreshnessIdentityRegressionAsync(string core)
+{
+    var root = Path.Combine(Path.GetTempPath(), "lucent-exact-freshness-" + Guid.NewGuid());
+    var hostRoot = Path.Combine(root, "host");
+    var referencedRoot = Path.Combine(root, "referenced");
+    Directory.CreateDirectory(hostRoot);
+    Directory.CreateDirectory(referencedRoot);
+    var hostProject = Path.Combine(hostRoot, "Host.csproj");
+    var referencedProject = Path.Combine(referencedRoot, "Referenced.csproj");
+    var hostLui = Path.Combine(hostRoot, "Widget.lui");
+    var referencedLui = Path.Combine(referencedRoot, "Widget.lui");
+    try
+    {
+        var metadata =
+            " LucentLuiLogicalPath=\"Widget.lui\" LucentLuiDocumentVersion=\"same\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiDocumentVersion\" />";
+        await File.WriteAllTextAsync(
+            referencedProject,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                + core
+                + "\" /><AdditionalFiles Include=\"Widget.lui\""
+                + metadata
+                + "</ItemGroup></Project>"
+        );
+        await File.WriteAllTextAsync(
+            referencedLui,
+            "namespace Referenced; using static Lucent.Core.Components; public component Imported() { <Row /> }"
+        );
+        await File.WriteAllTextAsync(
+            hostProject,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                + core
+                + "\" /><ProjectReference Include=\"../referenced/Referenced.csproj\" /><AdditionalFiles Include=\"Widget.lui\""
+                + metadata
+                + "</ItemGroup></Project>"
+        );
+        await File.WriteAllTextAsync(
+            hostLui,
+            "namespace Host; using static Referenced.Components; internal component Host() { <Imported /> }"
+        );
+        using var context = await LuiProjectContext.LoadAsync(hostProject, CancellationToken.None);
+        var referencedSource = await File.ReadAllTextAsync(referencedLui);
+        var imported = referencedSource.IndexOf("Imported", StringComparison.Ordinal);
+        var baseline = await context.PrepareRenameAsync(
+            new Uri(referencedLui),
+            imported,
+            CancellationToken.None
+        );
+        Func<LuiCompilationResult, LuiCompilationResult> staleCompilation = result =>
+        {
+            if (
+                !String.Equals(
+                    result.Identity.ProjectIdentity,
+                    referencedProject,
+                    StringComparison.Ordinal
+                )
+            )
+                return result;
+            var current = result.Identity;
+            return WithFreshnessIdentity(
+                result,
+                new LuiFreshnessIdentity(
+                    current.ProjectEpoch,
+                    current.ProjectIdentity,
+                    current.Document,
+                    current.DocumentVersion,
+                    current.CompilationGeneration + "-stale",
+                    current.SiblingIndexGeneration,
+                    current.LanguageVersion,
+                    current.CompilerVersion,
+                    current.ReferencesGeneration,
+                    current.GlobalUsingsGeneration,
+                    current.Options,
+                    current.Defines,
+                    current.RootNamespace
+                )
+            );
+        };
+        var staleReferences = await context.ReferencesAsync(
+            new Uri(referencedLui),
+            imported,
+            true,
+            CancellationToken.None,
+            transformGenerated: staleCompilation
+        );
+        var staleRename = await context.RenameAsync(
+            new Uri(referencedLui),
+            imported,
+            "Renamed",
+            CancellationToken.None,
+            transformGenerated: staleCompilation
+        );
+        var stalePrepared = await context.PrepareRenameAsync(
+            new Uri(referencedLui),
+            imported,
+            CancellationToken.None,
+            staleCompilation
+        );
+        Assert(
+            baseline is not null
+                && staleReferences is null
+                && staleRename is null
+                && stalePrepared is null,
+            "duplicate logical Widget.lui documents accepted a stale non-document freshness identity: baseline="
+                + (baseline is null ? "null" : "present")
+                + " references="
+                + (staleReferences is null ? "null" : "present")
+                + " rename="
+                + (staleRename is null ? "null" : "present")
+                + " prepare="
+                + (stalePrepared is null ? "null" : "present")
         );
     }
     finally
@@ -2773,21 +3198,31 @@ static LuiCompilationResult WithMap(
 static LuiCompilationResult WithIdentity(LuiCompilationResult result, string documentVersion)
 {
     var current = result.Identity;
-    var identity = new LuiFreshnessIdentity(
-        current.ProjectEpoch,
-        current.ProjectIdentity,
-        current.Document,
-        documentVersion,
-        current.CompilationGeneration,
-        current.SiblingIndexGeneration,
-        current.LanguageVersion,
-        current.CompilerVersion,
-        current.ReferencesGeneration,
-        current.GlobalUsingsGeneration,
-        current.Options,
-        current.Defines,
-        current.RootNamespace
+    return WithFreshnessIdentity(
+        result,
+        new LuiFreshnessIdentity(
+            current.ProjectEpoch,
+            current.ProjectIdentity,
+            current.Document,
+            documentVersion,
+            current.CompilationGeneration,
+            current.SiblingIndexGeneration,
+            current.LanguageVersion,
+            current.CompilerVersion,
+            current.ReferencesGeneration,
+            current.GlobalUsingsGeneration,
+            current.Options,
+            current.Defines,
+            current.RootNamespace
+        )
     );
+}
+
+static LuiCompilationResult WithFreshnessIdentity(
+    LuiCompilationResult result,
+    LuiFreshnessIdentity identity
+)
+{
     return new LuiCompilationResult(
         identity,
         result.Source,
