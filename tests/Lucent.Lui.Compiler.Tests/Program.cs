@@ -476,6 +476,72 @@ Assert(
         && variantMembers[2] is LuiStyleAssignmentSyntax,
     "inline variant separators changed ordering or formatter semantics."
 );
+var lintSource = """
+namespace Sample;
+using System;
+using System.Collections.Generic;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component X(IEnumerable<string> items) {
+    <Row>foreach (var item in items) keyed by Guid.NewGuid() { <Text content={item} /> }</Row>
+}
+style Unused { Spacing: 1f; }
+""";
+var linted = LuiCompiler.Compile(
+    LuiParser.Parse(lintSource),
+    CSharpCompilation.Create("lints", references: References()),
+    new LuiFreshnessIdentity(
+        "lints",
+        "lints",
+        new LuiDocumentIdentity("Lints.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    linted.Success
+        && linted.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI5001"
+            && diagnostic.Span.Start == lintSource.IndexOf("Guid.NewGuid", StringComparison.Ordinal)
+        )
+        && linted.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI5002"
+            && diagnostic.Span.Start == lintSource.IndexOf("Unused", StringComparison.Ordinal)
+        ),
+    "objective key/style lints lost their stable IDs or authored spans: "
+        + string.Join(
+            " | ",
+            linted.Diagnostics.Select(diagnostic => diagnostic.Id + "@" + diagnostic.Span.Start)
+        )
+);
+var stableKeySource = lintSource.Replace(
+    "Guid.NewGuid()",
+    "FakeGuid.NewGuid()",
+    StringComparison.Ordinal
+);
+var stableKey = LuiCompiler.Compile(
+    LuiParser.Parse(stableKeySource),
+    CSharpCompilation.Create(
+        "stable-key",
+        [
+            CSharpSyntaxTree.ParseText(
+                "public static class FakeGuid { public static System.Guid NewGuid() => default; }"
+            ),
+        ],
+        References()
+    ),
+    new LuiFreshnessIdentity(
+        "stable-key",
+        "stable-key",
+        new LuiDocumentIdentity("Stable.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    stableKey.Success && !stableKey.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI5001"),
+    "semantic unstable-key lint matched an unrelated member name."
+);
 var rejectedParameters = LuiParser.Parse(
     "internal component Rejected([Obsolete] ref string value, [System.CLSCompliant(true)] params int[] values, in int state, out int output) { <A /> }"
 );
@@ -602,7 +668,7 @@ using static Lucent.Core.Components;
 using static Lucent.Core.LayoutProperties;
 using static Lucent.Core.VisualProperties;
 public component Matrix(bool show, float spacing, IEnumerable<string> items, Style? style = null) {
-    <Column name="matrix" style={style with { Spacing: spacing; }}>
+    <Column name="matrix" style={MatrixStyle with { Spacing: spacing; }}>
         <Text>Start</Text>
         if (show) { <Text>Visible</Text> } else { <Text>Hidden</Text> }
         foreach (var item in items) keyed by item { <Text content={item} /> }

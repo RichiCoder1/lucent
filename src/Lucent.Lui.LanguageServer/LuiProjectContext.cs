@@ -7,6 +7,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Classification;
 using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -647,6 +648,388 @@ internal sealed class LuiProjectContext : IDisposable
             : DeclarationTarget(semantic.Document, symbol);
     }
 
+    internal async Task<LuiRenameResult?> PrepareRenameAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var snapshot = await RenameSnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (snapshot is null)
+            return null;
+        var target = ResolveRenameTarget(snapshot, uri, offset);
+        return target is null || !RenameSnapshotCurrent(snapshot)
+            ? null
+            : new LuiRenameResult(target.Uri, target.Span, []);
+    }
+
+    internal async Task<LuiRenameResult?> RenameAsync(
+        Uri uri,
+        int offset,
+        string newName,
+        CancellationToken cancellationToken,
+        Func<Task>? beforeCommit = null
+    )
+    {
+        if (
+            String.IsNullOrWhiteSpace(newName)
+            || !SyntaxFacts.IsValidIdentifier(newName)
+            || SyntaxFacts.GetKeywordKind(newName) != SyntaxKind.None
+        )
+            return null;
+        var snapshot = await RenameSnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (snapshot is null)
+            return null;
+        var target = ResolveRenameTarget(snapshot, uri, offset);
+        if (target is null)
+            return null;
+        var edits = new Dictionary<Uri, List<LuiSpan>>();
+        foreach (var tree in snapshot.Compilation.SyntaxTrees)
+        {
+            var model = snapshot.Compilation.GetSemanticModel(tree);
+            foreach (var token in tree.GetRoot(cancellationToken).DescendantTokens())
+            {
+                if (!SameSymbol(SymbolForToken(model, token), target.Symbol))
+                    continue;
+                if (
+                    model
+                        .LookupSymbols(token.SpanStart, name: newName)
+                        .Any(symbol => !SameSymbol(symbol, target.Symbol))
+                )
+                    return null;
+                LuiSpan? span;
+                Uri editUri;
+                if (snapshot.Generated.TryGetValue(tree, out var generated))
+                {
+                    span = RenameSourceSpan(generated, token);
+                    editUri = generated.Uri;
+                }
+                else
+                {
+                    if (!snapshot.CSharp.TryGetValue(tree, out var csharpUri))
+                        return null;
+                    editUri = csharpUri;
+                    span = new LuiSpan(token.SpanStart, token.Span.Length);
+                }
+                if (span is null || !AddRenameEdit(edits, editUri, span.Value))
+                    return null;
+            }
+        }
+        if (beforeCommit is not null)
+            await beforeCommit().ConfigureAwait(false);
+        if (!RenameSnapshotCurrent(snapshot) || edits.Count == 0)
+            return null;
+        return new LuiRenameResult(
+            target.Uri,
+            target.Span,
+            edits
+                .OrderBy(pair => pair.Key.AbsoluteUri, StringComparer.Ordinal)
+                .Select(pair => new LuiRenameDocumentEdit(
+                    pair.Key,
+                    pair.Value.OrderByDescending(span => span.Start).ToArray(),
+                    newName
+                ))
+                .ToArray()
+        );
+    }
+
+    internal async Task<LuiFormatResult?> FormatAsync(
+        Uri uri,
+        LuiSpan? range,
+        CancellationToken cancellationToken
+    )
+    {
+        var text = await GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (text is null || !Owns(uri))
+            return null;
+        var formatted = range is { } selection
+            ? LuiFormatter.FormatRange(text, selection)
+            : LuiFormatter.Format(text);
+        var start = 0;
+        while (start < text.Length && start < formatted.Length && text[start] == formatted[start])
+            start++;
+        var oldEnd = text.Length;
+        var newEnd = formatted.Length;
+        while (oldEnd > start && newEnd > start && text[oldEnd - 1] == formatted[newEnd - 1])
+        {
+            oldEnd--;
+            newEnd--;
+        }
+        return new LuiFormatResult(new LuiSpan(start, oldEnd - start), formatted[start..newEnd]);
+    }
+
+    private async Task<RenameSnapshot?> RenameSnapshotAsync(
+        Uri requested,
+        CancellationToken cancellationToken
+    )
+    {
+        Project project;
+        long captured;
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            project = Project();
+            captured = epoch;
+            if (
+                !project.Documents.Any(document => SameFile(document.FilePath, requested))
+                && !project.AdditionalDocuments.Any(document =>
+                    SameFile(document.FilePath, requested)
+                )
+            )
+                return null;
+        }
+        var original = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+        if (original is null)
+            return null;
+        original = original.RemoveSyntaxTrees(
+            original.SyntaxTrees.Where(tree =>
+                (tree.FilePath ?? "").Contains(
+                    "Lucent.Lui.Generator",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        );
+        var inputs = new List<LuiProjectDocument>();
+        var sourceByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (
+            var document in project.AdditionalDocuments.Where(document =>
+                document.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            var source = (
+                await document.GetTextAsync(cancellationToken).ConfigureAwait(false)
+            ).ToString();
+            var logical = LogicalPath(project, document);
+            if (!LuiDocumentIdentity.TryCreate(logical, out var identity))
+                return null;
+            inputs.Add(
+                new LuiProjectDocument(
+                    document.FilePath!,
+                    identity!.LogicalPath,
+                    source,
+                    DocumentVersion(project, document, source)
+                )
+            );
+            sourceByPath[document.FilePath!] = source;
+        }
+        var index = LuiProjectComponentIndex.Build(original, inputs, cancellationToken);
+        if (index.Diagnostics.Count != 0)
+            return null;
+        var globals = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
+        globals.TryGetValue("build_property.LucentLuiProjectEpoch", out var projectEpoch);
+        globals.TryGetValue("build_property.LucentLuiProjectIdentity", out var projectIdentity);
+        globals.TryGetValue("build_property.LucentLuiCompilerOptions", out var options);
+        globals.TryGetValue("build_property.LucentLuiDefines", out var defines);
+        var parse = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
+        var generated = new Dictionary<SyntaxTree, RenameGeneratedDocument>();
+        var combined = original;
+        foreach (var document in inputs)
+        {
+            var identity = new LuiFreshnessIdentity(
+                projectEpoch ?? "",
+                projectIdentity ?? project.FilePath ?? project.Name,
+                new LuiDocumentIdentity(document.LogicalPath),
+                document.Version,
+                "",
+                index.Generation,
+                parse.LanguageVersion.ToString(),
+                "",
+                "",
+                "",
+                options ?? "",
+                defines ?? "",
+                project.DefaultNamespace ?? ""
+            );
+            var result = LuiCompiler.Compile(
+                document.Syntax,
+                index.Augment(original, document.Path),
+                identity
+            );
+            if (!result.Success || result.ProjectionSource is null)
+                return null;
+            var generatedUri = new Uri(
+                "lucent-lui://generated/"
+                    + result.Identity.MapIdentity
+                    + "/"
+                    + result.Identity.HintName
+            );
+            var tree = CSharpSyntaxTree.ParseText(
+                result.ProjectionSource,
+                parse,
+                generatedUri.AbsoluteUri,
+                cancellationToken: cancellationToken
+            );
+            combined = combined.AddSyntaxTrees(tree);
+            generated[tree] = new RenameGeneratedDocument(
+                new Uri(document.Path),
+                document.Source,
+                result.Map
+            );
+        }
+        var csharp = project
+            .Documents.Where(document => document.FilePath is not null)
+            .Select(document => new { document.FilePath, Uri = new Uri(document.FilePath!) })
+            .Join(
+                combined.SyntaxTrees,
+                document => document.FilePath,
+                tree => tree.FilePath,
+                (document, tree) => new { tree, document.Uri },
+                StringComparer.OrdinalIgnoreCase
+            )
+            .ToDictionary(item => item.tree, item => item.Uri);
+        return new RenameSnapshot(captured, combined, generated, csharp, sourceByPath);
+    }
+
+    private bool RenameSnapshotCurrent(RenameSnapshot snapshot)
+    {
+        lock (gate)
+            return !disposed && !reloadFailed && epoch == snapshot.Epoch;
+    }
+
+    private static RenameTarget? ResolveRenameTarget(RenameSnapshot snapshot, Uri uri, int offset)
+    {
+        if (snapshot.CSharp.FirstOrDefault(pair => pair.Value == uri) is { Key: { } csharpTree })
+        {
+            var token = csharpTree
+                .GetRoot()
+                .FindToken(Math.Clamp(offset, 0, Math.Max(0, csharpTree.Length - 1)));
+            var symbol = SymbolForToken(snapshot.Compilation.GetSemanticModel(csharpTree), token);
+            return symbol is null
+                ? null
+                : new RenameTarget(uri, new LuiSpan(token.SpanStart, token.Span.Length), symbol);
+        }
+        foreach (var pair in snapshot.Generated)
+        {
+            if (!SameFile(pair.Value.Uri.LocalPath, uri))
+                continue;
+            var entry = pair
+                .Value.Map.FromSource(new LuiSpan(offset, 0))
+                .Where(entry => !entry.Hidden && entry.Generated.Length != 0)
+                .OrderBy(entry => entry.Kind == LuiMapKind.Symbol ? 0 : 1)
+                .ThenBy(entry => entry.Generated.Length)
+                .FirstOrDefault();
+            if (entry is null)
+                return null;
+            var root = pair.Key.GetRoot();
+            var token =
+                entry.Source.Length == entry.Generated.Length
+                    ? root.FindToken(
+                        entry.Generated.Start
+                            + Math.Clamp(offset - entry.Source.Start, 0, entry.Generated.Length - 1)
+                    )
+                    : root.DescendantTokens()
+                        .Where(token =>
+                            token.SpanStart >= entry.Generated.Start
+                            && token.Span.End <= entry.Generated.End
+                        )
+                        .FirstOrDefault(token =>
+                            token.ValueText
+                            == pair.Value.Source.Substring(entry.Source.Start, entry.Source.Length)
+                        );
+            var symbol =
+                token.RawKind == 0
+                    ? null
+                    : SymbolForToken(snapshot.Compilation.GetSemanticModel(pair.Key), token);
+            return symbol is null ? null
+                : RenameSourceSpan(pair.Value, token) is { } span
+                    ? new RenameTarget(uri, span, symbol)
+                : null;
+        }
+        return null;
+    }
+
+    private static ISymbol? SymbolForToken(SemanticModel model, SyntaxToken token)
+    {
+        var node = token.Parent;
+        if (node is null)
+            return null;
+        var declared = model.GetDeclaredSymbol(node);
+        if (declared is not null && IsDeclarationIdentifier(node, token))
+            return declared;
+        if (node is not IdentifierNameSyntax and not GenericNameSyntax)
+            return null;
+        var info = model.GetSymbolInfo(node);
+        return info.Symbol ?? (info.CandidateSymbols.Length == 1 ? info.CandidateSymbols[0] : null);
+    }
+
+    private static bool IsDeclarationIdentifier(SyntaxNode node, SyntaxToken token) =>
+        node switch
+        {
+            BaseTypeDeclarationSyntax declaration => declaration.Identifier == token,
+            DelegateDeclarationSyntax declaration => declaration.Identifier == token,
+            MethodDeclarationSyntax declaration => declaration.Identifier == token,
+            PropertyDeclarationSyntax declaration => declaration.Identifier == token,
+            EventDeclarationSyntax declaration => declaration.Identifier == token,
+            EnumMemberDeclarationSyntax declaration => declaration.Identifier == token,
+            VariableDeclaratorSyntax declaration => declaration.Identifier == token,
+            ParameterSyntax declaration => declaration.Identifier == token,
+            TypeParameterSyntax declaration => declaration.Identifier == token,
+            _ => false,
+        };
+
+    private static bool SameSymbol(ISymbol? left, ISymbol? right)
+    {
+        if (left is IAliasSymbol leftAlias)
+            left = leftAlias.Target;
+        if (right is IAliasSymbol rightAlias)
+            right = rightAlias.Target;
+        return left is not null
+            && right is not null
+            && SymbolEqualityComparer.Default.Equals(
+                left.OriginalDefinition,
+                right.OriginalDefinition
+            );
+    }
+
+    private static LuiSpan? RenameSourceSpan(RenameGeneratedDocument document, SyntaxToken token)
+    {
+        var candidates = new List<LuiSpan>();
+        foreach (
+            var entry in document.Map.FromGenerated(new LuiSpan(token.SpanStart, token.Span.Length))
+        )
+        {
+            if (entry.Hidden || entry.Source.Start < 0 || entry.Generated.Length == 0)
+                continue;
+            var source = document.Source.Substring(entry.Source.Start, entry.Source.Length);
+            if (source == token.Text || source == token.ValueText)
+                candidates.Add(entry.Source);
+            else if (entry.Source.Length == entry.Generated.Length)
+            {
+                var start = entry.Source.Start + token.SpanStart - entry.Generated.Start;
+                if (
+                    start >= entry.Source.Start
+                    && start + token.Span.Length <= entry.Source.End
+                    && document.Source.Substring(start, token.Span.Length) == token.Text
+                )
+                    candidates.Add(new LuiSpan(start, token.Span.Length));
+            }
+        }
+        var distinct = candidates.Distinct().ToArray();
+        return distinct.Length == 1 ? distinct[0] : null;
+    }
+
+    private static bool AddRenameEdit(Dictionary<Uri, List<LuiSpan>> edits, Uri uri, LuiSpan span)
+    {
+        if (!edits.TryGetValue(uri, out var ranges))
+            edits[uri] = ranges = [];
+        if (ranges.Any(existing => existing.Equals(span)))
+            return true;
+        if (ranges.Any(existing => existing.Start < span.End && span.Start < existing.End))
+            return false;
+        ranges.Add(span);
+        return true;
+    }
+
+    private static bool SameFile(string? path, Uri uri) =>
+        path is not null
+        && uri.IsFile
+        && String.Equals(
+            Path.GetFullPath(path),
+            Path.GetFullPath(FilePath(uri)),
+            StringComparison.OrdinalIgnoreCase
+        );
+
     internal async Task<bool> IsCurrentAsync(
         LuiCompilationResult result,
         CancellationToken cancellationToken
@@ -734,10 +1117,23 @@ internal sealed class LuiProjectContext : IDisposable
         }
         lock (gate)
             ThrowIfDisposed();
-        if (!Owns(uri))
-            return null;
-        var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
-        return snapshot.Text.ToString();
+        if (Owns(uri))
+        {
+            var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+            return snapshot.Text.ToString();
+        }
+        Project project;
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            project = Project();
+        }
+        var document = project.Documents.FirstOrDefault(document =>
+            SameFile(document.FilePath, uri)
+        );
+        return document is null
+            ? null
+            : (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString();
     }
 
     internal string? GetGeneratedText(Uri uri)
@@ -2058,6 +2454,60 @@ internal sealed class LuiEditorDiagnostic(
     internal LuiSpan Span { get; } = span;
     internal int Severity { get; } = severity;
     internal string Source { get; } = source;
+}
+
+internal sealed class LuiRenameResult(
+    Uri uri,
+    LuiSpan span,
+    IReadOnlyList<LuiRenameDocumentEdit> edits
+)
+{
+    internal Uri Uri { get; } = uri;
+    internal LuiSpan Span { get; } = span;
+    internal IReadOnlyList<LuiRenameDocumentEdit> Edits { get; } = edits;
+}
+
+internal sealed class LuiRenameDocumentEdit(Uri uri, IReadOnlyList<LuiSpan> spans, string newText)
+{
+    internal Uri Uri { get; } = uri;
+    internal IReadOnlyList<LuiSpan> Spans { get; } = spans;
+    internal string NewText { get; } = newText;
+}
+
+internal sealed class LuiFormatResult(LuiSpan span, string newText)
+{
+    internal LuiSpan Span { get; } = span;
+    internal string NewText { get; } = newText;
+}
+
+internal sealed class RenameGeneratedDocument(Uri uri, string source, LuiSourceMap map)
+{
+    internal Uri Uri { get; } = uri;
+    internal string Source { get; } = source;
+    internal LuiSourceMap Map { get; } = map;
+}
+
+internal sealed class RenameSnapshot(
+    long epoch,
+    Compilation compilation,
+    IReadOnlyDictionary<SyntaxTree, RenameGeneratedDocument> generated,
+    IReadOnlyDictionary<SyntaxTree, Uri> csharp,
+    IReadOnlyDictionary<string, string> sourceByPath
+)
+{
+    internal long Epoch { get; } = epoch;
+    internal Compilation Compilation { get; } = compilation;
+    internal IReadOnlyDictionary<SyntaxTree, RenameGeneratedDocument> Generated { get; } =
+        generated;
+    internal IReadOnlyDictionary<SyntaxTree, Uri> CSharp { get; } = csharp;
+    internal IReadOnlyDictionary<string, string> SourceByPath { get; } = sourceByPath;
+}
+
+internal sealed class RenameTarget(Uri uri, LuiSpan span, ISymbol symbol)
+{
+    internal Uri Uri { get; } = uri;
+    internal LuiSpan Span { get; } = span;
+    internal ISymbol Symbol { get; } = symbol;
 }
 
 internal sealed class LuiCompletionItem(

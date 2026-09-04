@@ -1,6 +1,6 @@
 {
-  "schema": 1,
-  "issue": 50,
+  "schema": 2,
+  "issue": 54,
   "frozenBeforeOptimization": true,
   "environment": {
     "runtime": ".NET SDK 10.0.400",
@@ -24,27 +24,31 @@
       "command": "dotnet run --project tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj --no-build",
       "baselineMilliseconds": 3455,
       "budgetMilliseconds": 15000,
-      "scope": "The existing compiler corpus owns formatter document/range/idempotence checks; no standalone formatter CLI exists yet."
+      "scope": "The compiler corpus proves shared formatter structure, comments, malformed input, significant text, idempotence, ranges, and LF/CRLF policy; CLI/LSP/MSBuild equivalence is covered by the tooling integration corpus."
     },
     "incrementalNoOpAndOneFileInvalidation": {
       "command": "dotnet run --project tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj --no-build",
       "baselineMilliseconds": 4056,
       "budgetMilliseconds": 15000,
       "scope": "The existing generator corpus asserts cached no-op and one-document invalidation through Roslyn tracked steps."
-    }
-  },
-  "deferred": [
-    {
-      "measure": "warmCompletion",
-      "reason": "Deferred: the LSP is owned by later editor work; no completion implementation exists."
     },
-    {
-      "measure": "editToDiagnostic",
-      "reason": "Deferred: the LSP/editor diagnostic loop is not implemented."
+    "warmCompletion": {
+      "command": "dotnet run --project tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj --no-build -- --measure warmCompletion",
+      "baselineMilliseconds": 182,
+      "budgetMilliseconds": 120000,
+      "scope": "One warmed textDocument/completion request after evaluated-project initialization; startup and warm-up are outside the operation stopwatch."
     },
-    {
-      "measure": "rename",
-      "reason": "Deferred: cross-language rename is owned by later editor work and must not be simulated."
+    "editToDiagnostic": {
+      "command": "dotnet run --project tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj --no-build -- --measure editToDiagnostic",
+      "baselineMilliseconds": 88,
+      "budgetMilliseconds": 120000,
+      "scope": "One didChange followed by its current pull diagnostic after an open-document diagnostic warm-up."
+    },
+    "rename": {
+      "command": "dotnet run --project tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj --no-build -- --measure rename",
+      "baselineMilliseconds": 40,
+      "budgetMilliseconds": 120000,
+      "scope": "One textDocument/rename request after prepareRename warm-up against the evaluated project."
     }
-  ]
+  }
 }

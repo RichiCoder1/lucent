@@ -1,6 +1,4 @@
 namespace Lucent.IssueBrowser;
-
-
 style IssueBrowserStyle {
     Width: 800;
     Height: 500;

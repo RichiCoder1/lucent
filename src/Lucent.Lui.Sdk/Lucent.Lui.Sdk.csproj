@@ -13,4 +13,8 @@
     <None Include="../Lucent.Lui.Generator/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Generator.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     <None Include="../Lucent.Lui.Compiler/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Compiler.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
+  <Target Name="BuildLucentLuiTooling" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="../Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
+    <ItemGroup><None Include="../Lucent.Lui.Tooling/bin/$(Configuration)/net10.0/**" Pack="true" PackagePath="tools/net10.0" Visible="false" /></ItemGroup>
+  </Target>
 </Project>

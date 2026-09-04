@@ -184,6 +184,9 @@ internal static class Program
                                 interFileDependencies = true,
                                 workspaceDiagnostics = false,
                             },
+                            renameProvider = new { prepareProvider = true },
+                            documentFormattingProvider = true,
+                            documentRangeFormattingProvider = true,
                             textDocumentSync = 1,
                         },
                     }
@@ -284,6 +287,93 @@ internal static class Program
                     )
                     .ConfigureAwait(false);
                 return new HandlerResult(null, target is null ? null : Location(target));
+            case "textDocument/prepareRename":
+                if (project is null)
+                    return new HandlerResult(null, null);
+                var prepareUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var prepared = await project
+                    .PrepareRenameAsync(
+                        prepareUri,
+                        await OffsetAsync(project, prepareUri, parameters.GetProperty("position"))
+                            .ConfigureAwait(false),
+                        CancellationToken.None
+                    )
+                    .ConfigureAwait(false);
+                var prepareText = await project
+                    .GetTextAsync(prepareUri, CancellationToken.None)
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    prepared is null || prepareText is null
+                        ? null
+                        : new
+                        {
+                            range = Range(prepareText, prepared.Span),
+                            placeholder = prepareText.Substring(
+                                prepared.Span.Start,
+                                prepared.Span.Length
+                            ),
+                        }
+                );
+            case "textDocument/rename":
+                if (project is null)
+                    return new HandlerResult(null, null);
+                var renameUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var renamed = await project
+                    .RenameAsync(
+                        renameUri,
+                        await OffsetAsync(project, renameUri, parameters.GetProperty("position"))
+                            .ConfigureAwait(false),
+                        parameters.GetProperty("newName").GetString() ?? "",
+                        CancellationToken.None
+                    )
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    renamed is null ? null : WorkspaceEdit(project, renamed)
+                );
+            case "textDocument/formatting":
+            case "textDocument/rangeFormatting":
+                if (project is null)
+                    return new HandlerResult(null, null);
+                var formatUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                LuiSpan? formatRange = null;
+                if (method == "textDocument/rangeFormatting")
+                {
+                    var range = parameters.GetProperty("range");
+                    var start = await OffsetAsync(project, formatUri, range.GetProperty("start"))
+                        .ConfigureAwait(false);
+                    var end = await OffsetAsync(project, formatUri, range.GetProperty("end"))
+                        .ConfigureAwait(false);
+                    formatRange = LuiSpan.From(start, end);
+                }
+                var format = await project
+                    .FormatAsync(formatUri, formatRange, CancellationToken.None)
+                    .ConfigureAwait(false);
+                var formatText = await project
+                    .GetTextAsync(formatUri, CancellationToken.None)
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    format is null
+                    || formatText is null
+                    || format.Span.Length == 0 && format.NewText.Length == 0
+                        ? Array.Empty<object>()
+                        : new[]
+                        {
+                            new
+                            {
+                                range = Range(formatText, format.Span),
+                                newText = format.NewText,
+                            },
+                        }
+                );
             case "textDocument/completion":
                 if (project is null)
                     return new HandlerResult(null, null);
@@ -587,6 +677,24 @@ internal static class Program
                 end = new { line = end.Line, character = end.Character },
             },
         };
+    }
+
+    private static object WorkspaceEdit(LuiProjectContext project, LuiRenameResult result)
+    {
+        var changes = new Dictionary<string, object>();
+        foreach (var document in result.Edits)
+        {
+            var text = project
+                .GetTextAsync(document.Uri, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+            if (text is null)
+                return null!;
+            changes[document.Uri.AbsoluteUri] = document
+                .Spans.Select(span => new { range = Range(text, span), newText = document.NewText })
+                .ToArray();
+        }
+        return new { changes };
     }
 
     private static (int Line, int Character) Position(string text, int offset)

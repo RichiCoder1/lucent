@@ -1,6 +1,4 @@
 namespace Lucent.IssueBrowser;
-
-
 style LoadingStyle {
     Height: 28;
 }

@@ -1,2 +1,7 @@
-style WidgetStyle { Spacing: DensitySpacing; }
-internal component Widget() { <Row style={WidgetStyle} /> }
+style WidgetStyle {
+    Spacing: DensitySpacing;
+}
+
+internal component Widget() {
+    <Row style={WidgetStyle} />
+}

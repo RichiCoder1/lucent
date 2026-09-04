@@ -9,6 +9,9 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 
+if (args is ["--measure", var measure])
+    return await MeasureOperationAsync(measure);
+
 var root = Path.Combine(Path.GetTempPath(), "lucent-lsp-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -36,7 +39,39 @@ try
     await File.WriteAllTextAsync(siblingPath, sibling);
     var sourceUri = new Uri(sourcePath);
 
+    var formatterSource =
+        "// formatter comment\r\ninternal component Widget(int count) { <Row><Text content={count . ToString ( )} />  exact  text </Row> }";
+    var formatterExpected = LuiFormatter.Format(formatterSource);
+    var formatterPath = Path.Combine(root, "Formatter.lui");
+    await File.WriteAllTextAsync(formatterPath, formatterSource);
+    Assert(
+        await ToolingExitCodeAsync("--check", formatterPath) == 1
+            && await ToolingExitCodeAsync("--write", formatterPath) == 0
+            && await File.ReadAllTextAsync(formatterPath) == formatterExpected
+            && await ToolingExitCodeAsync("--check", formatterPath) == 0,
+        "formatter CLI check/write diverged from the compiler formatter."
+    );
+
     using var context = await LuiProjectContext.LoadAsync(projectPath, CancellationToken.None);
+    context.ReplaceText(sourceUri, formatterSource);
+    var lspDocumentFormat = await context.FormatAsync(sourceUri, null, CancellationToken.None);
+    var lspRangeFormat = await context.FormatAsync(
+        sourceUri,
+        LuiParser.Parse(formatterSource).Component!.Span,
+        CancellationToken.None
+    );
+    Assert(
+        lspDocumentFormat is not null
+            && Apply(formatterSource, lspDocumentFormat) == formatterExpected
+            && lspRangeFormat is not null
+            && Apply(formatterSource, lspRangeFormat)
+                == LuiFormatter.FormatRange(
+                    formatterSource,
+                    LuiParser.Parse(formatterSource).Component!.Span
+                ),
+        "LSP document/range formatting diverged from compiler/CLI policy."
+    );
+    context.ReplaceText(sourceUri, source);
     var published = await context.CompileAsync(sourceUri, CancellationToken.None);
     Assert(
         published is not null,
@@ -124,6 +159,87 @@ try
             && sourceRoundTrip.Span.Length == "Card".Length,
         "generated navigation did not return to the exact .lui source span."
     );
+    var preparedRename = await context.PrepareRenameAsync(
+        sourceUri,
+        helper,
+        CancellationToken.None
+    );
+    var helperDeclaration = (await File.ReadAllTextAsync(helperPath)).LastIndexOf(
+        "Format",
+        StringComparison.Ordinal
+    );
+    var crossLanguageRename = await context.RenameAsync(
+        sourceUri,
+        helper,
+        "Render",
+        CancellationToken.None
+    );
+    Assert(
+        preparedRename is not null
+            && preparedRename.Span.Start == helper
+            && crossLanguageRename is not null
+            && crossLanguageRename.Edits.Any(edit =>
+                edit.Uri == sourceUri && edit.Spans.Any(span => span.Start == helper)
+            )
+            && crossLanguageRename.Edits.Any(edit =>
+                edit.Uri == new Uri(helperPath)
+                && edit.Spans.Any(span => span.Start == helperDeclaration)
+            ),
+        "cross-language C# expression rename was not a complete workspace edit: "
+            + (
+                crossLanguageRename is null
+                    ? "null"
+                    : string.Join(
+                        " | ",
+                        crossLanguageRename.Edits.Select(edit =>
+                            edit.Uri + ":" + string.Join(",", edit.Spans.Select(span => span.Start))
+                        )
+                    )
+            )
+            + " prepared="
+            + preparedRename?.Span.Start
+            + " helper="
+            + helper
+            + " declaration="
+            + helperDeclaration
+    );
+    var componentRename = await context.RenameAsync(
+        sourceUri,
+        card,
+        "Panel",
+        CancellationToken.None
+    );
+    Assert(
+        componentRename is not null
+            && componentRename.Edits.Any(edit =>
+                edit.Uri == sourceUri && edit.Spans.Any(span => span.Start == card)
+            )
+            && componentRename.Edits.Any(edit => edit.Uri == new Uri(siblingPath)),
+        "cross-language component rename did not include both .lui declaration and reference."
+    );
+    var renameReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var renameRelease = new TaskCompletionSource(
+        TaskCreationOptions.RunContinuationsAsynchronously
+    );
+    var staleRename = context.RenameAsync(
+        sourceUri,
+        helper,
+        "Stale",
+        CancellationToken.None,
+        async () =>
+        {
+            renameReady.SetResult();
+            await renameRelease.Task;
+        }
+    );
+    await renameReady.Task;
+    context.ReplaceText(
+        sourceUri,
+        source.Replace("Format(count)", "Format(count + 1)", StringComparison.Ordinal)
+    );
+    renameRelease.SetResult();
+    Assert(await staleRename is null, "stale rename returned partial workspace edits.");
+    context.ReplaceText(sourceUri, source);
     using (var foreign = await LuiProjectContext.LoadAsync(projectPath, CancellationToken.None))
         Assert(
             await foreign.NavigateAsync(
@@ -392,7 +508,66 @@ try
                 && capabilities.GetProperty("documentSymbolProvider").GetBoolean(),
             "LSP advertised an incomplete frozen tooling surface."
         );
+        Assert(
+            capabilities.GetProperty("renameProvider").GetProperty("prepareProvider").GetBoolean()
+                && capabilities.GetProperty("documentFormattingProvider").GetBoolean()
+                && capabilities.GetProperty("documentRangeFormattingProvider").GetBoolean(),
+            "LSP did not advertise rename and formatter providers."
+        );
         await lsp.NotifyAsync("initialized", new { });
+        await lsp.NotifyAsync(
+            "textDocument/didOpen",
+            new
+            {
+                textDocument = new
+                {
+                    uri = lspSourceUri,
+                    version = 1,
+                    text = formatterSource,
+                },
+            }
+        );
+        using (
+            var documentFormatting = await lsp.RequestAsync(
+                "textDocument/formatting",
+                new { textDocument = new { uri = lspSourceUri }, options = new { } }
+            )
+        )
+            Assert(
+                ApplyLspEdits(formatterSource, documentFormatting) == formatterExpected,
+                "document formatting RPC diverged from the shared formatter policy."
+            );
+        var componentSpan = LuiParser.Parse(formatterSource).Component!.Span;
+        var componentStart = Position(formatterSource, componentSpan.Start);
+        var componentEnd = Position(formatterSource, componentSpan.End);
+        using (
+            var rangeFormatting = await lsp.RequestAsync(
+                "textDocument/rangeFormatting",
+                new
+                {
+                    textDocument = new { uri = lspSourceUri },
+                    range = new
+                    {
+                        start = new
+                        {
+                            line = componentStart.Line,
+                            character = componentStart.Character,
+                        },
+                        end = new { line = componentEnd.Line, character = componentEnd.Character },
+                    },
+                    options = new { },
+                }
+            )
+        )
+            Assert(
+                ApplyLspEdits(formatterSource, rangeFormatting)
+                    == LuiFormatter.FormatRange(formatterSource, componentSpan),
+                "range formatting RPC diverged from the shared formatter policy."
+            );
+        await lsp.NotifyAsync(
+            "textDocument/didClose",
+            new { textDocument = new { uri = lspSourceUri } }
+        );
         using var repeatedInitialize = await lsp.RequestAsync(
             "initialize",
             new { initializationOptions = new { projectUri = new Uri(projectPath).AbsoluteUri } }
@@ -1085,7 +1260,7 @@ using (var messageKinds = LspClient.Start())
     Assert(await messageKinds.ExitAsync() == 0, "strict message-kind client did not exit cleanly.");
 }
 
-return;
+return 0;
 
 static async Task RunDiagnosticParityAsync(string core)
 {
@@ -1600,6 +1775,224 @@ static void Assert(bool condition, string message)
 {
     if (!condition)
         throw new InvalidOperationException(message);
+}
+
+static async Task<int> MeasureOperationAsync(string measure)
+{
+    var root = Path.Combine(
+        Path.GetTempPath(),
+        "lucent-lsp-measure-" + Guid.NewGuid().ToString("N")
+    );
+    Directory.CreateDirectory(root);
+    var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+    var project = new Uri(Path.Combine(root, "Measure.csproj"));
+    var document = new Uri(Path.Combine(root, "Widget.lui"));
+    var source =
+        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Widget(int count) { <Row><Text content={Helpers.Format(count)} /></Row> }";
+    await File.WriteAllTextAsync(
+        project.LocalPath,
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\""
+            + core
+            + "\" /><AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>"
+    );
+    await File.WriteAllTextAsync(
+        Path.Combine(root, "Helpers.cs"),
+        "namespace Sample; public static class Helpers { public static string Format(int value) => value.ToString(); }"
+    );
+    await File.WriteAllTextAsync(document.LocalPath, source);
+    using var lsp = LspClient.Start();
+    using var initialized = await lsp.RequestAsync(
+        "initialize",
+        new { initializationOptions = new { projectUri = VsCodeUri(project) } }
+    );
+    await lsp.NotifyAsync("initialized", new { });
+    var completionOffset =
+        source.IndexOf("Helpers.Format", StringComparison.Ordinal) + "Helpers.".Length;
+    var completionLocation = Position(source, completionOffset);
+    var completionPosition = new
+    {
+        line = completionLocation.Line,
+        character = completionLocation.Character,
+    };
+    var renameLocation = Position(source, source.IndexOf("Format", StringComparison.Ordinal));
+    var renamePosition = new { line = renameLocation.Line, character = renameLocation.Character };
+    var stopwatch = new Stopwatch();
+    switch (measure)
+    {
+        case "warmCompletion":
+            using (
+                var warm = await lsp.RequestAsync(
+                    "textDocument/completion",
+                    new
+                    {
+                        textDocument = new { uri = VsCodeUri(document) },
+                        position = completionPosition,
+                    }
+                )
+            ) { }
+            stopwatch.Start();
+            using (
+                var completion = await lsp.RequestAsync(
+                    "textDocument/completion",
+                    new
+                    {
+                        textDocument = new { uri = VsCodeUri(document) },
+                        position = completionPosition,
+                    }
+                )
+            )
+                Assert(
+                    completion.RootElement.TryGetProperty("result", out var completionResult)
+                        && completionResult.GetProperty("items").GetArrayLength() != 0,
+                    "completion measurement returned no completion result: "
+                        + completion.RootElement.GetRawText()
+                );
+            break;
+        case "editToDiagnostic":
+            await lsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri = VsCodeUri(document),
+                        version = 1,
+                        text = source,
+                    },
+                }
+            );
+            using (
+                var warm = await lsp.RequestAsync(
+                    "textDocument/diagnostic",
+                    new { textDocument = new { uri = VsCodeUri(document) } }
+                )
+            ) { }
+            stopwatch.Start();
+            await lsp.NotifyAsync(
+                "textDocument/didChange",
+                new
+                {
+                    textDocument = new { uri = VsCodeUri(document), version = 2 },
+                    contentChanges = new[]
+                    {
+                        new { text = source.Replace("Row", "Missing", StringComparison.Ordinal) },
+                    },
+                }
+            );
+            using (
+                var diagnostic = await lsp.RequestAsync(
+                    "textDocument/diagnostic",
+                    new { textDocument = new { uri = VsCodeUri(document) } }
+                )
+            )
+                Assert(
+                    diagnostic
+                        .RootElement.GetProperty("result")
+                        .GetProperty("items")
+                        .EnumerateArray()
+                        .Any(item => item.GetProperty("code").GetString() == "LUI2001"),
+                    "edit-to-diagnostic measurement returned no current diagnostic."
+                );
+            break;
+        case "rename":
+            using (
+                var warm = await lsp.RequestAsync(
+                    "textDocument/prepareRename",
+                    new
+                    {
+                        textDocument = new { uri = VsCodeUri(document) },
+                        position = renamePosition,
+                    }
+                )
+            ) { }
+            stopwatch.Start();
+            using (
+                var rename = await lsp.RequestAsync(
+                    "textDocument/rename",
+                    new
+                    {
+                        textDocument = new { uri = VsCodeUri(document) },
+                        position = renamePosition,
+                        newName = "FilterPanel",
+                    }
+                )
+            )
+                Assert(
+                    rename
+                        .RootElement.GetProperty("result")
+                        .GetProperty("changes")
+                        .EnumerateObject()
+                        .Any(),
+                    "rename measurement returned no workspace edit."
+                );
+            break;
+        default:
+            Console.Error.WriteLine("Unknown measurement: " + measure);
+            return 2;
+    }
+    stopwatch.Stop();
+    await lsp.RequestAsync("shutdown", new { });
+    if (await lsp.ExitAsync() != 0)
+        return 1;
+    Console.WriteLine("MeasureMilliseconds=" + stopwatch.ElapsedMilliseconds);
+    return 0;
+}
+
+static string Apply(string source, LuiFormatResult edit) =>
+    source[..edit.Span.Start] + edit.NewText + source[edit.Span.End..];
+
+static async Task<int> ToolingExitCodeAsync(params string[] arguments)
+{
+    var configuration = Directory
+        .GetParent(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar))!
+        .Name;
+    var executable = Path.GetFullPath(
+        $"src/Lucent.Lui.Tooling/bin/{configuration}/net10.0/Lucent.Lui.Tooling.exe"
+    );
+    using var process =
+        Process.Start(
+            new ProcessStartInfo(
+                executable,
+                String.Join(" ", arguments.Select(argument => '"' + argument + '"'))
+            )
+            {
+                UseShellExecute = false,
+            }
+        ) ?? throw new InvalidOperationException("Could not start the LUI tooling CLI.");
+    await process.WaitForExitAsync();
+    return process.ExitCode;
+}
+
+static string ApplyLspEdits(string source, JsonDocument response)
+{
+    var edits = response.RootElement.GetProperty("result").EnumerateArray().ToArray();
+    foreach (
+        var edit in edits.OrderByDescending(item =>
+            Offset(source, item.GetProperty("range").GetProperty("start"))
+        )
+    )
+    {
+        var range = edit.GetProperty("range");
+        var start = Offset(source, range.GetProperty("start"));
+        var end = Offset(source, range.GetProperty("end"));
+        source = source[..start] + edit.GetProperty("newText").GetString() + source[end..];
+    }
+    return source;
+}
+
+static int Offset(string text, JsonElement position)
+{
+    var line = position.GetProperty("line").GetInt32();
+    var character = position.GetProperty("character").GetInt32();
+    var offset = 0;
+    while (line-- > 0)
+    {
+        var newline = text.IndexOf('\n', offset);
+        if (newline < 0)
+            throw new InvalidOperationException("LSP position exceeds the source line count.");
+        offset = newline + 1;
+    }
+    return offset + character;
 }
 
 static (int Line, int Character) Position(string text, int offset)

@@ -71,6 +71,8 @@ test("activation preserves current diagnostics and clears closed documents", asy
             createDiagnosticCollection: () => diagnostics,
             registerCompletionItemProvider: disposable,
             registerDefinitionProvider: disposable,
+            registerDocumentFormattingEditProvider: disposable,
+            registerDocumentRangeFormattingEditProvider: disposable,
             registerDocumentSymbolProvider: disposable,
             registerDocumentSemanticTokensProvider: (_selector, provider, legend) => {
                 semanticProvider = provider;
@@ -78,6 +80,7 @@ test("activation preserves current diagnostics and clears closed documents", asy
                 return disposable();
             },
             registerHoverProvider: disposable,
+            registerRenameProvider: disposable,
             registerSignatureHelpProvider: disposable
         },
         window: { showErrorMessage() {} },

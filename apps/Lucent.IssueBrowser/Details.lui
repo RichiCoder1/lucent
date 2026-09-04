@@ -1,6 +1,4 @@
 namespace Lucent.IssueBrowser;
-
-
 style DetailsStyle {
     Width: 800;
     Spacing: DensitySpacing;

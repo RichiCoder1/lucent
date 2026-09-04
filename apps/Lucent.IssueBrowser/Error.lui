@@ -1,6 +1,4 @@
 namespace Lucent.IssueBrowser;
-
-
 style ErrorStatusStyle {
     Axis: LayoutAxis.Column;
 }

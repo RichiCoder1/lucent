@@ -352,6 +352,7 @@ public sealed class LuiCompilationResult
     /// <summary>Immutable parser, binding, and lowering diagnostics measured against authored spans.</summary>
     public IReadOnlyList<LuiDiagnostic> Diagnostics { get; }
 
-    /// <summary>Whether generated source is available with no diagnostics; callers must still perform freshness validation.</summary>
-    public bool Success => Source is not null && Diagnostics.Count == 0;
+    /// <summary>Whether generated source is available without errors; warning-level lints remain publishable.</summary>
+    public bool Success =>
+        Source is not null && !Diagnostics.Any(item => item.Severity == DiagnosticSeverity.Error);
 }

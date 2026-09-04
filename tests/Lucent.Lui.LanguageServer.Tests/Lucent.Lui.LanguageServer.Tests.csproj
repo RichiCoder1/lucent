@@ -8,5 +8,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj" />
     <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" />
+    <ProjectReference Include="../../src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>

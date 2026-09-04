@@ -57,6 +57,34 @@ function csharp(value) {
     return markdown;
 }
 
+function toWorkspaceEdit(result) {
+    if (!result) return undefined;
+    const edit = new vscode.WorkspaceEdit();
+    for (const [uri, changes] of Object.entries(result.changes)) {
+        for (const change of changes) {
+            edit.replace(vscode.Uri.parse(uri), new vscode.Range(
+                change.range.start.line,
+                change.range.start.character,
+                change.range.end.line,
+                change.range.end.character
+            ), change.newText);
+        }
+    }
+    return edit;
+}
+
+function toTextEdits(changes) {
+    return changes.map(change => new vscode.TextEdit(
+        new vscode.Range(
+            change.range.start.line,
+            change.range.start.character,
+            change.range.end.line,
+            change.range.end.character
+        ),
+        change.newText
+    ));
+}
+
 class Rpc {
     constructor(process) {
         this.process = process;
@@ -228,6 +256,38 @@ async function activate(context) {
                 );
             }
         }),
+        vscode.languages.registerRenameProvider("lui", {
+            prepareRename: async (document, position) => {
+                const result = await rpc.request("textDocument/prepareRename", {
+                    textDocument: { uri: document.uri.toString() }, position
+                });
+                return result && new vscode.Range(
+                    result.range.start.line,
+                    result.range.start.character,
+                    result.range.end.line,
+                    result.range.end.character
+                );
+            },
+            provideRenameEdits: async (document, position, newName) => toWorkspaceEdit(
+                await rpc.request("textDocument/rename", {
+                    textDocument: { uri: document.uri.toString() }, position, newName
+                })
+            )
+        }),
+        vscode.languages.registerDocumentFormattingEditProvider("lui", {
+            provideDocumentFormattingEdits: async document => toTextEdits(
+                await rpc.request("textDocument/formatting", {
+                    textDocument: { uri: document.uri.toString() }, options: {}
+                })
+            )
+        }),
+        vscode.languages.registerDocumentRangeFormattingEditProvider("lui", {
+            provideDocumentRangeFormattingEdits: async (document, range) => toTextEdits(
+                await rpc.request("textDocument/rangeFormatting", {
+                    textDocument: { uri: document.uri.toString() }, range, options: {}
+                })
+            )
+        }),
         vscode.languages.registerCompletionItemProvider("lui", {
             provideCompletionItems: async (document, position) => {
                 const result = await rpc.request("textDocument/completion", {
@@ -306,3 +366,5 @@ exports.toVsCodeCompletionKind = toVsCodeCompletionKind;
 exports.toVsCodeDiagnosticSeverity = toVsCodeDiagnosticSeverity;
 exports.toVsCodeSymbolKind = toVsCodeSymbolKind;
 exports.semanticTokensLegend = semanticTokensLegend;
+exports.toTextEdits = toTextEdits;
+exports.toWorkspaceEdit = toWorkspaceEdit;

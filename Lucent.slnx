@@ -5,6 +5,7 @@
   <Project Path="src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" />
   <Project Path="src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj" />
   <Project Path="src/Lucent.Lui.Sdk/Lucent.Lui.Sdk.csproj" />
+  <Project Path="src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" />
   <Project Path="src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
   <Project Path="src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
   <Project Path="tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj" />

@@ -4,6 +4,8 @@ $dotnet = Join-Path $root '.dotnet/dotnet.exe'; if (!(Test-Path $dotnet)) { $dot
 $artifacts = Join-Path $root 'artifacts/lui-matrix'
 $feed = Join-Path $root 'artifacts/lui-feed'
 $consumer = Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Consumer/Consumer.csproj'
+$widgetPath = Join-Path (Split-Path $consumer) 'Widget.lui'
+$widgetSource = Get-Content $widgetPath -Raw
 $config = Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/NuGet.config'
 $env:NUGET_PACKAGES = Join-Path $root 'artifacts/lui-packages'
 
@@ -43,7 +45,11 @@ try {
     Remove-Item $config -Force
 
     # The checked-in consumer is the smallest package, generated-output, and preprocess smoke.
-    Invoke-Dotnet @('build', $consumer, '--no-restore', '-warnaserror')
+    Invoke-Dotnet @('build', $consumer, '--no-restore', '-warnaserror', '-p:LucentLuiFormatCheck=true')
+    [IO.File]::WriteAllText($widgetPath, 'internal component Widget() { <Row/> }')
+    Expected-Failure @('build', $consumer, '--no-restore', '-p:LucentLuiFormatCheck=true') 'MSB3073' | Out-Null
+    [IO.File]::WriteAllText($widgetPath, $widgetSource)
+    Invoke-Dotnet @('build', $consumer, '--no-restore', '-warnaserror', '-p:LucentLuiFormatCheck=true')
     $items = (& $dotnet 'msbuild' $consumer '-getItem:AdditionalFiles') -join "`n"
     if ($LASTEXITCODE -or $items -notmatch 'Widget\.lui' -or $items -match 'bin|obj|Hidden|\.g\.lui|\.generated\.lui') { throw 'SDK default glob evaluated an excluded input.' }
     $preprocess = Join-Path $root 'artifacts/lui-consumer.preprocessed.xml'
@@ -156,5 +162,6 @@ try {
     if ((Compare-Object $allowed $actual)) { throw "NativeAOT runtime inventory differs from its fail-closed allowlist: $($actual -join ', ')." }
 }
 finally {
+    [IO.File]::WriteAllText($widgetPath, $widgetSource)
     Remove-Item $config, (Join-Path $root 'artifacts/lui-matrix/publish.NuGet.config') -Force -ErrorAction Ignore
 }

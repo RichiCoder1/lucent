@@ -54,10 +54,11 @@ public static class LuiCompiler
         identity = Snapshot(identity, compilation);
         var rootTokens = RootTokens(compilation, identity.RootNamespace);
         var diagnostics = new List<LuiDiagnostic>(document.Diagnostics);
+        UnusedStyleLints(document, diagnostics);
         var writer = new Writer(document, identity, null, []);
         if (document.Component is not null)
             writer.Document(diagnostics);
-        if (diagnostics.Count != 0)
+        if (HasErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
                 null,
@@ -167,7 +168,7 @@ public static class LuiCompiler
             tokenExpressions,
             NullChecks(probeModel, probeTree, document)
         );
-        if (diagnostics.Count != 0)
+        if (HasErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
                 null,
@@ -178,7 +179,7 @@ public static class LuiCompiler
         writer = new Writer(document, identity, plans, []);
         writer.Document(diagnostics);
         var map = new LuiSourceMap(identity, writer.Entries);
-        if (diagnostics.Count != 0)
+        if (HasErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
                 null,
@@ -237,9 +238,10 @@ public static class LuiCompiler
             );
         }
         RejectProhibitedOperations(model, tree, map, diagnostics);
+        UnstableKeyLints(document, model, tree, map, diagnostics);
         return new LuiCompilationResult(
             identity,
-            diagnostics.Count == 0 ? writer.Text : null,
+            HasErrors(diagnostics) ? null : writer.Text,
             map,
             diagnostics.OrderBy(item => item.Span.Start).ToArray(),
             writer.Text
@@ -273,6 +275,130 @@ public static class LuiCompiler
             );
         }
     }
+
+    private static void UnstableKeyLints(
+        LuiDocumentSyntax document,
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        List<LuiDiagnostic> diagnostics
+    )
+    {
+        foreach (var loop in Loops(document.Component?.Body ?? []))
+        {
+            if (
+                tree.GetRoot()
+                    .DescendantNodes()
+                    .OfType<ExpressionSyntax>()
+                    .Any(expression =>
+                    {
+                        var source = Translate(
+                            map,
+                            new LuiSpan(expression.SpanStart, expression.Span.Length)
+                        );
+                        return source is { } span
+                            && loop.Key.Span.Start <= span.Start
+                            && span.End <= loop.Key.Span.End
+                            && IsUnstableKeySymbol(
+                                model.GetSymbolInfo(expression).Symbol
+                                    ?? model
+                                        .GetSymbolInfo(expression)
+                                        .CandidateSymbols.SingleOrDefault()
+                            );
+                    })
+            )
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI5001",
+                        "A keyed iteration requires a stable identity.",
+                        loop.Key.Span,
+                        DiagnosticSeverity.Warning
+                    )
+                );
+        }
+    }
+
+    private static bool IsUnstableKeySymbol(ISymbol? symbol)
+    {
+        if (symbol is IAliasSymbol alias)
+            symbol = alias.Target;
+        var type = symbol switch
+        {
+            IMethodSymbol method => method.ContainingType.ToDisplayString(),
+            IPropertySymbol property => property.ContainingType.ToDisplayString(),
+            _ => "",
+        };
+        return symbol switch
+        {
+            IMethodSymbol { Name: "NewGuid" } when type == "System.Guid" => true,
+            IMethodSymbol method
+                when type == "System.Random"
+                    && method.Name.StartsWith("Next", StringComparison.Ordinal) => true,
+            IPropertySymbol { Name: "Now" or "UtcNow" }
+                when type is "System.DateTime" or "System.DateTimeOffset" => true,
+            IPropertySymbol { Name: "TickCount" or "TickCount64" }
+                when type == "System.Environment" => true,
+            IPropertySymbol { Name: "Shared" } when type == "System.Random" => true,
+            _ => false,
+        };
+    }
+
+    private static void UnusedStyleLints(
+        LuiDocumentSyntax document,
+        List<LuiDiagnostic> diagnostics
+    )
+    {
+        var used = new HashSet<string>(
+            Elements(document.Component?.Body ?? [])
+                .SelectMany(element => element.Attributes)
+                .Where(attribute => attribute.Name.Text == "style")
+                .Select(attribute =>
+                    attribute.Value switch
+                    {
+                        LuiStyleWithSyntax style => style.Name.Text,
+                        LuiExpressionSyntax expression => expression.Text.Trim(),
+                        _ => "",
+                    }
+                ),
+            StringComparer.Ordinal
+        );
+        foreach (var style in document.Styles.Where(style => !used.Contains(style.Name.Text)))
+            diagnostics.Add(
+                new LuiDiagnostic(
+                    "LUI5002",
+                    "Private style '" + style.Name.Text + "' is unused.",
+                    style.Name.Span,
+                    DiagnosticSeverity.Warning
+                )
+            );
+    }
+
+    private static IEnumerable<LuiForEachSyntax> Loops(IEnumerable<LuiBodySyntax> body) =>
+        body.SelectMany(node =>
+            node switch
+            {
+                LuiForEachSyntax loop => new[] { loop }.Concat(Loops(loop.Body)),
+                LuiIfSyntax conditional => Loops(conditional.ThenBody.Concat(conditional.ElseBody)),
+                LuiElementSyntax element => Loops(element.Children),
+                _ => [],
+            }
+        );
+
+    private static bool HasErrors(IEnumerable<LuiDiagnostic> diagnostics) =>
+        diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+
+    private static IEnumerable<LuiElementSyntax> Elements(IEnumerable<LuiBodySyntax> body) =>
+        body.SelectMany(node =>
+            node switch
+            {
+                LuiElementSyntax element => new[] { element }.Concat(Elements(element.Children)),
+                LuiIfSyntax conditional => Elements(
+                    conditional.ThenBody.Concat(conditional.ElseBody)
+                ),
+                LuiForEachSyntax loop => Elements(loop.Body),
+                _ => [],
+            }
+        );
 
     private static bool IsProhibitedOperation(SemanticModel model, ExpressionSyntax expression)
     {
@@ -732,7 +858,7 @@ public static class LuiCompiler
         );
         var diagnostics = new List<LuiDiagnostic>();
         writer.Document(diagnostics);
-        if (diagnostics.Count != 0)
+        if (HasErrors(diagnostics))
             return false;
         var parse =
             (CSharpParseOptions?)compilation.SyntaxTrees.FirstOrDefault()?.Options
