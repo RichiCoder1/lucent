@@ -2,6 +2,9 @@ style WidgetStyle {
     Spacing: DensitySpacing;
 }
 
-internal component Widget() {
-    <Row style={WidgetStyle} />
+internal component Widget(string value = "lui sdk consumer") {
+    <Row style={WidgetStyle}>
+        <Text>{value}</Text>
+        <Text content={value} />
+    </Row>
 }

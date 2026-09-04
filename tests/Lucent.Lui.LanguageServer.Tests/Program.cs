@@ -40,7 +40,7 @@ try
     var sourceUri = new Uri(sourcePath);
 
     var formatterSource =
-        "// formatter comment\r\ninternal component Widget(int count) { <Row><Text content={count . ToString ( )} />  exact  text </Row> }";
+        "// formatter comment\r\ninternal component Widget(int count) { <Row><Text>{count . ToString ( )}</Text>  exact  text </Row> }";
     var formatterExpected = LuiFormatter.Format(formatterSource);
     var formatterPath = Path.Combine(root, "Formatter.lui");
     await File.WriteAllTextAsync(formatterPath, formatterSource);
@@ -203,6 +203,87 @@ try
             + " declaration="
             + helperDeclaration
     );
+    var scalarBodySource = source.Replace(
+        "<Card content={Helpers.Format(count)} name=\"widget\" />",
+        "<Text>{Helpers.Format(count)}</Text>",
+        StringComparison.Ordinal
+    );
+    context.ReplaceText(sourceUri, scalarBodySource);
+    var scalarBodyPublished = await context.CompileAsync(sourceUri, CancellationToken.None);
+    var scalarBodyHelper = scalarBodySource.IndexOf("Format", StringComparison.Ordinal);
+    var scalarBodyHover = await context.HoverAsync(
+        sourceUri,
+        scalarBodyHelper,
+        CancellationToken.None
+    );
+    var scalarBodyRename = await context.RenameAsync(
+        sourceUri,
+        scalarBodyHelper,
+        "Render",
+        CancellationToken.None
+    );
+    var scalarBodyReferences = await context.ReferencesAsync(
+        new Uri(VsCodeUri(new Uri(helperPath))),
+        helperDeclaration,
+        true,
+        CancellationToken.None
+    );
+    Assert(
+        scalarBodyPublished is not null
+            && scalarBodyHover is not null
+            && scalarBodyRename is not null
+            && scalarBodyRename.Edits.Any(edit =>
+                edit.Uri == sourceUri
+                && edit.Spans.Any(span =>
+                    span.Equals(new LuiSpan(scalarBodyHelper, "Format".Length))
+                )
+            )
+            && scalarBodyReferences is not null
+            && scalarBodyReferences.Locations.Any(location =>
+                location.Uri == sourceUri
+                && location.Span.Equals(new LuiSpan(scalarBodyHelper, "Format".Length))
+            ),
+        "hover, rename, or references did not retain the exact scalar body-expression symbol span."
+    );
+    var incompleteScalarBody = scalarBodySource.Replace(
+        "Helpers.Format(count)",
+        "Helpers.",
+        StringComparison.Ordinal
+    );
+    context.ReplaceText(sourceUri, incompleteScalarBody);
+    var incompleteScalarPosition =
+        incompleteScalarBody.IndexOf("Helpers.", StringComparison.Ordinal) + "Helpers.".Length;
+    var incompleteScalarCompletions = await context.CompletionsAsync(
+        sourceUri,
+        incompleteScalarPosition,
+        CancellationToken.None
+    );
+    Assert(
+        incompleteScalarCompletions.Any(item => item.Label == "Format"),
+        "incomplete scalar body-expression input lost Roslyn member completion."
+    );
+    var invalidScalarBody = scalarBodySource.Replace(
+        "Helpers.Format(count)",
+        "Helpers.Format(\"bad\")",
+        StringComparison.Ordinal
+    );
+    context.ReplaceText(sourceUri, invalidScalarBody);
+    var invalidScalarDiagnostics = await context.DiagnosticsAsync(
+        sourceUri,
+        CancellationToken.None
+    );
+    var invalidScalarSpan = new LuiSpan(
+        invalidScalarBody.IndexOf("\"bad\"", StringComparison.Ordinal),
+        "\"bad\"".Length
+    );
+    Assert(
+        invalidScalarDiagnostics is not null
+            && invalidScalarDiagnostics.Any(diagnostic =>
+                diagnostic.Code == "LUI2000" && diagnostic.Span.Equals(invalidScalarSpan)
+            ),
+        "scalar body-expression diagnostics did not retain the exact authored argument span."
+    );
+    context.ReplaceText(sourceUri, source);
     var componentRename = await context.RenameAsync(
         sourceUri,
         card,

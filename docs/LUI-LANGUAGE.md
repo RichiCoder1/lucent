@@ -98,13 +98,16 @@ Unwrapped children map only to the declared `[DefaultContent]` scalar or `Compon
 
 ```lui
 <Button name="save" onInvoke={save}>Save</Button>
+<Text>{Label(state, issue)}</Text>
 ```
 
-Quoted attributes are string literals; all other element expression islands use braces. Bare Boolean attributes, spread attributes, directive prefixes, and implicit string conversion are deferred. Simple body text is a trimmed string literal whose internal characters are preserved. Formatting-only whitespace around component children is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Mixed text does not implicitly stringify expressions initially:
+Quoted attributes are string literals; all other element expression islands use braces. Bare Boolean attributes, spread attributes, directive prefixes, and implicit string conversion are deferred. Simple body text is a trimmed string literal whose internal characters are preserved. A body may contain exactly one scalar expression child, which lowers as the selected scalar `[DefaultContent]` argument with ordinary C# conversion and construction-time semantics. Formatting-only whitespace around component children is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Mixed text, multiple expressions, structural siblings, and expression children targeting ComponentContent are rejected:
 
 ```lui
 <Text content={"  exact\ntext  "} />
 ```
+
+Literal braces must be carried by an explicit string expression, since a brace at a body boundary starts an expression island.
 
 ## C# expressions and reactivity
 
@@ -159,7 +162,7 @@ style PrimaryButton {
 
 - End every named, inline, and variant style assignment with `;`. A missing terminator is a recoverable parse error so later assignments remain available to diagnostics and editor features.
 - Prefer bare numeric literals when ordinary C# conversion is unambiguous. Use a suffix only when it is needed to select a type, overload, or arithmetic behavior.
-- Put literal text and component/default content between tags. Keep dynamic scalar values as named attributes until expression children are added.
+- Put literal text and component/default content between tags. A single dynamic scalar expression may appear between tags. Body and named-attribute expressions keep ordinary target-typed semantics: plain scalars are construction-time values, while a lambda is live only when the C# parameter type defines a live reader.
 - Application theme keys conventionally live in an accessible top-level static `<RootNamespace>.Tokens` class. Its `Token<T>` fields and properties are implicitly available only inside named, inline, and variant style-value expressions. The compiler resolves them through ordinary C# rules and lowers fully qualified symbols; component parameters and structural expressions receive no implicit token scope. Runtime `ThemeContext` state remains composition-owned; token declarations are not mutable global theme state.
 
 `with` is the sole initial style composition syntax. It accepts named style values, nullable style parameters, and inline bodies; evaluation is left to right and the rightmost assignment wins. It lowers to ordered `Style.With` and `Style.When` calls. Compound variants use the real finite flags expression, for example `when Selected | FocusVisible`. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are internal to the document initially. `public style` is reserved as the fast-follow export syntax; shared styles remain ordinary public C# symbols until cross-document component binding/maps prove that feature. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.

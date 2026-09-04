@@ -2174,12 +2174,22 @@ internal sealed class LuiProjectContext : IDisposable
                 generated[document.GeneratedUri] = new GeneratedDocument(document);
             }
         }
-        var entry = document
-            .Result.Map.FromSource(new LuiSpan(offset, 0))
-            .Where(item => !item.Hidden && item.Generated.Length != 0)
-            .OrderBy(item => item.Kind == LuiMapKind.Symbol ? 0 : 1)
-            .ThenBy(item => item.Generated.Length)
-            .FirstOrDefault();
+        var entry =
+            document
+                .Result.Map.FromSource(new LuiSpan(offset, 0))
+                .Where(item => !item.Hidden && item.Generated.Length != 0)
+                .OrderBy(item => item.Kind == LuiMapKind.Symbol ? 0 : 1)
+                .ThenBy(item => item.Generated.Length)
+                .FirstOrDefault()
+            ?? document
+                .Result.Map.Entries.Where(item =>
+                    !item.Hidden
+                    && item.Kind == LuiMapKind.Expression
+                    && item.Generated.Length != 0
+                    && item.Source.End == offset
+                )
+                .OrderBy(item => item.Generated.Length)
+                .FirstOrDefault();
         var options =
             document
                 .Compilation.SyntaxTrees.Select(tree => tree.Options)
@@ -2195,6 +2205,8 @@ internal sealed class LuiProjectContext : IDisposable
         var compilation = ProjectionCompilation(document.Compilation, tree);
         var position =
             entry is null ? -1
+            : entry.Kind == LuiMapKind.Expression && offset == entry.Source.End
+                ? entry.Generated.End
             : entry.Kind is LuiMapKind.Symbol or LuiMapKind.Local
             && entry.Generated.Length > entry.Source.Length
                 ? entry.Generated.End - 1

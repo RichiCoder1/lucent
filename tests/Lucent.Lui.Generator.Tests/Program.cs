@@ -81,6 +81,42 @@ Assert(
     "generator did not emit mapped recipe source."
 );
 Assert(valid.Diagnostics.Length == 0, "valid probe reported a diagnostic.");
+var scalarExpression = Run(
+    new TextFile(
+        "C:/consumer/views/Scalar.lui",
+        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Scalar(string value) { <Text>{value}</Text> }",
+        "views/Scalar.lui"
+    )
+);
+var scalarGenerated = scalarExpression
+    .Results.Single()
+    .GeneratedSources.Single()
+    .SourceText.ToString();
+Assert(
+    scalarExpression.Diagnostics.Length == 0
+        && scalarGenerated.Contains(
+            "global::Lucent.Core.Components.Text(content:",
+            StringComparison.Ordinal
+        )
+        && scalarGenerated.Contains("\nvalue\n#line hidden", StringComparison.Ordinal),
+    "generator did not publish the scalar body expression through the ordinary component call."
+);
+var namedScalarExpression = Run(
+    new TextFile(
+        "C:/consumer/views/Scalar.lui",
+        "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Scalar(string value) { <Text content={value} /> }",
+        "views/Scalar.lui"
+    )
+);
+Assert(
+    namedScalarExpression.Diagnostics.Length == 0
+        && namedScalarExpression
+            .Results.Single()
+            .GeneratedSources.Single()
+            .SourceText.ToString()
+            .Contains("global::Lucent.Core.Components.Text(content:", StringComparison.Ordinal),
+    "named and body scalar expressions did not select the same generated component parameter."
+);
 var malformed = Run(
     new TextFile(
         "C:/consumer/Broken.lui",

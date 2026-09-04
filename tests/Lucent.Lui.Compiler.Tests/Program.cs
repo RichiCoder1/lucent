@@ -834,6 +834,10 @@ public static class Custom
     [LucentComponent] public static ComponentRecipe Choice([DefaultContent] ComponentContent values) => null!;
     [LucentComponent] public static ComponentRecipe Differing([DefaultContent] string label) => null!;
     [LucentComponent] public static ComponentRecipe Differing([DefaultContent] ComponentContent children) => null!;
+    [LucentComponent] public static ComponentRecipe Number([DefaultContent] long value) => null!;
+    [LucentComponent] public static ComponentRecipe Reader([DefaultContent] global::System.Func<string> read) => null!;
+    [LucentComponent] public static ComponentRecipe Ambiguous([DefaultContent] string value) => null!;
+    [LucentComponent] public static ComponentRecipe Ambiguous([DefaultContent] global::System.Uri value) => null!;
     public static ComponentRecipe Unannotated() => null!;
 }
 public sealed class Eligibility
@@ -925,6 +929,415 @@ var scalarOverload = LuiCompiler.Compile(
 Assert(
     scalarOverload.Success && scalarOverload.Source!.Contains("Differing(label: \"text\")"),
     "scalar [DefaultContent] overload did not bind through its actual parameter."
+);
+var scalarExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Label>\n {/* ignored */}\n { value }\n</Label> }";
+var scalarExpressionDocument = LuiParser.Parse(scalarExpressionSource);
+var scalarExpressionElement = (LuiElementSyntax)scalarExpressionDocument.Component!.Body.Single();
+var scalarExpressionChildren = scalarExpressionElement.Children;
+var scalarExpressionNode = scalarExpressionChildren.OfType<LuiExpressionBodySyntax>().Single();
+var scalarExpressionOffset =
+    scalarExpressionSource.IndexOf("{ value", StringComparison.Ordinal) + 2;
+Assert(
+    scalarExpressionDocument.Diagnostics.Count == 0
+        && scalarExpressionChildren.Count == 2
+        && scalarExpressionChildren.OfType<LuiCommentSyntax>().Count() == 1
+        && scalarExpressionNode.Span.Start == scalarExpressionOffset
+        && scalarExpressionNode.Span.Length == "value".Length
+        && scalarExpressionNode.OpenBrace.Span.Start == scalarExpressionOffset - 2
+        && scalarExpressionNode.CloseBrace.Span.Start
+            == scalarExpressionSource.IndexOf('}', scalarExpressionOffset),
+    "body expression parsing did not preserve the scalar island and comment spans: diagnostics="
+        + Diagnostics(scalarExpressionDocument)
+        + " count="
+        + scalarExpressionChildren.Count
+        + " span="
+        + scalarExpressionNode.Span.Start
+        + "/"
+        + scalarExpressionNode.Span.Length
+        + " expected="
+        + scalarExpressionOffset
+);
+var scalarExpressionFormatted = LuiFormatter.Format(scalarExpressionSource, LuiLineEnding.Lf);
+var expressionOnlyFormatted = LuiFormatter.Format(
+    "internal component Test(string value) { <Label>{ value }</Label> }",
+    LuiLineEnding.Lf
+);
+Assert(
+    scalarExpressionFormatted.Contains("{/* ignored */}\n        {value}", StringComparison.Ordinal)
+        && scalarExpressionFormatted
+            == LuiFormatter.Format(scalarExpressionFormatted, LuiLineEnding.Lf)
+        && expressionOnlyFormatted.Contains("<Label>{value}</Label>", StringComparison.Ordinal)
+        && expressionOnlyFormatted
+            == LuiFormatter.Format(expressionOnlyFormatted, LuiLineEnding.Lf),
+    "body expression formatting was not stable for expression-only or comment-adjacent content: adjacent="
+        + scalarExpressionFormatted.Replace("\n", "\\n", StringComparison.Ordinal)
+        + " only="
+        + expressionOnlyFormatted.Replace("\n", "\\n", StringComparison.Ordinal)
+);
+var scalarExpression = LuiCompiler.Compile(
+    scalarExpressionDocument,
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("ScalarExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    scalarExpression.Success
+        && scalarExpression.Source!.Contains("Label(value:", StringComparison.Ordinal)
+        && scalarExpression
+            .Map.FromSource(new LuiSpan(scalarExpressionOffset, "value".Length))
+            .Any(entry => entry.Kind == LuiMapKind.Expression)
+        && scalarExpression
+            .Map.FromSource(new LuiSpan(scalarExpressionOffset - 2, 1))
+            .Any(entry => entry.Kind == LuiMapKind.Structure)
+        && scalarExpression
+            .Map.FromSource(
+                new LuiSpan(scalarExpressionSource.IndexOf('}', scalarExpressionOffset), 1)
+            )
+            .Any(entry => entry.Kind == LuiMapKind.Structure),
+    "scalar body expression did not lower or preserve source-map spans: diagnostics="
+        + string.Join(
+            " | ",
+            scalarExpression.Diagnostics.Select(d =>
+                d.Id + ":" + d.Message + "@" + d.Span.Start + "/" + d.Span.Length
+            )
+        )
+        + " source="
+        + scalarExpression.Source
+);
+var mixedExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Label>prefix {value} suffix</Label> }";
+var mixedExpressionDocument = LuiParser.Parse(mixedExpressionSource);
+var mixedExpressionElement = (LuiElementSyntax)mixedExpressionDocument.Component!.Body.Single();
+var mixedExpression = LuiCompiler.Compile(
+    mixedExpressionDocument,
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("MixedExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    mixedExpressionDocument.Diagnostics.Count == 0
+        && mixedExpressionElement.Children.Count == 3
+        && !mixedExpression.Success
+        && mixedExpression.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2004"),
+    "mixed literal/expression content was accepted or not split: children="
+        + mixedExpressionElement.Children.Count
+        + " diagnostics="
+        + string.Join(
+            " | ",
+            mixedExpression.Diagnostics.Select(d =>
+                d.Id + ":" + d.Message + "@" + d.Span.Start + "/" + d.Span.Length
+            )
+        )
+);
+var multipleExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Label>{value}{value}</Label> }";
+var multipleExpressionDocument = LuiParser.Parse(multipleExpressionSource);
+var multipleExpression = LuiCompiler.Compile(
+    multipleExpressionDocument,
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("MultipleExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    multipleExpressionDocument.Diagnostics.Count == 0
+        && ((LuiElementSyntax)multipleExpressionDocument.Component!.Body.Single())
+            .Children.OfType<LuiExpressionBodySyntax>()
+            .Count() == 2
+        && !multipleExpression.Success
+        && multipleExpression.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2004"),
+    "multiple scalar body expressions were accepted."
+);
+foreach (var mixedBody in new[] { "prefix {value}", "{value} suffix" })
+{
+    var mixedEdgeSource =
+        "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Label>"
+        + mixedBody
+        + "</Label> }";
+    var mixedEdgeDocument = LuiParser.Parse(mixedEdgeSource);
+    var mixedEdgeResult = LuiCompiler.Compile(
+        mixedEdgeDocument,
+        customCompilation,
+        new LuiFreshnessIdentity(
+            "45",
+            "custom",
+            new LuiDocumentIdentity("MixedEdgeExpression.lui"),
+            "v1",
+            "preview"
+        )
+    );
+    var mixedEdgeFormatted = LuiFormatter.Format(mixedEdgeSource, LuiLineEnding.Lf);
+    Assert(
+        mixedEdgeDocument.Diagnostics.Count == 0
+            && ((LuiElementSyntax)mixedEdgeDocument.Component!.Body.Single()).Children.Count == 2
+            && !mixedEdgeResult.Success
+            && mixedEdgeResult.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2004")
+            && mixedEdgeFormatted == LuiFormatter.Format(mixedEdgeFormatted, LuiLineEnding.Lf),
+        "leading or trailing mixed expression content was accepted or formatted unstably: "
+            + mixedBody
+    );
+}
+foreach (
+    var structuralBody in new[]
+    {
+        "<Label>nested</Label>{value}",
+        "if (true) { <Label>nested</Label> }{value}",
+        "foreach (var item in new[] { value }) keyed by item { <Label>nested</Label> }{value}",
+    }
+)
+{
+    var structuralExpressionSource =
+        "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Label>"
+        + structuralBody
+        + "</Label> }";
+    var structuralExpressionDocument = LuiParser.Parse(structuralExpressionSource);
+    var structuralExpression = LuiCompiler.Compile(
+        structuralExpressionDocument,
+        customCompilation,
+        new LuiFreshnessIdentity(
+            "45",
+            "custom",
+            new LuiDocumentIdentity("StructuralExpression.lui"),
+            "v1",
+            "preview"
+        )
+    );
+    Assert(
+        structuralExpressionDocument.Diagnostics.Count == 0
+            && !structuralExpression.Success
+            && structuralExpression.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2004"),
+        "a structural sibling was accepted beside a scalar body expression: " + structuralBody
+    );
+}
+var incompleteBodyExpression = LuiParser.Parse(
+    "internal component Test(string value) { <Label>{value"
+);
+Assert(
+    incompleteBodyExpression.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1013")
+        && incompleteBodyExpression
+            .Component!.Body.OfType<LuiElementSyntax>()
+            .Single()
+            .Children.OfType<LuiExpressionBodySyntax>()
+            .Single()
+            .CloseBrace.IsMissing,
+    "an unterminated body expression did not retain a missing close-brace recovery token."
+);
+var collectionExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(ComponentContent children) { <Group>{children}</Group> }";
+var collectionExpression = LuiCompiler.Compile(
+    LuiParser.Parse(collectionExpressionSource),
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("CollectionExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    !collectionExpression.Success
+        && collectionExpression.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI3001"
+            && diagnostic.Message.Contains("scalar", StringComparison.OrdinalIgnoreCase)
+        ),
+    "expression content was accepted for ComponentContent."
+);
+var duplicateDefaultSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Differing label=\"explicit\">{value}</Differing> }";
+var duplicateDefault = LuiCompiler.Compile(
+    LuiParser.Parse(duplicateDefaultSource),
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("DuplicateDefault.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    !duplicateDefault.Success
+        && duplicateDefault.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI2008"
+            && diagnostic.Span.Start
+                == duplicateDefaultSource.IndexOf("label", StringComparison.Ordinal)
+        ),
+    "an explicit renamed default-content parameter was not rejected deterministically."
+);
+var nullableExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string? value) { <Label>{value}</Label> }";
+var nullableCompilation = customCompilation.WithOptions(
+    new CSharpCompilationOptions(
+        OutputKind.DynamicallyLinkedLibrary,
+        nullableContextOptions: NullableContextOptions.Enable
+    )
+);
+var nullableExpression = LuiCompiler.Compile(
+    LuiParser.Parse(nullableExpressionSource),
+    nullableCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("NullableExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+var nullableExpressionPosition = nullableExpressionSource.LastIndexOf(
+    "value",
+    StringComparison.Ordinal
+);
+Assert(
+    nullableExpression.Success
+        && nullableExpression.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI2000"
+            && diagnostic.Severity == DiagnosticSeverity.Warning
+            && diagnostic.Span.Equals(new LuiSpan(nullableExpressionPosition, "value".Length))
+        ),
+    "nullable warning behavior changed for scalar body expressions: success="
+        + nullableExpression.Success
+        + " diagnostics="
+        + string.Join(
+            " | ",
+            nullableExpression.Diagnostics.Select(d =>
+                d.Id + ":" + d.Severity + ":" + d.Message + "@" + d.Span.Start + "/" + d.Span.Length
+            )
+        )
+);
+var conversionExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(int value) { <Number>{value}</Number> }";
+var conversionExpression = LuiCompiler.Compile(
+    LuiParser.Parse(conversionExpressionSource),
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("ConversionExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    conversionExpression.Success
+        && conversionExpression.Source!.Contains("Number(value:", StringComparison.Ordinal)
+        && conversionExpression.Source.Contains("\nvalue\n#line hidden", StringComparison.Ordinal),
+    "ordinary numeric conversion did not lower through the scalar body-expression call path."
+);
+var hardConversionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(object value) { <Number>{value}</Number> }";
+var hardConversion = LuiCompiler.Compile(
+    LuiParser.Parse(hardConversionSource),
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("HardConversion.lui"),
+        "v1",
+        "preview"
+    )
+);
+var hardConversionPosition = hardConversionSource.LastIndexOf("value", StringComparison.Ordinal);
+Assert(
+    !hardConversion.Success
+        && hardConversion.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI2000"
+            && diagnostic.Span.Equals(new LuiSpan(hardConversionPosition, "value".Length))
+            && diagnostic.Message.Contains("cannot convert", StringComparison.OrdinalIgnoreCase)
+        ),
+    "a hard scalar conversion error did not retain the ordinary Roslyn diagnostic and exact span."
+);
+var delegateExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Reader>{() => value}</Reader> }";
+var delegateExpression = LuiCompiler.Compile(
+    LuiParser.Parse(delegateExpressionSource),
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("DelegateExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    delegateExpression.Success
+        && delegateExpression.Source!.Contains("Reader(read:", StringComparison.Ordinal)
+        && delegateExpression.Source.Contains("() => value", StringComparison.Ordinal),
+    "an explicit delegate body expression did not preserve its authored live-reader semantics."
+);
+var implicitDelegateSource = delegateExpressionSource.Replace(
+    "() => value",
+    "value",
+    StringComparison.Ordinal
+);
+var implicitDelegate = LuiCompiler.Compile(
+    LuiParser.Parse(implicitDelegateSource),
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("ImplicitDelegate.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    !implicitDelegate.Success
+        && implicitDelegate.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI2000"
+            && diagnostic.Message.Contains("cannot convert", StringComparison.OrdinalIgnoreCase)
+        ),
+    "a plain scalar expression was implicitly converted into a live delegate."
+);
+var ambiguousExpressionSource =
+    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test() { <Ambiguous>{null}</Ambiguous> }";
+var ambiguousExpression = LuiCompiler.Compile(
+    LuiParser.Parse(ambiguousExpressionSource),
+    customCompilation,
+    new LuiFreshnessIdentity(
+        "45",
+        "custom",
+        new LuiDocumentIdentity("AmbiguousExpression.lui"),
+        "v1",
+        "preview"
+    )
+);
+Assert(
+    !ambiguousExpression.Success
+        && ambiguousExpression.Diagnostics.Any(diagnostic =>
+            diagnostic.Id == "LUI2009"
+            && diagnostic.Span.Equals(
+                new LuiSpan(
+                    ambiguousExpressionSource.IndexOf("null", StringComparison.Ordinal),
+                    "null".Length
+                )
+            )
+        ),
+    "ambiguous scalar default-content targets did not fail at the body expression: success="
+        + ambiguousExpression.Success
+        + " diagnostics="
+        + string.Join(
+            " | ",
+            ambiguousExpression.Diagnostics.Select(d =>
+                d.Id + ":" + d.Message + "@" + d.Span.Start + "/" + d.Span.Length
+            )
+        )
 );
 var collectionOverload = LuiCompiler.Compile(
     LuiParser.Parse(

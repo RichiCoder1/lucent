@@ -400,7 +400,15 @@ public static class LuiParser
                     || (end == '\0' && Starts("</"))
                 )
                     break;
-                if (!(Current == '<' || Starts("{/*") || PeekRegion("if") || PeekRegion("foreach")))
+                if (
+                    !(
+                        Current == '<'
+                        || Current == '{'
+                        || Starts("{/*")
+                        || PeekRegion("if")
+                        || PeekRegion("foreach")
+                    )
+                )
                     position = white;
                 var before = position;
                 if (Starts("{/*"))
@@ -409,6 +417,8 @@ public static class LuiParser
                 }
                 else if (Current == '<')
                     result.Add(Element());
+                else if (Current == '{')
+                    result.Add(ExpressionBody());
                 else if (PeekRegion("if"))
                     result.Add(If());
                 else if (PeekRegion("foreach"))
@@ -421,6 +431,7 @@ public static class LuiParser
                         && Current != end
                         && Current != '}'
                         && Current != '<'
+                        && Current != '{'
                         && !Starts("{/*")
                         && !PeekRegion("if")
                         && !PeekRegion("foreach")
@@ -437,6 +448,40 @@ public static class LuiParser
                 }
             }
             return result;
+        }
+
+        private LuiExpressionBodySyntax ExpressionBody()
+        {
+            var start = position;
+            var open = Token("{", position++, 1);
+            var contentStart = position;
+            var end = IslandScanner.End(text, position, '}');
+            position = end;
+            var content = text.Substring(contentStart, end - contentStart);
+            var close = Missing("}");
+            if (Current == '}')
+            {
+                close = Token("}", position++, 1);
+            }
+            else
+                Error(
+                    "LUI1013",
+                    "Unterminated expression island.",
+                    new LuiSpan(start, text.Length - start)
+                );
+            var expression = Expression(
+                new LuiSpan(contentStart, content.Length),
+                content,
+                open,
+                close
+            );
+            return new LuiExpressionBodySyntax(
+                expression.Span,
+                expression.Text,
+                expression.Expression,
+                expression.OpenBrace,
+                expression.CloseBrace
+            );
         }
 
         private LuiCommentSyntax Comment()

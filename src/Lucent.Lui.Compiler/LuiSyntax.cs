@@ -331,6 +331,38 @@ public sealed class LuiCommentSyntax : LuiBodySyntax
     public string Text { get; }
 }
 
+/// <summary>Roslyn-parsed expression island used as a scalar body child.</summary>
+public sealed class LuiExpressionBodySyntax : LuiBodySyntax
+{
+    /// <summary>Creates a body expression with its exact text and brace tokens.</summary>
+    public LuiExpressionBodySyntax(
+        LuiSpan span,
+        string text,
+        ExpressionSyntax expression,
+        LuiToken openBrace,
+        LuiToken closeBrace
+    )
+        : base(span)
+    {
+        Text = text;
+        Expression = expression;
+        OpenBrace = openBrace;
+        CloseBrace = closeBrace;
+    }
+
+    /// <summary>Exact C# expression text inside the braces.</summary>
+    public string Text { get; }
+
+    /// <summary>Roslyn expression tree for semantic binding; its positions are relative to <see cref="Text"/>.</summary>
+    public ExpressionSyntax Expression { get; }
+
+    /// <summary>Opening expression-island brace.</summary>
+    public LuiToken OpenBrace { get; }
+
+    /// <summary>Closing expression-island brace, possibly a missing recovery token.</summary>
+    public LuiToken CloseBrace { get; }
+}
+
 /// <summary>Comment found between top-level declarations.</summary>
 public sealed class LuiTopLevelCommentSyntax : LuiSyntaxNode
 {

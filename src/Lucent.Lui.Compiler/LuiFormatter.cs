@@ -137,6 +137,8 @@ public static class LuiFormatter
             Pad(output, indent);
             if (node is LuiTextSyntax text)
                 output.Append(text.Text).Append(nl);
+            else if (node is LuiExpressionBodySyntax expression)
+                output.Append('{').Append(expression.Text).Append('}').Append(nl);
             else if (node is LuiCommentSyntax comment)
                 output.Append(comment.Text).Append(nl);
             else if (node is LuiElementSyntax element)
@@ -192,6 +194,19 @@ public static class LuiFormatter
             output
                 .Append('>')
                 .Append(scalar.Text)
+                .Append("</")
+                .Append(node.CloseName.Text)
+                .Append('>')
+                .Append(nl);
+            return;
+        }
+        if (node.Children.Count == 1 && node.Children[0] is LuiExpressionBodySyntax expression)
+        {
+            output
+                .Append('>')
+                .Append('{')
+                .Append(expression.Text)
+                .Append('}')
                 .Append("</")
                 .Append(node.CloseName.Text)
                 .Append('>')
