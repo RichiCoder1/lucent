@@ -5,7 +5,7 @@
   "publisher": "lucent",
   "engines": { "vscode": "^1.95.0" },
   "main": "./extension.js",
-  "activationEvents": ["onLanguage:lui"],
+  "activationEvents": ["onLanguage:lui", "workspaceContains:**/*.lui"],
   "contributes": {
     "languages": [{
       "id": "lui",

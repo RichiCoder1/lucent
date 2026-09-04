@@ -1206,11 +1206,13 @@ public static class LuiCompiler
         // Every generated character is either related to a source span or explicitly hidden.
         private void Write(string value) => Hidden(value);
 
-        private void Mapped(string value, LuiSpan source, LuiMapKind kind)
+        private LuiSpan Mapped(string value, LuiSpan source, LuiMapKind kind)
         {
             var start = text.Length;
             text.Append(value);
-            Entries.Add(new LuiMapEntry(source, new LuiSpan(start, value.Length), kind, false));
+            var generated = new LuiSpan(start, value.Length);
+            Entries.Add(new LuiMapEntry(source, generated, kind, false));
+            return generated;
         }
 
         private void Hidden(string value)
@@ -1378,7 +1380,7 @@ public static class LuiCompiler
                 && plans.Components.TryGetValue(element.Name.Span.Start, out var resolvedComponent)
                     ? resolvedComponent
                     : name;
-            Mapped(component, element.Name.Span, LuiMapKind.Symbol);
+            var componentName = Mapped(component, element.Name.Span, LuiMapKind.Symbol);
             Write("(");
             var arguments = new List<Action>();
             foreach (var attribute in element.Attributes)
@@ -1443,7 +1445,10 @@ public static class LuiCompiler
             Mark(element.OpenCloseAngle.Span, LuiMapKind.Structure);
             Mark(element.SelfClosingSlash.Span, LuiMapKind.Structure);
             Mark(element.CloseOpenAngle.Span, LuiMapKind.Structure);
-            Mark(element.CloseName.Span, LuiMapKind.Symbol);
+            if (!element.CloseName.IsMissing)
+                Entries.Add(
+                    new LuiMapEntry(element.CloseName.Span, componentName, LuiMapKind.Symbol, false)
+                );
             Mark(element.CloseAngle.Span, LuiMapKind.Structure);
         }
 
@@ -1563,11 +1568,11 @@ public static class LuiCompiler
             Write("\", () => ");
             Expression(loop.Source);
             Write(", ");
-            Mapped(loop.Variable.Text, loop.Variable.Span, LuiMapKind.Symbol);
+            Mapped(loop.Variable.Text, loop.Variable.Span, LuiMapKind.Local);
             Hidden(" => ");
             Expression(loop.Key);
             Write(", ");
-            Mapped(loop.Variable.Text, loop.Variable.Span, LuiMapKind.Symbol);
+            Mapped(loop.Variable.Text, loop.Variable.Span, LuiMapKind.Local);
             Hidden(" => ");
             Element(body, diagnostics);
             Write(")");

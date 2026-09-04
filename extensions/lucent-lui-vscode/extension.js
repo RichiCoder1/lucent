@@ -5,6 +5,7 @@ const path = require("path");
 const vscode = require("vscode");
 
 const semanticTokensLegend = ["keyword", "type", "property", "enumMember"];
+const crossLanguageSelector = [{ language: "lui" }, { language: "csharp", scheme: "file" }];
 
 function toVsCodeCompletionKind(kind, kinds) {
     switch (kind) {
@@ -245,7 +246,7 @@ async function activate(context) {
         vscode.workspace.registerTextDocumentContentProvider("lucent-lui", {
             provideTextDocumentContent: uri => rpc.request("lucent/generatedText", { uri: uri.toString() })
         }),
-        vscode.languages.registerDefinitionProvider([{ language: "lui" }, { scheme: "lucent-lui" }], {
+        vscode.languages.registerDefinitionProvider([...crossLanguageSelector, { scheme: "lucent-lui" }], {
             provideDefinition: async (document, position) => {
                 const location = await rpc.request("textDocument/definition", {
                     textDocument: { uri: document.uri.toString() }, position
@@ -256,7 +257,7 @@ async function activate(context) {
                 );
             }
         }),
-        vscode.languages.registerRenameProvider("lui", {
+        vscode.languages.registerRenameProvider(crossLanguageSelector, {
             prepareRename: async (document, position) => {
                 const result = await rpc.request("textDocument/prepareRename", {
                     textDocument: { uri: document.uri.toString() }, position
@@ -274,13 +275,13 @@ async function activate(context) {
                 })
             )
         }),
-        vscode.languages.registerReferenceProvider("lui", {
+        vscode.languages.registerReferenceProvider(crossLanguageSelector, {
             provideReferences: async (document, position, context) => {
                 const result = await rpc.request("textDocument/references", {
                     textDocument: { uri: document.uri.toString() }, position,
                     context: { includeDeclaration: context.includeDeclaration }
                 });
-                return result && result.map(location => new vscode.Location(
+                return result?.map(location => new vscode.Location(
                     vscode.Uri.parse(location.uri),
                     new vscode.Range(
                         location.range.start.line,
@@ -383,5 +384,6 @@ exports.toVsCodeCompletionKind = toVsCodeCompletionKind;
 exports.toVsCodeDiagnosticSeverity = toVsCodeDiagnosticSeverity;
 exports.toVsCodeSymbolKind = toVsCodeSymbolKind;
 exports.semanticTokensLegend = semanticTokensLegend;
+exports.crossLanguageSelector = crossLanguageSelector;
 exports.toTextEdits = toTextEdits;
 exports.toWorkspaceEdit = toWorkspaceEdit;

@@ -291,6 +291,82 @@ try
             && expressionReferences.Locations.All(location => location.Uri.Scheme != "lucent-lui"),
         "cross-language references did not return exact mapped component, property, and expression spans."
     );
+    var pairedSource = source.Replace(
+        "<Card content={Helpers.Format(count)} name=\"widget\" />",
+        "<Card content={Helpers.Format(count)} name=\"widget\"></Card>",
+        StringComparison.Ordinal
+    );
+    context.ReplaceText(sourceUri, pairedSource);
+    var pairedOpen = pairedSource.IndexOf("Card", StringComparison.Ordinal);
+    var pairedClose = pairedSource.LastIndexOf("Card", StringComparison.Ordinal);
+    var pairedReferences = await context.ReferencesAsync(
+        sourceUri,
+        pairedClose,
+        true,
+        CancellationToken.None
+    );
+    var pairedRename = await context.RenameAsync(
+        sourceUri,
+        pairedOpen,
+        "Panel",
+        CancellationToken.None
+    );
+    Assert(
+        pairedReferences is not null
+            && pairedReferences.Locations.Count(location =>
+                location.Uri == sourceUri
+                && (location.Span.Start == pairedOpen || location.Span.Start == pairedClose)
+            ) == 2
+            && pairedRename is not null
+            && pairedRename
+                .Edits.Single(edit => edit.Uri == sourceUri)
+                .Spans.Count(span => span.Start == pairedOpen || span.Start == pairedClose) == 2,
+        "paired tag references or rename omitted an authored tag name."
+    );
+    var localSource = source.Replace(
+        "<Card content={Helpers.Format(count)} name=\"widget\" />",
+        "<Row>foreach (var item in new[] { count }) keyed by item { <Card content={item.ToString()} /> }</Row>",
+        StringComparison.Ordinal
+    );
+    context.ReplaceText(sourceUri, localSource);
+    var localDeclaration = localSource.IndexOf("item in", StringComparison.Ordinal);
+    var localKey = localSource.IndexOf("by item", StringComparison.Ordinal) + "by ".Length;
+    var localBody = localSource.LastIndexOf("item.ToString", StringComparison.Ordinal);
+    var localRename = await context.RenameAsync(
+        sourceUri,
+        localKey,
+        "value",
+        CancellationToken.None
+    );
+    var localReferences = await context.ReferencesAsync(
+        sourceUri,
+        localBody,
+        true,
+        CancellationToken.None
+    );
+    Assert(
+        localRename is not null
+            && localRename.Edits.Single(edit => edit.Uri == sourceUri).Spans.Count == 3
+            && localReferences is not null
+            && localReferences.Locations.Count(location =>
+                location.Uri == sourceUri
+                && (
+                    location.Span.Start == localDeclaration
+                    || location.Span.Start == localKey
+                    || location.Span.Start == localBody
+                )
+            ) == 3,
+        "keyed foreach local provenance did not join declaration, key, and body uses."
+    );
+    var renamedLocal = localSource;
+    foreach (var span in localRename!.Edits.Single(edit => edit.Uri == sourceUri).Spans)
+        renamedLocal = renamedLocal[..span.Start] + "value" + renamedLocal[span.End..];
+    context.ReplaceText(sourceUri, renamedLocal);
+    Assert(
+        await context.CompileAsync(sourceUri, CancellationToken.None) is not null,
+        "applying keyed foreach rename did not compile."
+    );
+    context.ReplaceText(sourceUri, source);
     var renameReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var renameRelease = new TaskCompletionSource(
         TaskCreationOptions.RunContinuationsAsynchronously
@@ -1292,6 +1368,61 @@ using (
             && tagCompletions.Any(item => item.Label == "Row"),
         "Header.lui tag completion omitted evaluated component methods."
     );
+    var columnDeclarationPath = Path.GetFullPath("src/Lucent.Core/Components.cs");
+    var columnDeclaration = (await File.ReadAllTextAsync(columnDeclarationPath)).IndexOf(
+        "Column",
+        StringComparison.Ordinal
+    );
+    var columnReferences = await issueBrowser.ReferencesAsync(
+        header,
+        column,
+        true,
+        CancellationToken.None
+    );
+    var columnRename = await issueBrowser.RenameAsync(
+        header,
+        column,
+        "Vertical",
+        CancellationToken.None
+    );
+    var expectedColumnLocations = new HashSet<(Uri Uri, LuiSpan Span)>
+    {
+        (new Uri(columnDeclarationPath), new LuiSpan(columnDeclaration, "Column".Length)),
+    };
+    foreach (var path in Directory.GetFiles("apps/Lucent.IssueBrowser", "*.lui"))
+    {
+        var text = await File.ReadAllTextAsync(path);
+        var start = 0;
+        while ((start = text.IndexOf("Column", start, StringComparison.Ordinal)) >= 0)
+        {
+            if (text[start - 1] == '<' || (text[start - 2] == '<' && text[start - 1] == '/'))
+                expectedColumnLocations.Add(
+                    (new Uri(Path.GetFullPath(path)), new LuiSpan(start, 6))
+                );
+            start += 6;
+        }
+    }
+    var actualColumnLocations = columnReferences
+        ?.Locations.Select(location => (location.Uri, location.Span))
+        .ToHashSet();
+    var actualColumnEdits = columnRename
+        ?.Edits.SelectMany(edit => edit.Spans.Select(span => (edit.Uri, span)))
+        .ToHashSet();
+    var missingColumnReferences = expectedColumnLocations
+        .Except(actualColumnLocations ?? [])
+        .ToArray();
+    var unexpectedColumnReferences = (actualColumnLocations ?? [])
+        .Except(expectedColumnLocations)
+        .ToArray();
+    var missingColumnEdits = expectedColumnLocations.Except(actualColumnEdits ?? []).ToArray();
+    var unexpectedColumnEdits = (actualColumnEdits ?? []).Except(expectedColumnLocations).ToArray();
+    Assert(
+        actualColumnLocations is not null
+            && actualColumnLocations.SetEquals(expectedColumnLocations)
+            && actualColumnEdits is not null
+            && actualColumnEdits.SetEquals(expectedColumnLocations),
+        $"Issue Browser Column references/rename did not cover every paired tag and the Core project-reference declaration exactly. Missing references: {String.Join(", ", missingColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected references: {String.Join(", ", unexpectedColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; missing edits: {String.Join(", ", missingColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected edits: {String.Join(", ", unexpectedColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}."
+    );
     Assert(
         tagCompletions.Any(item =>
             item.Label == "FilterBar"
@@ -1851,6 +1982,61 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
             "evaluated project references did not contribute watched project directories."
         );
         var sourceText = await File.ReadAllTextAsync(source);
+        var external = sourceText.IndexOf("External", StringComparison.Ordinal);
+        var externalDeclaration = (await File.ReadAllTextAsync(referencedSource)).IndexOf(
+            "External",
+            StringComparison.Ordinal
+        );
+        var externalReferences = await context.ReferencesAsync(
+            uri,
+            external,
+            true,
+            CancellationToken.None
+        );
+        var externalRename = await context.RenameAsync(
+            uri,
+            external,
+            "ImportedExternal",
+            CancellationToken.None
+        );
+        var externalCSharpReferences = await context.ReferencesAsync(
+            new Uri(referencedSource),
+            externalDeclaration,
+            true,
+            CancellationToken.None
+        );
+        var externalCSharpRename = await context.RenameAsync(
+            new Uri(referencedSource),
+            externalDeclaration,
+            "ImportedExternal",
+            CancellationToken.None
+        );
+        Assert(
+            externalReferences is not null
+                && externalReferences.Locations.Any(location =>
+                    location.Uri == uri
+                    && location.Span.Equals(new LuiSpan(external, "External".Length))
+                )
+                && externalReferences.Locations.Any(location =>
+                    location.Uri == new Uri(referencedSource)
+                    && location.Span.Equals(new LuiSpan(externalDeclaration, "External".Length))
+                )
+                && externalRename is not null
+                && externalRename.Edits.Any(edit =>
+                    edit.Uri == new Uri(referencedSource)
+                    && edit.Spans.Any(span => span.Start == externalDeclaration)
+                )
+                && externalCSharpReferences is not null
+                && externalCSharpReferences.Locations.Any(location =>
+                    location.Uri == uri
+                    && location.Span.Equals(new LuiSpan(external, "External".Length))
+                )
+                && externalCSharpRename is not null
+                && externalCSharpRename.Edits.Any(edit =>
+                    edit.Uri == uri && edit.Spans.Any(span => span.Start == external)
+                ),
+            "project-reference rename or references omitted an editable source declaration or C# origin."
+        );
         var styleParameter = await context.CompletionsAsync(
             uri,
             sourceText.IndexOf("style={style}", StringComparison.Ordinal) + "style={".Length,

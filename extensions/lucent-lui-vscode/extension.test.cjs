@@ -45,12 +45,23 @@ test("does not treat component tag delimiters as expression brackets", () => {
     assert.ok(!configuration.brackets.some(pair => pair[0] === "<"));
 });
 
+test("activates only Lucent workspaces and registers C# cross-language selectors", () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
+    assert.deepEqual(manifest.activationEvents, ["onLanguage:lui", "workspaceContains:**/*.lui"]);
+    assert.deepEqual(JSON.parse(JSON.stringify(loaded.exports.crossLanguageSelector)), [
+        { language: "lui" }, { language: "csharp", scheme: "file" }
+    ]);
+});
+
 test("activation preserves current diagnostics and clears closed documents", async () => {
     const diagnostics = { deleted: [], delete(uri) { this.deleted.push(uri.toString()); }, dispose() {} };
     const patterns = [];
     let semanticProvider;
     let semanticLegend;
     let referenceProvider;
+    let referenceSelector;
+    let renameProvider;
+    let renameSelector;
     let spawnOptions;
     const process = new MockProcess();
     const openDocument = {
@@ -82,11 +93,16 @@ test("activation preserves current diagnostics and clears closed documents", asy
                 return disposable();
             },
             registerHoverProvider: disposable,
-            registerReferenceProvider: (_selector, provider) => {
+            registerReferenceProvider: (selector, provider) => {
+                referenceSelector = selector;
                 referenceProvider = provider;
                 return disposable();
             },
-            registerRenameProvider: disposable,
+            registerRenameProvider: (selector, provider) => {
+                renameSelector = selector;
+                renameProvider = provider;
+                return disposable();
+            },
             registerSignatureHelpProvider: disposable
         },
         window: { showErrorMessage() {} },
@@ -114,6 +130,12 @@ test("activation preserves current diagnostics and clears closed documents", asy
     assert.deepEqual(diagnostics.deleted, ["file:///missing.lui"]);
     assert.ok(patterns.some(([base]) => base === "referenced"));
     assert.ok(referenceProvider);
+    assert.deepEqual(JSON.parse(JSON.stringify(referenceSelector)), [
+        { language: "lui" }, { language: "csharp", scheme: "file" }
+    ]);
+    assert.deepEqual(JSON.parse(JSON.stringify(renameSelector)), [
+        { language: "lui" }, { language: "csharp", scheme: "file" }
+    ]);
     const references = await referenceProvider.provideReferences(
         { uri: { toString: () => "file:///Widget.lui" } },
         { line: 0, character: 0 },
@@ -121,6 +143,18 @@ test("activation preserves current diagnostics and clears closed documents", asy
     );
     assert.equal(process.lastRequest.params.context.includeDeclaration, true);
     assert.equal(references.length, 1);
+    assert.equal(await referenceProvider.provideReferences(
+        { uri: { toString: () => "file:///Helpers.cs" } },
+        { line: 0, character: 0 },
+        { includeDeclaration: false }
+    ), undefined);
+    assert.equal(process.lastRequest.params.textDocument.uri, "file:///Helpers.cs");
+    assert.equal(await renameProvider.provideRenameEdits(
+        { uri: { toString: () => "file:///Helpers.cs" } },
+        { line: 0, character: 0 },
+        "Renamed"
+    ), undefined);
+    assert.equal(process.lastRequest.params.textDocument.uri, "file:///Helpers.cs");
     assert.deepEqual(Array.from(semanticLegend.types), ["keyword", "type", "property", "enumMember"]);
     const tokens = await semanticProvider.provideDocumentSemanticTokens({
         uri: { toString: () => "file:///Widget.lui" }
@@ -162,10 +196,12 @@ class MockProcess extends EventEmitter {
                 jsonrpc: "2.0",
                 id: request.id,
                 result: request.method === "textDocument/semanticTokens/full" ? { data: [0, 0, 3, 0, 0] }
-                    : request.method === "textDocument/references" ? [{
+                    : request.method === "textDocument/references"
+                        ? request.params.textDocument.uri.endsWith("Helpers.cs") ? null : [{
                         uri: "file:///Widget.lui",
                         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }
-                    }] : {}
+                    }]
+                        : request.method === "textDocument/rename" ? null : {}
             });
         } };
     }

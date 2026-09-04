@@ -233,6 +233,9 @@ public enum LuiMapKind
     /// <summary>Generated symbol corresponding to an authored identifier.</summary>
     Symbol,
 
+    /// <summary>Compiler-owned local binding corresponding to an authored <c>foreach</c> variable.</summary>
+    Local,
+
     /// <summary>Generated expression corresponding to an authored C# island.</summary>
     Expression,
 

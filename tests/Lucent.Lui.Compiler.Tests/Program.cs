@@ -747,7 +747,7 @@ var foreachMaps = matrix
 Assert(
     foreachMaps.Length == 2
         && foreachMaps.All(entry =>
-            entry.Kind == LuiMapKind.Symbol
+            entry.Kind == LuiMapKind.Local
             && matrix.Source!.Substring(entry.Generated.Start, entry.Generated.Length)
                 == matrixLoop.Variable.Text
             && matrix
@@ -1781,8 +1781,20 @@ Assert(
         && pattern.Source.Contains("ThrowIfNull(required)"),
     "retained pattern branch or construction-time null guard did not lower."
 );
-var closing = loweredDocument.Component!.Body.OfType<LuiElementSyntax>().Single().CloseAngle.Span;
-Assert(lowered.Map.FromSource(closing).Any(), "closing source tokens are absent from the map.");
+var loweredElement = loweredDocument.Component!.Body.OfType<LuiElementSyntax>().Single();
+var closing = loweredElement.CloseAngle.Span;
+var pairedTagMaps = lowered
+    .Map.FromSource(loweredElement.Name.Span)
+    .Concat(lowered.Map.FromSource(loweredElement.CloseName.Span))
+    .Where(entry => !entry.Hidden && entry.Kind == LuiMapKind.Symbol)
+    .ToArray();
+Assert(
+    lowered.Map.FromSource(closing).Any()
+        && pairedTagMaps.Length == 2
+        && pairedTagMaps.Select(entry => entry.Generated).Distinct().Count() == 1
+        && pairedTagMaps.All(entry => entry.Generated.Length != 0),
+    "paired tag names did not map to one targetable generated symbol."
+);
 var loweredNamespace = loweredDocument.TopLevel.OfType<LuiNamespaceSyntax>().Single();
 var loweredUsing = loweredDocument.TopLevel.OfType<LuiUsingSyntax>().First();
 Assert(

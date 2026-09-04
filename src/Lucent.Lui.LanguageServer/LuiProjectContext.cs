@@ -8,6 +8,7 @@ using Microsoft.CodeAnalysis.Classification;
 using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -659,7 +660,8 @@ internal sealed class LuiProjectContext : IDisposable
             .ConfigureAwait(false);
         if (snapshot is null)
             return null;
-        var target = ResolveRenameTarget(snapshot, uri, offset);
+        var target = await ResolveRenameTargetAsync(snapshot, uri, offset, cancellationToken)
+            .ConfigureAwait(false);
         return
             target is null
             || !await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
@@ -686,40 +688,30 @@ internal sealed class LuiProjectContext : IDisposable
             .ConfigureAwait(false);
         if (snapshot is null)
             return null;
-        var target = ResolveRenameTarget(snapshot, uri, offset);
+        var target = await ResolveRenameTargetAsync(snapshot, uri, offset, cancellationToken)
+            .ConfigureAwait(false);
         if (target is null)
             return null;
         var edits = new Dictionary<Uri, List<LuiSpan>>();
-        foreach (var tree in snapshot.Compilation.SyntaxTrees)
+        var occurrences = await RenameOccurrencesAsync(
+                snapshot,
+                target,
+                includeDeclaration: true,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        if (occurrences is null)
+            return null;
+        foreach (var occurrence in occurrences)
         {
-            var model = snapshot.Compilation.GetSemanticModel(tree);
-            foreach (var token in tree.GetRoot(cancellationToken).DescendantTokens())
-            {
-                if (!SameSymbol(SymbolForToken(model, token), target.Symbol))
-                    continue;
-                if (
-                    model
-                        .LookupSymbols(token.SpanStart, name: newName)
-                        .Any(symbol => !SameSymbol(symbol, target.Symbol))
-                )
-                    return null;
-                LuiSpan? span;
-                Uri editUri;
-                if (snapshot.Generated.TryGetValue(tree, out var generated))
-                {
-                    span = RenameSourceSpan(generated, token);
-                    editUri = generated.Uri;
-                }
-                else
-                {
-                    if (!snapshot.CSharp.TryGetValue(tree, out var csharpUri))
-                        return null;
-                    editUri = csharpUri;
-                    span = new LuiSpan(token.SpanStart, token.Span.Length);
-                }
-                if (span is null || !AddRenameEdit(edits, editUri, span.Value))
-                    return null;
-            }
+            if (
+                occurrence
+                    .Model.LookupSymbols(occurrence.Token.SpanStart, name: newName)
+                    .Any(symbol => !SameSymbol(symbol, occurrence.Symbol))
+            )
+                return null;
+            if (!AddRenameEdit(edits, occurrence.Uri, occurrence.Span))
+                return null;
         }
         if (beforeCommit is not null)
             await beforeCommit().ConfigureAwait(false);
@@ -755,39 +747,24 @@ internal sealed class LuiProjectContext : IDisposable
             .ConfigureAwait(false);
         if (snapshot is null)
             return null;
-        var target = ResolveRenameTarget(snapshot, uri, offset);
+        var target = await ResolveRenameTargetAsync(snapshot, uri, offset, cancellationToken)
+            .ConfigureAwait(false);
         if (target is null)
             return null;
         var locations = new Dictionary<Uri, List<LuiSpan>>();
-        foreach (var tree in snapshot.Compilation.SyntaxTrees)
+        var occurrences = await RenameOccurrencesAsync(
+                snapshot,
+                target,
+                includeDeclaration,
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        if (occurrences is null)
+            return null;
+        foreach (var occurrence in occurrences)
         {
-            var model = snapshot.Compilation.GetSemanticModel(tree);
-            foreach (var token in tree.GetRoot(cancellationToken).DescendantTokens())
-            {
-                if (
-                    !SameSymbol(SymbolForToken(model, token), target.Symbol)
-                    || !includeDeclaration
-                        && token.Parent is { } parent
-                        && IsDeclarationIdentifier(parent, token)
-                )
-                    continue;
-                LuiSpan? span;
-                Uri locationUri;
-                if (snapshot.Generated.TryGetValue(tree, out var generated))
-                {
-                    span = RenameSourceSpan(generated, token);
-                    locationUri = generated.Uri;
-                }
-                else
-                {
-                    if (!snapshot.CSharp.TryGetValue(tree, out var csharpUri))
-                        return null;
-                    locationUri = csharpUri;
-                    span = new LuiSpan(token.SpanStart, token.Span.Length);
-                }
-                if (span is null || !AddRenameEdit(locations, locationUri, span.Value))
-                    return null;
-            }
+            if (!AddRenameEdit(locations, occurrence.Uri, occurrence.Span))
+                return null;
         }
         if (beforeCommit is not null)
             await beforeCommit().ConfigureAwait(false);
@@ -843,10 +820,15 @@ internal sealed class LuiProjectContext : IDisposable
             project = Project();
             captured = epoch;
             if (
-                !project.Documents.Any(document => SameFile(document.FilePath, requested))
-                && !project.AdditionalDocuments.Any(document =>
-                    SameFile(document.FilePath, requested)
-                )
+                !ProjectGraph(project)
+                    .Any(graphProject =>
+                        graphProject.Documents.Any(document =>
+                            SameFile(document.FilePath, requested)
+                        )
+                        || graphProject.AdditionalDocuments.Any(document =>
+                            SameFile(document.FilePath, requested)
+                        )
+                    )
             )
                 return null;
         }
@@ -894,8 +876,8 @@ internal sealed class LuiProjectContext : IDisposable
         globals.TryGetValue("build_property.LucentLuiCompilerOptions", out var options);
         globals.TryGetValue("build_property.LucentLuiDefines", out var defines);
         var parse = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
-        var generated = new Dictionary<SyntaxTree, RenameGeneratedDocument>();
-        var combined = original;
+        var generatedDocuments = new List<(DocumentId Id, RenameGeneratedDocument Document)>();
+        var renameSolution = project.Solution;
         foreach (var document in inputs)
         {
             var identity = new LuiFreshnessIdentity(
@@ -928,37 +910,65 @@ internal sealed class LuiProjectContext : IDisposable
                     + "/"
                     + result.Identity.HintName
             );
-            var tree = CSharpSyntaxTree.ParseText(
-                result.ProjectionSource,
-                parse,
-                generatedUri.AbsoluteUri,
-                cancellationToken: cancellationToken
+            var documentId = DocumentId.CreateNewId(project.Id, result.Identity.HintName);
+            renameSolution = renameSolution.AddDocument(
+                documentId,
+                result.Identity.HintName,
+                SourceText.From(result.ProjectionSource),
+                filePath: generatedUri.AbsoluteUri
             );
-            combined = combined.AddSyntaxTrees(tree);
-            generated[tree] = new RenameGeneratedDocument(
-                new Uri(document.Path),
-                document.Source,
-                result.Map,
-                result.Identity
+            generatedDocuments.Add(
+                (
+                    documentId,
+                    new RenameGeneratedDocument(
+                        new Uri(document.Path),
+                        document.Source,
+                        result.Map,
+                        result.Identity
+                    )
+                )
             );
         }
-        var csharp = project
-            .Documents.Where(document => document.FilePath is not null)
-            .Select(document => new { document.FilePath, Uri = new Uri(document.FilePath!) })
-            .Join(
-                combined.SyntaxTrees,
-                document => document.FilePath,
-                tree => tree.FilePath,
-                (document, tree) => new { tree, document.Uri },
-                StringComparer.OrdinalIgnoreCase
+        var generated = new Dictionary<SyntaxTree, RenameGeneratedDocument>();
+        var trees = new Dictionary<SyntaxTree, ProjectId>();
+        foreach (var item in generatedDocuments)
+        {
+            var document = renameSolution.GetDocument(item.Id);
+            var tree = document is null
+                ? null
+                : await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
+            if (tree is null)
+                return null;
+            generated[tree] = item.Document;
+            trees[tree] = project.Id;
+        }
+        var csharp = new Dictionary<SyntaxTree, Uri>();
+        foreach (var graphProject in ProjectGraph(project))
+        {
+            var current = renameSolution.GetProject(graphProject.Id);
+            if (current is null)
+                return null;
+            foreach (
+                var document in current.Documents.Where(document => document.FilePath is not null)
             )
-            .ToDictionary(item => item.tree, item => item.Uri);
+            {
+                var tree = await document
+                    .GetSyntaxTreeAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                if (tree is null)
+                    return null;
+                csharp[tree] = new Uri(document.FilePath!);
+                trees[tree] = current.Id;
+            }
+        }
         return new RenameSnapshot(
             captured,
-            combined,
+            renameSolution,
+            project.Id,
             generated,
             csharp,
             sourceByPath,
+            trees,
             generated.Values.Select(document => document.Identity).ToArray()
         );
     }
@@ -982,23 +992,33 @@ internal sealed class LuiProjectContext : IDisposable
         return RenameSnapshotCurrent(snapshot);
     }
 
-    private static RenameTarget? ResolveRenameTarget(RenameSnapshot snapshot, Uri uri, int offset)
+    private static async Task<RenameTarget?> ResolveRenameTargetAsync(
+        RenameSnapshot snapshot,
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
     {
         if (
             snapshot.CSharp.FirstOrDefault(pair => SameFile(pair.Value.LocalPath, uri)) is
             { Key: { } csharpTree, Value: { } csharpUri }
         )
         {
+            var model = await SemanticModelAsync(snapshot, csharpTree, cancellationToken)
+                .ConfigureAwait(false);
+            if (model is null)
+                return null;
             var token = csharpTree
-                .GetRoot()
+                .GetRoot(cancellationToken)
                 .FindToken(Math.Clamp(offset, 0, Math.Max(0, csharpTree.Length - 1)));
-            var symbol = SymbolForToken(snapshot.Compilation.GetSemanticModel(csharpTree), token);
+            var symbol = SymbolForToken(model, token);
             return symbol is null
                 ? null
                 : new RenameTarget(
                     csharpUri,
                     new LuiSpan(token.SpanStart, token.Span.Length),
-                    symbol
+                    symbol,
+                    null
                 );
         }
         foreach (var pair in snapshot.Generated)
@@ -1013,8 +1033,11 @@ internal sealed class LuiProjectContext : IDisposable
                 .ToArray();
             if (entries.Length == 0)
                 return null;
-            var root = pair.Key.GetRoot();
-            var model = snapshot.Compilation.GetSemanticModel(pair.Key);
+            var root = pair.Key.GetRoot(cancellationToken);
+            var model = await SemanticModelAsync(snapshot, pair.Key, cancellationToken)
+                .ConfigureAwait(false);
+            if (model is null)
+                return null;
             var targets = new List<RenameTarget>();
             foreach (var entry in entries)
             {
@@ -1041,18 +1064,212 @@ internal sealed class LuiProjectContext : IDisposable
                                 )
                             );
                 var symbol = token.RawKind == 0 ? null : SymbolForToken(model, token);
-                if (symbol is null || RenameSourceSpan(pair.Value, token) is not { } span)
+                var spans = token.RawKind == 0 ? [] : RenameSourceSpans(pair.Value, token);
+                var span =
+                    spans.Contains(entry.Source) ? entry.Source
+                    : spans.Length == 1 ? spans[0]
+                    : (LuiSpan?)null;
+                if (symbol is null || span is null)
                     return null;
-                targets.Add(new RenameTarget(pair.Value.Uri, span, symbol));
+                targets.Add(
+                    new RenameTarget(
+                        pair.Value.Uri,
+                        span.Value,
+                        symbol,
+                        LocalDeclarationFor(snapshot, symbol)
+                    )
+                );
             }
             var target = targets[0];
-            return targets.All(candidate =>
-                SameSymbol(candidate.Symbol, target.Symbol) && candidate.Span.Equals(target.Span)
-            )
-                ? target
-                : null;
+            return target.LocalDeclaration is { } local
+                ? targets.All(candidate => candidate.LocalDeclaration?.Equals(local) == true)
+                    ? target
+                    : null
+                : targets.All(candidate =>
+                    SameSymbol(candidate.Symbol, target.Symbol)
+                    && candidate.Span.Equals(target.Span)
+                )
+                    ? target
+                    : null;
         }
         return null;
+    }
+
+    private static async Task<SemanticModel?> SemanticModelAsync(
+        RenameSnapshot snapshot,
+        SyntaxTree tree,
+        CancellationToken cancellationToken
+    )
+    {
+        if (!snapshot.Trees.TryGetValue(tree, out var projectId))
+            projectId = snapshot
+                .Trees.FirstOrDefault(pair =>
+                    String.Equals(
+                        pair.Key.FilePath,
+                        tree.FilePath,
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                .Value;
+        if (projectId is null)
+            return null;
+        var project = snapshot.Solution.GetProject(projectId);
+        var compilation = project is null
+            ? null
+            : await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+        return compilation is null || !compilation.SyntaxTrees.Contains(tree)
+            ? null
+            : compilation.GetSemanticModel(tree);
+    }
+
+    private static LuiSpan? LocalDeclarationFor(RenameSnapshot snapshot, ISymbol symbol)
+    {
+        if (symbol is not IParameterSymbol parameter)
+            return null;
+        var spans = parameter
+            .DeclaringSyntaxReferences.Select(reference => reference.GetSyntax())
+            .Select(node =>
+                TryGenerated(snapshot, node.SyntaxTree, out var generated)
+                    ? RenameSourceSpan(generated, node.GetFirstToken()) is { } span
+                    && generated
+                        .Map.FromGenerated(new LuiSpan(node.SpanStart, node.Span.Length))
+                        .Any(entry => entry.Kind == LuiMapKind.Local && entry.Source.Equals(span))
+                        ? span
+                        : (LuiSpan?)null
+                    : null
+            )
+            .Where(span => span is not null)
+            .Select(span => span!.Value)
+            .Distinct()
+            .ToArray();
+        return spans.Length == 1 ? spans[0] : null;
+    }
+
+    private static async Task<IReadOnlyList<RenameOccurrence>?> RenameOccurrencesAsync(
+        RenameSnapshot snapshot,
+        RenameTarget target,
+        bool includeDeclaration,
+        CancellationToken cancellationToken
+    )
+    {
+        var locations = new List<(Location Location, ISymbol Symbol)>();
+        if (target.LocalDeclaration is { } local)
+        {
+            foreach (var pair in snapshot.Generated)
+            {
+                var model = await SemanticModelAsync(snapshot, pair.Key, cancellationToken)
+                    .ConfigureAwait(false);
+                if (model is null)
+                    return null;
+                foreach (var token in pair.Key.GetRoot(cancellationToken).DescendantTokens())
+                {
+                    var symbol = SymbolForToken(model, token);
+                    if (
+                        symbol is not null
+                        && LocalDeclarationFor(snapshot, symbol)?.Equals(local) == true
+                    )
+                        locations.Add((token.GetLocation(), symbol));
+                }
+            }
+        }
+        else
+        {
+            var definition = await SymbolFinder
+                .FindSourceDefinitionAsync(target.Symbol, snapshot.Solution, cancellationToken)
+                .ConfigureAwait(false);
+            if (definition is null || !definition.Locations.Any(location => location.IsInSource))
+            {
+                return null;
+            }
+            var references = await SymbolFinder
+                .FindReferencesAsync(definition, snapshot.Solution, cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var reference in references)
+            {
+                if (includeDeclaration)
+                    locations.AddRange(
+                        reference
+                            .Definition.Locations.Where(location => location.IsInSource)
+                            .Select(location => (location, reference.Definition))
+                    );
+                locations.AddRange(
+                    reference.Locations.Select(location =>
+                        (location.Location, reference.Definition)
+                    )
+                );
+            }
+        }
+        var result = new List<RenameOccurrence>();
+        foreach (var (location, symbol) in locations)
+        {
+            if (!location.IsInSource || location.SourceTree is null)
+                return null;
+            var tree = location.SourceTree;
+            var model = await SemanticModelAsync(snapshot, tree, cancellationToken)
+                .ConfigureAwait(false);
+            if (model is null)
+            {
+                return null;
+            }
+            var token = tree.GetRoot(cancellationToken).FindToken(location.SourceSpan.Start);
+            if (!token.Span.IntersectsWith(location.SourceSpan))
+                return null;
+            if (
+                !includeDeclaration
+                && token.Parent is { } parent
+                && IsDeclarationIdentifier(parent, token)
+            )
+                continue;
+            Uri occurrenceUri;
+            LuiSpan[] spans;
+            if (TryGenerated(snapshot, tree, out var generated))
+            {
+                occurrenceUri = generated.Uri;
+                spans = RenameSourceSpans(generated, token);
+            }
+            else if (TryCSharp(snapshot, tree, out var csharp))
+            {
+                occurrenceUri = csharp;
+                spans = [new LuiSpan(token.SpanStart, token.Span.Length)];
+            }
+            else
+            {
+                return null;
+            }
+            if (spans.Length == 0)
+            {
+                return null;
+            }
+            foreach (var span in spans)
+                result.Add(new RenameOccurrence(occurrenceUri, span, token, model, symbol));
+        }
+        return result;
+    }
+
+    private static bool TryGenerated(
+        RenameSnapshot snapshot,
+        SyntaxTree tree,
+        out RenameGeneratedDocument document
+    )
+    {
+        if (snapshot.Generated.TryGetValue(tree, out document!))
+            return true;
+        var pair = snapshot.Generated.FirstOrDefault(pair =>
+            String.Equals(pair.Key.FilePath, tree.FilePath, StringComparison.Ordinal)
+        );
+        document = pair.Value!;
+        return pair.Key is not null;
+    }
+
+    private static bool TryCSharp(RenameSnapshot snapshot, SyntaxTree tree, out Uri uri)
+    {
+        if (snapshot.CSharp.TryGetValue(tree, out uri!))
+            return true;
+        var pair = snapshot.CSharp.FirstOrDefault(pair =>
+            String.Equals(pair.Key.FilePath, tree.FilePath, StringComparison.OrdinalIgnoreCase)
+        );
+        uri = pair.Value!;
+        return pair.Key is not null;
     }
 
     private static ISymbol? SymbolForToken(SemanticModel model, SyntaxToken token)
@@ -1100,6 +1317,12 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static LuiSpan? RenameSourceSpan(RenameGeneratedDocument document, SyntaxToken token)
     {
+        var spans = RenameSourceSpans(document, token);
+        return spans.Length == 1 ? spans[0] : null;
+    }
+
+    private static LuiSpan[] RenameSourceSpans(RenameGeneratedDocument document, SyntaxToken token)
+    {
         var candidates = new List<LuiSpan>();
         foreach (
             var entry in document.Map.FromGenerated(new LuiSpan(token.SpanStart, token.Span.Length))
@@ -1121,8 +1344,7 @@ internal sealed class LuiProjectContext : IDisposable
                     candidates.Add(new LuiSpan(start, token.Span.Length));
             }
         }
-        var distinct = candidates.Distinct().ToArray();
-        return distinct.Length == 1 ? distinct[0] : null;
+        return candidates.Distinct().ToArray();
     }
 
     private static bool AddRenameEdit(Dictionary<Uri, List<LuiSpan>> edits, Uri uri, LuiSpan span)
@@ -2622,27 +2844,47 @@ internal sealed class RenameGeneratedDocument(
 
 internal sealed class RenameSnapshot(
     long epoch,
-    Compilation compilation,
+    Solution solution,
+    ProjectId projectId,
     IReadOnlyDictionary<SyntaxTree, RenameGeneratedDocument> generated,
     IReadOnlyDictionary<SyntaxTree, Uri> csharp,
     IReadOnlyDictionary<string, string> sourceByPath,
+    IReadOnlyDictionary<SyntaxTree, ProjectId> trees,
     IReadOnlyList<LuiFreshnessIdentity>? generatedIdentities = null
 )
 {
     internal long Epoch { get; } = epoch;
-    internal Compilation Compilation { get; } = compilation;
+    internal Solution Solution { get; } = solution;
+    internal ProjectId ProjectId { get; } = projectId;
     internal IReadOnlyDictionary<SyntaxTree, RenameGeneratedDocument> Generated { get; } =
         generated;
     internal IReadOnlyList<LuiFreshnessIdentity> GeneratedIdentities { get; } =
         generatedIdentities ?? generated.Values.Select(document => document.Identity).ToArray();
     internal IReadOnlyDictionary<SyntaxTree, Uri> CSharp { get; } = csharp;
     internal IReadOnlyDictionary<string, string> SourceByPath { get; } = sourceByPath;
+    internal IReadOnlyDictionary<SyntaxTree, ProjectId> Trees { get; } = trees;
 }
 
-internal sealed class RenameTarget(Uri uri, LuiSpan span, ISymbol symbol)
+internal sealed class RenameTarget(Uri uri, LuiSpan span, ISymbol symbol, LuiSpan? localDeclaration)
 {
     internal Uri Uri { get; } = uri;
     internal LuiSpan Span { get; } = span;
+    internal ISymbol Symbol { get; } = symbol;
+    internal LuiSpan? LocalDeclaration { get; } = localDeclaration;
+}
+
+internal sealed class RenameOccurrence(
+    Uri uri,
+    LuiSpan span,
+    SyntaxToken token,
+    SemanticModel model,
+    ISymbol symbol
+)
+{
+    internal Uri Uri { get; } = uri;
+    internal LuiSpan Span { get; } = span;
+    internal SyntaxToken Token { get; } = token;
+    internal SemanticModel Model { get; } = model;
     internal ISymbol Symbol { get; } = symbol;
 }
 
