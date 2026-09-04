@@ -13,7 +13,7 @@ Work in this order:
 
 Before the resize and QoL steps, read [execution refinements](remaining-work-plan.md) for the concrete test matrix and unresolved sizing/lifecycle seams.
 
-Do not reconfigure the Oracle model. Follow `AGENTS.md`, `CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and the issue bodies. Use affected checks while iterating and the full gate at issue or milestone closure.
+Do not reconfigure the Oracle model. Follow `AGENTS.md`, `CONTEXT.md`, `docs/ARCHITECTURE.md`, `docs/ROADMAP.md`, and the issue bodies. Use affected checks while iterating. The full M7 gate below applies to this seal; subsequent issues follow the owner-approved [pre-release verification policy](verification.md), which supersedes the original full-gate-per-issue requirement.
 
 ## Starting point
 

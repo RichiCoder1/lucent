@@ -1,6 +1,6 @@
 # Remaining-work execution refinements
 
-These notes refine `remaining-work-handoff.md`; GitHub issue acceptance remains authoritative. Complete M7 before implementing resizing, #58, and #59 in that order. File the cleanup/testing issue afterward. These are implementation directions, not claims of completion.
+These notes refine `remaining-work-handoff.md`; GitHub issue acceptance remains authoritative. Complete M7 before implementing resizing, #58, and #59 in that order. File the cleanup/testing issue afterward. These are implementation directions, not claims of completion. After M7, apply the [pre-release verification policy](verification.md) instead of the original full-gate-per-issue requirement.
 
 ## Resize: prove viewport coverage before choosing a sizing API
 
@@ -11,7 +11,7 @@ The defect spans both axes. Application styles fix widths to 800 and the main co
 3. Preserve element identity, selection, focus, and bounded realization across resizing. Keep the list's existing height/density policy and field widths unless evidence shows they prevent the requested behavior; responsive wrapping and list redesign are separate work.
 4. First evaluate the existing root-allocation and layout-property seams. If a fill capability is missing, define the smallest bounded sizing contract with this application as its consumer. Do not add viewport subscriptions or geometry assignments to application code. Do not silently assign new behavior to `MainAlignment.Stretch`: current main-axis documentation only promises start/center/end placement.
 5. Keep original-size pixel/behavior parity. Any diagnostic-hash change must be explained by the intended property/provenance change, not accepted by blindly replacing the expected hash.
-6. Run the affected application/Core tests, retain the existing external copied-publish pixel smoke, and run `pwsh -NoProfile -File tools/Verify-M1.ps1` before closure.
+6. Run the affected application/Core tests and a fresh published application pixel/resize smoke. Use the full gate only if the chosen layout change creates cross-cutting risk that these checks cannot contain.
 
 ## #58: scalar expression children
 
@@ -21,7 +21,7 @@ Treat `<Text>{expression}</Text>` as another spelling of the existing scalar `[D
 - Reject mixed literal/expression content, multiple expressions, structural siblings (element, if, or foreach), ambiguous default-content targets, and expression-produced `ComponentContent`. When children supply the selected default-content parameter, reject an explicit attribute with that parameter name, including names other than `content`, with a deterministic source diagnostic.
 - Preserve the distinction between a construction-time scalar and an explicitly live delegate: do not implicitly stringify values or make plain expressions reactive.
 - Prove generated-call and managed/NativeAOT parity with the equivalent named argument. Cover normal conversions, hard type errors, preserved nullable-warning diagnostics, incomplete editor input, exact diagnostic/source spans, rename/references inside the expression, and stable document/range formatting. Keep warning-as-error enforcement at the existing build/gate layer.
-- Use existing parser/compiler/generator/LSP fixtures. Run the SDK/NativeAOT proof and tooling budgets, then the full closure gate. Avoid a separate grammar or runtime evaluator.
+- Use existing parser/compiler/generator/LSP fixtures and the SDK/NativeAOT consumer proof. Recheck affected tooling budgets when there is a credible performance impact. Avoid a separate grammar or runtime evaluator; unrelated renderer/UI gates are not routine requirements for this compiler slice.
 
 ## #59: application lifecycle
 

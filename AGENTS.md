@@ -19,3 +19,7 @@ Use the default canonical triage labels. See `docs/agents/triage-labels.md`.
 ### Domain docs
 
 Use a single-context glossary at `CONTEXT.md` and decisions under `docs/adr/`. See `docs/agents/domain.md`.
+
+### Verification
+
+For pre-release work after M7, choose checks by affected behavior and risk. See `docs/agents/verification.md`; full milestone gates are not required for every issue.
