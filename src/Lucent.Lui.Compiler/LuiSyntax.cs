@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -65,11 +66,19 @@ public sealed class LuiToken
 public sealed class LuiDiagnostic
 {
     /// <summary>Creates an immutable diagnostic for editor or build-tool reporting.</summary>
-    public LuiDiagnostic(string id, string message, LuiSpan span)
+    public LuiDiagnostic(
+        string id,
+        string message,
+        LuiSpan span,
+        DiagnosticSeverity severity = DiagnosticSeverity.Error,
+        string source = "Lucent.Lui"
+    )
     {
         Id = id;
         Message = message;
         Span = span;
+        Severity = severity;
+        Source = source;
     }
 
     /// <summary>Stable diagnostic identifier such as <c>LUI1000</c>.</summary>
@@ -80,6 +89,12 @@ public sealed class LuiDiagnostic
 
     /// <summary>Authored range to highlight; it never identifies generated C#.</summary>
     public LuiSpan Span { get; }
+
+    /// <summary>Default Roslyn severity before evaluated project configuration.</summary>
+    public DiagnosticSeverity Severity { get; }
+
+    /// <summary>Diagnostic source/category retained by editor transport.</summary>
+    public string Source { get; }
 }
 
 /// <summary>Base for immutable parsed nodes, including recovered nodes with missing child tokens.</summary>

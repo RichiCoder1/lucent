@@ -3,31 +3,31 @@ using System.Text;
 
 namespace Lucent.Core;
 
-/// <summary>An immutable set of typed assignments for an element's arrangement and visual representation; it owns no interaction, semantics, lifecycle, or content.</summary>
+/// <summary>An immutable collection of layout, visual, text, and input settings for an element.</summary>
 public sealed class Style
 {
     private readonly Node[] _nodes;
 
     private Style(Node[] nodes) => _nodes = nodes;
 
-    /// <summary>Gets the identity style with no assignments.</summary>
+    /// <summary>Gets an empty style with all properties at their defaults.</summary>
     public static Style Empty { get; } = new([]);
 
-    /// <summary>Returns a new style that assigns a direct value; later assignments win during resolution.</summary>
+    /// <summary>Returns a new style that sets a property to an explicit value.</summary>
     public Style Set<T>(Property<T> property, T value) => Add(new Assignment<T>(property, value));
 
-    /// <summary>Returns a new style that resolves the assignment from the active theme token.</summary>
+    /// <summary>Returns a new style that gets a property's value from a theme token.</summary>
     public Style Set<T>(Property<T> property, Token<T> token) =>
         Add(new Assignment<T>(property, token));
 
-    /// <summary>Reads a live value when this candidate's variant is active on a presented element.</summary>
+    /// <summary>Returns a new style that gets a property's value from a reader while the style applies.</summary>
     public Style Bind<T>(Property<T> property, Func<T> read) =>
         Add(new BindingAssignment<T>(property, read));
 
-    /// <summary>Appends optional assignments; later assignments win.</summary>
+    /// <summary>Returns a new style with the assignments from <paramref name="style"/> appended.</summary>
     public Style With(Style? style) => style is null ? this : new([.. _nodes, .. style._nodes]);
 
-    /// <summary>Returns a new style whose nested assignments participate only while all requested variants are active.</summary>
+    /// <summary>Returns a new style whose nested settings apply only for the specified interaction states.</summary>
     public Style When(VariantState when, Style style)
     {
         VariantStates.Validate(when, nameof(when), false);
@@ -35,7 +35,7 @@ public sealed class Style
         return new([.. _nodes, new VariantNode(when, style)]);
     }
 
-    /// <summary>Combines styles in argument order; assignments from later styles override earlier candidates.</summary>
+    /// <summary>Combines styles in order; settings in later styles override earlier settings.</summary>
     public static Style Compose(params Style[] styles)
     {
         ArgumentNullException.ThrowIfNull(styles);
@@ -77,7 +77,7 @@ public sealed class Style
     private sealed record VariantNode(VariantState Condition, Style Style) : Node;
 }
 
-/// <summary>Immutable eligible-property/duration specification. Values exist only in active timeline samples.</summary>
+/// <summary>Specifies how long an eligible property takes to change between values.</summary>
 public sealed class Transition
 {
     private Transition(IProperty property, int durationMilliseconds)
@@ -88,10 +88,10 @@ public sealed class Transition
 
     internal IProperty Property { get; }
 
-    /// <summary>Gets the bounded transition duration in milliseconds.</summary>
+    /// <summary>Gets the transition duration in milliseconds.</summary>
     public int DurationMilliseconds { get; }
 
-    /// <summary>Creates a transition for an eligible property; duration must be from 1 through 500 milliseconds.</summary>
+    /// <summary>Creates a transition for a property that supports animation; duration must be from 1 through 500 milliseconds.</summary>
     public static Transition For<T>(Property<T> property, int durationMilliseconds)
     {
         ArgumentNullException.ThrowIfNull(property);

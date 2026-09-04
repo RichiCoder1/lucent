@@ -1,17 +1,20 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Lucent.Lui.Compiler;
 
 namespace Lucent.Lui.LanguageServer;
 
 internal static class Program
 {
     private static readonly object outputGate = new();
+    private static readonly string[] signatureTriggers = ["(", ",", " "];
+    private static readonly string[] completionTriggers = ["<", " ", ".", ":", "{"];
 
     private static async Task<int> Main()
     {
         LuiProjectContext? project = null;
-        var openDocuments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var openDocuments = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var initializeReceived = false;
         var initialized = false;
         var shutdown = false;
@@ -130,7 +133,7 @@ internal static class Program
         string method,
         JsonElement parameters,
         LuiProjectContext? project,
-        HashSet<string> openDocuments
+        Dictionary<string, int> openDocuments
     )
     {
         switch (method)
@@ -151,41 +154,84 @@ internal static class Program
                         CancellationToken.None
                     )
                     .ConfigureAwait(false);
+                WriteNotification(
+                    "lucent/projectGraph",
+                    new { directories = context.ProjectDirectories() }
+                );
                 return new HandlerResult(
                     context,
-                    new { capabilities = new { definitionProvider = true, textDocumentSync = 1 } }
+                    new
+                    {
+                        capabilities = new
+                        {
+                            definitionProvider = true,
+                            hoverProvider = true,
+                            signatureHelpProvider = new { triggerCharacters = signatureTriggers },
+                            completionProvider = new { triggerCharacters = completionTriggers },
+                            documentSymbolProvider = true,
+                            semanticTokensProvider = new
+                            {
+                                legend = new
+                                {
+                                    tokenTypes = LuiProjectContext.SemanticTokenTypes,
+                                    tokenModifiers = Array.Empty<string>(),
+                                },
+                                full = true,
+                            },
+                            diagnosticProvider = new
+                            {
+                                identifier = "lucent-lui",
+                                interFileDependencies = true,
+                                workspaceDiagnostics = false,
+                            },
+                            textDocumentSync = 1,
+                        },
+                    }
                 );
             }
             case "textDocument/didOpen":
                 if (project is not null)
                 {
-                    var openedUri = new Uri(
-                        parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
-                    );
+                    var opened = parameters.GetProperty("textDocument");
+                    var openedUri = new Uri(opened.GetProperty("uri").GetString()!);
+                    var version = opened.GetProperty("version").GetInt32();
                     if (!project.Owns(openedUri))
+                    {
+                        PublishEmptyDiagnostics(openedUri, version);
                         return new HandlerResult(null, null);
-                    openDocuments.Add(DocumentKey(openedUri));
-                    project.ReplaceText(
-                        openedUri,
-                        parameters.GetProperty("textDocument").GetProperty("text").GetString()!
-                    );
+                    }
+                    if (
+                        openDocuments.TryGetValue(DocumentKey(openedUri), out var current)
+                        && version <= current
+                    )
+                        return new HandlerResult(null, null);
+                    openDocuments[DocumentKey(openedUri)] = version;
+                    project.ReplaceText(openedUri, opened.GetProperty("text").GetString()!);
+                    await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
                 }
                 return new HandlerResult(null, null);
             case "textDocument/didChange":
                 if (project is not null)
                 {
-                    var changedUri = new Uri(
-                        parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
-                    );
+                    var changed = parameters.GetProperty("textDocument");
+                    var changedUri = new Uri(changed.GetProperty("uri").GetString()!);
+                    var version = changed.GetProperty("version").GetInt32();
+                    if (!project.Owns(changedUri))
+                    {
+                        PublishEmptyDiagnostics(changedUri, version);
+                        return new HandlerResult(null, null);
+                    }
                     if (
-                        !openDocuments.Contains(DocumentKey(changedUri))
-                        || !project.Owns(changedUri)
+                        !openDocuments.TryGetValue(DocumentKey(changedUri), out var current)
+                        || version <= current
                     )
                         return new HandlerResult(null, null);
+                    openDocuments[DocumentKey(changedUri)] = version;
                     project.ReplaceText(
                         changedUri,
                         parameters.GetProperty("contentChanges")[0].GetProperty("text").GetString()!
                     );
+                    await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
                 }
                 return new HandlerResult(null, null);
             case "textDocument/didClose":
@@ -194,9 +240,34 @@ internal static class Program
                     var closedUri = new Uri(
                         parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                     );
-                    openDocuments.Remove(DocumentKey(closedUri));
+                    openDocuments.Remove(DocumentKey(closedUri), out var version);
                     if (project.Owns(closedUri))
                         project.Close(closedUri);
+                    PublishEmptyDiagnostics(closedUri, version);
+                    await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
+                }
+                return new HandlerResult(null, null);
+            case "workspace/didChangeWatchedFiles":
+                if (project is null || !parameters.TryGetProperty("changes", out var changes))
+                    return new HandlerResult(null, null);
+                var reloaded = false;
+                foreach (var change in changes.EnumerateArray())
+                {
+                    if (
+                        change.TryGetProperty("uri", out var changedUri)
+                        && changedUri.GetString() is { } value
+                    )
+                        reloaded |= await project
+                            .ReloadIfRelevantAsync(new Uri(value), CancellationToken.None)
+                            .ConfigureAwait(false);
+                }
+                if (reloaded)
+                {
+                    WriteNotification(
+                        "lucent/projectGraph",
+                        new { directories = project.ProjectDirectories() }
+                    );
+                    await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
                 }
                 return new HandlerResult(null, null);
             case "textDocument/definition":
@@ -206,13 +277,172 @@ internal static class Program
                 var uri = new Uri(textDocument.GetProperty("uri").GetString()!);
                 var position = parameters.GetProperty("position");
                 var target = await project
-                    .NavigateAsync(
+                    .DefinitionAsync(
                         uri,
                         await OffsetAsync(project, uri, position).ConfigureAwait(false),
                         CancellationToken.None
                     )
                     .ConfigureAwait(false);
                 return new HandlerResult(null, target is null ? null : Location(target));
+            case "textDocument/completion":
+                if (project is null)
+                    return new HandlerResult(null, null);
+                var completionUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var completion = await project
+                    .CompletionsAsync(
+                        completionUri,
+                        await OffsetAsync(
+                                project,
+                                completionUri,
+                                parameters.GetProperty("position")
+                            )
+                            .ConfigureAwait(false),
+                        CancellationToken.None
+                    )
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    new
+                    {
+                        isIncomplete = false,
+                        items = completion?.Select(item => new
+                        {
+                            label = item.Label,
+                            kind = item.Kind,
+                            detail = item.Detail,
+                            documentation = item.Documentation is null
+                                ? null
+                                : new { kind = "plaintext", value = item.Documentation },
+                        }),
+                    }
+                );
+            case "textDocument/hover":
+                if (project is null)
+                    return new HandlerResult(null, null);
+                var hoverUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var hover = await project
+                    .HoverAsync(
+                        hoverUri,
+                        await OffsetAsync(project, hoverUri, parameters.GetProperty("position"))
+                            .ConfigureAwait(false),
+                        CancellationToken.None
+                    )
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    hover is null
+                        ? null
+                        : new
+                        {
+                            contents = new object[]
+                            {
+                                new { language = "csharp", value = hover.Value },
+                                hover.Documentation is null
+                                    ? null!
+                                    : new { kind = "plaintext", value = hover.Documentation },
+                            }.Where(item => item is not null),
+                        }
+                );
+            case "textDocument/signatureHelp":
+                if (project is null)
+                    return new HandlerResult(null, null);
+                var signatureUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var signature = await project
+                    .SignatureHelpAsync(
+                        signatureUri,
+                        await OffsetAsync(project, signatureUri, parameters.GetProperty("position"))
+                            .ConfigureAwait(false),
+                        CancellationToken.None
+                    )
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    signature is null
+                        ? null
+                        : new
+                        {
+                            signatures = signature.Signatures.Select(item => new
+                            {
+                                label = item.Label,
+                                documentation = item.Documentation is null
+                                    ? null
+                                    : new { kind = "plaintext", value = item.Documentation },
+                                parameters = item.Parameters.Select(parameter => new
+                                {
+                                    label = parameter,
+                                }),
+                            }),
+                            activeSignature = signature.ActiveSignature,
+                            activeParameter = signature.ActiveParameter,
+                        }
+                );
+            case "textDocument/documentSymbol":
+                if (project is null)
+                    return new HandlerResult(null, Array.Empty<object>());
+                var symbolUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var symbols = await project
+                    .DocumentSymbolsAsync(symbolUri, CancellationToken.None)
+                    .ConfigureAwait(false);
+                var symbolText = await project
+                    .GetTextAsync(symbolUri, CancellationToken.None)
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    symbols?.Select(symbol => DocumentSymbol(symbol, symbolText ?? ""))
+                );
+            case "textDocument/semanticTokens/full":
+                if (project is null)
+                    return new HandlerResult(null, new { data = Array.Empty<int>() });
+                var semanticTokenUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var semanticTokens = await project
+                    .SemanticTokensAsync(semanticTokenUri, CancellationToken.None)
+                    .ConfigureAwait(false);
+                return new HandlerResult(
+                    null,
+                    semanticTokens is null ? null : new { data = semanticTokens }
+                );
+            case "textDocument/diagnostic":
+                if (project is null)
+                    return new HandlerResult(
+                        null,
+                        new { kind = "full", items = Array.Empty<object>() }
+                    );
+                var diagnosticUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var diagnosticText = await project
+                    .GetTextAsync(diagnosticUri, CancellationToken.None)
+                    .ConfigureAwait(false);
+                var diagnostics = await project
+                    .DiagnosticsAsync(diagnosticUri, CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (diagnostics is null)
+                    return new HandlerResult(null, new { kind = "unchanged" });
+                return new HandlerResult(
+                    null,
+                    new
+                    {
+                        kind = "full",
+                        items = diagnostics.Select(diagnostic => new
+                        {
+                            range = Range(diagnosticText ?? "", diagnostic.Span),
+                            severity = diagnostic.Severity,
+                            code = diagnostic.Code,
+                            source = diagnostic.Source,
+                            message = diagnostic.Message,
+                        }),
+                    }
+                );
             case "lucent/generatedText":
                 if (project is null)
                     return new HandlerResult(null, null);
@@ -223,8 +453,7 @@ internal static class Program
         }
     }
 
-    private static string DocumentKey(Uri uri) =>
-        uri.IsFile ? Path.GetFullPath(LuiProjectContext.FilePath(uri)) : uri.AbsoluteUri;
+    private static string DocumentKey(Uri uri) => uri.AbsoluteUri;
 
     private static async Task<int> OffsetAsync(
         LuiProjectContext project,
@@ -253,6 +482,96 @@ internal static class Program
         if (line < 0 || character < 0 || character > end - start)
             throw new ArgumentOutOfRangeException(nameof(position));
         return start + character;
+    }
+
+    private static async Task PublishOpenDiagnosticsAsync(
+        LuiProjectContext project,
+        Dictionary<string, int> openDocuments
+    )
+    {
+        foreach (var (key, version) in openDocuments.ToArray())
+        {
+            var uri = new Uri(key);
+            if (project.Owns(uri))
+                await PublishDiagnosticsAsync(project, uri, version).ConfigureAwait(false);
+            else
+            {
+                PublishEmptyDiagnostics(uri, version);
+                openDocuments.Remove(key);
+            }
+        }
+    }
+
+    private static async Task PublishDiagnosticsAsync(
+        LuiProjectContext project,
+        Uri uri,
+        int version
+    )
+    {
+        var text = await project.GetTextAsync(uri, CancellationToken.None).ConfigureAwait(false);
+        if (text is null)
+            return;
+        var diagnostics = await project
+            .DiagnosticsAsync(uri, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (diagnostics is null)
+            return;
+        WriteNotification(
+            "textDocument/publishDiagnostics",
+            new
+            {
+                uri = uri.AbsoluteUri,
+                version,
+                diagnostics = diagnostics.Select(diagnostic => new
+                {
+                    range = Range(text, diagnostic.Span),
+                    severity = diagnostic.Severity,
+                    code = diagnostic.Code,
+                    source = diagnostic.Source,
+                    message = diagnostic.Message,
+                }),
+            }
+        );
+    }
+
+    private static void PublishEmptyDiagnostics(Uri uri, int? version)
+    {
+        if (version is int value)
+            WriteNotification(
+                "textDocument/publishDiagnostics",
+                new
+                {
+                    uri = uri.AbsoluteUri,
+                    version = value,
+                    diagnostics = Array.Empty<object>(),
+                }
+            );
+        else
+            WriteNotification(
+                "textDocument/publishDiagnostics",
+                new { uri = uri.AbsoluteUri, diagnostics = Array.Empty<object>() }
+            );
+    }
+
+    private static object DocumentSymbol(LuiDocumentSymbol symbol, string text) =>
+        new
+        {
+            name = symbol.Name,
+            kind = symbol.Kind,
+            range = Range(text, symbol.Span),
+            selectionRange = Range(text, symbol.SelectionSpan),
+            children = symbol.Children.Select(child => DocumentSymbol(child, text)),
+        };
+
+    private static object Range(string text, LuiSpan span)
+    {
+        var start = Position(text, Math.Clamp(span.Start, 0, text.Length));
+        var end = Position(text, Math.Clamp(span.End, 0, text.Length));
+        return new
+        {
+            start = new { line = start.Line, character = start.Character },
+            end = new { line = end.Line, character = end.Character },
+        };
     }
 
     private static object Location(LuiNavigationTarget target)
@@ -341,6 +660,15 @@ internal static class Program
                 + ",\"error\":{\"code\":-32603,\"message\":"
                 + JsonSerializer.Serialize(message)
                 + "}}"
+        );
+
+    private static void WriteNotification(string method, object parameters) =>
+        Write(
+            "{\"jsonrpc\":\"2.0\",\"method\":"
+                + JsonSerializer.Serialize(method)
+                + ",\"params\":"
+                + JsonSerializer.Serialize(parameters)
+                + "}"
         );
 
     private static void Write(string message)

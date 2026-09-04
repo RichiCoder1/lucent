@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Lucent.Core;
 
-/// <summary>Source-owned palettes for the bounded controls. Applications may layer their own tokens over either theme.</summary>
+/// <summary>Built-in color palettes for Lucent controls. Use one as the starting theme for an application.</summary>
 public static class ControlThemes
 {
     internal static readonly Token<Brush> Surface = new("control-surface", Color.Parse("#ffffff"));
@@ -33,7 +33,7 @@ public static class ControlThemes
         Color.Parse("#94a3b8")
     );
 
-    /// <summary>Gets the built-in light control palette.</summary>
+    /// <summary>Gets a light palette for controls.</summary>
     public static Theme Light { get; } =
         Palette(
             "controls-light",
@@ -47,7 +47,7 @@ public static class ControlThemes
             Color.Parse("#94a3b8")
         );
 
-    /// <summary>Gets the built-in dark control palette.</summary>
+    /// <summary>Gets a dark palette for controls.</summary>
     public static Theme Dark { get; } =
         Palette(
             "controls-dark",
@@ -61,7 +61,7 @@ public static class ControlThemes
             Color.Parse("#64748b")
         );
 
-    /// <summary>Gets the built-in high-contrast control palette.</summary>
+    /// <summary>Gets a high-contrast palette for controls.</summary>
     public static Theme HighContrast { get; } =
         Palette(
             "controls-high-contrast",
@@ -200,7 +200,7 @@ internal sealed class ScrollViewportState
     }
 }
 
-/// <summary>Bounded component recipes. Structure stays authored by callers; recipes configure one retained element at a time.</summary>
+/// <summary>Internal implementations used by the built-in components to configure their elements.</summary>
 internal static class Controls
 {
     private static readonly Style TextStyle = Style.Empty.Set(
@@ -351,7 +351,7 @@ internal static class Controls
         return state;
     }
 
-    /// <summary>Creates a fixed-height keyed list owned by its scroll viewport. Rows outside the bounded viewport window do not remain mounted.</summary>
+    /// <summary>Creates the fixed-height list used by <see cref="Components.VirtualizedList{TKey,TItem}"/>.</summary>
     public static VirtualizedRegion<TKey, TItem> VirtualizedList<TKey, TItem>(
         Element viewport,
         ThemeContext theme,

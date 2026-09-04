@@ -326,13 +326,15 @@ public sealed class LuiCompilationResult
         LuiFreshnessIdentity identity,
         string? source,
         LuiSourceMap map,
-        IReadOnlyList<LuiDiagnostic> diagnostics
+        IReadOnlyList<LuiDiagnostic> diagnostics,
+        string? projectionSource = null
     )
     {
         Identity = identity;
         Source = source;
         Map = map;
         Diagnostics = diagnostics;
+        ProjectionSource = projectionSource ?? source;
     }
 
     /// <summary>Freshness snapshot used to reject obsolete output.</summary>
@@ -340,6 +342,9 @@ public sealed class LuiCompilationResult
 
     /// <summary>Null when binding failed; callers must never publish stale output.</summary>
     public string? Source { get; }
+
+    /// <summary>Recovered generated C# used only by editor semantic projection; it is never publishable output.</summary>
+    public string? ProjectionSource { get; }
 
     /// <summary>Bidirectional map between the document's authored spans and generated C# spans.</summary>
     public LuiSourceMap Map { get; }

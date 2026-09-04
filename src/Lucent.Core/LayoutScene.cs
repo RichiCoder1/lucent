@@ -4,58 +4,58 @@ using System.Text;
 
 namespace Lucent.Core;
 
-/// <summary>The finite arrangement values resolved by the existing typed presentation model.</summary>
+/// <summary>Layout settings for size, direction, spacing, alignment, padding, clipping, and scrolling.</summary>
 public static class LayoutProperties
 {
-    /// <summary>Selects horizontal or vertical main-axis layout; the default is a column.</summary>
+    /// <summary>Chooses whether children flow horizontally or vertically. The default is <see cref="LayoutAxis.Column"/>.</summary>
     public static readonly Property<LayoutAxis> Axis = new("layout-axis", LayoutAxis.Column);
 
-    /// <summary>Sets an optional fixed logical-pixel width.</summary>
+    /// <summary>Sets an explicit width. Leave it unset to let the container determine the width.</summary>
     public static readonly Property<float?> Width = new("layout-width", null);
 
-    /// <summary>Sets an optional fixed logical-pixel height.</summary>
+    /// <summary>Sets an explicit height. Leave it unset to let the container determine the height.</summary>
     public static readonly Property<float?> Height = new("layout-height", null);
 
-    /// <summary>Sets a nonnegative minimum logical-pixel width.</summary>
+    /// <summary>Sets the smallest width this element may have.</summary>
     public static readonly Property<float> MinWidth = new("layout-min-width", 0);
 
-    /// <summary>Sets a nonnegative minimum logical-pixel height.</summary>
+    /// <summary>Sets the smallest height this element may have.</summary>
     public static readonly Property<float> MinHeight = new("layout-min-height", 0);
 
-    /// <summary>Sets a maximum logical-pixel width; infinity leaves it unbounded.</summary>
+    /// <summary>Sets the largest width this element may have. The default leaves width unrestricted.</summary>
     public static readonly Property<float> MaxWidth = new(
         "layout-max-width",
         float.PositiveInfinity
     );
 
-    /// <summary>Sets a maximum logical-pixel height; infinity leaves it unbounded.</summary>
+    /// <summary>Sets the largest height this element may have. The default leaves height unrestricted.</summary>
     public static readonly Property<float> MaxHeight = new(
         "layout-max-height",
         float.PositiveInfinity
     );
 
-    /// <summary>Sets nonnegative logical-pixel gaps between arranged children.</summary>
+    /// <summary>Sets the gap between adjacent children.</summary>
     public static readonly Property<float> Spacing = new("layout-spacing", 0);
 
-    /// <summary>Aligns children along the main axis after sizing.</summary>
+    /// <summary>Places children at the start, center, or end of the direction selected by <see cref="Axis"/>.</summary>
     public static readonly Property<LayoutAlignment> MainAlignment = new(
         "layout-main-alignment",
         LayoutAlignment.Start
     );
 
-    /// <summary>Aligns children across the main axis after sizing.</summary>
+    /// <summary>Controls how children fit across the direction selected by <see cref="Axis"/>.</summary>
     public static readonly Property<LayoutAlignment> CrossAlignment = new(
         "layout-cross-alignment",
         LayoutAlignment.Stretch
     );
 
-    /// <summary>Insets the content box by finite logical pixels.</summary>
+    /// <summary>Adds space inside the element around its children.</summary>
     public static readonly Property<Insets> Padding = new("layout-padding", Insets.Zero);
 
-    /// <summary>Clips descendants to this element's layout bounds when true.</summary>
+    /// <summary>When true, hides content that extends outside this element's bounds.</summary>
     public static readonly Property<bool> Clip = new("layout-clip", false);
 
-    /// <summary>Offsets laid-out content by nonnegative logical pixels.</summary>
+    /// <summary>Moves the content horizontally or vertically inside the element.</summary>
     public static readonly Property<ScrollOffset> Scroll = new("layout-scroll", default);
     internal static readonly Property<float?> VirtualRowHeight = new(
         "layout-virtual-row-height",
@@ -65,16 +65,16 @@ public static class LayoutProperties
     internal static readonly Property<int> VirtualRowIndex = new("layout-virtual-row-index", 0);
 }
 
-/// <summary>The minimal renderer-facing visual values; they are ordinary typed properties, not a second style model.</summary>
+/// <summary>Visual settings for an element's background and transparency.</summary>
 public static class VisualProperties
 {
-    /// <summary>Sets the box-local background brush.</summary>
+    /// <summary>Paints the element's background with the supplied brush.</summary>
     public static readonly Property<Brush> Background = new(
         "visual-background",
         Brush.Solid(default)
     );
 
-    /// <summary>Sets box opacity in the inclusive zero-to-one range.</summary>
+    /// <summary>Sets transparency from 0 (invisible) to 1 (fully opaque).</summary>
     public static readonly Property<float> Opacity = new(
         "visual-opacity",
         1,
@@ -82,10 +82,10 @@ public static class VisualProperties
     );
 }
 
-/// <summary>Typed text presentation properties consumed by the portable shaping request.</summary>
+/// <summary>Text settings inherited by an element's text and its descendants.</summary>
 public static class TypographyProperties
 {
-    /// <summary>Sets the inherited text color.</summary>
+    /// <summary>Sets the color used to draw text.</summary>
     public static readonly Property<Color> TextColor = new(
         "typography-text-color",
         Color.FromRgb(0, 0, 0),
@@ -93,28 +93,28 @@ public static class TypographyProperties
         transition: TransitionKind.Color
     );
 
-    /// <summary>Sets the inherited font family.</summary>
+    /// <summary>Sets the font family used for text.</summary>
     public static readonly Property<string> FontFamily = new(
         "typography-font-family",
         "Segoe UI",
         inherits: true
     );
 
-    /// <summary>Sets the inherited positive logical-pixel font size.</summary>
+    /// <summary>Sets the font size used for text.</summary>
     public static readonly Property<float> FontSize = new(
         "typography-font-size",
         14,
         inherits: true
     );
 
-    /// <summary>Sets the inherited shaping language tag.</summary>
+    /// <summary>Sets the language tag used when laying out text.</summary>
     public static readonly Property<string> Language = new(
         "typography-language",
         "en",
         inherits: true
     );
 
-    /// <summary>Sets the inherited explicit text-shaping direction.</summary>
+    /// <summary>Sets whether text flows from left to right or right to left.</summary>
     public static readonly Property<TextDirection> Direction = new(
         "typography-direction",
         global::Lucent.Core.TextDirection.LeftToRight,
@@ -136,17 +136,17 @@ internal static class ProjectionProperties
     internal static readonly Property<int?> TextCaret = new("projection-text-caret", null);
 }
 
-/// <summary>The main axis used to arrange a container's retained children.</summary>
+/// <summary>The direction in which a container places its children.</summary>
 public enum LayoutAxis
 {
-    /// <summary>Uses horizontal main-axis arrangement.</summary>
+    /// <summary>Places children from left to right.</summary>
     Row,
 
-    /// <summary>Uses vertical main-axis arrangement.</summary>
+    /// <summary>Places children from top to bottom.</summary>
     Column,
 }
 
-/// <summary>How children align on an arrangement axis after sizing.</summary>
+/// <summary>How a child is positioned when its available space is larger than its size.</summary>
 public enum LayoutAlignment
 {
     /// <summary>Places content at the leading edge.</summary>
@@ -162,20 +162,20 @@ public enum LayoutAlignment
     Stretch,
 }
 
-/// <summary>The explicit writing direction supplied to text shaping.</summary>
+/// <summary>The direction in which text is read and laid out.</summary>
 public enum TextDirection
 {
-    /// <summary>Shapes clusters in increasing logical order.</summary>
+    /// <summary>Lays out text from left to right.</summary>
     LeftToRight,
 
-    /// <summary>Shapes clusters in decreasing logical order.</summary>
+    /// <summary>Lays out text from right to left.</summary>
     RightToLeft,
 }
 
-/// <summary>Immutable physical logical-pixel space around an element's content box.</summary>
+/// <summary>Space added inside an element on its four edges.</summary>
 public readonly struct Insets : IEquatable<Insets>
 {
-    /// <summary>Initializes finite, nonnegative logical-pixel inset edges.</summary>
+    /// <summary>Creates edge insets. Every value must be finite and nonnegative.</summary>
     public Insets(float left, float top, float right, float bottom)
     {
         if (
@@ -198,16 +198,16 @@ public readonly struct Insets : IEquatable<Insets>
         Bottom = bottom == 0 ? 0 : bottom;
     }
 
-    /// <summary>Gets the nonnegative left inset in logical pixels.</summary>
+    /// <summary>Gets the space added along the left edge.</summary>
     public float Left { get; }
 
-    /// <summary>Gets the nonnegative top inset in logical pixels.</summary>
+    /// <summary>Gets the space added along the top edge.</summary>
     public float Top { get; }
 
-    /// <summary>Gets the nonnegative right inset in logical pixels.</summary>
+    /// <summary>Gets the space added along the right edge.</summary>
     public float Right { get; }
 
-    /// <summary>Gets the nonnegative bottom inset in logical pixels.</summary>
+    /// <summary>Gets the space added along the bottom edge.</summary>
     public float Bottom { get; }
 
     /// <summary>Gets zero inset on every edge.</summary>
@@ -216,7 +216,7 @@ public readonly struct Insets : IEquatable<Insets>
     /// <summary>Creates equal finite, nonnegative insets on all edges.</summary>
     public static Insets Uniform(float value) => new(value, value, value, value);
 
-    /// <summary>Creates equal horizontal and equal vertical logical-pixel insets.</summary>
+    /// <summary>Creates insets with one value for the horizontal edges and one for the vertical edges.</summary>
     public static Insets Symmetric(float horizontal, float vertical) =>
         new(horizontal, vertical, horizontal, vertical);
 

@@ -3,7 +3,7 @@ namespace Lucent.Core;
 /// <summary>Built-in component recipes for ordinary typed composition.</summary>
 public static class Components
 {
-    /// <summary>Creates one retained horizontal container that owns and mounts the supplied ordered content.</summary>
+    /// <summary>Creates a horizontal container for the supplied content. Use it to place child components in a row.</summary>
     [LucentComponent]
     public static ComponentRecipe Row(
         [DefaultContent] ComponentContent content,
@@ -21,7 +21,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates one retained vertical container that owns and mounts the supplied ordered content.</summary>
+    /// <summary>Creates a vertical container for the supplied content. Use it to stack child components in a column.</summary>
     [LucentComponent]
     public static ComponentRecipe Column(
         [DefaultContent] ComponentContent content,
@@ -39,7 +39,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates immutable text content for one retained text element.</summary>
+    /// <summary>Creates a text component that displays the supplied string.</summary>
     [LucentComponent]
     public static ComponentRecipe Text([DefaultContent] string content, Style? style = null)
     {
@@ -50,7 +50,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates reactive text content; the reader is tracked and updates the retained element without remounting it.</summary>
+    /// <summary>Creates a text component whose displayed string is read again when its value changes.</summary>
     [LucentComponent]
     public static ComponentRecipe Text([DefaultContent] Func<string> content, Style? style = null)
     {
@@ -76,7 +76,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates an invokable retained button whose callback runs only after its behavior accepts an input route.</summary>
+    /// <summary>Creates a button labeled with the supplied content. Use <paramref name="onInvoke"/> to respond when the user activates it.</summary>
     [LucentComponent]
     public static ComponentRecipe Button(
         [DefaultContent] string content,
@@ -91,7 +91,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a scope-owned single-line editor. The change callback observes committed text rather than IME preedit state.</summary>
+    /// <summary>Creates a single-line text editor. Use <paramref name="initialValue"/> for its starting text and <paramref name="onChange"/> to observe committed edits.</summary>
     [LucentComponent]
     public static ComponentRecipe TextField(
         string initialValue = "",
@@ -127,7 +127,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a selectable retained item with fixed text and list-owned selection semantics.</summary>
+    /// <summary>Creates a selectable list item with fixed text. Use <paramref name="onSelect"/> to respond when it is selected.</summary>
     [LucentComponent]
     public static ComponentRecipe Selectable(
         [DefaultContent] string content,
@@ -142,7 +142,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a selectable item whose text and selected state are read reactively without replacing its retained root.</summary>
+    /// <summary>Creates a selectable list item whose text and selected state follow the supplied readers.</summary>
     [LucentComponent]
     public static ComponentRecipe Selectable(
         [DefaultContent] Func<string> content,
@@ -177,7 +177,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a clipped retained viewport that owns its scroll offset and supplied content.</summary>
+    /// <summary>Creates a scrollable viewport that clips its content. Use it when content can be larger than the available space.</summary>
     [LucentComponent]
     public static ComponentRecipe ScrollViewport(
         [DefaultContent] ComponentContent content,
@@ -197,7 +197,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a fixed-row-height keyed list. Only the viewport window and two rows of overscan stay mounted.</summary>
+    /// <summary>Creates a scrollable list with a fixed row height. Use it for large collections so only rows near the viewport are kept active.</summary>
     [LucentComponent]
     public static ComponentRecipe VirtualizedList<TKey, TItem>(
         Func<IEnumerable<TItem>> source,
@@ -265,7 +265,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a noninteractive status element with immutable text.</summary>
+    /// <summary>Creates a noninteractive component that displays status text.</summary>
     [LucentComponent]
     public static ComponentRecipe Status([DefaultContent] string content, Style? style = null)
     {
@@ -276,7 +276,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a noninteractive status element whose text updates reactively.</summary>
+    /// <summary>Creates a noninteractive status component whose text follows the supplied reader.</summary>
     [LucentComponent]
     public static ComponentRecipe Status([DefaultContent] Func<string> content, Style? style = null)
     {
@@ -295,7 +295,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a progress element with a fixed value in the inclusive zero-to-one range.</summary>
+    /// <summary>Creates a progress component with a fixed value from 0 to 1, where 1 means complete.</summary>
     [LucentComponent]
     public static ComponentRecipe Progress(
         [DefaultContent] string label,
@@ -311,7 +311,7 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a progress element whose inclusive zero-to-one value is read reactively.</summary>
+    /// <summary>Creates a progress component whose value follows the supplied reader; values range from 0 to 1.</summary>
     [LucentComponent]
     public static ComponentRecipe Progress(
         [DefaultContent] string label,

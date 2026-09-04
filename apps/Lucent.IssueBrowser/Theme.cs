@@ -49,11 +49,11 @@ internal static class AppTheme
         IssueDensity density
     ) =>
         controls
-            .Set(Tokens.PageSurface, (Brush)surface)
+            .Set(Tokens.PageSurface, surface)
             .Set(Tokens.PageForeground, foreground)
-            .Set(Tokens.HeaderSurface, (Brush)header)
-            .Set(Tokens.RowSurface, (Brush)row)
-            .Set(Tokens.FocusSurface, (Brush)focus)
+            .Set(Tokens.HeaderSurface, header)
+            .Set(Tokens.RowSurface, row)
+            .Set(Tokens.FocusSurface, focus)
             .Set(Tokens.FocusForeground, focusForeground)
             .Set(Tokens.DensityHeaderHeight, density == IssueDensity.Comfortable ? 84f : 68f)
             .Set(Tokens.DensityFilterHeight, density == IssueDensity.Comfortable ? 28f : 22f)

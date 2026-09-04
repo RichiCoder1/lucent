@@ -55,14 +55,15 @@ public static class LuiCompiler
         var rootTokens = RootTokens(compilation, identity.RootNamespace);
         var diagnostics = new List<LuiDiagnostic>(document.Diagnostics);
         var writer = new Writer(document, identity, null, []);
-        if (diagnostics.Count == 0 && document.Component is not null)
+        if (document.Component is not null)
             writer.Document(diagnostics);
         if (diagnostics.Count != 0)
             return new LuiCompilationResult(
                 identity,
                 null,
                 new LuiSourceMap(identity, writer.Entries),
-                diagnostics.OrderBy(item => item.Span.Start).ToArray()
+                diagnostics.OrderBy(item => item.Span.Start).ToArray(),
+                writer.Text
             );
 
         var parseOptions =
@@ -171,7 +172,8 @@ public static class LuiCompiler
                 identity,
                 null,
                 probeMap,
-                diagnostics.OrderBy(item => item.Span.Start).ToArray()
+                diagnostics.OrderBy(item => item.Span.Start).ToArray(),
+                writer.Text
             );
         writer = new Writer(document, identity, plans, []);
         writer.Document(diagnostics);
@@ -181,7 +183,8 @@ public static class LuiCompiler
                 identity,
                 null,
                 map,
-                diagnostics.OrderBy(item => item.Span.Start).ToArray()
+                diagnostics.OrderBy(item => item.Span.Start).ToArray(),
+                writer.Text
             );
 
         var tree = CSharpSyntaxTree.ParseText(writer.Text, parseOptions, identity.HintName);
@@ -227,7 +230,9 @@ public static class LuiCompiler
                 new LuiDiagnostic(
                     "LUI2000",
                     diagnostic.GetMessage(CultureInfo.InvariantCulture),
-                    source
+                    source,
+                    diagnostic.Severity,
+                    diagnostic.Descriptor.Category
                 )
             );
         }
@@ -236,7 +241,8 @@ public static class LuiCompiler
             identity,
             diagnostics.Count == 0 ? writer.Text : null,
             map,
-            diagnostics.OrderBy(item => item.Span.Start).ToArray()
+            diagnostics.OrderBy(item => item.Span.Start).ToArray(),
+            writer.Text
         );
     }
 

@@ -131,21 +131,21 @@ public sealed class LuiGenerator : IIncrementalGenerator
     private static void ReportInputDiagnostics(SourceProductionContext production, ParseInput input)
     {
         if (!input.IsReadable)
-            production.ReportDiagnostic(
-                Diagnostic.Create(
-                    InvalidInput,
-                    Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()),
-                    input.Path
-                )
+            Report(
+                production,
+                InvalidInput,
+                Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()),
+                LuiDiagnosticProjection.Unreadable(input.Path),
+                input.Path
             );
         else if (!input.IsLogicalPathValid)
-            production.ReportDiagnostic(
-                Diagnostic.Create(
-                    InvalidLogicalPath,
-                    Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()),
-                    input.Path,
-                    input.LogicalPath
-                )
+            Report(
+                production,
+                InvalidLogicalPath,
+                Location.Create(input.Path, new TextSpan(0, 0), new LinePositionSpan()),
+                LuiDiagnosticProjection.InvalidLogicalPath(input.Path, input.LogicalPath),
+                input.Path,
+                input.LogicalPath
             );
         else
             foreach (var diagnostic in input.Document!.Diagnostics)
@@ -263,22 +263,26 @@ public sealed class LuiGenerator : IIncrementalGenerator
                 LuiProjectComponentIndex.DiagnosticKind.DuplicateComponent => DuplicateComponent,
                 _ => InvalidSibling,
             };
-            production.ReportDiagnostic(
+            var projection = LuiDiagnosticProjection.Index(diagnostic);
+            Report(
+                production,
+                descriptor,
+                input.Location(diagnostic.Span),
+                projection,
                 descriptor == DuplicateInput
-                    ? Diagnostic.Create(
-                        descriptor,
-                        input.Location(diagnostic.Span),
-                        input.Path,
-                        diagnostic.Value
-                    )
-                    : Diagnostic.Create(
-                        descriptor,
-                        input.Location(diagnostic.Span),
-                        diagnostic.Value
-                    )
+                    ? new object[] { input.Path, diagnostic.Value }
+                    : new object[] { diagnostic.Value }
             );
         }
     }
+
+    private static void Report(
+        SourceProductionContext production,
+        DiagnosticDescriptor descriptor,
+        Location location,
+        LuiDiagnostic projection,
+        params object[] arguments
+    ) => production.ReportDiagnostic(Diagnostic.Create(descriptor, location, arguments));
 
     private sealed class Publication
     {
@@ -321,8 +325,8 @@ public sealed class LuiGenerator : IIncrementalGenerator
             diagnostic.Id,
             "Invalid .lui syntax",
             "{0}",
-            "Lucent.Lui",
-            DiagnosticSeverity.Error,
+            diagnostic.Source,
+            diagnostic.Severity,
             true
         );
 

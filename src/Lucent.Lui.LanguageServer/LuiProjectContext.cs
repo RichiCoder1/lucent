@@ -1,7 +1,13 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Xml.Linq;
 using Lucent.Lui.Compiler;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Classification;
+using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
 
@@ -9,19 +15,44 @@ namespace Lucent.Lui.LanguageServer;
 
 internal sealed class LuiProjectContext : IDisposable
 {
+    internal static readonly string[] SemanticTokenTypes =
+    [
+        "keyword",
+        "type",
+        "property",
+        "enumMember",
+    ];
+
+    private static readonly string[] stylePropertyTypes =
+    [
+        "Lucent.Core.LayoutProperties",
+        "Lucent.Core.VisualProperties",
+        "Lucent.Core.TypographyProperties",
+        "Lucent.Core.InputProperties",
+    ];
     private readonly object gate = new();
-    private readonly MSBuildWorkspace workspace;
-    private readonly ProjectId projectId;
+    private MSBuildWorkspace workspace;
+    private ProjectId projectId;
+    private readonly string projectPath;
     private readonly Dictionary<Uri, GeneratedDocument> generated = [];
+    private readonly ConditionalWeakTable<LuiCompilationResult, SnapshotEpoch> resultEpochs = new();
+    private readonly Dictionary<string, SourceText> overlays = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+    private HashSet<string> projectDirectories;
     private Solution solution;
     private long epoch;
+    private bool reloadFailed;
     private bool disposed;
 
     private LuiProjectContext(MSBuildWorkspace workspace, Project project)
     {
         this.workspace = workspace;
         projectId = project.Id;
+        projectPath = Path.GetFullPath(project.FilePath!);
         solution = project.Solution;
+        projectDirectories = ProjectDirectories(project)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     internal static async Task<LuiProjectContext> LoadAsync(
@@ -90,7 +121,11 @@ internal sealed class LuiProjectContext : IDisposable
             await beforeCommit().ConfigureAwait(false);
         lock (gate)
         {
-            if (disposed || !generated.TryGetValue(published.GeneratedUri, out var cached))
+            if (
+                disposed
+                || epoch != published.Epoch
+                || !generated.TryGetValue(published.GeneratedUri, out var cached)
+            )
                 return null;
             if (entry is null)
                 return null;
@@ -109,6 +144,8 @@ internal sealed class LuiProjectContext : IDisposable
         if (!Owns(uri))
             return null;
         var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (snapshot.MetadataDiagnostic is not null)
+            return null;
         if (!snapshot.Index.TryGet(snapshot.Document.Path, out _))
             return null;
         var result = LuiCompiler.Compile(
@@ -116,6 +153,7 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Compilation,
             snapshot.Identity
         );
+        Track(result, snapshot.Epoch);
         if (!result.Success)
             return null;
         var published = new PublishedDocument(
@@ -129,7 +167,9 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Text,
             snapshot.Uri,
             snapshot.Index,
-            snapshot.Compilation
+            snapshot.Compilation,
+            snapshot.Epoch,
+            snapshot.Document.Syntax
         );
         if (!await IsCurrentAsync(result, cancellationToken).ConfigureAwait(false))
             return null;
@@ -142,30 +182,518 @@ internal sealed class LuiProjectContext : IDisposable
         }
     }
 
+    internal async Task<IReadOnlyList<LuiEditorDiagnostic>?> DiagnosticsAsync(
+        Uri uri,
+        CancellationToken cancellationToken
+    )
+    {
+        lock (gate)
+            ThrowIfDisposed();
+        if (!Owns(uri))
+            return [];
+        var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (snapshot.MetadataDiagnostic is not null)
+        {
+            var metadata = EditorDiagnostic(snapshot.Compilation, snapshot.MetadataDiagnostic);
+            return await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
+                ? metadata is null
+                    ? []
+                    : [metadata]
+                : null;
+        }
+        var result = LuiCompiler.Compile(
+            snapshot.Document.Syntax,
+            snapshot.Compilation,
+            snapshot.Identity
+        );
+        var diagnostics = result
+            .Diagnostics.Select(diagnostic => EditorDiagnostic(snapshot.Compilation, diagnostic))
+            .Where(diagnostic => diagnostic is not null)
+            .Cast<LuiEditorDiagnostic>()
+            .ToList();
+        foreach (
+            var diagnostic in snapshot.Index.Diagnostics.Where(item =>
+                String.Equals(item.Document.Path, snapshot.Document.Path, StringComparison.Ordinal)
+            )
+        )
+        {
+            var editor = EditorDiagnostic(
+                snapshot.Compilation,
+                LuiDiagnosticProjection.Index(diagnostic)
+            );
+            if (editor is not null)
+                diagnostics.Add(editor);
+        }
+        var published = diagnostics
+            .OrderBy(diagnostic => diagnostic.Span.Start)
+            .ThenBy(diagnostic => diagnostic.Code, StringComparer.Ordinal)
+            .ToArray();
+        return await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
+            ? published
+            : null;
+    }
+
+    internal async Task<IReadOnlyList<LuiDocumentSymbol>?> DocumentSymbolsAsync(
+        Uri uri,
+        CancellationToken cancellationToken
+    )
+    {
+        lock (gate)
+            ThrowIfDisposed();
+        if (!Owns(uri))
+            return [];
+        var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        var syntax = snapshot.Document.Syntax;
+        var symbols = new List<LuiDocumentSymbol>();
+        if (syntax.Component is { } component)
+        {
+            var children = component
+                .Parameters.Select(parameter => new LuiDocumentSymbol(
+                    parameter.Name.Text,
+                    13,
+                    parameter.Span,
+                    parameter.Name.Span,
+                    []
+                ))
+                .Concat(component.Body.SelectMany(StructureSymbols))
+                .ToArray();
+            symbols.Add(
+                new LuiDocumentSymbol(
+                    component.Name.Text,
+                    12,
+                    component.Span,
+                    component.Name.Span,
+                    children
+                )
+            );
+        }
+        symbols.AddRange(
+            syntax.Styles.Select(style => new LuiDocumentSymbol(
+                style.Name.Text,
+                5,
+                style.Span,
+                style.Name.Span,
+                style.Members.SelectMany(StyleSymbols).ToArray()
+            ))
+        );
+        var published = symbols.OrderBy(symbol => symbol.Span.Start).ToArray();
+        return await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
+            ? published
+            : null;
+    }
+
+    internal async Task<int[]?> SemanticTokensAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        lock (gate)
+            ThrowIfDisposed();
+        if (!Owns(uri))
+            return [];
+        var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (snapshot.MetadataDiagnostic is not null)
+            return [];
+        var result = LuiCompiler.Compile(
+            snapshot.Document.Syntax,
+            snapshot.Compilation,
+            snapshot.Identity
+        );
+        Track(result, snapshot.Epoch);
+        if (result.ProjectionSource is null)
+            return [];
+        var options =
+            snapshot
+                .Compilation.SyntaxTrees.Select(tree => tree.Options)
+                .OfType<CSharpParseOptions>()
+                .FirstOrDefault()
+            ?? CSharpParseOptions.Default;
+        var tree = CSharpSyntaxTree.ParseText(
+            result.ProjectionSource,
+            options,
+            cancellationToken: cancellationToken
+        );
+        using var classificationWorkspace = CreateClassificationWorkspace(
+            snapshot.Compilation,
+            tree,
+            result.ProjectionSource
+        );
+        var classified = await Classifier
+            .GetClassifiedSpansAsync(
+                classificationWorkspace.Document,
+                new TextSpan(0, result.ProjectionSource.Length),
+                cancellationToken
+            )
+            .ConfigureAwait(false);
+        var spans = SyntaxSemanticSpans(snapshot.Document.Syntax)
+            .Concat(ProjectClassifications(result.Map, classified))
+            .Where(span => span.Span.Length != 0 && span.Span.End <= snapshot.Text.Length)
+            .OrderBy(span => span.Priority)
+            .ThenBy(span => span.Span.Start)
+            .ThenBy(span => span.Span.Length)
+            .ThenBy(span => span.Type, StringComparer.Ordinal)
+            .Aggregate(
+                new List<LuiSemanticSpan>(),
+                (selected, span) =>
+                {
+                    if (!selected.Any(other => Overlaps(other.Span, span.Span)))
+                        selected.Add(span);
+                    return selected;
+                }
+            )
+            .OrderBy(span => span.Span.Start)
+            .ThenBy(span => span.Span.Length)
+            .ThenBy(span => span.Type, StringComparer.Ordinal)
+            .ToArray();
+        if (!await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false))
+            return null;
+        return EncodeSemanticTokens(snapshot.Text, spans);
+    }
+
+    internal async Task<IReadOnlyList<LuiCompletionItem>> CompletionsAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        if (semantic is null)
+            return null!;
+        var special = SpecialCompletions(semantic, offset);
+        if (special is not null)
+            return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+                ? special
+                : null!;
+        if (semantic.Position < 0)
+            return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+                ? []
+                : null!;
+        var completions = await RoslynCompletionsAsync(semantic, cancellationToken)
+            .ConfigureAwait(false);
+        if (
+            StyleAssignmentAt(semantic.Document.Syntax, offset) is { } assignment
+            && Contains(assignment.Expression.Span, offset)
+        )
+            completions = DistinctCompletions(Symbols(RootTokens(semantic)).Concat(completions));
+        return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+            ? completions
+            : null!;
+    }
+
+    private static async Task<IReadOnlyList<LuiCompletionItem>> RoslynCompletionsAsync(
+        SemanticDocument semantic,
+        CancellationToken cancellationToken
+    )
+    {
+        var host = MefHostServices.Create(
+            MefHostServices
+                .DefaultAssemblies.Concat([Assembly.Load("Microsoft.CodeAnalysis.CSharp.Features")])
+                .Distinct()
+        );
+        using var workspace = new AdhocWorkspace(host);
+        var projectId = ProjectId.CreateNewId();
+        var documentId = DocumentId.CreateNewId(projectId);
+        var solution = workspace.CurrentSolution.AddProject(
+            ProjectInfo.Create(
+                projectId,
+                VersionStamp.Create(),
+                "LucentLuiCompletion",
+                "LucentLuiCompletion",
+                LanguageNames.CSharp,
+                compilationOptions: semantic.Model.Compilation.Options,
+                parseOptions: semantic.Tree.Options,
+                metadataReferences: semantic.Model.Compilation.References
+            )
+        );
+        foreach (
+            var tree in semantic.Model.Compilation.SyntaxTrees.Where(tree => tree != semantic.Tree)
+        )
+        {
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(projectId),
+                Path.GetFileName(tree.FilePath),
+                tree.GetText(cancellationToken),
+                filePath: tree.FilePath
+            );
+        }
+        solution = solution.AddDocument(
+            documentId,
+            "generated.lui.cs",
+            SourceText.From(semantic.Document.GeneratedText),
+            filePath: semantic.Document.GeneratedUri.AbsoluteUri
+        );
+        var document = solution.GetDocument(documentId)!;
+        var service = CompletionService.GetService(document);
+        if (service is null)
+            return [];
+        var list = await service
+            .GetCompletionsAsync(
+                document,
+                semantic.Position,
+                CompletionTrigger.Invoke,
+                cancellationToken: cancellationToken
+            )
+            .ConfigureAwait(false);
+        if (list is null)
+            return [];
+        var results = new List<LuiCompletionItem>();
+        foreach (var item in list.ItemsList)
+        {
+            var description = await service
+                .GetDescriptionAsync(document, item, cancellationToken)
+                .ConfigureAwait(false);
+            var text = String
+                .Concat(description?.TaggedParts.Select(part => part.Text) ?? [])
+                .Trim();
+            results.Add(
+                new LuiCompletionItem(
+                    item.DisplayText,
+                    CompletionKind(item.Tags),
+                    item.InlineDescription ?? text,
+                    text.Length == 0 ? null : text
+                )
+            );
+        }
+        return DistinctCompletions(results);
+    }
+
+    private static LuiCompletionItem[]? SpecialCompletions(SemanticDocument semantic, int offset)
+    {
+        var syntax = semantic.Document.Syntax;
+        var directive = syntax.TopLevel.FirstOrDefault(item =>
+            item is LuiNamespaceSyntax or LuiUsingSyntax && Contains(item.Span, offset)
+        );
+        if (directive is not null)
+            return Symbols(NamespaceMembers(DirectiveNamespace(semantic, directive, offset)));
+
+        var element = ElementAt(syntax, offset);
+        if (element is not null && Contains(element.Name.Span, offset))
+            return Symbols(ComponentSymbols(semantic));
+        if (
+            element is not null
+            && element.OpenAngle.Span.End <= offset
+            && offset <= element.OpenCloseAngle.Span.Start
+            && !element.Attributes.Any(attribute => Contains(attribute.Value.Span, offset))
+        )
+            return DistinctCompletions(
+                Symbols(ComponentParameters(semantic, element))
+                    .Append(new LuiCompletionItem("name", 6, "string name", null))
+            );
+
+        if (StyleAssignmentAt(syntax, offset) is { } assignment)
+        {
+            if (Contains(assignment.Property.Span, offset))
+                return Symbols(StyleProperties(semantic));
+        }
+        if (VariantAt(syntax, offset) is { } variant && Contains(variant.Condition.Span, offset))
+            return Symbols(VariantStates(semantic.Model.Compilation));
+        if (StyleReferenceAt(syntax, offset))
+            return DistinctCompletions(
+                syntax.Styles.Select(style => new LuiCompletionItem(
+                    style.Name.Text,
+                    5,
+                    "Style",
+                    null
+                ))
+            );
+        return null;
+    }
+
+    private static LuiCompletionItem[] Symbols(IEnumerable<ISymbol> symbols) =>
+        DistinctCompletions(
+            symbols.Select(symbol => new LuiCompletionItem(
+                symbol.Name,
+                CompletionKind(symbol),
+                SymbolText(symbol),
+                Documentation(symbol)
+            ))
+        );
+
+    private static LuiCompletionItem[] DistinctCompletions(IEnumerable<LuiCompletionItem> items) =>
+        items
+            .GroupBy(item => item.Label + "\0" + item.Kind, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(item => item.Label, StringComparer.Ordinal)
+            .ToArray();
+
+    internal async Task<LuiHover?> HoverAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        if (semantic is not null)
+        {
+            var root = semantic.Tree.GetRoot(cancellationToken);
+            var literal = root.FindToken(
+                    Math.Clamp(semantic.Position, 0, Math.Max(0, root.FullSpan.End - 1))
+                )
+                .Parent?.AncestorsAndSelf()
+                .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.LiteralExpressionSyntax>()
+                .FirstOrDefault();
+            var type = literal is null
+                ? null
+                : semantic.Model.GetTypeInfo(literal, cancellationToken).Type;
+            if (
+                type is not null
+                && await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+            )
+                return new LuiHover(SymbolText(type), null);
+        }
+        var symbol = semantic is null ? null : SymbolAt(semantic);
+        if (
+            symbol is null
+            || !await CanPublishAsync(semantic!.Document, cancellationToken).ConfigureAwait(false)
+        )
+            return null;
+        return new LuiHover(SymbolText(symbol), Documentation(symbol));
+    }
+
+    internal async Task<LuiSignatureHelp?> SignatureHelpAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        if (semantic is null)
+            return null;
+        var element = ElementAt(semantic.Document.Syntax, offset);
+        if (element is null)
+            return null;
+        var invocation = InvocationAt(semantic);
+        var bound = invocation is null
+            ? null
+            : semantic.Model.GetSymbolInfo(invocation, CancellationToken.None).Symbol
+                as IMethodSymbol;
+        var methods = ComponentSymbols(semantic, element.Name.Text)
+            .OfType<IMethodSymbol>()
+            .Concat(bound is null ? [] : [bound])
+            .Distinct(SymbolEqualityComparer.Default)
+            .OfType<IMethodSymbol>()
+            .ToArray();
+        if (methods.Length == 0)
+            return null;
+        var activeSignature = bound is null
+            ? 0
+            : Array.FindIndex(
+                methods,
+                method => SymbolEqualityComparer.Default.Equals(method, bound)
+            );
+        var activeMethod = methods[Math.Max(0, activeSignature)];
+        var attribute = element.Attributes.FirstOrDefault(attribute =>
+            Contains(attribute.Span, offset)
+        );
+        var parameter =
+            attribute is not null
+                ? activeMethod.Parameters.FirstOrDefault(parameter =>
+                    String.Equals(parameter.Name, attribute.Name.Text, StringComparison.Ordinal)
+                )
+            : element.Children.Any(child => Contains(child.Span, offset))
+                ? activeMethod.Parameters.FirstOrDefault(IsDefaultContent)
+            : null;
+        var help = new LuiSignatureHelp(
+            methods
+                .Select(method => new LuiSignature(
+                    SymbolText(method),
+                    method.Parameters.Select(parameter => SymbolText(parameter)).ToArray(),
+                    Documentation(method)
+                ))
+                .ToArray(),
+            Math.Max(0, activeSignature),
+            parameter?.Ordinal ?? 0
+        );
+        return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+            ? help
+            : null;
+    }
+
+    internal async Task<LuiNavigationTarget?> DefinitionAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (generated.TryGetValue(uri, out var cached))
+                return cached.ToSource(offset);
+        }
+        var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        if (semantic is null)
+            return null;
+        var symbol = SymbolAt(semantic);
+        var target = symbol is null ? null : DeclarationTarget(semantic.Document, symbol);
+        if (target is not null)
+            return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+                ? target
+                : null;
+        var entry = semantic
+            .Document.Result.Map.FromSource(new LuiSpan(offset, 0))
+            .Where(item => !item.Hidden)
+            .OrderBy(item => item.Kind == LuiMapKind.Symbol ? 0 : 1)
+            .ThenBy(item => item.Generated.Length)
+            .FirstOrDefault();
+        var mapped = entry is null ? null : DeclarationTarget(semantic.Document, entry);
+        if (mapped is not null)
+            return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+                ? mapped
+                : null;
+        if (!semantic.Document.Result.Success)
+            return null;
+        return
+            symbol is null
+            || !await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+            ? null
+            : DeclarationTarget(semantic.Document, symbol);
+    }
+
     internal async Task<bool> IsCurrentAsync(
         LuiCompilationResult result,
         CancellationToken cancellationToken
     )
     {
-        Uri uri;
         lock (gate)
         {
-            if (disposed)
+            if (
+                resultEpochs.TryGetValue(result, out var captured)
+                && (disposed || captured.Value != epoch)
+            )
                 return false;
-            uri = new Uri(
-                Project()
-                    .AdditionalDocuments.Single(document =>
-                        new LuiDocumentIdentity(LogicalPath(Project(), document)).Equals(
-                            result.Identity.Document
-                        )
-                    )
-                    .FilePath!,
-                UriKind.Absolute
-            );
         }
+        return await IsCurrentAsync(result.Identity, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void Track(LuiCompilationResult result, long captured) =>
+        resultEpochs.Add(result, new SnapshotEpoch(captured));
+
+    private async Task<bool> IsCurrentAsync(
+        LuiFreshnessIdentity identity,
+        CancellationToken cancellationToken
+    )
+    {
         try
         {
-            return result.Identity.CanPublishTo(
+            Uri uri;
+            lock (gate)
+            {
+                if (disposed || reloadFailed)
+                    return false;
+                var project = Project();
+                var document = project.AdditionalDocuments.FirstOrDefault(document =>
+                    (
+                        LuiDocumentIdentity.TryCreate(
+                            LogicalPath(project, document),
+                            out var documentIdentity
+                        )
+                            ? documentIdentity!
+                            : new LuiDocumentIdentity(Path.GetFileName(document.FilePath!))
+                    ).Equals(identity.Document)
+                );
+                if (document is null)
+                    return false;
+                uri = new Uri(document.FilePath!, UriKind.Absolute);
+            }
+            return identity.CanPublishTo(
                 (await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false)).Identity
             );
         }
@@ -173,6 +701,27 @@ internal sealed class LuiProjectContext : IDisposable
         {
             return false;
         }
+    }
+
+    private async Task<bool> CanPublishAsync(Snapshot snapshot, CancellationToken cancellationToken)
+    {
+        if (!await IsCurrentAsync(snapshot.Identity, cancellationToken).ConfigureAwait(false))
+            return false;
+        lock (gate)
+            return !disposed && epoch == snapshot.Epoch;
+    }
+
+    private async Task<bool> CanPublishAsync(
+        PublishedDocument document,
+        CancellationToken cancellationToken
+    )
+    {
+        if (
+            !await IsCurrentAsync(document.Result.Identity, cancellationToken).ConfigureAwait(false)
+        )
+            return false;
+        lock (gate)
+            return !disposed && epoch == document.Epoch;
     }
 
     internal async Task<string?> GetTextAsync(Uri uri, CancellationToken cancellationToken)
@@ -202,11 +751,71 @@ internal sealed class LuiProjectContext : IDisposable
 
     internal void ReplaceText(Uri uri, string text) => Update(uri, SourceText.From(text));
 
+    internal async Task<bool> ReloadIfRelevantAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        if (!IsRelevantProjectInput(uri))
+            return false;
+        var reloaded = MSBuildWorkspace.Create();
+        try
+        {
+            var project = await reloaded
+                .OpenProjectAsync(projectPath, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            lock (gate)
+            {
+                ThrowIfDisposed();
+                foreach (var (path, text) in overlays)
+                {
+                    var document = project.AdditionalDocuments.SingleOrDefault(item =>
+                        String.Equals(item.FilePath, path, StringComparison.OrdinalIgnoreCase)
+                    );
+                    if (document is not null)
+                        project = project
+                            .Solution.WithAdditionalDocumentText(document.Id, text)
+                            .GetProject(project.Id)!;
+                }
+                var previous = workspace;
+                workspace = reloaded;
+                projectId = project.Id;
+                solution = project.Solution;
+                projectDirectories = ProjectDirectories(project)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                reloadFailed = false;
+                epoch++;
+                generated.Clear();
+                previous.Dispose();
+            }
+            return true;
+        }
+        catch
+        {
+            reloaded.Dispose();
+            lock (gate)
+            {
+                if (!disposed)
+                {
+                    reloadFailed = true;
+                    epoch++;
+                    generated.Clear();
+                }
+            }
+            return true;
+        }
+    }
+
+    internal IReadOnlyList<string> ProjectDirectories()
+    {
+        lock (gate)
+            return projectDirectories
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+    }
+
     internal bool Owns(Uri uri)
     {
         lock (gate)
         {
-            if (disposed || !uri.IsFile)
+            if (disposed || reloadFailed || !uri.IsFile)
                 return false;
             return Project()
                 .AdditionalDocuments.Any(document =>
@@ -223,19 +832,105 @@ internal sealed class LuiProjectContext : IDisposable
     {
         if (!Owns(uri))
             return;
-        Update(uri, SourceText.From(File.ReadAllText(FilePath(uri))));
+        Update(uri, SourceText.From(File.ReadAllText(FilePath(uri))), false);
     }
 
-    private void Update(Uri uri, SourceText text)
+    private void Update(Uri uri, SourceText text, bool overlay = true)
     {
         lock (gate)
         {
             ThrowIfDisposed();
             var document = FindDocument(Project(), uri);
             solution = solution.WithAdditionalDocumentText(document.Id, text);
+            if (overlay)
+                overlays[document.FilePath!] = text;
+            else
+                overlays.Remove(document.FilePath!);
             epoch++;
             generated.Clear();
         }
+    }
+
+    private bool IsRelevantProjectInput(Uri uri)
+    {
+        if (!uri.IsFile)
+            return false;
+        var path = Path.GetFullPath(FilePath(uri));
+        var name = Path.GetFileName(path);
+        if (
+            IsProjectAncestor(Path.GetDirectoryName(path)!)
+            && (
+                String.Equals(name, "global.json", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(name, ".editorconfig", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(name, "Directory.Build.props", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(
+                    name,
+                    "Directory.Packages.props",
+                    StringComparison.OrdinalIgnoreCase
+                )
+                || String.Equals(
+                    name,
+                    "Directory.Build.targets",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+            return true;
+        if (!projectDirectories.Any(directory => IsWithin(path, directory)))
+            return false;
+        return String.Equals(name, ".editorconfig", StringComparison.OrdinalIgnoreCase)
+            || String.Equals(name, "global.json", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".props", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".winmd", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsWithin(string path, string directory) =>
+        String.Equals(path, directory, StringComparison.OrdinalIgnoreCase)
+        || path.StartsWith(
+            directory + Path.DirectorySeparatorChar,
+            StringComparison.OrdinalIgnoreCase
+        );
+
+    private static IEnumerable<string> ProjectDirectories(Project project) =>
+        ProjectGraph(project)
+            .Where(project => project.FilePath is not null)
+            .Select(project => Path.GetDirectoryName(Path.GetFullPath(project.FilePath!))!);
+
+    private static IEnumerable<Project> ProjectGraph(Project project)
+    {
+        var visited = new HashSet<ProjectId>();
+        var pending = new Stack<Project>();
+        pending.Push(project);
+        while (pending.TryPop(out var current))
+        {
+            if (!visited.Add(current.Id))
+                continue;
+            yield return current;
+            foreach (var reference in current.ProjectReferences)
+            {
+                var referenced = current.Solution.GetProject(reference.ProjectId);
+                if (referenced is not null)
+                    pending.Push(referenced);
+            }
+        }
+    }
+
+    private bool IsProjectAncestor(string directory)
+    {
+        foreach (var root in projectDirectories)
+        {
+            for (var current = root; current is not null; current = Path.GetDirectoryName(current))
+            {
+                if (String.Equals(current, directory, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        return false;
     }
 
     private async Task<Snapshot> SnapshotAsync(Uri uri, CancellationToken cancellationToken)
@@ -245,11 +940,15 @@ internal sealed class LuiProjectContext : IDisposable
         lock (gate)
         {
             ThrowIfDisposed();
+            if (reloadFailed)
+                throw new InvalidOperationException("The evaluated project reload failed.");
             project = Project();
             captured = epoch;
         }
         var current = FindDocument(project, uri);
         var documents = new List<LuiProjectDocument>();
+        LuiProjectDocument? input = null;
+        LuiDiagnostic? metadataDiagnostic = null;
         foreach (
             var document in project.AdditionalDocuments.Where(item =>
                 item.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
@@ -258,14 +957,39 @@ internal sealed class LuiProjectContext : IDisposable
         {
             var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
             var source = text.ToString();
-            documents.Add(
-                new LuiProjectDocument(
-                    document.FilePath!,
-                    LogicalPath(project, document),
-                    source,
-                    DocumentVersion(project, document, source)
-                )
+            var logicalPath = LogicalPath(project, document);
+            var validLogicalPath = LuiDocumentIdentity.TryCreate(
+                logicalPath,
+                out var logicalIdentity
             );
+            if (
+                !validLogicalPath
+                && String.Equals(
+                    document.FilePath,
+                    current.FilePath,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+                metadataDiagnostic = LuiDiagnosticProjection.InvalidLogicalPath(
+                    document.FilePath!,
+                    logicalPath
+                );
+            var projectDocument = new LuiProjectDocument(
+                document.FilePath!,
+                logicalIdentity?.LogicalPath ?? Path.GetFileName(document.FilePath!),
+                source,
+                DocumentVersion(project, document, source)
+            );
+            if (validLogicalPath)
+                documents.Add(projectDocument);
+            if (
+                String.Equals(
+                    document.FilePath,
+                    current.FilePath,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+                input = projectDocument;
         }
         var compilation =
             await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false)
@@ -280,9 +1004,8 @@ internal sealed class LuiProjectContext : IDisposable
         );
         var index = LuiProjectComponentIndex.Build(compilation, documents, cancellationToken);
         compilation = index.Augment(compilation, current.FilePath!);
-        var input = documents.Single(document =>
-            String.Equals(document.Path, current.FilePath, StringComparison.OrdinalIgnoreCase)
-        );
+        if (input is null)
+            throw new InvalidOperationException("The evaluated project has no current document.");
         var globals = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
         globals.TryGetValue("build_property.LucentLuiProjectEpoch", out var projectEpoch);
         globals.TryGetValue("build_property.LucentLuiProjectIdentity", out var projectIdentity);
@@ -314,7 +1037,8 @@ internal sealed class LuiProjectContext : IDisposable
             identity,
             await current.GetTextAsync(cancellationToken).ConfigureAwait(false),
             uri,
-            index
+            index,
+            metadataDiagnostic
         );
     }
 
@@ -326,7 +1050,6 @@ internal sealed class LuiProjectContext : IDisposable
             && project
                 .AnalyzerOptions.AnalyzerConfigOptionsProvider.GetOptions(additional)
                 .TryGetValue("build_metadata.AdditionalFiles.LucentLuiLogicalPath", out var path)
-            && !String.IsNullOrWhiteSpace(path)
         )
             return path;
         return Path.GetRelativePath(Path.GetDirectoryName(project.FilePath)!, document.FilePath!);
@@ -390,6 +1113,8 @@ internal sealed class LuiProjectContext : IDisposable
         var position = Math.Min(entry.Generated.Start, root.FullSpan.End - 1);
         for (var node = root.FindToken(position).Parent; node is not null; node = node.Parent)
         {
+            if (node.SpanStart < entry.Generated.Start || node.Span.End > entry.Generated.End)
+                break;
             var symbol = model.GetSymbolInfo(node).Symbol as IMethodSymbol;
             if (symbol is null)
                 continue;
@@ -409,6 +1134,778 @@ internal sealed class LuiProjectContext : IDisposable
             );
         }
         return null;
+    }
+
+    private async Task<SemanticDocument?> SemanticAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (generated.TryGetValue(uri, out var cached))
+                return GeneratedSemantic(cached.Document, offset);
+        }
+        if (!Owns(uri))
+            return null;
+        var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (snapshot.MetadataDiagnostic is not null)
+            return null;
+        var result = LuiCompiler.Compile(
+            snapshot.Document.Syntax,
+            snapshot.Compilation,
+            snapshot.Identity
+        );
+        Track(result, snapshot.Epoch);
+        if (
+            result.ProjectionSource is null
+            || !await IsCurrentAsync(result, cancellationToken).ConfigureAwait(false)
+        )
+            return null;
+        var document = new PublishedDocument(
+            result,
+            new Uri(
+                "lucent-lui://generated/"
+                    + result.Identity.MapIdentity
+                    + "/"
+                    + result.Identity.HintName
+            ),
+            snapshot.Text,
+            snapshot.Uri,
+            snapshot.Index,
+            snapshot.Compilation,
+            snapshot.Epoch,
+            snapshot.Document.Syntax
+        );
+        if (result.Success)
+        {
+            lock (gate)
+            {
+                if (disposed || epoch != snapshot.Epoch)
+                    return null;
+                generated[document.GeneratedUri] = new GeneratedDocument(document);
+            }
+        }
+        var entry = document
+            .Result.Map.FromSource(new LuiSpan(offset, 0))
+            .Where(item => !item.Hidden && item.Generated.Length != 0)
+            .OrderBy(item => item.Kind == LuiMapKind.Symbol ? 0 : 1)
+            .ThenBy(item => item.Generated.Length)
+            .FirstOrDefault();
+        var options =
+            document
+                .Compilation.SyntaxTrees.Select(tree => tree.Options)
+                .OfType<CSharpParseOptions>()
+                .FirstOrDefault()
+            ?? CSharpParseOptions.Default;
+        var tree = CSharpSyntaxTree.ParseText(
+            document.GeneratedText,
+            options,
+            document.GeneratedUri.AbsoluteUri,
+            cancellationToken: CancellationToken.None
+        );
+        var compilation = ProjectionCompilation(document.Compilation, tree);
+        var position =
+            entry is null ? -1
+            : entry.Kind == LuiMapKind.Symbol && entry.Generated.Length > entry.Source.Length
+                ? entry.Generated.End - 1
+            : entry.Generated.Start
+                + Math.Min(
+                    Math.Max(0, offset - entry.Source.Start),
+                    Math.Max(0, entry.Generated.Length - 1)
+                );
+        return new SemanticDocument(
+            document,
+            tree,
+            compilation.GetSemanticModel(tree),
+            position,
+            entry
+        );
+    }
+
+    private static SemanticDocument GeneratedSemantic(PublishedDocument document, int offset)
+    {
+        var options =
+            document
+                .Compilation.SyntaxTrees.Select(tree => tree.Options)
+                .OfType<CSharpParseOptions>()
+                .FirstOrDefault()
+            ?? CSharpParseOptions.Default;
+        var tree = CSharpSyntaxTree.ParseText(
+            document.GeneratedText,
+            options,
+            document.GeneratedUri.AbsoluteUri,
+            cancellationToken: CancellationToken.None
+        );
+        var compilation = ProjectionCompilation(document.Compilation, tree);
+        return new SemanticDocument(
+            document,
+            tree,
+            compilation.GetSemanticModel(tree),
+            Math.Clamp(offset, 0, Math.Max(0, document.GeneratedText.Length - 1)),
+            null
+        );
+    }
+
+    private static LuiEditorDiagnostic? EditorDiagnostic(
+        Compilation compilation,
+        LuiDiagnostic diagnostic
+    )
+    {
+        var report = compilation.Options.SpecificDiagnosticOptions.TryGetValue(
+            diagnostic.Id,
+            out var configured
+        )
+            ? configured
+            : compilation.Options.GeneralDiagnosticOption;
+        if (report == ReportDiagnostic.Suppress)
+            return null;
+        var severity = report switch
+        {
+            ReportDiagnostic.Error => DiagnosticSeverity.Error,
+            ReportDiagnostic.Warn => DiagnosticSeverity.Warning,
+            ReportDiagnostic.Info => DiagnosticSeverity.Info,
+            ReportDiagnostic.Hidden => DiagnosticSeverity.Hidden,
+            _ => diagnostic.Severity,
+        };
+        return new LuiEditorDiagnostic(
+            diagnostic.Id,
+            diagnostic.Message,
+            diagnostic.Span,
+            severity switch
+            {
+                DiagnosticSeverity.Error => 1,
+                DiagnosticSeverity.Warning => 2,
+                DiagnosticSeverity.Info => 3,
+                _ => 4,
+            },
+            diagnostic.Source
+        );
+    }
+
+    private static IEnumerable<LuiDocumentSymbol> StructureSymbols(LuiBodySyntax node) =>
+        node switch
+        {
+            LuiElementSyntax element =>
+            [
+                new LuiDocumentSymbol(
+                    element.Name.Text,
+                    8,
+                    element.Span,
+                    element.Name.Span,
+                    element
+                        .Attributes.Select(attribute => new LuiDocumentSymbol(
+                            attribute.Name.Text,
+                            7,
+                            attribute.Span,
+                            attribute.Name.Span,
+                            attribute.Value is LuiStyleWithSyntax style
+                                ? style.Members.SelectMany(StyleSymbols).ToArray()
+                                : []
+                        ))
+                        .Concat(element.Children.SelectMany(StructureSymbols))
+                        .ToArray()
+                ),
+            ],
+            LuiIfSyntax conditional =>
+            [
+                new LuiDocumentSymbol(
+                    "if",
+                    6,
+                    conditional.Span,
+                    conditional.IfKeyword.Span,
+                    conditional
+                        .ThenBody.Concat(conditional.ElseBody)
+                        .SelectMany(StructureSymbols)
+                        .ToArray()
+                ),
+            ],
+            LuiForEachSyntax loop =>
+            [
+                new LuiDocumentSymbol(
+                    "foreach " + loop.Variable.Text,
+                    6,
+                    loop.Span,
+                    loop.Variable.Span,
+                    loop.Body.SelectMany(StructureSymbols).ToArray()
+                ),
+            ],
+            _ => [],
+        };
+
+    private static IEnumerable<LuiDocumentSymbol> StyleSymbols(LuiStyleMemberSyntax member) =>
+        member switch
+        {
+            LuiStyleAssignmentSyntax assignment =>
+            [
+                new LuiDocumentSymbol(
+                    assignment.Property.Text,
+                    7,
+                    assignment.Span,
+                    assignment.Property.Span,
+                    []
+                ),
+            ],
+            LuiVariantGroupSyntax variant =>
+            [
+                new LuiDocumentSymbol(
+                    "when " + variant.Condition.Text,
+                    6,
+                    variant.Span,
+                    variant.Condition.Span,
+                    variant.Assignments.SelectMany(StyleSymbols).ToArray()
+                ),
+            ],
+            _ => [],
+        };
+
+    private static IEnumerable<ISymbol> ComponentSymbols(
+        SemanticDocument semantic,
+        string? name = null
+    )
+    {
+        return semantic
+            .Model.LookupSymbols(semantic.Position)
+            .OfType<IMethodSymbol>()
+            .Where(method =>
+                name is null || String.Equals(method.Name, name, StringComparison.Ordinal)
+            )
+            .Where(IsComponent)
+            .Where(symbol => IsAccessible(semantic, symbol))
+            .Cast<ISymbol>();
+    }
+
+    private static ClassificationWorkspace CreateClassificationWorkspace(
+        Compilation compilation,
+        SyntaxTree tree,
+        string generatedText
+    )
+    {
+        var host = MefHostServices.Create(
+            MefHostServices
+                .DefaultAssemblies.Concat([Assembly.Load("Microsoft.CodeAnalysis.CSharp.Features")])
+                .Distinct()
+        );
+        var workspace = new AdhocWorkspace(host);
+        var projectId = ProjectId.CreateNewId();
+        var documentId = DocumentId.CreateNewId(projectId);
+        var solution = workspace.CurrentSolution.AddProject(
+            ProjectInfo.Create(
+                projectId,
+                VersionStamp.Create(),
+                "LucentLuiClassification",
+                "LucentLuiClassification",
+                LanguageNames.CSharp,
+                compilationOptions: compilation.Options,
+                parseOptions: tree.Options,
+                metadataReferences: compilation.References
+            )
+        );
+        foreach (var source in compilation.SyntaxTrees)
+        {
+            solution = solution.AddDocument(
+                DocumentId.CreateNewId(projectId),
+                Path.GetFileName(source.FilePath),
+                source.GetText(),
+                filePath: source.FilePath
+            );
+        }
+        solution = solution
+            .AddDocument(
+                documentId,
+                "generated.lui.cs",
+                SourceText.From(generatedText),
+                filePath: tree.FilePath
+            )
+            .AddDocument(
+                DocumentId.CreateNewId(projectId),
+                "LucentLuiStaticUsings.cs",
+                SourceText.From("global using static global::Lucent.Core.Components;")
+            );
+        workspace.TryApplyChanges(solution);
+        return new ClassificationWorkspace(
+            workspace,
+            workspace.CurrentSolution.GetDocument(documentId)!
+        );
+    }
+
+    private static Compilation ProjectionCompilation(Compilation compilation, SyntaxTree tree) =>
+        compilation.AddSyntaxTrees(
+            tree,
+            CSharpSyntaxTree.ParseText(
+                "global using static global::Lucent.Core.Components;",
+                (CSharpParseOptions)tree.Options
+            )
+        );
+
+    private static IEnumerable<ISymbol> ComponentParameters(
+        SemanticDocument semantic,
+        LuiElementSyntax element
+    ) =>
+        ComponentSymbols(semantic, element.Name.Text)
+            .OfType<IMethodSymbol>()
+            .SelectMany(method => method.Parameters);
+
+    private static IEnumerable<ISymbol> StyleProperties(SemanticDocument semantic) =>
+        stylePropertyTypes
+            .Select(semantic.Model.Compilation.GetTypeByMetadataName)
+            .Where(type => type is not null)
+            .SelectMany(type => type!.GetMembers())
+            .Concat(semantic.Model.LookupSymbols(semantic.Position))
+            .Where(symbol =>
+                symbol.IsStatic
+                && symbol switch
+                {
+                    IFieldSymbol field => IsStyleProperty(field.Type),
+                    IPropertySymbol property => IsStyleProperty(property.Type),
+                    _ => false,
+                }
+            )
+            .Where(symbol => IsAccessible(semantic, symbol));
+
+    private static IEnumerable<ISymbol> RootTokens(SemanticDocument semantic)
+    {
+        var root = semantic.Document.Result.Identity.RootNamespace;
+        var tokens = String.IsNullOrWhiteSpace(root)
+            ? null
+            : semantic.Model.Compilation.GetTypeByMetadataName(root + ".Tokens");
+        return tokens is { IsStatic: true }
+            ? tokens
+                .GetMembers()
+                .Where(symbol =>
+                    symbol.IsStatic
+                    && symbol switch
+                    {
+                        IFieldSymbol field => IsToken(field.Type),
+                        IPropertySymbol property => IsToken(property.Type),
+                        _ => false,
+                    }
+                )
+                .Where(symbol => IsAccessible(semantic, symbol))
+            : [];
+    }
+
+    private static IEnumerable<ISymbol> VariantStates(Compilation compilation)
+    {
+        var states = compilation.GetTypeByMetadataName("Lucent.Core.VariantState");
+        return states is null
+            ? []
+            : states
+                .GetMembers()
+                .OfType<IFieldSymbol>()
+                .Where(field => field.HasConstantValue && field.Name != "None");
+    }
+
+    private static INamespaceSymbol DirectiveNamespace(
+        SemanticDocument semantic,
+        LuiSyntaxNode directive,
+        int offset
+    )
+    {
+        var start = directive switch
+        {
+            LuiNamespaceSyntax item => item.Keyword.Span.End,
+            LuiUsingSyntax item => item.Keyword.Span.End,
+            _ => directive.Span.Start,
+        };
+        var qualifier = semantic
+            .Document.SourceText.ToString(new TextSpan(start, Math.Max(0, offset - start)))
+            .Trim()
+            .TrimEnd(';')
+            .TrimEnd('.');
+        if (directive is LuiUsingSyntax)
+        {
+            if (qualifier.Contains('='))
+                qualifier = qualifier[(qualifier.LastIndexOf('=') + 1)..].Trim();
+            if (qualifier.StartsWith("static ", StringComparison.Ordinal))
+                qualifier = qualifier["static ".Length..].TrimStart();
+        }
+        if (qualifier.StartsWith("global::", StringComparison.Ordinal))
+            qualifier = qualifier["global::".Length..];
+        var current = semantic.Model.Compilation.GlobalNamespace;
+        foreach (var part in qualifier.Split('.', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var next = current
+                .GetNamespaceMembers()
+                .FirstOrDefault(member =>
+                    String.Equals(member.Name, part, StringComparison.Ordinal)
+                );
+            if (next is null)
+                break;
+            current = next;
+        }
+        return current;
+    }
+
+    private static IEnumerable<ISymbol> NamespaceMembers(INamespaceSymbol @namespace) =>
+        @namespace.GetNamespaceMembers().Cast<ISymbol>();
+
+    private static bool IsStyleProperty(ITypeSymbol type) =>
+        type is INamedTypeSymbol { Name: "Property", Arity: 1, ContainingNamespace: { } @namespace }
+        && @namespace.ToDisplayString() == "Lucent.Core";
+
+    private static bool IsToken(ITypeSymbol type) =>
+        type is INamedTypeSymbol { Name: "Token", Arity: 1, ContainingNamespace: { } @namespace }
+        && @namespace.ToDisplayString() == "Lucent.Core";
+
+    private static LuiStyleAssignmentSyntax? StyleAssignmentAt(
+        LuiDocumentSyntax syntax,
+        int offset
+    ) => StyleAssignments(syntax).FirstOrDefault(assignment => Contains(assignment.Span, offset));
+
+    private static LuiVariantGroupSyntax? VariantAt(LuiDocumentSyntax syntax, int offset) =>
+        StyleMembers(syntax)
+            .OfType<LuiVariantGroupSyntax>()
+            .FirstOrDefault(variant => Contains(variant.Span, offset));
+
+    private static bool StyleReferenceAt(LuiDocumentSyntax syntax, int offset) =>
+        Elements(syntax)
+            .SelectMany(element => element.Attributes)
+            .Any(attribute =>
+                (attribute.Value is LuiStyleWithSyntax style && Contains(style.Name.Span, offset))
+            );
+
+    private static IEnumerable<LuiStyleMemberSyntax> StyleMembers(LuiDocumentSyntax syntax) =>
+        syntax
+            .Styles.SelectMany(style => style.Members)
+            .Concat(
+                Elements(syntax)
+                    .SelectMany(element => element.Attributes)
+                    .Select(attribute => attribute.Value)
+                    .OfType<LuiStyleWithSyntax>()
+                    .SelectMany(style => style.Members)
+            );
+
+    private static IEnumerable<LuiSemanticSpan> SyntaxSemanticSpans(LuiDocumentSyntax syntax) =>
+        StyleAssignments(syntax)
+            .Select(assignment => new LuiSemanticSpan(assignment.Property.Span, "property", 0))
+            .Concat(
+                Elements(syntax)
+                    .SelectMany(element => element.Attributes)
+                    .Select(attribute => attribute.Value)
+                    .OfType<LuiStyleWithSyntax>()
+                    .Select(style => new LuiSemanticSpan(style.WithKeyword.Span, "keyword", 0))
+            )
+            .Concat(
+                Loops(syntax.Component?.Body ?? [])
+                    .SelectMany(loop => new[] { loop.VarKeyword, loop.InKeyword })
+                    .Select(token => new LuiSemanticSpan(token.Span, "keyword", 0))
+            );
+
+    private static IEnumerable<LuiSemanticSpan> ProjectClassifications(
+        LuiSourceMap map,
+        IEnumerable<ClassifiedSpan> classified
+    )
+    {
+        foreach (var item in classified)
+        {
+            var type = SemanticTokenType(item.ClassificationType);
+            if (type is null)
+                continue;
+            var generated = new LuiSpan(item.TextSpan.Start, item.TextSpan.Length);
+            foreach (
+                var entry in map.FromGenerated(generated)
+                    .Where(entry => !entry.Hidden && entry.Generated.Length != 0)
+            )
+            {
+                var start = Math.Max(generated.Start, entry.Generated.Start);
+                var end = Math.Min(generated.End, entry.Generated.End);
+                if (start >= end)
+                    continue;
+                yield return new LuiSemanticSpan(
+                    new LuiSpan(entry.Source.Start + start - entry.Generated.Start, end - start),
+                    type,
+                    1
+                );
+            }
+        }
+    }
+
+    private static string? SemanticTokenType(string classification) =>
+        classification switch
+        {
+            "keyword" => "keyword",
+            "class name"
+            or "struct name"
+            or "interface name"
+            or "enum name"
+            or "delegate name"
+            or "type parameter name" => "type",
+            "property name" => "property",
+            "enum member name" => "enumMember",
+            _ => null,
+        };
+
+    private static IEnumerable<LuiForEachSyntax> Loops(IEnumerable<LuiBodySyntax> body) =>
+        body.SelectMany(node =>
+            node switch
+            {
+                LuiForEachSyntax loop => new[] { loop }.Concat(Loops(loop.Body)),
+                LuiIfSyntax conditional => Loops(conditional.ThenBody.Concat(conditional.ElseBody)),
+                LuiElementSyntax element => Loops(element.Children),
+                _ => [],
+            }
+        );
+
+    private static bool Overlaps(LuiSpan left, LuiSpan right) =>
+        left.Start < right.End && right.Start < left.End;
+
+    private static int[] EncodeSemanticTokens(SourceText text, IEnumerable<LuiSemanticSpan> spans)
+    {
+        var data = new List<int>();
+        var previousLine = 0;
+        var previousCharacter = 0;
+        foreach (var span in spans)
+        {
+            var line = text.Lines.GetLineFromPosition(span.Span.Start);
+            var character = span.Span.Start - line.Start;
+            var type = Array.IndexOf(SemanticTokenTypes, span.Type);
+            if (type < 0 || span.Span.End > line.End)
+                continue;
+            data.Add(line.LineNumber - previousLine);
+            data.Add(line.LineNumber == previousLine ? character - previousCharacter : character);
+            data.Add(span.Span.Length);
+            data.Add(type);
+            data.Add(0);
+            previousLine = line.LineNumber;
+            previousCharacter = character;
+        }
+        return data.ToArray();
+    }
+
+    private static IEnumerable<LuiStyleAssignmentSyntax> StyleAssignments(
+        LuiDocumentSyntax syntax
+    ) =>
+        StyleMembers(syntax)
+            .SelectMany(member =>
+                member is LuiStyleAssignmentSyntax assignment
+                    ? [assignment]
+                    : ((LuiVariantGroupSyntax)member).Assignments
+            );
+
+    private static bool IsComponent(IMethodSymbol method) =>
+        method.IsStatic
+        && method
+            .GetAttributes()
+            .Any(attribute =>
+                attribute.AttributeClass?.ToDisplayString()
+                == "Lucent.Core.LucentComponentAttribute"
+            );
+
+    private static bool IsAccessible(SemanticDocument semantic, ISymbol symbol) =>
+        semantic.Model.Compilation.IsSymbolAccessibleWithin(
+            symbol,
+            semantic.Model.Compilation.Assembly
+        );
+
+    private static bool IsDefaultContent(IParameterSymbol parameter) =>
+        parameter
+            .GetAttributes()
+            .Any(attribute =>
+                attribute.AttributeClass?.ToDisplayString() == "Lucent.Core.DefaultContentAttribute"
+            );
+
+    private static Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax? InvocationAt(
+        SemanticDocument semantic
+    )
+    {
+        if (semantic.Position < 0)
+            return null;
+        var root = semantic.Tree.GetRoot();
+        return root.FindToken(Math.Clamp(semantic.Position, 0, Math.Max(0, root.FullSpan.End - 1)))
+            .Parent?.AncestorsAndSelf()
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
+            .FirstOrDefault();
+    }
+
+    private static bool Contains(LuiSpan span, int offset) =>
+        span.Start <= offset && offset <= span.End;
+
+    private static LuiElementSyntax? ElementAt(LuiDocumentSyntax syntax, int offset) =>
+        Elements(syntax)
+            .Where(element => Contains(element.Span, offset))
+            .OrderBy(element => element.Span.Length)
+            .FirstOrDefault();
+
+    private static IEnumerable<LuiElementSyntax> Elements(LuiDocumentSyntax syntax) =>
+        syntax.Component?.Body.SelectMany(Elements) ?? [];
+
+    private static IEnumerable<LuiElementSyntax> Elements(LuiBodySyntax node) =>
+        node switch
+        {
+            LuiElementSyntax element => [element, .. element.Children.SelectMany(Elements)],
+            LuiIfSyntax conditional => conditional
+                .ThenBody.Concat(conditional.ElseBody)
+                .SelectMany(Elements),
+            LuiForEachSyntax loop => loop.Body.SelectMany(Elements),
+            _ => [],
+        };
+
+    private static int CompletionKind(ISymbol symbol) =>
+        symbol switch
+        {
+            IMethodSymbol => 2,
+            IPropertySymbol => 10,
+            IFieldSymbol { ContainingType.TypeKind: TypeKind.Enum } => 20,
+            IFieldSymbol => 5,
+            INamedTypeSymbol { TypeKind: TypeKind.Struct } => 22,
+            INamedTypeSymbol => 7,
+            IParameterSymbol or ILocalSymbol => 6,
+            INamespaceSymbol => 9,
+            _ => 1,
+        };
+
+    private static int CompletionKind(IEnumerable<string> tags) =>
+        tags.Contains("Method") ? 2
+        : tags.Contains("Property") ? 10
+        : tags.Contains("EnumMember") ? 20
+        : tags.Contains("Field") ? 5
+        : tags.Contains("Local") || tags.Contains("Parameter") ? 6
+        : tags.Contains("Namespace") ? 9
+        : tags.Contains("Structure") ? 22
+        : tags.Contains("Class") ? 7
+        : 1;
+
+    private static string SymbolText(ISymbol symbol) =>
+        symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+
+    private static string? Documentation(ISymbol symbol)
+    {
+        var xml = symbol.GetDocumentationCommentXml(cancellationToken: CancellationToken.None);
+        if (String.IsNullOrWhiteSpace(xml))
+            return null;
+        try
+        {
+            return String.Join(
+                "\n\n",
+                XDocument
+                    .Parse(xml)
+                    .Root!.Elements()
+                    .Select(section =>
+                    {
+                        var text = DocumentationText(section.Nodes()).Trim();
+                        return section.Name.LocalName == "summary"
+                            ? text
+                            : Char.ToUpperInvariant(section.Name.LocalName[0])
+                                + section.Name.LocalName[1..]
+                                + ":\n"
+                                + text;
+                    })
+                    .Where(text => text.Length != 0)
+            );
+        }
+        catch (System.Xml.XmlException)
+        {
+            return null;
+        }
+    }
+
+    private static string DocumentationText(IEnumerable<XNode> nodes) =>
+        String.Concat(
+            nodes.Select(node =>
+                node switch
+                {
+                    XText text => text.Value,
+                    XElement { Name.LocalName: "see" } element => DocumentationReference(element),
+                    XElement { Name.LocalName: "paramref" } element => element
+                        .Attribute("name")
+                        ?.Value
+                        ?? "",
+                    XElement { Name.LocalName: "para" } element => "\n\n"
+                        + DocumentationText(element.Nodes()),
+                    XElement element => DocumentationText(element.Nodes()),
+                    _ => "",
+                }
+            )
+        );
+
+    private static string DocumentationReference(XElement element) =>
+        (element.Attribute("cref")?.Value ?? element.Value)
+            .Replace("T:", "", StringComparison.Ordinal)
+            .Replace("M:", "", StringComparison.Ordinal)
+            .Replace("P:", "", StringComparison.Ordinal)
+            .Replace('#', '.');
+
+    private static ISymbol? SymbolAt(SemanticDocument semantic)
+    {
+        if (
+            semantic.Entry is not { Kind: LuiMapKind.Symbol or LuiMapKind.Expression } entry
+            || semantic.Position < 0
+        )
+            return null;
+        var root = semantic.Tree.GetRoot();
+        var token = root.FindToken(
+            Math.Clamp(semantic.Position, 0, Math.Max(0, root.FullSpan.End - 1))
+        );
+        for (var node = token.Parent; node is not null; node = node.Parent)
+        {
+            if (node.SpanStart < entry.Generated.Start || node.Span.End > entry.Generated.End)
+                break;
+            var declared = semantic.Model.GetDeclaredSymbol(node);
+            if (declared is not null)
+                return declared;
+            var info = semantic.Model.GetSymbolInfo(node, CancellationToken.None);
+            if (info.Symbol is not null)
+                return info.Symbol;
+            if (info.CandidateSymbols.Length != 0)
+                return info.CandidateSymbols[0];
+        }
+        return null;
+    }
+
+    private static LuiNavigationTarget? DeclarationTarget(
+        PublishedDocument document,
+        ISymbol symbol
+    )
+    {
+        if (symbol is IAliasSymbol alias)
+            symbol = alias.Target;
+        if (symbol is IMethodSymbol method)
+        {
+            var identity =
+                method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                + "."
+                + method.MetadataName;
+            var declaration = document.Index.Declarations.SingleOrDefault(candidate =>
+                StringComparer.Ordinal.Equals(candidate.Identity, identity)
+            );
+            if (declaration is not null)
+                return new LuiNavigationTarget(
+                    new Uri(declaration.Document.Path),
+                    declaration.Document.Syntax.Component!.Name.Span,
+                    declaration.Document.Source
+                );
+        }
+        var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
+        if (location is null)
+            return null;
+        if (location.SourceTree?.FilePath == document.GeneratedUri.AbsoluteUri)
+        {
+            var mapped = document
+                .Result.Map.FromGenerated(
+                    new LuiSpan(location.SourceSpan.Start, location.SourceSpan.Length)
+                )
+                .Where(item => !item.Hidden)
+                .OrderBy(item => item.Source.Length)
+                .FirstOrDefault();
+            return mapped is null
+                ? null
+                : new LuiNavigationTarget(
+                    document.SourceUri,
+                    mapped.Source,
+                    document.SourceText.ToString()
+                );
+        }
+        if (String.IsNullOrWhiteSpace(location.SourceTree?.FilePath))
+            return null;
+        var path = location.SourceTree.FilePath;
+        return new LuiNavigationTarget(
+            new Uri(path),
+            new LuiSpan(location.SourceSpan.Start, location.SourceSpan.Length),
+            location.SourceTree.GetText().ToString()
+        );
     }
 
     internal static string FilePath(Uri uri)
@@ -448,7 +1945,8 @@ internal sealed class LuiProjectContext : IDisposable
         LuiFreshnessIdentity identity,
         SourceText text,
         Uri uri,
-        LuiProjectComponentIndex index
+        LuiProjectComponentIndex index,
+        LuiDiagnostic? metadataDiagnostic
     )
     {
         internal long Epoch { get; } = epoch;
@@ -458,6 +1956,7 @@ internal sealed class LuiProjectContext : IDisposable
         internal SourceText Text { get; } = text;
         internal Uri Uri { get; } = uri;
         internal LuiProjectComponentIndex Index { get; } = index;
+        internal LuiDiagnostic? MetadataDiagnostic { get; } = metadataDiagnostic;
     }
 
     internal sealed class PublishedDocument(
@@ -466,25 +1965,36 @@ internal sealed class LuiProjectContext : IDisposable
         SourceText sourceText,
         Uri sourceUri,
         LuiProjectComponentIndex index,
-        Compilation compilation
+        Compilation compilation,
+        long epoch,
+        LuiDocumentSyntax syntax
     )
     {
         internal LuiCompilationResult Result { get; } = result;
         internal Uri GeneratedUri { get; } = generatedUri;
-        internal string GeneratedText { get; } = result.Source!;
+        internal string GeneratedText { get; } = result.ProjectionSource!;
         internal SourceText SourceText { get; } = sourceText;
         internal Uri SourceUri { get; } = sourceUri;
         internal LuiProjectComponentIndex Index { get; } = index;
         internal Compilation Compilation { get; } = compilation;
+        internal long Epoch { get; } = epoch;
+        internal LuiDocumentSyntax Syntax { get; } = syntax;
     }
 
-    private sealed class GeneratedDocument(PublishedDocument document)
+    private sealed class GeneratedDocument
     {
-        internal string Source { get; } = document.GeneratedText;
+        internal GeneratedDocument(PublishedDocument document)
+        {
+            Document = document;
+            Source = document.GeneratedText;
+        }
+
+        internal PublishedDocument Document { get; }
+        internal string Source { get; }
 
         internal LuiNavigationTarget? ToSource(int offset)
         {
-            var entry = document
+            var entry = Document
                 .Result.Map.FromGenerated(new LuiSpan(offset, 0))
                 .Where(item => !item.Hidden)
                 .OrderBy(item => item.Generated.Length)
@@ -492,11 +2002,39 @@ internal sealed class LuiProjectContext : IDisposable
             return entry is null
                 ? null
                 : new LuiNavigationTarget(
-                    document.SourceUri,
+                    Document.SourceUri,
                     entry.Source,
-                    document.SourceText.ToString()
+                    Document.SourceText.ToString()
                 );
         }
+    }
+
+    private sealed class ClassificationWorkspace(AdhocWorkspace workspace, Document document)
+        : IDisposable
+    {
+        internal Document Document { get; } = document;
+
+        public void Dispose() => workspace.Dispose();
+    }
+
+    private sealed class SemanticDocument(
+        PublishedDocument document,
+        SyntaxTree tree,
+        SemanticModel model,
+        int position,
+        LuiMapEntry? entry
+    )
+    {
+        internal PublishedDocument Document { get; } = document;
+        internal SyntaxTree Tree { get; } = tree;
+        internal SemanticModel Model { get; } = model;
+        internal int Position { get; } = position;
+        internal LuiMapEntry? Entry { get; } = entry;
+    }
+
+    private sealed class SnapshotEpoch(long value)
+    {
+        internal long Value { get; } = value;
     }
 }
 
@@ -505,4 +2043,82 @@ internal sealed class LuiNavigationTarget(Uri uri, LuiSpan span, string text)
     internal Uri Uri { get; } = uri;
     internal LuiSpan Span { get; } = span;
     internal string Text { get; } = text;
+}
+
+internal sealed class LuiEditorDiagnostic(
+    string code,
+    string message,
+    LuiSpan span,
+    int severity,
+    string source
+)
+{
+    internal string Code { get; } = code;
+    internal string Message { get; } = message;
+    internal LuiSpan Span { get; } = span;
+    internal int Severity { get; } = severity;
+    internal string Source { get; } = source;
+}
+
+internal sealed class LuiCompletionItem(
+    string label,
+    int kind,
+    string detail,
+    string? documentation
+)
+{
+    internal string Label { get; } = label;
+    internal int Kind { get; } = kind;
+    internal string Detail { get; } = detail;
+    internal string? Documentation { get; } = documentation;
+}
+
+internal sealed class LuiHover(string value, string? documentation)
+{
+    internal string Value { get; } = value;
+    internal string? Documentation { get; } = documentation;
+}
+
+internal sealed class LuiSignatureHelp(
+    IReadOnlyList<LuiSignature> signatures,
+    int activeSignature,
+    int activeParameter
+)
+{
+    internal IReadOnlyList<LuiSignature> Signatures { get; } = signatures;
+    internal int ActiveSignature { get; } = activeSignature;
+    internal int ActiveParameter { get; } = activeParameter;
+}
+
+internal sealed class LuiSignature(
+    string label,
+    IReadOnlyList<string> parameters,
+    string? documentation
+)
+{
+    internal string Label { get; } = label;
+    internal IReadOnlyList<string> Parameters { get; } = parameters;
+    internal string? Documentation { get; } = documentation;
+}
+
+internal sealed class LuiDocumentSymbol(
+    string name,
+    int kind,
+    LuiSpan span,
+    LuiSpan selectionSpan,
+    IReadOnlyList<LuiDocumentSymbol> children
+)
+{
+    internal string Name { get; } = name;
+    internal int Kind { get; } = kind;
+    internal LuiSpan Span { get; } = span;
+    internal LuiSpan SelectionSpan { get; } = selectionSpan;
+    internal IReadOnlyList<LuiDocumentSymbol> Children { get; } = children;
+}
+
+internal sealed class LuiSemanticSpan(LuiSpan span, string type, int priority)
+{
+    internal LuiSpan Span { get; } = span;
+    internal string Type { get; } = type;
+    internal int Priority { get; } = priority;
 }

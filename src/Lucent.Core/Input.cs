@@ -6,10 +6,10 @@ namespace Lucent.Core;
 /// <summary>Typed presentation properties that determine whether an element participates in routing and scene input.</summary>
 public static class InputProperties
 {
-    /// <summary>Controls whether an element accepts input and participates in focus routing.</summary>
+    /// <summary>When false, the element ignores pointer, keyboard, and focus input.</summary>
     public static readonly Property<bool> Enabled = new("input-enabled", true);
 
-    /// <summary>Controls whether an element participates in hit testing and scene input.</summary>
+    /// <summary>When false, the element is hidden from hit testing and input.</summary>
     public static readonly Property<bool> Visible = new("input-visible", true);
 }
 

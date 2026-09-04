@@ -356,10 +356,9 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
                 .DescendantNodes()
                 .OfType<MethodDeclarationSyntax>()
                 .SingleOrDefault();
-            var symbol =
-                method is null
-                    ? null
-                    : compilation.GetSemanticModel(Tree).GetDeclaredSymbol(method);
+            var symbol = method is null
+                ? null
+                : compilation.GetSemanticModel(Tree).GetDeclaredSymbol(method);
             if (
                 symbol is null
                 || ContainsErrorType(symbol.ReturnType)

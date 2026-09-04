@@ -76,6 +76,21 @@ public sealed class LuiDocumentIdentity : IEquatable<LuiDocumentIdentity>
     /// <summary>Normalized slash-separated project-relative path.</summary>
     public string LogicalPath { get; }
 
+    /// <summary>Attempts to validate and normalize a project-relative logical path.</summary>
+    public static bool TryCreate(string? logicalPath, out LuiDocumentIdentity? identity)
+    {
+        try
+        {
+            identity = new LuiDocumentIdentity(logicalPath!);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            identity = null;
+            return false;
+        }
+    }
+
     /// <summary>Stable truncated SHA-256 identifier derived from <see cref="LogicalPath"/>.</summary>
     public string StableId => Hash(LogicalPath);
 
