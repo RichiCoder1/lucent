@@ -29,7 +29,7 @@ try
     );
     await File.WriteAllTextAsync(
         helperPath,
-        "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString(); public static string AAAA(int value) => value.ToString();\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; }"
+        "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString(); public static string AAAA(int value) => value.ToString(); public static ComponentRecipe UseCard() => Components.Card(\"\", \"\");\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; }"
     );
     var source =
         "namespace Sample;\r\nusing Lucent.Core;\r\nusing static Sample.Components;\r\nusing static Sample.ImportedComponents;\r\nstyle WidgetStyle { Background: Brush.Solid(default); }\r\ninternal component Widget(int count) { <Card content={Helpers.Format(count)} name=\"widget\" /> }";
@@ -344,6 +344,12 @@ try
         true,
         CancellationToken.None
     );
+    var localHover = await context.HoverAsync(sourceUri, localDeclaration, CancellationToken.None);
+    var localDefinition = await context.DefinitionAsync(
+        sourceUri,
+        localBody,
+        CancellationToken.None
+    );
     Assert(
         localRename is not null
             && localRename.Edits.Single(edit => edit.Uri == sourceUri).Spans.Count == 3
@@ -355,7 +361,11 @@ try
                     || location.Span.Start == localKey
                     || location.Span.Start == localBody
                 )
-            ) == 3,
+            ) == 3
+            && localHover is not null
+            && localDefinition is not null
+            && localDefinition.Uri == sourceUri
+            && localDefinition.Span.Start == localDeclaration,
         "keyed foreach local provenance did not join declaration, key, and body uses."
     );
     var renamedLocal = localSource;
@@ -366,7 +376,34 @@ try
         await context.CompileAsync(sourceUri, CancellationToken.None) is not null,
         "applying keyed foreach rename did not compile."
     );
+    var sameOffsetOne =
+        "namespace Sample; using static Lucent.Core.Components; internal component One(int count) { <Row>foreach (var item in new[] { count }) keyed by item { <Text content={item.ToString()} /> }</Row> }";
+    var sameOffsetTwo = sameOffsetOne.Replace("One(int", "Two(int", StringComparison.Ordinal);
+    context.ReplaceText(sourceUri, sameOffsetOne);
+    context.ReplaceText(new Uri(siblingPath), sameOffsetTwo);
+    var sameOffset = sameOffsetOne.IndexOf("item in", StringComparison.Ordinal);
+    var sameOffsetRename = await context.RenameAsync(
+        sourceUri,
+        sameOffset,
+        "value",
+        CancellationToken.None
+    );
+    var sameOffsetReferences = await context.ReferencesAsync(
+        sourceUri,
+        sameOffset,
+        true,
+        CancellationToken.None
+    );
+    Assert(
+        sameOffsetRename is not null
+            && sameOffsetRename.Edits.Count == 1
+            && sameOffsetRename.Edits.Single().Uri == sourceUri
+            && sameOffsetReferences is not null
+            && sameOffsetReferences.Locations.All(location => location.Uri == sourceUri),
+        "equal local offsets from separate .lui documents were aliased."
+    );
     context.ReplaceText(sourceUri, source);
+    context.Close(new Uri(siblingPath));
     var renameReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var renameRelease = new TaskCompletionSource(
         TaskCreationOptions.RunContinuationsAsynchronously
@@ -1063,6 +1100,91 @@ try
                 == new Uri(helperPath).AbsoluteUri,
             "expression-island definition did not navigate to the real C# symbol."
         );
+        var helperText = await File.ReadAllTextAsync(helperPath);
+        var csharpCard = helperText.IndexOf("Card(\"\", \"\")", StringComparison.Ordinal);
+        var csharpFormat = helperText.IndexOf("Format", StringComparison.Ordinal);
+        var csharpOnly = helperText.IndexOf("AAAA", StringComparison.Ordinal);
+        var csharpCardPosition = Position(helperText, csharpCard);
+        var csharpFormatPosition = Position(helperText, csharpFormat);
+        var csharpOnlyPosition = Position(helperText, csharpOnly);
+        using var csharpLuiDefinition = await lsp.RequestAsync(
+            "textDocument/definition",
+            new
+            {
+                textDocument = new { uri = VsCodeUri(new Uri(helperPath)) },
+                position = new
+                {
+                    line = csharpCardPosition.Line,
+                    character = csharpCardPosition.Character,
+                },
+            }
+        );
+        using var ordinaryCsharpDefinition = await lsp.RequestAsync(
+            "textDocument/definition",
+            new
+            {
+                textDocument = new { uri = VsCodeUri(new Uri(helperPath)) },
+                position = new
+                {
+                    line = csharpFormatPosition.Line,
+                    character = csharpFormatPosition.Character,
+                },
+            }
+        );
+        Assert(
+            csharpLuiDefinition.RootElement.GetProperty("result").GetProperty("uri").GetString()
+                == new Uri(siblingPath).AbsoluteUri
+                && ordinaryCsharpDefinition.RootElement.GetProperty("result").ValueKind
+                    == JsonValueKind.Null,
+            "C# definition did not route only participating .lui symbols to Lucent."
+        );
+        using var ordinaryCsharpPrepareRename = await lsp.RequestAsync(
+            "textDocument/prepareRename",
+            new
+            {
+                textDocument = new { uri = VsCodeUri(new Uri(helperPath)) },
+                position = new
+                {
+                    line = csharpOnlyPosition.Line,
+                    character = csharpOnlyPosition.Character,
+                },
+            }
+        );
+        using var ordinaryCsharpReferences = await lsp.RequestAsync(
+            "textDocument/references",
+            new
+            {
+                textDocument = new { uri = VsCodeUri(new Uri(helperPath)) },
+                position = new
+                {
+                    line = csharpOnlyPosition.Line,
+                    character = csharpOnlyPosition.Character,
+                },
+                context = new { includeDeclaration = true },
+            }
+        );
+        using var ordinaryCsharpRename = await lsp.RequestAsync(
+            "textDocument/rename",
+            new
+            {
+                textDocument = new { uri = VsCodeUri(new Uri(helperPath)) },
+                position = new
+                {
+                    line = csharpOnlyPosition.Line,
+                    character = csharpOnlyPosition.Character,
+                },
+                newName = "BBBB",
+            }
+        );
+        Assert(
+            ordinaryCsharpPrepareRename.RootElement.GetProperty("result").ValueKind
+                == JsonValueKind.Null
+                && ordinaryCsharpReferences.RootElement.GetProperty("result").ValueKind
+                    == JsonValueKind.Null
+                && ordinaryCsharpRename.RootElement.GetProperty("result").ValueKind
+                    == JsonValueKind.Null,
+            "Lucent claimed rename/references for an ordinary C#-only symbol."
+        );
         using var signature = await lsp.RequestAsync(
             "textDocument/signatureHelp",
             new
@@ -1567,6 +1689,120 @@ using (var browserLsp = LspClient.Start())
         "LSP did not advertise the standard semantic-token legend and full provider."
     );
     await browserLsp.NotifyAsync("initialized", new { });
+    var column = headerText.IndexOf("Column", StringComparison.Ordinal);
+    var columnPosition = Position(headerText, column);
+    using var browserColumnReferences = await browserLsp.RequestAsync(
+        "textDocument/references",
+        new
+        {
+            textDocument = new { uri = VsCodeUri(header) },
+            position = new { line = columnPosition.Line, character = columnPosition.Character },
+            context = new { includeDeclaration = true },
+        }
+    );
+    using var browserColumnRename = await browserLsp.RequestAsync(
+        "textDocument/rename",
+        new
+        {
+            textDocument = new { uri = VsCodeUri(header) },
+            position = new { line = columnPosition.Line, character = columnPosition.Character },
+            newName = "Vertical",
+        }
+    );
+    Assert(
+        browserColumnReferences.RootElement.TryGetProperty("result", out _)
+            && browserColumnRename.RootElement.TryGetProperty("result", out var renameResult)
+            && renameResult.ValueKind != JsonValueKind.Null
+            && renameResult.TryGetProperty("changes", out _),
+        "Issue Browser Column RPC returned no result: "
+            + browserColumnReferences.RootElement.GetRawText()
+            + " / "
+            + browserColumnRename.RootElement.GetRawText()
+    );
+    var rpcColumnReferences = browserColumnReferences
+        .RootElement.GetProperty("result")
+        .EnumerateArray()
+        .ToArray();
+    var rpcColumnChanges = browserColumnRename
+        .RootElement.GetProperty("result")
+        .GetProperty("changes");
+    Assert(
+        rpcColumnReferences.Length == 9
+            && rpcColumnReferences.Count(location =>
+                location
+                    .GetProperty("uri")
+                    .GetString()!
+                    .EndsWith("Components.cs", StringComparison.Ordinal)
+            ) == 1
+            && rpcColumnChanges
+                .EnumerateObject()
+                .Single(change => change.Name.EndsWith("Components.cs", StringComparison.Ordinal))
+                .Value.GetArrayLength() == 1
+            && rpcColumnChanges
+                .EnumerateObject()
+                .Where(change => change.Name.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
+                .Sum(change => change.Value.GetArrayLength()) == 8,
+        "Issue Browser Column RPC references/rename did not preserve all paired tags and Core declaration."
+    );
+    var columnSource = new Uri(Path.GetFullPath("src/Lucent.Core/Components.cs"));
+    var columnSourceText = await File.ReadAllTextAsync(columnSource.LocalPath);
+    var columnSourceOffset = columnSourceText.IndexOf("Column", StringComparison.Ordinal);
+    var insertedLine = "\n" + columnSourceText;
+    await browserLsp.NotifyAsync(
+        "textDocument/didOpen",
+        new
+        {
+            textDocument = new
+            {
+                uri = VsCodeUri(columnSource),
+                version = 1,
+                text = insertedLine,
+            },
+        }
+    );
+    var shiftedColumn = Position(insertedLine, columnSourceOffset + 1);
+    using var insertedLineReferences = await browserLsp.RequestAsync(
+        "textDocument/references",
+        new
+        {
+            textDocument = new { uri = VsCodeUri(columnSource) },
+            position = new { line = shiftedColumn.Line, character = shiftedColumn.Character },
+            context = new { includeDeclaration = true },
+        }
+    );
+    var sameLine = "  " + insertedLine;
+    await browserLsp.NotifyAsync(
+        "textDocument/didChange",
+        new
+        {
+            textDocument = new { uri = VsCodeUri(columnSource), version = 2 },
+            contentChanges = new[] { new { text = sameLine } },
+        }
+    );
+    var sameLineColumn = Position(sameLine, columnSourceOffset + 3);
+    using var sameLineRename = await browserLsp.RequestAsync(
+        "textDocument/rename",
+        new
+        {
+            textDocument = new { uri = VsCodeUri(columnSource) },
+            position = new { line = sameLineColumn.Line, character = sameLineColumn.Character },
+            newName = "Vertical",
+        }
+    );
+    Assert(
+        insertedLineReferences.RootElement.GetProperty("result").GetArrayLength() == 9
+            && sameLineRename
+                .RootElement.GetProperty("result")
+                .GetProperty("changes")
+                .EnumerateObject()
+                .Single(change => change.Name.EndsWith("Components.cs", StringComparison.Ordinal))
+                .Value.GetArrayLength() == 1,
+        "dirty C# inserted-line or same-line offsets used stale source positions."
+    );
+    await browserLsp.NotifyAsync(
+        "textDocument/didClose",
+        new { textDocument = new { uri = VsCodeUri(columnSource) } }
+    );
     var member = headerText.IndexOf("browser.ToggleDensity", StringComparison.Ordinal);
     var memberPosition = Position(headerText, member + "browser.".Length);
     using var browserCompletion = await browserLsp.RequestAsync(
@@ -1935,6 +2171,7 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
     var referencedProject = Path.Combine(referencedRoot, "Referenced.csproj");
     var source = Path.Combine(hostRoot, "Widget.lui");
     var referencedSource = Path.Combine(referencedRoot, "Components.cs");
+    var referencedLui = Path.Combine(referencedRoot, "Imported.lui");
     var hostProjectText =
         "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Host</RootNamespace></PropertyGroup><ItemGroup><ProjectReference Include=\""
         + core
@@ -2037,6 +2274,84 @@ static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
                 ),
             "project-reference rename or references omitted an editable source declaration or C# origin."
         );
+        await File.WriteAllTextAsync(
+            referencedLui,
+            "namespace Referenced; using static Lucent.Core.Components; public component Imported() { <Row /> }"
+        );
+        await File.WriteAllTextAsync(
+            referencedProject,
+            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                + core
+                + "\" /><AdditionalFiles Include=\"Imported.lui\" /></ItemGroup></Project>"
+        );
+        Assert(
+            await context.ReloadIfRelevantAsync(new Uri(referencedProject), CancellationToken.None),
+            "referenced-project .lui input change did not reload the evaluated graph."
+        );
+        var importedHost =
+            "namespace Host; using static Referenced.Components; internal component Widget() { <Imported /> }";
+        context.ReplaceText(uri, importedHost);
+        var imported = importedHost.IndexOf("Imported", StringComparison.Ordinal);
+        var importedDeclaration = (await File.ReadAllTextAsync(referencedLui)).IndexOf(
+            "Imported",
+            StringComparison.Ordinal
+        );
+        var importedReferences = await context.ReferencesAsync(
+            uri,
+            imported,
+            true,
+            CancellationToken.None
+        );
+        var importedRename = await context.RenameAsync(
+            uri,
+            imported,
+            "SharedImported",
+            CancellationToken.None
+        );
+        var importedDefinition = await context.DefinitionAsync(
+            new Uri(referencedLui),
+            importedDeclaration,
+            CancellationToken.None
+        );
+        var importedHover = await context.HoverAsync(
+            new Uri(referencedLui),
+            importedDeclaration,
+            CancellationToken.None
+        );
+        var importedPublished = await context.CompileAsync(
+            new Uri(referencedLui),
+            CancellationToken.None
+        );
+        Assert(
+            importedReferences is not null
+                && importedReferences.Locations.Any(location =>
+                    location.Uri == uri
+                    && location.Span.Equals(new LuiSpan(imported, "Imported".Length))
+                )
+                && importedReferences.Locations.Any(location =>
+                    location.Uri == new Uri(referencedLui)
+                    && location.Span.Equals(new LuiSpan(importedDeclaration, "Imported".Length))
+                )
+                && importedRename is not null
+                && importedRename.Edits.Any(edit =>
+                    edit.Uri == new Uri(referencedLui)
+                    && edit.Spans.Any(span => span.Start == importedDeclaration)
+                )
+                && importedDefinition is not null
+                && importedHover is not null
+                && importedPublished is not null,
+            "referenced-project .lui source did not provide exact graph tooling: refs="
+                + (importedReferences is null ? "null" : "present")
+                + " rename="
+                + (importedRename is null ? "null" : "present")
+                + " definition="
+                + (importedDefinition is null ? "null" : "present")
+                + " hover="
+                + (importedHover is null ? "null" : "present")
+                + " compile="
+                + (importedPublished is null ? "null" : "present")
+        );
+        context.ReplaceText(uri, sourceText);
         var styleParameter = await context.CompletionsAsync(
             uri,
             sourceText.IndexOf("style={style}", StringComparison.Ordinal) + "style={".Length,

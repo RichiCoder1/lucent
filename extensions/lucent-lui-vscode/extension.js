@@ -230,19 +230,19 @@ async function activate(context) {
     try { await rpc.request("initialize", { initializationOptions: { projectUri } }); }
     catch (error) { stop.dispose(); throw error; }
     rpc.notify("initialized", {});
-    const isLui = document => document.languageId === "lui";
-    const update = document => isLui(document) && rpc.notify("textDocument/didChange", {
+    const isLucentDocument = document => document.languageId === "lui" || document.languageId === "csharp";
+    const update = document => isLucentDocument(document) && rpc.notify("textDocument/didChange", {
         textDocument: { uri: document.uri.toString(), version: document.version }, contentChanges: [{ text: document.getText() }]
     });
-    for (const document of vscode.workspace.textDocuments.filter(isLui)) rpc.notify("textDocument/didOpen", {
+    for (const document of vscode.workspace.textDocuments.filter(isLucentDocument)) rpc.notify("textDocument/didOpen", {
         textDocument: { uri: document.uri.toString(), version: document.version, text: document.getText() }
     });
     context.subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument(document => isLui(document) && rpc.notify("textDocument/didOpen", {
+        vscode.workspace.onDidOpenTextDocument(document => isLucentDocument(document) && rpc.notify("textDocument/didOpen", {
             textDocument: { uri: document.uri.toString(), version: document.version, text: document.getText() }
         })),
         vscode.workspace.onDidChangeTextDocument(event => update(event.document)),
-        vscode.workspace.onDidCloseTextDocument(document => isLui(document) && rpc.notify("textDocument/didClose", { textDocument: { uri: document.uri.toString() } })),
+        vscode.workspace.onDidCloseTextDocument(document => isLucentDocument(document) && rpc.notify("textDocument/didClose", { textDocument: { uri: document.uri.toString() } })),
         vscode.workspace.registerTextDocumentContentProvider("lucent-lui", {
             provideTextDocumentContent: uri => rpc.request("lucent/generatedText", { uri: uri.toString() })
         }),

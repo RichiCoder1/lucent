@@ -620,6 +620,9 @@ internal sealed class LuiProjectContext : IDisposable
             if (generated.TryGetValue(uri, out var cached))
                 return cached.ToSource(offset);
         }
+        if (!Owns(uri))
+            return await CSharpDefinitionAsync(uri, offset, cancellationToken)
+                .ConfigureAwait(false);
         var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
         if (semantic is null)
             return null;
@@ -649,6 +652,44 @@ internal sealed class LuiProjectContext : IDisposable
             : DeclarationTarget(semantic.Document, symbol);
     }
 
+    private async Task<LuiNavigationTarget?> CSharpDefinitionAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var snapshot = await RenameSnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (snapshot is null)
+            return null;
+        var target = await ResolveRenameTargetAsync(snapshot, uri, offset, cancellationToken)
+            .ConfigureAwait(false);
+        if (target is null)
+            return null;
+        var definition = await SymbolFinder
+            .FindSourceDefinitionAsync(target.Symbol, snapshot.Solution, cancellationToken)
+            .ConfigureAwait(false);
+        if (definition is null)
+            return null;
+        foreach (var location in definition.Locations.Where(location => location.IsInSource))
+        {
+            if (
+                location.SourceTree is null
+                || !TryGenerated(snapshot, location.SourceTree, out var generated)
+            )
+                continue;
+            var token = location
+                .SourceTree.GetRoot(cancellationToken)
+                .FindToken(location.SourceSpan.Start);
+            var spans = RenameSourceSpans(generated, token);
+            if (spans.Length != 1)
+                return null;
+            return await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
+                ? new LuiNavigationTarget(generated.Uri, spans[0], generated.Source)
+                : null;
+        }
+        return null;
+    }
+
     internal async Task<LuiRenameResult?> PrepareRenameAsync(
         Uri uri,
         int offset,
@@ -662,6 +703,18 @@ internal sealed class LuiProjectContext : IDisposable
             return null;
         var target = await ResolveRenameTargetAsync(snapshot, uri, offset, cancellationToken)
             .ConfigureAwait(false);
+        if (target is not null && IsCSharp(uri))
+        {
+            var occurrences = await RenameOccurrencesAsync(
+                    snapshot,
+                    target,
+                    includeDeclaration: false,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            if (occurrences is null || !occurrences.Any(occurrence => IsLui(occurrence.Uri)))
+                return null;
+        }
         return
             target is null
             || !await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
@@ -700,7 +753,10 @@ internal sealed class LuiProjectContext : IDisposable
                 cancellationToken
             )
             .ConfigureAwait(false);
-        if (occurrences is null)
+        if (
+            occurrences is null
+            || IsCSharp(uri) && !occurrences.Any(occurrence => IsLui(occurrence.Uri))
+        )
             return null;
         foreach (var occurrence in occurrences)
         {
@@ -759,7 +815,10 @@ internal sealed class LuiProjectContext : IDisposable
                 cancellationToken
             )
             .ConfigureAwait(false);
-        if (occurrences is null)
+        if (
+            occurrences is null
+            || IsCSharp(uri) && !occurrences.Any(occurrence => IsLui(occurrence.Uri))
+        )
             return null;
         foreach (var occurrence in occurrences)
         {
@@ -832,102 +891,108 @@ internal sealed class LuiProjectContext : IDisposable
             )
                 return null;
         }
-        var original = await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
-        if (original is null)
-            return null;
-        original = original.RemoveSyntaxTrees(
-            original.SyntaxTrees.Where(tree =>
-                (tree.FilePath ?? "").Contains(
-                    "Lucent.Lui.Generator",
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-        );
-        var inputs = new List<LuiProjectDocument>();
         var sourceByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (
-            var document in project.AdditionalDocuments.Where(document =>
-                document.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
-            )
-        )
-        {
-            var source = (
-                await document.GetTextAsync(cancellationToken).ConfigureAwait(false)
-            ).ToString();
-            var logical = LogicalPath(project, document);
-            if (!LuiDocumentIdentity.TryCreate(logical, out var identity))
-                return null;
-            inputs.Add(
-                new LuiProjectDocument(
-                    document.FilePath!,
-                    identity!.LogicalPath,
-                    source,
-                    DocumentVersion(project, document, source)
-                )
-            );
-            sourceByPath[document.FilePath!] = source;
-        }
-        var index = LuiProjectComponentIndex.Build(original, inputs, cancellationToken);
-        if (index.Diagnostics.Count != 0)
-            return null;
-        var globals = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
-        globals.TryGetValue("build_property.LucentLuiProjectEpoch", out var projectEpoch);
-        globals.TryGetValue("build_property.LucentLuiProjectIdentity", out var projectIdentity);
-        globals.TryGetValue("build_property.LucentLuiCompilerOptions", out var options);
-        globals.TryGetValue("build_property.LucentLuiDefines", out var defines);
-        var parse = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
         var generatedDocuments = new List<(DocumentId Id, RenameGeneratedDocument Document)>();
         var renameSolution = project.Solution;
-        foreach (var document in inputs)
+        foreach (var graphProject in ProjectGraph(project).Reverse())
         {
-            var identity = new LuiFreshnessIdentity(
-                projectEpoch ?? "",
-                projectIdentity ?? project.FilePath ?? project.Name,
-                new LuiDocumentIdentity(document.LogicalPath),
-                document.Version,
-                "",
-                index.Generation,
-                parse.LanguageVersion.ToString(),
-                "",
-                "",
-                "",
-                options ?? "",
-                defines ?? "",
-                project.DefaultNamespace ?? ""
-            );
-            var result = LuiCompiler.Compile(
-                document.Syntax,
-                index.Augment(original, document.Path),
-                identity
-            );
-            if (transformGenerated is not null)
-                result = transformGenerated(result);
-            if (!result.Success || result.ProjectionSource is null)
+            var current = renameSolution.GetProject(graphProject.Id);
+            var compilation = current is null
+                ? null
+                : await current.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
+            if (current is null || compilation is null)
                 return null;
-            var generatedUri = new Uri(
-                "lucent-lui://generated/"
-                    + result.Identity.MapIdentity
-                    + "/"
-                    + result.Identity.HintName
-            );
-            var documentId = DocumentId.CreateNewId(project.Id, result.Identity.HintName);
-            renameSolution = renameSolution.AddDocument(
-                documentId,
-                result.Identity.HintName,
-                SourceText.From(result.ProjectionSource),
-                filePath: generatedUri.AbsoluteUri
-            );
-            generatedDocuments.Add(
-                (
-                    documentId,
-                    new RenameGeneratedDocument(
-                        new Uri(document.Path),
-                        document.Source,
-                        result.Map,
-                        result.Identity
+            compilation = compilation.RemoveSyntaxTrees(
+                compilation.SyntaxTrees.Where(tree =>
+                    (tree.FilePath ?? "").Contains(
+                        "Lucent.Lui.Generator",
+                        StringComparison.OrdinalIgnoreCase
                     )
                 )
             );
+            var inputs = new List<LuiProjectDocument>();
+            foreach (
+                var document in current.AdditionalDocuments.Where(document =>
+                    document.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            {
+                var source = (
+                    await document.GetTextAsync(cancellationToken).ConfigureAwait(false)
+                ).ToString();
+                var logical = LogicalPath(current, document);
+                if (!LuiDocumentIdentity.TryCreate(logical, out var documentIdentity))
+                    return null;
+                inputs.Add(
+                    new LuiProjectDocument(
+                        document.FilePath!,
+                        documentIdentity!.LogicalPath,
+                        source,
+                        DocumentVersion(current, document, source)
+                    )
+                );
+                sourceByPath[document.FilePath!] = source;
+            }
+            var index = LuiProjectComponentIndex.Build(compilation, inputs, cancellationToken);
+            if (index.Diagnostics.Count != 0)
+                return null;
+            var globals = current.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
+            globals.TryGetValue("build_property.LucentLuiProjectEpoch", out var projectEpoch);
+            globals.TryGetValue("build_property.LucentLuiProjectIdentity", out var projectIdentity);
+            globals.TryGetValue("build_property.LucentLuiCompilerOptions", out var options);
+            globals.TryGetValue("build_property.LucentLuiDefines", out var defines);
+            var parse = current.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
+            foreach (var document in inputs)
+            {
+                var identity = new LuiFreshnessIdentity(
+                    projectEpoch ?? "",
+                    projectIdentity ?? current.FilePath ?? current.Name,
+                    new LuiDocumentIdentity(document.LogicalPath),
+                    document.Version,
+                    "",
+                    index.Generation,
+                    parse.LanguageVersion.ToString(),
+                    "",
+                    "",
+                    "",
+                    options ?? "",
+                    defines ?? "",
+                    current.DefaultNamespace ?? ""
+                );
+                var result = LuiCompiler.Compile(
+                    document.Syntax,
+                    index.Augment(compilation, document.Path),
+                    identity
+                );
+                if (transformGenerated is not null && current.Id == project.Id)
+                    result = transformGenerated(result);
+                if (!result.Success || result.ProjectionSource is null)
+                    return null;
+                var generatedUri = new Uri(
+                    "lucent-lui://generated/"
+                        + result.Identity.MapIdentity
+                        + "/"
+                        + result.Identity.HintName
+                );
+                var documentId = DocumentId.CreateNewId(current.Id, result.Identity.HintName);
+                renameSolution = renameSolution.AddDocument(
+                    documentId,
+                    result.Identity.HintName,
+                    SourceText.From(result.ProjectionSource),
+                    filePath: generatedUri.AbsoluteUri
+                );
+                generatedDocuments.Add(
+                    (
+                        documentId,
+                        new RenameGeneratedDocument(
+                            new Uri(document.Path),
+                            document.Source,
+                            result.Map,
+                            result.Identity
+                        )
+                    )
+                );
+            }
         }
         var generated = new Dictionary<SyntaxTree, RenameGeneratedDocument>();
         var trees = new Dictionary<SyntaxTree, ProjectId>();
@@ -937,10 +1002,10 @@ internal sealed class LuiProjectContext : IDisposable
             var tree = document is null
                 ? null
                 : await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
-            if (tree is null)
+            if (document is null || tree is null)
                 return null;
             generated[tree] = item.Document;
-            trees[tree] = project.Id;
+            trees[tree] = document.Project.Id;
         }
         var csharp = new Dictionary<SyntaxTree, Uri>();
         foreach (var graphProject in ProjectGraph(project))
@@ -1122,7 +1187,7 @@ internal sealed class LuiProjectContext : IDisposable
             : compilation.GetSemanticModel(tree);
     }
 
-    private static LuiSpan? LocalDeclarationFor(RenameSnapshot snapshot, ISymbol symbol)
+    private static LuiLocalProvenance? LocalDeclarationFor(RenameSnapshot snapshot, ISymbol symbol)
     {
         if (symbol is not IParameterSymbol parameter)
             return null;
@@ -1134,8 +1199,8 @@ internal sealed class LuiProjectContext : IDisposable
                     && generated
                         .Map.FromGenerated(new LuiSpan(node.SpanStart, node.Span.Length))
                         .Any(entry => entry.Kind == LuiMapKind.Local && entry.Source.Equals(span))
-                        ? span
-                        : (LuiSpan?)null
+                        ? new LuiLocalProvenance(generated.Uri, span)
+                        : (LuiLocalProvenance?)null
                     : null
             )
             .Where(span => span is not null)
@@ -1359,6 +1424,12 @@ internal sealed class LuiProjectContext : IDisposable
         return true;
     }
 
+    private static bool IsCSharp(Uri uri) =>
+        String.Equals(Path.GetExtension(uri.LocalPath), ".cs", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLui(Uri uri) =>
+        String.Equals(Path.GetExtension(uri.LocalPath), ".lui", StringComparison.OrdinalIgnoreCase);
+
     private static bool SameFile(string? path, Uri uri) =>
         path is not null
         && uri.IsFile
@@ -1395,28 +1466,36 @@ internal sealed class LuiProjectContext : IDisposable
         try
         {
             Uri uri;
+            Project? identityProject;
+            TextDocument? identityDocument;
             lock (gate)
             {
                 if (disposed || reloadFailed)
                     return false;
-                var project = Project();
-                var document = project.AdditionalDocuments.FirstOrDefault(document =>
-                    (
-                        LuiDocumentIdentity.TryCreate(
-                            LogicalPath(project, document),
-                            out var documentIdentity
-                        )
-                            ? documentIdentity!
-                            : new LuiDocumentIdentity(Path.GetFileName(document.FilePath!))
-                    ).Equals(identity.Document)
-                );
-                if (document is null)
+                var match = ProjectGraph(Project())
+                    .SelectMany(project =>
+                        project.AdditionalDocuments.Select(document => (project, document))
+                    )
+                    .FirstOrDefault(item =>
+                        (
+                            LuiDocumentIdentity.TryCreate(
+                                LogicalPath(item.project, item.document),
+                                out var documentIdentity
+                            )
+                                ? documentIdentity!
+                                : new LuiDocumentIdentity(Path.GetFileName(item.document.FilePath!))
+                        ).Equals(identity.Document)
+                    );
+                if (match.document is null)
                     return false;
-                uri = new Uri(document.FilePath!, UriKind.Absolute);
+                identityProject = match.project;
+                identityDocument = match.document;
+                uri = new Uri(match.document.FilePath!, UriKind.Absolute);
             }
-            return identity.CanPublishTo(
-                (await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false)).Identity
-            );
+            var text = await GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
+            return text is not null
+                && identity.DocumentVersion
+                    == DocumentVersion(identityProject!, identityDocument!, text);
         }
         catch (InvalidOperationException)
         {
@@ -1455,23 +1534,16 @@ internal sealed class LuiProjectContext : IDisposable
         }
         lock (gate)
             ThrowIfDisposed();
-        if (Owns(uri))
+        if (CanEdit(uri))
         {
-            var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
-            return snapshot.Text.ToString();
+            TextDocument? document;
+            lock (gate)
+                document = FindTextDocument(Project(), uri);
+            return document is null
+                ? null
+                : (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString();
         }
-        Project project;
-        lock (gate)
-        {
-            ThrowIfDisposed();
-            project = Project();
-        }
-        var document = project.Documents.FirstOrDefault(document =>
-            SameFile(document.FilePath, uri)
-        );
-        return document is null
-            ? null
-            : (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString();
+        return null;
     }
 
     internal string? GetGeneratedText(Uri uri)
@@ -1500,13 +1572,15 @@ internal sealed class LuiProjectContext : IDisposable
                 ThrowIfDisposed();
                 foreach (var (path, text) in overlays)
                 {
-                    var document = project.AdditionalDocuments.SingleOrDefault(item =>
-                        String.Equals(item.FilePath, path, StringComparison.OrdinalIgnoreCase)
-                    );
+                    var document = FindTextDocument(project, new Uri(path));
                     if (document is not null)
-                        project = project
-                            .Solution.WithAdditionalDocumentText(document.Id, text)
-                            .GetProject(project.Id)!;
+                    {
+                        var next =
+                            document is AdditionalDocument
+                                ? project.Solution.WithAdditionalDocumentText(document.Id, text)
+                                : project.Solution.WithDocumentText(document.Id, text);
+                        project = next.GetProject(project.Id)!;
+                    }
                 }
                 var previous = workspace;
                 workspace = reloaded;
@@ -1551,20 +1625,22 @@ internal sealed class LuiProjectContext : IDisposable
         {
             if (disposed || reloadFailed || !uri.IsFile)
                 return false;
-            return Project()
-                .AdditionalDocuments.Any(document =>
-                    String.Equals(
-                        Path.GetFullPath(document.FilePath!),
-                        Path.GetFullPath(FilePath(uri)),
-                        StringComparison.OrdinalIgnoreCase
-                    )
+            return ProjectGraph(Project())
+                .Any(project =>
+                    project.AdditionalDocuments.Any(document => SameFile(document.FilePath, uri))
                 );
         }
     }
 
+    internal bool CanEdit(Uri uri)
+    {
+        lock (gate)
+            return !disposed && !reloadFailed && FindTextDocument(Project(), uri) is not null;
+    }
+
     internal void Close(Uri uri)
     {
-        if (!Owns(uri))
+        if (!CanEdit(uri))
             return;
         Update(uri, SourceText.From(File.ReadAllText(FilePath(uri))), false);
     }
@@ -1574,8 +1650,13 @@ internal sealed class LuiProjectContext : IDisposable
         lock (gate)
         {
             ThrowIfDisposed();
-            var document = FindDocument(Project(), uri);
-            solution = solution.WithAdditionalDocumentText(document.Id, text);
+            var document =
+                FindTextDocument(Project(), uri)
+                ?? throw new ArgumentException("An evaluated document is required.", nameof(uri));
+            solution =
+                document is AdditionalDocument
+                    ? solution.WithAdditionalDocumentText(document.Id, text)
+                    : solution.WithDocumentText(document.Id, text);
             if (overlay)
                 overlays[document.FilePath!] = text;
             else
@@ -1676,7 +1757,17 @@ internal sealed class LuiProjectContext : IDisposable
             ThrowIfDisposed();
             if (reloadFailed)
                 throw new InvalidOperationException("The evaluated project reload failed.");
-            project = Project();
+            project =
+                ProjectGraph(Project())
+                    .FirstOrDefault(project =>
+                        project.AdditionalDocuments.Any(document =>
+                            SameFile(document.FilePath, uri)
+                        )
+                    )
+                ?? throw new ArgumentException(
+                    "An evaluated .lui document is required.",
+                    nameof(uri)
+                );
             captured = epoch;
         }
         var current = FindDocument(project, uri);
@@ -1829,6 +1920,17 @@ internal sealed class LuiProjectContext : IDisposable
                 )
             );
 
+    private static TextDocument? FindTextDocument(Project project, Uri uri) =>
+        !uri.IsFile
+            ? null
+            : ProjectGraph(project)
+                .SelectMany(graphProject =>
+                    graphProject
+                        .Documents.Cast<TextDocument>()
+                        .Concat(graphProject.AdditionalDocuments)
+                )
+                .FirstOrDefault(document => SameFile(document.FilePath, uri));
+
     private static LuiNavigationTarget? DeclarationTarget(
         PublishedDocument document,
         LuiMapEntry entry
@@ -1943,7 +2045,8 @@ internal sealed class LuiProjectContext : IDisposable
         var compilation = ProjectionCompilation(document.Compilation, tree);
         var position =
             entry is null ? -1
-            : entry.Kind == LuiMapKind.Symbol && entry.Generated.Length > entry.Source.Length
+            : entry.Kind is LuiMapKind.Symbol or LuiMapKind.Local
+            && entry.Generated.Length > entry.Source.Length
                 ? entry.Generated.End - 1
             : entry.Generated.Start
                 + Math.Min(
@@ -2565,7 +2668,10 @@ internal sealed class LuiProjectContext : IDisposable
     private static ISymbol? SymbolAt(SemanticDocument semantic)
     {
         if (
-            semantic.Entry is not { Kind: LuiMapKind.Symbol or LuiMapKind.Expression } entry
+            semantic.Entry
+                is not {
+                    Kind: LuiMapKind.Symbol or LuiMapKind.Local or LuiMapKind.Expression
+                } entry
             || semantic.Position < 0
         )
             return null;
@@ -2575,9 +2681,11 @@ internal sealed class LuiProjectContext : IDisposable
         );
         for (var node = token.Parent; node is not null; node = node.Parent)
         {
+            var declared = semantic.Model.GetDeclaredSymbol(node);
+            if (declared is not null && IsDeclarationIdentifier(node, token))
+                return declared;
             if (node.SpanStart < entry.Generated.Start || node.Span.End > entry.Generated.End)
                 break;
-            var declared = semantic.Model.GetDeclaredSymbol(node);
             if (declared is not null)
                 return declared;
             var info = semantic.Model.GetSymbolInfo(node, CancellationToken.None);
@@ -2865,13 +2973,20 @@ internal sealed class RenameSnapshot(
     internal IReadOnlyDictionary<SyntaxTree, ProjectId> Trees { get; } = trees;
 }
 
-internal sealed class RenameTarget(Uri uri, LuiSpan span, ISymbol symbol, LuiSpan? localDeclaration)
+internal sealed class RenameTarget(
+    Uri uri,
+    LuiSpan span,
+    ISymbol symbol,
+    LuiLocalProvenance? localDeclaration
+)
 {
     internal Uri Uri { get; } = uri;
     internal LuiSpan Span { get; } = span;
     internal ISymbol Symbol { get; } = symbol;
-    internal LuiSpan? LocalDeclaration { get; } = localDeclaration;
+    internal LuiLocalProvenance? LocalDeclaration { get; } = localDeclaration;
 }
+
+internal readonly record struct LuiLocalProvenance(Uri Uri, LuiSpan Span);
 
 internal sealed class RenameOccurrence(
     Uri uri,

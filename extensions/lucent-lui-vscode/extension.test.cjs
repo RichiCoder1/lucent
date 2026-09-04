@@ -66,7 +66,15 @@ test("activation preserves current diagnostics and clears closed documents", asy
     const process = new MockProcess();
     const openDocument = {
         uri: { toString: () => "file:///missing.lui" },
-        version: 1
+        version: 1,
+        languageId: "lui",
+        getText: () => ""
+    };
+    const csharpDocument = {
+        uri: { toString: () => "file:///Helpers.cs" },
+        version: 1,
+        languageId: "csharp",
+        getText: () => "class Helpers {}"
     };
     const vscode = {
         Diagnostic: class { constructor() {} },
@@ -113,12 +121,16 @@ test("activation preserves current diagnostics and clears closed documents", asy
             onDidCloseTextDocument: disposable,
             onDidOpenTextDocument: disposable,
             registerTextDocumentContentProvider: disposable,
-            textDocuments: [openDocument]
+            textDocuments: [openDocument, csharpDocument]
         }
     };
     const extension = loadExtension(vscode, process, options => spawnOptions = options);
     await extension.activate({ subscriptions: [] });
     assert.equal(spawnOptions.windowsHide, true);
+    assert.ok(process.notifications.some(notification =>
+        notification.method === "textDocument/didOpen"
+        && notification.params.textDocument.uri === "file:///Helpers.cs"
+    ));
     process.send({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: {
         uri: "file:///missing.lui", version: 999, diagnostics: []
     } });
@@ -185,9 +197,11 @@ class MockProcess extends EventEmitter {
         super();
         this.exitCode = null;
         this.stdout = new EventEmitter();
+        this.notifications = [];
         this.stdin = { write: value => {
             if (!Buffer.isBuffer(value)) return;
             const request = JSON.parse(value.toString());
+            if (request.id === undefined) this.notifications.push(request);
             this.lastRequest = request;
             if (request.method === "initialize") {
                 this.send({ jsonrpc: "2.0", method: "lucent/projectGraph", params: { directories: ["host", "referenced"] } });

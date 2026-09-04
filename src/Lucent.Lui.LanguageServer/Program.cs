@@ -199,7 +199,7 @@ internal static class Program
                     var opened = parameters.GetProperty("textDocument");
                     var openedUri = new Uri(opened.GetProperty("uri").GetString()!);
                     var version = opened.GetProperty("version").GetInt32();
-                    if (!project.Owns(openedUri))
+                    if (!project.CanEdit(openedUri))
                     {
                         PublishEmptyDiagnostics(openedUri, version);
                         return new HandlerResult(null, null);
@@ -220,7 +220,7 @@ internal static class Program
                     var changed = parameters.GetProperty("textDocument");
                     var changedUri = new Uri(changed.GetProperty("uri").GetString()!);
                     var version = changed.GetProperty("version").GetInt32();
-                    if (!project.Owns(changedUri))
+                    if (!project.CanEdit(changedUri))
                     {
                         PublishEmptyDiagnostics(changedUri, version);
                         return new HandlerResult(null, null);
@@ -245,7 +245,7 @@ internal static class Program
                         parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                     );
                     openDocuments.Remove(DocumentKey(closedUri), out var version);
-                    if (project.Owns(closedUri))
+                    if (project.CanEdit(closedUri))
                         project.Close(closedUri);
                     PublishEmptyDiagnostics(closedUri, version);
                     await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
@@ -622,7 +622,7 @@ internal static class Program
             var uri = new Uri(key);
             if (project.Owns(uri))
                 await PublishDiagnosticsAsync(project, uri, version).ConfigureAwait(false);
-            else
+            else if (!project.CanEdit(uri))
             {
                 PublishEmptyDiagnostics(uri, version);
                 openDocuments.Remove(key);
