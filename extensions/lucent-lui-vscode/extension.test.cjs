@@ -50,6 +50,7 @@ test("activation preserves current diagnostics and clears closed documents", asy
     const patterns = [];
     let semanticProvider;
     let semanticLegend;
+    let referenceProvider;
     let spawnOptions;
     const process = new MockProcess();
     const openDocument = {
@@ -59,6 +60,7 @@ test("activation preserves current diagnostics and clears closed documents", asy
     const vscode = {
         Diagnostic: class { constructor() {} },
         DiagnosticSeverity: { Error: 1, Warning: 2, Information: 3, Hint: 4 },
+        Location: class { constructor(uri, range) { this.uri = uri; this.range = range; } },
         Range: class { constructor() {} },
         RelativePattern: class { constructor(base, pattern) { patterns.push([base, pattern]); } },
         SemanticTokens: class { constructor(data) { this.data = data; } },
@@ -80,6 +82,10 @@ test("activation preserves current diagnostics and clears closed documents", asy
                 return disposable();
             },
             registerHoverProvider: disposable,
+            registerReferenceProvider: (_selector, provider) => {
+                referenceProvider = provider;
+                return disposable();
+            },
             registerRenameProvider: disposable,
             registerSignatureHelpProvider: disposable
         },
@@ -107,6 +113,14 @@ test("activation preserves current diagnostics and clears closed documents", asy
     } });
     assert.deepEqual(diagnostics.deleted, ["file:///missing.lui"]);
     assert.ok(patterns.some(([base]) => base === "referenced"));
+    assert.ok(referenceProvider);
+    const references = await referenceProvider.provideReferences(
+        { uri: { toString: () => "file:///Widget.lui" } },
+        { line: 0, character: 0 },
+        { includeDeclaration: true }
+    );
+    assert.equal(process.lastRequest.params.context.includeDeclaration, true);
+    assert.equal(references.length, 1);
     assert.deepEqual(Array.from(semanticLegend.types), ["keyword", "type", "property", "enumMember"]);
     const tokens = await semanticProvider.provideDocumentSemanticTokens({
         uri: { toString: () => "file:///Widget.lui" }
@@ -140,13 +154,18 @@ class MockProcess extends EventEmitter {
         this.stdin = { write: value => {
             if (!Buffer.isBuffer(value)) return;
             const request = JSON.parse(value.toString());
+            this.lastRequest = request;
             if (request.method === "initialize") {
                 this.send({ jsonrpc: "2.0", method: "lucent/projectGraph", params: { directories: ["host", "referenced"] } });
             }
             if (request.id !== undefined) this.send({
                 jsonrpc: "2.0",
                 id: request.id,
-                result: request.method === "textDocument/semanticTokens/full" ? { data: [0, 0, 3, 0, 0] } : {}
+                result: request.method === "textDocument/semanticTokens/full" ? { data: [0, 0, 3, 0, 0] }
+                    : request.method === "textDocument/references" ? [{
+                        uri: "file:///Widget.lui",
+                        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }
+                    }] : {}
             });
         } };
     }

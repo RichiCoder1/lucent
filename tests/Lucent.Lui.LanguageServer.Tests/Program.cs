@@ -29,10 +29,10 @@ try
     );
     await File.WriteAllTextAsync(
         helperPath,
-        "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString();\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; }"
+        "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString(); public static string AAAA(int value) => value.ToString();\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; }"
     );
     var source =
-        "namespace Sample;\r\nusing Lucent.Core;\r\nusing static Sample.Components;\r\nusing static Sample.ImportedComponents;\r\ninternal component Widget(int count) { <Card content={Helpers.Format(count)} name=\"widget\" /> }";
+        "namespace Sample;\r\nusing Lucent.Core;\r\nusing static Sample.Components;\r\nusing static Sample.ImportedComponents;\r\nstyle WidgetStyle { Background: Brush.Solid(default); }\r\ninternal component Widget(int count) { <Card content={Helpers.Format(count)} name=\"widget\" /> }";
     var sibling =
         "namespace Sample;\r\nusing static Lucent.Core.Components;\r\ninternal component Card(string content, string name = \"\") { <Row /> }";
     await File.WriteAllTextAsync(sourcePath, source);
@@ -217,6 +217,80 @@ try
             && componentRename.Edits.Any(edit => edit.Uri == new Uri(siblingPath)),
         "cross-language component rename did not include both .lui declaration and reference."
     );
+    var componentReferences = await context.ReferencesAsync(
+        sourceUri,
+        card,
+        true,
+        CancellationToken.None
+    );
+    var componentReferencesWithoutDeclaration = await context.ReferencesAsync(
+        sourceUri,
+        card,
+        false,
+        CancellationToken.None
+    );
+    var content = source.IndexOf("content", StringComparison.Ordinal);
+    var contentDeclaration = sibling.IndexOf("content", StringComparison.Ordinal);
+    var propertyReferences = await context.ReferencesAsync(
+        sourceUri,
+        content,
+        true,
+        CancellationToken.None
+    );
+    var visualProperty = source.IndexOf("Background", StringComparison.Ordinal);
+    var visualPropertyReferences = await context.ReferencesAsync(
+        sourceUri,
+        visualProperty,
+        true,
+        CancellationToken.None
+    );
+    var normalizedHelperUri = new Uri(VsCodeUri(new Uri(helperPath)));
+    var expressionReferences = await context.ReferencesAsync(
+        normalizedHelperUri,
+        helperDeclaration,
+        true,
+        CancellationToken.None
+    );
+    Assert(
+        componentReferences is not null
+            && componentReferences.Locations.Any(location =>
+                location.Uri == sourceUri && location.Span.Equals(new LuiSpan(card, "Card".Length))
+            )
+            && componentReferences.Locations.Any(location =>
+                location.Uri == new Uri(siblingPath)
+                && location.Span.Equals(new LuiSpan(cardDeclarationSpan.Start, "Card".Length))
+            )
+            && componentReferencesWithoutDeclaration is not null
+            && !componentReferencesWithoutDeclaration.Locations.Any(location =>
+                location.Uri == new Uri(siblingPath)
+                && location.Span.Start == cardDeclarationSpan.Start
+            )
+            && propertyReferences is not null
+            && propertyReferences.Locations.Any(location =>
+                location.Uri == sourceUri
+                && location.Span.Equals(new LuiSpan(content, "content".Length))
+            )
+            && propertyReferences.Locations.Any(location =>
+                location.Uri == new Uri(siblingPath)
+                && location.Span.Equals(new LuiSpan(contentDeclaration, "content".Length))
+            )
+            && visualPropertyReferences is not null
+            && visualPropertyReferences.Locations.Any(location =>
+                location.Uri == sourceUri
+                && location.Span.Equals(new LuiSpan(visualProperty, "Background".Length))
+            )
+            && expressionReferences is not null
+            && expressionReferences.Locations.Any(location =>
+                location.Uri == new Uri(helperPath)
+                && location.Span.Equals(new LuiSpan(helperDeclaration, "Format".Length))
+            )
+            && expressionReferences.Locations.Any(location =>
+                location.Uri == sourceUri
+                && location.Span.Equals(new LuiSpan(helper, "Format".Length))
+            )
+            && expressionReferences.Locations.All(location => location.Uri.Scheme != "lucent-lui"),
+        "cross-language references did not return exact mapped component, property, and expression spans."
+    );
     var renameReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var renameRelease = new TaskCompletionSource(
         TaskCreationOptions.RunContinuationsAsynchronously
@@ -239,6 +313,162 @@ try
     );
     renameRelease.SetResult();
     Assert(await staleRename is null, "stale rename returned partial workspace edits.");
+    context.ReplaceText(sourceUri, source);
+    var referencesReady = new TaskCompletionSource(
+        TaskCreationOptions.RunContinuationsAsynchronously
+    );
+    var referencesRelease = new TaskCompletionSource(
+        TaskCreationOptions.RunContinuationsAsynchronously
+    );
+    var staleReferences = context.ReferencesAsync(
+        sourceUri,
+        helper,
+        true,
+        CancellationToken.None,
+        async () =>
+        {
+            referencesReady.SetResult();
+            await referencesRelease.Task;
+        }
+    );
+    await referencesReady.Task;
+    context.ReplaceText(
+        sourceUri,
+        source.Replace("Format(count)", "Format(count + 1)", StringComparison.Ordinal)
+    );
+    referencesRelease.SetResult();
+    Assert(await staleReferences is null, "stale references returned a partial result.");
+    context.ReplaceText(sourceUri, source);
+    Func<LuiCompilationResult, LuiCompilationResult> staleIdentity = result =>
+        result.Identity.Document.LogicalPath == "nested/screens/Widget.lui"
+            ? WithIdentity(result, result.Identity.DocumentVersion + "-stale")
+            : result;
+    var staleIdentityReferences = await context.ReferencesAsync(
+        sourceUri,
+        helper,
+        true,
+        CancellationToken.None,
+        transformGenerated: staleIdentity
+    );
+    var staleIdentityRename = await context.RenameAsync(
+        sourceUri,
+        helper,
+        "Identity",
+        CancellationToken.None,
+        transformGenerated: staleIdentity
+    );
+    var staleIdentityPrepareRename = await context.PrepareRenameAsync(
+        sourceUri,
+        helper,
+        CancellationToken.None,
+        staleIdentity
+    );
+    Assert(
+        staleIdentityReferences is null
+            && staleIdentityRename is null
+            && staleIdentityPrepareRename is null,
+        "a non-current generated identity published references or rename without an epoch change."
+    );
+    Func<LuiCompilationResult, LuiCompilationResult> ambiguousMap = result =>
+    {
+        if (result.Identity.Document.LogicalPath != "nested/screens/Widget.lui")
+            return result;
+        var entries = result.Map.Entries.ToList();
+        entries.Add(
+            new LuiMapEntry(
+                new LuiSpan(card, "Card".Length),
+                GeneratedTokenSpan(result, helper, "Format"),
+                LuiMapKind.Symbol,
+                false
+            )
+        );
+        return WithMap(result, entries);
+    };
+    Func<LuiCompilationResult, LuiCompilationResult> unmappableMap = result =>
+    {
+        if (result.Identity.Document.LogicalPath != "nested/screens/Widget.lui")
+            return result;
+        var entries = result.Map.Entries.Append(
+            new LuiMapEntry(
+                new LuiSpan(card, "Card".Length),
+                new LuiSpan(result.ProjectionSource!.IndexOf('('), 1),
+                LuiMapKind.Symbol,
+                false
+            )
+        );
+        return WithMap(result, entries);
+    };
+    Assert(
+        await context.ReferencesAsync(
+            sourceUri,
+            card,
+            true,
+            CancellationToken.None,
+            transformGenerated: ambiguousMap
+        )
+            is null
+            && await context.ReferencesAsync(
+                sourceUri,
+                card,
+                true,
+                CancellationToken.None,
+                transformGenerated: unmappableMap
+            )
+                is null,
+        "ambiguous or unmappable source-map targets returned references."
+    );
+    var overlapSource =
+        source
+            .Replace("Helpers.Format(count)", "Helpers.AAAA(count)", StringComparison.Ordinal)
+            .Replace("name=\"widget\"", "name={Helpers.AAAA(count)}", StringComparison.Ordinal)
+        + "\r\n// AAAAA";
+    var firstAaaa =
+        overlapSource.IndexOf("Helpers.AAAA", StringComparison.Ordinal) + "Helpers.".Length;
+    var secondAaaa =
+        overlapSource.IndexOf("Helpers.AAAA", firstAaaa + 1, StringComparison.Ordinal)
+        + "Helpers.".Length;
+    var overlapComment = overlapSource.LastIndexOf("AAAAA", StringComparison.Ordinal);
+    context.ReplaceText(sourceUri, overlapSource);
+    Func<LuiCompilationResult, LuiCompilationResult> overlappingMap = result =>
+    {
+        if (result.Identity.Document.LogicalPath != "nested/screens/Widget.lui")
+            return result;
+        var firstToken = GeneratedTokenSpan(result, firstAaaa, "AAAA");
+        var secondToken = GeneratedTokenSpan(result, secondAaaa, "AAAA");
+        var entries = result
+            .Map.Entries.Where(entry =>
+                !Intersects(entry.Generated, firstToken)
+                && !Intersects(entry.Generated, secondToken)
+            )
+            .Append(
+                new LuiMapEntry(
+                    new LuiSpan(overlapComment, "AAAA".Length),
+                    firstToken,
+                    LuiMapKind.Symbol,
+                    false
+                )
+            )
+            .Append(
+                new LuiMapEntry(
+                    new LuiSpan(overlapComment + 1, "AAAA".Length),
+                    secondToken,
+                    LuiMapKind.Symbol,
+                    false
+                )
+            );
+        return WithMap(result, entries);
+    };
+    Assert(
+        await context.ReferencesAsync(
+            sourceUri,
+            overlapComment,
+            true,
+            CancellationToken.None,
+            transformGenerated: overlappingMap
+        )
+            is null,
+        "overlapping mapped references returned a partial result."
+    );
     context.ReplaceText(sourceUri, source);
     using (var foreign = await LuiProjectContext.LoadAsync(projectPath, CancellationToken.None))
         Assert(
@@ -510,11 +740,87 @@ try
         );
         Assert(
             capabilities.GetProperty("renameProvider").GetProperty("prepareProvider").GetBoolean()
+                && capabilities.GetProperty("referencesProvider").GetBoolean()
                 && capabilities.GetProperty("documentFormattingProvider").GetBoolean()
                 && capabilities.GetProperty("documentRangeFormattingProvider").GetBoolean(),
-            "LSP did not advertise rename and formatter providers."
+            "LSP did not advertise rename, references, and formatter providers."
         );
         await lsp.NotifyAsync("initialized", new { });
+        using var lspComponentReferences = await lsp.RequestAsync(
+            "textDocument/references",
+            new
+            {
+                textDocument = new { uri = lspSourceUri },
+                position = new { line = rowPosition.Line, character = rowPosition.Character },
+                context = new { includeDeclaration = false },
+            }
+        );
+        var lspHelperText = await File.ReadAllTextAsync(helperPath);
+        var lspHelperDeclaration = Position(lspHelperText, helperDeclaration);
+        using var lspExpressionReferences = await lsp.RequestAsync(
+            "textDocument/references",
+            new
+            {
+                textDocument = new { uri = VsCodeUri(new Uri(helperPath)) },
+                position = new
+                {
+                    line = lspHelperDeclaration.Line,
+                    character = lspHelperDeclaration.Character,
+                },
+                context = new { includeDeclaration = true },
+            }
+        );
+        var lspComponentLocations = lspComponentReferences
+            .RootElement.GetProperty("result")
+            .EnumerateArray()
+            .ToArray();
+        var lspExpressionLocations = lspExpressionReferences
+            .RootElement.GetProperty("result")
+            .EnumerateArray()
+            .ToArray();
+        Assert(
+            lspComponentLocations.Any(location =>
+                location.GetProperty("uri").GetString() == sourceUri.AbsoluteUri
+                && location.GetProperty("range").GetProperty("start").GetProperty("line").GetInt32()
+                    == rowPosition.Line
+                && location
+                    .GetProperty("range")
+                    .GetProperty("start")
+                    .GetProperty("character")
+                    .GetInt32() == rowPosition.Character
+            )
+                && !lspComponentLocations.Any(location =>
+                    location.GetProperty("uri").GetString() == new Uri(siblingPath).AbsoluteUri
+                )
+                && lspExpressionLocations.Any(location =>
+                    location.GetProperty("uri").GetString() == new Uri(helperPath).AbsoluteUri
+                    && location
+                        .GetProperty("range")
+                        .GetProperty("start")
+                        .GetProperty("character")
+                        .GetInt32() == lspHelperDeclaration.Character
+                )
+                && lspExpressionLocations.Any(location =>
+                    location.GetProperty("uri").GetString() == sourceUri.AbsoluteUri
+                    && location
+                        .GetProperty("range")
+                        .GetProperty("start")
+                        .GetProperty("line")
+                        .GetInt32() == Position(source, helper).Line
+                    && location
+                        .GetProperty("range")
+                        .GetProperty("start")
+                        .GetProperty("character")
+                        .GetInt32() == Position(source, helper).Character
+                )
+                && lspExpressionLocations.All(location =>
+                    location
+                        .GetProperty("uri")
+                        .GetString()!
+                        .StartsWith("file:", StringComparison.Ordinal)
+                ),
+            "LSP references did not preserve includeDeclaration, C# URI normalization, exact ranges, or source-only locations."
+        );
         await lsp.NotifyAsync(
             "textDocument/didOpen",
             new
@@ -909,9 +1215,19 @@ try
             "lucent/generatedText",
             new { uri = generatedUri }
         );
+        using var referencesAfterShutdown = await lsp.RequestAsync(
+            "textDocument/references",
+            new
+            {
+                textDocument = new { uri = lspSourceUri },
+                position = new { line = rowPosition.Line, character = rowPosition.Character },
+                context = new { includeDeclaration = true },
+            }
+        );
         Assert(
-            afterShutdown.RootElement.TryGetProperty("error", out _),
-            "request after shutdown was accepted."
+            afterShutdown.RootElement.TryGetProperty("error", out _)
+                && referencesAfterShutdown.RootElement.TryGetProperty("error", out _),
+            "request or references after shutdown was accepted."
         );
         Assert(await lsp.ExitAsync() == 0, "normal shutdown/exit returned a failure code.");
     }
@@ -1941,6 +2257,66 @@ static async Task<int> MeasureOperationAsync(string measure)
 static string Apply(string source, LuiFormatResult edit) =>
     source[..edit.Span.Start] + edit.NewText + source[edit.Span.End..];
 
+static LuiCompilationResult WithMap(
+    LuiCompilationResult result,
+    IEnumerable<LuiMapEntry> entries
+) =>
+    new(
+        result.Identity,
+        result.Source,
+        new LuiSourceMap(result.Identity, entries.ToArray()),
+        result.Diagnostics,
+        result.ProjectionSource
+    );
+
+static LuiCompilationResult WithIdentity(LuiCompilationResult result, string documentVersion)
+{
+    var current = result.Identity;
+    var identity = new LuiFreshnessIdentity(
+        current.ProjectEpoch,
+        current.ProjectIdentity,
+        current.Document,
+        documentVersion,
+        current.CompilationGeneration,
+        current.SiblingIndexGeneration,
+        current.LanguageVersion,
+        current.CompilerVersion,
+        current.ReferencesGeneration,
+        current.GlobalUsingsGeneration,
+        current.Options,
+        current.Defines,
+        current.RootNamespace
+    );
+    return new LuiCompilationResult(
+        identity,
+        result.Source,
+        new LuiSourceMap(identity, result.Map.Entries),
+        result.Diagnostics,
+        result.ProjectionSource
+    );
+}
+
+static LuiSpan GeneratedTokenSpan(LuiCompilationResult result, int sourceStart, string text)
+{
+    foreach (var entry in result.Map.FromSource(new LuiSpan(sourceStart, 0)))
+    {
+        if (
+            entry.Hidden
+            || entry.Source.Length != entry.Generated.Length
+            || sourceStart < entry.Source.Start
+            || sourceStart + text.Length > entry.Source.End
+        )
+            continue;
+        var generatedStart = entry.Generated.Start + sourceStart - entry.Source.Start;
+        if (result.ProjectionSource!.Substring(generatedStart, text.Length) == text)
+            return new LuiSpan(generatedStart, text.Length);
+    }
+    throw new InvalidOperationException("Missing generated token span for " + text + ".");
+}
+
+static bool Intersects(LuiSpan left, LuiSpan right) =>
+    left.Start < right.End && right.Start < left.End;
+
 static async Task<int> ToolingExitCodeAsync(params string[] arguments)
 {
     var configuration = Directory
@@ -2100,8 +2476,13 @@ sealed class LspClient : IDisposable
 
     internal static LspClient Start()
     {
+#if DEBUG
+        const string configuration = "Debug";
+#else
+        const string configuration = "Release";
+#endif
         var built = Path.GetFullPath(
-            "src/Lucent.Lui.LanguageServer/bin/Debug/net10.0/Lucent.Lui.LanguageServer.exe"
+            $"src/Lucent.Lui.LanguageServer/bin/{configuration}/net10.0/Lucent.Lui.LanguageServer.exe"
         );
         var process =
             Process.Start(

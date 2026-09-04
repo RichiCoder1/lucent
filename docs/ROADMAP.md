@@ -143,6 +143,8 @@ The first language version is `preview`. Named styles are internal and tokens/sh
 
 **Gate:** equivalent C# and `.lui` produce identical framework behavior and dumps; warning-clean NativeAOT; exact bidirectional source maps; C#-quality completion, XML documentation hover, diagnostics, rename/references, formatting, and generated-code navigation; no implementation-name leakage or editor dead spots.
 
+The automated Issue Browser cutover record is maintained in [M7 evidence](M7-EVIDENCE.md). Independent review and the existing manual milestone gates remain closure decisions.
+
 **Stop:** `.lui` requires a parallel runtime, reflection fallback, runtime parser, compatibility bridge to archived behavior, or lower-quality language tooling than the declared matrix.
 
 ## Later options

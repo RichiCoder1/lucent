@@ -185,6 +185,7 @@ internal static class Program
                                 workspaceDiagnostics = false,
                             },
                             renameProvider = new { prepareProvider = true },
+                            referencesProvider = true,
                             documentFormattingProvider = true,
                             documentRangeFormattingProvider = true,
                             textDocumentSync = 1,
@@ -336,6 +337,43 @@ internal static class Program
                     null,
                     renamed is null ? null : WorkspaceEdit(project, renamed)
                 );
+            case "textDocument/references":
+                if (project is null)
+                    return new HandlerResult(null, null);
+                var referencesUri = new Uri(
+                    parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
+                );
+                var references = await project
+                    .ReferencesAsync(
+                        referencesUri,
+                        await OffsetAsync(
+                                project,
+                                referencesUri,
+                                parameters.GetProperty("position")
+                            )
+                            .ConfigureAwait(false),
+                        parameters
+                            .GetProperty("context")
+                            .GetProperty("includeDeclaration")
+                            .GetBoolean(),
+                        CancellationToken.None
+                    )
+                    .ConfigureAwait(false);
+                if (references is null)
+                    return new HandlerResult(null, null);
+                var referenceLocations = new List<object>();
+                foreach (var location in references.Locations)
+                {
+                    var text = await project
+                        .GetTextAsync(location.Uri, CancellationToken.None)
+                        .ConfigureAwait(false);
+                    if (text is null)
+                        return new HandlerResult(null, null);
+                    referenceLocations.Add(
+                        Location(new LuiNavigationTarget(location.Uri, location.Span, text))
+                    );
+                }
+                return new HandlerResult(null, referenceLocations);
             case "textDocument/formatting":
             case "textDocument/rangeFormatting":
                 if (project is null)

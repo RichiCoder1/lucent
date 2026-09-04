@@ -274,6 +274,23 @@ async function activate(context) {
                 })
             )
         }),
+        vscode.languages.registerReferenceProvider("lui", {
+            provideReferences: async (document, position, context) => {
+                const result = await rpc.request("textDocument/references", {
+                    textDocument: { uri: document.uri.toString() }, position,
+                    context: { includeDeclaration: context.includeDeclaration }
+                });
+                return result && result.map(location => new vscode.Location(
+                    vscode.Uri.parse(location.uri),
+                    new vscode.Range(
+                        location.range.start.line,
+                        location.range.start.character,
+                        location.range.end.line,
+                        location.range.end.character
+                    )
+                ));
+            }
+        }),
         vscode.languages.registerDocumentFormattingEditProvider("lui", {
             provideDocumentFormattingEdits: async document => toTextEdits(
                 await rpc.request("textDocument/formatting", {

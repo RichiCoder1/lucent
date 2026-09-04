@@ -651,14 +651,18 @@ internal sealed class LuiProjectContext : IDisposable
     internal async Task<LuiRenameResult?> PrepareRenameAsync(
         Uri uri,
         int offset,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        Func<LuiCompilationResult, LuiCompilationResult>? transformGenerated = null
     )
     {
-        var snapshot = await RenameSnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        var snapshot = await RenameSnapshotAsync(uri, cancellationToken, transformGenerated)
+            .ConfigureAwait(false);
         if (snapshot is null)
             return null;
         var target = ResolveRenameTarget(snapshot, uri, offset);
-        return target is null || !RenameSnapshotCurrent(snapshot)
+        return
+            target is null
+            || !await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
             ? null
             : new LuiRenameResult(target.Uri, target.Span, []);
     }
@@ -668,7 +672,8 @@ internal sealed class LuiProjectContext : IDisposable
         int offset,
         string newName,
         CancellationToken cancellationToken,
-        Func<Task>? beforeCommit = null
+        Func<Task>? beforeCommit = null,
+        Func<LuiCompilationResult, LuiCompilationResult>? transformGenerated = null
     )
     {
         if (
@@ -677,7 +682,8 @@ internal sealed class LuiProjectContext : IDisposable
             || SyntaxFacts.GetKeywordKind(newName) != SyntaxKind.None
         )
             return null;
-        var snapshot = await RenameSnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
+        var snapshot = await RenameSnapshotAsync(uri, cancellationToken, transformGenerated)
+            .ConfigureAwait(false);
         if (snapshot is null)
             return null;
         var target = ResolveRenameTarget(snapshot, uri, offset);
@@ -717,7 +723,10 @@ internal sealed class LuiProjectContext : IDisposable
         }
         if (beforeCommit is not null)
             await beforeCommit().ConfigureAwait(false);
-        if (!RenameSnapshotCurrent(snapshot) || edits.Count == 0)
+        if (
+            !await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
+            || edits.Count == 0
+        )
             return null;
         return new LuiRenameResult(
             target.Uri,
@@ -729,6 +738,68 @@ internal sealed class LuiProjectContext : IDisposable
                     pair.Value.OrderByDescending(span => span.Start).ToArray(),
                     newName
                 ))
+                .ToArray()
+        );
+    }
+
+    internal async Task<LuiReferenceResult?> ReferencesAsync(
+        Uri uri,
+        int offset,
+        bool includeDeclaration,
+        CancellationToken cancellationToken,
+        Func<Task>? beforeCommit = null,
+        Func<LuiCompilationResult, LuiCompilationResult>? transformGenerated = null
+    )
+    {
+        var snapshot = await RenameSnapshotAsync(uri, cancellationToken, transformGenerated)
+            .ConfigureAwait(false);
+        if (snapshot is null)
+            return null;
+        var target = ResolveRenameTarget(snapshot, uri, offset);
+        if (target is null)
+            return null;
+        var locations = new Dictionary<Uri, List<LuiSpan>>();
+        foreach (var tree in snapshot.Compilation.SyntaxTrees)
+        {
+            var model = snapshot.Compilation.GetSemanticModel(tree);
+            foreach (var token in tree.GetRoot(cancellationToken).DescendantTokens())
+            {
+                if (
+                    !SameSymbol(SymbolForToken(model, token), target.Symbol)
+                    || !includeDeclaration
+                        && token.Parent is { } parent
+                        && IsDeclarationIdentifier(parent, token)
+                )
+                    continue;
+                LuiSpan? span;
+                Uri locationUri;
+                if (snapshot.Generated.TryGetValue(tree, out var generated))
+                {
+                    span = RenameSourceSpan(generated, token);
+                    locationUri = generated.Uri;
+                }
+                else
+                {
+                    if (!snapshot.CSharp.TryGetValue(tree, out var csharpUri))
+                        return null;
+                    locationUri = csharpUri;
+                    span = new LuiSpan(token.SpanStart, token.Span.Length);
+                }
+                if (span is null || !AddRenameEdit(locations, locationUri, span.Value))
+                    return null;
+            }
+        }
+        if (beforeCommit is not null)
+            await beforeCommit().ConfigureAwait(false);
+        if (!await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false))
+            return null;
+        return new LuiReferenceResult(
+            locations
+                .OrderBy(pair => pair.Key.AbsoluteUri, StringComparer.Ordinal)
+                .SelectMany(pair =>
+                    pair.Value.OrderBy(span => span.Start)
+                        .Select(span => new LuiReferenceLocation(pair.Key, span))
+                )
                 .ToArray()
         );
     }
@@ -760,7 +831,8 @@ internal sealed class LuiProjectContext : IDisposable
 
     private async Task<RenameSnapshot?> RenameSnapshotAsync(
         Uri requested,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        Func<LuiCompilationResult, LuiCompilationResult>? transformGenerated = null
     )
     {
         Project project;
@@ -846,6 +918,8 @@ internal sealed class LuiProjectContext : IDisposable
                 index.Augment(original, document.Path),
                 identity
             );
+            if (transformGenerated is not null)
+                result = transformGenerated(result);
             if (!result.Success || result.ProjectionSource is null)
                 return null;
             var generatedUri = new Uri(
@@ -864,7 +938,8 @@ internal sealed class LuiProjectContext : IDisposable
             generated[tree] = new RenameGeneratedDocument(
                 new Uri(document.Path),
                 document.Source,
-                result.Map
+                result.Map,
+                result.Identity
             );
         }
         var csharp = project
@@ -878,7 +953,14 @@ internal sealed class LuiProjectContext : IDisposable
                 StringComparer.OrdinalIgnoreCase
             )
             .ToDictionary(item => item.tree, item => item.Uri);
-        return new RenameSnapshot(captured, combined, generated, csharp, sourceByPath);
+        return new RenameSnapshot(
+            captured,
+            combined,
+            generated,
+            csharp,
+            sourceByPath,
+            generated.Values.Select(document => document.Identity).ToArray()
+        );
     }
 
     private bool RenameSnapshotCurrent(RenameSnapshot snapshot)
@@ -887,9 +969,25 @@ internal sealed class LuiProjectContext : IDisposable
             return !disposed && !reloadFailed && epoch == snapshot.Epoch;
     }
 
+    private async Task<bool> CanPublishAsync(
+        RenameSnapshot snapshot,
+        CancellationToken cancellationToken
+    )
+    {
+        foreach (var identity in snapshot.GeneratedIdentities)
+        {
+            if (!await IsCurrentAsync(identity, cancellationToken).ConfigureAwait(false))
+                return false;
+        }
+        return RenameSnapshotCurrent(snapshot);
+    }
+
     private static RenameTarget? ResolveRenameTarget(RenameSnapshot snapshot, Uri uri, int offset)
     {
-        if (snapshot.CSharp.FirstOrDefault(pair => pair.Value == uri) is { Key: { } csharpTree })
+        if (
+            snapshot.CSharp.FirstOrDefault(pair => SameFile(pair.Value.LocalPath, uri)) is
+            { Key: { } csharpTree, Value: { } csharpUri }
+        )
         {
             var token = csharpTree
                 .GetRoot()
@@ -897,43 +995,61 @@ internal sealed class LuiProjectContext : IDisposable
             var symbol = SymbolForToken(snapshot.Compilation.GetSemanticModel(csharpTree), token);
             return symbol is null
                 ? null
-                : new RenameTarget(uri, new LuiSpan(token.SpanStart, token.Span.Length), symbol);
+                : new RenameTarget(
+                    csharpUri,
+                    new LuiSpan(token.SpanStart, token.Span.Length),
+                    symbol
+                );
         }
         foreach (var pair in snapshot.Generated)
         {
             if (!SameFile(pair.Value.Uri.LocalPath, uri))
                 continue;
-            var entry = pair
+            var entries = pair
                 .Value.Map.FromSource(new LuiSpan(offset, 0))
                 .Where(entry => !entry.Hidden && entry.Generated.Length != 0)
                 .OrderBy(entry => entry.Kind == LuiMapKind.Symbol ? 0 : 1)
                 .ThenBy(entry => entry.Generated.Length)
-                .FirstOrDefault();
-            if (entry is null)
+                .ToArray();
+            if (entries.Length == 0)
                 return null;
             var root = pair.Key.GetRoot();
-            var token =
-                entry.Source.Length == entry.Generated.Length
-                    ? root.FindToken(
-                        entry.Generated.Start
-                            + Math.Clamp(offset - entry.Source.Start, 0, entry.Generated.Length - 1)
-                    )
-                    : root.DescendantTokens()
-                        .Where(token =>
-                            token.SpanStart >= entry.Generated.Start
-                            && token.Span.End <= entry.Generated.End
+            var model = snapshot.Compilation.GetSemanticModel(pair.Key);
+            var targets = new List<RenameTarget>();
+            foreach (var entry in entries)
+            {
+                var token =
+                    entry.Source.Length == entry.Generated.Length
+                        ? root.FindToken(
+                            entry.Generated.Start
+                                + Math.Clamp(
+                                    offset - entry.Source.Start,
+                                    0,
+                                    entry.Generated.Length - 1
+                                )
                         )
-                        .FirstOrDefault(token =>
-                            token.ValueText
-                            == pair.Value.Source.Substring(entry.Source.Start, entry.Source.Length)
-                        );
-            var symbol =
-                token.RawKind == 0
-                    ? null
-                    : SymbolForToken(snapshot.Compilation.GetSemanticModel(pair.Key), token);
-            return symbol is null ? null
-                : RenameSourceSpan(pair.Value, token) is { } span
-                    ? new RenameTarget(uri, span, symbol)
+                        : root.DescendantTokens()
+                            .Where(token =>
+                                token.SpanStart >= entry.Generated.Start
+                                && token.Span.End <= entry.Generated.End
+                            )
+                            .FirstOrDefault(token =>
+                                token.ValueText
+                                == pair.Value.Source.Substring(
+                                    entry.Source.Start,
+                                    entry.Source.Length
+                                )
+                            );
+                var symbol = token.RawKind == 0 ? null : SymbolForToken(model, token);
+                if (symbol is null || RenameSourceSpan(pair.Value, token) is not { } span)
+                    return null;
+                targets.Add(new RenameTarget(pair.Value.Uri, span, symbol));
+            }
+            var target = targets[0];
+            return targets.All(candidate =>
+                SameSymbol(candidate.Symbol, target.Symbol) && candidate.Span.Equals(target.Span)
+            )
+                ? target
                 : null;
         }
         return null;
@@ -2474,17 +2590,34 @@ internal sealed class LuiRenameDocumentEdit(Uri uri, IReadOnlyList<LuiSpan> span
     internal string NewText { get; } = newText;
 }
 
+internal sealed class LuiReferenceResult(IReadOnlyList<LuiReferenceLocation> locations)
+{
+    internal IReadOnlyList<LuiReferenceLocation> Locations { get; } = locations;
+}
+
+internal sealed class LuiReferenceLocation(Uri uri, LuiSpan span)
+{
+    internal Uri Uri { get; } = uri;
+    internal LuiSpan Span { get; } = span;
+}
+
 internal sealed class LuiFormatResult(LuiSpan span, string newText)
 {
     internal LuiSpan Span { get; } = span;
     internal string NewText { get; } = newText;
 }
 
-internal sealed class RenameGeneratedDocument(Uri uri, string source, LuiSourceMap map)
+internal sealed class RenameGeneratedDocument(
+    Uri uri,
+    string source,
+    LuiSourceMap map,
+    LuiFreshnessIdentity identity
+)
 {
     internal Uri Uri { get; } = uri;
     internal string Source { get; } = source;
     internal LuiSourceMap Map { get; } = map;
+    internal LuiFreshnessIdentity Identity { get; } = identity;
 }
 
 internal sealed class RenameSnapshot(
@@ -2492,13 +2625,16 @@ internal sealed class RenameSnapshot(
     Compilation compilation,
     IReadOnlyDictionary<SyntaxTree, RenameGeneratedDocument> generated,
     IReadOnlyDictionary<SyntaxTree, Uri> csharp,
-    IReadOnlyDictionary<string, string> sourceByPath
+    IReadOnlyDictionary<string, string> sourceByPath,
+    IReadOnlyList<LuiFreshnessIdentity>? generatedIdentities = null
 )
 {
     internal long Epoch { get; } = epoch;
     internal Compilation Compilation { get; } = compilation;
     internal IReadOnlyDictionary<SyntaxTree, RenameGeneratedDocument> Generated { get; } =
         generated;
+    internal IReadOnlyList<LuiFreshnessIdentity> GeneratedIdentities { get; } =
+        generatedIdentities ?? generated.Values.Select(document => document.Identity).ToArray();
     internal IReadOnlyDictionary<SyntaxTree, Uri> CSharp { get; } = csharp;
     internal IReadOnlyDictionary<string, string> SourceByPath { get; } = sourceByPath;
 }
