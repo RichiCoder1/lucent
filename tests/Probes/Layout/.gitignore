@@ -1,0 +1,4 @@
+TaffyNative/target/
+**/bin/
+**/obj/
+**/publish/

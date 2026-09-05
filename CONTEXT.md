@@ -48,6 +48,14 @@ _Avoid_: Window scope, global service locator
 The retryable decision to stop accepting work and finish accepted operations before terminal application shutdown. A declined or failed preparation leaves the application available for recovery.
 _Avoid_: Force close, service stop
 
+**Editor session**:
+The document draft and editing continuity owned independently of the view currently presenting it.
+_Avoid_: Mounted editor, text-field instance
+
+**Participation**:
+Whether a retained subtree is visible, reserves space while hidden, or is collapsed without ending its ownership.
+_Avoid_: Routing visibility, unmounting
+
 **Default content**:
 The single explicitly marked component parameter that receives its unnamed element body. Its type determines whether the body supplies one scalar value or an ordered group of content recipes; its name does not determine its role.
 _Avoid_: Magic content parameter, implicit slot

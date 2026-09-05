@@ -20,43 +20,74 @@ public static class SceneLayout
         composition.RealizeVirtualized(viewport);
         composition.Flush(); // Virtual row factories may register effects; a projected scene must not precede their first commit.
         composition.RealizeVirtualized(viewport);
-        var boxes = new List<LayoutBox>();
-        var shapes = new Dictionary<long, ShapedText?>();
-        var nodes = Layout(
-            composition.Root,
-            new LayoutRect(0, 0, viewport.Width, viewport.Height),
+        var projected = composition.CaptureInputProjection(() =>
+        {
+            var elements = composition.Elements().ToArray();
+            var signatures = elements.Select(InputSignature).ToArray();
+            var boxes = new List<LayoutBox>();
+            var shapes = new Dictionary<long, ShapedText?>();
+            var nodes = composition.WithoutProjectionTracking(() =>
+                Layout(
+                    composition.Root,
+                    new LayoutRect(0, 0, viewport.Width, viewport.Height),
+                    viewport,
+                    shaper,
+                    boxes,
+                    shapes,
+                    null,
+                    false,
+                    false
+                )
+            );
+            var currentElements = composition.Elements().ToArray();
+            if (!currentElements.SequenceEqual(elements))
+                throw new InvalidOperationException(
+                    "Composition structure changed while the scene was being produced."
+                );
+            var byId = boxes.ToDictionary(box => box.Identity.ElementId);
+            var input = elements
+                .Select(
+                    (element, order) =>
+                    {
+                        var signature = InputSignature(element);
+                        if (!StringComparer.Ordinal.Equals(signature, signatures[order]))
+                            throw new InvalidOperationException(
+                                "Input projection state changed while the scene was being produced."
+                            );
+                        return new RetainedInputElement(
+                            new(composition.Epoch, element.Id),
+                            element.Parent is null
+                                ? null
+                                : new(composition.Epoch, element.Parent.Id),
+                            byId[element.Id].Bounds,
+                            element.Resolve(LayoutProperties.Clip).Value
+                                ? ContentBounds(
+                                    byId[element.Id].Bounds,
+                                    element.Resolve(LayoutProperties.Padding).Value,
+                                    viewport.Scale
+                                )
+                                : null,
+                            order,
+                            element.Resolve(InputProperties.Enabled).Value,
+                            element.Resolve(InputProperties.Visible).Value
+                                && element.ParticipatesInInput(),
+                            signature
+                        );
+                    }
+                )
+                .ToArray();
+            var collapsed = elements.Where(IsCollapsed).Select(element => element.Id).ToArray();
+            return (Boxes: boxes, Nodes: nodes, Input: input, Collapsed: collapsed);
+        });
+        return new RetainedScene(
+            composition.NextSceneGeneration(),
             viewport,
-            shaper,
-            boxes,
-            shapes,
-            null,
-            false,
-            false
+            projected.Boxes,
+            projected.Nodes,
+            projected.Input,
+            composition.InputProjectionRevision,
+            projected.Collapsed
         );
-        var byId = boxes.ToDictionary(box => box.Identity.ElementId);
-        var input = composition
-            .Elements()
-            .Select(
-                (element, order) =>
-                    new RetainedInputElement(
-                        new(composition.Epoch, element.Id),
-                        element.Parent is null ? null : new(composition.Epoch, element.Parent.Id),
-                        byId[element.Id].Bounds,
-                        element.Resolve(LayoutProperties.Clip).Value
-                            ? ContentBounds(
-                                byId[element.Id].Bounds,
-                                element.Resolve(LayoutProperties.Padding).Value,
-                                viewport.Scale
-                            )
-                            : null,
-                        order,
-                        element.Resolve(InputProperties.Enabled).Value,
-                        element.Resolve(InputProperties.Visible).Value,
-                        InputSignature(element)
-                    )
-            )
-            .ToArray();
-        return new RetainedScene(composition.NextSceneGeneration(), viewport, boxes, nodes, input);
     }
 
     private static IReadOnlyList<SceneNode> Layout(
@@ -71,6 +102,11 @@ public static class SceneLayout
         bool mainAllotted
     )
     {
+        if (element.Participation == ElementParticipation.Collapsed)
+        {
+            AddCollapsedBoxes(element, allotted.X, allotted.Y, boxes);
+            return [];
+        }
         var style = Read(element);
         var text = Shape(element, style, viewport.Scale, shaper, shapes);
         var textMetrics = IntrinsicTextMetrics(style, text, viewport.Scale, shaper);
@@ -116,12 +152,13 @@ public static class SceneLayout
             var axis = style.Axis;
             var mainLimit = axis == LayoutAxis.Row ? inner.Width : inner.Height;
             var crossLimit = axis == LayoutAxis.Row ? inner.Height : inner.Width;
-            var measured = element
-                .Children.Select(child =>
-                    Measure(child, axis, crossLimit, viewport.Scale, shaper, shapes)
-                )
+            var participatingChildren = element
+                .Children.Where(child => child.Participation != ElementParticipation.Collapsed)
                 .ToArray();
-            var spacing = Finite(style.Spacing * (element.Children.Count - 1));
+            var measured = participatingChildren
+                .Select(child => Measure(child, axis, crossLimit, viewport.Scale, shaper, shapes))
+                .ToArray();
+            var spacing = Finite(style.Spacing * Math.Max(0, participatingChildren.Length - 1));
             var total = Finite(measured.Sum(item => item.Main) + spacing);
             GrowMain(measured, Math.Max(0, mainLimit - total));
             total = Finite(measured.Sum(item => item.Main) + spacing);
@@ -131,8 +168,15 @@ public static class SceneLayout
                 LayoutAlignment.End => Math.Max(0, mainLimit - total),
                 _ => 0,
             };
-            foreach (var item in measured)
+            var measuredIndex = 0;
+            foreach (var child in element.Children)
             {
+                if (child.Participation == ElementParticipation.Collapsed)
+                {
+                    AddCollapsedBoxes(child, inner.X, inner.Y, boxes);
+                    continue;
+                }
+                var item = measured[measuredIndex++];
                 var virtualIndex = style.VirtualRowHeight is null
                     ? 0
                     : Read(item.Element).VirtualRowIndex;
@@ -176,6 +220,8 @@ public static class SceneLayout
                     cursor = Finite(cursor + item.Main + style.Spacing);
             }
         }
+        if (element.Participation == ElementParticipation.Hidden)
+            return [];
         var identity = new ElementIdentity(element.Composition.Epoch, element.Id);
         var result = new List<SceneNode>();
         if (style.Background.Color is not { A: 0 })
@@ -275,6 +321,27 @@ public static class SceneLayout
             ];
     }
 
+    private static void AddCollapsedBoxes(Element element, float x, float y, List<LayoutBox> boxes)
+    {
+        boxes.Add(
+            new(
+                new ElementIdentity(element.Composition.Epoch, element.Id),
+                new LayoutRect(x, y, 0, 0),
+                null
+            )
+        );
+        foreach (var child in element.Children)
+            AddCollapsedBoxes(child, x, y, boxes);
+    }
+
+    private static bool IsCollapsed(Element element)
+    {
+        for (Element? current = element; current is not null; current = current.Parent)
+            if (current.Participation == ElementParticipation.Collapsed)
+                return true;
+        return false;
+    }
+
     private static LayoutRect VisibleBounds(IReadOnlyList<SceneNode> nodes, LayoutViewport viewport)
     {
         var left = nodes.Min(node => node.Bounds.X);
@@ -367,17 +434,18 @@ public static class SceneLayout
         var textMetrics = IntrinsicTextMetrics(style, text, scale, shaper);
         var width = textMetrics?.Width ?? 0f;
         var height = textMetrics?.Height ?? 0f;
-        if (element.Children.Count == 0)
+        var participatingChildren = element
+            .Children.Where(child => child.Participation != ElementParticipation.Collapsed)
+            .ToArray();
+        if (participatingChildren.Length == 0)
             return Outer(
                 style,
                 style.VirtualRowHeight is { } emptyRowHeight
                     ? (width, Finite(emptyRowHeight * style.VirtualItemCount))
                     : (width, height)
             );
-        var children = element
-            .Children.Select(child =>
-                Measure(child, style.Axis, float.MaxValue, scale, shaper, shapes)
-            )
+        var children = participatingChildren
+            .Select(child => Measure(child, style.Axis, float.MaxValue, scale, shaper, shapes))
             .ToArray();
         if (style.Axis == LayoutAxis.Row)
         {
@@ -678,49 +746,86 @@ public static class SceneLayout
 
     internal static string InputSignature(Element element)
     {
-        var value = Read(element);
+        var axis = element.Resolve(LayoutProperties.Axis).Value;
+        var width = element.Resolve(LayoutProperties.Width).Value;
+        var height = element.Resolve(LayoutProperties.Height).Value;
+        var minWidth = element.Resolve(LayoutProperties.MinWidth).Value;
+        var minHeight = element.Resolve(LayoutProperties.MinHeight).Value;
+        var maxWidth = element.Resolve(LayoutProperties.MaxWidth).Value;
+        var maxHeight = element.Resolve(LayoutProperties.MaxHeight).Value;
+        var spacing = element.Resolve(LayoutProperties.Spacing).Value;
+        var mainGrow = element.Resolve(LayoutProperties.MainGrow).Value;
+        var mainAlignment = element.Resolve(LayoutProperties.MainAlignment).Value;
+        var crossAlignment = element.Resolve(LayoutProperties.CrossAlignment).Value;
+        var clip = element.Resolve(LayoutProperties.Clip).Value;
+        var padding = element.Resolve(LayoutProperties.Padding).Value;
+        var scroll = element.Resolve(LayoutProperties.Scroll).Value;
+        var virtualRowHeight = element.Resolve(LayoutProperties.VirtualRowHeight).Value;
+        var virtualItemCount = element.Resolve(LayoutProperties.VirtualItemCount).Value;
+        var virtualRowIndex = element.Resolve(LayoutProperties.VirtualRowIndex).Value;
+        var text = element.Resolve(ProjectionProperties.Text).Value;
+        var textMeasure = element.Resolve(ProjectionProperties.TextMeasure).Value;
+        var fontFamily = element.Resolve(TypographyProperties.FontFamily).Value;
+        var fontSize = element.Resolve(TypographyProperties.FontSize).Value;
+        var language = element.Resolve(TypographyProperties.Language).Value;
+        var direction = element.Resolve(TypographyProperties.Direction).Value;
+        var selectionStart = element.Resolve(ProjectionProperties.TextSelectionStart).Value;
+        var selectionEnd = element.Resolve(ProjectionProperties.TextSelectionEnd).Value;
+        var caret = element.Resolve(ProjectionProperties.TextCaret).Value;
+        var enabled = element.Resolve(InputProperties.Enabled).Value;
+        var visible = element.Resolve(InputProperties.Visible).Value;
+        var participation = element.Participation;
         return Hash(writer =>
         {
-            writer.Write((int)value.Axis);
-            writer.Write(value.Width.HasValue);
-            if (value.Width is { } width)
-                writer.Write(width);
-            writer.Write(value.Height.HasValue);
-            if (value.Height is { } height)
-                writer.Write(height);
-            writer.Write(value.MinWidth);
-            writer.Write(value.MinHeight);
-            writer.Write(value.MaxWidth);
-            writer.Write(value.MaxHeight);
-            writer.Write(value.Spacing);
-            writer.Write(value.MainGrow);
-            writer.Write((int)value.MainAlignment);
-            writer.Write((int)value.CrossAlignment);
-            writer.Write(value.Clip);
-            writer.Write(value.Padding.Left);
-            writer.Write(value.Padding.Top);
-            writer.Write(value.Padding.Right);
-            writer.Write(value.Padding.Bottom);
-            writer.Write(value.Scroll.X);
-            writer.Write(value.Scroll.Y);
-            writer.Write(value.Text is not null);
-            if (value.Text is { } text)
-                writer.Write(text);
-            writer.Write(value.FontFamily);
-            writer.Write(value.FontSize);
-            writer.Write(value.Language);
-            writer.Write((int)value.Direction);
-            writer.Write(value.SelectionStart.HasValue);
-            if (value.SelectionStart is { } selectionStart)
-                writer.Write(selectionStart);
-            writer.Write(value.SelectionEnd.HasValue);
-            if (value.SelectionEnd is { } selectionEnd)
-                writer.Write(selectionEnd);
-            writer.Write(value.Caret.HasValue);
-            if (value.Caret is { } caret)
-                writer.Write(caret);
-            writer.Write(element.Resolve(InputProperties.Enabled).Value);
-            writer.Write(element.Resolve(InputProperties.Visible).Value);
+            writer.Write((int)axis);
+            writer.Write(width.HasValue);
+            if (width is { } resolvedWidth)
+                writer.Write(resolvedWidth);
+            writer.Write(height.HasValue);
+            if (height is { } resolvedHeight)
+                writer.Write(resolvedHeight);
+            writer.Write(minWidth);
+            writer.Write(minHeight);
+            writer.Write(maxWidth);
+            writer.Write(maxHeight);
+            writer.Write(spacing);
+            writer.Write(mainGrow);
+            writer.Write((int)mainAlignment);
+            writer.Write((int)crossAlignment);
+            writer.Write(clip);
+            writer.Write(padding.Left);
+            writer.Write(padding.Top);
+            writer.Write(padding.Right);
+            writer.Write(padding.Bottom);
+            writer.Write(scroll.X);
+            writer.Write(scroll.Y);
+            writer.Write(virtualRowHeight.HasValue);
+            if (virtualRowHeight is { } rowHeight)
+                writer.Write(rowHeight);
+            writer.Write(virtualItemCount);
+            writer.Write(virtualRowIndex);
+            writer.Write(text is not null);
+            if (text is { } resolvedText)
+                writer.Write(resolvedText);
+            writer.Write(textMeasure is not null);
+            if (textMeasure is { } resolvedTextMeasure)
+                writer.Write(resolvedTextMeasure);
+            writer.Write(fontFamily);
+            writer.Write(fontSize);
+            writer.Write(language);
+            writer.Write((int)direction);
+            writer.Write(selectionStart.HasValue);
+            if (selectionStart is { } resolvedSelectionStart)
+                writer.Write(resolvedSelectionStart);
+            writer.Write(selectionEnd.HasValue);
+            if (selectionEnd is { } resolvedSelectionEnd)
+                writer.Write(resolvedSelectionEnd);
+            writer.Write(caret.HasValue);
+            if (caret is { } resolvedCaret)
+                writer.Write(resolvedCaret);
+            writer.Write(enabled);
+            writer.Write(visible);
+            writer.Write((int)participation);
         });
     }
 

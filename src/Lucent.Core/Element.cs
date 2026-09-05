@@ -87,6 +87,8 @@ public sealed class Element : IDisposable
             author ?? Style.Empty,
             transitions
         );
+        if (Composition.IsReachable(this))
+            Composition.InvalidateInputProjection();
     }
 
     /// <summary>Checks presentation inputs without allocating reactive presentation state.</summary>
@@ -267,16 +269,41 @@ public sealed class Element : IDisposable
                 "An element can only be attached to its owning parent."
             );
         _children.Add(child);
+        if (Composition.IsReachable(this))
+        {
+            Composition.RegisterSubtree(child);
+            Composition.InvalidateInputProjection();
+        }
     }
 
     internal void ReplaceChildren(IReadOnlyList<Element> children)
     {
         ThrowIfDisposed();
+        var reachable = Composition.IsReachable(this);
+        if (reachable)
+            foreach (var child in _children)
+                Composition.UnregisterSubtree(child);
         _children.Clear();
         _children.AddRange(children);
+        if (reachable)
+        {
+            foreach (var child in _children)
+                Composition.RegisterSubtree(child);
+            Composition.InvalidateInputProjection();
+        }
     }
 
-    internal void Detach(Element child) => _children.Remove(child);
+    internal void Detach(Element child)
+    {
+        if (_children.Remove(child))
+        {
+            if (Composition.IsReachable(this))
+            {
+                Composition.UnregisterSubtree(child);
+                Composition.InvalidateInputProjection();
+            }
+        }
+    }
 
     internal void OnDisposed(Action callback)
     {
@@ -502,11 +529,37 @@ public sealed class Element : IDisposable
     private bool HasBehaviorState(BehaviorState state) =>
         _behaviors.Any(behavior => behavior.State.GetValueOrDefault(state));
 
+    internal ElementParticipation Participation
+    {
+        get
+        {
+            var value = Resolve(VisualProperties.Participation).Value;
+            if (
+                value
+                is not (
+                    ElementParticipation.Visible
+                    or ElementParticipation.Hidden
+                    or ElementParticipation.Collapsed
+                )
+            )
+                throw new InvalidOperationException(
+                    "Element participation must be visible, hidden, or collapsed."
+                );
+            return value;
+        }
+    }
+
+    internal bool ParticipatesInInput() =>
+        !IsDisposed
+        && Participation == ElementParticipation.Visible
+        && (_parent is null || _parent.ParticipatesInInput());
+
     private bool InputAvailable() =>
         !IsDisposed
         && (_parent is null || _parent.InputAvailable())
         && Resolve(InputProperties.Enabled).Value
-        && Resolve(InputProperties.Visible).Value;
+        && Resolve(InputProperties.Visible).Value
+        && Participation == ElementParticipation.Visible;
 
     private void BehaviorStateChanged()
     {
@@ -560,7 +613,11 @@ public sealed class Element : IDisposable
         Composition.ThrowIfBehaviorAttachment();
         if (IsDisposed)
             return;
+        var reachable = Composition.IsReachable(this);
         IsDisposed = true;
+        Composition.UnregisterSubtree(this);
+        if (reachable)
+            Composition.InvalidateInputProjection();
         Composition.InvalidateSemantics();
         Composition.Transitions.Remove(this);
         List<Exception>? errors = null;

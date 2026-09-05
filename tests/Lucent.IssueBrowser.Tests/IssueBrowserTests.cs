@@ -80,7 +80,7 @@ public sealed class IssueBrowserTests
         );
         Assert(
             Hash(dump + semantics)
-                == "cd0b993f4e78607366d22a04d7628c8069aa4b04c1019abf755df4af32f5e1dc",
+                == "c236d3f367554e38c9a978e8f5d95ba044cf3a4b2950b7cafc8018d8e32d1dbc",
             "Issue Browser composition/semantic evidence changed: " + Hash(dump + semantics)
         );
     }
@@ -126,7 +126,7 @@ public sealed class IssueBrowserTests
             + generatedRow.Dump
             + generatedRow.Semantics;
         Assert(
-            Hash(evidence) == "8546133a2448f9ac734bfb81d881b8eed3213d389fe6ec9646b30d1b017a1d07",
+            Hash(evidence) == "3ca9bd05b388a07f8ff9b196cbded96f98021a1f0a2e42f89fc6fb120c022b48",
             "Direct-root parity evidence changed: " + Hash(evidence)
         );
     }

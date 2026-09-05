@@ -15,10 +15,13 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 - Reactive state, derived state, batching, scopes, async generations, deterministic disposal, and stable keyed composition.
 - Bounded rows, columns, layout, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, finite variants, theme settings, reduced motion, and bounded transitions.
 - Text, panel/layout primitives, button, single-line text field, selectable/list row, scroll viewport, virtualized list, loading/progress, and simple error state.
-- Basic international single-line editing with composition support, plus bounded UI Automation patterns and stale-node handling for the reference controls.
+- Basic international single-line editing with composition support, hoistable editor/viewport sessions, explicit hidden/collapsed participation, plus bounded UI Automation patterns and stale-node handling for the reference controls.
+- Optional Microsoft hosting integration with negotiated asynchronous shutdown and accepted-work recovery.
 - Deterministic tree, reactive, layout, style, semantic, scene, and timing dumps.
 - Persistent CPU Skia and SDL presentation with explicit backing-pixel scaling, deterministic local data, fake async behavior, and an optional live GitHub adapter.
 - External contract, published application, SDK, performance, and accessibility checks that keep proof orchestration out of the application.
+
+The [layout and paragraph decision](adr/0004-layout-and-paragraphs.md) selects a managed extension for the next Grid/Flex and wrapped-text implementation; these features are not yet implemented.
 
 ## Next development: links and notes
 

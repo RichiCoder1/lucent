@@ -185,3 +185,7 @@ The Issue Browser contains no test mode, capture orchestration, or proof runner.
 Repository checks use affected contracts and explicit opt-in published, SDK, performance, and accessibility scopes; see TESTING.md and agents/verification.md. Large captures, binaries, and traces are CI artifacts; Git retains scripts and compact summaries.
 
 The affected-check policy and repository test scopes are documented in TESTING.md and agents/verification.md. Keep the runner interface synchronized with those docs when the repository test entry point changes.
+
+## Editor continuity and participation
+
+An application-owned `EditorSession` carries document text, caret, selection, undo history and viewport state across `.lui` arrangement mounts. Mount-local input and IME resources remain scoped to the retained element. `VisualProperties.Participation` explicitly separates visible, hidden and collapsed subtrees across layout, paint, input, focus and semantics. See [editor sessions](EDITOR-SESSIONS.md) for ownership, synchronization and focus handoff.

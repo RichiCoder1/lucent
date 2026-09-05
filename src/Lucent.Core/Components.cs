@@ -91,22 +91,35 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a single-line text editor. Use <paramref name="initialValue"/> for its starting text and <paramref name="onChange"/> to observe committed edits.</summary>
+    /// <summary>Creates a single-line text editor. Supply <paramref name="session"/> to retain its document state across mounts; otherwise <paramref name="initialValue"/> seeds mount-owned state.</summary>
     [LucentComponent]
     public static ComponentRecipe TextField(
         string initialValue = "",
         Action<string>? onChange = null,
         Style? style = null,
-        string label = "Text field"
+        string label = "Text field",
+        EditorSession? session = null
     )
     {
         TextFieldState.ValidateText(initialValue);
+        if (session is not null && initialValue.Length != 0)
+            throw new ArgumentException(
+                "Initial text is owned by the supplied editor session.",
+                nameof(initialValue)
+            );
         label = Required(label, nameof(label));
         return ComponentRecipe.Create(
             "text-field",
             (context, root) =>
             {
-                var state = Controls.TextField(root, context.Theme, label, initialValue, style);
+                var state = Controls.TextField(
+                    root,
+                    context.Theme,
+                    label,
+                    initialValue,
+                    style,
+                    session
+                );
                 if (onChange is not null)
                 {
                     var prior = state.Value;
@@ -177,12 +190,13 @@ public static class Components
         );
     }
 
-    /// <summary>Creates a scrollable viewport that clips its content. Use it when content can be larger than the available space.</summary>
+    /// <summary>Creates a scrollable viewport that clips its content. Supply <paramref name="viewport"/> to retain its offset across mounts.</summary>
     [LucentComponent]
     public static ComponentRecipe ScrollViewport(
         [DefaultContent] ComponentContent content,
         string label = "Scroll viewport",
-        Style? style = null
+        Style? style = null,
+        ViewportState? viewport = null
     )
     {
         content = Content(content);
@@ -191,7 +205,13 @@ public static class Components
             "scroll-viewport",
             (context, root) =>
             {
-                Controls.ScrollViewport(root, context.Theme, label, style: style);
+                Controls.ScrollViewport(
+                    root,
+                    context.Theme,
+                    label,
+                    style: style,
+                    viewport: viewport
+                );
                 context.Mount(root, content);
             }
         );

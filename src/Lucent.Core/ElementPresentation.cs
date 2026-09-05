@@ -81,6 +81,14 @@ internal sealed class ElementPresentation
                 _element.Scope.Signal(value, _element.Name + ".control." + property.Name)
             )
         );
+        // A newly introduced winning slot was absent from the previous projection's dependencies.
+        // Paint-only values do not change hit geometry, text editing, or availability.
+        if (
+            !ReferenceEquals(property, VisualProperties.Background)
+            && !ReferenceEquals(property, VisualProperties.Opacity)
+            && !ReferenceEquals(property, TypographyProperties.TextColor)
+        )
+            _element.Composition.InvalidateInputProjection();
     }
 
     internal void Start<T>(Property<T> property, T value)
@@ -113,7 +121,13 @@ internal sealed class ElementPresentation
             var inherited = _element.Parent.Resolve(property);
             candidates.Add((inherited.Value, new("inherited", inherited.Winner.Ordinal)));
         }
-        var active = _variants.Value | _behaviorVariants.Value;
+        var conditional = _component
+            .Concat(_author)
+            .Any(item =>
+                ReferenceEquals(item.Assignment.Property, property)
+                && item.Condition != VariantState.None
+            );
+        var active = conditional ? _variants.Value | _behaviorVariants.Value : VariantState.None;
         var resolved =
             new List<(
                 T Value,
@@ -127,8 +141,8 @@ internal sealed class ElementPresentation
                 .Select(item => (item, author: false))
                 .Concat(_author.Select(item => (item, author: true)))
                 .Where(entry =>
-                    entry.item.Assignment.IsAvailable
-                    && ReferenceEquals(entry.item.Assignment.Property, property)
+                    ReferenceEquals(entry.item.Assignment.Property, property)
+                    && entry.item.Assignment.IsAvailable
                     && (active & entry.item.Condition) == entry.item.Condition
                 )
         )

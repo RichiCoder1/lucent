@@ -117,6 +117,7 @@ function Invoke-Published {
     if ($LASTEXITCODE) { throw 'Negative publish inventory proof failed.' }
     & (Join-Path $PSScriptRoot 'Test-PublishedIssueBrowser.ps1') -PublishDirectory $published.AppDirectory
     if ($LASTEXITCODE) { throw 'Published Issue Browser proof failed.' }
+    & (Join-Path $PSScriptRoot 'Test-EditorSessions.ps1') -Executable $published.HostExe
     & (Join-Path $PSScriptRoot 'Test-WindowsLifecycle.ps1') -Executable $published.HostExe
     if ($LASTEXITCODE) { throw 'Windows application lifecycle proof failed.' }
     & (Join-Path $PSScriptRoot 'Test-WindowsSettingsListener.ps1') -Executable $published.HostExe

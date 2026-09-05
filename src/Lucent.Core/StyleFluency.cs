@@ -278,4 +278,16 @@ public static class StyleFluency
     /// <summary>Returns a style that gets visibility from a live reader.</summary>
     public static Style Visible(this Style style, Func<bool> read) =>
         style.Bind(InputProperties.Visible, read);
+
+    /// <summary>Returns a style that controls retained subtree participation.</summary>
+    public static Style Participation(this Style style, ElementParticipation value) =>
+        style.Set(VisualProperties.Participation, value);
+
+    /// <summary>Returns a style that reads retained subtree participation from a theme token.</summary>
+    public static Style Participation(this Style style, Token<ElementParticipation> value) =>
+        style.Set(VisualProperties.Participation, value);
+
+    /// <summary>Returns a style that reads retained subtree participation reactively.</summary>
+    public static Style Participation(this Style style, Func<ElementParticipation> read) =>
+        style.Bind(VisualProperties.Participation, read);
 }

@@ -17,6 +17,9 @@ const int SurfaceLimit = 1,
     UiaProviderLimit = 18,
     HandleGrowthLimit = 128;
 
+if (args.Length == 1 && args[0] == "--input-dispatch")
+    return InputDispatchProbe.Run();
+
 if (args.Length != 2 || args[0] != "--app")
     return Fail("usage: --app <published-exe>");
 var app = Path.GetFullPath(args[1]);

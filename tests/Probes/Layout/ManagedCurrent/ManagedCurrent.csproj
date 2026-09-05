@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Lucent.Core.Tests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Lucent.Core">
+      <HintPath>../../../../artifacts/layout-evaluation/baseline/Lucent.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

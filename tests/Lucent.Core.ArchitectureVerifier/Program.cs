@@ -205,6 +205,7 @@ static void VerifyPropertySurface(
             {
                 ["Background"] = "Lucent.Core.Property`1|Lucent.Core.Brush",
                 ["Opacity"] = "Lucent.Core.Property`1|System.Single",
+                ["Participation"] = "Lucent.Core.Property`1|Lucent.Core.ElementParticipation",
             },
             ["Lucent.Core.TypographyProperties"] = new()
             {

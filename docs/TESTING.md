@@ -47,3 +47,7 @@ FlaUI UIA3 drives published application workflows through the public UI Automati
 These dependencies belong to the test driver. The application remains NativeAOT-compatible and has no test-framework dependency, private test IPC, or proof mode. Tests use deterministic local data and ordinary input, accessibility, and diagnostics interfaces. See [CREDITS.md](../CREDITS.md) for dependency identities and attribution.
 
 Follow the [pre-release verification policy](agents/verification.md) for check selection. Record a short result and any limitation in the issue. Keep generated reports, captures, and binaries under ignored `artifacts/` directories; completed evidence remains in issue records and Git history.
+
+The published suite also runs `Test-EditorSessions.ps1`: a `.lui` editor changes arrangement after native window resizes in both directions and checks draft/selection/undo continuity, explicit focus handoff, SDL text-input lifecycle, canceled preedit and real shaping/paint. This is automated transport evidence, not real-language IME certification.
+
+For focused input allocation measurements, run `dotnet run --project tests/Lucent.Performance.Verifier -c Release -- --input-dispatch`. It reports flat/deep pointer, key, and repeated same-target focus cases after checking that dispatch remains accepted; timing is diagnostic rather than a new release threshold.

@@ -1,0 +1,22 @@
+namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+style EditorFieldStyle {
+    Width: 220;
+    Height: 28;
+}
+
+internal component EditorSessionView(EditorSessionFixtureModel model) {
+    <Column>
+        <Column style={Style.Empty.Height(32).Participation(() => model.Compact.Value ? ElementParticipation.Collapsed : ElementParticipation.Visible)}>
+            <Text>Wide navigation</Text>
+        </Column>
+        if (model.Compact.Value) {
+            <Column name="compact-editor">
+                <TextField session={model.Session} label="Draft" style={EditorFieldStyle} />
+            </Column>
+        } else {
+            <Row name="wide-editor">
+                <TextField session={model.Session} label="Draft" style={EditorFieldStyle} />
+            </Row>
+        }
+    </Column>
+}

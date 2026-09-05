@@ -1,5 +1,3 @@
-using System.Buffers;
-using System.Globalization;
 using System.Text;
 
 namespace Lucent.Core;
@@ -27,7 +25,7 @@ public readonly record struct TextInputCommand(
 {
     /// <summary>Rejects newline and control input; valid text is returned as scalar-normalized UTF-16.</summary>
     public static bool TryNormalizeSingleLine(string? text, out string normalized) =>
-        TextFieldState.TryNormalizeSingleLine(text, out normalized);
+        EditorSession.TryNormalizeSingleLine(text, out normalized);
 
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
@@ -38,7 +36,7 @@ public readonly record struct TextInputCommand(
             || (Kind != TextInputKind.Preedit && (Start != 0 || Length != 0))
         )
             throw new ArgumentException("Text input commands are finite and explicit.");
-        TextFieldState.ValidateText(Text);
+        EditorSession.ValidateText(Text);
         var count = Text.EnumerateRunes().Count();
         if (
             Kind == TextInputKind.Preedit
@@ -86,41 +84,30 @@ public sealed class TextClipboardRequest
 /// <summary>Scope-owned, single-line Unicode text state. Positions are UTF-16 offsets constrained to grapheme boundaries.</summary>
 internal sealed class TextFieldState
 {
-    private const int UndoLimit = 64;
     private readonly ReactiveScope _scope;
-    private readonly Signal<string> _value;
-    private readonly Signal<int> _anchor;
-    private readonly Signal<int> _caret;
+    private readonly EditorSession _session;
     private readonly Signal<Preedit> _preedit;
     private readonly Signal<bool> _focused;
-    private readonly List<Snapshot> _undo = [];
-    private readonly List<Snapshot> _redo = [];
     private TextClipboardRequest? _clipboard;
-    private bool _lastWasInsert;
-    private long _editGeneration;
 
-    internal TextFieldState(ReactiveScope scope, string name, string value)
+    internal TextFieldState(ReactiveScope scope, string name, EditorSession session)
     {
         _scope = scope;
-        ValidateText(value);
-        _value = scope.Signal(Normalize(value), name + ".value");
-        _anchor = scope.Signal(_value.Value.Length, name + ".anchor");
-        _caret = scope.Signal(_value.Value.Length, name + ".caret");
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+        _ = session.AcquireMount(scope);
         _preedit = scope.Signal(default(Preedit), name + ".preedit");
         _focused = scope.Signal(false, name + ".focused");
+        session.ChangedForMount += SessionChanged;
+        scope.OnDispose(() => session.ChangedForMount -= SessionChanged);
     }
 
     public string Value
     {
-        get => _value.Value;
-        set
-        {
-            Check();
-            ReplaceAll(value);
-        }
+        get => _session.Text;
+        set => _session.Text = value;
     }
-    public int Caret => _caret.Value;
-    public int Anchor => _anchor.Value;
+    public int Caret => _session.Caret;
+    public int Anchor => _session.Anchor;
     public string PreeditText => _preedit.Value.Text ?? "";
     public int PreeditStart => _preedit.Value.Start;
     public int PreeditLength => _preedit.Value.Length;
@@ -133,74 +120,29 @@ internal sealed class TextFieldState
     internal int DisplaySelectionStart => Display().SelectionStart;
     internal int DisplaySelectionEnd => Display().SelectionEnd;
     internal bool Focused => _focused.Value;
-    public bool CanUndo => _undo.Count != 0;
-    public bool CanRedo => _redo.Count != 0;
-    public string SelectedText => Slice(Math.Min(Anchor, Caret), Math.Max(Anchor, Caret));
+    public bool CanUndo => _session.CanUndo;
+    public bool CanRedo => _session.CanRedo;
+    public string SelectedText => _session.SelectedText;
 
-    public void MoveLeft(bool extend = false) =>
-        Move(
-            !extend && Anchor != Caret ? Math.Min(Anchor, Caret) : PreviousBoundary(Caret),
-            extend
-        );
+    public void MoveLeft(bool extend = false) => _session.MoveLeft(extend);
 
-    public void MoveRight(bool extend = false) =>
-        Move(!extend && Anchor != Caret ? Math.Max(Anchor, Caret) : NextBoundary(Caret), extend);
+    public void MoveRight(bool extend = false) => _session.MoveRight(extend);
 
-    public void MoveHome(bool extend = false) => Move(0, extend);
+    public void MoveHome(bool extend = false) => _session.MoveHome(extend);
 
-    public void MoveEnd(bool extend = false) => Move(Value.Length, extend);
+    public void MoveEnd(bool extend = false) => _session.MoveEnd(extend);
 
-    public void SelectAll() => SetSelection(0, Value.Length);
+    public void SelectAll() => _session.SelectAll();
 
-    public void Insert(string text) => Replace(text, coalesceInsert: true);
+    public void Insert(string text) => _session.Insert(text);
 
-    public void DeleteBackward()
-    {
-        if (Anchor != Caret)
-            Replace("");
-        else if (Caret > 0)
-        {
-            SetSelection(PreviousBoundary(Caret), Caret);
-            Replace("");
-        }
-    }
+    public void DeleteBackward() => _session.DeleteBackward();
 
-    public void DeleteForward()
-    {
-        if (Anchor != Caret)
-            Replace("");
-        else if (Caret < Value.Length)
-        {
-            SetSelection(Caret, NextBoundary(Caret));
-            Replace("");
-        }
-    }
+    public void DeleteForward() => _session.DeleteForward();
 
-    public void Undo()
-    {
-        Check();
-        if (_undo.Count == 0)
-            return;
-        _redo.Add(Current());
-        Restore(_undo[^1]);
-        _undo.RemoveAt(_undo.Count - 1);
-        Changed();
-        _lastWasInsert = false;
-        CancelComposition();
-    }
+    public void Undo() => _session.Undo();
 
-    public void Redo()
-    {
-        Check();
-        if (_redo.Count == 0)
-            return;
-        _undo.Add(Current());
-        Restore(_redo[^1]);
-        _redo.RemoveAt(_redo.Count - 1);
-        Changed();
-        _lastWasInsert = false;
-        CancelComposition();
-    }
+    public void Redo() => _session.Redo();
 
     public void SetPreedit(string text, int start, int length)
     {
@@ -210,7 +152,7 @@ internal sealed class TextFieldState
         var replacementStart = prior.Active ? prior.ReplacementStart : Math.Min(Anchor, Caret);
         var replacementEnd = prior.Active ? prior.ReplacementEnd : Math.Max(Anchor, Caret);
         if (!prior.Active)
-            _lastWasInsert = false;
+            _session.BreakInsertCoalescing();
         _preedit.Value = new(
             Normalize(text),
             start,
@@ -227,7 +169,7 @@ internal sealed class TextFieldState
         new TextInputCommand(TextInputKind.Commit, text).Validate();
         var composition = _preedit.Value;
         _preedit.Value = default;
-        Replace(
+        _session.Replace(
             text,
             coalesceInsert: !composition.Active,
             composition.Active ? composition.ReplacementStart : null,
@@ -280,7 +222,7 @@ internal sealed class TextFieldState
             return false;
         if (request.Operation == TextClipboardOperation.Cut && SelectedText == request.Text)
         {
-            Replace("", coalesceInsert: false);
+            _session.Replace("", coalesceInsert: false);
             return true;
         }
         if (
@@ -288,111 +230,13 @@ internal sealed class TextFieldState
             && TryNormalizeSingleLine(text, out var normalized)
         )
         {
-            Replace(normalized, coalesceInsert: false);
+            _session.Replace(normalized, coalesceInsert: false);
             return true;
         }
         return false;
     }
 
-    internal void ReplaceAll(string text)
-    {
-        ValidateText(text);
-        var normalized = Normalize(text);
-        if (normalized == Value)
-            return;
-        Save(false);
-        _value.Value = normalized;
-        _anchor.Value = _caret.Value = normalized.Length;
-        Changed();
-        CancelComposition();
-    }
-
-    private void Replace(
-        string text,
-        bool coalesceInsert = false,
-        int? replacementStart = null,
-        int? replacementEnd = null
-    )
-    {
-        Check();
-        ValidateText(text);
-        text = Normalize(text);
-        var start = replacementStart ?? Math.Min(Anchor, Caret);
-        var end = replacementEnd ?? Math.Max(Anchor, Caret);
-        if (start == end && text.Length == 0)
-            return;
-        Save(coalesceInsert && start == end && text.Length != 0);
-        _value.Value = Value[..start] + text + Value[end..];
-        _anchor.Value = _caret.Value = BoundaryAtOrAfter(start + text.Length);
-        Changed();
-        CancelComposition();
-    }
-
-    private void Move(int caret, bool extend)
-    {
-        Check();
-        if (!IsBoundary(caret))
-            throw new ArgumentException("Caret must remain on a grapheme boundary.", nameof(caret));
-        if (Caret == caret && (extend || Anchor == caret))
-            return;
-        _caret.Value = caret;
-        if (!extend)
-            _anchor.Value = caret;
-        Changed();
-        _lastWasInsert = false;
-        CancelComposition();
-    }
-
-    private void SetSelection(int anchor, int caret)
-    {
-        Check();
-        if (!IsBoundary(anchor) || !IsBoundary(caret))
-            throw new ArgumentException("Selection must remain on grapheme boundaries.");
-        if (Anchor == anchor && Caret == caret)
-            return;
-        _anchor.Value = anchor;
-        _caret.Value = caret;
-        Changed();
-        _lastWasInsert = false;
-    }
-
-    private void Save(bool coalesce)
-    {
-        if (!coalesce || !_lastWasInsert)
-        {
-            _undo.Add(Current());
-            if (_undo.Count > UndoLimit)
-                _undo.RemoveAt(0);
-        }
-        _redo.Clear();
-        _lastWasInsert = coalesce;
-    }
-
-    private Snapshot Current() => new(Value, Anchor, Caret);
-
-    private void Restore(Snapshot value)
-    {
-        _value.Value = value.Value;
-        _anchor.Value = value.Anchor;
-        _caret.Value = value.Caret;
-    }
-
-    private int PreviousBoundary(int position) =>
-        Boundaries().Where(boundary => boundary < position).DefaultIfEmpty(0).Max();
-
-    private int NextBoundary(int position) =>
-        Boundaries().Where(boundary => boundary > position).DefaultIfEmpty(Value.Length).Min();
-
-    private int BoundaryAtOrAfter(int position) =>
-        Boundaries().First(boundary => boundary >= position);
-
-    private bool IsBoundary(int position) =>
-        position >= 0 && position <= Value.Length && Boundaries().Contains(position);
-
-    private IEnumerable<int> Boundaries() =>
-        StringInfo.ParseCombiningCharacters(Value).Append(Value.Length);
-
-    private string Slice(int start, int end) => Value[start..end];
+    internal void ReplaceAll(string text) => _session.Text = text;
 
     private (string Text, int Caret, int SelectionStart, int SelectionEnd) Display()
     {
@@ -433,7 +277,7 @@ internal sealed class TextFieldState
         return offset;
     }
 
-    internal long EditGeneration => _editGeneration;
+    internal long EditGeneration => _session.EditGeneration;
     internal bool IsDisposed => _scope.IsDisposed;
 
     internal void SetFocused(bool focused)
@@ -442,7 +286,11 @@ internal sealed class TextFieldState
         _focused.Value = focused;
     }
 
-    private void Changed() => _editGeneration = checked(_editGeneration + 1);
+    private void SessionChanged()
+    {
+        if (!_scope.IsDisposed && _preedit.Value.Active)
+            _preedit.Value = default;
+    }
 
     private void Check()
     {
@@ -450,49 +298,18 @@ internal sealed class TextFieldState
         ObjectDisposedException.ThrowIf(_scope.IsDisposed, typeof(TextFieldState));
     }
 
-    internal static void ValidateText(string text)
-    {
-        if (!TryNormalizeSingleLine(text, out _))
-            throw new ArgumentException(
-                "Text fields accept one line of Unicode scalar values without control characters.",
-                nameof(text)
-            );
-    }
+    internal static void ValidateText(string text) => EditorSession.ValidateText(text);
 
-    /// <summary>Rejects newline and control input; valid text is returned as scalar-normalized UTF-16.</summary>
-    public static bool TryNormalizeSingleLine(string? text, out string normalized)
-    {
-        normalized = "";
-        if (text is null)
-            return false;
-        var output = new StringBuilder(text.Length);
-        for (var index = 0; index < text.Length; )
-        {
-            if (
-                Rune.DecodeFromUtf16(text.AsSpan(index), out var rune, out var consumed)
-                    != OperationStatus.Done
-                || Rune.GetUnicodeCategory(rune)
-                    is UnicodeCategory.Control
-                        or UnicodeCategory.LineSeparator
-                        or UnicodeCategory.ParagraphSeparator
-            )
-                return false;
-            output.Append(rune);
-            index += consumed;
-        }
-        normalized = output.ToString();
-        return true;
-    }
+    public static bool TryNormalizeSingleLine(string? text, out string normalized) =>
+        EditorSession.TryNormalizeSingleLine(text, out normalized);
 
     private static string Normalize(string text) =>
-        TryNormalizeSingleLine(text, out var normalized)
+        EditorSession.TryNormalizeSingleLine(text, out var normalized)
             ? normalized
             : throw new ArgumentException(
                 "Text fields accept one line of Unicode scalar values without control characters.",
                 nameof(text)
             );
-
-    private readonly record struct Snapshot(string Value, int Anchor, int Caret);
 
     private readonly record struct Preedit(
         string? Text,

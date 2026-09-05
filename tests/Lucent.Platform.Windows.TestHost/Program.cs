@@ -8,6 +8,7 @@ internal static class Program
     private static int Main(string[] args) =>
         args switch
         {
+            ["--editor-session-proof"] => EditorSessionFixture.Run(),
             ["--listener-proof"] => ListenerProof.Run(),
             ["--uia-fixture"] => UiaFixture.Run(),
             ["--virtualization-fixture"] => VirtualizationFixture.Run(),

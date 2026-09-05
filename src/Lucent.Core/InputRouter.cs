@@ -19,6 +19,10 @@ public sealed class InputRouter
     private readonly Dictionary<int, Capture> _captures = [];
     private RetainedScene? _scene;
     private Dictionary<long, RetainedInputElement> _input = [];
+    private Dictionary<long, bool> _available = [];
+    private Dictionary<long, ElementIdentity[]> _paths = [];
+    private Dictionary<long, LayoutRect?> _effectiveClips = [];
+    private RetainedInputElement[] _hitOrder = [];
     private FocusState? _focused;
     private PendingFocus? _pendingFocus;
     private int _publicDepth;
@@ -63,7 +67,7 @@ public sealed class InputRouter
         try
         {
             ArgumentNullException.ThrowIfNull(scene);
-            if (!ValidateScene(scene))
+            if (!ValidateScene(scene, installing: true))
             {
                 var rejectedErrors = new List<Exception>();
                 if (_scene is not null && EnsureScene(rejectedErrors) == InputRejection.StaleScene)
@@ -76,7 +80,7 @@ public sealed class InputRouter
             try
             {
                 _input = nextInput;
-                clamped = ClampScrolls();
+                clamped = ClampScrolls(scene);
             }
             finally
             {
@@ -91,6 +95,7 @@ public sealed class InputRouter
                     RequestFocus(null, FocusChangeReason.SceneChanged, rejectedErrors);
                 _scene = null;
                 _input.Clear();
+                ClearInputCaches();
                 Throw(rejectedErrors);
                 return false;
             }
@@ -98,6 +103,7 @@ public sealed class InputRouter
             var visualGeneration = _composition.InteractionVisualGeneration;
             _scene = scene;
             _input = nextInput;
+            BuildInputCaches(scene);
             foreach (var scrollable in _scrollable)
                 if (_input.ContainsKey(scrollable.Key))
                     scrollable.Value.InstalledOffset = scrollable.Value.State.Offset;
@@ -119,6 +125,7 @@ public sealed class InputRouter
             if (_composition.InteractionVisualGeneration != visualGeneration)
             {
                 _scene = null;
+                ClearInputCaches();
                 Throw(errors);
                 return false;
             }
@@ -141,7 +148,6 @@ public sealed class InputRouter
             var errors = new List<Exception>();
             if (EnsureScene(errors) is { } rejection)
                 return Reject(rejection, "Pointer/" + command.Kind, errors);
-            SyncAvailability(errors);
             if (command.Kind == PointerCommandKind.Down)
                 SetModality(InputModality.Pointer, errors);
             ElementIdentity? target = null;
@@ -179,7 +185,6 @@ public sealed class InputRouter
             var errors = new List<Exception>();
             if (EnsureScene(errors) is { } rejection)
                 return Reject(rejection, "Key/" + command.Kind, errors);
-            SyncAvailability(errors);
             if (command.Kind == KeyCommandKind.Down)
                 SetModality(InputModality.Keyboard, errors);
             var target =
@@ -218,7 +223,6 @@ public sealed class InputRouter
             var errors = new List<Exception>();
             if (EnsureScene(errors) is { } rejection)
                 return Reject(rejection, "Text/" + command.Kind, errors);
-            SyncAvailability(errors);
             if (
                 _focused is not { } focus
                 || !Eligible(focus.Identity)
@@ -367,7 +371,6 @@ public sealed class InputRouter
                 Throw(errors);
                 return false;
             }
-            SyncAvailability(errors);
             SetModality(InputModality.Keyboard, errors);
             var moved = MoveFocusCore(direction, errors);
             Throw(errors);
@@ -740,6 +743,7 @@ public sealed class InputRouter
         _textFields.Clear();
         _clipboardTickets.Clear();
         _input.Clear();
+        ClearInputCaches();
         _scene = null;
         _focused = null;
         _pendingFocus = null;
@@ -952,24 +956,30 @@ public sealed class InputRouter
             return InputRejection.NoScene;
         if (ValidateScene(_scene))
             return null;
+        foreach (var element in _composition.Elements())
+            element.ReconcileSemanticStateForInput();
         foreach (var capture in _captures.ToArray())
             Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
         if (_focused is { } focus)
             RequestFocus(null, FocusReason(focus.Identity), errors);
         _scene = null;
         _input.Clear();
+        ClearInputCaches();
         return InputRejection.StaleScene;
     }
 
-    private bool ValidateScene(RetainedScene scene)
+    private bool ValidateScene(RetainedScene scene, bool installing = false)
     {
         if (
             scene.Generation == 0
             || scene.Generation != _composition.LatestSceneGeneration
+            || scene.InputProjectionRevision != _composition.InputProjectionRevision
             || scene.Input.Count != scene.Boxes.Count
             || scene.Input.Count == 0
         )
             return false;
+        if (!installing)
+            return true;
         var live = _composition.Elements().ToArray();
         if (
             !scene
@@ -979,20 +989,14 @@ public sealed class InputRouter
                 )
         )
             return false;
-        var current = true;
-        foreach (var item in scene.Input)
-        {
-            var element = _composition.Find(item.Identity);
-            if (element is null || SceneLayout.InputSignature(element) != item.Signature)
-                current = false;
-            element?.ReconcileSemanticStateForInput();
-        }
-        return current;
+        foreach (var element in live)
+            element.ReconcileSemanticStateForInput();
+        return true;
     }
 
     private ElementIdentity? Hit(float x, float y)
     {
-        foreach (var candidate in _scene!.Input.OrderByDescending(item => item.Order))
+        foreach (var candidate in _hitOrder)
             if (
                 Available(candidate.Identity)
                 && Contains(candidate.Bounds, x, y)
@@ -1010,21 +1014,8 @@ public sealed class InputRouter
     private bool Eligible(ElementIdentity identity) =>
         _input.ContainsKey(identity.ElementId) && Available(identity);
 
-    private bool Available(ElementIdentity identity)
-    {
-        for (var current = identity; ; )
-        {
-            if (
-                !_input.TryGetValue(current.ElementId, out var retained)
-                || !retained.Enabled
-                || !retained.Visible
-            )
-                return false;
-            if (retained.Parent is not { } parent)
-                return true;
-            current = parent;
-        }
-    }
+    private bool Available(ElementIdentity identity) =>
+        _available.GetValueOrDefault(identity.ElementId);
 
     private PointerCaptureLossReason CaptureReason(ElementIdentity identity) =>
         UnavailableReason(identity) switch
@@ -1071,20 +1062,9 @@ public sealed class InputRouter
 
     private bool ClippedIn(ElementIdentity identity, float x, float y)
     {
-        if (
-            !_input.TryGetValue(identity.ElementId, out var candidate)
-            || candidate.Parent is not { } current
-        )
-            return true;
-        while (true)
-        {
-            var retained = _input[current.ElementId];
-            if (retained.ChildClipBounds is { } clip && !Contains(clip, x, y))
-                return false;
-            if (retained.Parent is not { } parent)
-                return true;
-            current = parent;
-        }
+        return !_effectiveClips.TryGetValue(identity.ElementId, out var clip)
+            || clip is null
+            || Contains(clip.Value, x, y);
     }
 
     private static PaintSceneNode? FindCaret(IEnumerable<SceneNode> nodes, ElementIdentity identity)
@@ -1129,19 +1109,59 @@ public sealed class InputRouter
         }
     }
 
-    private IEnumerable<ElementIdentity> Path(ElementIdentity identity)
+    private IReadOnlyList<ElementIdentity> Path(ElementIdentity identity) =>
+        _paths.TryGetValue(identity.ElementId, out var path) ? path : [];
+
+    private void BuildInputCaches(RetainedScene scene)
     {
-        var path = new List<ElementIdentity>();
-        for (var current = identity; ; )
+        _available = new Dictionary<long, bool>(scene.Input.Count);
+        _paths = new Dictionary<long, ElementIdentity[]>(scene.Input.Count);
+        _effectiveClips = new Dictionary<long, LayoutRect?>(scene.Input.Count);
+        foreach (var retained in scene.Input)
         {
-            path.Add(current);
-            var retained = _input[current.ElementId];
-            if (retained.Parent is not { } parent)
-                break;
-            current = parent;
+            var parentAvailable = true;
+            ElementIdentity[] path;
+            LayoutRect? effectiveClip = null;
+            if (retained.Parent is { } parent)
+            {
+                parentAvailable = _available.GetValueOrDefault(parent.ElementId);
+                var parentPath = _paths[parent.ElementId];
+                path = new ElementIdentity[parentPath.Length + 1];
+                parentPath.CopyTo(path, 0);
+                path[^1] = retained.Identity;
+                effectiveClip = _effectiveClips[parent.ElementId];
+                if (_input[parent.ElementId].ChildClipBounds is { } parentClip)
+                    effectiveClip = Intersect(effectiveClip, parentClip);
+            }
+            else
+                path = [retained.Identity];
+            _available.Add(
+                retained.Identity.ElementId,
+                parentAvailable && retained.Enabled && retained.Visible
+            );
+            _paths.Add(retained.Identity.ElementId, path);
+            _effectiveClips.Add(retained.Identity.ElementId, effectiveClip);
         }
-        path.Reverse();
-        return path;
+        _hitOrder = scene.Input.OrderByDescending(item => item.Order).ToArray();
+    }
+
+    private void ClearInputCaches()
+    {
+        _available.Clear();
+        _paths.Clear();
+        _effectiveClips.Clear();
+        _hitOrder = [];
+    }
+
+    private static LayoutRect Intersect(LayoutRect? first, LayoutRect second)
+    {
+        if (first is null)
+            return second;
+        var left = Math.Max(first.Value.X, second.X);
+        var top = Math.Max(first.Value.Y, second.Y);
+        var right = Math.Min(first.Value.X + first.Value.Width, second.X + second.Width);
+        var bottom = Math.Min(first.Value.Y + first.Value.Height, second.Y + second.Height);
+        return new(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
     }
 
     private static bool Contains(LayoutRect bounds, float x, float y) =>
@@ -1252,11 +1272,14 @@ public sealed class InputRouter
         return SetScroll(identity, scrollable, bounds.X, bounds.Y, scrollable.InstalledOffset);
     }
 
-    private bool ClampScrolls()
+    private bool ClampScrolls(RetainedScene candidate)
     {
         var changed = false;
         foreach (var pair in _scrollable.ToArray())
-            if (_input.TryGetValue(pair.Key, out var retained))
+            if (
+                _input.TryGetValue(pair.Key, out var retained)
+                && !candidate.IsCollapsed(retained.Identity.ElementId)
+            )
             {
                 var projected = pair.Value.State.Offset;
                 changed |= SetScroll(

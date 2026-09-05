@@ -68,9 +68,28 @@ public static class LayoutProperties
     internal static readonly Property<int> VirtualRowIndex = new("layout-virtual-row-index", 0);
 }
 
-/// <summary>Visual settings for an element's background and transparency.</summary>
+/// <summary>Controls retained participation independently of routing-only visibility.</summary>
+public enum ElementParticipation
+{
+    /// <summary>Participates in layout, painting, input, focus, and accessibility.</summary>
+    Visible,
+
+    /// <summary>Reserves layout space but omits the subtree from painting, input, focus, and accessibility.</summary>
+    Hidden,
+
+    /// <summary>Retains ownership and state but consumes no layout space and is otherwise hidden.</summary>
+    Collapsed,
+}
+
+/// <summary>Visual settings for an element's background, transparency, and participation.</summary>
 public static class VisualProperties
 {
+    /// <summary>Controls subtree layout, painting, input, focus, and accessibility without disposing its state.</summary>
+    public static readonly Property<ElementParticipation> Participation = new(
+        "visual-participation",
+        ElementParticipation.Visible
+    );
+
     /// <summary>Paints the element's background with the supplied brush.</summary>
     public static readonly Property<Brush> Background = new(
         "visual-background",
@@ -792,7 +811,9 @@ public sealed class RetainedScene
         LayoutViewport viewport,
         IReadOnlyList<LayoutBox> boxes,
         IReadOnlyList<SceneNode> nodes,
-        IReadOnlyList<RetainedInputElement> input
+        IReadOnlyList<RetainedInputElement> input,
+        long inputProjectionRevision = 0,
+        IReadOnlyCollection<long>? collapsedElementIds = null
     )
     {
         Generation = generation;
@@ -800,6 +821,8 @@ public sealed class RetainedScene
         Boxes = Array.AsReadOnly(boxes.ToArray());
         Nodes = Array.AsReadOnly(nodes.Select(ClipSceneNode.Clone).ToArray());
         Input = Array.AsReadOnly(input.ToArray());
+        InputProjectionRevision = inputProjectionRevision;
+        _collapsedElementIds = collapsedElementIds is null ? [] : [.. collapsedElementIds];
         InputSignature = Signature(Input);
     }
 
@@ -817,6 +840,12 @@ public sealed class RetainedScene
 
     /// <summary>Retained hit/focus metadata matched to this scene generation.</summary>
     public IReadOnlyList<RetainedInputElement> Input { get; }
+
+    /// <summary>Gets the composition projection revision captured with this scene.</summary>
+    internal long InputProjectionRevision { get; }
+    private readonly HashSet<long> _collapsedElementIds;
+
+    internal bool IsCollapsed(long elementId) => _collapsedElementIds.Contains(elementId);
 
     /// <summary>Gets the deterministic signature of the scene input projection.</summary>
     public string InputSignature { get; }

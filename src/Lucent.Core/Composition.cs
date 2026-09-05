@@ -12,6 +12,8 @@ public sealed class Composition : IDisposable
     private static long _nextEpoch;
     private readonly ReactiveGraph _graph;
     private readonly long _epoch = Interlocked.Increment(ref _nextEpoch);
+    private readonly Dictionary<long, Element> _elements = [];
+    private readonly InputProjectionTracker _inputProjection;
     private readonly HashSet<SemanticIdentity> _emittedSemantics = [];
     private readonly TransitionController _transitions = new();
     private long _nextElementId;
@@ -32,6 +34,10 @@ public sealed class Composition : IDisposable
         ReactiveGraph.ValidateName(name, nameof(name));
         var scope = graph.CreateScope(name);
         Root = new Element(this, null, scope, NextId(), name);
+        _elements.Add(Root.Id, Root);
+        _inputProjection = scope.Own(
+            new InputProjectionTracker(graph, scope, name + ".input-projection")
+        );
     }
 
     /// <summary>The stable root element for this composition.</summary>
@@ -70,7 +76,14 @@ public sealed class Composition : IDisposable
     }
 
     internal long LatestSceneGeneration => _nextSceneGeneration;
+    internal long InputProjectionRevision => _inputProjection.Revision;
     internal long InteractionVisualGeneration => _interactionVisualGeneration;
+
+    internal T CaptureInputProjection<T>(Func<T> project) => _inputProjection.Capture(project);
+
+    internal T WithoutProjectionTracking<T>(Func<T> project) => _graph.Untracked(project);
+
+    internal void InvalidateInputProjection() => _inputProjection.Invalidate();
 
     internal void InvalidateInteractionVisuals() =>
         _interactionVisualGeneration = checked(_interactionVisualGeneration + 1);
@@ -268,7 +281,7 @@ public sealed class Composition : IDisposable
         _graph.CheckThread();
         return !IsDisposed
             && identity.CompositionEpoch == _epoch
-            && Find(Root, identity.ElementId) is { } element
+            && Find(identity.ElementId) is { } element
             && element.IsCurrent(identity);
     }
 
@@ -282,7 +295,7 @@ public sealed class Composition : IDisposable
         if (IsDisposed)
             return SemanticCommandResult.Stale;
         command.Validate();
-        if (!IsCurrent(identity) || Find(Root, identity.ElementId) is not { } element)
+        if (!IsCurrent(identity) || Find(identity.ElementId) is not { } element)
             return SemanticCommandResult.Stale;
         if (!element.SemanticEnabled())
             return SemanticCommandResult.Disabled;
@@ -297,7 +310,7 @@ public sealed class Composition : IDisposable
         _graph.CheckThread();
         if (
             identity.CompositionEpoch != _epoch
-            || Find(Root, identity.ElementId) is not { } target
+            || Find(identity.ElementId) is not { } target
             || !target.SemanticEnabled()
         )
             return false;
@@ -316,6 +329,8 @@ public sealed class Composition : IDisposable
     {
         foreach (var child in parent.Children)
         {
+            if (child.Participation != ElementParticipation.Visible)
+                continue;
             if (child.DeclaredSemanticRole is null)
             {
                 foreach (var descendant in SemanticChildren(child))
@@ -549,7 +564,28 @@ public sealed class Composition : IDisposable
     }
 
     internal Element? Find(ElementIdentity identity) =>
-        identity.CompositionEpoch == _epoch ? Find(Root, identity.ElementId) : null;
+        identity.CompositionEpoch == _epoch ? Find(identity.ElementId) : null;
+
+    private Element? Find(long elementId) =>
+        _elements.TryGetValue(elementId, out var element) && !element.IsDisposed ? element : null;
+
+    internal bool IsReachable(Element element) => _elements.ContainsKey(element.Id);
+
+    internal void RegisterSubtree(Element element)
+    {
+        if (element.IsDisposed)
+            return;
+        _elements.Add(element.Id, element);
+        foreach (var child in element.Children)
+            RegisterSubtree(child);
+    }
+
+    internal void UnregisterSubtree(Element element)
+    {
+        _elements.Remove(element.Id);
+        foreach (var child in element.Children)
+            UnregisterSubtree(child);
+    }
 
     internal IReadOnlyList<Element> Path(Element element)
     {
@@ -639,6 +675,8 @@ public sealed class Composition : IDisposable
 
     private static List<SemanticSnapshot> BuildSemantic(Element element)
     {
+        if (element.Participation != ElementParticipation.Visible)
+            return [];
         var children = element.Children.SelectMany(BuildSemantic).ToArray();
         return element.CreateSemanticSnapshot(children) is { } semantic
             ? [semantic]
@@ -669,16 +707,6 @@ public sealed class Composition : IDisposable
             Append(child, output);
     }
 
-    private static Element? Find(Element element, long id)
-    {
-        if (element.Id == id)
-            return element;
-        foreach (var child in element.Children)
-            if (Find(child, id) is { } found)
-                return found;
-        return null;
-    }
-
     internal static void ThrowAll(List<Exception>? errors, string message)
     {
         if (errors is null or { Count: 0 })
@@ -689,4 +717,38 @@ public sealed class Composition : IDisposable
     }
 
     private static string Quote(string value) => DiagnosticText.Quote(value);
+
+    private sealed class InputProjectionTracker(
+        ReactiveGraph graph,
+        ReactiveScope scope,
+        string name
+    ) : ReactiveNode(graph, name, scope)
+    {
+        internal override string Kind => "input-projection";
+        internal long Revision { get; private set; }
+
+        internal T Capture<T>(Func<T> project)
+        {
+            ArgumentNullException.ThrowIfNull(project);
+            Invalidate();
+            var captureRevision = Revision;
+            T result = default!;
+            if (Graph.Collect(this, () => result = project()) || Revision != captureRevision)
+            {
+                Invalidate();
+                throw new InvalidOperationException(
+                    "Input projection state changed while the scene was being produced."
+                );
+            }
+            return result;
+        }
+
+        internal void Invalidate() => Revision = checked(Revision + 1);
+
+        internal override void DependencyChanged()
+        {
+            if (!IsDisposed)
+                Invalidate();
+        }
+    }
 }

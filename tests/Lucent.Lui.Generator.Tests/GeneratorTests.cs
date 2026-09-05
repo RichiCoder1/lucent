@@ -1006,6 +1006,66 @@ public static class Harness
     }
 
     [TestMethod]
+    public void EditorAndViewportStateAreTypedLuiParameters()
+    {
+        const string Source =
+            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; "
+            + "public component Editor(EditorSession session, ViewportState viewport) { "
+            + "<Column><TextField session={session} label=\"Draft\" />"
+            + "<ScrollViewport viewport={viewport}><Text>body</Text></ScrollViewport></Column> }";
+        var result = RunWithSource(
+            "",
+            new TextFile("C:/consumer/Editor.lui", Source, "Editor.lui")
+        );
+        Assert(
+            result.Diagnostics.Length == 0 && result.Results.Single().GeneratedSources.Length == 1,
+            "Typed editor and viewport session parameters did not generate: "
+                + string.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+
+        var generated = result.Results.Single().GeneratedSources.Single().SourceText.ToString();
+        var compilation = CSharpCompilation.Create(
+            "generated-editor-session",
+            [
+                CSharpSyntaxTree.ParseText(
+                    generated,
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    "Editor.g.cs"
+                ),
+            ],
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var stream = new MemoryStream();
+        var emit = compilation.Emit(stream);
+        Assert(
+            emit.Success
+                && !emit.Diagnostics.Any(diagnostic =>
+                    diagnostic.Severity == DiagnosticSeverity.Warning
+                ),
+            "Generated editor-session .lui was not warning-clean: "
+                + string.Join(
+                    " | ",
+                    emit.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        Assert(
+            generated.Contains("EditorSession session", StringComparison.Ordinal)
+                && generated.Contains("ViewportState viewport", StringComparison.Ordinal)
+                && generated.Contains("session:", StringComparison.Ordinal)
+                && generated.Contains("viewport:", StringComparison.Ordinal),
+            "Generated .lui lost typed editor or viewport state arguments."
+        );
+    }
+
+    [TestMethod]
     public void InvalidSiblingDoesNotPoisonValidDocuments()
     {
         var parameterSiblingIsolation = Run(

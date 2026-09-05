@@ -174,29 +174,48 @@ internal sealed class ControlState
     }
 }
 
-/// <summary>Scope-owned offset for a bounded scroll viewport.</summary>
+/// <summary>Mount adapter for a hoistable bounded viewport.</summary>
 internal sealed class ScrollViewportState
 {
     private readonly ReactiveScope _scope;
-    private readonly Signal<ScrollOffset> _offset;
+    private readonly ViewportState _viewport;
 
-    internal ScrollViewportState(ReactiveScope scope, string name, ScrollOffset offset)
+    internal ScrollViewportState(
+        ReactiveScope scope,
+        string name,
+        ScrollOffset offset,
+        ViewportState? viewport = null
+    )
     {
-        offset.Validate();
         _scope = scope;
-        _offset = scope.Signal(offset, name + ".offset");
+        _viewport = viewport ?? new ViewportState(scope, offset, name + ".state");
+        _ = _viewport.AcquireMount(scope);
     }
 
     public ScrollOffset Offset
     {
-        get => _offset.Value;
+        get
+        {
+            CheckRead();
+            return _viewport.Offset;
+        }
         set
         {
-            _scope.CheckMutationGuard();
-            ObjectDisposedException.ThrowIf(_scope.IsDisposed, typeof(ScrollViewportState));
-            value.Validate();
-            _offset.Value = value;
+            CheckMutation();
+            _viewport.Offset = value;
         }
+    }
+
+    private void CheckRead()
+    {
+        _scope.Graph.CheckThread();
+        ObjectDisposedException.ThrowIf(_scope.IsDisposed, typeof(ScrollViewportState));
+    }
+
+    private void CheckMutation()
+    {
+        _scope.CheckMutationGuard();
+        ObjectDisposedException.ThrowIf(_scope.IsDisposed, typeof(ScrollViewportState));
     }
 }
 
@@ -336,16 +355,23 @@ internal static class Controls
         ThemeContext theme,
         string name,
         ScrollOffset offset = default,
-        Style? style = null
+        Style? style = null,
+        ViewportState? viewport = null
     )
     {
         name = Required(name, nameof(name));
         offset.Validate();
+        var initialOffset = viewport?.Offset ?? offset;
         var component = PanelStyle
             .Set(LayoutProperties.Clip, true)
-            .Set(LayoutProperties.Scroll, offset);
+            .Set(LayoutProperties.Scroll, initialOffset);
         Preflight(element, theme, component, style, new ScrollViewportBehavior(name, null!));
-        var state = new ScrollViewportState(element.Scope, element.Name + ".scroll", offset);
+        var state = new ScrollViewportState(
+            element.Scope,
+            element.Name + ".scroll",
+            offset,
+            viewport
+        );
         Configure(element, theme, component, style, new ScrollViewportBehavior(name, state));
         Bind(element, state, value => element.UpdateControl(LayoutProperties.Scroll, value.Offset));
         return state;
@@ -418,16 +444,21 @@ internal static class Controls
         ThemeContext theme,
         string name,
         string value = "",
-        Style? style = null
+        Style? style = null,
+        EditorSession? session = null
     )
     {
         name = Required(name, nameof(name));
         TextFieldState.ValidateText(value);
+        var initialText = session?.Text ?? value;
         var component = TextFieldStyle
-            .Set(ProjectionProperties.Text, value)
+            .Set(ProjectionProperties.Text, initialText)
             .Set(ProjectionProperties.TextMeasure, name);
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
-        var state = new TextFieldState(element.Scope, element.Name + ".text", value);
+        var editor =
+            session
+            ?? new EditorSession(element.Scope, element.Name, value, element.Name + ".editor");
+        var state = new TextFieldState(element.Scope, element.Name + ".text", editor);
         Configure(element, theme, component, style, new TextFieldBehavior(state, name));
         _ = element.Scope.Effect(
             () =>
