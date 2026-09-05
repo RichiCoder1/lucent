@@ -12,14 +12,15 @@
     <PackageReference Include="Microsoft.Windows.CsWin32" PrivateAssets="all" />
     <PackageReference Include="SDL3-CS" />
     <PackageReference Include="SDL3-CS.Windows" />
-    <None Include="native/win-x64/vcruntime140.dll" Link="vcruntime140.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="notices/Microsoft-VCRuntime.txt" Link="notices/Microsoft-VCRuntime.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)sdl3-cs.windows/3.4.14.1/LICENSE" Link="notices/SDL3-CS.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)skiasharp.nativeassets.win32/4.151.1/LICENSE.txt" Link="notices/SkiaSharp-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)skiasharp.nativeassets.win32/4.151.1/THIRD-PARTY-NOTICES.txt" Link="notices/SkiaSharp-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)harfbuzzsharp.nativeassets.win32/14.2.1.1/LICENSE.txt" Link="notices/HarfBuzzSharp-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)harfbuzzsharp.nativeassets.win32/14.2.1.1/THIRD-PARTY-NOTICES.txt" Link="notices/HarfBuzzSharp-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(MSBuildToolsPath)\..\..\LICENSE.txt" Link="notices/dotnet-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(MSBuildToolsPath)\..\..\ThirdPartyNotices.txt" Link="notices/dotnet-ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="native/win-x64/vcruntime140.dll" Link="vcruntime140.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="runtimes/win-x64/native/" />
+    <None Include="notices/Microsoft-VCRuntime.txt" Link="notices/Microsoft-VCRuntime.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/Microsoft-VCRuntime.txt" />
+    <None Include="$(NuGetPackageRoot)sdl3-cs.windows/3.4.14.1/LICENSE" Link="notices/SDL3-CS.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/SDL3-CS/" />
+    <None Include="$(NuGetPackageRoot)skiasharp.nativeassets.win32/4.151.1/LICENSE.txt" Link="notices/SkiaSharp-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/SkiaSharp-LICENSE.txt" />
+    <None Include="$(NuGetPackageRoot)skiasharp.nativeassets.win32/4.151.1/THIRD-PARTY-NOTICES.txt" Link="notices/SkiaSharp-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/SkiaSharp-NOTICES.txt" />
+    <None Include="$(NuGetPackageRoot)harfbuzzsharp.nativeassets.win32/14.2.1.1/LICENSE.txt" Link="notices/HarfBuzzSharp-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/HarfBuzzSharp-LICENSE.txt" />
+    <None Include="$(NuGetPackageRoot)harfbuzzsharp.nativeassets.win32/14.2.1.1/THIRD-PARTY-NOTICES.txt" Link="notices/HarfBuzzSharp-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/HarfBuzzSharp-NOTICES.txt" />
+    <None Include="$(MSBuildToolsPath)\..\..\LICENSE.txt" Link="notices/dotnet-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/dotnet-LICENSE.txt" />
+    <None Include="$(MSBuildToolsPath)\..\..\ThirdPartyNotices.txt" Link="notices/dotnet-ThirdPartyNotices.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/dotnet-ThirdPartyNotices.txt" />
   </ItemGroup>
+  <ItemGroup><None Include="buildTransitive/Lucent.Platform.Windows.targets" Pack="true" PackagePath="buildTransitive/Lucent.Platform.Windows.targets" /></ItemGroup>
 </Project>

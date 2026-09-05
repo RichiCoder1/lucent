@@ -1,0 +1,6 @@
+<Project>
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)notices/*" Link="notices/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)notices/SDL3-CS/LICENSE" Link="notices/SDL3-CS.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+</Project>

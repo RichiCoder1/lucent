@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <LucentIsDistributionPackage Condition="'$(MSBuildProjectName)' == 'Lucent.Core' Or '$(MSBuildProjectName)' == 'Lucent.Renderer.Skia' Or '$(MSBuildProjectName)' == 'Lucent.Platform.Windows' Or '$(MSBuildProjectName)' == 'Lucent.Hosting' Or '$(MSBuildProjectName)' == 'Lucent.Lui.Sdk'">true</LucentIsDistributionPackage>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(LucentIsDistributionPackage)' == 'true'">
+    <Version Condition="'$(LucentPackageVersion)' != ''">$(LucentPackageVersion)</Version>
+    <Authors>Richard Simpson</Authors>
+    <RepositoryUrl>https://github.com/RichiCoder1/lucent</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>Lucent Windows-first NativeAOT desktop UI framework. Experimental prerelease APIs.</Description>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(LucentIsDistributionPackage)' == 'true'">
+    <None Include="$(MSBuildThisFileDirectory)../README.md" Pack="true" PackagePath="README.md" />
+    <None Include="$(MSBuildThisFileDirectory)../LICENSE" Pack="true" PackagePath="" />
+  </ItemGroup>
+</Project>

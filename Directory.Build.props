@@ -12,4 +12,5 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <LucentLuiToolingVersion>0.2.0</LucentLuiToolingVersion>
   </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)eng/Packages.props" />
 </Project>

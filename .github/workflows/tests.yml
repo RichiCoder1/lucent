@@ -27,3 +27,37 @@ jobs:
       - name: Managed tests
         shell: pwsh
         run: ./tools/Test-Repository.ps1 -Suite Managed
+
+  packages:
+    needs: managed
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: global.json
+      - name: Pack and consume prerelease packages
+        shell: pwsh
+        run: |
+          $version = "0.3.0-dev.${{ github.run_number }}.${{ github.run_attempt }}"
+          ./tools/Pack-Packages.ps1 -Version $version
+          ./tools/Test-Packages.ps1 -Version $version -Feed "artifacts/packages/$version"
+      - name: Publish immutable package set
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "0.3.0-dev.${{ github.run_number }}.${{ github.run_attempt }}"
+          $source = 'https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json'
+          foreach ($package in Get-ChildItem "artifacts/packages/$version/*.nupkg") {
+            dotnet nuget push $package.FullName --api-key $env:GITHUB_TOKEN --source $source
+            if ($LASTEXITCODE) { throw "Package publish failed: $($package.Name)" }
+          }
+          "Published Lucent $version from ${{ github.sha }}" >> $env:GITHUB_STEP_SUMMARY

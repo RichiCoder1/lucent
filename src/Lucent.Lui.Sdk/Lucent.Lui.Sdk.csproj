@@ -2,11 +2,12 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion><GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer>
-    <PackageId>Lucent.Lui.Sdk</PackageId><Version>$(LucentLuiToolingVersion)</Version><Authors>Lucent</Authors>
-    <Description>Additive .lui generator SDK proof.</Description><IncludeBuildOutput>false</IncludeBuildOutput>
+    <PackageId>Lucent.Lui.Sdk</PackageId><Version Condition="'$(LucentPackageVersion)' == ''">$(LucentLuiToolingVersion)</Version><Authors>Lucent</Authors>
+    <Description>Additive .lui compiler, generator, and formatting SDK for Lucent.</Description><IncludeBuildOutput>false</IncludeBuildOutput>
     <NoPackageAnalysis>true</NoPackageAnalysis>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="../Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
     <None Include="Sdk/Sdk.props" Pack="true" PackagePath="Sdk/Sdk.props" />
     <None Include="Sdk/Sdk.targets" Pack="true" PackagePath="Sdk/Sdk.targets" />

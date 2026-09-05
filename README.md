@@ -23,3 +23,5 @@ Run the managed tests:
 ```
 
 See [testing guidance](docs/TESTING.md) for focused tests, NativeAOT publication, desktop interactions, and accessibility scans.
+
+Prerelease distribution and independent application setup: [NuGet packages](docs/PACKAGES.md). Lucent is [MIT licensed](LICENSE).

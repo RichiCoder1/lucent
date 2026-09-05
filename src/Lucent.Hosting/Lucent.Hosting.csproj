@@ -3,7 +3,8 @@
   <ItemGroup>
     <ProjectReference Include="../Lucent.Core/Lucent.Core.csproj" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <None Include="$(MSBuildToolsPath)/../../LICENSE.txt" Link="notices/Microsoft.Extensions-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Include="$(NuGetPackageRoot)microsoft.extensions.hosting/10.0.11/THIRD-PARTY-NOTICES.TXT" Link="notices/Microsoft.Extensions.Hosting-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="$(MSBuildToolsPath)/../../LICENSE.txt" Link="notices/Microsoft.Extensions-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/Microsoft.Extensions-LICENSE.txt" />
+    <None Include="$(NuGetPackageRoot)microsoft.extensions.hosting/10.0.11/THIRD-PARTY-NOTICES.TXT" Link="notices/Microsoft.Extensions.Hosting-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/Microsoft.Extensions.Hosting-NOTICES.txt" />
   </ItemGroup>
+  <ItemGroup><None Include="buildTransitive/Lucent.Hosting.targets" Pack="true" PackagePath="buildTransitive/Lucent.Hosting.targets" /></ItemGroup>
 </Project>
