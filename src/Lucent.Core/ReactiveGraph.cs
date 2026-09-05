@@ -21,7 +21,8 @@ public sealed class ReactiveGraph
     private int _nextNodeId;
     private int _nextScopeId;
 
-    /// <summary>Raised once when worker-posted work changes from empty to nonempty.</summary>
+    /// <summary>Raised when worker-posted work changes from empty to nonempty.</summary>
+    /// <remarks>Observers are notified independently. Their failures are posted for aggregation by <see cref="Drain"/>; a new edge for those failures re-notifies only still-subscribed observers that succeeded.</remarks>
     public event Action? WorkAvailable;
 
     /// <summary>Creates a root lifetime scope on the UI thread. Disposing it releases every owned node and child scope.</summary>
@@ -302,7 +303,53 @@ public sealed class ReactiveGraph
             if (wasEmpty)
                 available = WorkAvailable;
         }
-        available?.Invoke();
+        NotifyWorkAvailable(available);
+    }
+
+    private void NotifyWorkAvailable(Action? available)
+    {
+        while (available is not null)
+        {
+            List<Exception>? errors = null;
+            Action? succeeded = null;
+            foreach (Action observer in available.GetInvocationList())
+            {
+                try
+                {
+                    observer();
+                    succeeded += observer;
+                }
+                catch (Exception error)
+                {
+                    (errors ??= []).Add(error);
+                }
+            }
+            if (errors is null)
+                return;
+
+            lock (_postedGate)
+            {
+                var wasEmpty = _posted.IsEmpty;
+                foreach (var error in errors)
+                    _posted.Enqueue(new WakeFailure(error));
+                // A host may already have drained the original work while observers ran.
+                // Wake it for the new failure work without invoking a failed observer again.
+                available = null;
+                if (wasEmpty && succeeded is not null)
+                {
+                    var subscribed = WorkAvailable?.GetInvocationList() ?? [];
+                    foreach (Action observer in succeeded.GetInvocationList())
+                        if (subscribed.Contains(observer))
+                            available += observer;
+                }
+            }
+        }
+    }
+
+    private sealed class WakeFailure(Exception error) : IPosted
+    {
+        public bool Commit() =>
+            throw new AggregateException("WorkAvailable observer failed.", error);
     }
 
     private bool TakePosted(out IPosted post)

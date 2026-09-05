@@ -596,6 +596,133 @@ public sealed class ReactiveContracts
         Assert(wakes == 2 && three.Value == 3, "Empty-to-nonempty reset lost a later worker wake.");
     }
 
+    [TestMethod]
+    public void WorkAvailableObserverFailurePreservesDeliveryAndCoalescing()
+    {
+        var graph = new ReactiveGraph();
+        var first = new TaskCompletionSource<int>();
+        var second = new TaskCompletionSource<int>();
+        using var one = graph.Async(_ => first.Task, 0, "wake-one");
+        using var two = graph.Async(_ => second.Task, 0, "wake-two");
+        _ = one.Value;
+        _ = two.Value;
+        var failure = new InvalidOperationException("wake-observer");
+        Action failing = () => throw failure;
+        var wakes = 0;
+        graph.WorkAvailable += failing;
+        graph.WorkAvailable += () => Interlocked.Increment(ref wakes);
+        Task.Run(() =>
+            {
+                first.SetResult(1);
+                second.SetResult(2);
+            })
+            .GetAwaiter()
+            .GetResult();
+
+        var errors = Flatten(CaptureAggregate(graph.Drain)).ToArray();
+        Assert(
+            wakes == 1 && one.Value == 1 && two.Value == 2 && errors.SequenceEqual([failure]),
+            "A failing observer suppressed delivery, burst coalescing, commit, or error reporting."
+        );
+        graph.Drain();
+        graph.WorkAvailable -= failing;
+        var third = new TaskCompletionSource<int>();
+        using var three = graph.Async(_ => third.Task, 0, "wake-three");
+        _ = three.Value;
+        Task.Run(() => third.SetResult(3)).GetAwaiter().GetResult();
+        graph.Drain();
+        Assert(wakes == 2 && three.Value == 3, "An observer failure broke the next wake edge.");
+    }
+
+    [TestMethod]
+    public void LateWakeObserverFailureRearmsAfterConcurrentDrain()
+    {
+        var graph = new ReactiveGraph();
+        var completion = new TaskCompletionSource<int>();
+        using var value = graph.Async(_ => completion.Task, 0, "late-wake-error");
+        _ = value.Value;
+        using var observerEntered = new ManualResetEventSlim();
+        using var releaseObserver = new ManualResetEventSlim();
+        var wakes = 0;
+        var failures = 0;
+        var failure = new InvalidOperationException("late-observer");
+        var unsubscribedCalls = 0;
+        Action? unsubscribe = null;
+        unsubscribe = () =>
+        {
+            Interlocked.Increment(ref unsubscribedCalls);
+            graph.WorkAvailable -= unsubscribe;
+        };
+        graph.WorkAvailable += unsubscribe;
+        graph.WorkAvailable += () => Interlocked.Increment(ref wakes);
+        graph.WorkAvailable += () =>
+        {
+            Interlocked.Increment(ref failures);
+            observerEntered.Set();
+            if (!releaseObserver.Wait(TimeSpan.FromSeconds(5)))
+                throw new TimeoutException("Owner did not release observer.");
+            throw failure;
+        };
+        var producer = Task.Run(() => completion.SetResult(7));
+        try
+        {
+            Assert(observerEntered.Wait(TimeSpan.FromSeconds(5)), "Observer never ran.");
+            graph.Drain();
+            Assert(
+                wakes == 1 && value.Value == 7,
+                "Original work was not drainable during notification."
+            );
+        }
+        finally
+        {
+            releaseObserver.Set();
+            producer.GetAwaiter().GetResult();
+        }
+        Assert(
+            wakes == 2 && failures == 1 && unsubscribedCalls == 1,
+            "Late failure was stranded or retried a failed or unsubscribed observer."
+        );
+        Assert(
+            Flatten(CaptureAggregate(graph.Drain)).Single() == failure,
+            "Late observer failure was not reported on the owner."
+        );
+        graph.Drain();
+    }
+
+    [TestMethod]
+    public void AllWakeObserversMayFailWithoutRecursiveNotification()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("failed-wake-scope");
+        var completion = new TaskCompletionSource<int>();
+        var value = scope.Async(_ => completion.Task, 0, "disposed-wake-value");
+        _ = value.Value;
+        var one = new InvalidOperationException("first-observer");
+        var two = new InvalidOperationException("second-observer");
+        var calls = 0;
+        graph.WorkAvailable += () =>
+        {
+            Interlocked.Increment(ref calls);
+            throw one;
+        };
+        graph.WorkAvailable += () =>
+        {
+            Interlocked.Increment(ref calls);
+            throw two;
+        };
+        Task.Run(() => completion.SetResult(1)).GetAwaiter().GetResult();
+        scope.Dispose();
+        Assert(
+            calls == 2 && Flatten(CaptureAggregate(graph.Drain)).SequenceEqual([one, two]),
+            "Observer failures escaped posting, recursed, or were lost during scope disposal."
+        );
+        graph.Drain();
+        Assert(
+            !graph.Dump().Contains("disposed-wake-value", StringComparison.Ordinal),
+            "Disposed async work remained active."
+        );
+    }
+
     [System.Runtime.CompilerServices.MethodImpl(
         System.Runtime.CompilerServices.MethodImplOptions.NoInlining
     )]
