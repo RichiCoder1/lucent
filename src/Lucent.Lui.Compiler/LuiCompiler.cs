@@ -84,6 +84,7 @@ public static class LuiCompiler
         var componentCompilation = compilation.AddSyntaxTrees(componentTree);
         var componentModel = componentCompilation.GetSemanticModel(componentTree);
         var componentMap = new LuiSourceMap(identity, componentWriter.Entries);
+        var contentContributions = ContentContributionPlans(probeModel, probeTree, writer);
         var propertyWriter = new Writer(document, identity, null, ImplicitStylePropertyTypes);
         propertyWriter.Document(diagnostics);
         var propertyTree = CSharpSyntaxTree.ParseText(
@@ -133,6 +134,7 @@ public static class LuiCompiler
                 writer,
                 document,
                 identity,
+                contentContributions,
                 diagnostics
             )
             .ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -145,6 +147,7 @@ public static class LuiCompiler
                 componentWriter,
                 document,
                 identity,
+                contentContributions,
                 implicitComponentDiagnostics
             )
         )
@@ -165,6 +168,7 @@ public static class LuiCompiler
             contentPlans,
             PropertyPlans(propertyModel, propertyTree, propertyMap, propertyWriter),
             styleValues,
+            contentContributions,
             tokenExpressions,
             NullChecks(probeModel, probeTree, document)
         );
@@ -674,18 +678,16 @@ public static class LuiCompiler
             .ToArray();
     }
 
-    private static string ComponentName(IMethodSymbol method)
-    {
-        var name = method.Name;
-        if (
-            SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None
-            || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None
-        )
-            name = "@" + name;
-        return method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-            + "."
-            + name;
-    }
+    private static string ComponentName(IMethodSymbol method) =>
+        method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+        + "."
+        + EscapeIdentifier(method.Name);
+
+    private static string EscapeIdentifier(string name) =>
+        SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None
+        || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None
+            ? "@" + name
+            : name;
 
     private static IReadOnlyDictionary<int, string> ComponentPlans(
         SemanticModel model,
@@ -715,6 +717,39 @@ public static class LuiCompiler
         return plans;
     }
 
+    private static IReadOnlyDictionary<int, ContentContributionKind> ContentContributionPlans(
+        SemanticModel model,
+        SyntaxTree tree,
+        Writer writer
+    )
+    {
+        var root = tree.GetRoot();
+        var plans = new Dictionary<int, ContentContributionKind>();
+        foreach (var contribution in writer.ContentExpressions)
+        {
+            var node = root.FindNode(
+                new TextSpan(contribution.Generated.Start, contribution.Generated.Length),
+                getInnermostNodeForTie: true
+            );
+            var expression = node.AncestorsAndSelf()
+                .OfType<ExpressionSyntax>()
+                .FirstOrDefault(candidate =>
+                    candidate.SpanStart == contribution.Generated.Start
+                    && candidate.Span.Length == contribution.Generated.Length
+                );
+            var type = expression is null ? null : model.GetTypeInfo(expression).Type;
+            var display = type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            plans[contribution.Source.Start] = display switch
+            {
+                "global::Lucent.Core.ComponentContent" => ContentContributionKind.Collection,
+                "global::Lucent.Core.ComponentRecipe" => ContentContributionKind.Recipe,
+                "global::Lucent.Core.ContentRecipe" => ContentContributionKind.Recipe,
+                _ => ContentContributionKind.Invalid,
+            };
+        }
+        return plans;
+    }
+
     private static IReadOnlyDictionary<int, ContentPlan> ContentPlans(
         SemanticModel model,
         SyntaxTree tree,
@@ -722,6 +757,7 @@ public static class LuiCompiler
         Writer writer,
         LuiDocumentSyntax document,
         LuiFreshnessIdentity identity,
+        IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
         List<LuiDiagnostic> diagnostics
     )
     {
@@ -796,7 +832,8 @@ public static class LuiCompiler
                         document,
                         identity,
                         mapped.Source.Start,
-                        candidate
+                        candidate,
+                        contentContributions
                     )
                 )
                 .ToArray();
@@ -809,23 +846,19 @@ public static class LuiCompiler
                     .ToArray();
                 if (applicable.Length == 0 && scalarCandidates.Length == 1)
                     plans[mapped.Source.Start] = ContentPlan.For(scalarCandidates[0]);
-                else if (scalarCandidates.Length == 0)
-                    diagnostics.Add(
-                        new LuiDiagnostic(
-                            "LUI3001",
-                            "Expression content requires a scalar [DefaultContent] parameter.",
-                            expression.Span
-                        )
-                    );
+                else if (candidates.Length == 1)
+                    plans[mapped.Source.Start] = ContentPlan.For(candidates[0]);
                 else
                     diagnostics.Add(
                         new LuiDiagnostic(
                             "LUI2009",
-                            "Expression content must resolve to exactly one scalar [DefaultContent] parameter.",
+                            "Expression content must resolve to exactly one compatible [DefaultContent] parameter.",
                             expression.Span
                         )
                     );
             }
+            else if (candidates.Length == 1)
+                plans[mapped.Source.Start] = ContentPlan.For(candidates[0]);
         }
         return plans;
     }
@@ -867,7 +900,8 @@ public static class LuiCompiler
         LuiDocumentSyntax document,
         LuiFreshnessIdentity identity,
         int elementStart,
-        IParameterSymbol parameter
+        IParameterSymbol parameter,
+        IReadOnlyDictionary<int, ContentContributionKind> contentContributions
     )
     {
         var candidate = ContentPlan.For(parameter);
@@ -879,6 +913,7 @@ public static class LuiCompiler
                 new Dictionary<int, ContentPlan> { [elementStart] = candidate },
                 new Dictionary<int, StylePropertyPlan>(),
                 new Dictionary<int, StyleValuePlan>(),
+                contentContributions,
                 new HashSet<int>(),
                 new HashSet<int>()
             ),
@@ -1134,6 +1169,13 @@ public static class LuiCompiler
         );
     }
 
+    private enum ContentContributionKind
+    {
+        Invalid,
+        Recipe,
+        Collection,
+    }
+
     private sealed class ContentPlan
     {
         internal ContentPlan(string name, bool isCollection)
@@ -1184,6 +1226,7 @@ public static class LuiCompiler
             IReadOnlyDictionary<int, ContentPlan> content,
             IReadOnlyDictionary<int, StylePropertyPlan> properties,
             IReadOnlyDictionary<int, StyleValuePlan> values,
+            IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
             HashSet<int> tokenExpressions,
             HashSet<int> nullChecks
         )
@@ -1192,6 +1235,7 @@ public static class LuiCompiler
             Content = content;
             Properties = properties;
             Values = values;
+            ContentContributions = contentContributions;
             TokenExpressions = tokenExpressions;
             NullChecks = nullChecks;
         }
@@ -1200,6 +1244,7 @@ public static class LuiCompiler
         internal IReadOnlyDictionary<int, ContentPlan> Content { get; }
         internal IReadOnlyDictionary<int, StylePropertyPlan> Properties { get; }
         internal IReadOnlyDictionary<int, StyleValuePlan> Values { get; }
+        internal IReadOnlyDictionary<int, ContentContributionKind> ContentContributions { get; }
         internal HashSet<int> TokenExpressions { get; }
         internal HashSet<int> NullChecks { get; }
     }
@@ -1219,6 +1264,7 @@ public static class LuiCompiler
         internal readonly HashSet<int> ElementNames = new HashSet<int>();
         internal readonly HashSet<int> StylePropertyNames = new HashSet<int>();
         internal readonly List<LuiSpan> StyleExpressionSpans = new List<LuiSpan>();
+        internal readonly List<(LuiSpan Source, LuiSpan Generated)> ContentExpressions = [];
 
         private sealed class PatternLocal
         {
@@ -1486,7 +1532,7 @@ public static class LuiCompiler
                 plan is null || children.Length == 0
                     ? null
                     : element.Attributes.FirstOrDefault(attribute =>
-                        attribute.Name.Text == plan.Name
+                        attribute.Name.Text.TrimStart('@') == plan.Name
                     );
             if (duplicateDefault is not null && !suppressDefaultContentAttribute)
                 diagnostics.Add(
@@ -1513,19 +1559,37 @@ public static class LuiCompiler
             }
             if (plan is null)
             {
-                if (children.Length != 0)
+                if (children.Length != 0 && (plans is null || suppressDefaultContentAttribute))
                     arguments.Add(() =>
                         Content(
                             "content",
-                            children.Any(child => child is LuiExpressionBodySyntax)
-                                ? false
-                                : children.Length != 1 || children[0] is not LuiTextSyntax,
+                            children.Length != 1
+                                || children[0] is not (LuiTextSyntax or LuiExpressionBodySyntax),
                             children,
                             diagnostics
                         )
                     );
+                else if (
+                    children.Length != 0
+                    && plans!.Components.ContainsKey(element.Name.Span.Start)
+                )
+                    diagnostics.Add(
+                        new LuiDiagnostic(
+                            "LUI2011",
+                            "Element '"
+                                + element.Name.Text
+                                + "' has content but no [DefaultContent] parameter.",
+                            element.Name.Span
+                        )
+                    );
             }
-            else if (children.Length == 0 && plan.IsCollection)
+            else if (
+                children.Length == 0
+                && plan.IsCollection
+                && !element.Attributes.Any(attribute =>
+                    attribute.Name.Text.TrimStart('@') == plan.Name
+                )
+            )
                 arguments.Add(() => Content(plan.Name, true, children, diagnostics));
             else if (children.Length != 0)
                 arguments.Add(() => Content(plan.Name, plan.IsCollection, children, diagnostics));
@@ -1572,7 +1636,7 @@ public static class LuiCompiler
             List<LuiDiagnostic> diagnostics
         )
         {
-            Write(name + ": ");
+            Hidden(EscapeIdentifier(name) + ": ");
             if (!collection && children.Count == 1 && children[0] is LuiTextSyntax textNode)
             {
                 Mapped(Escape(textNode.Text), textNode.Span, LuiMapKind.Expression);
@@ -1584,7 +1648,7 @@ public static class LuiCompiler
                 && children[0] is LuiExpressionBodySyntax expressionNode
             )
             {
-                Expression(expressionNode);
+                ContentExpression(expressionNode, false, diagnostics);
                 return;
             }
             if (!collection)
@@ -1622,22 +1686,19 @@ public static class LuiCompiler
                     ForEach(loop, diagnostics);
                     break;
                 case LuiTextSyntax textNode:
-                    diagnostics.Add(
-                        new LuiDiagnostic(
-                            "LUI3001",
-                            "Text content cannot be mixed with component content.",
-                            textNode.Span
-                        )
-                    );
+                    if (plans is null)
+                        Mapped(Escape(textNode.Text), textNode.Span, LuiMapKind.Expression);
+                    else
+                        diagnostics.Add(
+                            new LuiDiagnostic(
+                                "LUI3001",
+                                "Text content cannot be mixed with component content.",
+                                textNode.Span
+                            )
+                        );
                     break;
                 case LuiExpressionBodySyntax expressionNode:
-                    diagnostics.Add(
-                        new LuiDiagnostic(
-                            "LUI3001",
-                            "Expression content requires a scalar [DefaultContent] parameter.",
-                            expressionNode.Span
-                        )
-                    );
+                    ContentExpression(expressionNode, true, diagnostics);
                     break;
                 default:
                     diagnostics.Add(
@@ -1645,6 +1706,31 @@ public static class LuiCompiler
                     );
                     break;
             }
+        }
+
+        private void ContentExpression(
+            LuiExpressionBodySyntax expression,
+            bool collection,
+            List<LuiDiagnostic> diagnostics
+        )
+        {
+            var kind =
+                plans is not null
+                && plans.ContentContributions.TryGetValue(expression.Span.Start, out var resolved)
+                    ? resolved
+                    : ContentContributionKind.Invalid;
+            if (collection && kind == ContentContributionKind.Collection)
+                Hidden(".. ");
+            var generated = Expression(expression);
+            ContentExpressions.Add((expression.Span, generated));
+            if (collection && plans is not null && kind == ContentContributionKind.Invalid)
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI3001",
+                        "A component-content expression must have type ComponentContent, ContentRecipe, or ComponentRecipe.",
+                        expression.Span
+                    )
+                );
         }
 
         private string UniqueGeneratedName(string prefix, string suffix = "")
@@ -2092,7 +2178,7 @@ public static class LuiCompiler
             Mark(assignment.Terminator.Span, LuiMapKind.Structure);
         }
 
-        private void Expression(LuiExpressionSyntax expression, string? excludedLocal = null) =>
+        private LuiSpan Expression(LuiExpressionSyntax expression, string? excludedLocal = null) =>
             Expression(
                 expression.Span,
                 expression.Text,
@@ -2102,7 +2188,7 @@ public static class LuiCompiler
                 excludedLocal
             );
 
-        private void Expression(LuiExpressionBodySyntax expression) =>
+        private LuiSpan Expression(LuiExpressionBodySyntax expression) =>
             Expression(
                 expression.Span,
                 expression.Text,
@@ -2112,7 +2198,7 @@ public static class LuiCompiler
                 null
             );
 
-        private void Expression(
+        private LuiSpan Expression(
             LuiSpan expressionSpan,
             string expressionText,
             ExpressionSyntax expressionSyntax,
@@ -2139,6 +2225,7 @@ public static class LuiCompiler
                 + identity.Document.LogicalPath.Replace("\\", "\\\\").Replace("\"", "\\\"")
                 + "\"\n";
             Hidden(directive);
+            var generatedStart = text.Length;
 
             var replacements =
                 new List<(
@@ -2242,9 +2329,11 @@ public static class LuiCompiler
             }
             else if (replacements.Count == 0)
                 Mapped(value, source, LuiMapKind.Expression);
+            var generated = LuiSpan.From(generatedStart, text.Length);
             Hidden("\n#line hidden\n");
             Mark(openBrace.Span, LuiMapKind.Structure);
             Mark(closeBrace.Span, LuiMapKind.Structure);
+            return generated;
         }
 
         private static bool References(ExpressionSyntax expression, string name) =>

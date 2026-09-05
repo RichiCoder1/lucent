@@ -1939,6 +1939,184 @@ public sealed class LanguageServerTests
     }
 
     [TestMethod]
+    public async Task DeclaredDefaultContentSupportsForwardingAndParameterRename()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-content-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            var projectPath = Path.Combine(root, "Content.csproj");
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                    + core
+                    + "\" /><AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            var shellUri = new Uri(Path.Combine(root, "Shell.lui"));
+            var callerUri = new Uri(Path.Combine(root, "Caller.lui"));
+            var shell =
+                "namespace Content; using Lucent.Core; internal component Shell([DefaultContent] ComponentContent children) { <Column><Text>Header</Text>{children}<Text>Footer</Text></Column> }";
+            var caller =
+                "namespace Content; using Lucent.Core; internal component Caller(ComponentContent supplied) { <Column><Shell children={supplied} /><Shell><Text>Body</Text></Shell><Shell /></Column> }";
+            await File.WriteAllTextAsync(shellUri.LocalPath, shell);
+            await File.WriteAllTextAsync(callerUri.LocalPath, caller);
+            using var context = await LuiProjectContext.LoadAsync(
+                projectPath,
+                CancellationToken.None
+            );
+            foreach (var uri in new[] { shellUri, callerUri })
+                Assert(
+                    await context.CompileAsync(uri, CancellationToken.None) is not null,
+                    "Explicit default-content fixture did not compile: "
+                        + string.Join(
+                            " | ",
+                            (await context.DiagnosticsAsync(uri, CancellationToken.None))!.Select(
+                                diagnostic => diagnostic.Code + ":" + diagnostic.Message
+                            )
+                        )
+                );
+            var declaration = shell.IndexOf("children)", StringComparison.Ordinal);
+            var forwarding = shell.IndexOf("children}", StringComparison.Ordinal);
+            var argument = caller.IndexOf("children=", StringComparison.Ordinal);
+            var definition = await context.DefinitionAsync(
+                shellUri,
+                forwarding,
+                CancellationToken.None
+            );
+            var completions = await context.CompletionsAsync(
+                callerUri,
+                argument,
+                CancellationToken.None
+            );
+            var references = await context.ReferencesAsync(
+                shellUri,
+                declaration,
+                true,
+                CancellationToken.None
+            );
+            var rename = await context.RenameAsync(
+                shellUri,
+                forwarding,
+                "parts",
+                CancellationToken.None
+            );
+            Assert(
+                definition is not null
+                    && definition.Uri == shellUri
+                    && definition.Span.Start <= declaration
+                    && definition.Span.End >= declaration + "children".Length,
+                "Forwarded content did not navigate to its authored parameter."
+            );
+            Assert(
+                completions.Any(item => item.Label == "children"),
+                "Explicit content parameter was absent from attribute completion."
+            );
+            Assert(
+                references is not null && references.Locations.Count == 3,
+                "Content references must include declaration, forwarding read, and explicit argument only."
+            );
+            Assert(
+                rename is not null && rename.Edits.Sum(edit => edit.Spans.Count) == 3,
+                "Content parameter rename omitted authored uses or edited implicit child markup."
+            );
+            Func<LuiCompilationResult, LuiCompilationResult> hiddenExplicitArgument = result =>
+                result.Identity.Document.LogicalPath.EndsWith(
+                    "Caller.lui",
+                    StringComparison.Ordinal
+                )
+                    ? WithMap(
+                        result,
+                        result.Map.Entries.Select(entry =>
+                            entry.Source.Start == argument
+                                ? new LuiMapEntry(entry.Source, entry.Generated, entry.Kind, true)
+                                : entry
+                        )
+                    )
+                    : result;
+            Assert(
+                await context.RenameAsync(
+                    shellUri,
+                    forwarding,
+                    "parts",
+                    CancellationToken.None,
+                    transformGenerated: hiddenExplicitArgument
+                )
+                    is null,
+                "An authored content argument with missing provenance was mistaken for implicit content."
+            );
+            Func<LuiCompilationResult, LuiCompilationResult> malformedImplicitArgument = result =>
+                result.Identity.Document.LogicalPath.EndsWith(
+                    "Caller.lui",
+                    StringComparison.Ordinal
+                )
+                    ? WithMap(
+                        result,
+                        result.Map.Entries.Select(entry =>
+                            entry.Hidden
+                            && entry.Generated.Length == "children: ".Length
+                            && result.ProjectionSource!.Substring(
+                                entry.Generated.Start,
+                                entry.Generated.Length
+                            ) == "children: "
+                                ? new LuiMapEntry(
+                                    new LuiSpan(argument, "children".Length),
+                                    entry.Generated,
+                                    LuiMapKind.Symbol,
+                                    true
+                                )
+                                : entry
+                        )
+                    )
+                    : result;
+            Assert(
+                await context.RenameAsync(
+                    shellUri,
+                    forwarding,
+                    "parts",
+                    CancellationToken.None,
+                    transformGenerated: malformedImplicitArgument
+                )
+                    is null,
+                "A malformed source-backed implicit argument mapping was trusted as compiler scaffolding."
+            );
+            foreach (var edit in rename!.Edits)
+            {
+                var text = edit.Uri == shellUri ? shell : caller;
+                foreach (var span in edit.Spans.OrderByDescending(span => span.Start))
+                    text = text[..span.Start] + "parts" + text[span.End..];
+                context.ReplaceText(edit.Uri, text);
+            }
+            foreach (var uri in new[] { shellUri, callerUri })
+                Assert(
+                    await context.CompileAsync(uri, CancellationToken.None) is not null,
+                    "Renaming the explicit default-content parameter changed nested-content semantics."
+                );
+            context.ReplaceText(
+                callerUri,
+                caller.Replace(
+                    "<Shell children={supplied} />",
+                    "<Shell parts={supplied}><Text>Duplicate</Text></Shell>",
+                    StringComparison.Ordinal
+                )
+            );
+            Assert(
+                (await context.DiagnosticsAsync(callerUri, CancellationToken.None))!.Any(
+                    diagnostic => diagnostic.Code == "LUI2008"
+                ),
+                "Explicit attribute plus nested content lost the duplicate-content diagnostic."
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task RealIssueBrowserProjectSupportsFormattingNavigationAndCompletion()
     {
         var projectPath = Path.GetFullPath("apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj");

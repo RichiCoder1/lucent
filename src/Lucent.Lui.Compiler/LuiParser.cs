@@ -232,12 +232,21 @@ public static class LuiParser
                 return Array.Empty<LuiParameterSyntax>();
             }
             var result = new List<LuiParameterSyntax>();
+            var defaultContentCount = 0;
             for (var i = 0; i < list.Parameters.Count; i++)
             {
                 var parameter = list.Parameters[i];
                 var parameterStart = start + Math.Max(0, parameter.SpanStart - 1);
+                var defaultContent =
+                    parameter.AttributeLists.Count == 1
+                    && parameter.AttributeLists[0].Target == null
+                    && parameter.AttributeLists[0].Attributes.Count == 1
+                    && parameter.AttributeLists[0].Attributes[0].Name
+                        is IdentifierNameSyntax attributeName
+                    && attributeName.Identifier.ValueText == "DefaultContent"
+                    && parameter.AttributeLists[0].Attributes[0].ArgumentList == null;
                 if (
-                    parameter.AttributeLists.Count != 0
+                    (parameter.AttributeLists.Count != 0 && !defaultContent)
                     || parameter.Modifiers.Any(modifier =>
                         modifier.IsKind(SyntaxKind.RefKeyword)
                         || modifier.IsKind(SyntaxKind.OutKeyword)
@@ -247,7 +256,13 @@ public static class LuiParser
                 )
                     Error(
                         "LUI3004",
-                        "Component parameters cannot have attributes, ref, out, in, or params modifiers.",
+                        "Component parameters support only one [DefaultContent] marker and cannot have ref, out, in, or params modifiers.",
+                        new LuiSpan(parameterStart, parameter.Span.Length)
+                    );
+                if (defaultContent && ++defaultContentCount > 1)
+                    Error(
+                        "LUI3004",
+                        "A component may declare only one [DefaultContent] parameter.",
                         new LuiSpan(parameterStart, parameter.Span.Length)
                     );
                 var type = parameter.Type!;
@@ -273,7 +288,8 @@ public static class LuiParser
                             new LuiSpan(nameStart, parameter.Identifier.Span.Length),
                             false
                         ),
-                        comma
+                        comma,
+                        defaultContent
                     )
                 );
             }

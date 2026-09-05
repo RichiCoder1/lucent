@@ -1,0 +1,4 @@
+namespace Consumer;
+internal component Marker(string value) {
+    <Text>{value}</Text>
+}

@@ -1452,6 +1452,8 @@ internal sealed class LuiProjectContext : IDisposable
             LuiSpan[] spans;
             if (TryGenerated(snapshot, tree, out var generated))
             {
+                if (IsImplicitContentArgument(generated, token, symbol))
+                    continue;
                 occurrenceUri = generated.Uri;
                 spans = RenameSourceSpans(generated, token);
             }
@@ -1472,6 +1474,44 @@ internal sealed class LuiProjectContext : IDisposable
                 result.Add(new RenameOccurrence(occurrenceUri, span, token, model, symbol));
         }
         return result;
+    }
+
+    private static bool IsImplicitContentArgument(
+        RenameGeneratedDocument document,
+        SyntaxToken token,
+        ISymbol symbol
+    )
+    {
+        if (
+            symbol is not IParameterSymbol parameter
+            || !IsDefaultContent(parameter)
+            || token.Parent is not IdentifierNameSyntax { Parent: NameColonSyntax name }
+            || name.Parent
+                is not ArgumentSyntax { Parent.Parent: InvocationExpressionSyntax invocation }
+        )
+            return false;
+        var mappings = document.Map.FromGenerated(new LuiSpan(token.SpanStart, token.Span.Length));
+        if (
+            mappings.Count != 1
+            || mappings[0] is not { Hidden: true, Kind: LuiMapKind.Scaffolding }
+            || !mappings[0].Source.Equals(new LuiSpan(-1, 0))
+            || mappings[0].Generated.Start != token.SpanStart
+            || mappings[0].Generated.End != name.Span.End + 1
+        )
+            return false;
+        var owners = document
+            .Map.FromGenerated(
+                new LuiSpan(invocation.Expression.SpanStart, invocation.Expression.Span.Length)
+            )
+            .Where(entry => !entry.Hidden)
+            .Select(entry => entry.Source)
+            .ToArray();
+        var elements = Elements(document.Syntax)
+            .Where(element => owners.Contains(element.Name.Span))
+            .ToArray();
+        return elements.Length == 1
+            && !elements[0]
+                .Attributes.Any(attribute => attribute.Name.Text.TrimStart('@') == parameter.Name);
     }
 
     private static bool TryGenerated(

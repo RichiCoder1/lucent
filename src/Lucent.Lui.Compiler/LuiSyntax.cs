@@ -272,7 +272,8 @@ public sealed class LuiParameterSyntax : LuiSyntaxNode
         string typeText,
         string declarationText,
         LuiToken name,
-        LuiToken separator
+        LuiToken separator,
+        bool isDefaultContent
     )
         : base(span)
     {
@@ -280,6 +281,7 @@ public sealed class LuiParameterSyntax : LuiSyntaxNode
         DeclarationText = declarationText;
         Name = name;
         Separator = separator;
+        IsDefaultContent = isDefaultContent;
     }
 
     /// <summary>Exact C# type text.</summary>
@@ -293,6 +295,9 @@ public sealed class LuiParameterSyntax : LuiSyntaxNode
 
     /// <summary>Following comma, or a missing token after the final parameter.</summary>
     public LuiToken Separator { get; }
+
+    /// <summary>Whether this parameter explicitly carries the one supported <c>[DefaultContent]</c> marker.</summary>
+    public bool IsDefaultContent { get; }
 }
 
 /// <summary>Base for constructs allowed inside a component or element body.</summary>

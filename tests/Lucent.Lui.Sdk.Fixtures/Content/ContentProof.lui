@@ -1,0 +1,18 @@
+namespace Consumer;
+internal component ContentProof(ComponentRecipe component, ContentRecipe contribution, [DefaultContent] ComponentContent children) {
+    <Column>
+        <Header />
+        {component}
+        {contribution}
+        {children}
+        <Footer />
+        <Wrapper />
+        <Wrapper>
+            <Marker value="nested-before" />
+            <Wrapper>
+                <Marker value="nested-inner" />
+            </Wrapper>
+            <Marker value="nested-after" />
+        </Wrapper>
+    </Column>
+}

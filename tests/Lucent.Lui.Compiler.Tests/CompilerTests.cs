@@ -4,6 +4,7 @@ using Lucent.Core;
 using Lucent.Lui.Compiler;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lucent.Lui.Compiler.Tests;
@@ -734,6 +735,23 @@ style Unused { Spacing: 1f; }
                     == 4,
             "Roslyn parameter exclusions were not stable or complete."
         );
+        var declaredDefault = LuiParser.Parse(
+            "internal component Wrapper([DefaultContent] ComponentContent children) { <A /> }"
+        );
+        Assert(
+            declaredDefault.Diagnostics.Count == 0
+                && declaredDefault.Component!.Parameters.Single().IsDefaultContent
+                && LuiFormatter.Format(declaredDefault.Source)
+                    == LuiFormatter.Format(LuiFormatter.Format(declaredDefault.Source)),
+            "the explicit [DefaultContent] parameter marker was not parsed and formatted."
+        );
+        var duplicateDefault = LuiParser.Parse(
+            "internal component Wrapper([DefaultContent] ComponentContent first, [DefaultContent] ComponentContent second) { <A /> }"
+        );
+        Assert(
+            duplicateDefault.Diagnostics.Count(diagnostic => diagnostic.Id == "LUI3004") == 1,
+            "multiple explicit [DefaultContent] parameters did not fail closed once."
+        );
         var roslynNames = LuiParser.Parse(
             "internal component X() { <global::Sample.A Alias::Sample.A=\"x\" Sample.\\u00C5ngström=\"y\" @verbatim=\"z\" Á=\"q\" /> }"
         );
@@ -1043,6 +1061,8 @@ public static class Custom
     [LucentComponent] public static ComponentRecipe Group([DefaultContent] ComponentContent children) => null!;
     [LucentComponent] public static ComponentRecipe Label([DefaultContent] string value) => null!;
     [LucentComponent] public static ComponentRecipe Plain(int count = 7) => null!;
+    [LucentComponent] public static ComponentRecipe Magic(ComponentContent content) => null!;
+    [LucentComponent] public static ComponentRecipe Escaped([DefaultContent] ComponentContent @event) => null!;
     [LucentComponent] public static ComponentRecipe Choice([DefaultContent] string value) => null!;
     [LucentComponent] public static ComponentRecipe Choice([DefaultContent] ComponentContent values) => null!;
     [LucentComponent] public static ComponentRecipe Differing([DefaultContent] string label) => null!;
@@ -1052,12 +1072,37 @@ public static class Custom
     [LucentComponent] public static ComponentRecipe Ambiguous([DefaultContent] string value) => null!;
     [LucentComponent] public static ComponentRecipe Ambiguous([DefaultContent] global::System.Uri value) => null!;
     public static ComponentRecipe Unannotated() => null!;
+    public static ComponentRecipe One(string value) => null!;
+    public static ContentRecipe Contribution(string value) => One(value);
 }
 public sealed class Eligibility
 {
     [LucentComponent] public ComponentRecipe Instance() => null!;
 }
 """;
+        var unknownWithContent = LuiCompiler.Compile(
+            LuiParser.Parse(
+                "namespace Sample; using Lucent.Core; internal component Test() { <Missing><Text>child</Text></Missing> }"
+            ),
+            CSharpCompilation.Create(
+                "unknown-with-content",
+                references: References(),
+                options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+            ),
+            new LuiFreshnessIdentity(
+                "45",
+                "unknown-with-content",
+                new LuiDocumentIdentity("UnknownWithContent.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            !unknownWithContent.Success
+                && unknownWithContent.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2001")
+                && !unknownWithContent.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2011"),
+            "an unresolved tag with children bypassed the existing LUI2001 diagnostic."
+        );
         var customCompilation = CSharpCompilation.Create(
             "custom",
             [
@@ -1121,9 +1166,32 @@ public sealed class Eligibility
         Assert(
             !invalidContent.Success
                 && invalidContent.Diagnostics.Any(diagnostic =>
-                    diagnostic.Id == "LUI2000" || diagnostic.Id == "LUI2004"
+                    diagnostic.Id == "LUI2000"
+                    || diagnostic.Id == "LUI2004"
+                    || diagnostic.Id == "LUI2011"
                 ),
             "content without [DefaultContent] was accepted."
+        );
+        var magicContentName = LuiCompiler.Compile(
+            LuiParser.Parse(
+                "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test() { <Magic><Label>bad</Label></Magic> }"
+            ),
+            customCompilation,
+            new LuiFreshnessIdentity(
+                "45",
+                "custom",
+                new LuiDocumentIdentity("MagicContentName.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            !magicContentName.Success
+                && magicContentName.Diagnostics.Any(diagnostic =>
+                    diagnostic.Id == "LUI2011"
+                    && diagnostic.Message.Contains("[DefaultContent]", StringComparison.Ordinal)
+                ),
+            "the unannotated content parameter name remained an author-facing fallback."
         );
         var ambiguousContent = LuiCompiler.Compile(
             LuiParser.Parse(
@@ -1386,7 +1454,7 @@ public sealed class Eligibility
             "an unterminated body expression did not retain a missing close-brace recovery token."
         );
         var collectionExpressionSource =
-            "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(ComponentContent children) { <Group>{children}</Group> }";
+            """namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test([DefaultContent] ComponentContent children) { <Group><Label>header</Label>{children}{One("one")}{Contribution("two")}<Label>footer</Label></Group> }""";
         var collectionExpression = LuiCompiler.Compile(
             LuiParser.Parse(collectionExpressionSource),
             customCompilation,
@@ -1399,13 +1467,131 @@ public sealed class Eligibility
             )
         );
         Assert(
-            !collectionExpression.Success
-                && collectionExpression.Diagnostics.Any(diagnostic =>
-                    diagnostic.Id == "LUI3001"
-                    && diagnostic.Message.Contains("scalar", StringComparison.OrdinalIgnoreCase)
-                ),
-            "expression content was accepted for ComponentContent."
+            collectionExpression.Success
+                && CSharpSyntaxTree
+                    .ParseText(
+                        collectionExpression.Source!,
+                        new CSharpParseOptions(LanguageVersion.Preview)
+                    )
+                    .GetRoot()
+                    .DescendantNodes()
+                    .OfType<CollectionExpressionSyntax>()
+                    .Single()
+                    .Elements.OfType<SpreadElementSyntax>()
+                    .Single()
+                    .Expression.ToString() == "children"
+                && collectionExpression
+                    .Map.FromSource(
+                        new LuiSpan(
+                            collectionExpressionSource.IndexOf(
+                                "children}{",
+                                StringComparison.Ordinal
+                            ),
+                            "children".Length
+                        )
+                    )
+                    .Any(entry => !entry.Hidden && entry.Kind == LuiMapKind.Expression),
+            "typed ComponentContent/ComponentRecipe/ContentRecipe expressions did not splice in authored order:\n"
+                + string.Join(
+                    " | ",
+                    collectionExpression.Diagnostics.Select(item => item.Id + ":" + item.Message)
+                )
+                + "\n"
+                + collectionExpression.ProjectionSource
         );
+        var explicitCollectionAttribute = LuiCompiler.Compile(
+            LuiParser.Parse(
+                "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(ComponentContent children) { <Group children={children} /> }"
+            ),
+            customCompilation,
+            new LuiFreshnessIdentity(
+                "45",
+                "custom",
+                new LuiDocumentIdentity("ExplicitCollectionAttribute.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        var explicitCollectionInvocation = CSharpSyntaxTree
+            .ParseText(
+                explicitCollectionAttribute.Source!,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            )
+            .GetRoot()
+            .DescendantNodes()
+            .OfType<InvocationExpressionSyntax>()
+            .Single(invocation =>
+                invocation.Expression.ToString().EndsWith(".Group", StringComparison.Ordinal)
+            );
+        Assert(
+            explicitCollectionAttribute.Success
+                && explicitCollectionInvocation.ArgumentList.Arguments.Count == 1
+                && explicitCollectionInvocation
+                    .ArgumentList.Arguments.Single()
+                    .NameColon!.Name.Identifier.ValueText == "children"
+                && explicitCollectionInvocation.ArgumentList.Arguments.Single().Expression
+                    is IdentifierNameSyntax,
+            "an explicit default-content attribute also received an invented empty collection."
+        );
+        var escapedDefault = LuiCompiler.Compile(
+            LuiParser.Parse(
+                "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test() { <Escaped><Label>ok</Label></Escaped> }"
+            ),
+            customCompilation,
+            new LuiFreshnessIdentity(
+                "45",
+                "custom",
+                new LuiDocumentIdentity("EscapedDefault.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            escapedDefault.Success
+                && escapedDefault.Source!.Contains("@event:", StringComparison.Ordinal),
+            "an escaped [DefaultContent] parameter did not produce a valid implicit named argument."
+        );
+        foreach (
+            var incompatibleExpression in new[]
+            {
+                "\"bad\"",
+                "null",
+                "System.Array.Empty<ContentRecipe>()",
+            }
+        )
+        {
+            var incompatibleContribution = LuiCompiler.Compile(
+                LuiParser.Parse(
+                    "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test() { <Group><Label>header</Label>{"
+                        + incompatibleExpression
+                        + "}</Group> }"
+                ),
+                customCompilation,
+                new LuiFreshnessIdentity(
+                    "45",
+                    "custom",
+                    new LuiDocumentIdentity("IncompatibleContribution.lui"),
+                    incompatibleExpression,
+                    "preview"
+                )
+            );
+            Assert(
+                !incompatibleContribution.Success
+                    && incompatibleContribution.Diagnostics.Any(diagnostic =>
+                        diagnostic.Id == "LUI3001"
+                        && diagnostic.Message.Contains("ComponentContent", StringComparison.Ordinal)
+                    ),
+                "an incompatible component-content expression did not fail with a typed diagnostic: "
+                    + incompatibleExpression
+                    + " "
+                    + string.Join(
+                        " | ",
+                        incompatibleContribution.Diagnostics.Select(item =>
+                            item.Id + ":" + item.Message
+                        )
+                    )
+            );
+        }
         var duplicateDefaultSource =
             "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test(string value) { <Differing label=\"explicit\">{value}</Differing> }";
         var duplicateDefault = LuiCompiler.Compile(

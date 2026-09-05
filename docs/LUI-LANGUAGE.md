@@ -94,20 +94,58 @@ Every component body has one component-element root for its mounted lifetime. A 
 
 Tags resolve normal C# symbols. Tag/component names are PascalCase; exact C# parameter and attribute names are camelCase. Attribute order is irrelevant; duplicate, inaccessible, unknown, missing, and ambiguous parameters are errors. Normal Roslyn overload resolution applies to annotated C# components; `.lui` component declarations cannot overload initially.
 
-Unwrapped children map only to the declared `[DefaultContent]` scalar or `ComponentContent` parameter. Named child blocks are reserved and rejected initially:
+Unwrapped children map only to the declared `[DefaultContent]` scalar or `ComponentContent` parameter. `.lui` declarations opt in explicitly, just like C# components. Parameter spelling has no special meaning: an unannotated parameter named `content` does not accept an element body. Named child blocks remain reserved and rejected:
 
 ```lui
 <Button name="save" onInvoke={save}>Save</Button>
 <Text>{Label(state, issue)}</Text>
 ```
 
-Quoted attributes are string literals; all other element expression islands use braces. Bare Boolean attributes, spread attributes, directive prefixes, and implicit string conversion are deferred. Simple body text is a trimmed string literal whose internal characters are preserved. A body may contain exactly one scalar expression child, which lowers as the selected scalar `[DefaultContent]` argument with ordinary C# conversion and construction-time semantics. Formatting-only whitespace around component children is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Mixed text, multiple expressions, structural siblings, and expression children targeting ComponentContent are rejected:
+Quoted attributes are string literals; all other element expression islands use braces. Bare Boolean attributes, spread attributes, directive prefixes, and implicit string conversion are deferred. Simple body text is a trimmed string literal whose internal characters are preserved. A scalar-content body contains exactly one text or expression child, which lowers as the selected scalar `[DefaultContent]` argument with ordinary C# conversion and construction-time semantics. Formatting-only whitespace around component children is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Scalar bodies reject mixed text, multiple expressions, and structural siblings; combine scalar values in one C# expression:
 
 ```lui
 <Text content={"  exact\ntext  "} />
 ```
 
 Literal braces must be carried by an explicit string expression, since a brace at a body boundary starts an expression island.
+
+A `.lui` component can declare one `[DefaultContent]` parameter. This is the only supported parameter annotation; general C# parameter attributes remain outside the grammar. For example, a scalar wrapper can use any parameter name:
+
+```lui
+public component Caption([DefaultContent] string label) {
+    <Text>{label}</Text>
+}
+```
+
+A `ComponentContent` body accepts elements, retained regions, and typed expression contributions in declaration order. A `ComponentRecipe` or `ContentRecipe` expression contributes one recipe. A `ComponentContent` expression splices its ordered recipes into that same body, without a wrapper element. Empty content contributes nothing. Strings, arbitrary enumerables, untyped null, and incompatible expression types are rejected instead of being converted into UI implicitly.
+
+```lui
+public component Framed([DefaultContent] ComponentContent children) {
+    <Column>
+        <Text>Header</Text>
+        {children}
+        <Text>Footer</Text>
+    </Column>
+}
+```
+
+A caller in another `.lui` document can nest wrappers and supply several children:
+
+```lui
+public component Example() {
+    <Framed>
+        <Framed>
+            <Text>First</Text>
+            <Text>Second</Text>
+        </Framed>
+        <Framed />
+    </Framed>
+}
+```
+
+`<Framed />` supplies an empty collection. `<Framed children={existing} />` forwards the explicitly supplied collection, and assigning both that attribute and an element body is an error (`LUI2008`). Omitted scalar content follows the declared parameter's ordinary required/default-value rules. A body on a component without default-content metadata is diagnosed with `LUI2011`; renaming an annotated parameter preserves implicit child syntax, while explicit attributes and forwarding expressions participate in ordinary parameter rename.
+
+Forwarding evaluates recipe values when the containing recipe is constructed. Their existing live readers, retained regions, mount ordering, rollback, and disposal contracts remain intact. It does not make collection membership implicitly reactive. The initial shell needs these sibling contributions and fixed header/footer composition; named-slot tags, unnamed fragment tags, and multiple component or structural-branch roots remain deferred until a concrete control needs them.
 
 ## C# expressions and reactivity
 

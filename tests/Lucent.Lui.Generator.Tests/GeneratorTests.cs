@@ -507,6 +507,190 @@ public sealed class GeneratorTests
     }
 
     [TestMethod]
+    public void DeclaredDefaultContentSplicesTypedContributionsInOrder()
+    {
+        const string runtimeApi = """
+namespace ForwardingRuntime;
+using Lucent.Core;
+public static class Probes
+{
+    [LucentComponent]
+    public static ComponentRecipe Probe(string label) =>
+        ComponentRecipe.Create(label, static (_, _) => { }).Named(label);
+
+    public static ComponentContent Spread =>
+        [Probe("spread-a"), Probe("spread-b")];
+
+    public static ComponentRecipe Single => Probe("single");
+
+    public static ContentRecipe Contribution => Probe("content");
+}
+""";
+        const string wrapperSource = """
+namespace ForwardingRuntime;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static ForwardingRuntime.Probes;
+internal component Frame([DefaultContent] ComponentContent children) {
+    <Column>
+        <Probe label="header" />
+        {children}
+        <Probe label="footer" />
+    </Column>
+}
+""";
+        const string requiredCaptionSource = """
+namespace ForwardingRuntime;
+using Lucent.Core;
+using static ForwardingRuntime.Probes;
+internal component RequiredCaption([DefaultContent] string label) {
+    <Probe label={label} />
+}
+""";
+        const string defaultCaptionSource = """
+namespace ForwardingRuntime;
+using Lucent.Core;
+using static ForwardingRuntime.Probes;
+internal component DefaultCaption([DefaultContent] string label = "fallback") {
+    <Probe label={label} />
+}
+""";
+        const string pageSource = """
+namespace ForwardingRuntime;
+using Lucent.Core;
+using static ForwardingRuntime.Probes;
+internal component Page() {
+    <Frame>
+        <Probe label="body" />
+        {Spread}
+        {Single}
+        {Contribution}
+        <RequiredCaption>supplied</RequiredCaption>
+        <DefaultCaption />
+        <Frame />
+    </Frame>
+}
+""";
+        var generatedResult = RunWithSource(
+            runtimeApi,
+            new TextFile("C:/consumer/Frame.lui", wrapperSource, "Frame.lui"),
+            new TextFile(
+                "C:/consumer/RequiredCaption.lui",
+                requiredCaptionSource,
+                "RequiredCaption.lui"
+            ),
+            new TextFile(
+                "C:/consumer/DefaultCaption.lui",
+                defaultCaptionSource,
+                "DefaultCaption.lui"
+            ),
+            new TextFile("C:/consumer/Page.lui", pageSource, "Page.lui")
+        );
+        Assert(
+            generatedResult.Diagnostics.Length == 0
+                && generatedResult.Results.Single().GeneratedSources.Length == 4,
+            "declared default-content documents did not generate: "
+                + string.Join(
+                    " | ",
+                    generatedResult.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        const string harness = """
+namespace ForwardingRuntime;
+using System.Linq;
+using Lucent.Core;
+public static class Harness
+{
+    public static string Run()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "content-forwarding");
+        using var theme = new ThemeContext(
+            composition.Root.Scope,
+            new Theme("content-forwarding")
+        );
+        var root = composition.Mount(composition.Root, theme, Components.Page());
+        var nested = root.Children[8];
+        return string.Join(",", root.Children.Take(8).Select(child => child.Name))
+            + "|"
+            + string.Join(",", nested.Children.Select(child => child.Name))
+            + "|"
+            + root.Children[9].Name
+            + "|"
+            + root.Children.Count;
+    }
+}
+""";
+        var trees = new List<SyntaxTree>
+        {
+            CSharpSyntaxTree.ParseText(runtimeApi, new CSharpParseOptions(LanguageVersion.Preview)),
+            CSharpSyntaxTree.ParseText(harness, new CSharpParseOptions(LanguageVersion.Preview)),
+        };
+        trees.AddRange(
+            generatedResult
+                .Results.Single()
+                .GeneratedSources.Select(source =>
+                    CSharpSyntaxTree.ParseText(
+                        source.SourceText.ToString(),
+                        new CSharpParseOptions(LanguageVersion.Preview),
+                        source.HintName
+                    )
+                )
+        );
+        var compilation = CSharpCompilation.Create(
+            "generated-content-forwarding",
+            trees,
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var stream = new MemoryStream();
+        var emit = compilation.Emit(stream);
+        Assert(
+            emit.Success
+                && !emit.Diagnostics.Any(diagnostic =>
+                    diagnostic.Severity == DiagnosticSeverity.Warning
+                ),
+            "generated content forwarding was not warning-clean: "
+                + string.Join(
+                    " | ",
+                    emit.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        var assembly = Assembly.Load(stream.ToArray());
+        var omittedRequired = RunWithSource(
+            runtimeApi,
+            new TextFile(
+                "C:/consumer/RequiredCaption.lui",
+                requiredCaptionSource,
+                "RequiredCaption.lui"
+            ),
+            new TextFile(
+                "C:/consumer/InvalidPage.lui",
+                "namespace ForwardingRuntime; using Lucent.Core; internal component InvalidPage() { <RequiredCaption /> }",
+                "InvalidPage.lui"
+            )
+        );
+        Assert(
+            omittedRequired.Diagnostics.Any(diagnostic =>
+                diagnostic
+                    .GetMessage(CultureInfo.InvariantCulture)
+                    .Contains("required parameter", StringComparison.OrdinalIgnoreCase)
+            ),
+            "omitting a required scalar default-content parameter was accepted."
+        );
+        Assert(
+            (string)
+                assembly.GetType("ForwardingRuntime.Harness")!.GetMethod("Run")!.Invoke(null, null)!
+                == "header,body,spread-a,spread-b,single,content,supplied,fallback|header,footer|footer|10",
+            "typed contributions, nested wrappers, or empty forwarded content changed order."
+        );
+    }
+
+    [TestMethod]
     public void RetainedStructuralLocalsStayCurrentWithoutRemounting()
     {
         const string runtimeApi = """

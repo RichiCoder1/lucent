@@ -47,3 +47,9 @@ The same compiler and project-context model serves build and editor tooling. The
 - A component keeps one stable element root for its mounted lifetime. Reactive alternative roots remain a caller-owned retained condition until a concrete use case justifies a root-switching module.
 - Declarative `transition`/keyframe syntax is deferred until Core owns automatic winner-change sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior. Existing manual C# transition samples are not sufficient lowering evidence.
 - Pre-1.0 language and framework APIs may change cleanly. The initial language version is `preview`; compatibility modes begin only when a revision is intentionally retained.
+
+## Explicit default content and sibling forwarding
+
+Issue #71 adopts `[DefaultContent]` on a single `.lui` component parameter, matching the existing C# metadata. No parameter spelling grants implicit content behavior; the unreleased `content`-name fallback is removed. Scalar input rules stay unchanged. Within `ComponentContent`, an expression contributes a `ComponentRecipe`/`ContentRecipe` or spreads a `ComponentContent` collection in place.
+
+The links-and-notes shell requires scope/container wrappers and sibling header/body/footer composition. Those uses are supported by ordinary markup plus typed `{children}` forwarding. They do not require named-slot tags or multiple-root components yet, so those forms remain deferred. This introduces no additional runtime type, mounting path, or compatibility layer: generated C# uses existing collection expressions, recipe conversion, and transactional content mounting.

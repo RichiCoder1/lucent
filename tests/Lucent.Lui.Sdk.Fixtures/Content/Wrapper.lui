@@ -1,0 +1,8 @@
+namespace Consumer;
+internal component Wrapper([DefaultContent] ComponentContent children) {
+    <Column>
+        <Header />
+        {children}
+        <Footer />
+    </Column>
+}

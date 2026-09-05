@@ -13,7 +13,7 @@ The coherent set of Lucent capabilities available to application authors, indepe
 _Avoid_: Library API, engine API
 
 **Authoring surface**:
-A supported way to declare Lucent UI. Typed C# composition and `.lui` are authoring surfaces over the same framework model.
+A supported way to declare Lucent UI. `.lui` is the primary application authoring surface over the same framework model used by typed C# composition.
 _Avoid_: Frontend, binding syntax, wrapper
 
 **Diagnostic dump**:
@@ -39,6 +39,10 @@ _Avoid_: Template, widget class, render function
 **Content recipe**:
 A typed capability that contributes zero or more retained components or structural regions below an existing component root. Immutable ordered `ComponentContent` groups content recipes transactionally; an ordinary component recipe converts safely to one content recipe.
 _Avoid_: Fragment element, child template, virtual children
+
+**Default content**:
+The single explicitly marked component parameter that receives its unnamed element body. Its type determines whether the body supplies one scalar value or an ordered group of content recipes; its name does not determine its role.
+_Avoid_: Magic content parameter, implicit slot
 
 **Current item**:
 The latest payload associated with a mounted retained entry, available through a read-only capability. Replacing the payload preserves the entry's identity and local state; removing the entry ends that capability's lifetime.

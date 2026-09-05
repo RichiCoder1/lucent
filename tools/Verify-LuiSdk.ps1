@@ -152,9 +152,10 @@ try {
     (Get-Content (Join-Path $using 'Program.cs') -Raw).Replace('using static Author.Theme;', 'using Lucent.Core; using static Author.Theme;') | Set-Content (Join-Path $using 'Program.cs')
     Invoke-Dotnet @('build', (Join-Path $using 'Using.csproj'), '--no-restore', '-warnaserror')
 
-    # The published consumer also exercises retained .lui payloads through the packed SDK.
+    # The published consumer also exercises content forwarding and retained payloads through the packed SDK.
+    Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Content/*.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Content/ContentConsumer.cs') $matrix
     Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/Retained.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/RetainedConsumer.cs') $matrix
-    Set-Content (Join-Path $matrix 'Program.cs') 'Consumer.RetainedConsumer.Run(); Console.WriteLine("lui sdk consumer");'
+    Set-Content (Join-Path $matrix 'Program.cs') 'Consumer.ContentConsumer.Run(); Consumer.RetainedConsumer.Run(); Console.WriteLine("lui sdk consumer");'
 
     # Publish/run is the runtime-asset boundary proof; analyzers must not enter the app.
     $publish = Join-Path $artifacts 'publish'
@@ -167,7 +168,7 @@ try {
     if (!(Test-Path $exe)) { throw 'NativeAOT consumer executable is missing.' }
     $consumerOutput = @(& $exe)
     $consumerOutput | Write-Output
-    if ($LASTEXITCODE -ne 0 -or ($consumerOutput -join "`n") -notmatch 'retained payload SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not pass its runtime contracts.' }
+    if ($LASTEXITCODE -ne 0 -or ($consumerOutput -join "`n") -notmatch 'content forwarding SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'retained payload SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not pass its runtime contracts.' }
     $actual = Get-ChildItem $publish -Recurse -File | ForEach-Object { $_.FullName.Substring($publish.Length + 1).Replace('\', '/') } | Sort-Object
     $allowed = @('Consumer.exe', 'Consumer.pdb', 'Lucent.Core.pdb', 'Lucent.Core.xml')
     if ((Compare-Object $allowed $actual)) { throw "NativeAOT runtime inventory differs from its fail-closed allowlist: $($actual -join ', ')." }
