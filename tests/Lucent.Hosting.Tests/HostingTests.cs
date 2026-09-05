@@ -181,11 +181,17 @@ public sealed class HostingTests
         );
         var hostAdapter = new PumpingHost(session =>
         {
-            Task.Run(() =>
-                {
-                    worker = Environment.CurrentManagedThreadId;
-                    lifetime!.StopApplication();
-                })
+            // A pool task may inline when this pool-owned test waits on it. Require a real worker.
+            Task.Factory.StartNew(
+                    () =>
+                    {
+                        worker = Environment.CurrentManagedThreadId;
+                        lifetime!.StopApplication();
+                    },
+                    CancellationToken.None,
+                    TaskCreationOptions.LongRunning,
+                    TaskScheduler.Default
+                )
                 .GetAwaiter()
                 .GetResult();
             PumpingHost.WaitFor(
