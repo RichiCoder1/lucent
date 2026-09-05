@@ -107,6 +107,68 @@ public sealed class CommandContracts
     }
 
     [TestMethod]
+    public void AsyncCommandCallbackSignalAccessDoesNotBecomeAReactiveDependency()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = graph.CreateScope("untracked-command");
+        var enabled = owner.Signal(true, "untracked-enabled");
+        var callbackInput = owner.Signal(1, "callback-input");
+        var callbackOutput = owner.Signal(0, "callback-output");
+        var completion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var runs = 0;
+        using var command = new ApplicationCommand(
+            owner,
+            async _ =>
+            {
+                runs++;
+                callbackOutput.Value = callbackInput.Value + 1;
+                if (runs == 1)
+                    await completion.Task;
+            },
+            () => enabled.Value,
+            "untracked"
+        );
+
+        Assert.IsTrue(command.TryExecute());
+        Assert.AreEqual(1, runs);
+        Assert.AreEqual(2, callbackOutput.Value);
+
+        callbackInput.Value = 10;
+        callbackOutput.Value = 20;
+        graph.Drain();
+        Assert.IsTrue(command.IsBusy);
+        Assert.AreEqual(1, runs, "Signal changes reran a pending command callback.");
+
+        using var completionPosted = new ManualResetEventSlim();
+        graph.WorkAvailable += completionPosted.Set;
+        Task.Run(completion.SetResult).GetAwaiter().GetResult();
+        Assert.IsTrue(
+            completionPosted.Wait(TimeSpan.FromSeconds(2)),
+            "Async command completion did not wake its owning graph."
+        );
+        graph.Drain();
+        Assert.IsFalse(command.IsBusy);
+
+        callbackInput.Value = 30;
+        callbackOutput.Value = 40;
+        graph.Drain();
+        Assert.IsFalse(command.IsBusy);
+        Assert.AreEqual(1, runs, "Signal changes reran a completed command callback.");
+
+        enabled.Value = false;
+        Assert.IsFalse(command.IsEnabled, "Enabled callback stopped tracking its signal.");
+        enabled.Value = true;
+        Assert.IsTrue(command.IsEnabled, "Enabled callback did not react to its signal.");
+
+        Assert.IsTrue(command.TryExecute());
+        graph.Drain();
+        Assert.AreEqual(2, runs, "Explicit execution did not rerun the callback.");
+        Assert.AreEqual(31, callbackOutput.Value);
+    }
+
+    [TestMethod]
     public void NearestCommandScopeConsumesDisabledBusyAndExactChords()
     {
         var graph = new ReactiveGraph();

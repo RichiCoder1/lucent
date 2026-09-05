@@ -35,7 +35,7 @@ public sealed class ApplicationCommand : IDisposable
                 async cancellation =>
                 {
                     _ = _generation.Value;
-                    await execute(cancellation).ConfigureAwait(false);
+                    await owner.Graph.Untracked(() => execute(cancellation)).ConfigureAwait(false);
                     return true;
                 },
                 false,
