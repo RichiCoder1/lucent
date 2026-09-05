@@ -172,6 +172,82 @@ style Panel { Padding: Insets.All(2); when Hover { Opacity: .5; } }
                     .Source.Text == "selected is { } value ? [value] : Array.Empty<Item>()",
             "keyed foreach source stopped at a recursive pattern or generic type."
         );
+        foreach (
+            var directCondition in new[]
+            {
+                "count < 2",
+                "count <= limit",
+                "count > 0 && limit < count",
+                "Check<int>()",
+            }
+        )
+        {
+            var directConditionSource =
+                "internal component X(int count, int limit) { <Root>if ("
+                + directCondition
+                + ") { <A /> } <B /> </Root> }";
+            var directConditionDocument = LuiParser.Parse(directConditionSource);
+            var directConditionRoot = (LuiElementSyntax)
+                directConditionDocument.Component!.Body.Single();
+            var directConditionFormatted = LuiFormatter.Format(
+                directConditionSource,
+                LuiLineEnding.Lf
+            );
+            Assert(
+                directConditionDocument.Diagnostics.Count == 0
+                    && directConditionRoot.Children.OfType<LuiIfSyntax>().Single().Condition.Text
+                        == directCondition
+                    && directConditionRoot.Children.OfType<LuiElementSyntax>().Single().Name.Text
+                        == "B"
+                    && directConditionFormatted.Contains(
+                        "if (" + directCondition + ")",
+                        StringComparison.Ordinal
+                    )
+                    && directConditionFormatted
+                        == LuiFormatter.Format(directConditionFormatted, LuiLineEnding.Lf),
+                "a direct structural condition stopped at a valid comparison or generic token: "
+                    + directCondition
+                    + " "
+                    + Diagnostics(directConditionDocument)
+            );
+        }
+        const string structuralOperatorSource =
+            "internal component X(int count, int limit) { <Root>"
+            + "if ((count < 2 && Check<int>()) || (count <= limit && (limit > 0))) { <A /> } "
+            + "foreach (var item in Items.Where(item => item < limit)) keyed by Key<int>(item <= count ? item : count) { <B /> }"
+            + "</Root> }";
+        var structuralOperators = LuiParser.Parse(structuralOperatorSource);
+        var structuralOperatorRoot = (LuiElementSyntax)structuralOperators.Component!.Body.Single();
+        var structuralOperatorIf = structuralOperatorRoot.Children.OfType<LuiIfSyntax>().Single();
+        var structuralOperatorLoop = structuralOperatorRoot
+            .Children.OfType<LuiForEachSyntax>()
+            .Single();
+        Assert(
+            structuralOperators.Diagnostics.Count == 0
+                && structuralOperatorIf.Condition.Text
+                    == "(count < 2 && Check<int>()) || (count <= limit && (limit > 0))"
+                && structuralOperatorLoop.Source.Text == "Items.Where(item => item < limit)"
+                && structuralOperatorLoop.Key.Text == "Key<int>(item <= count ? item : count)",
+            "comparison, generic, nested, or keyed structural expressions stopped at '<': "
+                + Diagnostics(structuralOperators)
+        );
+        var structuralOperatorFormatted = LuiFormatter.Format(
+            structuralOperatorSource,
+            LuiLineEnding.Lf
+        );
+        Assert(
+            structuralOperatorFormatted
+                == LuiFormatter.Format(structuralOperatorFormatted, LuiLineEnding.Lf)
+                && structuralOperatorFormatted.Contains(
+                    "if ((count < 2 && Check<int>()) || (count <= limit && (limit > 0)))",
+                    StringComparison.Ordinal
+                )
+                && structuralOperatorFormatted.Contains(
+                    "keyed by Key<int>(item <= count ? item : count)",
+                    StringComparison.Ordinal
+                ),
+            "structural expression formatting changed comparison or generic token text."
+        );
         var missingLoopClose = LuiParser.Parse(
             "internal component X() { <Root>foreach (var x in xs keyed by x.Id { <A /> } <B /> </Root> }"
         );
@@ -180,6 +256,30 @@ style Panel { Padding: Insets.All(2); when Hover { Opacity: .5; } }
                 .Children.OfType<LuiElementSyntax>()
                 .Any(element => element.Name.Text == "B"),
             "a missing keyed foreach ')' consumed a later sibling."
+        );
+        var missingComparisonClose = LuiParser.Parse(
+            "internal component X() { <Root>if (count < 2 { <A /> } <B /> </Root> }"
+        );
+        var missingComparisonRoot = (LuiElementSyntax)
+            missingComparisonClose.Component!.Body.Single();
+        Assert(
+            missingComparisonRoot.Children.OfType<LuiIfSyntax>().Single().CloseCondition.IsMissing
+                && missingComparisonRoot
+                    .Children.OfType<LuiElementSyntax>()
+                    .Any(element => element.Name.Text == "B"),
+            "a missing comparison condition ')' consumed a later sibling."
+        );
+        var missingKeyOpen = LuiParser.Parse(
+            "internal component X() { <Root>foreach (var item in Items) keyed by Key<int>(item < limit) <A /> <B /> </Root> }"
+        );
+        var missingKeyRoot = (LuiElementSyntax)missingKeyOpen.Component!.Body.Single();
+        Assert(
+            missingKeyRoot.Children.OfType<LuiForEachSyntax>().Single().OpenBrace.IsMissing
+                && missingKeyRoot
+                    .Children.OfType<LuiElementSyntax>()
+                    .Select(element => element.Name.Text)
+                    .SequenceEqual(["A", "B"]),
+            "a missing keyed-loop opener consumed later siblings after a generic comparison key."
         );
 
         var missingOpen = LuiParser.Parse("internal component X() { if (ok) <A /> <B /> }");

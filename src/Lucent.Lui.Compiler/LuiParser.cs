@@ -1082,6 +1082,7 @@ public static class LuiParser
             {
                 case LiteralExpressionSyntax _:
                 case IdentifierNameSyntax _:
+                case GenericNameSyntax _:
                 case ThisExpressionSyntax _:
                 case BaseExpressionSyntax _:
                 case TypeOfExpressionSyntax _:
@@ -1612,7 +1613,17 @@ public static class LuiParser
                         (kind == SyntaxKind.CloseParenToken && stops.Contains(')'))
                         || (kind == SyntaxKind.CloseBraceToken && stops.Contains('}'))
                         || (kind == SyntaxKind.OpenBraceToken && stops.Contains('{'))
-                        || (kind == SyntaxKind.LessThanToken && stops.Contains('<'))
+                        || (
+                            kind == SyntaxKind.LessThanToken
+                            && stops.Contains('<')
+                            && !ContinuesValidExpression(
+                                source,
+                                start,
+                                start + token.SpanStart,
+                                stopAtKeyed,
+                                stops
+                            )
+                        )
                         || (kind == SyntaxKind.SemicolonToken && stops.Contains(';'))
                     )
                 )
@@ -1632,5 +1643,72 @@ public static class LuiParser
             }
             return source.Length;
         }
+
+        private static bool ContinuesValidExpression(
+            string source,
+            int start,
+            int lessThan,
+            bool stopAtKeyed,
+            char[] stops
+        )
+        {
+            var parens = 0;
+            var brackets = 0;
+            var braces = 0;
+            var tokens = SyntaxFactory.ParseTokens(source.Substring(start)).ToArray();
+            for (var index = 0; index < tokens.Length; index++)
+            {
+                var token = tokens[index];
+                if (token.IsKind(SyntaxKind.EndOfFileToken))
+                    return IsCompleteExpression(source, start, source.Length);
+
+                var kind = token.Kind();
+                var atTop = parens == 0 && brackets == 0 && braces == 0;
+                if (
+                    stopAtKeyed
+                    && atTop
+                    && token.ValueText == "keyed"
+                    && index + 1 < tokens.Length
+                    && tokens[index + 1].ValueText == "by"
+                )
+                    return IsCompleteExpression(source, start, start + token.SpanStart);
+
+                if (atTop && kind == SyntaxKind.LessThanToken && start + token.SpanStart > lessThan)
+                {
+                    if (IsCompleteExpression(source, start, start + token.SpanStart))
+                        return true;
+                }
+                else if (
+                    atTop
+                    && (
+                        (kind == SyntaxKind.CloseParenToken && stops.Contains(')'))
+                        || (kind == SyntaxKind.CloseBraceToken && stops.Contains('}'))
+                        || (kind == SyntaxKind.OpenBraceToken && stops.Contains('{'))
+                        || (kind == SyntaxKind.SemicolonToken && stops.Contains(';'))
+                    )
+                )
+                    return IsCompleteExpression(source, start, start + token.SpanStart);
+
+                if (kind == SyntaxKind.OpenParenToken)
+                    parens++;
+                else if (kind == SyntaxKind.CloseParenToken && parens > 0)
+                    parens--;
+                else if (kind == SyntaxKind.OpenBracketToken)
+                    brackets++;
+                else if (kind == SyntaxKind.CloseBracketToken && brackets > 0)
+                    brackets--;
+                else if (kind == SyntaxKind.OpenBraceToken)
+                    braces++;
+                else if (kind == SyntaxKind.CloseBraceToken && braces > 0)
+                    braces--;
+            }
+            return IsCompleteExpression(source, start, source.Length);
+        }
+
+        private static bool IsCompleteExpression(string source, int start, int end) =>
+            end > start
+            && !SyntaxFactory
+                .ParseExpression(source.Substring(start, end - start))
+                .ContainsDiagnostics;
     }
 }
