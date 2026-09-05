@@ -20,11 +20,11 @@ Use that application to strengthen Lucent's framework surface: foundational comp
 - Keep the Windows-first, .NET 10, NativeAOT-compatible direction. Preserve portable Core concepts and the shared framework model behind typed C# and `.lui`.
 - Use focused, risk-based verification. Pre-release API changes and explicit bounded risk are acceptable; milestone artifacts and routine full release checks are unnecessary.
 
-## Starting point
+## Starting point at planning
 
-The Issue Browser remains a maintained reference application. Lucent currently provides retained composition, reactive state and ownership, typed styles, bounded rows and columns, sizing constraints, alignment, positive main-axis growth, scrolling, fixed-height virtualization, and single-line text input. Existing test suites cover managed behavior, published applications, SDK consumption, performance, and accessibility.
+The Issue Browser remains a maintained reference application. At the reviewed baseline, Lucent provided retained composition, reactive state and ownership, typed styles, bounded rows and columns, sizing constraints, alignment, positive main-axis growth, scrolling, fixed-height virtualization, and single-line text input. Existing test suites cover managed behavior, published applications, SDK consumption, performance, and accessibility.
 
-Grid, a complete Flex-style sizing model, responsive composition, multiline editing, DI/Generic Host integration, and application persistence are planned work. Existing single-line editing and international-text guarantees do not imply a complete multiline or bidirectional editor.
+Grid, a complete Flex-style sizing model, responsive composition, multiline editing, DI/Generic Host integration, and application persistence were the planned additions. See the current [roadmap](../ROADMAP.md) for the implemented boundary. Existing single-line editing and international-text guarantees do not imply a complete multiline or bidirectional editor.
 
 The current [architecture](../ARCHITECTURE.md) and [authoring ADR](../adr/0002-lui-authoring-surface.md) describe the supported boundary. Extend those documents when an implementation decision changes that boundary. Keep the [glossary](../../CONTEXT.md) for canonical terms rather than execution notes.
 
@@ -135,7 +135,7 @@ These are useful work slices, not release milestones. Ticket order expresses pri
 5. **Build the responsive inbox/editor and durable workflow.** Compose the designed shell in `.lui`, then complete capture, edit, search, open, archive, save feedback, orderly close, and reopen. Preserve session state and keyboard access through arrangement changes.
 6. **Refine for daily use and prioritize further authoring improvements.** Exercise real data upgrade/recovery and modest export/backup, long content, selected DPI/themes, and targeted accessibility. Resolve visual and interaction friction throughout earlier slices as well. Select later authoring conveniences from observed repetition; do not pre-approve a broad syntax rewrite or component registry.
 
-The ordered ticket index below is maintained with GitHub issue links. Implementation specifications live in those tickets. Application name, external repository shape, and publication license must be resolved before external repository publication; those decisions do not block independent Core/tooling corrections. An explicitly pinned source-consumption path is acceptable initially if public runtime packages are not ready.
+The ordered ticket index below is maintained with GitHub issue links. Implementation specifications live in those tickets. The external app is now Light Notes in the public RichiCoder1/light-notes repository, MIT licensed and pinned to Lucent prerelease NuGet packages. The original planning-readiness column below is historical; GitHub owns completion and active-work status.
 
 Tracking issue: [#63 — .lui-first links and notes](https://github.com/RichiCoder1/lucent/issues/63). All execution tickets are sub-issues in [Project 4](https://github.com/users/RichiCoder1/projects/4), with native blocker relationships. The table is priority order; dependencies permit parallel work. GitHub owns live status.
 
@@ -163,7 +163,7 @@ Tracking issue: [#63 — .lui-first links and notes](https://github.com/RichiCod
 | 20 | [#82 Refine daily-use design, recovery and accessibility](https://github.com/RichiCoder1/lucent/issues/82) | [#81](https://github.com/RichiCoder1/lucent/issues/81) | Refine after upstream work |
 | 21 | [#83 Select the next .lui improvements from application friction](https://github.com/RichiCoder1/lucent/issues/83) | [#82](https://github.com/RichiCoder1/lucent/issues/82) | Refine after upstream work |
 
-Design #69 and independent corrective tickets can start immediately. Layout decisions #74, hosting #72, session work #73 and input performance #75 can progress on separate tracks as their blockers clear. Issue #62 preserves the unresolved external repository/name/license decisions; it is not a duplicate sample bootstrap.
+Design #69 and independent corrective tickets can start immediately. Layout decisions #74, hosting #72, session work #73 and input performance #75 can progress on separate tracks as their blockers clear. Issue #62 established Light Notes independently; its repository, name, MIT license and package-consumption decisions are resolved.
 
 ## Verification approach
 

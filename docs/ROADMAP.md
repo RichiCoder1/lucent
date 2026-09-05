@@ -2,7 +2,7 @@
 
 ## Current direction
 
-Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. Its current published-package proof covers NativeAOT first startup and clean close; persistence, editing, and the daily-use flows remain application work.
+Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, single-line draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. Reusable multiline editing and the designed responsive daily-use shell are the next work.
 
 Production follows the decisions and contracts validated by the archived Native spike. The old implementation remains on [archive/avalonia-final](https://github.com/RichiCoder1/lucent/tree/archive/avalonia-final), and the complete spike record remains in the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). They are historical evidence, not active execution instructions.
 
@@ -25,13 +25,13 @@ The [layout and paragraph decision](adr/0004-layout-and-paragraphs.md) selects t
 
 ## Next development: Light Notes
 
-The independent application lives in [RichiCoder1/light-notes](https://github.com/RichiCoder1/light-notes). Its first startup proof is established; the sections below describe the product and framework work that follows.
+The independent application lives in [RichiCoder1/light-notes](https://github.com/RichiCoder1/light-notes). Its independent package consumption and first durable workflow are established; the sections below describe the remaining product and framework direction.
 
 The [draft application and framework plan](plans/links-and-notes-draft.md) captures the agreed direction, proposed implementation sequence, and open technical choices. The [experience design](design/links-and-notes/README.md) and [responsive visual board](design/links-and-notes/VISUAL.md) provide proposed application flows and authoring examples. Execution specifications and status belong in GitHub Issues and Project 4.
 
 Build a polished, local, single-user link inbox that also supports standalone notes. The owner and coding agents on the owner's Windows machine are the primary audience, with reproducible setup for other contributors. The application should make capture, editing, retrieval, opening, and archiving comfortable across wide, medium, and compact window arrangements.
 
-The first effort includes Grid, a coherent Flex-style Row/Column surface, responsive composition, and strong reusable layout, text, presentation, keyboard, and accessibility capabilities. Establish DI/hosting and local persistence through ecosystem components, with NativeAOT and the existing portable Core boundary intact. The managed layout evaluation selected Lucent-owned Core code; Taffy remains a credited historical alternative rather than an adopted dependency. Microsoft.Data.Sqlite remains a future application persistence candidate.
+The first effort includes Grid, a coherent Flex-style Row/Column surface, responsive composition, and strong reusable layout, text, presentation, keyboard, and accessibility capabilities. Establish DI/hosting and local persistence through ecosystem components, with NativeAOT and the existing portable Core boundary intact. The managed layout evaluation selected Lucent-owned Core code; Taffy remains a credited historical alternative rather than an adopted dependency. Light Notes uses Microsoft.Data.Sqlite behind an app-owned serialized worker, schema and close policy; Lucent does not own application storage.
 
 Develop design quality alongside complete application slices. Deliver required `.lui` content composition, live-data, command, and editor-session contracts with those slices; prioritize additional authoring conveniences from observed friction afterward. Higher-level source-owned component recipes can build on the foundations later. Continue using the current risk-based verification policy.
 
