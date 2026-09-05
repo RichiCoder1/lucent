@@ -1813,9 +1813,13 @@ public sealed class LanguageServerTests
     [TestMethod]
     public async Task RealIssueBrowserProjectSupportsFormattingNavigationAndCompletion()
     {
+        var projectPath = Path.GetFullPath("apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj");
+        // MSBuildWorkspace evaluates the real project with its default Debug configuration.
+        // Prepare that exact graph so project-reference analyzers resolve in a fresh checkout.
+        await BuildProjectAsync(projectPath, "Debug");
         using (
             var issueBrowser = await LuiProjectContext.LoadAsync(
-                Path.GetFullPath("apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj"),
+                projectPath,
                 CancellationToken.None
             )
         )
@@ -3678,6 +3682,67 @@ public sealed class LanguageServerTests
             ) ?? throw new InvalidOperationException("Could not start the LUI tooling CLI.");
         await process.WaitForExitAsync();
         return process.ExitCode;
+    }
+
+    static async Task BuildProjectAsync(string projectPath, string configuration)
+    {
+        await RunDotnetAsync(
+            ["restore", projectPath, "--locked-mode"],
+            $"Restoring '{projectPath}'"
+        );
+        await RunDotnetAsync(
+            ["build", projectPath, "--no-restore", "-c", configuration, "-warnaserror"],
+            $"Building '{projectPath}' for {configuration}"
+        );
+    }
+
+    static async Task RunDotnetAsync(string[] arguments, string operation)
+    {
+        var localDotnet = Path.Combine(RepositoryRoot, ".dotnet", "dotnet.exe");
+        var startInfo = new ProcessStartInfo(File.Exists(localDotnet) ? localDotnet : "dotnet")
+        {
+            WorkingDirectory = RepositoryRoot,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in arguments)
+            startInfo.ArgumentList.Add(argument);
+        using var process =
+            Process.Start(startInfo)
+            ?? throw new InvalidOperationException($"Could not start: {operation}.");
+        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
+        var standardErrorTask = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(3));
+        }
+        catch (TimeoutException)
+        {
+            process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync();
+            var timeoutOutput = await standardOutputTask;
+            var timeoutError = await standardErrorTask;
+            throw new InvalidOperationException(
+                $"{operation} timed out after three minutes."
+                    + Environment.NewLine
+                    + timeoutOutput
+                    + Environment.NewLine
+                    + timeoutError
+            );
+        }
+        var standardOutput = await standardOutputTask;
+        var standardError = await standardErrorTask;
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"{operation} failed ({process.ExitCode})."
+                    + Environment.NewLine
+                    + standardOutput
+                    + Environment.NewLine
+                    + standardError
+            );
+        }
     }
 
     static string ApplyLspEdits(string source, JsonDocument response)
