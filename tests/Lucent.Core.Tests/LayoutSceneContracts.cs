@@ -911,6 +911,85 @@ public sealed class LayoutSceneContracts
     }
 
     [TestMethod]
+    public void VirtualizedCurrentItemsUpdateRealizedRowsAndReenterWithLatestPayload()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "current-virtual-layout");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("current-virtual-layout"));
+        Controls.Column(composition.Root, theme, "root");
+        var viewport = composition.Child(composition.Root, "viewport");
+        Controls.ScrollViewport(
+            viewport,
+            theme,
+            "Rows",
+            style: Style.Empty.Width(100f).Height(20f)
+        );
+        var initial = Enumerable
+            .Range(0, 100)
+            .Select(index => new VirtualRow(index, "row-" + index))
+            .ToArray();
+        var values = graph.Signal(initial, "current-virtual-values");
+        var readers = new Dictionary<int, CurrentItem<VirtualRow>>();
+        var observed = new Dictionary<int, string>();
+        var list = Controls.VirtualizedList(
+            viewport,
+            theme,
+            "current-rows",
+            "Rows",
+            () => values.Value,
+            value => value.Key,
+            (current, context) =>
+            {
+                var key = current.Value.Key;
+                readers[key] = current;
+                var row = context.Element("current-row");
+                _ = row.Scope.Effect(
+                    () => observed[key] = current.Value.Text,
+                    "current-row-observer"
+                );
+                return row;
+            },
+            10f
+        );
+        graph.Drain();
+        _ = SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper());
+        graph.Drain();
+
+        var firstRoot = list.Items[0];
+        var firstReader = readers[0];
+        var replacement = new VirtualRow(0, "updated");
+        values.Value = [replacement, .. initial[1..]];
+        graph.Drain();
+        Assert(
+            ReferenceEquals(list.Items[0], firstRoot)
+                && ReferenceEquals(firstReader.Value, replacement)
+                && observed[0] == "updated",
+            "A realized same-key virtual row remounted or retained a stale payload."
+        );
+
+        viewport.UpdateControl(LayoutProperties.Scroll, new ScrollOffset(0, 500));
+        _ = SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper());
+        graph.Drain();
+        Assert(firstRoot.IsDisposed, "A row leaving the virtual window kept its root alive.");
+        Expect<ObjectDisposedException>(() => _ = firstReader.Value);
+
+        var latest = values.Value.ToArray();
+        latest[0] = new VirtualRow(0, "latest-offscreen");
+        values.Value = latest;
+        graph.Drain();
+        viewport.UpdateControl(LayoutProperties.Scroll, new ScrollOffset(0, 0));
+        _ = SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper());
+        graph.Drain();
+        Assert(
+            readers.TryGetValue(0, out var reentered)
+                && !ReferenceEquals(reentered, firstReader)
+                && ReferenceEquals(reentered.Value, latest[0])
+                && observed[0] == "latest-offscreen",
+            "A virtualized re-entry did not create a fresh reader from the latest accepted source."
+        );
+    }
+
+    [TestMethod]
     public void FixedHeightVirtualization()
     {
         var graph = new ReactiveGraph();
@@ -938,7 +1017,7 @@ public sealed class LayoutSceneContracts
             (value, context) =>
             {
                 var row = context.Element("row");
-                Controls.Selectable(row, theme, "row " + value);
+                Controls.Selectable(row, theme, "row " + value.Value);
                 return row;
             },
             30f
@@ -1047,7 +1126,7 @@ public sealed class LayoutSceneContracts
             (value, context) =>
             {
                 var row = context.Element("row");
-                Controls.Selectable(row, fractionalTheme, "row " + value);
+                Controls.Selectable(row, fractionalTheme, "row " + value.Value);
                 return row;
             },
             13f
@@ -1075,6 +1154,8 @@ public sealed class LayoutSceneContracts
             );
         }
     }
+
+    private sealed record VirtualRow(int Key, string Text);
 
     private sealed class ProbeShaper : ITextShaper
     {

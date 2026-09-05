@@ -181,7 +181,7 @@ public sealed class Composition : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, CompositionContext, Element> content
+        Func<CurrentItem<TItem>, CompositionContext, Element> content
     )
         where TKey : notnull
     {
@@ -199,7 +199,7 @@ public sealed class Composition : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, CompositionContext, Element> content,
+        Func<CurrentItem<TItem>, CompositionContext, Element> content,
         float rowHeight,
         ThemeContext theme
     )
@@ -368,7 +368,7 @@ public sealed class Composition : IDisposable
         _factory = context;
         try
         {
-            return factory();
+            return _graph.Untracked(factory);
         }
         finally
         {

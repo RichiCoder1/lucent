@@ -1,0 +1,14 @@
+namespace Consumer;
+internal component Retained(Signal<Item[]> items, Signal<Item?> selected) {
+    <Column>
+        foreach (var item in items.Value) keyed by item.Id {
+            <Column>
+                <Text content={() => "live:" + item.Title} />
+                <Text content={"static:" + item.Title} />
+            </Column>
+        }
+        if (selected.Value is { } detail) {
+            <Text content={() => "detail:" + detail.Title} />
+        }
+    </Column>
+}

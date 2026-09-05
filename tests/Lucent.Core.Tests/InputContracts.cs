@@ -120,18 +120,19 @@ public sealed class InputContracts
             value => value,
             (value, context) =>
             {
+                var item = value.Value;
                 var row = context.Element("row");
                 Present(row, theme, 100, 20, true);
                 row.AttachBehaviors(
                     new Probe(
-                        "row-" + value,
+                        "row-" + item,
                         BehaviorOwnership.Action
                             | BehaviorOwnership.Focus
                             | BehaviorOwnership.Semantics,
                         pointer: route =>
                         {
                             route.Focus();
-                            if (value == 1)
+                            if (item == 1)
                                 throw new InvalidOperationException("first");
                         },
                         lost: _ => failures++

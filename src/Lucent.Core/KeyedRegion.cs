@@ -15,9 +15,10 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
     private readonly Composition _composition;
     private Func<IEnumerable<TItem>>? _source;
     private Func<TItem, TKey>? _key;
-    private Func<TItem, CompositionContext, Element>? _content;
+    private Func<CurrentItem<TItem>, CompositionContext, Element>? _content;
     private readonly ReactiveEffect _effect;
-    private Dictionary<TKey, Element> _entries = [];
+    private Dictionary<TKey, Entry> _entries = [];
+    private long _nextEntryId;
     private bool _updating;
 
     internal KeyedRegion(
@@ -26,7 +27,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, CompositionContext, Element> content,
+        Func<CurrentItem<TItem>, CompositionContext, Element> content,
         CompositionContext? factory = null,
         ThemeContext? theme = null
     )
@@ -86,34 +87,47 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
             }
 
             RetireDisposedEntries();
-            var retained = new Dictionary<TKey, Element>(_entries);
-            var provisional = new Dictionary<TKey, (Element Element, CompositionContext Context)>();
-            var provisionalOrder = new List<(Element Element, CompositionContext Context)>();
-            Element[] ordered = null!;
-            Dictionary<TKey, Element> nextEntries = null!;
-            Element[] departed = null!;
+            var retained = new Dictionary<TKey, Entry>(_entries);
+            var provisional = new Dictionary<TKey, (Entry Entry, CompositionContext Context)>();
+            var provisionalOrder =
+                new List<(Entry? Entry, ReactiveScope Scope, CompositionContext Context)>();
+            Entry[] ordered = null!;
+            Dictionary<TKey, Entry> nextEntries = null!;
+            Entry[] departed = null!;
+            (Entry Entry, TItem Value)[] retainedUpdates = null!;
             try
             {
                 for (var index = 0; index < next.Length; index++)
                 {
                     if (retained.ContainsKey(keys[index]))
                         continue;
+                    var itemScope = Region.Scope.CreateChild(
+                        Region.Name
+                            + ".current-item-"
+                            + checked(++_nextEntryId).ToString(CultureInfo.InvariantCulture)
+                    );
+                    var current = itemScope.CurrentItemForFramework(
+                        next[index],
+                        itemScope.Name + ".value"
+                    );
                     var context = new CompositionContext(_composition, Region, Theme);
-                    provisionalOrder.Add((null!, context));
-                    var created = context.Run(() => _content!(next[index], context));
+                    provisionalOrder.Add((null, itemScope, context));
+                    var created = context.Run(() => _content!(current, context));
                     ObjectDisposedException.ThrowIf(
                         IsDisposed || Region.IsDisposed,
                         typeof(KeyedRegion<TKey, TItem>)
                     );
-                    provisional[keys[index]] = (created, context);
-                    provisionalOrder[^1] = (created, context);
+                    var entry = new Entry(created, itemScope, current);
+                    provisional[keys[index]] = (entry, context);
+                    provisionalOrder[^1] = (entry, itemScope, context);
                 }
 
-                foreach (var entry in provisionalOrder)
-                    entry.Context.Validate(entry.Element);
+                foreach (var value in provisionalOrder)
+                    value.Context.Validate(value.Entry!.Root);
                 foreach (var pair in retained)
                     if (
-                        pair.Value.IsDisposed
+                        pair.Value.Root.IsDisposed
+                        || pair.Value.Root.Scope.IsDisposed
                         || pair.Value.Scope.IsDisposed
                         || !_entries.TryGetValue(pair.Key, out var current)
                         || !ReferenceEquals(current, pair.Value)
@@ -123,57 +137,86 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
                         );
 
                 ordered = keys.Select(key =>
-                        retained.TryGetValue(key, out var entry) ? entry : provisional[key].Element
+                        retained.TryGetValue(key, out var entry) ? entry : provisional[key].Entry
                     )
                     .ToArray();
-                nextEntries = new Dictionary<TKey, Element>();
+                nextEntries = new Dictionary<TKey, Entry>();
                 for (var index = 0; index < keys.Length; index++)
                     nextEntries.Add(keys[index], ordered[index]);
                 foreach (var pair in provisional)
                 {
                     var key = pair.Key;
-                    var entry = pair.Value.Element;
-                    entry.OnDisposed(() => RemoveEntry(key, entry));
+                    var entry = pair.Value.Entry;
+                    entry.Root.OnDisposed(() => ReleaseEntry(key, entry));
                 }
                 departed = retained
                     .Where(pair => !unique.Contains(pair.Key))
                     .Select(pair => pair.Value)
                     .ToArray();
-                foreach (var entry in provisionalOrder)
-                    entry.Context.Complete();
+                retainedUpdates = Enumerable
+                    .Range(0, next.Length)
+                    .Where(index => retained.ContainsKey(keys[index]))
+                    .Select(index => (nextEntries[keys[index]], next[index]))
+                    .ToArray();
+                foreach (var value in provisionalOrder)
+                    value.Context.Complete();
             }
             catch (Exception error)
             {
                 var factoryErrors = new List<Exception> { error };
-                foreach (var entry in provisionalOrder)
+                foreach (var value in provisionalOrder)
+                {
                     try
                     {
-                        entry.Context.Dispose();
+                        value.Context.Dispose();
                     }
                     catch (Exception cleanup)
                     {
                         factoryErrors.Add(cleanup);
                     }
+                    try
+                    {
+                        value.Scope.Dispose();
+                    }
+                    catch (Exception cleanup)
+                    {
+                        factoryErrors.Add(cleanup);
+                    }
+                }
                 Composition.ThrowAll(factoryErrors, "Keyed region factory failed.");
                 throw;
             }
 
             _entries = nextEntries;
-            Region.ReplaceChildren(ordered);
-            foreach (var entry in provisionalOrder)
-                entry.Context.Dispose();
+            Region.ReplaceChildren(ordered.Select(entry => entry.Root).ToArray());
+            foreach (var value in provisionalOrder)
+            {
+                value.Context.Dispose();
+            }
+
+            foreach (var update in retainedUpdates)
+                update.Entry.Current.Stage(update.Value);
 
             List<Exception>? errors = null;
-            foreach (var entry in departed)
+            foreach (var update in retainedUpdates)
                 try
                 {
-                    entry.Dispose();
+                    update.Entry.Current.Notify();
                 }
                 catch (Exception exception)
                 {
                     (errors ??= []).Add(exception);
                 }
-            Composition.ThrowAll(errors, "Keyed region cleanup failed.");
+            foreach (var entry in departed)
+                try
+                {
+                    entry.Root.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    (errors ??= []).Add(exception);
+                }
+            Composition.ThrowAll(errors, "Keyed region publication or cleanup failed.");
         }
         finally
         {
@@ -184,14 +227,19 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
     private void RetireDisposedEntries()
     {
         foreach (var pair in _entries.ToArray())
-            if (pair.Value.IsDisposed || pair.Value.Scope.IsDisposed)
-                RemoveEntry(pair.Key, pair.Value);
+            if (
+                pair.Value.Root.IsDisposed
+                || pair.Value.Root.Scope.IsDisposed
+                || pair.Value.Scope.IsDisposed
+            )
+                ReleaseEntry(pair.Key, pair.Value);
     }
 
-    private void RemoveEntry(TKey key, Element entry)
+    private void ReleaseEntry(TKey key, Entry entry)
     {
         if (_entries.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
             _entries.Remove(key);
+        entry.Scope.Dispose();
     }
 
     /// <summary>Releases this object's retained resources and owned reactive lifetime.</summary>
@@ -219,7 +267,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
         foreach (var entry in entries.Reverse())
             try
             {
-                entry.Dispose();
+                entry.Root.Dispose();
             }
             catch (Exception exception)
             {
@@ -231,4 +279,6 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
         Region.Scope.Detach(this);
         Composition.ThrowAll(errors, "Keyed region cleanup failed.");
     }
+
+    private sealed record Entry(Element Root, ReactiveScope Scope, CurrentItem<TItem> Current);
 }

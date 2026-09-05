@@ -78,6 +78,14 @@ public sealed class ReactiveScope : IDisposable
         return OwnElement(new Signal<T>(_graph, value, name, this));
     }
 
+    internal CurrentItem<T> CurrentItemForFramework<T>(T value, string name)
+    {
+        CheckActive(skipFactoryGuard: true);
+        ReactiveGraph.ValidateName(name, nameof(name));
+        var node = OwnElement(new CurrentItemNode<T>(_graph, value, name, this));
+        return new CurrentItem<T>(node);
+    }
+
     /// <summary>Creates lazy scope-owned state with dependencies discovered on evaluation.</summary>
     public Derived<T> Derived<T>(Func<T> compute, string name)
     {

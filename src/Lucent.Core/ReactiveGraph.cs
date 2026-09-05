@@ -224,6 +224,22 @@ public sealed class ReactiveGraph
         _collecting?.Add(node);
     }
 
+    internal T Untracked<T>(Func<T> callback)
+    {
+        CheckThread();
+        ArgumentNullException.ThrowIfNull(callback);
+        var prior = _collecting;
+        _collecting = null;
+        try
+        {
+            return callback();
+        }
+        finally
+        {
+            _collecting = prior;
+        }
+    }
+
     internal Evaluation<T> Evaluate<T>(ReactiveNode node, Func<T> callback)
     {
         CheckThread();

@@ -450,8 +450,9 @@ public sealed class ControlsContracts
             value => value,
             (value, context) =>
             {
+                var item = value.Value;
                 var row = context.Element("row");
-                if (value == 0)
+                if (item == 0)
                     Controls.Button(
                         row,
                         theme,
@@ -1065,8 +1066,9 @@ public sealed class ControlsContracts
             value => value,
             (value, context) =>
             {
+                var item = value.Value;
                 var row = context.Element("row");
-                if (value == 0)
+                if (item == 0)
                     Controls.Button(
                         row,
                         theme,

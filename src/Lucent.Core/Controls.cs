@@ -359,7 +359,7 @@ internal static class Controls
         string label,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, CompositionContext, Element> row,
+        Func<CurrentItem<TItem>, CompositionContext, Element> row,
         float rowHeight
     )
         where TKey : notnull

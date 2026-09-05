@@ -19,9 +19,9 @@ public component IssueBrowser(IssueBrowserState browser) {
         if (browser.Error is not null) {
             <Error browser={browser} name="issue-browser.error" />
         }
-        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, issue).Named("issue-browser.issue-row")} rowHeight={() => browser.Density == IssueDensity.Comfortable ? 30 : 22} label="Issues" style={VirtualizedListStyle} name="issue-browser.scroll-viewport" />
+        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value).Named("issue-browser.issue-row")} rowHeight={() => browser.Density == IssueDensity.Comfortable ? 30 : 22} label="Issues" style={VirtualizedListStyle} name="issue-browser.scroll-viewport" />
         foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number {
-            <Details browser={browser} issue={issue} name="issue-browser.details" />
+            <Details browser={browser} issue={() => issue} name="issue-browser.details" />
         }
         if (browser.SelectedIssue is not null && browser.CanRetrySelected) {
             <Button onInvoke={browser.RetrySelected} style={Style.Empty with { Height: browser.Density == IssueDensity.Comfortable ? 28f : 22f; }} name="issue-browser.details-retry">Retry</Button>

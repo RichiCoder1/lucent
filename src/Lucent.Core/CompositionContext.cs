@@ -132,7 +132,7 @@ public sealed class CompositionContext : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, CompositionContext, Element> content
+        Func<CurrentItem<TItem>, CompositionContext, Element> content
     )
         where TKey : notnull
     {
@@ -163,7 +163,7 @@ public sealed class CompositionContext : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, CompositionContext, Element> content,
+        Func<CurrentItem<TItem>, CompositionContext, Element> content,
         float rowHeight
     )
         where TKey : notnull

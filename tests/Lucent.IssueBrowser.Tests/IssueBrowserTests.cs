@@ -64,7 +64,8 @@ public sealed class IssueBrowserTests
         graph.Drain();
         using var renderer = new SkiaSceneRenderer();
         _ = SceneLayout.Project(composition, new(800, 500, 1), renderer);
-        var semantics = composition.SemanticDump();
+        // Composition epochs are process-wide; keep this snapshot independent of test order.
+        var semantics = Regex.Replace(composition.SemanticDump(), @"epoch=\d+", "epoch=*");
         var dump = composition.Dump();
         Assert(
             dump.Contains("name=\"issue-browser.filters\"", StringComparison.Ordinal)
@@ -79,7 +80,7 @@ public sealed class IssueBrowserTests
         );
         Assert(
             Hash(dump + semantics)
-                == "7797152d92b3bb3a67cea0fcd9ba1ebba5bf25c71cc8f847c1f26371210563a3",
+                == "cd0b993f4e78607366d22a04d7628c8069aa4b04c1019abf755df4af32f5e1dc",
             "Issue Browser composition/semantic evidence changed: " + Hash(dump + semantics)
         );
     }
@@ -101,11 +102,11 @@ public sealed class IssueBrowserTests
             issue
         );
         var generatedRow = DirectRootEvidence(
-            browser => Lucent.IssueBrowser.Components.IssueRow(browser, issue),
+            browser => Lucent.IssueBrowser.Components.IssueRow(browser, () => issue),
             issue
         );
         var handwrittenRow = DirectRootEvidence(
-            browser => HandwrittenParityFixture.CreateRow(browser, issue),
+            browser => HandwrittenParityFixture.CreateRow(browser, () => issue),
             issue
         );
         Assert(
@@ -125,8 +126,8 @@ public sealed class IssueBrowserTests
             + generatedRow.Dump
             + generatedRow.Semantics;
         Assert(
-            Hash(evidence) == "f7130f88147e7f4d1809533240fcd990cfd59df317654ca8883b7e96615c4e85",
-            "Approved direct-root #48 parity rebaseline changed: " + Hash(evidence)
+            Hash(evidence) == "8546133a2448f9ac734bfb81d881b8eed3213d389fe6ec9646b30d1b017a1d07",
+            "Direct-root parity evidence changed: " + Hash(evidence)
         );
     }
 
@@ -148,7 +149,7 @@ public sealed class IssueBrowserTests
     }
 
     static VirtualizedIssueRowEvidence CaptureVirtualizedIssueRowEvidence(
-        Func<IssueBrowserState, BrowserIssue, ComponentRecipe> row
+        Func<IssueBrowserState, Func<BrowserIssue>, ComponentRecipe> row
     )
     {
         var graph = new ReactiveGraph();
@@ -173,7 +174,7 @@ public sealed class IssueBrowserTests
             Lucent.Core.Components.VirtualizedList(
                 () => values.Value,
                 issue => issue.Number,
-                issue => row(browser, issue).Named("issue-browser.issue-row"),
+                issue => row(browser, () => issue.Value).Named("issue-browser.issue-row"),
                 () => 30f,
                 "Issues",
                 Style.Empty.Width(800f).Height(60f)
@@ -242,6 +243,27 @@ public sealed class IssueBrowserTests
                 && composition.Input.FocusedElement?.ElementId == selected.Identity.ElementId
                 && composition.IsCurrent(selected.Identity),
             "Keyed virtual Issue Row reorder changed runtime identity, focus, selection, or current semantics."
+        );
+
+        var beforeReplacementPixels = Pixels(renderer, scene, 800, 60);
+        // Replace only the list source: the browser's original records deliberately stay unchanged.
+        // A row must read its retained payload rather than looking the key up in browser.Issues.
+        values.Value = values
+            .Value.Select(issue =>
+                issue.Number == 10_000 ? issue with { Title = "Updated retained record" } : issue
+            )
+            .ToArray();
+        graph.Drain();
+        scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
+        Assert(composition.Input.SetScene(scene), "The replaced-record scene was rejected.");
+        var refreshed = IssueRow(composition, 10_000, "replaced");
+        Assert(
+            refreshed.Name.Contains("Updated retained record", StringComparison.Ordinal)
+                && refreshed.Identity.ElementId == reordered.Identity.ElementId
+                && refreshed.Selected
+                && composition.Input.FocusedElement?.ElementId == refreshed.Identity.ElementId
+                && Pixels(renderer, scene, 800, 60) != beforeReplacementPixels,
+            "Same-key replacement failed to update row text/semantics while retaining identity, focus and selection."
         );
 
         values.Value = values.Value.Skip(2).ToArray();
@@ -1405,7 +1427,7 @@ public sealed class IssueBrowserTests
                             StringComparison.Ordinal
                         )
                         && issueBrowser.Contains(
-                            "<VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, issue).Named(\"issue-browser.issue-row\")}",
+                            "<VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value).Named(\"issue-browser.issue-row\")}",
                             StringComparison.Ordinal
                         )
                         && issueBrowser.Contains(
@@ -1669,7 +1691,10 @@ public sealed class IssueBrowserTests
             );
         }
 
-        internal static ComponentRecipe CreateRow(IssueBrowserState browser, BrowserIssue issue)
+        internal static ComponentRecipe CreateRow(
+            IssueBrowserState browser,
+            Func<BrowserIssue> issue
+        )
         {
             ArgumentNullException.ThrowIfNull(browser);
             ArgumentNullException.ThrowIfNull(issue);
@@ -1686,17 +1711,14 @@ public sealed class IssueBrowserTests
                         .Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f)
                 );
             return Lucent.Core.Components.Selectable(
-                () => Label(browser, issue),
-                () => browser.IsSelected(issue.Number),
-                () => browser.Select(issue.Number),
+                () => Label(issue()),
+                () => browser.IsSelected(issue().Number),
+                () => browser.Select(issue().Number),
                 style
             );
         }
 
-        private static string Label(IssueBrowserState browser, BrowserIssue issue)
-        {
-            var current = browser.Issues.First(candidate => candidate.Number == issue.Number);
-            return $"#{current.Number} {current.Title} — {current.Status} · {current.Assignee}";
-        }
+        private static string Label(BrowserIssue issue) =>
+            $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}";
     }
 }

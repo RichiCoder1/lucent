@@ -15,6 +15,8 @@ public sealed class ConditionalRegion : IDisposable
     private int _branch = Int32.MinValue;
     private readonly ReactiveEffect _effect;
     private Element? _child;
+    private MountedConditionalPayload? _payload;
+    private long _nextPayloadId;
     private bool _updating;
 
     internal ConditionalRegion(
@@ -93,13 +95,17 @@ public sealed class ConditionalRegion : IDisposable
         try
         {
             if (_child?.IsDisposed == true)
+            {
                 _child = null;
+                _payload = null;
+            }
             if (active == (_child is not null))
                 return;
             if (!active)
             {
                 var departed = _child!;
                 _child = null;
+                _payload = null;
                 Region.ReplaceChildren([]);
                 departed.Dispose();
                 return;
@@ -122,31 +128,108 @@ public sealed class ConditionalRegion : IDisposable
 
     private void Update(ConditionalChoice choice)
     {
-        var recipe = choice.Recipe;
-        if (recipe is null)
-        {
-            Update(false);
-            _branch = choice.Branch;
-            return;
-        }
-        if (_branch == choice.Branch && _child is not null)
+        _composition.CheckThread();
+        _composition.ThrowIfBehaviorAttachment();
+        _composition.RejectForeignFactory(Region);
+        if (IsDisposed)
             return;
         if (_updating)
             throw new InvalidOperationException("A conditional region cannot update reentrantly.");
         _updating = true;
         try
         {
-            var created = Create(recipe.Mount);
-            var prior = _child;
-            _child = created;
-            _branch = choice.Branch;
-            created.OnDisposed(() =>
+            if (_child?.IsDisposed == true)
             {
-                if (ReferenceEquals(_child, created))
-                    _child = null;
-            });
-            Region.ReplaceChildren([created]);
-            prior?.Dispose();
+                _child = null;
+                _payload = null;
+            }
+
+            if (_branch == choice.Branch && _child is not null)
+            {
+                if (choice.Payload is null && choice.Recipe is not null && _payload is null)
+                    return;
+                if (
+                    choice.Payload is null
+                    || choice.Recipe is not null
+                    || _payload is null
+                    || _payload.ValueType != choice.Payload.ValueType
+                )
+                    throw new InvalidOperationException(
+                        "A retained conditional branch cannot change its payload shape or type."
+                    );
+
+                _payload.Stage(choice.Payload);
+                _payload.Notify();
+                return;
+            }
+
+            if (choice.Payload is null && choice.Recipe is null)
+            {
+                var departed = _child;
+                _child = null;
+                _payload = null;
+                _branch = choice.Branch;
+                if (departed is not null)
+                {
+                    Region.ReplaceChildren([]);
+                    departed.Dispose();
+                }
+                return;
+            }
+
+            MountedConditionalPayload? mounted = null;
+            try
+            {
+                mounted = choice.Payload?.Mount(
+                    Region.Scope,
+                    Region.Name
+                        + ".current-item-"
+                        + checked(++_nextPayloadId).ToString(CultureInfo.InvariantCulture)
+                );
+                var recipe = mounted?.Recipe ?? choice.Recipe!;
+                var created = Create(recipe.Mount);
+                var prior = _child;
+                var priorPayload = _payload;
+                _child = created;
+                _payload = mounted;
+                _branch = choice.Branch;
+                created.OnDisposed(() =>
+                {
+                    mounted?.Dispose();
+                    if (ReferenceEquals(_child, created))
+                    {
+                        _child = null;
+                        _payload = null;
+                    }
+                });
+                Region.ReplaceChildren([created]);
+
+                List<Exception>? errors = null;
+                try
+                {
+                    prior?.Dispose();
+                }
+                catch (Exception error)
+                {
+                    (errors ??= []).Add(error);
+                }
+                if (prior is null)
+                    try
+                    {
+                        priorPayload?.Dispose();
+                    }
+                    catch (Exception error)
+                    {
+                        (errors ??= []).Add(error);
+                    }
+                Composition.ThrowAll(errors, "Conditional region cleanup failed.");
+            }
+            catch
+            {
+                if (!ReferenceEquals(_payload, mounted))
+                    mounted?.Dispose();
+                throw;
+            }
         }
         finally
         {
@@ -203,7 +286,9 @@ public sealed class ConditionalRegion : IDisposable
             (errors ??= []).Add(exception);
         }
         var departed = _child;
+        var payload = _payload;
         _child = null;
+        _payload = null;
         if (!Region.IsDisposed)
             Region.ReplaceChildren([]);
         try
@@ -214,6 +299,15 @@ public sealed class ConditionalRegion : IDisposable
         {
             (errors ??= []).Add(exception);
         }
+        if (departed is null)
+            try
+            {
+                payload?.Dispose();
+            }
+            catch (Exception exception)
+            {
+                (errors ??= []).Add(exception);
+            }
         _active = null!;
         _content = null!;
         _select = null;

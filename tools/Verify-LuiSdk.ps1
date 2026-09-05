@@ -35,6 +35,9 @@ function Write-Project([string]$directory, [string]$name, [string]$body) {
 Remove-Item $feed, $env:NUGET_PACKAGES, $artifacts -Recurse -Force -ErrorAction Ignore
 New-Item $artifacts -ItemType Directory -Force | Out-Null
 try {
+    $coreProject = Join-Path $root 'src/Lucent.Core/Lucent.Core.csproj'
+    Invoke-Dotnet @('restore', $coreProject, '--locked-mode')
+    Invoke-Dotnet @('build', $coreProject, '-c', 'Debug', '--no-restore', '-warnaserror')
     $sdk = Join-Path $root 'src/Lucent.Lui.Sdk/Lucent.Lui.Sdk.csproj'
     Invoke-Dotnet @('restore', $sdk, '--locked-mode')
     Invoke-Dotnet @('pack', $sdk, '-c', 'Release', '--no-restore', '-o', $feed)
@@ -149,6 +152,10 @@ try {
     (Get-Content (Join-Path $using 'Program.cs') -Raw).Replace('using static Author.Theme;', 'using Lucent.Core; using static Author.Theme;') | Set-Content (Join-Path $using 'Program.cs')
     Invoke-Dotnet @('build', (Join-Path $using 'Using.csproj'), '--no-restore', '-warnaserror')
 
+    # The published consumer also exercises retained .lui payloads through the packed SDK.
+    Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/Retained.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/RetainedConsumer.cs') $matrix
+    Set-Content (Join-Path $matrix 'Program.cs') 'Consumer.RetainedConsumer.Run(); Console.WriteLine("lui sdk consumer");'
+
     # Publish/run is the runtime-asset boundary proof; analyzers must not enter the app.
     $publish = Join-Path $artifacts 'publish'
     $publishConfig = Join-Path $artifacts 'publish.NuGet.config'
@@ -157,7 +164,10 @@ try {
 "@ | Set-Content $publishConfig
     Invoke-Dotnet @('publish', $matrixProject, '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-p:PublishAot=true', '--configfile', $publishConfig, '-o', $publish)
     $exe = Join-Path $publish 'Consumer.exe'
-    if (!(Test-Path $exe) -or (& $exe) -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not run.' }
+    if (!(Test-Path $exe)) { throw 'NativeAOT consumer executable is missing.' }
+    $consumerOutput = @(& $exe)
+    $consumerOutput | Write-Output
+    if ($LASTEXITCODE -ne 0 -or ($consumerOutput -join "`n") -notmatch 'retained payload SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not pass its runtime contracts.' }
     $actual = Get-ChildItem $publish -Recurse -File | ForEach-Object { $_.FullName.Substring($publish.Length + 1).Replace('\', '/') } | Sort-Object
     $allowed = @('Consumer.exe', 'Consumer.pdb', 'Lucent.Core.pdb', 'Lucent.Core.xml')
     if ((Compare-Object $allowed $actual)) { throw "NativeAOT runtime inventory differs from its fail-closed allowlist: $($actual -join ', ')." }

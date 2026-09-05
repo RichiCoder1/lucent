@@ -7,6 +7,6 @@ style IssueRowStyle {
     }
 }
 
-public component IssueRow(IssueBrowserState browser, BrowserIssue issue) {
-    <Selectable content={() => Label(browser, issue)} selected={() => browser.IsSelected(issue.Number)} onSelect={() => browser.Select(issue.Number)} style={IssueRowStyle with { Spacing: browser.Density == IssueDensity.Comfortable ? 8f : 4f; FontSize: browser.Density == IssueDensity.Comfortable ? 14f : 12f; Height: browser.Density == IssueDensity.Comfortable ? 30f : 22f; }} />
+public component IssueRow(IssueBrowserState browser, Func<BrowserIssue> issue) {
+    <Selectable content={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => browser.Select(issue().Number)} style={IssueRowStyle with { Spacing: browser.Density == IssueDensity.Comfortable ? 8f : 4f; FontSize: browser.Density == IssueDensity.Comfortable ? 14f : 12f; Height: browser.Density == IssueDensity.Comfortable ? 30f : 22f; }} />
 }

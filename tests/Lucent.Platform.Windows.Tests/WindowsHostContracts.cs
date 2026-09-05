@@ -525,7 +525,7 @@ public sealed class WindowsHostContracts
             (value, context) =>
             {
                 var row = context.Element("row");
-                Controls.Selectable(row, theme, "row " + value);
+                Controls.Selectable(row, theme, "row " + value.Value);
                 return row;
             },
             30f

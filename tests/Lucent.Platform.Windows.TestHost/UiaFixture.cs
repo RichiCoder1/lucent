@@ -100,9 +100,9 @@ internal static class UiaFixture
                 var style = Style
                     .Empty.Set(LayoutProperties.Width, 300f)
                     .Set(LayoutProperties.Height, 24f);
-                if (value == "Disabled")
+                if (value.Value == "Disabled")
                     style = style.Set(InputProperties.Enabled, false);
-                Controls.Selectable(item, themeContext, value, style: style);
+                Controls.Selectable(item, themeContext, value.Value, style: style);
                 return item;
             }
         );

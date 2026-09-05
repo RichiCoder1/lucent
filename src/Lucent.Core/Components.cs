@@ -202,7 +202,7 @@ public static class Components
     public static ComponentRecipe VirtualizedList<TKey, TItem>(
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, ComponentRecipe> row,
+        Func<CurrentItem<TItem>, ComponentRecipe> row,
         Func<float> rowHeight,
         string label = "Items",
         Style? style = null

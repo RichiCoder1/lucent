@@ -507,6 +507,171 @@ public sealed class GeneratorTests
     }
 
     [TestMethod]
+    public void RetainedStructuralLocalsStayCurrentWithoutRemounting()
+    {
+        const string runtimeApi = """
+namespace CurrentRuntime;
+using System;
+using Lucent.Core;
+public sealed record Row(int Id, string Title);
+public static class Probes
+{
+    public static int LoopFactories;
+    public static string LoopSnapshot = "";
+    public static Func<string> LoopLive = null!;
+    public static int PatternFactories;
+    public static string PatternSnapshot = "";
+    public static Func<string> PatternLive = null!;
+
+    [LucentComponent]
+    public static ComponentRecipe LoopProbe(string snapshot, Func<string> live) =>
+        ComponentRecipe.Create("loop-probe", (_, _) =>
+        {
+            LoopFactories++;
+            LoopSnapshot = snapshot;
+            LoopLive = live;
+        });
+
+    [LucentComponent]
+    public static ComponentRecipe PatternProbe(string snapshot, Func<string> live) =>
+        ComponentRecipe.Create("pattern-probe", (_, _) =>
+        {
+            PatternFactories++;
+            PatternSnapshot = snapshot;
+            PatternLive = live;
+        });
+}
+""";
+        const string loopSource = """
+namespace CurrentRuntime;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static CurrentRuntime.Probes;
+internal component Loop(Signal<Row[]> rows) {
+    <Row>
+        foreach (var item in rows.Value) keyed by item.Id {
+            <LoopProbe snapshot={item.Title} live={() => item.Title} />
+        }
+    </Row>
+}
+""";
+        const string patternSource = """
+namespace CurrentRuntime;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static CurrentRuntime.Probes;
+internal component Pattern(Signal<object?> candidate) {
+    <Row>
+        if (candidate.Value is Row { } item) {
+            <PatternProbe snapshot={item.Title} live={() => item.Title} />
+        }
+    </Row>
+}
+""";
+        var generatedResult = RunWithSource(
+            runtimeApi,
+            new TextFile("C:/consumer/Loop.lui", loopSource, "Loop.lui"),
+            new TextFile("C:/consumer/Pattern.lui", patternSource, "Pattern.lui")
+        );
+        Assert(
+            generatedResult.Diagnostics.Length == 0
+                && generatedResult.Results.Single().GeneratedSources.Length == 2,
+            "current-reader documents did not generate: "
+                + string.Join(
+                    " | ",
+                    generatedResult.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        const string harness = """
+#nullable enable
+namespace CurrentRuntime;
+using System.Linq;
+using Lucent.Core;
+public static class Harness
+{
+    public static string Loop()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "loop-current");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("loop-current"));
+        var rows = composition.Root.Scope.Signal(new[] { new Row(1, "before") }, "rows");
+        var root = composition.Mount(composition.Root, theme, Components.Loop(rows));
+        graph.Drain();
+        var retained = root.Children.Single().Children.Single().Id;
+        rows.Value = new[] { new Row(1, "after") };
+        graph.Drain();
+        var current = root.Children.Single().Children.Single().Id;
+        return $"{Probes.LoopSnapshot}|{Probes.LoopLive()}|{Probes.LoopFactories}|{retained == current}";
+    }
+
+    public static string Pattern()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "pattern-current");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("pattern-current"));
+        var candidate = composition.Root.Scope.Signal<object?>(new Row(1, "before"), "candidate");
+        var root = composition.Mount(composition.Root, theme, Components.Pattern(candidate));
+        graph.Drain();
+        var retained = root.Children.Single().Children.Single().Id;
+        candidate.Value = new Row(1, "after");
+        graph.Drain();
+        var current = root.Children.Single().Children.Single().Id;
+        return $"{Probes.PatternSnapshot}|{Probes.PatternLive()}|{Probes.PatternFactories}|{retained == current}";
+    }
+}
+""";
+        var trees = new List<SyntaxTree>
+        {
+            CSharpSyntaxTree.ParseText(runtimeApi, new CSharpParseOptions(LanguageVersion.Preview)),
+            CSharpSyntaxTree.ParseText(harness, new CSharpParseOptions(LanguageVersion.Preview)),
+        };
+        trees.AddRange(
+            generatedResult
+                .Results.Single()
+                .GeneratedSources.Select(source =>
+                    CSharpSyntaxTree.ParseText(
+                        source.SourceText.ToString(),
+                        new CSharpParseOptions(LanguageVersion.Preview),
+                        source.HintName
+                    )
+                )
+        );
+        var compilation = CSharpCompilation.Create(
+            "generated-current-readers",
+            trees,
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var stream = new MemoryStream();
+        var emit = compilation.Emit(stream);
+        Assert(
+            emit.Success
+                && !emit.Diagnostics.Any(diagnostic =>
+                    diagnostic.Severity == DiagnosticSeverity.Warning
+                ),
+            "generated current-reader runtime was not warning-clean: "
+                + string.Join(
+                    " | ",
+                    emit.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        var assembly = Assembly.Load(stream.ToArray());
+        var type = assembly.GetType("CurrentRuntime.Harness")!;
+        Assert(
+            (string)type.GetMethod("Loop")!.Invoke(null, null)! == "before|after|1|True",
+            "same-key foreach replacement was stale or remounted."
+        );
+        Assert(
+            (string)type.GetMethod("Pattern")!.Invoke(null, null)! == "before|after|1|True",
+            "same-branch pattern replacement was stale or remounted."
+        );
+    }
+
+    [TestMethod]
     public void GeneratedCodeExecutes()
     {
         const string InlineProbe =

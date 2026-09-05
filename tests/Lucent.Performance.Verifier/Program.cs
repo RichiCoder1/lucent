@@ -332,7 +332,7 @@ static Composition CreateVirtualizationFixture(ReactiveGraph graph, out ThemeCon
         (value, factory) =>
         {
             var row = factory.Element("row");
-            Controls.Selectable(row, context, "Issue " + value);
+            Controls.Selectable(row, context, "Issue " + value.Value);
             return row;
         },
         30f

@@ -66,7 +66,8 @@ public sealed class CompositionContracts
             (value, context) =>
             {
                 var row = context.Element("keyed-row");
-                row.Scope.OnDispose(() => cleanup[value] = cleanup.GetValueOrDefault(value) + 1);
+                var item = value.Value;
+                row.Scope.OnDispose(() => cleanup[item] = cleanup.GetValueOrDefault(item) + 1);
                 return row;
             }
         );
@@ -108,6 +109,205 @@ public sealed class CompositionContracts
                 && cleanup.GetValueOrDefault("d") == 1,
             "Departed keyed entries were not cleaned once."
         );
+    }
+
+    [TestMethod]
+    public void KeyedCurrentItemsPublishWithoutRemountOrFactorySelfSubscription()
+    {
+        var graph = new ReactiveGraph();
+        var first = new CurrentRow(1, "before");
+        var rows = graph.Signal(new[] { first }, "current-keyed-rows");
+        using var composition = new Composition(graph, "current-keyed-root");
+        var factoryReads = 0;
+        var snapshots = new List<string>();
+        var observed = "";
+        CurrentItem<CurrentRow>? reader = null;
+        Signal<int>? local = null;
+        var region = composition.ForEach(
+            composition.Root,
+            "current-keyed-region",
+            () => rows.Value,
+            value => value.Key,
+            (current, context) =>
+            {
+                factoryReads++;
+                snapshots.Add(current.Value.Text);
+                if (current.Value.Text == "broken")
+                    throw new InvalidOperationException("current-keyed-factory");
+                reader = current;
+                var row = context.Element("current-keyed-row");
+                local = row.Scope.Signal(0, "current-keyed-local");
+                _ = row.Scope.Effect(
+                    () => observed = current.Value.Text + ":" + local.Value,
+                    "current-keyed-observer"
+                );
+                return row;
+            }
+        );
+        graph.Drain();
+        var retained = region.Items.Single();
+        local!.Value = 7;
+        graph.Drain();
+
+        var replacement = new CurrentRow(1, "after");
+        rows.Value = [replacement];
+        graph.Drain();
+        Assert(
+            ReferenceEquals(region.Items.Single(), retained)
+                && factoryReads == 1
+                && snapshots.SequenceEqual(["before"])
+                && ReferenceEquals(reader!.Value, replacement)
+                && observed == "after:7",
+            "Same-key payload publication remounted, captured a stale value, or subscribed the region factory to its own reader."
+        );
+
+        var equalReplacement = new CurrentRow(1, "after");
+        rows.Value = [equalReplacement];
+        graph.Drain();
+        Assert(
+            ReferenceEquals(reader!.Value, equalReplacement) && factoryReads == 1,
+            "An equal-but-distinct same-key payload was not accepted exactly."
+        );
+
+        rows.Value = [new CurrentRow(1, "rejected"), new CurrentRow(2, "broken")];
+        ExpectAggregate(graph.Drain);
+        Assert(
+            ReferenceEquals(region.Items.Single(), retained)
+                && ReferenceEquals(reader!.Value, equalReplacement)
+                && observed == "after:7",
+            "A failed keyed factory published retained payloads before the transaction committed."
+        );
+
+        rows.Value = [new CurrentRow(1, "recovered")];
+        graph.Drain();
+        Assert(observed == "recovered:7", "A failed keyed refresh could not recover.");
+
+        rows.Value = [];
+        graph.Drain();
+        Assert(retained.IsDisposed, "Keyed removal did not dispose its retained root.");
+        Expect<ObjectDisposedException>(() => _ = reader!.Value);
+    }
+
+    [TestMethod]
+    public void KeyedCurrentItemsPublishOneCoherentBatch()
+    {
+        var graph = new ReactiveGraph();
+        var rows = graph.Signal(
+            new[] { new CurrentRow(1, "one"), new CurrentRow(2, "two") },
+            "current-keyed-batch-rows"
+        );
+        using var composition = new Composition(graph, "current-keyed-batch-root");
+        var readers = new Dictionary<int, CurrentItem<CurrentRow>>();
+        var observed = "";
+        _ = composition.ForEach(
+            composition.Root,
+            "current-keyed-batch-region",
+            () => rows.Value,
+            value => value.Key,
+            (current, context) =>
+            {
+                var key = current.Value.Key;
+                readers.Add(key, current);
+                var row = context.Element("current-keyed-batch-row");
+                if (key == 1)
+                    _ = row.Scope.Effect(
+                        () => observed = readers[1].Value.Text + "|" + readers[2].Value.Text,
+                        "current-keyed-batch-observer"
+                    );
+                return row;
+            }
+        );
+        graph.Drain();
+
+        rows.Value = [new CurrentRow(1, "one-next"), new CurrentRow(2, "two-next")];
+        graph.Drain();
+        Assert(
+            observed == "one-next|two-next",
+            "A retained observer saw a partially published keyed payload batch."
+        );
+    }
+
+    [TestMethod]
+    public void ConditionalCurrentItemRetainsSameBranchAndRejectsShapeChanges()
+    {
+        var graph = new ReactiveGraph();
+        var value = graph.Signal("before", "current-conditional-value");
+        var shape = graph.Signal(0, "current-conditional-shape");
+        using var composition = new Composition(graph, "current-conditional-root");
+        using var theme = new ThemeContext(
+            composition.Root.Scope,
+            new Theme("current-conditional-theme")
+        );
+        var factories = 0;
+        var observed = "";
+        CurrentItem<string>? reader = null;
+        ConditionalRegion? region = null;
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            ComponentRecipe.Create(
+                "current-conditional-host",
+                (context, root) =>
+                    region = context.Switch(
+                        root,
+                        "current-conditional-region",
+                        () =>
+                            shape.Value switch
+                            {
+                                0 => ConditionalChoice.Create(
+                                    1,
+                                    value.Value,
+                                    current =>
+                                    {
+                                        factories++;
+                                        _ = current.Value;
+                                        reader = current;
+                                        return Components.Text(() =>
+                                        {
+                                            observed = current.Value;
+                                            return observed;
+                                        });
+                                    }
+                                ),
+                                1 => ConditionalChoice.Create(
+                                    1,
+                                    42,
+                                    _ => ComponentRecipe.Create("wrong-shape", static (_, _) => { })
+                                ),
+                                _ => new ConditionalChoice(
+                                    2,
+                                    ComponentRecipe.Create("replacement", static (_, _) => { })
+                                ),
+                            }
+                    )
+            )
+        );
+        graph.Drain();
+        var retained = region!.Active!;
+        value.Value = "after";
+        graph.Drain();
+        Assert(
+            ReferenceEquals(region.Active, retained)
+                && factories == 1
+                && reader!.Value == "after"
+                && observed == "after",
+            "A same-branch payload update remounted or left a live text reader stale."
+        );
+
+        shape.Value = 1;
+        ExpectAggregate(graph.Drain);
+        Assert(
+            ReferenceEquals(region.Active, retained) && reader!.Value == "after",
+            "An incompatible same-branch payload type mutated retained state."
+        );
+
+        shape.Value = 2;
+        graph.Drain();
+        Assert(
+            !ReferenceEquals(region.Active, retained) && retained.IsDisposed,
+            "A branch replacement did not retire the prior current-item lifetime."
+        );
+        Expect<ObjectDisposedException>(() => _ = reader!.Value);
     }
 
     [TestMethod]
@@ -263,8 +463,8 @@ public sealed class CompositionContracts
                             ReferenceEquals(child.Theme, theme),
                             "Keyed recipe lost its root theme."
                         );
-                        var text = child.Element("recipe-text-" + value);
-                        Controls.Text(text, child.Theme, "Item " + value);
+                        var text = child.Element("recipe-text-" + value.Value);
+                        Controls.Text(text, child.Theme, "Item " + value.Value);
                         return text;
                     }
                 );
@@ -416,7 +616,8 @@ public sealed class CompositionContracts
                 item =>
                     ComponentRecipe.Create(
                         "row",
-                        (context, element) => Controls.Text(element, context.Theme, item.ToString())
+                        (context, element) =>
+                            Controls.Text(element, context.Theme, item.Value.ToString())
                     )
             ),
         ];
@@ -565,7 +766,7 @@ public sealed class CompositionContracts
             Components.VirtualizedList(
                 () => new[] { 1, 2 },
                 value => value,
-                value => Components.Text(value.ToString()),
+                value => Components.Text(value.Value.ToString()),
                 () => height.Value,
                 style: Style.Empty.Width(100f).Height(20f)
             )
@@ -661,7 +862,7 @@ public sealed class CompositionContracts
             Components.VirtualizedList(
                 () => Array.Empty<int>(),
                 value => value,
-                value => Components.Text(value.ToString()),
+                value => Components.Text(value.Value.ToString()),
                 () =>
                 {
                     heightReads++;
@@ -1076,7 +1277,7 @@ public sealed class CompositionContracts
                     "Virtualized row lost its source theme."
                 );
                 var row = context.Element("themed-row");
-                Controls.Text(row, context.Theme, "Row " + value);
+                Controls.Text(row, context.Theme, "Row " + value.Value);
                 return row;
             },
             10f
@@ -1209,13 +1410,14 @@ public sealed class CompositionContracts
             value => value,
             (value, context) =>
             {
+                var item = value.Value;
                 var row = context.Element("facet-row");
                 _ = row.Scope.Effect(() => _ = tick.Value, "facet-subscription");
                 var pending = row.Scope.Async(
                     token =>
                     {
                         token.Register(() => cancelled++);
-                        return work[value].Task;
+                        return work[item].Task;
                     },
                     "facet-async"
                 );
@@ -1262,12 +1464,12 @@ public sealed class CompositionContracts
             (value, context) =>
             {
                 var row = context.Element("failure-row");
-                if (value == "broken")
+                if (value.Value == "broken")
                 {
                     row.Scope.OnDispose(() => provisionalCleanup++);
                     throw new InvalidOperationException("factory");
                 }
-                if (value == "throwing")
+                if (value.Value == "throwing")
                 {
                     row.Scope.OnDispose(() => throwingCleanup++);
                     row.Scope.OnDispose(() => throw new InvalidOperationException("cleanup"));
@@ -1492,7 +1694,7 @@ public sealed class CompositionContracts
             (value, context) =>
             {
                 var root = context.Element("joint-keyed-child");
-                if (value == 1)
+                if (value.Value == 1)
                 {
                     root.Scope.OnDispose(() =>
                         throw new InvalidOperationException("keyed-provisional-cleanup")
@@ -1782,12 +1984,12 @@ public sealed class CompositionContracts
             {
                 var root = context.Element("keyed-transaction-child");
                 root.Scope.OnDispose(() => cleanup++);
-                if (value == 1)
+                if (value.Value == 1)
                 {
                     firstRoot = root;
                     firstLeaf = context.Child(root, "keyed-transaction-leaf");
                 }
-                else if (value == 2)
+                else if (value.Value == 2)
                     firstLeaf!.Scope.Dispose();
                 else
                     firstRoot!.Scope.Dispose();
@@ -1866,7 +2068,7 @@ public sealed class CompositionContracts
             (value, context) =>
             {
                 var root = context.Element("keyed-retained-child");
-                if (value == 1)
+                if (value.Value == 1)
                 {
                     retained = root;
                 }
@@ -1914,7 +2116,7 @@ public sealed class CompositionContracts
                 var root = context.Element("keyed-ordering-child");
                 weak.Add(new WeakReference(root));
                 root.Scope.OnDispose(() => cleanup++);
-                if (ReferenceEquals(value, second))
+                if (ReferenceEquals(value.Value, second))
                     first.Hash = 3;
                 return root;
             }
@@ -2133,6 +2335,8 @@ public sealed class CompositionContracts
     private sealed record ScopeProbe(WeakReference Payload, object Root);
 
     private sealed record KeyPreparationProbe(IReadOnlyList<WeakReference> Payloads, object Root);
+
+    private sealed record CurrentRow(int Key, string Text);
 
     private sealed class MutableKey(int hash)
     {

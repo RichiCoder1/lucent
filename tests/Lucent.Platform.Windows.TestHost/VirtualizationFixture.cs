@@ -52,7 +52,7 @@ internal static class VirtualizationFixture
             Components.VirtualizedList(
                 () => values.Value,
                 value => value,
-                value => Components.Selectable("Issue " + value),
+                value => Components.Selectable("Issue " + value.Value),
                 () => 30f,
                 "Issues",
                 Style.Empty.Set(LayoutProperties.Width, 400f).Set(LayoutProperties.Height, 180f)

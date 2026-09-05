@@ -1612,7 +1612,17 @@ public static class LuiParser
                     && (
                         (kind == SyntaxKind.CloseParenToken && stops.Contains(')'))
                         || (kind == SyntaxKind.CloseBraceToken && stops.Contains('}'))
-                        || (kind == SyntaxKind.OpenBraceToken && stops.Contains('{'))
+                        || (
+                            kind == SyntaxKind.OpenBraceToken
+                            && stops.Contains('{')
+                            && !ContinuesPastOpenBrace(
+                                source,
+                                start,
+                                start + token.SpanStart,
+                                stopAtKeyed,
+                                stops
+                            )
+                        )
                         || (
                             kind == SyntaxKind.LessThanToken
                             && stops.Contains('<')
@@ -1642,6 +1652,66 @@ public static class LuiParser
                     braces--;
             }
             return source.Length;
+        }
+
+        private static bool ContinuesPastOpenBrace(
+            string source,
+            int start,
+            int openBrace,
+            bool stopAtKeyed,
+            char[] stops
+        )
+        {
+            var parens = 0;
+            var brackets = 0;
+            var braces = 0;
+            var tokens = SyntaxFactory.ParseTokens(source.Substring(start)).ToArray();
+            for (var index = 0; index < tokens.Length; index++)
+            {
+                var token = tokens[index];
+                if (token.IsKind(SyntaxKind.EndOfFileToken))
+                    return IsCompleteExpression(source, start, source.Length);
+
+                var kind = token.Kind();
+                var tokenStart = start + token.SpanStart;
+                var atTop = parens == 0 && brackets == 0 && braces == 0;
+                if (
+                    tokenStart > openBrace
+                    && stopAtKeyed
+                    && atTop
+                    && token.ValueText == "keyed"
+                    && index + 1 < tokens.Length
+                    && tokens[index + 1].ValueText == "by"
+                )
+                    return IsCompleteExpression(source, start, tokenStart);
+
+                if (
+                    tokenStart > openBrace
+                    && atTop
+                    && (
+                        (kind == SyntaxKind.CloseParenToken && stops.Contains(')'))
+                        || (kind == SyntaxKind.CloseBraceToken && stops.Contains('}'))
+                        || (kind == SyntaxKind.OpenBraceToken && stops.Contains('{'))
+                        || (kind == SyntaxKind.LessThanToken && stops.Contains('<'))
+                        || (kind == SyntaxKind.SemicolonToken && stops.Contains(';'))
+                    )
+                )
+                    return IsCompleteExpression(source, start, tokenStart);
+
+                if (kind == SyntaxKind.OpenParenToken)
+                    parens++;
+                else if (kind == SyntaxKind.CloseParenToken && parens > 0)
+                    parens--;
+                else if (kind == SyntaxKind.OpenBracketToken)
+                    brackets++;
+                else if (kind == SyntaxKind.CloseBracketToken && brackets > 0)
+                    brackets--;
+                else if (kind == SyntaxKind.OpenBraceToken)
+                    braces++;
+                else if (kind == SyntaxKind.CloseBraceToken && braces > 0)
+                    braces--;
+            }
+            return IsCompleteExpression(source, start, source.Length);
         }
 
         private static bool ContinuesValidExpression(

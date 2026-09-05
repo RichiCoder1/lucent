@@ -547,7 +547,50 @@ internal sealed class LuiProjectContext : IDisposable
             || !await CanPublishAsync(semantic!.Document, cancellationToken).ConfigureAwait(false)
         )
             return await GraphHoverAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        symbol = AuthoredLocalSymbol(semantic!, symbol) ?? symbol;
         return new LuiHover(SymbolText(symbol), Documentation(symbol));
+    }
+
+    private static ISymbol? AuthoredLocalSymbol(SemanticDocument semantic, ISymbol symbol)
+    {
+        if (symbol is not IParameterSymbol and not ILocalSymbol)
+            return null;
+        var root = semantic.Tree.GetRoot();
+        var declarations = symbol
+            .DeclaringSyntaxReferences.Where(reference => reference.SyntaxTree == semantic.Tree)
+            .SelectMany(reference =>
+                semantic.Document.Result.Map.FromGenerated(
+                    new LuiSpan(reference.Span.Start, reference.Span.Length)
+                )
+            )
+            .Where(entry => !entry.Hidden && entry.Kind == LuiMapKind.Local)
+            .Select(entry => entry.Source)
+            .Distinct()
+            .ToArray();
+        if (declarations.Length != 1)
+            return null;
+        var source = declarations[0];
+        var name = semantic.Document.SourceText.ToString().Substring(source.Start, source.Length);
+        foreach (
+            var entry in semantic
+                .Document.Result.Map.FromSource(source)
+                .Where(entry =>
+                    !entry.Hidden && entry.Kind == LuiMapKind.Local && entry.Source.Equals(source)
+                )
+                .OrderBy(entry => entry.Generated.Start)
+        )
+        {
+            var token = root.FindToken(entry.Generated.Start);
+            if (token.ValueText != name.TrimStart('@') || token.Parent is null)
+                continue;
+            var declared = semantic.Model.GetDeclaredSymbol(token.Parent);
+            if (
+                declared is IParameterSymbol or ILocalSymbol
+                && IsDeclarationIdentifier(token.Parent, token)
+            )
+                return declared;
+        }
+        return null;
     }
 
     private async Task<LuiHover?> GraphHoverAsync(
@@ -1138,7 +1181,11 @@ internal sealed class LuiProjectContext : IDisposable
             foreach (var entry in entries)
             {
                 var token =
-                    entry.Source.Length == entry.Generated.Length
+                    entry.Kind == LuiMapKind.Local
+                    && root.FindToken(entry.Generated.Start)
+                        .Span.Equals(new TextSpan(entry.Generated.Start, entry.Generated.Length))
+                        ? root.FindToken(entry.Generated.Start)
+                    : entry.Source.Length == entry.Generated.Length
                         ? root.FindToken(
                             entry.Generated.Start
                                 + Math.Clamp(
@@ -1147,18 +1194,15 @@ internal sealed class LuiProjectContext : IDisposable
                                     entry.Generated.Length - 1
                                 )
                         )
-                        : root.DescendantTokens()
-                            .Where(token =>
-                                token.SpanStart >= entry.Generated.Start
-                                && token.Span.End <= entry.Generated.End
-                            )
-                            .FirstOrDefault(token =>
-                                token.ValueText
-                                == pair.Value.Source.Substring(
-                                    entry.Source.Start,
-                                    entry.Source.Length
-                                )
-                            );
+                    : root.DescendantTokens()
+                        .Where(token =>
+                            token.SpanStart >= entry.Generated.Start
+                            && token.Span.End <= entry.Generated.End
+                        )
+                        .FirstOrDefault(token =>
+                            token.ValueText
+                            == pair.Value.Source.Substring(entry.Source.Start, entry.Source.Length)
+                        );
                 var symbol = token.RawKind == 0 ? null : SymbolForToken(model, token);
                 var spans = token.RawKind == 0 ? [] : RenameSourceSpans(pair.Value, token);
                 var span =
@@ -1304,9 +1348,9 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static LuiLocalProvenance? LocalDeclarationFor(RenameSnapshot snapshot, ISymbol symbol)
     {
-        if (symbol is not IParameterSymbol parameter)
+        if (symbol is not IParameterSymbol and not ILocalSymbol)
             return null;
-        var spans = parameter
+        var spans = symbol
             .DeclaringSyntaxReferences.Select(reference => reference.GetSyntax())
             .Select(node =>
                 TryGenerated(snapshot, node.SyntaxTree, out var generated)
@@ -1480,6 +1524,7 @@ internal sealed class LuiProjectContext : IDisposable
             EventDeclarationSyntax declaration => declaration.Identifier == token,
             EnumMemberDeclarationSyntax declaration => declaration.Identifier == token,
             VariableDeclaratorSyntax declaration => declaration.Identifier == token,
+            SingleVariableDesignationSyntax declaration => declaration.Identifier == token,
             ParameterSyntax declaration => declaration.Identifier == token,
             TypeParameterSyntax declaration => declaration.Identifier == token,
             _ => false,
@@ -1515,7 +1560,14 @@ internal sealed class LuiProjectContext : IDisposable
             if (entry.Hidden || entry.Source.Start < 0 || entry.Generated.Length == 0)
                 continue;
             var source = document.Source.Substring(entry.Source.Start, entry.Source.Length);
-            if (source == token.Text || source == token.ValueText)
+            if (
+                source == token.Text
+                || source == token.ValueText
+                || entry.Kind == LuiMapKind.Local
+                    && entry.Generated.Start == token.SpanStart
+                    && entry.Generated.Length == token.Span.Length
+                    && IsStructuralAlias(token.ValueText, source)
+            )
                 candidates.Add(entry.Source);
             else if (entry.Source.Length == entry.Generated.Length)
             {
@@ -1542,6 +1594,22 @@ internal sealed class LuiProjectContext : IDisposable
             )
             ? spans
             : [];
+    }
+
+    private static bool IsStructuralAlias(string generated, string authored)
+    {
+        const string prefix = "__luiLocal";
+        if (!SyntaxFacts.IsValidIdentifier(authored))
+            return false;
+        var suffix = "_" + authored.TrimStart('@');
+        if (
+            !generated.StartsWith(prefix, StringComparison.Ordinal)
+            || !generated.EndsWith(suffix, StringComparison.Ordinal)
+        )
+            return false;
+        var ordinalLength = generated.Length - prefix.Length - suffix.Length;
+        return ordinalLength > 0
+            && generated.AsSpan(prefix.Length, ordinalLength).IndexOfAnyExceptInRange('0', '9') < 0;
     }
 
     private static bool AddRenameEdit(Dictionary<Uri, List<LuiSpan>> edits, Uri uri, LuiSpan span)

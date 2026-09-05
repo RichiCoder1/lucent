@@ -1,16 +1,16 @@
 # `.lui` language contract
 
-Status: Accepted design for the first `0.2` implementation
+Status: Current `0.2` authoring contract
 
 ## Boundary
 
 `.lui` is a compile-time, opinionated authoring surface over ordinary Lucent C# APIs. It adds declarations, JSX-like element trees, typed style bodies, retained conditionals, and keyed iteration. It does not add a runtime parser, binding engine, template runtime, property lookup, component instance model, virtual DOM, or service container.
 
-The first implementation converts the Issue Browser Filter Bar, then one virtualized Issue Row. Equivalent C# and `.lui` must produce identical behavior, ownership, diagnostics, and deterministic dumps before the application cuts over and superseded composition code is deleted.
+The Issue Browser uses `.lui` for its component tree, including its Filter Bar, virtualized Issue Rows, and retained details. Equivalent C# and `.lui` are checked for matching behavior, ownership, diagnostics, and deterministic evidence.
 
 ## C# recipe contract
 
-Typed C# is the canonical, pleasant authoring surface. `.lui` removes ceremony but has no privileged runtime operation. The ordinary C# vocabulary is:
+`.lui` is the primary application authoring surface. Typed C# defines the underlying recipe contract and remains available for handwritten components; `.lui` has no privileged runtime operation. The C# vocabulary is:
 
 - `ComponentRecipe`: a reusable in-process capability that creates exactly one retained root per mount;
 - `ContentRecipe`: a capability that contributes zero or more retained entries below an existing root;
@@ -121,11 +121,11 @@ Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValu
 
 ## Structural regions
 
-Conditionals are C#-shaped compile-time constructs lowering to retained `When` regions:
+Conditionals are C#-shaped compile-time constructs lowering to retained `Switch` regions:
 
 ```lui
 if (state.Error is { } error) {
-    <ErrorState error={error} onRetry={state.Retry} />
+    <ErrorState error={() => error} onRetry={state.Retry} />
 }
 ```
 
@@ -133,9 +133,17 @@ Dynamic collections initially require explicit identity and lower to `ForEach`:
 
 ```lui
 foreach (var issue in state.Issues) keyed by issue.Id {
-    <IssueRow issue={issue} />
+    <IssueRow issue={() => issue} />
 }
 ```
+
+These examples assume the receiving component declares a live reader parameter, such as `Func<Issue> issue`. A structural local still has the authored record's type: `issue.Title` is ordinary member access. Body reads lower through a scope-owned current-item reader, so `() => issue.Title` reads the latest same-key record without remounting the row. An ordinary attribute such as `issue={issue}` is still evaluated once when that row's recipe is constructed; it does not become live automatically. Styles and explicit live component inputs retain their existing dependency-tracking rules.
+
+Pattern locals carried into a retained conditional body use the same current-item rule. A compatible same-branch update replaces the matched payload while preserving the mounted root and local state. Branch changes mount a fresh root. The compiler must reject unsupported pattern-local capture shapes instead of silently retaining a stale value.
+
+In handwritten C#, retained collection factories receive `CurrentItem<T>` and read `.Value`; source enumeration and key selection still receive `T`. `VirtualizedList` row factories use this same reader. The capability is read-only, bound to the mounted entry's scope, and throws after disposal. A retained update installs the exact replacement record even if value equality considers it equal to the prior record. Virtualization eviction ends the mounted entry; later re-entry creates a new scope from the latest accepted source.
+
+Keyed updates validate keys and provisional factories before changing retained payloads. Pre-commit failure preserves the prior tree and payloads; notification and cleanup failures after commit are reported after the sibling updates are attempted. Virtualized source updates and viewport realization are separate transactions: a later row-factory failure does not undo an already accepted source/payload update. Applications should handle that failure and retry realization against the current source.
 
 Keys obey the existing stable .NET equality/hash contract. Duplicate, null-invalid, unstable, or side-effecting key behavior fails through existing retained-region rules. Unkeyed dynamic iteration is deferred.
 

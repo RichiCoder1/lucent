@@ -539,6 +539,22 @@ public sealed class LanguageServerTests
                 localBody,
                 CancellationToken.None
             );
+            var localBodyHover = await context.HoverAsync(
+                sourceUri,
+                localBody,
+                CancellationToken.None
+            );
+            var localBodyMembers = await context.CompletionsAsync(
+                sourceUri,
+                localBody + "item.".Length,
+                CancellationToken.None
+            );
+            Assert(
+                localBodyHover is not null
+                    && !localBodyHover.Value.Contains("CurrentItem", StringComparison.Ordinal)
+                    && localBodyMembers.Any(item => item.Label == "CompareTo"),
+                "Retained foreach tooling exposed the reader instead of the authored item type."
+            );
             Assert(
                 localRename is not null
                     && localRename.Edits.Single(edit => edit.Uri == sourceUri).Spans.Count == 3
@@ -564,6 +580,117 @@ public sealed class LanguageServerTests
             Assert(
                 await context.CompileAsync(sourceUri, CancellationToken.None) is not null,
                 "applying keyed foreach rename did not compile."
+            );
+            var patternSource = source.Replace(
+                "<Card content={Helpers.Format(count)} name=\"widget\" />",
+                "<Row>if (Helpers.Format(count) is { } detail) { <Card content={detail} /> }</Row>",
+                StringComparison.Ordinal
+            );
+            context.ReplaceText(sourceUri, patternSource);
+            var patternPublished = await context.CompileAsync(sourceUri, CancellationToken.None);
+            Assert(
+                patternPublished is not null,
+                "Conditional local fixture did not compile: "
+                    + string.Join(
+                        " | ",
+                        (await context.DiagnosticsAsync(sourceUri, CancellationToken.None))!.Select(
+                            diagnostic => diagnostic.Code + ":" + diagnostic.Message
+                        )
+                    )
+            );
+            var patternDeclaration = patternSource.IndexOf("detail)", StringComparison.Ordinal);
+            var patternUse = patternSource.LastIndexOf("detail}", StringComparison.Ordinal);
+            var patternDefinition = await context.DefinitionAsync(
+                sourceUri,
+                patternUse,
+                CancellationToken.None
+            );
+            var patternRename = await context.RenameAsync(
+                sourceUri,
+                patternUse,
+                "currentDetail",
+                CancellationToken.None
+            );
+            var patternHover = await context.HoverAsync(
+                sourceUri,
+                patternUse,
+                CancellationToken.None
+            );
+            Assert(
+                patternDefinition is not null
+                    && patternDefinition.Uri == sourceUri
+                    && patternDefinition.Span.Start == patternDeclaration
+                    && patternRename is not null
+                    && patternRename.Edits.Single(edit => edit.Uri == sourceUri).Spans.Count == 2
+                    && patternHover is not null
+                    && !patternHover.Value.Contains("CurrentItem", StringComparison.Ordinal),
+                "Retained conditional pattern local lost its authored type or declaration provenance. "
+                    + "definition="
+                    + patternDefinition?.Span.Start
+                    + " expected="
+                    + patternDeclaration
+                    + " rename="
+                    + patternRename?.Edits.Count
+                    + " hover="
+                    + patternHover?.Value
+            );
+            var twoPatternSource = patternSource
+                .Replace(
+                    "is { } detail)",
+                    "is { } detail && Helpers.Format(count) is { } other)",
+                    StringComparison.Ordinal
+                )
+                .Replace("content={detail}", "content={detail + other}", StringComparison.Ordinal);
+            context.ReplaceText(sourceUri, twoPatternSource);
+            var firstPatternDeclaration = twoPatternSource.IndexOf(
+                "detail &&",
+                StringComparison.Ordinal
+            );
+            var otherPatternDeclaration = twoPatternSource.IndexOf(
+                "other)",
+                StringComparison.Ordinal
+            );
+            var firstPatternUse = twoPatternSource.IndexOf("detail +", StringComparison.Ordinal);
+            Func<LuiCompilationResult, LuiCompilationResult> crosswiredPatternMap = result =>
+            {
+                if (result.Identity.Document.LogicalPath != "nested/screens/Widget.lui")
+                    return result;
+                return WithMap(
+                    result,
+                    result.Map.Entries.Select(entry =>
+                        entry.Kind == LuiMapKind.Local
+                        && entry.Source.Start == firstPatternDeclaration
+                        && result
+                            .Source!.Substring(entry.Generated.Start, entry.Generated.Length)
+                            .StartsWith("__luiLocal", StringComparison.Ordinal)
+                            ? new LuiMapEntry(
+                                new LuiSpan(otherPatternDeclaration, "other".Length),
+                                entry.Generated,
+                                entry.Kind,
+                                entry.Hidden
+                            )
+                            : entry
+                    )
+                );
+            };
+            Assert(
+                await context.RenameAsync(
+                    sourceUri,
+                    firstPatternUse,
+                    "renamed",
+                    CancellationToken.None,
+                    transformGenerated: crosswiredPatternMap
+                )
+                    is null
+                    && await context.ReferencesAsync(
+                        sourceUri,
+                        firstPatternUse,
+                        true,
+                        CancellationToken.None,
+                        transformGenerated: crosswiredPatternMap
+                    )
+                        is null,
+                "A cross-wired retained alias map joined distinct authored pattern locals."
             );
             var sameOffsetOne =
                 "namespace Sample; using static Lucent.Core.Components; internal component One(int count) { <Row>foreach (var item in new[] { count }) keyed by item { <Text content={item.ToString()} /> }</Row> }";

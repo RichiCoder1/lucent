@@ -87,7 +87,7 @@ public sealed class ContentRecipe
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<TItem, ComponentRecipe> content
+        Func<CurrentItem<TItem>, ComponentRecipe> content
     )
         where TKey : notnull
     {
@@ -116,7 +116,96 @@ public sealed class ContentRecipe
 }
 
 /// <summary>The selected retained conditional branch and its recipe.</summary>
-public readonly record struct ConditionalChoice(int Branch, ComponentRecipe? Recipe);
+public readonly record struct ConditionalChoice(int Branch, ComponentRecipe? Recipe)
+{
+    internal ConditionalPayload? Payload { get; init; }
+
+    /// <summary>Creates a retained branch whose mounted recipe can read its current payload.</summary>
+    public static ConditionalChoice Create<T>(
+        int branch,
+        T value,
+        Func<CurrentItem<T>, ComponentRecipe> factory
+    )
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        return new ConditionalChoice(branch, null)
+        {
+            Payload = new ConditionalPayload<T>(value, factory),
+        };
+    }
+}
+
+internal abstract class ConditionalPayload
+{
+    internal abstract Type ValueType { get; }
+
+    internal abstract MountedConditionalPayload Mount(ReactiveScope owner, string name);
+}
+
+internal sealed class ConditionalPayload<T>(T value, Func<CurrentItem<T>, ComponentRecipe> factory)
+    : ConditionalPayload
+{
+    internal T Value { get; } = value;
+    internal override Type ValueType => typeof(T);
+
+    internal override MountedConditionalPayload Mount(ReactiveScope owner, string name)
+    {
+        var scope = owner.CreateChild(name);
+        try
+        {
+            var current = scope.CurrentItemForFramework(Value, name + ".value");
+            var recipe = owner.Graph.Untracked(() => factory(current));
+            ArgumentNullException.ThrowIfNull(recipe);
+            return new MountedConditionalPayload<T>(scope, current, recipe);
+        }
+        catch (Exception error)
+        {
+            var errors = new List<Exception> { error };
+            try
+            {
+                scope.Dispose();
+            }
+            catch (Exception cleanup)
+            {
+                errors.Add(cleanup);
+            }
+            Composition.ThrowAll(errors, "Conditional payload factory failed.");
+            throw;
+        }
+    }
+}
+
+internal abstract class MountedConditionalPayload : IDisposable
+{
+    internal abstract Type ValueType { get; }
+    internal abstract ComponentRecipe Recipe { get; }
+    internal abstract void Stage(ConditionalPayload payload);
+    internal abstract void Notify();
+    public abstract void Dispose();
+}
+
+internal sealed class MountedConditionalPayload<T>(
+    ReactiveScope scope,
+    CurrentItem<T> current,
+    ComponentRecipe recipe
+) : MountedConditionalPayload
+{
+    internal override Type ValueType => typeof(T);
+    internal override ComponentRecipe Recipe { get; } = recipe;
+
+    internal override void Stage(ConditionalPayload payload)
+    {
+        if (payload is not ConditionalPayload<T> typed)
+            throw new InvalidOperationException(
+                "A retained conditional branch cannot change its current payload type."
+            );
+        current.Stage(typed.Value);
+    }
+
+    internal override void Notify() => current.Notify();
+
+    public override void Dispose() => scope.Dispose();
+}
 
 /// <summary>An immutable ordered group of content contributions.</summary>
 [CollectionBuilder(typeof(ComponentContent), nameof(Create))]

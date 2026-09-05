@@ -40,6 +40,10 @@ _Avoid_: Template, widget class, render function
 A typed capability that contributes zero or more retained components or structural regions below an existing component root. Immutable ordered `ComponentContent` groups content recipes transactionally; an ordinary component recipe converts safely to one content recipe.
 _Avoid_: Fragment element, child template, virtual children
 
+**Current item**:
+The latest payload associated with a mounted retained entry, available through a read-only capability. Replacing the payload preserves the entry's identity and local state; removing the entry ends that capability's lifetime.
+_Avoid_: Captured item, mutable row model, replacement component
+
 **Brush**:
 An immutable box-local visual value. The initial closed set is solid color and bounded linear gradient. A brush does not imply image layers, borders, clipping, opacity, or layout.
 _Avoid_: CSS background, renderer paint object, `IBrush`

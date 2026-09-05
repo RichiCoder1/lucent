@@ -179,6 +179,9 @@ style Panel { Padding: Insets.All(2); when Hover { Opacity: .5; } }
                 "count <= limit",
                 "count > 0 && limit < count",
                 "Check<int>()",
+                "selected.Value is { } detail",
+                "Helpers.Format(count) is { } detail",
+                "candidate is Pair { Left: Row left, Right: Row right }",
             }
         )
         {
@@ -2504,7 +2507,7 @@ public sealed class Eligibility
         );
         Assert(
             pattern.Success
-                && pattern.Source!.Contains("ConditionalChoice(1")
+                && pattern.Source!.Contains("ConditionalChoice.Create(1")
                 && pattern.Source.Contains("ConditionalChoice(2")
                 && pattern.Source.Contains("ThrowIfNull(required)"),
             "retained pattern branch or construction-time null guard did not lower."
@@ -2735,6 +2738,127 @@ public sealed class Eligibility
         Assert(
             parseSnapshotOne.CompilationGeneration != parseSnapshotTwo.CompilationGeneration,
             "same source with different actual parse defines did not invalidate freshness."
+        );
+    }
+
+    [TestMethod]
+    public void RetainedStructuralLocalsLowerToCurrentReaders()
+    {
+        const string api = """
+namespace Sample;
+using System;
+using Lucent.Core;
+public sealed record Row(int Id, string Title);
+public sealed record Pair(Row Left, Row Right);
+public sealed class Holder { public string item = "member"; }
+public static class TestComponents
+{
+    [LucentComponent]
+    public static ComponentRecipe Probe(
+        string snapshot,
+        Func<string> live,
+        string label,
+        string direct,
+        Func<Row, string> transform,
+        string member) => ComponentRecipe.Create("probe", static (_, _) => { });
+}
+""";
+        const string source = """
+namespace Sample;
+using System;
+using System.Collections.Generic;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static Sample.TestComponents;
+internal component Current(IEnumerable<Row> rows, IEnumerable<Style> styles, object? candidate, Holder holder) {
+    <Column>
+        foreach (var item in rows) keyed by item.Id {
+            <Probe snapshot={item.Title} live={() =>
+ item.Title} label={nameof(item.Title)} direct={nameof(item)} transform={item => item.Title} member={holder.item} />
+        }
+        foreach (var styleItem in styles) keyed by styleItem.GetHashCode() {
+            <Row style={styleItem with styleItem} />
+        }
+        if (candidate is Pair { Left: Row left, Right: Row right }) {
+            <Probe snapshot={left.Title + right.Title} live={() => left.Title + right.Title} label={nameof(left.Title)} direct={nameof(left)} transform={left => left.Title} member={holder.item} />
+        }
+    </Column>
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create(
+                "current-readers",
+                [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "70",
+                "current-readers",
+                new LuiDocumentIdentity("Current.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "current-reader lowering did not compile: "
+                + string.Join(
+                    " | ",
+                    result.Diagnostics.Select(item =>
+                        item.Id + "@" + item.Span.Start + ":" + item.Message
+                    )
+                )
+                + "\n"
+                + result.ProjectionSource
+        );
+        var generated = result.Source!;
+        Assert(
+            generated.Contains("item.Value.Title", StringComparison.Ordinal)
+                && generated.Contains("nameof(item.Value.Title)", StringComparison.Ordinal)
+                && generated.Contains("nameof(item)", StringComparison.Ordinal)
+                && generated.Contains("item => item.Title", StringComparison.Ordinal)
+                && generated.Contains("holder.item", StringComparison.Ordinal)
+                && generated.Contains(
+                    ".With(styleItem.Value).With(styleItem.Value)",
+                    StringComparison.Ordinal
+                )
+                && generated.Contains("ConditionalChoice.Create", StringComparison.Ordinal)
+                && generated.Contains("__luiLocal1_left().Title", StringComparison.Ordinal)
+                && generated.Contains("__luiLocal2_right().Title", StringComparison.Ordinal),
+            "structural locals, shadowing, nameof, or member names were rewritten incorrectly:\n"
+                + generated
+        );
+        var shadowed = LuiCompiler.Compile(
+            LuiParser.Parse(
+                "namespace Sample; using System.Collections.Generic; using Lucent.Core; using static Lucent.Core.Components; using static Sample.TestComponents; internal component Shadow(IEnumerable<Row> rows, object? candidate) { <Row>foreach (var item in rows) keyed by item.Id { <Probe snapshot={item.Title} live={() => candidate is Row item ? item.Title : string.Empty} label=\"x\" direct=\"x\" transform={value => value.Title} member=\"x\" /> }</Row> }"
+            ),
+            CSharpCompilation.Create(
+                "shadowed-current-reader",
+                [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "70",
+                "shadowed-current-reader",
+                new LuiDocumentIdentity("Shadow.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            !shadowed.Success && shadowed.Diagnostics.Any(item => item.Id == "LUI2010"),
+            "a nested pattern shadowing a retained local did not fail closed."
+        );
+        var liveItem = source.IndexOf(" item.Title}", StringComparison.Ordinal) + 1;
+        Assert(
+            result
+                .Map.FromSource(new LuiSpan(liveItem, "item".Length))
+                .Any(entry =>
+                    !entry.Hidden
+                    && generated.Substring(entry.Generated.Start, entry.Generated.Length) == "item"
+                ),
+            "rewritten foreach local lost its authored source map."
         );
     }
 
