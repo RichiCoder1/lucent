@@ -128,6 +128,7 @@ public static class TypographyProperties
 internal static class ProjectionProperties
 {
     internal static readonly Property<string?> Text = new("projection-text", null);
+    internal static readonly Property<string?> TextMeasure = new("projection-text-measure", null);
     internal static readonly Property<int?> TextSelectionStart = new(
         "projection-text-selection-start",
         null

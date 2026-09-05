@@ -1,0 +1,14 @@
+namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+style Fixture {
+    Width: 360;
+    Height: 120;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Start;
+}
+
+public component AutoSizedTextFieldFixtureView() {
+    <Column name="autosized.container" style={Fixture}>
+        <TextField name="autosized.field" label="Autosized field" />
+        <TextField name="autosized.other" label="Other field" />
+    </Column>
+}

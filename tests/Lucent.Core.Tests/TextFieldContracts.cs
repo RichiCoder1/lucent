@@ -405,6 +405,124 @@ public sealed class TextFieldContracts
     }
 
     [TestMethod]
+    public void EmptyAutoSizeSurvivesFocusEditAndBlurInRowsAndColumns()
+    {
+        foreach (var axis in new[] { LayoutAxis.Row, LayoutAxis.Column })
+        {
+            foreach (var scale in new[] { 1f, 1.25f })
+            {
+                var graph = new ReactiveGraph();
+                using var composition = new Composition(
+                    graph,
+                    "text-field-intrinsic-" + axis + "-" + scale
+                );
+                var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+                var rootStyle = Style
+                    .Empty.Set(LayoutProperties.Width, 200f)
+                    .Set(LayoutProperties.Height, 80f)
+                    .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start);
+                if (axis == LayoutAxis.Row)
+                    Controls.Row(composition.Root, theme, "root", rootStyle);
+                else
+                    Controls.Column(composition.Root, theme, "root", rootStyle);
+
+                var field = composition.Child(composition.Root, "auto-field");
+                var state = Controls.TextField(field, theme, "Search");
+                var explicitField = composition.Child(composition.Root, "explicit-field");
+                Controls.TextField(
+                    explicitField,
+                    theme,
+                    "Fixed",
+                    style: Style
+                        .Empty.Set(LayoutProperties.Width, 41f)
+                        .Set(LayoutProperties.Height, 19f)
+                );
+                var router = composition.Input;
+
+                RetainedScene Project()
+                {
+                    composition.Flush();
+                    var projected = SceneLayout.Project(
+                        composition,
+                        new(200, 80, scale),
+                        new MetricShaper()
+                    );
+                    if (!router.SetScene(projected))
+                    {
+                        composition.Flush();
+                        projected = SceneLayout.Project(
+                            composition,
+                            new(200, 80, scale),
+                            new MetricShaper()
+                        );
+                        Assert(router.SetScene(projected), "Text field scene did not converge.");
+                    }
+                    return projected;
+                }
+
+                var scene = Project();
+                var initial = scene.Boxes.Single(box => box.Identity.ElementId == field.Id).Bounds;
+                var explicitInitial = scene
+                    .Boxes.Single(box => box.Identity.ElementId == explicitField.Id)
+                    .Bounds;
+                Assert(
+                    initial.Width > 0 && initial.Height > 0,
+                    $"Empty {axis} text field had no placeholder-derived intrinsic size at {scale}x."
+                );
+                Assert(
+                    router
+                        .DispatchPointer(
+                            new(
+                                PointerCommandKind.Down,
+                                1,
+                                initial.X + 1,
+                                initial.Y + 1,
+                                PointerButton.Primary
+                            )
+                        )
+                        .Handled,
+                    $"Empty {axis} text field rejected focus at {scale}x."
+                );
+
+                scene = Project();
+                var focused = scene.Boxes.Single(box => box.Identity.ElementId == field.Id).Bounds;
+                Assert(
+                    focused == initial
+                        && field.Resolve(ProjectionProperties.Text).Value == ""
+                        && !Flatten(scene.Nodes)
+                            .OfType<TextSceneNode>()
+                            .Any(node => node.Identity.Element.ElementId == field.Id)
+                        && router.TryGetCaretGeometry(out var caret)
+                        && caret.X == focused.X
+                        && caret.Y == focused.Y
+                        && caret.Height == focused.Height,
+                    $"Focused empty {axis} text field changed size, painted its placeholder, or lost caret geometry at {scale}x."
+                );
+
+                state.Insert("x");
+                scene = Project();
+                Assert(
+                    scene.Boxes.Single(box => box.Identity.ElementId == field.Id).Bounds == initial,
+                    $"First edit changed the auto-sized {axis} text field at {scale}x."
+                );
+                state.Value = "";
+                Assert(
+                    router.MoveFocus(FocusTraversalDirection.Next),
+                    $"Auto-sized {axis} text field could not blur at {scale}x."
+                );
+                scene = Project();
+                Assert(
+                    scene.Boxes.Single(box => box.Identity.ElementId == field.Id).Bounds == initial
+                        && scene
+                            .Boxes.Single(box => box.Identity.ElementId == explicitField.Id)
+                            .Bounds == explicitInitial,
+                    $"Blur changed intrinsic or explicit {axis} text-field sizing at {scale}x."
+                );
+            }
+        }
+    }
+
+    [TestMethod]
     public void SetupRollback()
     {
         var graph = new ReactiveGraph();

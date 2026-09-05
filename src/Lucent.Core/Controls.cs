@@ -423,7 +423,9 @@ internal static class Controls
     {
         name = Required(name, nameof(name));
         TextFieldState.ValidateText(value);
-        var component = TextFieldStyle.Set(ProjectionProperties.Text, value);
+        var component = TextFieldStyle
+            .Set(ProjectionProperties.Text, value)
+            .Set(ProjectionProperties.TextMeasure, name);
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
         var state = new TextFieldState(element.Scope, element.Name + ".text", value);
         Configure(element, theme, component, style, new TextFieldBehavior(state, name));

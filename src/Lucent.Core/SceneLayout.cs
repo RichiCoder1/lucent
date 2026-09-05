@@ -73,15 +73,24 @@ public static class SceneLayout
     {
         var style = Read(element);
         var text = Shape(element, style, viewport.Scale, shaper, shapes);
+        var textMetrics = IntrinsicTextMetrics(style, text, viewport.Scale, shaper);
         var width = Constrain(
             style.Width
-                ?? (text is null ? allotted.Width : Finite(text.Width + style.Padding.Horizontal)),
+                ?? (
+                    textMetrics is null
+                        ? allotted.Width
+                        : Finite(textMetrics.Value.Width + style.Padding.Horizontal)
+                ),
             style.MinWidth,
             style.MaxWidth
         );
         var height = Constrain(
             style.Height
-                ?? (text is null ? allotted.Height : Finite(text.Height + style.Padding.Vertical)),
+                ?? (
+                    textMetrics is null
+                        ? allotted.Height
+                        : Finite(textMetrics.Value.Height + style.Padding.Vertical)
+                ),
             style.MinHeight,
             style.MaxHeight
         );
@@ -355,8 +364,9 @@ public static class SceneLayout
         Dictionary<long, ShapedText?> shapes
     )
     {
-        var width = text?.Width ?? 0f;
-        var height = text?.Height ?? 0f;
+        var textMetrics = IntrinsicTextMetrics(style, text, scale, shaper);
+        var width = textMetrics?.Width ?? 0f;
+        var height = textMetrics?.Height ?? 0f;
         if (element.Children.Count == 0)
             return Outer(
                 style,
@@ -430,8 +440,22 @@ public static class SceneLayout
             return cached;
         if (string.IsNullOrEmpty(style.Text))
             return null;
+        var shaped = ShapeText(style.Text, style, scale, shaper);
+        shapes.Add(element.Id, shaped);
+        return shaped;
+    }
+
+    private static ShapedText? ShapeText(
+        string? text,
+        Values style,
+        float scale,
+        ITextShaper shaper
+    )
+    {
+        if (string.IsNullOrEmpty(text))
+            return null;
         var request = new TextMeasureRequest(
-            style.Text,
+            text,
             style.FontFamily,
             style.FontSize,
             style.Language,
@@ -441,8 +465,26 @@ public static class SceneLayout
         request.Validate();
         var shaped = shaper.Shape(request);
         shaped.Validate(request);
-        shapes.Add(element.Id, shaped);
         return shaped;
+    }
+
+    private static (float Width, float Height)? IntrinsicTextMetrics(
+        Values style,
+        ShapedText? text,
+        float scale,
+        ITextShaper shaper
+    )
+    {
+        var measuredText =
+            style.TextMeasure == style.Text
+                ? text
+                : ShapeText(style.TextMeasure, style, scale, shaper);
+        if (text is null && measuredText is null)
+            return null;
+        return (
+            Math.Max(text?.Width ?? 0f, measuredText?.Width ?? 0f),
+            Math.Max(text?.Height ?? 0f, measuredText?.Height ?? 0f)
+        );
     }
 
     private static float Constrain(float value, float min, float max)
@@ -493,6 +535,7 @@ public static class SceneLayout
             element.Resolve(VisualProperties.Opacity).Value,
             element.Resolve(TypographyProperties.TextColor).Value,
             element.Resolve(ProjectionProperties.Text).Value,
+            element.Resolve(ProjectionProperties.TextMeasure).Value,
             element.Resolve(TypographyProperties.FontFamily).Value,
             element.Resolve(TypographyProperties.FontSize).Value,
             element.Resolve(TypographyProperties.Language).Value,
@@ -563,6 +606,7 @@ public static class SceneLayout
         float Opacity,
         Color TextColor,
         string? Text,
+        string? TextMeasure,
         string FontFamily,
         float FontSize,
         string Language,

@@ -138,14 +138,17 @@ function Invoke-DesktopTests([hashtable] $Published, [string] $TestFilter) {
     Invoke-Dotnet @('build', 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj', '--no-restore', '-c', $configuration)
     Assert-DiscoveredTests 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj'
     $priorApp = $env:LUCENT_DESKTOP_APP
+    $priorHost = $env:LUCENT_DESKTOP_HOST
     $priorOutput = $env:LUCENT_ACCESSIBILITY_OUTPUT
     try {
         $env:LUCENT_DESKTOP_APP = $Published.AppExe
+        $env:LUCENT_DESKTOP_HOST = $Published.HostExe
         $env:LUCENT_ACCESSIBILITY_OUTPUT = Reset-ArtifactDirectory 'artifacts/test/accessibility'
         Invoke-Dotnet @('test', '--project', 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj', '--no-build', '--no-restore', '-c', $configuration, '--filter', $TestFilter)
     }
     finally {
         $env:LUCENT_DESKTOP_APP = $priorApp
+        $env:LUCENT_DESKTOP_HOST = $priorHost
         $env:LUCENT_ACCESSIBILITY_OUTPUT = $priorOutput
     }
 }

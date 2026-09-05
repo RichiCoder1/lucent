@@ -11,6 +11,7 @@ internal static class Program
             ["--listener-proof"] => ListenerProof.Run(),
             ["--uia-fixture"] => UiaFixture.Run(),
             ["--virtualization-fixture"] => VirtualizationFixture.Run(),
+            ["--autosized-text-field-fixture"] => AutoSizedTextFieldFixture.Run(),
             _ => 2,
         };
 }
