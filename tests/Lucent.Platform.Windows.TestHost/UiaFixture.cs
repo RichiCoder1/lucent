@@ -14,7 +14,7 @@ internal static class UiaFixture
         {
             var graph = new ReactiveGraph();
             using var composition = Create(graph, out var theme);
-            return WindowsBootstrap.Run("Lucent Issue Browser", composition, theme);
+            return WindowsBootstrap.Run("Lucent UIA Fixture", composition, theme);
         }
         catch (Exception error)
         {
@@ -111,12 +111,37 @@ internal static class UiaFixture
             viewport,
             themeContext,
             "Scroll",
+            new ScrollOffset(0, 36f),
             style: Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 32f)
         );
         var content = composition.Child(viewport, "scroll-content");
         content.Present(
             themeContext,
             author: Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 128f)
+        );
+        var clippedBefore = composition.Child(content, "clipped-before");
+        clippedBefore.Present(
+            themeContext,
+            author: Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 24f)
+        );
+        var partlyClipped = composition.Child(content, "partly-clipped");
+        Controls.Text(
+            partlyClipped,
+            themeContext,
+            "Partly clipped",
+            Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 24f)
+        );
+        var clippedBetween = composition.Child(content, "clipped-between");
+        clippedBetween.Present(
+            themeContext,
+            author: Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 24f)
+        );
+        var fullyClipped = composition.Child(content, "fully-clipped");
+        Controls.Text(
+            fullyClipped,
+            themeContext,
+            "Fully clipped",
+            Style.Empty.Set(LayoutProperties.Width, 300f).Set(LayoutProperties.Height, 24f)
         );
         return composition;
     }

@@ -11,10 +11,20 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -ReferencedAssemblies @([System.Windows.Automation.AutomationElement].Assembly.Location, [System.Windows.Automation.AutomationProperty].Assembly.Location) -TypeDefinition @'
 using System;
 using System.Threading.Tasks;
+using System.Runtime.InteropServices;
 using System.Windows.Automation;
 
 public static class LucentUiaProof
 {
+    [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+    public static bool PreparePointLookup(IntPtr window)
+    {
+        ShowWindow(window, 5);
+        // Screen-point queries need an unobscured fixture, not keyboard activation.
+        // Change only this test-owned window; preserve its position and size.
+        return SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040);
+    }
     private static int focus, property, structure;
     private static string structureSource = "", structureType = "", structureRuntimeId = "";
     private static readonly AutomationFocusChangedEventHandler FocusHandler = (_, __) => focus++;
@@ -85,7 +95,7 @@ function Find-Node([hashtable] $nodes, [string] $name, [System.Windows.Automatio
 }
 function Invoke-Once([int] $run) {
     $stderr = Join-Path ([IO.Path]::GetTempPath()) ("lucent-uia-" + [Guid]::NewGuid() + ".stderr")
-    $process = Start-Process -FilePath $HostExe -ArgumentList $HostArguments -RedirectStandardError $stderr -PassThru
+    $process = Start-Process -FilePath $HostExe -ArgumentList $HostArguments -RedirectStandardError $stderr -WindowStyle Hidden -PassThru
     $guard = Start-Job -ArgumentList $PID, $process.Id, ($TimeoutSeconds + 15) -ScriptBlock {
         param($clientId, $hostId, $seconds)
         Start-Sleep -Seconds $seconds
@@ -99,11 +109,12 @@ function Invoke-Once([int] $run) {
         Assert-True ($handle -ne 0) 'Published UIA fixture did not expose an HWND.'
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
         Assert-True ($null -ne $root -and $root.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window) 'UIA did not attach to the published fixture root.'
+        Assert-True ($root.Current.Name -eq 'Lucent UIA Fixture') 'UIA root did not expose the hosted application title.'
         Assert-Patterns $root @([System.Windows.Automation.WindowPattern]::Pattern, [System.Windows.Automation.TransformPattern]::Pattern) 'root host'
-        1..3 | ForEach-Object { Assert-True (([System.Windows.Automation.AutomationElement]::FromHandle($handle)).Current.Name -eq 'Lucent Issue Browser') 'Repeated WM_GETOBJECT attach changed the root provider.' }
+        1..3 | ForEach-Object { Assert-True (([System.Windows.Automation.AutomationElement]::FromHandle($handle)).Current.Name -eq 'Lucent UIA Fixture') 'Repeated WM_GETOBJECT attach changed the root provider or application identity.' }
         $nodes = @{}
         foreach ($node in Get-Descendants $root) { $nodes[$node.Current.Name] = $node }
-        Assert-True ($nodes.Count -eq 11) "Fixture exposed $($nodes.Count) descendants rather than the frozen 11."
+        Assert-True ($nodes.Count -eq 13) "Fixture exposed $($nodes.Count) descendants rather than the expected 13."
         $group = Find-Node $nodes 'Controls' ([System.Windows.Automation.ControlType]::Group)
         $text = Find-Node $nodes 'Read only' ([System.Windows.Automation.ControlType]::Text)
         $edit = Find-Node $nodes 'Value' ([System.Windows.Automation.ControlType]::Edit)
@@ -115,10 +126,29 @@ function Invoke-Once([int] $run) {
         $retireIdentity = $retire.GetRuntimeId() -join ','
         $status = Find-Node $nodes 'Ready' ([System.Windows.Automation.ControlType]::StatusBar)
         $scroll = Find-Node $nodes 'Scroll' ([System.Windows.Automation.ControlType]::Pane)
+        $partlyClipped = Find-Node $nodes 'Partly clipped' ([System.Windows.Automation.ControlType]::Text)
+        $fullyClipped = Find-Node $nodes 'Fully clipped' ([System.Windows.Automation.ControlType]::Text)
         Assert-Patterns $group @() 'group'; Assert-Patterns $text @() 'text'; Assert-Patterns $edit @([System.Windows.Automation.ValuePattern]::Pattern) 'text field'
         Assert-Patterns $button @([System.Windows.Automation.InvokePattern]::Pattern) 'button'; Assert-Patterns $list @([System.Windows.Automation.SelectionPattern]::Pattern) 'list'
         Assert-Patterns $keep @([System.Windows.Automation.SelectionItemPattern]::Pattern) 'list item'; Assert-Patterns $status @() 'status'; Assert-Patterns $scroll @([System.Windows.Automation.ScrollPattern]::Pattern) 'scroll viewport'
         Assert-Patterns $disabledItem @([System.Windows.Automation.SelectionItemPattern]::Pattern) 'disabled list item'
+        Wait-Until { [LucentUiaProof]::PreparePointLookup($handle) } 'Fixture could not be shown above other windows for screen-point queries.'
+        $scrollBounds = $scroll.Current.BoundingRectangle
+        $partlyBounds = $partlyClipped.Current.BoundingRectangle
+        $fullyBounds = $fullyClipped.Current.BoundingRectangle
+        Assert-True ($partlyBounds.Top -lt $scrollBounds.Top -and $partlyBounds.Bottom -gt $scrollBounds.Top) 'Partly clipped fixture node did not cross the viewport clip boundary.'
+        Assert-True ($fullyBounds.Top -ge $scrollBounds.Bottom) 'Fully clipped fixture node remained inside the viewport clip boundary.'
+        $partlyIdentity = $partlyClipped.GetRuntimeId() -join ','
+        $fullyIdentity = $fullyClipped.GetRuntimeId() -join ','
+        $visiblePoint = [System.Windows.Point]::new([Math]::Max($scrollBounds.Left, $partlyBounds.Left) + 1, $scrollBounds.Top + 1)
+        $visibleHit = [System.Windows.Automation.AutomationElement]::FromPoint($visiblePoint)
+        Assert-True ($null -ne $visibleHit -and ($visibleHit.GetRuntimeId() -join ',') -eq $partlyIdentity) "Point lookup did not return the partly clipped child inside its visible intersection: hit=$($visibleHit.Current.Name), hitProcess=$($visibleHit.Current.ProcessId), expectedProcess=$($process.Id), type=$($visibleHit.Current.ControlType.ProgrammaticName), point=$visiblePoint, viewport=$scrollBounds, child=$partlyBounds."
+        $partlyOutsidePoint = [System.Windows.Point]::new([Math]::Max($scrollBounds.Left, $partlyBounds.Left) + 1, $partlyBounds.Top + (($scrollBounds.Top - $partlyBounds.Top) / 2))
+        $partlyOutsideHit = [System.Windows.Automation.AutomationElement]::FromPoint($partlyOutsidePoint)
+        Assert-True ($null -eq $partlyOutsideHit -or ($partlyOutsideHit.GetRuntimeId() -join ',') -ne $partlyIdentity) 'Point lookup returned the partly clipped child from outside its ancestor clip.'
+        $fullyOutsidePoint = [System.Windows.Point]::new($fullyBounds.Left + 1, $fullyBounds.Top + 1)
+        $fullyOutsideHit = [System.Windows.Automation.AutomationElement]::FromPoint($fullyOutsidePoint)
+        Assert-True ($null -eq $fullyOutsideHit -or ($fullyOutsideHit.GetRuntimeId() -join ',') -ne $fullyIdentity) 'Point lookup returned a fully clipped child.'
     $identity = $edit.GetRuntimeId() -join ','
     $null = [LucentUiaProof]::ReadName($edit, 5000)
     Assert-True ($identity -eq ($edit.GetRuntimeId() -join ',')) 'Runtime ID was not stable across cross-thread reads.'
@@ -170,6 +200,10 @@ function Invoke-Once([int] $run) {
         finally { [LucentUiaProof]::Stop($root) }
         [pscustomobject]@{ run = $run; runtimeId = $identity; descendants = $nodes.Count; focusEvents = [LucentUiaProof]::Focus; propertyEvents = [LucentUiaProof]::Property; structureEvents = [LucentUiaProof]::Structure }
     }
+    catch {
+        Write-Warning ("UIA proof failed before cleanup: " + $_.Exception.Message)
+        throw
+    }
     finally {
         Stop-Job $guard -ErrorAction SilentlyContinue; Remove-Job $guard -Force -ErrorAction SilentlyContinue
         if (-not $process.HasExited) { $process.CloseMainWindow() | Out-Null; if (-not $process.WaitForExit(5000)) { $process.Kill(); $null = $process.WaitForExit(5000) } }
@@ -180,7 +214,7 @@ function Invoke-Once([int] $run) {
         Assert-True ($stderrLines.Count -eq 1 -and $stderrLines[0].StartsWith('Lucent UIA diagnostics: ', [StringComparison]::Ordinal)) "Unexpected host stderr: $($stderrTrace.TrimEnd())"
         $line = $stderrLines[0]
         Assert-True ($line -match 'cache=(\d+) maxCache=(\d+) stale=(\d+) root=(\d+) listenerFailure=(\d+) timeout=(\d+)') 'UIA diagnostics omitted cache/lifetime evidence.'
-        Assert-True ([int]$Matches[1] -eq 10 -and [int]$Matches[2] -eq 11 -and [int]$Matches[3] -eq 1 -and [int]$Matches[4] -ge 4 -and [int]$Matches[5] -eq 0 -and [int]$Matches[6] -eq 0) "UIA diagnostics failed bounds/lifetime checks: $line"
+        Assert-True ([int]$Matches[1] -eq 12 -and [int]$Matches[2] -eq 13 -and [int]$Matches[3] -eq 1 -and [int]$Matches[4] -ge 4 -and [int]$Matches[5] -eq 0 -and [int]$Matches[6] -eq 0) "UIA diagnostics failed bounds/lifetime checks: $line"
     }
 }
 

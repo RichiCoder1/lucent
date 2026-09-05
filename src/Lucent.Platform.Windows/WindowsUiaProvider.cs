@@ -21,6 +21,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         VtUnknown = 13;
     private static readonly UiaWrappers Wrappers = new();
     private readonly nint _hwnd;
+    private readonly string _applicationName;
     private readonly Composition _composition;
     private readonly WindowsUiaDispatcher _dispatcher;
     private readonly WindowsUiaProvider _root;
@@ -31,9 +32,16 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         _simple;
     private int _disposed;
 
-    internal WindowsUiaProvider(nint hwnd, Composition composition, WindowsUiaDispatcher dispatcher)
+    internal WindowsUiaProvider(
+        nint hwnd,
+        Composition composition,
+        WindowsUiaDispatcher dispatcher,
+        string applicationName
+    )
     {
         ArgumentOutOfRangeException.ThrowIfZero(hwnd, nameof(hwnd));
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
+        _applicationName = applicationName;
         _hwnd = hwnd;
         _composition = composition ?? throw new ArgumentNullException(nameof(composition));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
@@ -46,6 +54,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     private WindowsUiaProvider(WindowsUiaProvider root, NodeKey key)
     {
         _hwnd = root._hwnd;
+        _applicationName = root._applicationName;
         _composition = root._composition;
         _dispatcher = root._dispatcher;
         _root = root;
@@ -181,6 +190,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             box => new NodeKey(box.Identity.CompositionEpoch, box.Identity.ElementId),
             box => box.Bounds
         );
+        var input = scene.Input.ToDictionary(item => item.Identity);
         var ordinal = 0L;
         foreach (var node in Flatten(root, null))
             yield return node;
@@ -205,12 +215,41 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 snapshot.Selected,
                 snapshot.Actions,
                 bounds.GetValueOrDefault(key),
+                PointBounds(new(key.Epoch, key.Element), bounds.GetValueOrDefault(key), input),
                 scroll
             );
             foreach (var child in snapshot.Children)
             foreach (var node in Flatten(child, key))
                 yield return node;
         }
+    }
+
+    // Use structural input ancestry: semantic parents can omit a clipping presentation element.
+    // Keep full layout bounds for UIA geometry; point lookup uses the clipped intersection only.
+    private static LayoutRect PointBounds(
+        ElementIdentity identity,
+        LayoutRect bounds,
+        Dictionary<ElementIdentity, RetainedInputElement> input
+    )
+    {
+        if (!input.TryGetValue(identity, out var current))
+            return default;
+        while (current.Parent is { } parent)
+        {
+            if (!input.TryGetValue(parent, out current))
+                return default;
+            if (current.ChildClipBounds is not { } clip)
+                continue;
+            var x = Math.Max(bounds.X, clip.X);
+            var y = Math.Max(bounds.Y, clip.Y);
+            bounds = new(
+                x,
+                y,
+                Math.Max(0, Math.Min(bounds.X + bounds.Width, clip.X + clip.Width) - x),
+                Math.Max(0, Math.Min(bounds.Y + bounds.Height, clip.Y + clip.Height) - y)
+            );
+        }
+        return bounds;
     }
 
     private bool Try<T>(string callback, Func<T> action, out T value) =>
@@ -317,7 +356,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             if (id == 30003)
                 I4(value, 50032);
             else if (id == 30005)
-                Bstr(value, "Lucent Issue Browser");
+                Bstr(value, _applicationName);
             else if (id == 30010 || id == 30016 || id == 30017)
                 Bool(value, true);
             else if (id == 30011)
@@ -538,10 +577,10 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         var scale = GetDpiForWindow(_hwnd) / 96d;
         var node = CurrentSnapshot()
             .Nodes.Values.Where(node =>
-                x >= point.X + node.Bounds.X * scale
-                && y >= point.Y + node.Bounds.Y * scale
-                && x < point.X + (node.Bounds.X + node.Bounds.Width) * scale
-                && y < point.Y + (node.Bounds.Y + node.Bounds.Height) * scale
+                x >= point.X + node.PointBounds.X * scale
+                && y >= point.Y + node.PointBounds.Y * scale
+                && x < point.X + (node.PointBounds.X + node.PointBounds.Width) * scale
+                && y < point.Y + (node.PointBounds.Y + node.PointBounds.Height) * scale
             )
             .OrderBy(node => node.Ordinal)
             .LastOrDefault();
@@ -868,6 +907,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         bool Selected,
         SemanticAction Actions,
         LayoutRect Bounds,
+        LayoutRect PointBounds,
         SemanticScrollState? Scroll
     );
 

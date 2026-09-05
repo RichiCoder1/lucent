@@ -492,7 +492,12 @@ public sealed class PlatformContracts
                 "uia-snapshot"
             );
             using var dispatcher = new WindowsUiaDispatcher();
-            using var provider = new WindowsUiaProvider(hwnd, composition, dispatcher);
+            using var provider = new WindowsUiaProvider(
+                hwnd,
+                composition,
+                dispatcher,
+                "Lucent UIA contract"
+            );
             if (provider.ScrollPercent(-1, 101) != unchecked((int)0x80070057))
                 throw new InvalidOperationException(
                     "Invalid UIA scroll percent did not return E_INVALIDARG at the provider boundary."

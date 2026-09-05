@@ -38,7 +38,12 @@ public sealed unsafe partial class UiaLifecycleContracts
         using var probe = new SubclassProbe(hwnd);
         using var composition = new Composition(new ReactiveGraph(), "uia-lifecycle");
         using var dispatcher = new WindowsUiaDispatcher();
-        using var provider = new WindowsUiaProvider(hwnd, composition, dispatcher);
+        using var provider = new WindowsUiaProvider(
+            hwnd,
+            composition,
+            dispatcher,
+            "Lucent UIA contract"
+        );
         using var listener = new WindowsUiaListener(hwnd, provider);
         var simple = AddRef(provider.InterfacePointer);
         var fragment = Query(simple, UiaWrappers.Fragment);
@@ -81,7 +86,12 @@ public sealed unsafe partial class UiaLifecycleContracts
             using var probe = new SubclassProbe(hwnd);
             using var composition = new Composition(new ReactiveGraph(), "uia-remove");
             using var dispatcher = new WindowsUiaDispatcher();
-            using var provider = new WindowsUiaProvider(hwnd, composition, dispatcher);
+            using var provider = new WindowsUiaProvider(
+                hwnd,
+                composition,
+                dispatcher,
+                "Lucent UIA contract"
+            );
             using var listener = new WindowsUiaListener(hwnd, provider);
             listener.Dispose();
             _ = SendMessage(hwnd, WmGetObject, 0, UiaRootObjectId);

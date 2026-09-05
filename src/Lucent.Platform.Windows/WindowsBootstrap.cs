@@ -27,7 +27,7 @@ public static class WindowsBootstrap
     private const int InstallAttempts = 3;
 
     /// <summary>Creates the Windows host, runs frames until the window closes, and performs ordered teardown.</summary>
-    /// <param name="title">Nonblank title shown in the SDL-created top-level window.</param>
+    /// <param name="title">Nonblank title shown in the SDL-created top-level window and exposed as its accessible name.</param>
     /// <param name="composition">Composition to project, present, route input to, and expose through UI Automation.</param>
     /// <param name="theme">Optional theme context whose settings are initialized and refreshed from Windows.</param>
     /// <returns>Zero after the host observes a normal close or quit event.</returns>
@@ -78,7 +78,7 @@ public static class WindowsBootstrap
                 throw new InvalidOperationException("SDL window did not expose an HWND.");
 
             using var uiaDispatcher = new WindowsUiaDispatcher();
-            using var uiaProvider = new WindowsUiaProvider(hwnd, composition, uiaDispatcher);
+            using var uiaProvider = new WindowsUiaProvider(hwnd, composition, uiaDispatcher, title);
             using var uiaListener = new WindowsUiaListener(hwnd, uiaProvider);
             using var presenter = new CpuSkiaPresenter(sdlRenderer);
             using var sceneRenderer = new SkiaSceneRenderer();
