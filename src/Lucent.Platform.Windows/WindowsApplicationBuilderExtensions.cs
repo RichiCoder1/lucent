@@ -18,7 +18,6 @@ public static class WindowsApplicationBuilderExtensions
 
         private WindowsApplicationHost() { }
 
-        public int Run(string title, Composition composition, ThemeContext theme) =>
-            WindowsBootstrap.Run(title, composition, theme);
+        public int Run(ApplicationSession session) => WindowsBootstrap.Run(session);
     }
 }

@@ -1634,9 +1634,12 @@ public sealed class IssueBrowserTests
         internal bool ObservedApplicationRoot { get; private set; }
         internal bool CompositionDisposed => _composition?.IsDisposed == true;
 
-        public int Run(string title, Composition composition, ThemeContext theme)
+        public int Run(ApplicationSession session)
         {
-            Title = title;
+            session.Start();
+            var composition = session.Composition;
+            var theme = session.Theme;
+            Title = session.Title;
             _composition = composition;
 
             var applicationRoot = composition.Root.Children.Single();
@@ -1649,6 +1652,9 @@ public sealed class IssueBrowserTests
                 && applicationRoot.Resolve(LayoutProperties.MainGrow).Value == 1f
                 && applicationRoot.Children.Single().Name == "Issue Browser"
                 && theme.Theme.Name == ControlThemes.Light.Name;
+            session.RequestClose();
+            session.ProcessEvents();
+            Assert(session.IsCompleted, "The application lifecycle did not complete.");
             return 23;
         }
     }

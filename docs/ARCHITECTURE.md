@@ -72,9 +72,13 @@ The canonical C# authoring interface uses reusable `ComponentRecipe` values for 
 
 ### Application lifecycle
 
-Applications use `LucentApplication.CreateBuilder()` to snapshot a title, appearance-oriented theme factory, and explicit platform host. `Build()` allocates no runtime state. A built application is one-shot: `Run(ComponentRecipe)` creates exactly one reactive graph, composition, and theme context, mounts the recipe, synchronously delegates to `IApplicationHost`, then releases the composition before returning or propagating failures. If hosting and cleanup both fail, both errors remain observable.
+Applications use `LucentApplication.CreateBuilder()` to snapshot a title, appearance-oriented theme factory, and explicit platform host. `Build()` allocates no runtime state. A built application is one-shot: `Run(ComponentRecipe)` uses the service-free lifecycle, while `Run(IApplicationLifecycle)` starts services and constructs the root asynchronously through an owner-thread `ApplicationSession`.
 
-Core defines the portable host boundary without discovering a platform. The Windows adapter is selected explicitly with `UseWindows()` and delegates the caller-owned composition and theme to the Windows host. Platform settings update `ThemeContext.Appearance` and `ReducedMotion`; the application lifecycle is the sole writer that maps appearance to the effective theme.
+The session keeps asynchronous startup, close preparation, service stop and cleanup on the desktop event loop. A declined or failed preparation leaves the window and composition alive for recovery; repeated requests coalesce. Once preparation accepts close, stop and cleanup are terminal. Core disposes the composition before lifecycle resources, and failures remain observable across independently attempted cleanup stages. Accepted saves must be drained by the application service before acceptance; they are separate from cancellation of obsolete scope-owned reads.
+
+Core defines the portable host boundary without discovering a platform. The Windows adapter is selected explicitly with `UseWindows()` and pumps session continuations through the same wake transport as reactive work, even while minimized. Platform settings update `ThemeContext.Appearance` and `ReducedMotion`; the application lifecycle maps appearance to the effective theme.
+
+Optional `Lucent.Hosting` references Core and Microsoft's Generic Host, independently of Windows. It owns one application DI scope, starts/stops hosted services, and resolves typed models at the application composition root. `.lui` components receive those models as parameters; there are no per-element DI scopes. [ADR 0003](adr/0003-application-services-and-shutdown.md) records recovery, service ownership and Microsoft container disposal boundaries.
 
 ### Styles and behaviors
 

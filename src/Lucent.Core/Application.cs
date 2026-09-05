@@ -1,16 +1,14 @@
+using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 
 namespace Lucent.Core;
 
-/// <summary>A platform adapter that runs one caller-owned Lucent composition and theme.</summary>
+/// <summary>A platform adapter that runs one caller-owned Lucent application session.</summary>
 public interface IApplicationHost
 {
-    /// <summary>Runs the host synchronously until the application exits.</summary>
-    /// <param name="title">The nonblank title for the application's top-level window.</param>
-    /// <param name="composition">The caller-owned composition to present.</param>
-    /// <param name="theme">The caller-owned theme context to synchronize with platform settings.</param>
+    /// <summary>Runs the host synchronously until the application session completes.</summary>
     /// <returns>The process exit code selected by the host.</returns>
-    int Run(string title, Composition composition, ThemeContext theme);
+    int Run(ApplicationSession session);
 }
 
 /// <summary>Collects reusable configuration snapshots for <see cref="LucentApplication"/>.</summary>
@@ -61,7 +59,7 @@ public sealed class LucentApplicationBuilder
         : ControlThemes.Light;
 }
 
-/// <summary>Owns the portable lifecycle for one Lucent component recipe.</summary>
+/// <summary>Owns the portable lifecycle for one Lucent application session.</summary>
 public sealed class LucentApplication
 {
     private readonly string _title;
@@ -83,23 +81,25 @@ public sealed class LucentApplication
     /// <summary>Creates a reusable application builder with the title "Lucent" and standard control themes.</summary>
     public static LucentApplicationBuilder CreateBuilder() => new();
 
-    /// <summary>Creates, mounts, hosts, and deterministically releases one component graph.</summary>
-    /// <param name="root">The stable root component recipe to mount.</param>
-    /// <returns>The exit code returned by the configured host.</returns>
-    /// <exception cref="InvalidOperationException">This application instance has already run.</exception>
+    /// <summary>Runs one fixed component recipe through the configured host.</summary>
     public int Run(ComponentRecipe root)
     {
         ArgumentNullException.ThrowIfNull(root);
+        return Run(new RecipeLifecycle(root));
+    }
+
+    /// <summary>Runs one asynchronous lifecycle through the configured host and deterministic cleanup.</summary>
+    public int Run(IApplicationLifecycle lifecycle)
+    {
+        ArgumentNullException.ThrowIfNull(lifecycle);
         if (Interlocked.Exchange(ref _started, 1) != 0)
             throw new InvalidOperationException("A built application can run only once.");
 
-        Composition? composition = null;
-        var errors = new List<Exception>();
-        var exitCode = 0;
+        var graph = new ReactiveGraph();
+        var composition = new Composition(graph, "application");
+        ApplicationSession? session = null;
         try
         {
-            var graph = new ReactiveGraph();
-            composition = new Composition(graph, "application");
             var initialAppearance = ThemeAppearance.Light;
             var theme = new ThemeContext(
                 composition.Root.Scope,
@@ -119,28 +119,123 @@ public sealed class LucentApplication
                 },
                 "application-theme"
             );
-            _ = composition.Mount(composition.Root, theme, root);
-            exitCode = _host.Run(_title, composition, theme);
+            session = new ApplicationSession(_title, composition, theme, lifecycle);
         }
-        catch (Exception exception)
+        catch (Exception error)
         {
-            errors.Add(exception);
+            var errors = new List<Exception> { error };
+            CleanupWithoutSession(lifecycle, composition, errors);
+            ThrowAll(errors);
         }
 
-        if (composition is not null)
+        var exitCode = 0;
+        Exception? hostError = null;
+        try
         {
+            exitCode = _host.Run(session!);
+        }
+        catch (Exception error)
+        {
+            hostError = error;
+        }
+
+        session!.Abort(hostError);
+        PumpToCompletion(session);
+        if (session.Failure is { } failure)
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        return exitCode;
+    }
+
+    private static void PumpToCompletion(ApplicationSession session)
+    {
+        using var available = new AutoResetEvent(false);
+        void Wake() => available.Set();
+        session.WorkAvailable += Wake;
+        try
+        {
+            while (!session.IsCompleted)
+            {
+                session.ProcessEvents();
+                if (!session.Composition.IsDisposed)
+                    session.Composition.Flush();
+                if (!session.IsCompleted)
+                    available.WaitOne();
+            }
+        }
+        catch (Exception error)
+        {
+            session.Abort(error);
+            while (!session.IsCompleted)
+            {
+                try
+                {
+                    session.ProcessEvents();
+                    if (!session.Composition.IsDisposed)
+                        session.Composition.Flush();
+                }
+                catch (Exception additional)
+                {
+                    session.Abort(additional);
+                }
+                if (!session.IsCompleted)
+                    available.WaitOne();
+            }
+        }
+        finally
+        {
+            session.WorkAvailable -= Wake;
+        }
+    }
+
+    private static void CleanupWithoutSession(
+        IApplicationLifecycle lifecycle,
+        Composition composition,
+        List<Exception> errors
+    ) =>
+        Pump(async () =>
+        {
+            try
+            {
+                await lifecycle.StopAsync();
+            }
+            catch (Exception error)
+            {
+                errors.Add(error);
+            }
             try
             {
                 composition.Dispose();
             }
-            catch (Exception exception)
+            catch (Exception error)
             {
-                errors.Add(exception);
+                errors.Add(error);
             }
-        }
+            try
+            {
+                await lifecycle.DisposeAsync();
+            }
+            catch (Exception error)
+            {
+                errors.Add(error);
+            }
+        });
 
-        ThrowAll(errors);
-        return exitCode;
+    private static void Pump(Func<Task> operation)
+    {
+        var prior = SynchronizationContext.Current;
+        using var context = new CleanupSynchronizationContext();
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(context);
+            var task = operation();
+            while (!task.IsCompleted)
+                context.RunOne();
+            task.GetAwaiter().GetResult();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(prior);
+        }
     }
 
     private static Theme RequireTheme(Theme? theme) =>
@@ -154,5 +249,42 @@ public sealed class LucentApplication
         if (errors.Count == 1)
             ExceptionDispatchInfo.Capture(errors[0]).Throw();
         throw new AggregateException("Application run and cleanup failed.", errors);
+    }
+
+    private sealed class CleanupSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly ConcurrentQueue<(SendOrPostCallback Callback, object? State)> _queue = [];
+        private readonly AutoResetEvent _available = new(false);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            ArgumentNullException.ThrowIfNull(d);
+            _queue.Enqueue((d, state));
+            _available.Set();
+        }
+
+        internal void RunOne()
+        {
+            (SendOrPostCallback Callback, object? State) work;
+            while (!_queue.TryDequeue(out work))
+            {
+                _available.WaitOne();
+            }
+            work.Callback(work.State);
+        }
+
+        public void Dispose() => _available.Dispose();
+    }
+
+    private sealed class RecipeLifecycle(ComponentRecipe recipe) : IApplicationLifecycle
+    {
+        public ValueTask<ComponentRecipe> StartAsync(ApplicationSession session) =>
+            ValueTask.FromResult(recipe);
+
+        public ValueTask<bool> PrepareCloseAsync() => ValueTask.FromResult(true);
+
+        public ValueTask StopAsync() => ValueTask.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

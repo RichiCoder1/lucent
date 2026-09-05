@@ -12,6 +12,13 @@ internal static class Program
             ["--uia-fixture"] => UiaFixture.Run(),
             ["--virtualization-fixture"] => VirtualizationFixture.Run(),
             ["--autosized-text-field-fixture"] => AutoSizedTextFieldFixture.Run(),
+            ["--lifecycle-fixture"] => LifecycleFixture.Run(LifecycleFixtureMode.Normal),
+            ["--lifecycle-startup-failure"] => LifecycleFixture.Run(
+                LifecycleFixtureMode.StartupFailure
+            ),
+            ["--lifecycle-cleanup-failure"] => LifecycleFixture.Run(
+                LifecycleFixtureMode.CleanupFailure
+            ),
             _ => 2,
         };
 }

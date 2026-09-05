@@ -40,6 +40,14 @@ _Avoid_: Template, widget class, render function
 A typed capability that contributes zero or more retained components or structural regions below an existing component root. Immutable ordered `ComponentContent` groups content recipes transactionally; an ordinary component recipe converts safely to one content recipe.
 _Avoid_: Fragment element, child template, virtual children
 
+**Application session**:
+The one-run owner of an application's startup, visible composition, close negotiation and final cleanup.
+_Avoid_: Window scope, global service locator
+
+**Close preparation**:
+The retryable decision to stop accepting work and finish accepted operations before terminal application shutdown. A declined or failed preparation leaves the application available for recovery.
+_Avoid_: Force close, service stop
+
 **Default content**:
 The single explicitly marked component parameter that receives its unnamed element body. Its type determines whether the body supplies one scalar value or an ordered group of content recipes; its name does not determine its role.
 _Avoid_: Magic content parameter, implicit slot

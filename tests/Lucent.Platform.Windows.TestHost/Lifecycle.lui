@@ -1,0 +1,20 @@
+namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+style LifecycleFixtureStyle {
+    Width: 420;
+    Height: 180;
+    Spacing: 12;
+    CrossAlignment: LayoutAlignment.Start;
+}
+
+style LifecycleRetryStyle {
+    Width: 140;
+    Height: 34;
+}
+
+public component LifecycleFixtureView(LifecycleFixtureModel model) {
+    <Column name="lifecycle.container" style={LifecycleFixtureStyle}>
+        <Text>Hosted lifecycle</Text>
+        <Status name="lifecycle.status" content={() => model.Status} />
+        <Button name="lifecycle.retry" onInvoke={model.Retry} style={LifecycleRetryStyle}>Retry close</Button>
+    </Column>
+}

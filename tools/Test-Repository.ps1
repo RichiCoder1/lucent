@@ -15,6 +15,7 @@ if (-not (Test-Path $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $configuration = 'Release'
 $managedProjects = @(
     'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj',
+    'tests/Lucent.Hosting.Tests/Lucent.Hosting.Tests.csproj',
     'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj',
     'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj',
     'tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj',
@@ -116,6 +117,8 @@ function Invoke-Published {
     if ($LASTEXITCODE) { throw 'Negative publish inventory proof failed.' }
     & (Join-Path $PSScriptRoot 'Test-PublishedIssueBrowser.ps1') -PublishDirectory $published.AppDirectory
     if ($LASTEXITCODE) { throw 'Published Issue Browser proof failed.' }
+    & (Join-Path $PSScriptRoot 'Test-WindowsLifecycle.ps1') -Executable $published.HostExe
+    if ($LASTEXITCODE) { throw 'Windows application lifecycle proof failed.' }
     & (Join-Path $PSScriptRoot 'Test-WindowsSettingsListener.ps1') -Executable $published.HostExe
     if ($LASTEXITCODE) { throw 'Windows settings listener proof failed.' }
     Invoke-DesktopTests $published 'FullyQualifiedName~FlaUi'

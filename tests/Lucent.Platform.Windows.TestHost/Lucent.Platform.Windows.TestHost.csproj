@@ -3,6 +3,7 @@
   <ItemGroup>
     <Using Include="Lucent.Core" />
     <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
+    <ProjectReference Include="../../src/Lucent.Hosting/Lucent.Hosting.csproj" />
     <ProjectReference Include="../../src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
     <ProjectReference Include="../../src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
     <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />

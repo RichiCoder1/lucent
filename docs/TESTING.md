@@ -36,6 +36,8 @@ The affected-file helper includes relevant downstream suites and falls back to a
 
 Tooling measurements use [LuiTooling.Measurements.json](../tools/LuiTooling.Measurements.json). Results distinguish whole-corpus timings from completion, diagnostics, and rename operation timings. Builds happen before measurement; timing limits are optional configuration, not a frozen milestone baseline.
 
+The published suite includes `Test-WindowsLifecycle.ps1`: a `.lui` application with controlled pending work verifies close rejection/retry, accepted-work drain, asynchronous service cleanup, and startup/stop/disposal failure paths through the real Windows host. `Lucent.Hosting.Tests` covers the portable Microsoft hosting adapter.
+
 Desktop interaction checks require an interactive Windows session. They launch and close their own application processes. Keep desktop checks separate from unrelated work that changes focus or input.
 
 ## Desktop and accessibility coverage

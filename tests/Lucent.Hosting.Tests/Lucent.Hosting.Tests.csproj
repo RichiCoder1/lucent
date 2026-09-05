@@ -1,0 +1,4 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup><RuntimeIdentifiers>win-x64</RuntimeIdentifiers><PublishAot>true</PublishAot><PublishTrimmed>true</PublishTrimmed></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/Lucent.Hosting/Lucent.Hosting.csproj" /></ItemGroup>
+</Project>

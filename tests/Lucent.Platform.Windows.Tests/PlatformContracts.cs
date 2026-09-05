@@ -517,6 +517,106 @@ public sealed class PlatformContracts
     }
 
     [TestMethod]
+    public void ApplicationSessionWakeContract()
+    {
+        if (!SDL3.SDL.Init(SDL3.SDL.InitFlags.Video))
+            throw new InvalidOperationException("SDL_Init(session wake): " + SDL3.SDL.GetError());
+        try
+        {
+            var graph = new ReactiveGraph();
+            var composition = new Composition(graph, "session-wake");
+            var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            var lifecycle = new SessionLifecycle(Environment.CurrentManagedThreadId);
+            var session = new ApplicationSession("Session wake", composition, theme, lifecycle);
+            var pushes = 0;
+            using var dispatcher = new WindowsWorkDispatcher(
+                session,
+                (ref SDL3.SDL.Event _) =>
+                {
+                    Interlocked.Increment(ref pushes);
+                    return true;
+                }
+            );
+            var priorContext = SynchronizationContext.Current;
+
+            session.Start();
+            if (
+                SynchronizationContext.Current != priorContext
+                || session.Status.Phase != ApplicationPhase.Starting
+            )
+                throw new InvalidOperationException(
+                    "Session startup did not restore the caller context or remain pending."
+                );
+
+            Task.Run(() =>
+                    lifecycle.Started.SetResult(
+                        ComponentRecipe.Create("session-root", (_, _) => { })
+                    )
+                )
+                .GetAwaiter()
+                .GetResult();
+            if (pushes != 1)
+                throw new InvalidOperationException(
+                    "An asynchronous session continuation did not schedule one SDL wake."
+                );
+            var startupFrames = 0;
+            for (
+                var attempt = 0;
+                attempt < 4 && session.Status.Phase == ApplicationPhase.Starting;
+                attempt++
+            )
+                if (dispatcher.Process())
+                    startupFrames++;
+            if (
+                lifecycle.StartThread != Environment.CurrentManagedThreadId
+                || lifecycle.ResumeThread != Environment.CurrentManagedThreadId
+                || !lifecycle.StartContextInstalled
+                || !lifecycle.ResumeContextInstalled
+                || SynchronizationContext.Current != priorContext
+                || startupFrames == 0
+                || session.Status.Phase != ApplicationPhase.Running
+                || composition.Root.Children.Count != 1
+            )
+                throw new InvalidOperationException(
+                    "Session startup did not resume, mount, and restore context on the SDL owner thread."
+                );
+
+            var beforeCloseWakes = pushes;
+            Task.Run(session.RequestClose).GetAwaiter().GetResult();
+            if (
+                pushes != beforeCloseWakes + 1
+                || dispatcher.Process()
+                || session.IsCompleted
+                || !composition.IsDisposed
+            )
+                throw new InvalidOperationException(
+                    "Accepted session close did not keep pumping while asynchronous disposal remained pending."
+                );
+
+            var beforeDisposeWakes = pushes;
+            Task.Run(() => lifecycle.Disposed.SetResult()).GetAwaiter().GetResult();
+            for (var attempt = 0; attempt < 6 && !session.IsCompleted; attempt++)
+                if (dispatcher.Process())
+                    throw new InvalidOperationException(
+                        "Disposed composition requested a frame while finishing session disposal."
+                    );
+            if (!session.IsCompleted || pushes <= beforeDisposeWakes)
+                throw new InvalidOperationException(
+                    "Asynchronous session disposal did not wake and complete on the SDL owner thread."
+                );
+            _ = dispatcher.Process();
+            if (SynchronizationContext.Current != priorContext)
+                throw new InvalidOperationException(
+                    "Session shutdown did not restore the caller synchronization context."
+                );
+        }
+        finally
+        {
+            SDL3.SDL.Quit();
+        }
+    }
+
+    [TestMethod]
     public void ReactiveWakeContract()
     {
         if (!SDL3.SDL.Init(SDL3.SDL.InitFlags.Video))
@@ -664,6 +764,42 @@ public sealed class PlatformContracts
         finally
         {
             SDL3.SDL.Quit();
+        }
+    }
+
+    private sealed class SessionLifecycle(int ownerThread) : IApplicationLifecycle
+    {
+        internal TaskCompletionSource<ComponentRecipe> Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Disposed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal int StartThread { get; private set; }
+        internal int ResumeThread { get; private set; }
+        internal bool StartContextInstalled { get; private set; }
+        internal bool ResumeContextInstalled { get; private set; }
+
+        public async ValueTask<ComponentRecipe> StartAsync(ApplicationSession session)
+        {
+            StartThread = Environment.CurrentManagedThreadId;
+            StartContextInstalled = SynchronizationContext.Current is not null;
+            var recipe = await Started.Task;
+            ResumeThread = Environment.CurrentManagedThreadId;
+            ResumeContextInstalled = SynchronizationContext.Current is not null;
+            if (StartThread != ownerThread || ResumeThread != ownerThread)
+                throw new InvalidOperationException("Lifecycle startup escaped its owner thread.");
+            return recipe;
+        }
+
+        public ValueTask<bool> PrepareCloseAsync() => ValueTask.FromResult(true);
+
+        public ValueTask StopAsync() => ValueTask.CompletedTask;
+
+        public async ValueTask DisposeAsync()
+        {
+            await Disposed.Task;
+            if (Environment.CurrentManagedThreadId != ownerThread)
+                throw new InvalidOperationException("Lifecycle disposal escaped its owner thread.");
         }
     }
 

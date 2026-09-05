@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Lucent.Core;
 using Lucent.Renderer.Skia;
 using SDL3;
@@ -17,8 +18,8 @@ namespace Lucent.Platform.Windows;
 /// Startup validates the supported Windows version and the SDL, Skia, HarfBuzz, and Visual C++
 /// native assets needed by a NativeAOT deployment before creating the window. The method owns
 /// host-side adapters and native window resources for the duration of the loop, tears them down
-/// before SDL shutdown, and returns only after a close event. The supplied composition remains
-/// caller-owned; Core itself has no Windows or renderer dependency.
+/// before SDL shutdown, and returns only after direct close or completed session shutdown. A low-level
+/// supplied composition remains caller-owned; an application session owns its composition and lifecycle.
 /// </remarks>
 public static class WindowsBootstrap
 {
@@ -37,7 +38,23 @@ public static class WindowsBootstrap
     /// <exception cref="FileNotFoundException">A NativeAOT-published SDL, Skia, HarfBuzz, or Visual C++ runtime asset is missing beside the application.</exception>
     /// <exception cref="InvalidOperationException">Windows DPI setup, SDL initialization, window creation, rendering, input projection, or native presentation fails.</exception>
     [STAThread]
-    public static int Run(string title, Composition composition, ThemeContext? theme = null)
+    public static int Run(string title, Composition composition, ThemeContext? theme = null) =>
+        RunCore(title, composition, theme, null);
+
+    /// <summary>Runs one portable application session through startup and negotiated asynchronous shutdown.</summary>
+    [STAThread]
+    public static int Run(ApplicationSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return RunCore(session.Title, session.Composition, session.Theme, session);
+    }
+
+    private static int RunCore(
+        string title,
+        Composition composition,
+        ThemeContext? theme,
+        ApplicationSession? session
+    )
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
         ArgumentNullException.ThrowIfNull(composition);
@@ -54,6 +71,18 @@ public static class WindowsBootstrap
 
         nint window = 0;
         nint sdlRenderer = 0;
+        WindowsUiaDispatcher? uiaDispatcher = null;
+        WindowsUiaProvider? uiaProvider = null;
+        WindowsUiaListener? uiaListener = null;
+        CpuSkiaPresenter? presenter = null;
+        SkiaSceneRenderer? sceneRenderer = null;
+        WindowsCursor? cursor = null;
+        WindowsClipboard? clipboard = null;
+        WindowsSettingsListener? settingsListener = null;
+        WindowsWorkDispatcher? workDispatcher = null;
+        PerformanceDiagnostics? performanceDiagnostics = null;
+        WindowsInputAdapter? input = null;
+        var errors = new List<Exception>();
         try
         {
             window = SDL.CreateWindow(
@@ -77,25 +106,29 @@ public static class WindowsBootstrap
             if (hwnd == 0)
                 throw new InvalidOperationException("SDL window did not expose an HWND.");
 
-            using var uiaDispatcher = new WindowsUiaDispatcher();
-            using var uiaProvider = new WindowsUiaProvider(hwnd, composition, uiaDispatcher, title);
-            using var uiaListener = new WindowsUiaListener(hwnd, uiaProvider);
-            using var presenter = new CpuSkiaPresenter(sdlRenderer);
-            using var sceneRenderer = new SkiaSceneRenderer();
-            using var cursor = new WindowsCursor();
-            using var clipboard = new WindowsClipboard();
-            using var settingsListener = new WindowsSettingsListener(hwnd);
-            using var workDispatcher = new WindowsWorkDispatcher(composition);
-            using var performanceDiagnostics = new PerformanceDiagnostics();
+            uiaDispatcher = new WindowsUiaDispatcher();
+            uiaProvider = new WindowsUiaProvider(hwnd, composition, uiaDispatcher, title);
+            uiaListener = new WindowsUiaListener(hwnd, uiaProvider);
+            presenter = new CpuSkiaPresenter(sdlRenderer);
+            sceneRenderer = new SkiaSceneRenderer();
+            cursor = new WindowsCursor();
+            clipboard = new WindowsClipboard();
+            settingsListener = new WindowsSettingsListener(hwnd);
+            workDispatcher = session is null
+                ? new WindowsWorkDispatcher(composition)
+                : new WindowsWorkDispatcher(session);
+            using var sessionContext = session?.EnterContext();
+            performanceDiagnostics = new PerformanceDiagnostics();
             var scheduler = new WindowsFrameScheduler();
-            using var input = new WindowsInputAdapter(composition, window, clipboard);
+            input = new WindowsInputAdapter(composition, window, clipboard);
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
             _ = cursor.Activate();
             _ = ApplySettings(composition, settings, theme);
             diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
             var recordedPerformanceBaseline = false;
-            while (scheduler.IsOpen)
+            session?.Start();
+            while (scheduler.IsOpen && session?.IsCompleted != true)
             {
                 uiaDispatcher.SetOwnerPhase("events");
                 var refreshSettings = false;
@@ -103,15 +136,41 @@ public static class WindowsBootstrap
                 {
                     if (!SDL.WaitEvent(out var @event))
                         throw new InvalidOperationException($"SDL_WaitEvent: {SDL.GetError()}");
-                    refreshSettings |= Observe(scheduler, input, workDispatcher, @event);
+                    refreshSettings |= Observe(
+                        scheduler,
+                        input,
+                        workDispatcher,
+                        composition,
+                        session,
+                        @event
+                    );
                 }
                 while (SDL.PollEvent(out var @event))
-                    refreshSettings |= Observe(scheduler, input, workDispatcher, @event);
+                    refreshSettings |= Observe(
+                        scheduler,
+                        input,
+                        workDispatcher,
+                        composition,
+                        session,
+                        @event
+                    );
+
                 uiaDispatcher.SetOwnerPhase("dispatch");
+                if (workDispatcher.Process())
+                    scheduler.Request();
+                if (
+                    session?.IsCompleted == true
+                    || !scheduler.IsOpen
+                    || (session is null && composition.IsDisposed)
+                )
+                    break;
+                if (composition.IsDisposed)
+                {
+                    scheduler.Observe(WindowsFrameEvent.Minimized);
+                    continue;
+                }
                 if (uiaDispatcher.Process() != 0)
                     scheduler.Request();
-                if (!scheduler.IsOpen)
-                    break;
                 refreshSettings |= settingsListener.TakePending();
                 if (refreshSettings)
                 {
@@ -163,71 +222,78 @@ public static class WindowsBootstrap
                 }
             }
             uiaDispatcher.SetOwnerPhase("shutdown");
-            uiaListener.Dispose();
-            uiaProvider.Dispose();
-            presenter.Dispose();
-            sceneRenderer.Dispose();
-            performanceDiagnostics.RecordPostGcResources(
-                presenter.LiveSurfaceCount,
-                presenter.LiveTextureCount,
-                sceneRenderer.LiveTextBlobCount,
-                uiaProvider.CacheCount
-            );
-            return 0;
+        }
+        catch (Exception error)
+        {
+            errors.Add(error);
         }
         finally
         {
+            Capture(errors, () => input?.Dispose());
+            Capture(errors, () => workDispatcher?.Dispose());
+            Capture(errors, () => settingsListener?.Dispose());
+            Capture(errors, () => clipboard?.Dispose());
+            Capture(errors, () => cursor?.Dispose());
+            Capture(errors, () => uiaListener?.Dispose());
+            Capture(errors, () => uiaProvider?.Dispose());
+            Capture(errors, () => presenter?.Dispose());
+            Capture(errors, () => sceneRenderer?.Dispose());
+            if (performanceDiagnostics is not null)
+                Capture(
+                    errors,
+                    () =>
+                        performanceDiagnostics.RecordPostGcResources(
+                            presenter?.LiveSurfaceCount ?? 0,
+                            presenter?.LiveTextureCount ?? 0,
+                            sceneRenderer?.LiveTextBlobCount ?? 0,
+                            uiaProvider?.CacheCount ?? 0
+                        )
+                );
+            Capture(errors, () => performanceDiagnostics?.Dispose());
+            Capture(errors, () => uiaDispatcher?.Dispose());
             if (sdlRenderer != 0)
-                SDL.DestroyRenderer(sdlRenderer);
+                Capture(errors, () => SDL.DestroyRenderer(sdlRenderer));
             if (window != 0)
-                SDL.DestroyWindow(window);
-            SDL.Quit();
+                Capture(errors, () => SDL.DestroyWindow(window));
+            Capture(errors, SDL.Quit);
         }
-    }
 
-    private static WindowsViewport GetViewport(nint window, nint renderer)
-    {
-        var hwnd = SDL.GetPointerProperty(
-            SDL.GetWindowProperties(window),
-            SDL.Props.WindowWin32HWNDPointer,
-            0
-        );
-        var dpi = hwnd == 0 ? 0U : PInvoke.GetDpiForWindow(new HWND(hwnd));
-        if (dpi == 0 || !SDL.GetRenderOutputSize(renderer, out var width, out var height))
-            throw new InvalidOperationException($"Windows viewport: {SDL.GetError()}");
-        return new(width, height, dpi / 96F);
+        ThrowAll(errors);
+        return 0;
     }
 
     private static bool Observe(
         WindowsFrameScheduler scheduler,
         WindowsInputAdapter input,
         WindowsWorkDispatcher workDispatcher,
+        Composition composition,
+        ApplicationSession? session,
         SDL.Event @event
     )
     {
         if (workDispatcher.IsWakeEvent(@event))
-        {
-            if (workDispatcher.Process())
-                scheduler.Request();
             return false;
-        }
         var timestamp = Stopwatch.GetTimestamp();
         var type = (SDL.EventType)@event.Type;
-        try
-        {
-            if (input.Dispatch(@event))
-                scheduler.Request(FrameOperation.Input, timestamp);
-        }
-        finally
-        {
-            if (input.ConsumeRepaintRequest())
-                scheduler.Request(FrameOperation.Input, timestamp);
-        }
+        if (!composition.IsDisposed)
+            try
+            {
+                if (input.Dispatch(@event))
+                    scheduler.Request(FrameOperation.Input, timestamp);
+            }
+            finally
+            {
+                if (input.ConsumeRepaintRequest())
+                    scheduler.Request(FrameOperation.Input, timestamp);
+            }
         switch (type)
         {
             case SDL.EventType.Quit:
             case SDL.EventType.WindowCloseRequested:
-                scheduler.Observe(WindowsFrameEvent.Closed);
+                if (session is null)
+                    scheduler.Observe(WindowsFrameEvent.Closed);
+                else
+                    session.RequestClose();
                 return false;
             case SDL.EventType.WindowMinimized:
                 scheduler.Observe(WindowsFrameEvent.Minimized);
@@ -253,6 +319,40 @@ public static class WindowsBootstrap
             default:
                 return false;
         }
+    }
+
+    private static void Capture(List<Exception> errors, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception error)
+        {
+            errors.Add(error);
+        }
+    }
+
+    private static void ThrowAll(List<Exception> errors)
+    {
+        if (errors.Count == 0)
+            return;
+        if (errors.Count == 1)
+            ExceptionDispatchInfo.Capture(errors[0]).Throw();
+        throw new AggregateException("Windows host run and cleanup failed.", errors);
+    }
+
+    private static WindowsViewport GetViewport(nint window, nint renderer)
+    {
+        var hwnd = SDL.GetPointerProperty(
+            SDL.GetWindowProperties(window),
+            SDL.Props.WindowWin32HWNDPointer,
+            0
+        );
+        var dpi = hwnd == 0 ? 0U : PInvoke.GetDpiForWindow(new HWND(hwnd));
+        if (dpi == 0 || !SDL.GetRenderOutputSize(renderer, out var width, out var height))
+            throw new InvalidOperationException($"Windows viewport: {SDL.GetError()}");
+        return new(width, height, dpi / 96F);
     }
 
     internal static bool ApplySettings(
