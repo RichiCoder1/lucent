@@ -263,7 +263,7 @@ public sealed class CommandContracts
             name: "capture"
         );
         var bindings = new CommandBindings([new(capture, KeyChord.Ctrl(Key.N))]);
-        composition.Mount(
+        var commandScope = composition.Mount(
             composition.Root,
             theme,
             Components.CommandScope(
@@ -280,11 +280,13 @@ public sealed class CommandContracts
             )
         );
         composition.Flush();
-        Assert.IsTrue(
-            composition.Input.SetScene(
-                SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())
-            )
+        var scene = SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper());
+        Assert.AreEqual(
+            100f,
+            scene.Boxes.Single(box => box.Identity.ElementId == commandScope.Id).Bounds.Height,
+            "Mounted CommandScope did not fill its available main axis."
         );
+        Assert.IsTrue(composition.Input.SetScene(scene));
         Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
         Assert.IsTrue(
             composition

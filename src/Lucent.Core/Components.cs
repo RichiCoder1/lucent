@@ -85,7 +85,9 @@ public static class Components
             {
                 root.Present(
                     context.Theme,
-                    author: Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
+                    author: Style
+                        .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
+                        .Set(LayoutProperties.MainGrow, 1f)
                 );
                 root.AttachBehaviors(new CommandScopeBehavior(bindings));
                 context.Mount(root, content);
