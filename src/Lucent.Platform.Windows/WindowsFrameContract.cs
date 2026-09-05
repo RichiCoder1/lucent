@@ -41,7 +41,7 @@ internal enum CpuAlphaFormat
 
 internal readonly record struct CpuSurfaceFormat(CpuColorFormat Color, CpuAlphaFormat Alpha);
 
-/// <summary>The sole M2 pixel and pacing policy: premultiplied RGBA CPU pixels upload as SDL ABGR bytes with vsync enabled.</summary>
+/// <summary>The sole Windows pixel and pacing policy: premultiplied RGBA CPU pixels upload as SDL ABGR bytes with vsync enabled.</summary>
 internal static class WindowsPresentationContract
 {
     public static readonly CpuSurfaceFormat SurfaceFormat = new(

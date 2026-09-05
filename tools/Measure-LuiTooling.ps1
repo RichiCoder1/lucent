@@ -1,50 +1,98 @@
-param([switch] $Verify)
+param(
+    [switch] $Verify,
+    [string] $ConfigurationPath,
+    [string] $ResultsPath
+)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$baseline = Get-Content (Join-Path $root 'docs/M7-TOOLING-BASELINE.json') -Raw | ConvertFrom-Json
-$dotnet = Join-Path $root '.dotnet/dotnet.exe'; if (!(Test-Path $dotnet)) { $dotnet = 'dotnet' }
+$dotnet = Join-Path $root '.dotnet/dotnet.exe'
+if (!(Test-Path $dotnet)) { $dotnet = 'dotnet' }
+if (!$ConfigurationPath) {
+    $ConfigurationPath = Join-Path $PSScriptRoot 'LuiTooling.Measurements.json'
+}
+if (!$ResultsPath) {
+    $ResultsPath = Join-Path $root 'artifacts/lui-tooling-measurements.json'
+}
 
-foreach ($project in @(
+$configuration = Get-Content $ConfigurationPath -Raw | ConvertFrom-Json
+if ($configuration.schema -ne 1 -or !$configuration.operations) {
+    throw "Invalid tooling measurement configuration '$ConfigurationPath'."
+}
+
+$prerequisites = @(
     'tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj',
     'tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj',
-    'tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj'
-)) {
-    & $dotnet build (Join-Path $root $project) --no-restore -warnaserror
-    if ($LASTEXITCODE -ne 0) { throw "Failed to prepare tooling measurement project '$project'." }
+    'tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj',
+    'tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj'
+)
+foreach ($project in $prerequisites) {
+    $projectPath = Join-Path $root $project
+    & $dotnet restore $projectPath --locked-mode
+    if ($LASTEXITCODE -ne 0) { throw "Failed to restore tooling prerequisite '$project'." }
+    & $dotnet build $projectPath --no-restore -c Release -warnaserror
+    if ($LASTEXITCODE -ne 0) { throw "Failed to build tooling prerequisite '$project'." }
+}
+function Expand-Argument([string] $argument) {
+    $argument.Replace('{root}', $root)
 }
 
-function Measure-Operation([string] $Name, [string[]] $Arguments) {
-    $milliseconds = [Math]::Round((Measure-Command { & $dotnet @Arguments; if ($LASTEXITCODE -ne 0) { throw "dotnet $($Arguments -join ' ') failed ($LASTEXITCODE)." } }).TotalMilliseconds)
-    $operation = $baseline.operations.$Name
-    if (!$operation.command -or $operation.baselineMilliseconds -le 0 -or $operation.baselineMilliseconds -gt $operation.budgetMilliseconds) { throw "$Name has no valid frozen baseline/budget." }
-    if ($milliseconds -gt $operation.budgetMilliseconds) { throw "$Name took $milliseconds ms; budget is $($operation.budgetMilliseconds) ms." }
-    Write-Output "$Name=$milliseconds ms (budget $($operation.budgetMilliseconds) ms)"
+$results = @()
+foreach ($operation in $configuration.operations) {
+    if (!$operation.name -or !$operation.arguments) {
+        throw 'Every tooling measurement operation requires a name and arguments.'
+    }
+
+    $arguments = @($operation.arguments | ForEach-Object { Expand-Argument $_ })
+    $output = $null
+    $elapsed = Measure-Command {
+        $output = & $dotnet @arguments 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $details = $output -join [Environment]::NewLine
+            throw "dotnet $($arguments -join ' ') failed ($LASTEXITCODE). $details"
+        }
+    }
+    $milliseconds = [Math]::Round($elapsed.TotalMilliseconds)
+    if ($operation.resultPattern) {
+        $resultMatch = [regex]::Match(
+            ($output -join [Environment]::NewLine),
+            $operation.resultPattern
+        )
+        if (!$resultMatch.Success -or !$resultMatch.Groups['milliseconds'].Success) {
+            throw "$($operation.name) did not report an operation duration."
+        }
+        $milliseconds = [int]$resultMatch.Groups['milliseconds'].Value
+    }
+    if ($Verify -and $operation.maximumMilliseconds -and $milliseconds -gt $operation.maximumMilliseconds) {
+        throw "$($operation.name) took $milliseconds ms; configured maximum is $($operation.maximumMilliseconds) ms."
+    }
+
+    $results += [ordered]@{
+        name = $operation.name
+        timingKind = $operation.timingKind
+        measurementScope = $operation.measurementScope
+        milliseconds = $milliseconds
+        maximumMilliseconds = $operation.maximumMilliseconds
+        command = 'dotnet ' + ($arguments -join ' ')
+    }
+    $maximum = if ($operation.maximumMilliseconds) {
+        " (maximum $($operation.maximumMilliseconds) ms)"
+    } else {
+        ''
+    }
+    Write-Output "$($operation.name)=$milliseconds ms$maximum"
 }
 
-function Measure-LspOperation([string] $Name) {
-    $output = & $dotnet run --project (Join-Path $root 'tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj') --no-build -- --measure $Name 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "LSP $Name measurement failed ($LASTEXITCODE): $($output -join "`n")" }
-    $line = $output | Where-Object { $_ -match '^MeasureMilliseconds=\d+$' } | Select-Object -Last 1
-    if (!$line) { throw "LSP $Name measurement did not report milliseconds: $($output -join "`n")" }
-    $milliseconds = [int]($line -replace '^MeasureMilliseconds=', '')
-    $operation = $baseline.operations.$Name
-    if (!$operation.command -or $operation.baselineMilliseconds -le 0 -or $operation.baselineMilliseconds -gt $operation.budgetMilliseconds) { throw "$Name has no valid frozen baseline/budget." }
-    if ($milliseconds -gt $operation.budgetMilliseconds) { throw "$Name took $milliseconds ms; budget is $($operation.budgetMilliseconds) ms." }
-    Write-Output "$Name=$milliseconds ms (budget $($operation.budgetMilliseconds) ms)"
+$resultDirectory = Split-Path $ResultsPath -Parent
+if ($resultDirectory) {
+    New-Item $resultDirectory -ItemType Directory -Force | Out-Null
 }
+[ordered]@{
+    schema = 1
+    measuredAtUtc = [DateTime]::UtcNow.ToString('O')
+    configuration = [IO.Path]::GetFullPath($ConfigurationPath)
+    verified = [bool]$Verify
+    operations = $results
+} | ConvertTo-Json -Depth 5 | Set-Content $ResultsPath
 
-if ($baseline.schema -ne 2 -or !$baseline.frozenBeforeOptimization) { throw 'Invalid M7 tooling baseline.' }
-foreach ($measure in @('coldProjectLoad', 'warmCompilerCorpus', 'formattingCorpus', 'incrementalNoOpAndOneFileInvalidation', 'warmCompletion', 'editToDiagnostic', 'rename')) {
-    if (!$baseline.operations.$measure) { throw "Missing required tooling measure '$measure'." }
-}
-
-Measure-Operation 'coldProjectLoad' @('build', (Join-Path $root 'apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj'), '-c', 'Release', '--no-restore', '-t:Rebuild', '-warnaserror')
-Measure-Operation 'warmCompilerCorpus' @('run', '--project', (Join-Path $root 'tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj'), '--no-build')
-Measure-Operation 'formattingCorpus' @('run', '--project', (Join-Path $root 'tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj'), '--no-build')
-Measure-Operation 'incrementalNoOpAndOneFileInvalidation' @('run', '--project', (Join-Path $root 'tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj'), '--no-build')
-Measure-LspOperation 'warmCompletion'
-Measure-LspOperation 'editToDiagnostic'
-Measure-LspOperation 'rename'
-
-if ($Verify) { Write-Output 'M7 Lui tooling baseline: PASS' }
+Write-Output "Tooling measurements: $ResultsPath"

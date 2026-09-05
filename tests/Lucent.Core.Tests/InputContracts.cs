@@ -1,33 +1,12 @@
 using Lucent.Core;
 
-internal static class InputContracts
-{
-    public static int Run()
-    {
-        try
-        {
-            RoutingFocusCaptureAndAvailability();
-            SnapshotFailureAndReorderSafety();
-            DisposalDuringRouteUsesSnapshot();
-            FreshnessEscapesAndRegistrationCleanup();
-            ReentrancyAndCombinedFailures();
-            RetainedHitRules();
-            FocusLossDisposalIsIterative();
-            SignatureSemanticsLifetimeAndDiagnostics();
-            FinalRouterSeal();
-            Console.WriteLine("Lucent.Core input/focus/capture contracts: PASS");
-            return 0;
-        }
-        catch (Exception error)
-        {
-            Console.Error.WriteLine(
-                "Lucent.Core input/focus/capture contracts: FAIL: " + error.Message
-            );
-            return 1;
-        }
-    }
+namespace Lucent.Core.Tests;
 
-    private static void RoutingFocusCaptureAndAvailability()
+[TestClass]
+public sealed class InputContracts
+{
+    [TestMethod]
+    public void RoutingFocusCaptureAndAvailability()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "input");
@@ -118,7 +97,8 @@ internal static class InputContracts
         );
     }
 
-    private static void SnapshotFailureAndReorderSafety()
+    [TestMethod]
+    public void SnapshotFailureAndReorderSafety()
     {
         var graph = new ReactiveGraph();
         var rows = graph.Signal(new[] { 1, 2 }, "rows");
@@ -217,7 +197,8 @@ internal static class InputContracts
         );
     }
 
-    private static void DisposalDuringRouteUsesSnapshot()
+    [TestMethod]
+    public void DisposalDuringRouteUsesSnapshot()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "dispatch-disposal");
@@ -256,7 +237,8 @@ internal static class InputContracts
         );
     }
 
-    private static void FreshnessEscapesAndRegistrationCleanup()
+    [TestMethod]
+    public void FreshnessEscapesAndRegistrationCleanup()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "fresh");
@@ -342,7 +324,8 @@ internal static class InputContracts
         GC.KeepAlive(probe.Root);
     }
 
-    private static void ReentrancyAndCombinedFailures()
+    [TestMethod]
+    public void ReentrancyAndCombinedFailures()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "failures");
@@ -426,7 +409,8 @@ internal static class InputContracts
         Expect<ArgumentException>(() => router.MoveFocus((FocusTraversalDirection)99));
     }
 
-    private static void RetainedHitRules()
+    [TestMethod]
+    public void RetainedHitRules()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "hit");
@@ -505,7 +489,8 @@ internal static class InputContracts
         );
     }
 
-    private static void FocusLossDisposalIsIterative()
+    [TestMethod]
+    public void FocusLossDisposalIsIterative()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "focus-loss");
@@ -554,7 +539,8 @@ internal static class InputContracts
         }
     }
 
-    private static void SignatureSemanticsLifetimeAndDiagnostics()
+    [TestMethod]
+    public void SignatureSemanticsLifetimeAndDiagnostics()
     {
         var geometryGraph = new ReactiveGraph();
         using var geometry = new Composition(geometryGraph, "geometry-signature");
@@ -708,12 +694,32 @@ internal static class InputContracts
         var threadGraph = new ReactiveGraph();
         using var threadComposition = new Composition(threadGraph, "thread");
         var threadRouter = threadComposition.Input;
-        Expect<InvalidOperationException>(() =>
-            Task.Run(() => _ = threadRouter.FocusedElement).GetAwaiter().GetResult()
+        Exception? threadFailure = null;
+        var worker = new Thread(() =>
+        {
+            try
+            {
+                _ = threadRouter.FocusedElement;
+            }
+            catch (Exception error)
+            {
+                threadFailure = error;
+            }
+        })
+        {
+            IsBackground = true,
+        };
+        worker.Start();
+        if (!worker.Join(TimeSpan.FromSeconds(5)))
+            throw new TimeoutException("Foreign-thread input ownership proof did not finish.");
+        Assert(
+            threadFailure is InvalidOperationException,
+            "Input router accepted a read from a foreign thread."
         );
     }
 
-    private static void FinalRouterSeal()
+    [TestMethod]
+    public void FinalRouterSeal()
     {
         var neverGraph = new ReactiveGraph();
         using var never = new Composition(neverGraph, "never");

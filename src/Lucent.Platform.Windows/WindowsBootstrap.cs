@@ -43,7 +43,7 @@ public static class WindowsBootstrap
         ArgumentNullException.ThrowIfNull(composition);
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 14393))
             throw new PlatformNotSupportedException(
-                "M2 requires Windows 10 version 1607 or later."
+                "Lucent requires Windows 10 version 1607 or later."
             );
         EnablePerMonitorV2();
         RequireNativeAssets();
@@ -86,7 +86,7 @@ public static class WindowsBootstrap
             using var clipboard = new WindowsClipboard();
             using var settingsListener = new WindowsSettingsListener(hwnd);
             using var workDispatcher = new WindowsWorkDispatcher(composition);
-            using var m6Diagnostics = new M6Diagnostics();
+            using var performanceDiagnostics = new PerformanceDiagnostics();
             var scheduler = new WindowsFrameScheduler();
             using var input = new WindowsInputAdapter(composition, window, clipboard);
             var settings = new WindowsSettings();
@@ -94,7 +94,7 @@ public static class WindowsBootstrap
             _ = cursor.Activate();
             _ = ApplySettings(composition, settings, theme);
             diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
-            var recordedM6Baseline = false;
+            var recordedPerformanceBaseline = false;
             while (scheduler.IsOpen)
             {
                 uiaDispatcher.SetOwnerPhase("events");
@@ -143,23 +143,23 @@ public static class WindowsBootstrap
                     phase.Presented
                 );
                 scheduler.Complete(timing);
-                m6Diagnostics.Record(
+                performanceDiagnostics.Record(
                     scheduler.CurrentRequest.Complete(phase.Presented),
                     timing,
                     presenter,
                     sceneRenderer,
                     uiaProvider
                 );
-                if (!recordedM6Baseline)
+                if (!recordedPerformanceBaseline)
                 {
-                    m6Diagnostics.RecordResources(
+                    performanceDiagnostics.RecordResources(
                         "pre",
                         presenter.LiveSurfaceCount,
                         presenter.LiveTextureCount,
                         sceneRenderer.LiveTextBlobCount,
                         uiaProvider.CacheCount
                     );
-                    recordedM6Baseline = true;
+                    recordedPerformanceBaseline = true;
                 }
             }
             uiaDispatcher.SetOwnerPhase("shutdown");
@@ -167,7 +167,7 @@ public static class WindowsBootstrap
             uiaProvider.Dispose();
             presenter.Dispose();
             sceneRenderer.Dispose();
-            m6Diagnostics.RecordPostGcResources(
+            performanceDiagnostics.RecordPostGcResources(
                 presenter.LiveSurfaceCount,
                 presenter.LiveTextureCount,
                 sceneRenderer.LiveTextBlobCount,

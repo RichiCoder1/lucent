@@ -1,6 +1,6 @@
-# M3 bounded UI Automation matrix
+# Bounded UI Automation matrix
 
-This is the complete M3 fixture contract. It is intentionally limited to the retained controls already present in the Issue Browser shell; it is not a virtualized-list or full application certification matrix.
+This is the current bounded fixture contract.
 
 | Fixture | UIA control type / name | Required properties | Required patterns and commands | Required events / lifetime |
 | --- | --- | --- | --- | --- |

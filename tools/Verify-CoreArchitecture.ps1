@@ -1,4 +1,4 @@
-param([switch] $Negative)
+param([switch] $Negative, [ValidateSet('Debug', 'Release')] [string] $Configuration = 'Release')
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -30,7 +30,7 @@ function Assert-ProjectRejected([string] $Project) {
 }
 
 function Assert-PublicApi([string] $AssemblyPath, [bool] $ExpectFailure) {
-    $probe = Join-Path $root 'tests/Lucent.Core.Tests/bin/Debug/net10.0/Lucent.Core.Tests.dll'
+    $probe = Join-Path $root "tests/Lucent.Core.ArchitectureVerifier/bin/$Configuration/net10.0/Lucent.Core.ArchitectureVerifier.dll"
     $prior = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $output = & $dotnet $probe $AssemblyPath 2>&1
@@ -47,7 +47,7 @@ function Assert-PublicApi([string] $AssemblyPath, [bool] $ExpectFailure) {
 
 $core = Join-Path $root 'src/Lucent.Core/Lucent.Core.csproj'
 Assert-ProjectHasNoForbiddenDependencies $core
-Assert-PublicApi (Join-Path $root 'src/Lucent.Core/bin/Debug/net10.0/Lucent.Core.dll') $false
+Assert-PublicApi (Join-Path $root "src/Lucent.Core/bin/$Configuration/net10.0/Lucent.Core.dll") $false
 
 if ($Negative) {
     $fixtures = Join-Path $root 'tests/ArchitectureFixtures'

@@ -1,34 +1,12 @@
 using Lucent.Core;
 
-internal static class ReactiveContracts
-{
-    public static int Run()
-    {
-        try
-        {
-            BranchesBatchesAndReentrancy();
-            FailureRecoveryAndOwnership();
-            AsyncOwnershipAndThreading();
-            WorkAvailableIsEdgeTriggered();
-            LifetimeRelease();
-            var first = EquivalentDump();
-            Assert(first == EquivalentDump(), "Reactive dumps differ for equivalent live graphs.");
-            Assert(
-                !first.Contains("value=", StringComparison.OrdinalIgnoreCase)
-                    && !first.Contains("secret", StringComparison.OrdinalIgnoreCase),
-                "Dump exposed values or errors."
-            );
-            Console.WriteLine("Lucent.Core reactive contracts: PASS");
-            return 0;
-        }
-        catch (Exception exception)
-        {
-            Console.Error.WriteLine("Lucent.Core reactive contracts: FAIL: " + exception.Message);
-            return 1;
-        }
-    }
+namespace Lucent.Core.Tests;
 
-    private static void BranchesBatchesAndReentrancy()
+[TestClass]
+public sealed class ReactiveContracts
+{
+    [TestMethod]
+    public void BranchesBatchesAndReentrancy()
     {
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("branches");
@@ -132,7 +110,8 @@ internal static class ReactiveContracts
         graph.Drain();
     }
 
-    private static void FailureRecoveryAndOwnership()
+    [TestMethod]
+    public void FailureRecoveryAndOwnership()
     {
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("failures");
@@ -296,7 +275,8 @@ internal static class ReactiveContracts
         Assert(graph.Dump() == before, "Invalid callback registered a ghost node.");
     }
 
-    private static void AsyncOwnershipAndThreading()
+    [TestMethod]
+    public void AsyncOwnershipAndThreading()
     {
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("async");
@@ -364,21 +344,31 @@ internal static class ReactiveContracts
         var wrongWork = new TaskCompletionSource<int>();
         var wrong = wrongGraph.Async(_ => wrongWork.Task, 0, "wrong-thread");
         _ = wrong.Value;
-        var rejected = Task.Run(() =>
+        var rejected = false;
+        Exception? workerFailure = null;
+        var worker = new Thread(() =>
+        {
+            try
             {
                 wrongWork.SetResult(9);
                 try
                 {
                     wrongGraph.Drain();
-                    return false;
                 }
                 catch (InvalidOperationException)
                 {
-                    return true;
+                    rejected = true;
                 }
-            })
-            .GetAwaiter()
-            .GetResult();
+            }
+            catch (Exception error)
+            {
+                workerFailure = error;
+            }
+        });
+        worker.Start();
+        worker.Join();
+        if (workerFailure is not null)
+            throw new InvalidOperationException("Wrong-thread proof worker failed.", workerFailure);
         Assert(
             rejected && wrong.Value == 0 && wrong.IsPending,
             "Wrong-thread commit was accepted."
@@ -527,26 +517,35 @@ internal static class ReactiveContracts
             faulted.Error?.Message == "async-fault" && faulted.Value == 4 && !faulted.IsPending,
             "Faulted async task did not retain stale state and expose error."
         );
-        Assert(
-            Task.Run(() =>
-                {
-                    try
-                    {
-                        source.Value = 99;
-                        return false;
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        return true;
-                    }
-                })
-                .GetAwaiter()
-                .GetResult(),
-            "Wrong-thread mutation was accepted."
-        );
+        var mutationRejected = false;
+        workerFailure = null;
+        worker = new Thread(() =>
+        {
+            try
+            {
+                source.Value = 99;
+            }
+            catch (InvalidOperationException)
+            {
+                mutationRejected = true;
+            }
+            catch (Exception error)
+            {
+                workerFailure = error;
+            }
+        });
+        worker.Start();
+        worker.Join();
+        if (workerFailure is not null)
+            throw new InvalidOperationException(
+                "Wrong-thread mutation worker failed.",
+                workerFailure
+            );
+        Assert(mutationRejected, "Wrong-thread mutation was accepted.");
     }
 
-    private static void LifetimeRelease()
+    [TestMethod]
+    public void LifetimeRelease()
     {
         var disposed = DisposedScopePayload();
         var queued = QueuedEffectPayload();
@@ -567,7 +566,8 @@ internal static class ReactiveContracts
         GC.KeepAlive(never.Producer);
     }
 
-    private static void WorkAvailableIsEdgeTriggered()
+    [TestMethod]
+    public void WorkAvailableIsEdgeTriggered()
     {
         var graph = new ReactiveGraph();
         var first = new TaskCompletionSource<int>();
@@ -751,4 +751,16 @@ internal static class ReactiveContracts
     );
 
     private sealed class Payload;
+
+    [TestMethod]
+    public void DiagnosticDumpIsDeterministicAndRedacted()
+    {
+        var first = EquivalentDump();
+        Assert(first == EquivalentDump(), "Reactive dumps differ for equivalent live graphs.");
+        Assert(
+            !first.Contains("value=", StringComparison.OrdinalIgnoreCase)
+                && !first.Contains("secret", StringComparison.OrdinalIgnoreCase),
+            "Dump exposed values or errors."
+        );
+    }
 }

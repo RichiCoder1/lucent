@@ -4,7 +4,7 @@ Status: Accepted
 
 ## Context
 
-The C# Issue Browser, two frozen feature changes, and the M6 viability gate established the first complete framework surface. `.lui` can now improve authoring without inventing a second runtime, property system, binding engine, component lifetime, or project model.
+The C# Issue Browser, two frozen feature changes, and the resulting framework surface established the basis for this decision. .lui can now improve authoring without inventing a second runtime, property system, binding engine, component lifetime, or project model.
 
 The archived Avalonia language is evidence, not a compatibility baseline. Blazor/Razor, Mobile Blazor Bindings, GPUIX, QML, StyleX, Panda CSS, shadcn/ui, and the researched layout systems are conceptual references only.
 
@@ -35,7 +35,7 @@ Ordinary component parameters are validated and captured when a recipe is create
 
 The language uses normal C# namespace, using, type, nullability, overload, accessibility, and expression semantics. A bounded handwritten parser owns only `.lui` structure and recovery; Roslyn parses and binds expression islands. C# components and content parameters opt in through explicit metadata. The build uses a reusable compiler library, a thin incremental source generator, and an additive MSBuild SDK. Generated output lives under `obj` and is not a public compatibility surface.
 
-The same compiler and project-context model serves build and editor tooling. The first editor client is VS Code backed by a separate .NET 10 LSP process. Build/runtime packages do not carry editor or Roslyn dependencies. Exact source maps, deterministic formatting, cross-language rename/references, generated navigation, and C#-quality diagnostics are release gates.
+The same compiler and project-context model serves build and editor tooling. The first editor client is VS Code backed by a separate .NET 10 LSP process. Build/runtime packages do not carry editor or Roslyn dependencies. Exact source maps, deterministic formatting, cross-language rename/references, generated navigation, and C#-quality diagnostics are part of the authoring contract.
 
 ## Consequences
 

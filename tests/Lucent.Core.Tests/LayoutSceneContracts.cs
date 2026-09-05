@@ -2,32 +2,13 @@ using System.Globalization;
 using System.Numerics;
 using Lucent.Core;
 
-internal static class LayoutSceneContracts
-{
-    public static int Run()
-    {
-        try
-        {
-            ColorAndBrushValues();
-            InsetsAndPadding();
-            OpacityGroups();
-            RowsColumnsClipsAndRounding();
-            MainGrowth();
-            InvalidBoundsFail();
-            ExplicitZeroAndOverflow();
-            CrossAxisIntrinsicAndMalformedRuns();
-            FixedHeightVirtualization();
-            Console.WriteLine("Lucent.Core layout/scene contracts: PASS");
-            return 0;
-        }
-        catch (Exception error)
-        {
-            Console.Error.WriteLine("Lucent.Core layout/scene contracts: FAIL: " + error.Message);
-            return 1;
-        }
-    }
+namespace Lucent.Core.Tests;
 
-    private static void ColorAndBrushValues()
+[TestClass]
+public sealed class LayoutSceneContracts
+{
+    [TestMethod]
+    public void ColorAndBrushValues()
     {
         var color = Color.Parse("#12345678");
         Assert(
@@ -137,7 +118,8 @@ internal static class LayoutSceneContracts
             );
     }
 
-    private static void InsetsAndPadding()
+    [TestMethod]
+    public void InsetsAndPadding()
     {
         var value = new Insets(1, 2, 3, 4);
         Assert(
@@ -349,7 +331,8 @@ internal static class LayoutSceneContracts
         );
     }
 
-    private static void OpacityGroups()
+    [TestMethod]
+    public void OpacityGroups()
     {
         foreach (
             var invalid in new[]
@@ -523,7 +506,8 @@ internal static class LayoutSceneContracts
         }
     }
 
-    private static void RowsColumnsClipsAndRounding()
+    [TestMethod]
+    public void RowsColumnsClipsAndRounding()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "layout");
@@ -591,7 +575,8 @@ internal static class LayoutSceneContracts
         );
     }
 
-    private static void MainGrowth()
+    [TestMethod]
+    public void MainGrowth()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "main-growth");
@@ -665,7 +650,8 @@ internal static class LayoutSceneContracts
         );
     }
 
-    private static void InvalidBoundsFail()
+    [TestMethod]
+    public void InvalidBoundsFail()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "invalid-layout");
@@ -684,7 +670,8 @@ internal static class LayoutSceneContracts
         );
     }
 
-    private static void ExplicitZeroAndOverflow()
+    [TestMethod]
+    public void ExplicitZeroAndOverflow()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "zero-layout");
@@ -743,7 +730,8 @@ internal static class LayoutSceneContracts
         );
     }
 
-    private static void CrossAxisIntrinsicAndMalformedRuns()
+    [TestMethod]
+    public void CrossAxisIntrinsicAndMalformedRuns()
     {
         foreach (
             var alignment in new[]
@@ -922,7 +910,8 @@ internal static class LayoutSceneContracts
         );
     }
 
-    private static void FixedHeightVirtualization()
+    [TestMethod]
+    public void FixedHeightVirtualization()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "virtual-layout");

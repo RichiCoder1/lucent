@@ -4,7 +4,7 @@ Status: Accepted design for the first `0.2` implementation
 
 ## Projects and dependencies
 
-M7 adds three initial build-time deliverables:
+The SDK work provides three initial build-time deliverables:
 
 ```text
 Lucent.Lui.Compiler   parser, bound model, formatter, diagnostics, lowering, maps
@@ -12,7 +12,7 @@ Lucent.Lui.Generator  thin Roslyn incremental-generator adapter
 Lucent.Lui.Sdk        additive MSBuild SDK props/targets and package metadata
 ```
 
-`Lucent.Lui.LanguageServer` and a thin VS Code extension follow after the Filter Bar compiler slice. All experimental packages version together. The app/runtime has no dependency on Roslyn, the SDK, language server, JSON-RPC, or editor assets.
+Lucent.Lui.LanguageServer and a thin VS Code extension provide the editor surface over the compiler and shared project model. All experimental packages version together. The app/runtime has no dependency on Roslyn, the SDK, language server, JSON-RPC, or editor assets.
 
 The compiler and generator target `netstandard2.0`, the documented analyzer-compatible boundary. The LSP targets .NET 10. Generated applications remain .NET 10 NativeAOT; any .NET 10 generator experiment is informational and cannot delay the supported path.
 
@@ -59,7 +59,7 @@ The first complete editor target is VS Code. A separate .NET 10 LSP process cons
 
 The initial host loads one configured evaluated `.csproj` through `MSBuildWorkspace`; it does not parse project files or resolve references itself. Its bounded proof supports source-to-generated and generated-to-source definition navigation for `.lui` maps. Project/document replacements and disposal increment the same freshness epoch carried by compiler results, so obsolete work is dropped before publication. The VS Code host starts the separately installed server named by `lucentLui.serverPath`; neither host nor server is a runtime package asset.
 
-Before `.lui` is preferred, tooling covers every frozen construct: components, parameters, overloads, enums, literals, expression islands, default content, styles, tokens, variants, conditionals, keyed loops, namespaces/usings, locals, and XML documentation. It provides completion, signature help, document symbols, hover, diagnostics, semantic navigation, cross-language rename/references, stable formatting, generated navigation, and mapped expression breakpoints/exceptions. Unsafe or ambiguous rename is refused rather than partially applied.
+The .lui tooling contract covers every frozen construct: components, parameters, overloads, enums, literals, expression islands, default content, styles, tokens, variants, conditionals, keyed loops, namespaces/usings, locals, and XML documentation. It provides completion, signature help, document symbols, hover, diagnostics, semantic navigation, cross-language rename/references, stable formatting, generated navigation, and mapped expression breakpoints/exceptions. Unsafe or ambiguous rename is refused rather than partially applied.
 
 One formatter implementation serves editor document/range formatting, a repository CLI, and optional check-only CI/MSBuild integration. Builds never rewrite source. Hot reload, markup stepping, and a visual designer are follow-ups; initial DevX requires correct incremental build and fast restart.
 
@@ -67,7 +67,7 @@ The first formatter preserves Roslyn expression-island token text rather than in
 
 ## Evidence and budgets
 
-Before the first app conversion:
+The .lui tooling contract covers every frozen construct: components, parameters, overloads, enums, literals, expression islands, default content, styles, tokens, variants, conditionals, keyed loops, namespaces/usings, locals, and XML documentation. It provides completion, signature help, document symbols, hover, diagnostics, semantic navigation, cross-language rename/references, stable formatting, generated navigation, and mapped expression breakpoints/exceptions. Unsafe or ambiguous rename is refused rather than partially applied.
 
 - parser recovery and stable diagnostics pass a bounded malformed-input matrix;
 - binding covers symbols, types, nullability, overloads, content, and styles;
@@ -79,4 +79,4 @@ Before the first app conversion:
 
 The Filter Bar prototype establishes an honest editor baseline. Budgets are frozen before optimization for cold project load, warm completion, edit-to-diagnostic, rename, formatting, incremental no-op, and one-file invalidation. The Issue Row/keyed slice must pass those budgets before application cutover.
 
-Review occurs once at each meaningful boundary: runtime primitives; syntax/recovery; binding/lowering/maps; SDK/incrementality; Filter Bar parity; Issue Row parity; editor/cutover. Only blocker/high/medium findings block the boundary. Full runtime/NativeAOT gates run when runtime evidence is invalidated and once at final M7 closure, not after every parser-only edit.
+Review occurs once at each meaningful authoring boundary: runtime primitives; syntax/recovery; binding/lowering/maps; SDK/incrementality; Filter Bar parity; Issue Row parity; editor/cutover. Only blocker/high/medium findings block the boundary. Full runtime, NativeAOT, package, or manual checks run when their evidence is invalidated or when a release decision requires them, not after every parser-only edit.

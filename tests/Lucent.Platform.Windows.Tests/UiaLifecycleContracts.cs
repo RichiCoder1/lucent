@@ -4,14 +4,18 @@ using Lucent.Core;
 using Lucent.Platform.Windows;
 using SDL3;
 
-internal static unsafe partial class UiaLifecycleContracts
+namespace Lucent.Platform.Windows.Tests;
+
+[TestClass]
+public sealed unsafe partial class UiaLifecycleContracts
 {
     private const uint WmGetObject = 0x003d,
         WmNcDestroy = 0x0082;
     private const nint UiaRootObjectId = -25;
     private static long _nextId;
 
-    internal static void Run()
+    [TestMethod]
+    public void WindowProviderLifecycle()
     {
         if (!SDL.Init(SDL.InitFlags.Video))
             throw new InvalidOperationException("SDL_Init(UIA lifecycle): " + SDL.GetError());

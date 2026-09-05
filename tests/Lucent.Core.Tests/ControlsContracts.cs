@@ -1,39 +1,12 @@
 using Lucent.Core;
 
-internal static class ControlsContracts
-{
-    internal static int Run()
-    {
-        try
-        {
-            var first = Build(out var controls);
-            using var composition = controls.Composition;
-            Assert(
-                first == Build(out var second),
-                "Control composition dumps differ for equivalent recipes."
-            );
-            using (second.Composition) { }
-            ActivateAndSelect(controls);
-            StatusRetryThemesAndDisposal(controls);
-            ArmedPointerAndPaletteRegressions();
-            CaptureContinuityAcrossReprojection();
-            MutableStateScrollAndRollback();
-            PresentationPreflightAndControlAuthority();
-            ViewportFocusAndSceneInstallation();
-            ScrollUsesInstalledGeometry();
-            VisualRejectionPreservesOnlyStableCapture();
-            SemanticCommandsFailClosed();
-            Console.WriteLine("Lucent.Core controls contracts: PASS");
-            return 0;
-        }
-        catch (Exception error)
-        {
-            Console.Error.WriteLine("Lucent.Core controls contracts: FAIL: " + error.Message);
-            return 1;
-        }
-    }
+namespace Lucent.Core.Tests;
 
-    private static void SemanticCommandsFailClosed()
+[TestClass]
+public sealed class ControlsContracts
+{
+    [TestMethod]
+    public void SemanticCommandsFailClosed()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "semantic-commands");
@@ -289,7 +262,8 @@ internal static class ControlsContracts
         );
     }
 
-    private static void ArmedPointerAndPaletteRegressions()
+    [TestMethod]
+    public void ArmedPointerAndPaletteRegressions()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "armed");
@@ -435,7 +409,8 @@ internal static class ControlsContracts
         );
     }
 
-    private static void CaptureContinuityAcrossReprojection()
+    [TestMethod]
+    public void CaptureContinuityAcrossReprojection()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "capture-continuity");
@@ -614,7 +589,8 @@ internal static class ControlsContracts
         );
     }
 
-    private static void MutableStateScrollAndRollback()
+    [TestMethod]
+    public void MutableStateScrollAndRollback()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "mutable");
@@ -714,7 +690,8 @@ internal static class ControlsContracts
         );
     }
 
-    private static void PresentationPreflightAndControlAuthority()
+    [TestMethod]
+    public void PresentationPreflightAndControlAuthority()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "control-preflight");
@@ -845,7 +822,8 @@ internal static class ControlsContracts
         );
     }
 
-    private static void ViewportFocusAndSceneInstallation()
+    [TestMethod]
+    public void ViewportFocusAndSceneInstallation()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "viewport-focus");
@@ -955,7 +933,8 @@ internal static class ControlsContracts
         );
     }
 
-    private static void ScrollUsesInstalledGeometry()
+    [TestMethod]
+    public void ScrollUsesInstalledGeometry()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "installed-scroll");
@@ -1058,7 +1037,8 @@ internal static class ControlsContracts
         );
     }
 
-    private static void VisualRejectionPreservesOnlyStableCapture()
+    [TestMethod]
+    public void VisualRejectionPreservesOnlyStableCapture()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "visual-rejection");
@@ -1306,5 +1286,34 @@ internal static class ControlsContracts
             );
             return new("controls", request.Text.Length, request.FontSize, [run]);
         }
+    }
+
+    [TestMethod]
+    public void EquivalentCompositionsAreDeterministic()
+    {
+        var first = Build(out var controls);
+        using var composition = controls.Composition;
+        Assert(
+            first == Build(out var second),
+            "Control composition dumps differ for equivalent recipes."
+        );
+        using (second.Composition) { }
+    }
+
+    [TestMethod]
+    public void ActivationAndSelection()
+    {
+        _ = Build(out var controls);
+        using var composition = controls.Composition;
+        ActivateAndSelect(controls);
+    }
+
+    [TestMethod]
+    public void StatusRetryThemesAndDisposal()
+    {
+        _ = Build(out var controls);
+        using var composition = controls.Composition;
+        ActivateAndSelect(controls);
+        StatusRetryThemesAndDisposal(controls);
     }
 }

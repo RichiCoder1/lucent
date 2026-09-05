@@ -70,7 +70,7 @@ internal sealed class CpuSkiaPresenter : IDisposable
             return;
         if (descriptor.Format != WindowsPresentationContract.SurfaceFormat)
             throw new InvalidOperationException(
-                "The M2 CPU presenter supports only premultiplied RGBA8888."
+                "The CPU presenter supports only premultiplied RGBA8888."
             );
         DestroyResources();
         using var colorSpace = SKColorSpace.CreateSrgb();

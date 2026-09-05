@@ -1,0 +1,7 @@
+<Project Sdk="MSTest.Sdk">
+  <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Axe.Windows" />
+    <PackageReference Include="FlaUI.UIA3" />
+  </ItemGroup>
+</Project>

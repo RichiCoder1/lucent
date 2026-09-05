@@ -6,14 +6,18 @@
   <Project Path="src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj" />
   <Project Path="src/Lucent.Lui.Sdk/Lucent.Lui.Sdk.csproj" />
   <Project Path="src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" />
+  <Project Path="tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj" />
   <Project Path="src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
   <Project Path="src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
   <Project Path="tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj" />
+  <Project Path="tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj" />
+  <Project Path="tests/Lucent.Core.ArchitectureVerifier/Lucent.Core.ArchitectureVerifier.csproj" />
   <Project Path="tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj" />
   <Project Path="tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj" />
   <Project Path="tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj" />
   <Project Path="tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj" />
-  <Project Path="tests/Lucent.M6.Verifier/Lucent.M6.Verifier.csproj" />
+  <Project Path="tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj" />
   <Project Path="tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj" />
+  <Project Path="tests/Lucent.Platform.Windows.TestHost/Lucent.Platform.Windows.TestHost.csproj" />
   <Project Path="tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj" />
 </Solution>

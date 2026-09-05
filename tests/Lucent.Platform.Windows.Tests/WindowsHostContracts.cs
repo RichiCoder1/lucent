@@ -3,9 +3,13 @@ using Lucent.Platform.Windows;
 using Lucent.Renderer.Skia;
 using SDL3;
 
-internal static class WindowsHostContracts
+namespace Lucent.Platform.Windows.Tests;
+
+[TestClass]
+public sealed class WindowsHostContracts
 {
-    public static void InputAdapterAndRoutingContract()
+    [TestMethod]
+    public void InputAdapterAndRoutingContract()
     {
         Assert(
             WindowsInputAdapter.MapKey(SDL.Keycode.Tab) == Key.Tab
@@ -249,7 +253,8 @@ internal static class WindowsHostContracts
         Assert(stops == 2, "Text adapter disposal did not stop SDL text input.");
     }
 
-    public static void SettingsAndAppearanceContract()
+    [TestMethod]
+    public void SettingsAndAppearanceContract()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "windows-settings");
@@ -364,7 +369,8 @@ internal static class WindowsHostContracts
         );
     }
 
-    public static void InputInstallConvergenceContract()
+    [TestMethod]
+    public void InputInstallConvergenceContract()
     {
         using var renderer = new SkiaSceneRenderer();
         var graph = new ReactiveGraph();
@@ -477,7 +483,8 @@ internal static class WindowsHostContracts
         );
     }
 
-    public static void VirtualizedInputFreshnessContract()
+    [TestMethod]
+    public void VirtualizedInputFreshnessContract()
     {
         using var renderer = new SkiaSceneRenderer();
         var graph = new ReactiveGraph();
@@ -567,7 +574,8 @@ internal static class WindowsHostContracts
         );
     }
 
-    public static void InputReconciliationPaintContract()
+    [TestMethod]
+    public void InputReconciliationPaintContract()
     {
         using var renderer = new SkiaSceneRenderer();
         var graph = new ReactiveGraph();
@@ -666,7 +674,8 @@ internal static class WindowsHostContracts
         Assert(activations == 1, "A stable replacement did not preserve capture continuity.");
     }
 
-    public static void ClipboardAndCursorContract()
+    [TestMethod]
+    public void ClipboardAndCursorContract()
     {
         var clipboard = new WindowsClipboard(
             () => throw new InvalidOperationException("read failed"),
@@ -744,7 +753,8 @@ internal static class WindowsHostContracts
         Assert(failedCursorDestroyed == 1, "Failed cursor activation leaked its SDL cursor.");
     }
 
-    public static void ThrowingCleanupContract()
+    [TestMethod]
+    public void ThrowingCleanupContract()
     {
         using var renderer = new SkiaSceneRenderer();
         var cleanupGraph = new ReactiveGraph();

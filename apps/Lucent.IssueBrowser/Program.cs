@@ -19,7 +19,7 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Lucent M0 startup failed: {exception.Message}");
+            Console.Error.WriteLine($"Lucent startup failed: {exception.Message}");
             return 1;
         }
     }

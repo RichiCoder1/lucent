@@ -1,51 +1,12 @@
 using Lucent.Core;
 
-internal static class CompositionContracts
-{
-    public static int Run()
-    {
-        try
-        {
-            ConditionalIdentityAndCleanup();
-            SwitchReplacementIsTransactional();
-            KeyedIdentityRollbackAndCleanup();
-            DepartedFacetsAndLateAsync();
-            FailureAndDisposalSafety();
-            FactoryGuardsAndJointFailures();
-            PublicFactoryStructuralGuards();
-            ManualScopeDisposalRetiresEntries();
-            KeyedFactoryTransactionsAndReentrancy();
-            RecipeMountsAndMetadataSurface();
-            ComponentRecipeContracts();
-            FactoryMutationContainment();
-            BuiltinRecipeContracts();
-            NestedFactoryIsolationAndVirtualRows();
-            var first = EquivalentDump();
-            Assert(
-                first == EquivalentDump(),
-                "Composition dumps differ for equivalent active trees."
-            );
-            Assert(
-                !first.Contains("secret", StringComparison.OrdinalIgnoreCase)
-                    && !first.Contains("value=", StringComparison.OrdinalIgnoreCase),
-                "Composition dump exposed application values."
-            );
-            ReleasedPayload();
-            ReleasedOwnershipIdentities();
-            UnrelatedSemanticRefreshKeepsIdentityCurrent();
-            Console.WriteLine("Lucent.Core composition contracts: PASS");
-            return 0;
-        }
-        catch (Exception exception)
-        {
-            Console.Error.WriteLine(
-                "Lucent.Core composition contracts: FAIL: " + exception.Message
-            );
-            return 1;
-        }
-    }
+namespace Lucent.Core.Tests;
 
-    private static void ConditionalIdentityAndCleanup()
+[TestClass]
+public sealed class CompositionContracts
+{
+    [TestMethod]
+    public void ConditionalIdentityAndCleanup()
     {
         var graph = new ReactiveGraph();
         var active = graph.Signal(false, "conditional-active");
@@ -90,7 +51,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void KeyedIdentityRollbackAndCleanup()
+    [TestMethod]
+    public void KeyedIdentityRollbackAndCleanup()
     {
         var graph = new ReactiveGraph();
         var rows = graph.Signal(new[] { "a", "b" }, "keyed-rows");
@@ -148,7 +110,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void SwitchReplacementIsTransactional()
+    [TestMethod]
+    public void SwitchReplacementIsTransactional()
     {
         var graph = new ReactiveGraph();
         var branch = graph.Signal(1, "switch-branch");
@@ -193,7 +156,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void UnrelatedSemanticRefreshKeepsIdentityCurrent()
+    [TestMethod]
+    public void UnrelatedSemanticRefreshKeepsIdentityCurrent()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "semantic-current");
@@ -219,7 +183,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void RecipeMountsAndMetadataSurface()
+    [TestMethod]
+    public void RecipeMountsAndMetadataSurface()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "recipe-mount");
@@ -418,7 +383,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void ComponentRecipeContracts()
+    [TestMethod]
+    public void ComponentRecipeContracts()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "component-recipe-root");
@@ -552,7 +518,8 @@ internal static class CompositionContracts
         Expect<ArgumentNullException>(() => ComponentRecipe.Create("null-callback", null!));
     }
 
-    private static void BuiltinRecipeContracts()
+    [TestMethod]
+    public void BuiltinRecipeContracts()
     {
         Expect<ArgumentException>(() => Components.Text(" "));
         Expect<ArgumentException>(() => Components.TextField("bad\nvalue"));
@@ -826,7 +793,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void FactoryMutationContainment()
+    [TestMethod]
+    public void FactoryMutationContainment()
     {
         AssertFactoryMutationGuard("present", (_, theme) => _.Present(theme));
         AssertFactoryMutationGuard(
@@ -959,7 +927,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void NestedFactoryIsolationAndVirtualRows()
+    [TestMethod]
+    public void NestedFactoryIsolationAndVirtualRows()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "factory-isolation");
@@ -1223,7 +1192,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void DepartedFacetsAndLateAsync()
+    [TestMethod]
+    public void DepartedFacetsAndLateAsync()
     {
         var graph = new ReactiveGraph();
         var rows = graph.Signal(new[] { 1, 2 }, "facet-rows");
@@ -1276,7 +1246,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void FailureAndDisposalSafety()
+    [TestMethod]
+    public void FailureAndDisposalSafety()
     {
         var graph = new ReactiveGraph();
         var rows = graph.Signal(new[] { "kept" }, "failure-rows");
@@ -1356,7 +1327,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void FactoryGuardsAndJointFailures()
+    [TestMethod]
+    public void FactoryGuardsAndJointFailures()
     {
         var graph = new ReactiveGraph();
         var active = graph.Signal(false, "invalid-parent-active");
@@ -1547,7 +1519,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void PublicFactoryStructuralGuards()
+    [TestMethod]
+    public void PublicFactoryStructuralGuards()
     {
         AssertPublicFactoryGuard(
             false,
@@ -1691,7 +1664,8 @@ internal static class CompositionContracts
         );
     }
 
-    private static void ManualScopeDisposalRetiresEntries()
+    [TestMethod]
+    public void ManualScopeDisposalRetiresEntries()
     {
         var graph = new ReactiveGraph();
         var active = graph.Signal(true, "manual-scope-conditional-active");
@@ -1790,7 +1764,8 @@ internal static class CompositionContracts
         return new ScopeProbe(payload, composition);
     }
 
-    private static void KeyedFactoryTransactionsAndReentrancy()
+    [TestMethod]
+    public void KeyedFactoryTransactionsAndReentrancy()
     {
         var graph = new ReactiveGraph();
         var rows = graph.Signal(Array.Empty<int>(), "keyed-transaction-rows");
@@ -1956,7 +1931,8 @@ internal static class CompositionContracts
         return new KeyPreparationProbe(weak, composition);
     }
 
-    private static void ReleasedPayload()
+    [TestMethod]
+    public void ReleasedPayload()
     {
         var probe = RemovedPayload();
         GC.Collect();
@@ -1969,7 +1945,8 @@ internal static class CompositionContracts
         GC.KeepAlive(probe.Root);
     }
 
-    private static void ReleasedOwnershipIdentities()
+    [TestMethod]
+    public void ReleasedOwnershipIdentities()
     {
         var probe = ReleasedIdentities();
         GC.Collect();
@@ -2207,4 +2184,16 @@ internal static class CompositionContracts
     }
 
     private sealed class Payload;
+
+    [TestMethod]
+    public void DiagnosticDumpIsDeterministicAndRedacted()
+    {
+        var first = EquivalentDump();
+        Assert(first == EquivalentDump(), "Composition dumps differ for equivalent active trees.");
+        Assert(
+            !first.Contains("secret", StringComparison.OrdinalIgnoreCase)
+                && !first.Contains("value=", StringComparison.OrdinalIgnoreCase),
+            "Composition dump exposed application values."
+        );
+    }
 }

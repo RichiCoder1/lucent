@@ -8,9 +8,9 @@ try {
     & $dotnet tool restore
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-    $files = @(& git ls-files '*.cs')
+    $files = @(& git ls-files --cached --others --exclude-standard '*.cs' | Where-Object { Test-Path -LiteralPath $_ } | Sort-Object -Unique)
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
-    if ($files.Count -eq 0) { throw 'No tracked C# files were found.' }
+    if ($files.Count -eq 0) { throw 'No authored C# files were found.' }
 
     & $dotnet csharpier check @files
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -19,4 +19,4 @@ finally {
     Pop-Location
 }
 
-Write-Output "CSharpier authored C# check: PASS ($($files.Count) files)"
+Write-Output "CSharpier working-tree C# check: PASS ($($files.Count) files)"

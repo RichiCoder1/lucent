@@ -248,7 +248,7 @@ public sealed class Composition : IDisposable
         return snapshot;
     }
 
-    /// <summary>Returns a deterministic, value-free semantic diagnostic dump. The declared M3 matrix has no suppressions.</summary>
+    /// <summary>Returns a deterministic, value-free semantic diagnostic dump. The semantic matrix has no suppressions.</summary>
     public string SemanticDump()
     {
         _graph.CheckThread();

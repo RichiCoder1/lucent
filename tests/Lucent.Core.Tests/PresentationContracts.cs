@@ -1,7 +1,10 @@
 using System.Globalization;
 using Lucent.Core;
 
-internal static class PresentationContracts
+namespace Lucent.Core.Tests;
+
+[TestClass]
+public sealed class PresentationContracts
 {
     private static readonly Property<int> Value = new("value", 1);
     private static readonly Property<int> Inherited = new("inherited", 2, inherits: true);
@@ -14,29 +17,8 @@ internal static class PresentationContracts
     private static readonly Token<int> MaliciousToken = new("bad\r\n:#[]", 1);
     private static readonly Property<int> FallbackValue = new("fallback-value", 0);
 
-    public static int Run()
-    {
-        try
-        {
-            StylesTransitionsAndDependencies();
-            TokenFactoryRollback();
-            FluentStylesAndComposition();
-            TypographyInheritanceScale();
-            BindingsRespectVariantsAndControlAuthority();
-            BindingRowScaleLifecycle();
-            BehaviorIsolationAndRollback();
-            SemanticsAndDumps();
-            Console.WriteLine("Lucent.Core presentation contracts: PASS");
-            return 0;
-        }
-        catch (Exception error)
-        {
-            Console.Error.WriteLine("Lucent.Core presentation contracts: FAIL: " + error.Message);
-            return 1;
-        }
-    }
-
-    private static void StylesTransitionsAndDependencies()
+    [TestMethod]
+    public void StylesTransitionsAndDependencies()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "styles");
@@ -298,7 +280,8 @@ internal static class PresentationContracts
         );
     }
 
-    private static void TokenFactoryRollback()
+    [TestMethod]
+    public void TokenFactoryRollback()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "token-factory");
@@ -427,7 +410,8 @@ internal static class PresentationContracts
         );
     }
 
-    private static void FluentStylesAndComposition()
+    [TestMethod]
+    public void FluentStylesAndComposition()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "fluent-styles");
@@ -521,7 +505,8 @@ internal static class PresentationContracts
         );
     }
 
-    private static void BehaviorIsolationAndRollback()
+    [TestMethod]
+    public void BehaviorIsolationAndRollback()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "behavior");
@@ -731,7 +716,8 @@ internal static class PresentationContracts
         GC.KeepAlive(probe.Root);
     }
 
-    private static void BindingsRespectVariantsAndControlAuthority()
+    [TestMethod]
+    public void BindingsRespectVariantsAndControlAuthority()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "bindings");
@@ -857,7 +843,8 @@ internal static class PresentationContracts
         GC.KeepAlive(released.Root);
     }
 
-    private static void TypographyInheritanceScale()
+    [TestMethod]
+    public void TypographyInheritanceScale()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "typography-scale");
@@ -949,7 +936,8 @@ internal static class PresentationContracts
         );
     }
 
-    private static void BindingRowScaleLifecycle()
+    [TestMethod]
+    public void BindingRowScaleLifecycle()
     {
         var graph = new ReactiveGraph();
         var composition = new Composition(graph, "binding-row-scale");
@@ -977,7 +965,8 @@ internal static class PresentationContracts
         );
     }
 
-    private static void SemanticsAndDumps()
+    [TestMethod]
+    public void SemanticsAndDumps()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "semantic\r\nroot");

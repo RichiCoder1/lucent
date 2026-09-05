@@ -1,12 +1,12 @@
 # Verification during pre-release development
 
-After the M7 handoff chunk, use risk-based verification so routine work stays fast. This policy supersedes the earlier requirement to run the full milestone gate for every issue closure.
+Use risk-based verification for pre-release work so routine changes stay fast and the selected checks match the affected behavior.
 
 ## Default loop
 
 - While editing, run the smallest meaningful regression for the changed behavior. Check both the original failure and the intended result when fixing a bug.
 - Before committing, run the affected contract suite, a warning-clean build of affected projects, authored formatting, and `git diff --check`.
-- Reuse passing checks when the intervening changes cannot affect them. Re-run for source changes, failures, or a concrete unresolved concern; do not repeat the same gate just to attach a new ceremony to every commit.
+- Reuse passing checks when the intervening changes cannot affect them. Re-run for source changes, failures, or a concrete unresolved concern; do not repeat the same check solely to add ceremony to every commit.
 - Record the commands/results and any known limitation briefly in the issue. Keep large logs and binaries as artifacts.
 
 ## Add checks when the change reaches them
@@ -16,9 +16,9 @@ After the M7 handoff chunk, use risk-based verification so routine work stays fa
 - Lifecycle/hosting/AOT/dependency changes: published NativeAOT startup/close/failure proof, relevant architecture/package inventory checks, and UIA evidence if the host or semantic bridge changes.
 - Documentation-only changes: inspect content and links; skip builds and UI tests.
 
-## Larger gates
+## Release checks
 
-Run `tools/Verify-M1.ps1` for a planned release, a substantial cross-cutting change, or evidence that targeted checks cannot contain the risk. Run package/performance/Sandbox gates when publishing a release candidate or changing their relevant paths. Independent review is for substantial correctness, architecture, or security risk, not a mandatory second pass on every small change.
+Reserve broad package, performance, Sandbox, and manual checks for release candidates, substantial cross-cutting changes, or risks that focused checks cannot contain. Independent review is for substantial correctness, architecture, or security risk, not a mandatory second pass on every small change.
 
 Broad manual visual/accessibility/IME walkthroughs are release decisions, not routine issue-closure chores. Real-language IME certification remains supplemental. State exactly what was automated, observed, waived, or left unverified; do not manufacture pass records or silently reuse source-bound evidence for different artifacts.
 

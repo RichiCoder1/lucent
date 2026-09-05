@@ -2,7 +2,7 @@
 
 Lucent is informed by open-source UI systems and platform documentation. Conceptual influence does not imply source reuse. Any copied or translated code must carry file-level attribution, upstream commit identity, and its required license notice.
 
-The Native validation spike's detailed reference ledger is preserved in [`docs/history/native-spike/REFERENCES.md`](docs/history/native-spike/REFERENCES.md). It includes GPUI, Solid, alien-signals, Tailwind CSS, shadcn/ui, ProGPU, SDL3, Skia, Windows UI Automation, and Windows text services.
+The Native validation spike's complete conceptual reference ledger remains available at the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). The active ledger below records current architectural references, adopted dependencies, and distribution attribution.
 
 [OpenTelemetry .NET](https://github.com/open-telemetry/opentelemetry-dotnet/tree/164d8a59ae4f8ae4d9b498981f1a2ea046d0513f) `core-1.15.0` (Apache-2.0) informs Lucent's optional application-owned export of standard .NET activities and metrics. This is conceptual and API guidance only; no source is reused. Lucent's deterministic diagnostic dumps remain its own framework contract, and Lucent does not configure exporters or transmit telemetry.
 
@@ -23,10 +23,11 @@ These sources were consulted on 2026-08-27. They are conceptual references only;
 | [shadcn/ui](https://github.com/shadcn-ui/ui/tree/683a5a9b370acdb7785a0529434e6a3b8c7e0441) | `683a5a9b370acdb7785a0529434e6a3b8c7e0441` | MIT | Paired semantic foreground/surface tokens and source-owned components |
 | [Design Tokens Community Group](https://github.com/design-tokens/community-group/tree/16c902d9327c18290e956a21130c445f1b88c40f) | `16c902d9327c18290e956a21130c445f1b88c40f`; Format Module 2025.10 | Community Group report, not a W3C Standard | Potential build-time token interchange; never executable runtime input |
 | [Windows UI Automation SDK](https://learn.microsoft.com/windows/win32/winauto/uiauto-serversideprovider) | Windows SDK `10.0.26100.0` `UIAutomationCore.idl` and `UIAutomationCoreApi.h`, consulted 2026-08-29 | Windows SDK platform contract; no copied source | Exact UIA provider IIDs, vtable slots, HRESULT, VARIANT and SAFEARRAY ownership |
+| [Windows text services](https://learn.microsoft.com/windows/win32/tsf/text-services-framework) | Microsoft documentation, consulted 2026-08-29 | Windows platform contract; no copied source | IME composition and editable-text platform behavior |
 
-## M7 language, compiler, and authoring references
+## Language, compiler, and authoring references
 
-These sources were consulted on 2026-08-30 for the `.lui` design. They are conceptual/tooling references only unless separately listed as an adopted package dependency. Detailed findings are in [`docs/research`](docs/research/).
+These sources were consulted on 2026-08-30 for the .lui design. They are conceptual/tooling references only unless separately listed as an adopted package dependency. Historical research remains available in the immutable spike tree linked above.
 
 | Source | Consulted identity | License or status | Influence |
 | --- | --- | --- | --- |
@@ -45,7 +46,7 @@ These sources were consulted on 2026-08-30 for the `.lui` design. They are conce
 | [QML](https://doc.qt.io/qt-6.11/qtqml-syntax-basics.html) | Qt 6.11 object-declaration documentation | LGPL/GPL/commercial framework terms; no dependency | Concise typed property-block syntax and warning against dynamic runtime object semantics |
 | [CSSWG](https://github.com/w3c/csswg-drafts/tree/f89f7a1a0138b072051e65323f49c737152880fb) | commit `f89f7a1a0138b072051e65323f49c737152880fb` | W3C specification terms | Familiar vocabulary plus evidence that flex, background layers, overflow, and alignment semantics must not be implied by names alone |
 
-The M7 design also revisited the already-recorded GPUI, Avalonia, Compose, Flutter, Slint, StyleX, Panda CSS, shadcn/ui, and DTCG identities above. No source is copied. Exact implementation package versions and NativeAOT/editor-host compatibility must be rechecked before package references are added.
+The authoring design also revisited the already-recorded GPUI, Avalonia, Compose, Flutter, Slint, StyleX, Panda CSS, shadcn/ui, and DTCG identities above. No source is copied. Exact implementation package versions and NativeAOT/editor-host compatibility must be rechecked before package references are added.
 
 ## Development tooling
 
@@ -60,17 +61,23 @@ Before adding a dependency or adopting a new architectural reference:
 3. Distinguish conceptual influence from copied or translated code.
 4. Re-check NativeAOT support and distribution notices against the final published output.
 
-## M0 runtime dependency ledger
+## Runtime dependency ledger
 
-These M0 `win-x64` NativeAOT dependencies were checked on 2026-08-27 before their package references were added. The dependency choice follows the validated Native spike; `tools/Verify-M0Assets.ps1` reconciles the final publish directory.
+These win-x64 NativeAOT dependencies were checked on 2026-08-27 before their package references were added. The dependency choice follows the validated Native spike; the asset verifier reconciles the final publish directory.
 
 | Dependency | Exact identity | License | NativeAOT status | Distribution notice |
 | --- | --- | --- | --- | --- |
-| [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) | SDK `10.0.400`, runtime `10.0.11`, `win-x64` | MIT ([runtime](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT)) | Required baseline; NativeAOT compiler and trimming analyzers are enabled for M0 | Publish SDK `LICENSE.txt` and `ThirdPartyNotices.txt` as `notices/dotnet-LICENSE.txt` and `notices/dotnet-ThirdPartyNotices.txt`. |
+| [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) | SDK `10.0.400`, runtime `10.0.11`, `win-x64` | MIT ([runtime](https://github.com/dotnet/runtime/blob/main/LICENSE.TXT)) | Required baseline; NativeAOT compiler and trimming analyzers are enabled for runtime projects | Publish SDK `LICENSE.txt` and `ThirdPartyNotices.txt` as `notices/dotnet-LICENSE.txt` and `notices/dotnet-ThirdPartyNotices.txt`. |
 | [SDL3-CS](https://www.nuget.org/packages/SDL3-CS/3.4.14.1) / [SDL3-CS.Windows](https://www.nuget.org/packages/SDL3-CS.Windows/3.4.14.1) | `3.4.14.1`, [`edwardgushchin/SDL3-CS@b525db5bf89a46c3416efe21b09431c28cf00b8d`](https://github.com/edwardgushchin/SDL3-CS/tree/b525db5bf89a46c3416efe21b09431c28cf00b8d); `SDL3.dll` | zlib | Spike-validated NativeAOT window, stable HWND retrieval, streaming-texture presentation | Ship `SDL3-CS.Windows/LICENSE` as `notices/SDL3-CS.txt`. |
 | [Microsoft Visual C++ Runtime](https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files) | `vcruntime140.dll` `14.44.35211.0`, SHA-256 `d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066` | Microsoft Visual Studio 2022 Redistributable Code terms | App-local dependency of the selected `SDL3.dll`; clean Windows Sandbox proved the DLL is absent from the base OS | Ship the unmodified x64 DLL and `notices/Microsoft-VCRuntime.txt`; service it with dependency updates. |
 | [SkiaSharp](https://www.nuget.org/packages/SkiaSharp/4.151.1) / [SkiaSharp.HarfBuzz](https://www.nuget.org/packages/SkiaSharp.HarfBuzz/4.151.1) | `4.151.1`, [`mono/SkiaSharp@279f93f4ffa7f9fe4e9c0bc298bedc3c9e439764`](https://github.com/mono/SkiaSharp/tree/279f93f4ffa7f9fe4e9c0bc298bedc3c9e439764); transitive HarfBuzzSharp `14.2.1.1`; `libSkiaSharp.dll` | MIT bindings; Skia BSD-3-Clause | Windows native-assets package supplies the selected `win-x64` native DLL; spike NativeAOT-published this line | Ship `SkiaSharp.NativeAssets.Win32/LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` as `notices/SkiaSharp-LICENSE.txt` and `notices/SkiaSharp-NOTICES.txt`. |
 | [HarfBuzzSharp](https://www.nuget.org/packages/HarfBuzzSharp/14.2.1.1) | transitive from `SkiaSharp.HarfBuzz 4.151.1`; `libHarfBuzzSharp.dll` | MIT binding and HarfBuzz | Windows native-assets package supplies selected `win-x64` native DLL; spike NativeAOT-published this line | Ship `HarfBuzzSharp.NativeAssets.Win32/LICENSE.txt` and `THIRD-PARTY-NOTICES.txt` as `notices/HarfBuzzSharp-LICENSE.txt` and `notices/HarfBuzzSharp-NOTICES.txt`. |
-| [Microsoft.Windows.CsWin32](https://www.nuget.org/packages/Microsoft.Windows.CsWin32/0.3.321) | `0.3.321`, [`microsoft/CsWin32@b0f1e799e6aa793eccffafa6ba8164ca45a9266f`](https://github.com/microsoft/CsWin32/tree/b0f1e799e6aa793eccffafa6ba8164ca45a9266f) | MIT | Source-generated P/Invoke; M0 uses `CsWin32RunAsBuildTask` and disables runtime marshalling per [its NativeAOT guidance](https://microsoft.github.io/CsWin32/docs/getting-started.html) | Build-time-only (`PrivateAssets="all"`); no package asset is shipped. |
+| [Microsoft.Windows.CsWin32](https://www.nuget.org/packages/Microsoft.Windows.CsWin32/0.3.321) | `0.3.321`, [`microsoft/CsWin32@b0f1e799e6aa793eccffafa6ba8164ca45a9266f`](https://github.com/microsoft/CsWin32/tree/b0f1e799e6aa793eccffafa6ba8164ca45a9266f) | MIT | Source-generated P/Invoke; Lucent uses `CsWin32RunAsBuildTask` and disables runtime marshalling per [its NativeAOT guidance](https://microsoft.github.io/CsWin32/docs/getting-started.html) | Build-time-only (`PrivateAssets="all"`); no package asset is shipped. |
 
-M0 carries no copied source. CsWin32 output is generated from Microsoft Win32 metadata at build time and is not a runtime dependency.
+This ledger carries no copied source. CsWin32 output is generated from Microsoft Win32 metadata at build time and is not a runtime dependency.
+
+## Test tooling
+
+- [MSTest and Microsoft.Testing.Platform](https://github.com/microsoft/testfx/tree/v4.4.0), selected through `MSTest.Sdk` 4.4.0, provide discoverable .NET tests, filtering, reports, and NativeAOT-compatible test execution. Test-only dependencies; no source is copied. Framework/platform source is MIT-licensed; optional extensions retain their upstream package terms.
+- [Axe.Windows](https://github.com/microsoft/axe-windows), package 2.4.2 (MIT), provides Windows accessibility rule scans through its supported Automation API. It is test-driver tooling, not a Lucent runtime dependency. Its automated scans do not represent the manual tab-stop portion of Accessibility Insights FastPass.
+- [FlaUI](https://github.com/FlaUI/FlaUI) / FlaUI.UIA3 5.0.0 (MIT) is the selected test-only desktop interaction driver. It is not a Lucent runtime dependency.

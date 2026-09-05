@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><NoWarn>$(NoWarn);CA1822;CA1861</NoWarn></PropertyGroup>
+</Project>

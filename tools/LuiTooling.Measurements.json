@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "operations": [
+    {
+      "name": "compilerCorpus",
+      "timingKind": "process",
+      "measurementScope": "already-built compiler MSTest corpus",
+      "arguments": ["test", "--project", "{root}/tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj", "--no-build", "--no-restore", "-c", "Release", "--filter", "FullyQualifiedName~CompilerTests"]
+    },
+    {
+      "name": "formattingCorpus",
+      "timingKind": "process",
+      "measurementScope": "already-built parser and formatter MSTest corpus",
+      "arguments": ["test", "--project", "{root}/tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj", "--no-build", "--no-restore", "-c", "Release", "--filter", "FullyQualifiedName~ParserAndFormatting"]
+    },
+    {
+      "name": "generatorIncrementality",
+      "timingKind": "process",
+      "measurementScope": "already-built generator incrementality MSTest case",
+      "arguments": ["test", "--project", "{root}/tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj", "--no-build", "--no-restore", "-c", "Release", "--filter", "FullyQualifiedName~IncrementalUpdatesInvalidateOnlyAffectedOutputs"]
+    },
+    {
+      "name": "warmCompletion",
+      "timingKind": "operation",
+      "measurementScope": "warm LSP completion request",
+      "arguments": ["run", "--project", "{root}/tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj", "--no-build", "--no-restore", "-c", "Release", "--", "warmCompletion"],
+      "resultPattern": "MeasureMilliseconds=(?<milliseconds>\\d+)"
+    },
+    {
+      "name": "editToDiagnostic",
+      "timingKind": "operation",
+      "measurementScope": "LSP didChange through pull diagnostic response",
+      "arguments": ["run", "--project", "{root}/tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj", "--no-build", "--no-restore", "-c", "Release", "--", "editToDiagnostic"],
+      "resultPattern": "MeasureMilliseconds=(?<milliseconds>\\d+)"
+    },
+    {
+      "name": "rename",
+      "timingKind": "operation",
+      "measurementScope": "warm LSP rename request",
+      "arguments": ["run", "--project", "{root}/tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj", "--no-build", "--no-restore", "-c", "Release", "--", "rename"],
+      "resultPattern": "MeasureMilliseconds=(?<milliseconds>\\d+)"
+    }
+  ]
+}
