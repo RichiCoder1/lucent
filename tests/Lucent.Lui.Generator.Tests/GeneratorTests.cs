@@ -1066,6 +1066,70 @@ public static class Harness
     }
 
     [TestMethod]
+    public void MultilineEditorUsesAnOwnedSessionThroughLui()
+    {
+        const string source =
+            "namespace MultilineSample; using Lucent.Core; "
+            + "public component Editor(EditorSession session) { "
+            + "<TextArea session={session} label=\"Note body\" style={Style.Empty.Width(240).Height(120)} /> }";
+        var result = RunWithSource(
+            "",
+            new TextFile("C:/consumer/Editor.lui", source, "Editor.lui")
+        );
+        Assert(
+            result.Diagnostics.Length == 0,
+            "TextArea diagnostics: " + string.Join(" | ", result.Diagnostics)
+        );
+        var generated = result.Results.Single().GeneratedSources.Single().SourceText.ToString();
+        var compilation = CSharpCompilation.Create(
+            "multiline-lui-runtime",
+            [CSharpSyntaxTree.ParseText(generated)],
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var stream = new MemoryStream();
+        var emitted = compilation.Emit(stream);
+        Assert(emitted.Success, "TextArea emit: " + string.Join(" | ", emitted.Diagnostics));
+        var assembly = Assembly.Load(stream.ToArray());
+        using var composition = new Composition(new ReactiveGraph(), "multiline-lui");
+        using var session = new EditorSession(
+            composition.Root.Scope,
+            "note",
+            "First\nSecond",
+            multiline: true
+        );
+        var recipe = (ComponentRecipe)
+            assembly
+                .GetType("MultilineSample.Components")!
+                .GetMethod("Editor")!
+                .Invoke(null, [session])!;
+        composition.Mount(
+            composition.Root,
+            new ThemeContext(composition.Root.Scope, ControlThemes.Light),
+            recipe
+        );
+        composition.Flush();
+        static SemanticSnapshot FindEditor(SemanticSnapshot node) =>
+            node.Role == SemanticRole.TextField ? node : node.Children.Select(FindEditor).First();
+        Assert(
+            FindEditor(composition.SemanticSnapshot()!).Value == "First\nSecond",
+            "TextArea lost the multiline initial draft."
+        );
+        session.Text = "Updated\nStill here";
+        composition.Flush();
+        Assert(
+            FindEditor(composition.SemanticSnapshot()!).Value == session.Text,
+            "TextArea did not follow its owned session."
+        );
+        session.Undo();
+        composition.Flush();
+        Assert(
+            session.Text == "First\nSecond",
+            "Generated TextArea did not retain session history."
+        );
+    }
+
+    [TestMethod]
     public void ApplicationCommandsAreTypedLuiParameters()
     {
         const string source =

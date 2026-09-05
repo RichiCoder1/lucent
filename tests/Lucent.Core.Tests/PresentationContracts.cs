@@ -276,7 +276,7 @@ public sealed class PresentationContracts
         );
         Expect<ArgumentException>(() => new SemanticDeclaration((SemanticRole)99, "bad"));
         Expect<ArgumentException>(() =>
-            new SemanticDeclaration(SemanticRole.Text, "bad", actions: (SemanticAction)32)
+            new SemanticDeclaration(SemanticRole.Text, "bad", actions: (SemanticAction)128)
         );
     }
 

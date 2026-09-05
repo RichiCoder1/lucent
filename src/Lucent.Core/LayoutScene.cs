@@ -212,6 +212,11 @@ internal static class ProjectionProperties
         null
     );
     internal static readonly Property<int?> TextCaret = new("projection-text-caret", null);
+    internal static readonly Property<bool> TextMultiline = new("projection-text-multiline", false);
+    internal static readonly Property<TextAffinity> TextCaretAffinity = new(
+        "projection-text-caret-affinity",
+        TextAffinity.Downstream
+    );
 }
 
 /// <summary>The direction in which a container places its children.</summary>

@@ -252,6 +252,71 @@ public sealed class RendererTests
     }
 
     [TestMethod]
+    public void ShapesAndPaintsMultilineTabsWithPositiveAdvance()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        const string source = "left\tright\nnext\tline";
+        var shaped = renderer.Shape(
+            new TextMeasureRequest(
+                source,
+                "Segoe UI",
+                16,
+                "en",
+                TextDirection.LeftToRight,
+                1,
+                InlineConstraint: new LayoutConstraint(240),
+                Wrap: TextWrap.WordWithGraphemeFallback
+            )
+        );
+
+        Assert(
+            shaped.Lines.Count == 2
+                && shaped
+                    .Runs.SelectMany(run => run.Glyphs)
+                    .All(glyph => glyph.GlyphId != 0 && float.IsFinite(glyph.XAdvance))
+                && shaped.Runs.All(run => run.RunWidth > 0),
+            "Multiline tab text did not produce paintable bounded line geometry."
+        );
+        var glyphs = shaped.Runs.SelectMany(run => run.Glyphs).ToArray();
+        var beforeTab = shaped.CaretBounds(source, 4, TextAffinity.Downstream);
+        var afterTab = shaped.CaretBounds(source, 5, TextAffinity.Upstream);
+        Assert(
+            glyphs.Count(glyph => glyph.Cluster == 4) == 4
+                && glyphs.Count(glyph => glyph.Cluster == 15) == 4
+                && afterTab.X > beforeTab.X
+                && shaped.SelectionBounds(source, 4, 5).Single().Width > 0,
+            "Fixed-width tab glyphs did not map to one selectable source grapheme."
+        );
+        var identity = new ElementIdentity(1, 1);
+        var bounds = new LayoutRect(0, 0, 240, 80);
+        var scene = new RetainedScene(
+            1,
+            new(240, 80, 1),
+            [],
+            [
+                new TextSceneNode(
+                    new(identity, SceneNodeKind.Text),
+                    bounds,
+                    Color.Parse("#000000"),
+                    shaped
+                ),
+            ],
+            []
+        );
+        using var bitmap = new SKBitmap(240, 80);
+        using var canvas = new SKCanvas(bitmap);
+        renderer.Render(scene, canvas);
+        Assert(
+            Enumerable
+                .Range(0, bitmap.Height)
+                .Any(y =>
+                    Enumerable.Range(0, bitmap.Width).Any(x => bitmap.GetPixel(x, y).Alpha != 0)
+                ),
+            "Multiline tab text produced no painted pixels."
+        );
+    }
+
+    [TestMethod]
     public void RetainsEllipsisGlyphForOverflowingParagraph()
     {
         using var renderer = new SkiaSceneRenderer();
@@ -365,6 +430,133 @@ public sealed class RendererTests
                 + ellipsized.Lines[0].Utf16Length
                 + " UTF-16 units"
         );
+    }
+
+    [TestMethod]
+    public void LongWrappedParagraphReusesTextBlobsAcrossClippedPaints()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var text = string.Concat(Enumerable.Repeat("word ", 4000));
+        var shaped = renderer.Shape(
+            new TextMeasureRequest(
+                text,
+                "Segoe UI",
+                16,
+                "en",
+                TextDirection.LeftToRight,
+                1,
+                InlineConstraint: new LayoutConstraint(320),
+                Wrap: TextWrap.WordWithGraphemeFallback
+            )
+        );
+        var identity = new ElementIdentity(1, 1);
+        var bounds = new LayoutRect(0, 0, 320, 160);
+        var scene = new RetainedScene(
+            1,
+            new(320, 160, 1),
+            [],
+            [
+                new ClipSceneNode(
+                    new(identity, SceneNodeKind.Clip),
+                    bounds,
+                    [
+                        new TextSceneNode(
+                            new(identity, SceneNodeKind.Text),
+                            bounds,
+                            Color.Parse("#000000"),
+                            shaped
+                        ),
+                    ]
+                ),
+            ],
+            []
+        );
+        using var bitmap = new SKBitmap(320, 160);
+        using var canvas = new SKCanvas(bitmap);
+
+        renderer.Render(scene, canvas);
+        var createdAfterFirstPaint = renderer.TextBlobCreationCount;
+        Assert(
+            shaped.Runs.Count > 256 && createdAfterFirstPaint == shaped.Runs.Count,
+            "The clipped paragraph did not exercise more than the former count cap."
+        );
+
+        renderer.Render(scene, canvas);
+
+        Assert(
+            renderer.TextBlobCreationCount == createdAfterFirstPaint,
+            "The second unchanged clipped paint regenerated text blobs."
+        );
+        Console.WriteLine(
+            $"20,000-unit clipped paint: {shaped.Runs.Count} runs; "
+                + $"{renderer.LiveTextBlobCount} retained blobs; "
+                + $"{renderer.RetainedTextBlobBytes} estimated bytes."
+        );
+    }
+
+    [TestMethod]
+    public void MultilineEditorReusesTwentyThousandUnitShapingDuringSelectionAndPaint()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "long-editor");
+        using var renderer = new SkiaSceneRenderer();
+        using var session = new EditorSession(
+            composition.Root.Scope,
+            "long-note",
+            string.Concat(Enumerable.Repeat("word ", 4000)),
+            multiline: true
+        );
+        composition.Mount(
+            composition.Root,
+            new ThemeContext(composition.Root.Scope, ControlThemes.Light),
+            Components.TextArea(session: session, style: Style.Empty.Width(320).Height(160))
+        );
+        RetainedScene Project()
+        {
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                composition.Flush();
+                var scene = SceneLayout.Project(composition, new(320, 160, 1), renderer);
+                if (composition.Input.SetScene(scene))
+                    return scene;
+            }
+            throw new InvalidOperationException("Long editor scene did not settle.");
+        }
+        var initial = Project();
+        var shaped = initial.Boxes.Single(box => box.Text is not null).Text!;
+        Assert(shaped.Lines.Count > 10, "Long editor did not wrap its constrained text.");
+        using var bitmap = new SKBitmap(320, 160);
+        using var canvas = new SKCanvas(bitmap);
+        renderer.Render(initial, canvas);
+        var createdAfterFirstPaint = renderer.TextBlobCreationCount;
+        Assert(
+            shaped.Runs.Count > 256 && createdAfterFirstPaint == shaped.Runs.Count,
+            "The long wrapped paragraph did not exercise more than the former count cap."
+        );
+        session.MoveHome();
+        _ = Project();
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        for (var index = 0; index < 30; index++)
+        {
+            session.MoveRight(extend: true);
+            var scene = Project();
+            Assert(
+                ReferenceEquals(shaped, scene.Boxes.Single(box => box.Text is not null).Text),
+                "Caret/selection movement reshaped an unchanged 20,000-unit document."
+            );
+            renderer.Render(scene, canvas);
+        }
+        timer.Stop();
+        Assert(
+            renderer.TextBlobCreationCount == createdAfterFirstPaint,
+            "Unchanged long-editor paints regenerated native text blobs."
+        );
+        Console.WriteLine(
+            $"20,000-unit editor: 30 selection/projection/paint steps; {timer.Elapsed.TotalMilliseconds:F1} ms; {GC.GetAllocatedBytesForCurrentThread() - allocated} managed bytes; {renderer.LiveTextBlobCount} retained blobs."
+        );
+        session.Text += "edited";
+        var edited = Project().Boxes.Single(box => box.Text is not null).Text!;
+        Assert(!ReferenceEquals(shaped, edited), "A committed edit reused stale shaping.");
     }
 
     [TestMethod]

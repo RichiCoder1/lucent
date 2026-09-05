@@ -224,7 +224,7 @@ internal sealed class WindowsInputAdapter : IDisposable
             return false;
         if (command.Kind is TextInputKind.Commit or TextInputKind.Preedit)
         {
-            if (!TextInputCommand.TryNormalizeSingleLine(command.Text, out var text))
+            if (!TextInputCommand.TryNormalizeMultiline(command.Text, out var text))
                 return false;
             command = command with { Text = text };
         }

@@ -27,8 +27,12 @@ public readonly record struct TextInputCommand(
     public static bool TryNormalizeSingleLine(string? text, out string normalized) =>
         EditorSession.TryNormalizeSingleLine(text, out normalized);
 
+    /// <summary>Normalizes canonical multiline editor input for adapter dispatch.</summary>
+    public static bool TryNormalizeMultiline(string? text, out string normalized) =>
+        EditorSession.TryNormalizeMultiline(text, out normalized);
+
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
-    public void Validate()
+    public void Validate(bool allowMultiline = false)
     {
         if (
             !Enum.IsDefined(Kind)
@@ -36,7 +40,7 @@ public readonly record struct TextInputCommand(
             || (Kind != TextInputKind.Preedit && (Start != 0 || Length != 0))
         )
             throw new ArgumentException("Text input commands are finite and explicit.");
-        EditorSession.ValidateText(Text);
+        EditorSession.ValidateText(Text, allowMultiline);
         var count = Text.EnumerateRunes().Count();
         if (
             Kind == TextInputKind.Preedit
@@ -82,13 +86,17 @@ public sealed class TextClipboardRequest
 }
 
 /// <summary>Scope-owned, single-line Unicode text state. Positions are UTF-16 offsets constrained to grapheme boundaries.</summary>
-internal sealed class TextFieldState
+internal class TextFieldState
 {
     private readonly ReactiveScope _scope;
     private readonly EditorSession _session;
     private readonly Signal<Preedit> _preedit;
     private readonly Signal<bool> _focused;
+    private readonly ScrollViewportState? _scrollState;
     private TextClipboardRequest? _clipboard;
+    private long _displayEditGeneration = -1;
+    private Preedit _displayPreedit;
+    private (string Text, int Caret, int SelectionStart, int SelectionEnd)? _displayCache;
 
     internal TextFieldState(ReactiveScope scope, string name, EditorSession session)
     {
@@ -97,9 +105,17 @@ internal sealed class TextFieldState
         _ = session.AcquireMount(scope);
         _preedit = scope.Signal(default(Preedit), name + ".preedit");
         _focused = scope.Signal(false, name + ".focused");
+        IsMultiline = session.IsMultiline;
+        _scrollState = IsMultiline
+            ? new ScrollViewportState(scope, name + ".scroll", default, session.Viewport)
+            : null;
         session.ChangedForMount += SessionChanged;
         scope.OnDispose(() => session.ChangedForMount -= SessionChanged);
     }
+
+    internal bool IsMultiline { get; }
+    internal ScrollViewportState? ScrollState => _scrollState;
+    internal EditorSession Session => _session;
 
     public string Value
     {
@@ -119,6 +135,7 @@ internal sealed class TextFieldState
     public int DisplayCaret => Display().Caret;
     internal int DisplaySelectionStart => Display().SelectionStart;
     internal int DisplaySelectionEnd => Display().SelectionEnd;
+    internal bool HasPreedit => _preedit.Value.Active;
     internal bool Focused => _focused.Value;
     public bool CanUndo => _session.CanUndo;
     public bool CanRedo => _session.CanRedo;
@@ -128,9 +145,38 @@ internal sealed class TextFieldState
 
     public void MoveRight(bool extend = false) => _session.MoveRight(extend);
 
-    public void MoveHome(bool extend = false) => _session.MoveHome(extend);
+    public void MoveHome(bool extend = false)
+    {
+        if (IsMultiline)
+            _session.MoveLineHome(extend);
+        else
+            _session.MoveHome(extend);
+    }
 
-    public void MoveEnd(bool extend = false) => _session.MoveEnd(extend);
+    public void MoveEnd(bool extend = false)
+    {
+        if (IsMultiline)
+            _session.MoveLineEnd(extend);
+        else
+            _session.MoveEnd(extend);
+    }
+
+    internal void MoveDocumentHome(bool extend = false) => _session.MoveHome(extend);
+
+    internal void MoveDocumentEnd(bool extend = false) => _session.MoveEnd(extend);
+
+    internal void MoveUp(ShapedText paragraph, bool extend = false) =>
+        _session.MoveUp(paragraph, extend);
+
+    internal void MoveDown(ShapedText paragraph, bool extend = false) =>
+        _session.MoveDown(paragraph, extend);
+
+    internal void SetSelection(
+        int anchor,
+        int caret,
+        TextAffinity anchorAffinity = TextAffinity.Downstream,
+        TextAffinity caretAffinity = TextAffinity.Downstream
+    ) => _session.SetSelection(anchor, caret, anchorAffinity, caretAffinity);
 
     public void SelectAll() => _session.SelectAll();
 
@@ -147,7 +193,7 @@ internal sealed class TextFieldState
     public void SetPreedit(string text, int start, int length)
     {
         Check();
-        new TextInputCommand(TextInputKind.Preedit, text, start, length).Validate();
+        new TextInputCommand(TextInputKind.Preedit, text, start, length).Validate(IsMultiline);
         var prior = _preedit.Value;
         var replacementStart = prior.Active ? prior.ReplacementStart : Math.Min(Anchor, Caret);
         var replacementEnd = prior.Active ? prior.ReplacementEnd : Math.Max(Anchor, Caret);
@@ -166,7 +212,7 @@ internal sealed class TextFieldState
     public void Commit(string text)
     {
         Check();
-        new TextInputCommand(TextInputKind.Commit, text).Validate();
+        new TextInputCommand(TextInputKind.Commit, text).Validate(IsMultiline);
         var composition = _preedit.Value;
         _preedit.Value = default;
         _session.Replace(
@@ -227,7 +273,7 @@ internal sealed class TextFieldState
         }
         if (
             request.Operation == TextClipboardOperation.Paste
-            && TryNormalizeSingleLine(text, out var normalized)
+            && NormalizeClipboard(text, out var normalized)
         )
         {
             _session.Replace(normalized, coalesceInsert: false);
@@ -241,28 +287,46 @@ internal sealed class TextFieldState
     private (string Text, int Caret, int SelectionStart, int SelectionEnd) Display()
     {
         var composition = _preedit.Value;
+        var source = _session.Text;
+        var caret = _session.Caret;
+        var anchor = _session.Anchor;
+        var editGeneration = _session.EditGeneration;
+        if (
+            _displayCache is { } cached
+            && _displayEditGeneration == editGeneration
+            && _displayPreedit.Equals(composition)
+        )
+            return cached;
+        (string Text, int Caret, int SelectionStart, int SelectionEnd) display;
         if (!composition.Active)
-            return (Value, Caret, Math.Min(Anchor, Caret), Math.Max(Anchor, Caret));
-        var start = composition.ReplacementStart;
-        var cursor = start + ScalarToUtf16(composition.Text!, Math.Max(0, composition.Start));
-        var selectionStart =
-            start + ScalarToUtf16(composition.Text!, Math.Max(0, composition.Start));
-        var selectionEnd =
-            selectionStart
-            + (
-                composition.Length < 0
-                    ? 0
-                    : ScalarToUtf16(
-                        composition.Text![(selectionStart - start)..],
-                        composition.Length
-                    )
+            display = (source, caret, Math.Min(anchor, caret), Math.Max(anchor, caret));
+        else
+        {
+            var start = composition.ReplacementStart;
+            var cursor = start + ScalarToUtf16(composition.Text!, Math.Max(0, composition.Start));
+            var selectionStart =
+                start + ScalarToUtf16(composition.Text!, Math.Max(0, composition.Start));
+            var selectionEnd =
+                selectionStart
+                + (
+                    composition.Length < 0
+                        ? 0
+                        : ScalarToUtf16(
+                            composition.Text![(selectionStart - start)..],
+                            composition.Length
+                        )
+                );
+            display = (
+                Value[..start] + composition.Text + Value[composition.ReplacementEnd..],
+                cursor,
+                selectionStart,
+                selectionEnd
             );
-        return (
-            Value[..start] + composition.Text + Value[composition.ReplacementEnd..],
-            cursor,
-            selectionStart,
-            selectionEnd
-        );
+        }
+        _displayEditGeneration = editGeneration;
+        _displayPreedit = composition;
+        _displayCache = display;
+        return display;
     }
 
     private static int ScalarToUtf16(string text, int scalarCount)
@@ -300,16 +364,51 @@ internal sealed class TextFieldState
 
     internal static void ValidateText(string text) => EditorSession.ValidateText(text);
 
+    internal static void ValidateMultilineText(string text) =>
+        EditorSession.ValidateText(text, multiline: true);
+
     public static bool TryNormalizeSingleLine(string? text, out string normalized) =>
         EditorSession.TryNormalizeSingleLine(text, out normalized);
 
-    private static string Normalize(string text) =>
-        EditorSession.TryNormalizeSingleLine(text, out var normalized)
-            ? normalized
-            : throw new ArgumentException(
-                "Text fields accept one line of Unicode scalar values without control characters.",
-                nameof(text)
+    public static bool TryNormalizeMultiline(string? text, out string normalized) =>
+        EditorSession.TryNormalizeMultiline(text, out normalized);
+
+    private string Normalize(string text) =>
+        IsMultiline
+            ? EditorSession.TryNormalizeMultiline(text, out var normalizedMultiline)
+                ? normalizedMultiline
+                : throw new ArgumentException(
+                    "Text areas accept Unicode scalar values, LF line breaks, and tabs.",
+                    nameof(text)
+                )
+            : EditorSession.TryNormalizeSingleLine(text, out var normalizedSingleLine)
+                ? normalizedSingleLine
+                : throw new ArgumentException(
+                    "Text fields accept one line of Unicode scalar values without control characters.",
+                    nameof(text)
+                );
+
+    private bool NormalizeClipboard(string? text, out string normalized) =>
+        IsMultiline
+            ? EditorSession.TryNormalizeMultiline(text, out normalized)
+            : EditorSession.TryNormalizeSingleLine(text, out normalized);
+
+    internal SemanticTextSnapshot SemanticText
+    {
+        get
+        {
+            var display = Display();
+            return new SemanticTextSnapshot(
+                display.Text,
+                display.Caret == display.SelectionStart
+                    ? display.SelectionEnd
+                    : display.SelectionStart,
+                display.Caret,
+                _session.AnchorAffinity,
+                _session.CaretAffinity
             );
+        }
+    }
 
     private readonly record struct Preedit(
         string? Text,
@@ -324,6 +423,10 @@ internal sealed class TextFieldState
 /// <summary>Text behavior bridges portable key/text commands to scope-owned field state; pointer down focuses but intentionally does not place a caret.</summary>
 internal sealed class TextFieldBehavior(TextFieldState state, string name) : Behavior
 {
+    private int? _dragPointer;
+    private int _dragAnchor;
+    private TextAffinity _dragAnchorAffinity;
+
     public override string Name => name;
     public override BehaviorOwnership Ownership =>
         BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
@@ -331,22 +434,70 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
     public override void Attach(BehaviorContext context)
     {
         ArgumentNullException.ThrowIfNull(state);
+        var actions = SemanticAction.SetValue;
+        if (state.IsMultiline)
+            actions |= SemanticAction.SelectText | SemanticAction.ScrollTextIntoView;
         context.SetSemantics(
-            new(SemanticRole.TextField, name, actions: SemanticAction.SetValue, value: state.Value)
+            new(
+                SemanticRole.TextField,
+                name,
+                actions: actions,
+                value: state.Value,
+                text: state.SemanticText
+            )
         );
         context.MakeFocusable();
         context.RegisterText(state);
+        if (state.ScrollState is { } scroll)
+            context.RegisterScrollable(scroll);
         context.OnSemanticCommand(command =>
         {
             if (command.Kind == SemanticCommandKind.Focus)
                 return context.CompositionInput().FocusSemantic(context.Identity);
+            if (command.Kind == SemanticCommandKind.SetValue)
+            {
+                string value;
+                if (state.IsMultiline)
+                {
+                    if (!TextFieldState.TryNormalizeMultiline(command.Value, out value!))
+                        return false;
+                }
+                else if (!TextFieldState.TryNormalizeSingleLine(command.Value, out value!))
+                    return false;
+                state.Value = value;
+                return true;
+            }
             if (
-                command.Kind != SemanticCommandKind.SetValue
-                || !TextFieldState.TryNormalizeSingleLine(command.Value, out var value)
+                command.Kind == SemanticCommandKind.SelectText
+                && state.IsMultiline
+                && !state.HasPreedit
+                && command.Anchor is { } anchor
+                && command.Caret is { } caret
+                && anchor <= state.DisplayText.Length
+                && caret <= state.DisplayText.Length
             )
-                return false;
-            state.Value = value;
-            return true;
+            {
+                state.CancelComposition();
+                state.SetSelection(anchor, caret);
+                return true;
+            }
+            if (
+                command.Kind == SemanticCommandKind.ScrollTextIntoView
+                && state.IsMultiline
+                && !state.HasPreedit
+                && command.Anchor is { } scrollAnchor
+                && command.Caret is { } scrollCaret
+                && scrollAnchor <= state.DisplayText.Length
+                && scrollCaret <= state.DisplayText.Length
+            )
+                return context
+                    .CompositionInput()
+                    .ScrollTextIntoView(
+                        context.Identity,
+                        command.AlignToTop ? scrollAnchor : scrollCaret,
+                        command.AlignToTop
+                    );
+            return false;
         });
         context.Effect(
             () =>
@@ -354,8 +505,9 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                     new(
                         SemanticRole.TextField,
                         name,
-                        actions: SemanticAction.SetValue,
-                        value: state.Value
+                        actions: actions,
+                        value: state.Value,
+                        text: state.SemanticText
                     )
                 ),
             name + ".semantics"
@@ -366,16 +518,79 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
             if (route.Command.Kind == FocusCommandKind.Lost)
                 state.CancelComposition();
         });
+        context.OnCaptureLost(loss =>
+        {
+            if (_dragPointer == loss.PointerId)
+                _dragPointer = null;
+        });
         context.OnPointer(route =>
         {
             if (route.Command is { Kind: PointerCommandKind.Down, Button: PointerButton.Primary })
             {
                 route.Focus();
+                if (state.IsMultiline)
+                {
+                    if (state.HasPreedit)
+                    {
+                        state.CancelComposition();
+                        route.Handled = true;
+                        return;
+                    }
+                    if (
+                        context
+                            .CompositionInput()
+                            .HitTestText(context.Identity, route.Command.X, route.Command.Y) is
+                        { } hit
+                    )
+                    {
+                        _dragPointer = route.Command.PointerId;
+                        _dragAnchor = hit.Utf16Offset;
+                        _dragAnchorAffinity = hit.Affinity;
+                        state.SetSelection(
+                            hit.Utf16Offset,
+                            hit.Utf16Offset,
+                            hit.Affinity,
+                            hit.Affinity
+                        );
+                        route.Capture();
+                    }
+                }
+                route.Handled = true;
+                return;
+            }
+            if (
+                state.IsMultiline
+                && _dragPointer == route.Command.PointerId
+                && route.Command.Kind is PointerCommandKind.Move or PointerCommandKind.Up
+            )
+            {
+                if (
+                    context
+                        .CompositionInput()
+                        .HitTestText(context.Identity, route.Command.X, route.Command.Y) is
+                    { } hit
+                )
+                {
+                    state.SetSelection(
+                        _dragAnchor,
+                        hit.Utf16Offset,
+                        _dragAnchorAffinity,
+                        hit.Affinity
+                    );
+                }
+                if (route.Command.Kind == PointerCommandKind.Up)
+                    _dragPointer = null;
                 route.Handled = true;
             }
         });
         context.OnText(route =>
         {
+            if (
+                !state.IsMultiline
+                && route.Command.Kind is TextInputKind.Commit or TextInputKind.Preedit
+                && !TextFieldState.TryNormalizeSingleLine(route.Command.Text, out _)
+            )
+                return;
             switch (route.Command.Kind)
             {
                 case TextInputKind.Commit:
@@ -425,6 +640,12 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                     case Key.Y:
                         state.Redo();
                         break;
+                    case Key.Home:
+                        state.MoveDocumentHome(shift);
+                        break;
+                    case Key.End:
+                        state.MoveDocumentEnd(shift);
+                        break;
                     default:
                         return;
                 }
@@ -442,6 +663,27 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                         break;
                     case Key.End:
                         state.MoveEnd(shift);
+                        break;
+                    case Key.Enter when state.IsMultiline:
+                        state.Insert("\n");
+                        break;
+                    case Key.Up when state.IsMultiline:
+                        if (
+                            context.CompositionInput().TextParagraph(context.Identity) is
+                            { } upParagraph
+                        )
+                            state.MoveUp(upParagraph, shift);
+                        else
+                            return;
+                        break;
+                    case Key.Down when state.IsMultiline:
+                        if (
+                            context.CompositionInput().TextParagraph(context.Identity) is
+                            { } downParagraph
+                        )
+                            state.MoveDown(downParagraph, shift);
+                        else
+                            return;
                         break;
                     case Key.Backspace:
                         state.DeleteBackward();

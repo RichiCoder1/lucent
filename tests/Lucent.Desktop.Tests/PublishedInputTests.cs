@@ -67,6 +67,84 @@ public sealed partial class PublishedInputTests
         }
     }
 
+    [TestMethod]
+    public void FlaUiEditsMultilineTextAndReadsSelectedTextRanges()
+    {
+        using var process = StartApplication();
+        try
+        {
+            var window = WaitForWindow(process);
+            using var automation = new UIA3Automation();
+            var root = automation.FromHandle(window);
+            FlaUI.Core.AutomationElements.AutomationElement Editor() =>
+                root.FindFirstDescendant(condition =>
+                    condition
+                        .ByControlType(ControlType.Edit)
+                        .And(condition.ByName("Multiline note"))
+                ) ?? throw new InvalidOperationException("Multiline editor was not exposed.");
+            root.SetForeground();
+            Editor().FocusNative();
+            WaitUntil(
+                process,
+                () => GetForegroundWindow() == window && Editor().Properties.HasKeyboardFocus.Value,
+                "Multiline editor did not receive native focus."
+            );
+            Keyboard.Type("First");
+            Keyboard.Press(VirtualKeyShort.RETURN);
+            Keyboard.Release(VirtualKeyShort.RETURN);
+            Keyboard.Type("Second");
+            Wait.UntilInputIsProcessed();
+            WaitUntil(
+                process,
+                () => Editor().Patterns.Value.Pattern.Value.Value == "First\nSecond",
+                "Physical Enter and text input did not produce two lines."
+            );
+            TypeChord(VirtualKeyShort.KEY_A);
+            WaitUntil(
+                process,
+                () =>
+                    Editor().Patterns.Text.Pattern.GetSelection() is { Length: 1 } ranges
+                    && ranges[0].GetText(-1) == "First\nSecond",
+                "Select all did not reach the published text range."
+            );
+            var pattern = Editor().Patterns.Text.Pattern;
+            Assert.AreEqual("First\nSecond", pattern.DocumentRange.GetText(-1));
+            var selection = pattern.GetSelection();
+            Assert.AreEqual(1, selection.Length);
+            Assert.AreEqual("First\nSecond", selection[0].GetText(-1));
+            Assert.IsTrue(
+                selection[0].GetBoundingRectangles().Length >= 2,
+                "A selected two-line draft did not expose cross-line geometry."
+            );
+            Keyboard.Press(VirtualKeyShort.BACK);
+            Keyboard.Release(VirtualKeyShort.BACK);
+            WaitUntil(
+                process,
+                () => Editor().Patterns.Value.Pattern.Value.Value == "",
+                "Selection deletion did not update the document."
+            );
+            TypeChord(VirtualKeyShort.KEY_Z);
+            WaitUntil(
+                process,
+                () => Editor().Patterns.Value.Pattern.Value.Value == "First\nSecond",
+                "Undo did not restore the multiline draft."
+            );
+            TypeChord(VirtualKeyShort.KEY_Y);
+            WaitUntil(
+                process,
+                () => Editor().Patterns.Value.Pattern.Value.Value == "",
+                "Redo did not repeat the selection deletion."
+            );
+            Assert.IsTrue(process.CloseMainWindow());
+            Assert.IsTrue(process.WaitForExit((int)Timeout.TotalMilliseconds));
+            Assert.AreEqual(0, process.ExitCode);
+        }
+        finally
+        {
+            StopApplication(process);
+        }
+    }
+
     [LibraryImport("user32.dll")]
     private static partial nint GetForegroundWindow();
 

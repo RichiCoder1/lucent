@@ -75,23 +75,32 @@ public sealed class InputRouter
                 return false;
             }
             var priorInput = _input;
+            var priorScene = _scene;
             var nextInput = scene.Input.ToDictionary(item => item.Identity.ElementId);
             bool clamped;
             try
             {
                 _input = nextInput;
+                _scene = scene;
                 clamped = ClampScrolls(scene);
             }
             finally
             {
                 _input = priorInput;
+                _scene = priorScene;
             }
             if (clamped)
             {
                 var rejectedErrors = new List<Exception>();
                 if (_scene is not null)
                     ReleaseAll(PointerCaptureLossReason.SceneChanged, rejectedErrors);
-                if (_focused is not null)
+                if (
+                    _focused is { } focused
+                    && (
+                        !_textFields.TryGetValue(focused.Identity.ElementId, out var editor)
+                        || !editor.IsMultiline
+                    )
+                )
                     RequestFocus(null, FocusChangeReason.SceneChanged, rejectedErrors);
                 _scene = null;
                 _input.Clear();
@@ -122,7 +131,7 @@ public sealed class InputRouter
                 )
             )
                 RequestFocus(null, FocusChangeReason.Reordered, errors);
-            if (_composition.InteractionVisualGeneration != visualGeneration)
+            if (RevealEditorCaret() || _composition.InteractionVisualGeneration != visualGeneration)
             {
                 _scene = null;
                 ClearInputCaches();
@@ -274,14 +283,14 @@ public sealed class InputRouter
         Enter();
         try
         {
-            command.Validate();
+            command.Validate(allowMultiline: true);
             var errors = new List<Exception>();
             if (EnsureScene(errors) is { } rejection)
                 return Reject(rejection, "Text/" + command.Kind, errors);
             if (
                 _focused is not { } focus
                 || !Eligible(focus.Identity)
-                || !_textFields.ContainsKey(focus.Identity.ElementId)
+                || !_textFields.TryGetValue(focus.Identity.ElementId, out var textState)
             )
                 return Reject(InputRejection.NoTarget, "Text/" + command.Kind, errors);
             var handled = false;
@@ -394,13 +403,33 @@ public sealed class InputRouter
                 || !ValidateScene(_scene)
                 || _focused is not { } focus
                 || !Eligible(focus.Identity)
-                || !_textFields.ContainsKey(focus.Identity.ElementId)
+                || !_textFields.TryGetValue(focus.Identity.ElementId, out var textState)
             )
                 return false;
             var caret = FindCaret(_scene.Nodes, focus.Identity);
             if (caret is null)
                 return false;
             rectangle = caret.Bounds;
+            if (
+                textState.IsMultiline && _input.TryGetValue(focus.Identity.ElementId, out var field)
+            )
+            {
+                var clip = field.ChildClipBounds ?? field.Bounds;
+                rectangle = new(
+                    Math.Clamp(
+                        rectangle.X,
+                        clip.X,
+                        Math.Max(clip.X, clip.X + clip.Width - rectangle.Width)
+                    ),
+                    Math.Clamp(
+                        rectangle.Y,
+                        clip.Y,
+                        Math.Max(clip.Y, clip.Y + clip.Height - rectangle.Height)
+                    ),
+                    Math.Min(rectangle.Width, clip.Width),
+                    Math.Min(rectangle.Height, clip.Height)
+                );
+            }
             return true;
         }
         finally
@@ -1295,6 +1324,101 @@ public sealed class InputRouter
         scope.OnDispose(() => list.Remove(registration));
     }
 
+    internal ShapedText? TextParagraph(ElementIdentity identity)
+    {
+        if (_scene is null)
+            return null;
+        return _scene.Boxes.FirstOrDefault(box => box.Identity == identity).Text;
+    }
+
+    internal ParagraphHitTest? HitTestText(ElementIdentity identity, float x, float y)
+    {
+        if (_scene is null || !_textFields.TryGetValue(identity.ElementId, out var state))
+            return null;
+        if (state.DisplayText.Length == 0)
+            return new(0, TextAffinity.Downstream, 0);
+        var text = FindTextNode(_scene.Nodes, identity);
+        return text?.Text.HitTest(state.DisplayText, x - text.Bounds.X, y - text.Bounds.Y);
+    }
+
+    private static TextSceneNode? FindTextNode(
+        IEnumerable<SceneNode> nodes,
+        ElementIdentity identity
+    )
+    {
+        foreach (var node in nodes)
+        {
+            if (node is TextSceneNode text && text.Identity.Element == identity)
+                return text;
+            var children = node switch
+            {
+                ClipSceneNode clip => clip.Children,
+                OpacitySceneNode opacity => opacity.Children,
+                _ => null,
+            };
+            if (children is not null && FindTextNode(children, identity) is { } nested)
+                return nested;
+        }
+        return null;
+    }
+
+    internal bool ScrollTextIntoView(ElementIdentity identity, int textOffset, bool alignToTop)
+    {
+        if (
+            !_scrollable.TryGetValue(identity.ElementId, out var scrollable)
+            || !_textFields.TryGetValue(identity.ElementId, out var state)
+            || _scene is null
+        )
+            return false;
+        var box = _scene.Boxes.FirstOrDefault(item => item.Identity == identity);
+        if (box.Text is null || textOffset < 0 || textOffset > state.DisplayText.Length)
+            return false;
+        var caret = box.Text.CaretBounds(
+            state.DisplayText,
+            textOffset,
+            state.Session.CaretAffinity
+        );
+        var viewport = _input.TryGetValue(identity.ElementId, out var retained)
+            ? retained.ChildClipBounds ?? retained.Bounds
+            : box.Bounds;
+        var requested = scrollable.State.Offset;
+        var nextY =
+            alignToTop ? caret.Y
+            : caret.Y < requested.Y ? caret.Y
+            : caret.Y + caret.Height > requested.Y + viewport.Height
+                ? caret.Y + caret.Height - viewport.Height
+            : requested.Y;
+        _ = SetScroll(identity, scrollable, requested.X, nextY, scrollable.InstalledOffset);
+        return true;
+    }
+
+    private bool RevealEditorCaret()
+    {
+        if (
+            _focused is not { } focus
+            || !_textFields.TryGetValue(focus.Identity.ElementId, out var state)
+            || !state.IsMultiline
+            || !_scrollable.TryGetValue(focus.Identity.ElementId, out var scrollable)
+            || !_input.TryGetValue(focus.Identity.ElementId, out var retained)
+        )
+            return false;
+        var clip = retained.ChildClipBounds ?? retained.Bounds;
+        var stamp = new EditorCaretStamp(
+            state.EditGeneration,
+            state.DisplayText,
+            state.DisplayCaret,
+            state.Session.CaretAffinity,
+            clip.Width,
+            clip.Height
+        );
+        if (scrollable.CaretStamp == stamp)
+            return false;
+        scrollable.CaretStamp = stamp;
+        var before = scrollable.State.Offset;
+        _ = ScrollTextIntoView(focus.Identity, state.DisplayCaret, alignToTop: false);
+        return before != scrollable.State.Offset;
+    }
+
     internal bool ScrollBy(ElementIdentity identity, float horizontal, float vertical)
     {
         if (!float.IsFinite(horizontal) || !float.IsFinite(vertical))
@@ -1382,6 +1506,15 @@ public sealed class InputRouter
         {
             right = Math.Max(right, child.Bounds.X + child.Bounds.Width + projectedOffset.X);
             bottom = Math.Max(bottom, child.Bounds.Y + child.Bounds.Height + projectedOffset.Y);
+        }
+        if (
+            _textFields.TryGetValue(identity.ElementId, out var textState)
+            && textState.IsMultiline
+            && _scene?.Boxes.FirstOrDefault(item => item.Identity == identity).Text is { } text
+        )
+        {
+            right = Math.Max(right, content.X + text.Width);
+            bottom = Math.Max(bottom, content.Y + text.Height);
         }
         return new(
             Math.Max(0, right - content.X - content.Width),
@@ -1486,7 +1619,17 @@ public sealed class InputRouter
     {
         public ScrollViewportState State { get; } = state;
         public ScrollOffset InstalledOffset { get; set; } = state.Offset;
+        public EditorCaretStamp? CaretStamp { get; set; }
     }
+
+    private readonly record struct EditorCaretStamp(
+        long EditGeneration,
+        string Text,
+        int Caret,
+        TextAffinity Affinity,
+        float Width,
+        float Height
+    );
 
     private readonly record struct ClipboardTicket(
         ElementIdentity Origin,

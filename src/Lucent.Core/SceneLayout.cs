@@ -488,10 +488,10 @@ public static class SceneLayout
                 ? TextViewOffset(text, style.Text!, caretOffset, inner.Width)
                 : 0;
             var textBounds = new LayoutRect(
-                inner.X - viewOffset,
-                inner.Y,
-                inner.Width + viewOffset,
-                inner.Height
+                inner.X - viewOffset - style.Scroll.X,
+                inner.Y - style.Scroll.Y,
+                inner.Width + viewOffset + style.Scroll.X,
+                Math.Max(inner.Height, text.Height)
             );
             if (
                 style.SelectionStart is { } start
@@ -501,20 +501,44 @@ public static class SceneLayout
                 && end <= style.Text!.Length
             )
             {
-                var left = TextPosition(text, style.Text!, start);
-                var right = TextPosition(text, style.Text!, end);
-                result.Add(
-                    new PaintSceneNode(
-                        new(identity, SceneNodeKind.Selection),
-                        new(
-                            textBounds.X + Math.Min(left, right),
-                            inner.Y,
-                            MathF.Abs(right - left),
-                            inner.Height
-                        ),
-                        Color.FromArgb(0x66, 0x3b, 0x82, 0xf6)
-                    )
-                );
+                if (style.TextWrap == TextWrap.NoWrap)
+                {
+                    var left = TextPosition(text, style.Text!, start);
+                    var right = TextPosition(text, style.Text!, end);
+                    result.Add(
+                        new PaintSceneNode(
+                            new(identity, SceneNodeKind.Selection),
+                            new(
+                                textBounds.X + Math.Min(left, right),
+                                inner.Y,
+                                MathF.Abs(right - left),
+                                inner.Height
+                            ),
+                            Color.FromArgb(0x66, 0x3b, 0x82, 0xf6)
+                        )
+                    );
+                }
+                else
+                {
+                    var selectionRects = text.SelectionBounds(
+                        style.Text!,
+                        Math.Min(start, end),
+                        Math.Max(start, end)
+                    );
+                    foreach (var selection in selectionRects)
+                        result.Add(
+                            new PaintSceneNode(
+                                new(identity, SceneNodeKind.Selection),
+                                new(
+                                    textBounds.X + selection.X,
+                                    textBounds.Y + selection.Y,
+                                    selection.Width,
+                                    selection.Height
+                                ),
+                                Color.FromArgb(0x66, 0x3b, 0x82, 0xf6)
+                            )
+                        );
+                }
             }
             result.Add(
                 new TextSceneNode(
@@ -525,18 +549,44 @@ public static class SceneLayout
                 )
             );
             if (style.Caret is { } caret && caret >= 0 && caret <= style.Text!.Length)
-                result.Add(
-                    new PaintSceneNode(
-                        new(identity, SceneNodeKind.Caret),
-                        new(
-                            textBounds.X + TextPosition(text, style.Text!, caret),
-                            inner.Y,
-                            1 / viewport.Scale,
-                            inner.Height
-                        ),
-                        style.TextColor
-                    )
-                );
+            {
+                if (style.TextWrap == TextWrap.NoWrap)
+                {
+                    result.Add(
+                        new PaintSceneNode(
+                            new(identity, SceneNodeKind.Caret),
+                            new(
+                                textBounds.X + TextPosition(text, style.Text!, caret),
+                                inner.Y,
+                                1 / viewport.Scale,
+                                inner.Height
+                            ),
+                            style.TextColor
+                        )
+                    );
+                }
+                else
+                {
+                    var caretBounds = text.CaretBounds(
+                        style.Text!,
+                        caret,
+                        style.CaretAffinity,
+                        1 / viewport.Scale
+                    );
+                    result.Add(
+                        new PaintSceneNode(
+                            new(identity, SceneNodeKind.Caret),
+                            new(
+                                textBounds.X + caretBounds.X,
+                                textBounds.Y + caretBounds.Y,
+                                caretBounds.Width,
+                                Math.Max(caretBounds.Height, 1 / viewport.Scale)
+                            ),
+                            style.TextColor
+                        )
+                    );
+                }
+            }
         }
         else if (style.Text is "" && style.Caret == 0)
             result.Add(
@@ -795,7 +845,7 @@ public static class SceneLayout
             style.Direction,
             scale,
             inlineConstraint,
-            blockConstraint,
+            style.Multiline ? default : blockConstraint,
             style.TextWrap,
             style.MaxLines,
             style.TextOverflow
@@ -896,7 +946,9 @@ public static class SceneLayout
             element.Resolve(TypographyProperties.Overflow).Value,
             element.Resolve(ProjectionProperties.TextSelectionStart).Value,
             element.Resolve(ProjectionProperties.TextSelectionEnd).Value,
-            element.Resolve(ProjectionProperties.TextCaret).Value
+            element.Resolve(ProjectionProperties.TextCaret).Value,
+            element.Resolve(ProjectionProperties.TextMultiline).Value,
+            element.Resolve(ProjectionProperties.TextCaretAffinity).Value
         );
         if (
             !Enum.IsDefined(values.Mode)
@@ -1011,7 +1063,9 @@ public static class SceneLayout
         TextOverflow TextOverflow,
         int? SelectionStart,
         int? SelectionEnd,
-        int? Caret
+        int? Caret,
+        bool Multiline,
+        TextAffinity CaretAffinity
     );
 
     /// <summary>Returns a bounded LTR caret position; it interpolates grapheme boundaries inside one ligature cluster and does not implement full bidi caret ordering.</summary>
@@ -1119,6 +1173,8 @@ public static class SceneLayout
         var selectionStart = element.Resolve(ProjectionProperties.TextSelectionStart).Value;
         var selectionEnd = element.Resolve(ProjectionProperties.TextSelectionEnd).Value;
         var caret = element.Resolve(ProjectionProperties.TextCaret).Value;
+        var multiline = element.Resolve(ProjectionProperties.TextMultiline).Value;
+        var caretAffinity = element.Resolve(ProjectionProperties.TextCaretAffinity).Value;
         var enabled = element.Resolve(InputProperties.Enabled).Value;
         var visible = element.Resolve(InputProperties.Visible).Value;
         var participation = element.Participation;
@@ -1190,6 +1246,8 @@ public static class SceneLayout
             writer.Write(selectionEnd.HasValue);
             if (selectionEnd is { } resolvedSelectionEnd)
                 writer.Write(resolvedSelectionEnd);
+            writer.Write(multiline);
+            writer.Write((int)caretAffinity);
             writer.Write(caret.HasValue);
             if (caret is { } resolvedCaret)
                 writer.Write(resolvedCaret);

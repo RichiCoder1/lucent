@@ -10,6 +10,12 @@ internal static class EditorSessionFixture
 {
     internal static int Run()
     {
+        var singleLine = RunCase(multiline: false);
+        return singleLine == 0 ? RunCase(multiline: true) : singleLine;
+    }
+
+    private static int RunCase(bool multiline)
+    {
         nint window = 0;
         try
         {
@@ -23,7 +29,7 @@ internal static class EditorSessionFixture
             Require(window != 0, "native window creation");
             using var composition = new Composition(new ReactiveGraph(), "editor-proof");
             var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-            var model = new EditorSessionFixtureModel(composition.Root.Scope);
+            var model = new EditorSessionFixtureModel(composition.Root.Scope, multiline);
             composition.Mount(
                 composition.Root,
                 theme,
@@ -94,7 +100,8 @@ internal static class EditorSessionFixture
                 canvas.Clear(SKColors.White);
                 renderer.Render(scene, canvas);
                 Require(
-                    renderer.LiveTextBlobCount > 0 && renderer.LiveTextBlobCount <= 256,
+                    renderer.LiveTextBlobCount > 0
+                        && renderer.RetainedTextBlobBytes <= 16L * 1024 * 1024,
                     "paint retained an unbounded native text-blob cache"
                 );
                 _ = Install(composition, renderer, actualWidth, 1.5f);
@@ -108,13 +115,13 @@ internal static class EditorSessionFixture
                 "final preedit cancellation"
             );
             model.Session.Undo();
-            Require(model.Session.Text == "Initial", "undo survived both remounts");
+            Require(model.Session.Text == model.InitialText, "undo survived both remounts");
             model.Session.Redo();
             Require(model.Session.Text == text, "redo survived both remounts");
             composition.Dispose();
             Require(model.Session.IsDisposed, "application scope disposed editor session");
             Console.WriteLine(
-                "editor-session-proof: PASS; native resize 900->420->900; .lui remount; draft/selection/undo; focus/SDL text input; canceled preedit; 150% shaping/paint"
+                $"editor-session-proof: PASS; multiline={multiline}; native resize 900->420->900; .lui remount; draft/selection/undo; focus/SDL text input; canceled preedit; 150% shaping/paint"
             );
             return 0;
         }
@@ -178,12 +185,18 @@ internal static class EditorSessionFixture
 
 internal sealed class EditorSessionFixtureModel
 {
-    internal EditorSessionFixtureModel(ReactiveScope owner)
+    internal EditorSessionFixtureModel(ReactiveScope owner, bool multiline)
     {
-        Session = new EditorSession(owner, "note-1", "Initial");
+        Multiline = multiline;
+        InitialText = multiline
+            ? "Initial first line\nA second line with enough words to wrap inside the editor."
+            : "Initial";
+        Session = new EditorSession(owner, "note-1", InitialText, multiline: multiline);
         Compact = owner.Signal(false, "compact");
     }
 
+    public bool Multiline { get; }
+    public string InitialText { get; }
     public EditorSession Session { get; }
     public Signal<bool> Compact { get; }
 }

@@ -12,8 +12,8 @@ namespace Lucent.Renderer.Skia;
 
 /// <summary>Shapes Core text with HarfBuzz and paints retained scenes through Skia.</summary>
 /// <remarks>
-/// The renderer owns bounded LRU shape and native text-blob caches (256 entries and 16 MiB
-/// estimated retained payload per cache; 32 MiB combined) and the typeface fingerprints used to
+/// The renderer owns bounded LRU shape and native text-blob caches (16 MiB estimated retained
+/// payload per cache; 32 MiB combined) and the typeface fingerprints used to
 /// verify that cached glyph data still identifies the face that produced it. Shape results are immutable Core values and do
 /// not retain Skia resources. Itemization supports common left-to-right
 /// text and Arabic/Hebrew right-to-left text; full Unicode bidirectional reordering is not provided.
@@ -29,7 +29,6 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private const float FontSizeScale = 512f;
     private const int ShapeCacheCapacity = 256;
     private const long ShapeCacheByteBudget = 16L * 1024 * 1024;
-    private const int TextBlobCacheCapacity = 256;
     private const long TextBlobCacheByteBudget = 16L * 1024 * 1024;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly Dictionary<FaceKey, string> _faceFingerprints = [];
@@ -47,6 +46,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         new(ShapedRunReferenceComparer.Instance);
     private long _shapeBytes;
     private long _textBlobBytes;
+    private long _textBlobCreationCount;
     private bool _disposed;
 
     /// <summary>Gets the number of retained native text blobs owned by this renderer.</summary>
@@ -55,6 +55,9 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 
     /// <summary>Gets the estimated bytes retained by the native text-blob cache.</summary>
     public long RetainedTextBlobBytes => _textBlobBytes;
+
+    /// <summary>Gets the number of native text blobs created during this renderer's lifetime.</summary>
+    public long TextBlobCreationCount => _textBlobCreationCount;
 
     /// <summary>Shapes a Core text request into immutable logical-pixel glyph runs.</summary>
     /// <param name="request">Font, language, direction, text, and scale values to shape.</param>
@@ -488,7 +491,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                     );
                 glyphs[index] = new(
                     result.Codepoints[index],
-                    result.Clusters[index] + (uint)piece.Utf16Offset,
+                    piece.ClusterOverride ?? result.Clusters[index] + (uint)piece.Utf16Offset,
                     point.X,
                     point.Y,
                     advance,
@@ -746,17 +749,12 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             ?? throw new InvalidOperationException(
                 "Immutable run produced no paintable text blob."
             );
+        _textBlobCreationCount = checked(_textBlobCreationCount + 1);
         var bytes = EstimateTextBlobBytes(run);
         if (bytes > TextBlobCacheByteBudget)
             return new(blob, true);
 
-        while (
-            _textBlobLru.First is not null
-            && (
-                _textBlobs.Count >= TextBlobCacheCapacity
-                || _textBlobBytes + bytes > TextBlobCacheByteBudget
-            )
-        )
+        while (_textBlobLru.First is not null && (_textBlobBytes + bytes > TextBlobCacheByteBudget))
         {
             var evicted = _textBlobLru.First!;
             _textBlobLru.RemoveFirst();
@@ -872,31 +870,61 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             blocks.Reverse();
         foreach (var block in blocks)
         {
-            var blockText = string.Concat(block.Elements.Select(item => item.Text));
-            if (TryDescribeRequestedFace(request, blockText, out var blockFace))
-            {
-                result.Add(
-                    new Piece(blockText, block.Elements[0].Offset, block.Direction, blockFace)
-                );
-                continue;
-            }
-
-            var faceRuns = new List<Piece>();
+            var segment = new List<TextElement>();
             foreach (var item in block.Elements)
             {
-                using var face = ResolveFace(request, item.Text, out var collectionIndex);
-                var descriptor =
-                    FaceFingerprint(face, collectionIndex)
-                    + ":"
-                    + collectionIndex.ToString(CultureInfo.InvariantCulture);
-                if (faceRuns.LastOrDefault() is { } priorRun && priorRun.Face == descriptor)
-                    faceRuns[^1] = priorRun with { Text = priorRun.Text + item.Text };
+                if (item.Text == "\t")
+                {
+                    AddTextPieces(result, request, block.Direction, segment);
+                    segment.Clear();
+                    result.Add(
+                        new Piece(
+                            "    ",
+                            item.Offset,
+                            block.Direction,
+                            string.Empty,
+                            (uint)item.Offset
+                        )
+                    );
+                }
                 else
-                    faceRuns.Add(new Piece(item.Text, item.Offset, block.Direction, descriptor));
+                    segment.Add(item);
             }
-            result.AddRange(faceRuns);
+            AddTextPieces(result, request, block.Direction, segment);
         }
         return result;
+    }
+
+    private void AddTextPieces(
+        List<Piece> result,
+        TextMeasureRequest request,
+        TextDirection direction,
+        IReadOnlyList<TextElement> elements
+    )
+    {
+        if (elements.Count == 0)
+            return;
+        var text = string.Concat(elements.Select(item => item.Text));
+        if (TryDescribeRequestedFace(request, text, out var face))
+        {
+            result.Add(new Piece(text, elements[0].Offset, direction, face));
+            return;
+        }
+
+        var faceRuns = new List<Piece>();
+        foreach (var item in elements)
+        {
+            using var resolved = ResolveFace(request, item.Text, out var collectionIndex);
+            var descriptor =
+                FaceFingerprint(resolved, collectionIndex)
+                + ":"
+                + collectionIndex.ToString(CultureInfo.InvariantCulture);
+            if (faceRuns.LastOrDefault() is { } priorRun && priorRun.Face == descriptor)
+                faceRuns[^1] = priorRun with { Text = priorRun.Text + item.Text };
+            else
+                faceRuns.Add(new Piece(item.Text, item.Offset, direction, descriptor));
+        }
+        result.AddRange(faceRuns);
     }
 
     private bool TryDescribeRequestedFace(
@@ -1242,7 +1270,13 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         public List<TextElement> Elements { get; } = elements;
     }
 
-    private sealed record Piece(string Text, int Utf16Offset, TextDirection Direction, string Face);
+    private sealed record Piece(
+        string Text,
+        int Utf16Offset,
+        TextDirection Direction,
+        string Face,
+        uint? ClusterOverride = null
+    );
 
     private sealed record PendingRun(
         string Family,

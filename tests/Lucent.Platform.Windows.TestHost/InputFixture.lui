@@ -1,7 +1,7 @@
 namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
 style InputFixtureShell {
     Width: 320;
-    Height: 300;
+    Height: 440;
     Spacing: 12;
 }
 
@@ -25,6 +25,7 @@ internal component InputFixtureView(InputFixtureModel model) {
                     <Text>Wheel content</Text>
                 </Column>
             </ScrollViewport>
+            <TextArea session={model.Editor} label="Multiline note" style={Style.Empty.Width(280).Height(180)} />
         </Column>
     </CommandScope>
 }

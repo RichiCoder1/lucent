@@ -14,14 +14,17 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         ValuePattern = new("c7935180-6fb3-4201-b174-7df73adbf64a"),
         SelectionPattern = new("fb8b03af-3bdf-48d4-bd36-1a65793be168"),
         SelectionItem = new("2acad808-b2d4-452d-a407-91ff1ad167b2"),
-        Scroll = new("b38b8077-1fc3-42a5-8cae-d40c2215055a");
+        Scroll = new("b38b8077-1fc3-42a5-8cae-d40c2215055a"),
+        TextProvider = new("3589c92c-63f3-4367-99bb-ada653b77cf2"),
+        TextProvider2 = new("0dc5e6ed-3e16-4bf1-8f9a-a979878bc195");
     private static readonly ComInterfaceEntry* RootEntries,
         PlainEntries,
         InvokeEntries,
         ValueEntries,
         ListEntries,
         ItemEntries,
-        ScrollEntries;
+        ScrollEntries,
+        TextEntries;
 
     static UiaWrappers()
     {
@@ -92,7 +95,9 @@ internal sealed unsafe class UiaWrappers : ComWrappers
             release,
             (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint, int>)&SetValue,
             (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)&Value,
-            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&False
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &ValueReadOnly
         );
         var selection = Entry(
             SelectionPattern,
@@ -145,6 +150,68 @@ internal sealed unsafe class UiaWrappers : ComWrappers
                 (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
                     &VerticalScrollable
         );
+        var text = Entry(
+            TextProvider,
+            query,
+            addRef,
+            release,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &TextSelection,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &VisibleRanges,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint, nint*, int>)
+                    &RangeFromChild,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<
+                    ComInterfaceDispatch*,
+                    WindowsUiaProvider.UiaPoint,
+                    nint*,
+                    int>)
+                    &TextRangeFromPoint,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &DocumentRange,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &SupportedTextSelection
+        );
+        var text2 = Entry(
+            TextProvider2,
+            query,
+            addRef,
+            release,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &TextSelection,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &VisibleRanges,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint, nint*, int>)
+                    &RangeFromChild,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<
+                    ComInterfaceDispatch*,
+                    WindowsUiaProvider.UiaPoint,
+                    nint*,
+                    int>)
+                    &TextRangeFromPoint,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &DocumentRange,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &SupportedTextSelection,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint, nint*, int>)
+                    &RangeFromAnnotation,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, nint*, int>)
+                    &CaretRange
+        );
         RootEntries = Entries(simple, fragment, root);
         PlainEntries = Entries(simple, fragment);
         InvokeEntries = Entries(simple, fragment, invoke);
@@ -152,6 +219,7 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         ListEntries = Entries(simple, fragment, selection);
         ItemEntries = Entries(simple, fragment, item);
         ScrollEntries = Entries(simple, fragment, scroll);
+        TextEntries = Entries(simple, fragment, value, scroll, text, text2);
     }
 
     protected override ComInterfaceEntry* ComputeVtables(
@@ -167,6 +235,11 @@ internal sealed unsafe class UiaWrappers : ComWrappers
             return RootEntries;
         }
         var actions = provider.ProviderActions;
+        if (provider.ProviderHasText)
+        {
+            count = 6;
+            return TextEntries;
+        }
         if (actions.HasFlag(SemanticAction.Invoke))
         {
             count = 3;
@@ -327,6 +400,13 @@ internal sealed unsafe class UiaWrappers : ComWrappers
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int ValueReadOnly(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).ValueReadOnly(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
     private static int Selection(ComInterfaceDispatch* d, nint* x)
     {
         *x = 0;
@@ -420,4 +500,65 @@ internal sealed unsafe class UiaWrappers : ComWrappers
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
     private static int Reject(ComInterfaceDispatch* d) => Guard(() => P(d).UnsupportedSelection());
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int TextSelection(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TextSelection(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int VisibleRanges(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TextVisibleRanges(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeFromChild(ComInterfaceDispatch* d, nint child, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TextRangeFromChild(child, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int TextRangeFromPoint(
+        ComInterfaceDispatch* d,
+        WindowsUiaProvider.UiaPoint point,
+        nint* value
+    )
+    {
+        *value = 0;
+        return Guard(() => P(d).TextRangeFromPoint(point.X, point.Y, out *value));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int DocumentRange(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TextDocumentRange(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int SupportedTextSelection(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TextSupportedSelection(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeFromAnnotation(ComInterfaceDispatch* d, nint annotation, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TextRangeFromAnnotation(annotation, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int CaretRange(ComInterfaceDispatch* d, int* active, nint* x)
+    {
+        *active = 0;
+        *x = 0;
+        return Guard(() => P(d).TextCaretRange(out *active, out *x));
+    }
 }

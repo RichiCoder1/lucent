@@ -33,6 +33,7 @@ internal sealed class InputFixtureModel
 {
     internal InputFixtureModel(ReactiveScope owner)
     {
+        Editor = new EditorSession(owner, "input-note", multiline: true);
         Status = owner.Signal("Ready", "input-fixture.status");
         Viewport = new ViewportState(owner, new ScrollOffset(0, 40), "input-fixture.viewport");
         var capture = Create(owner, "Capture");
@@ -45,6 +46,7 @@ internal sealed class InputFixtureModel
         ]);
     }
 
+    public EditorSession Editor { get; }
     public Signal<string> Status { get; }
     public ViewportState Viewport { get; }
     public CommandBindings Bindings { get; }

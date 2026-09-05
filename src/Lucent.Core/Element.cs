@@ -358,7 +358,8 @@ public sealed class Element : IDisposable
             state.Focused,
             state.Selected,
             _semantics.Actions,
-            children
+            children,
+            _semantics.Text
         );
     }
 
@@ -479,6 +480,12 @@ public sealed class Element : IDisposable
             SemanticCommandKind.SetValue => _semantics!.Actions.HasFlag(SemanticAction.SetValue),
             SemanticCommandKind.Select => _semantics!.Actions.HasFlag(SemanticAction.Select),
             SemanticCommandKind.Scroll => _semantics!.Actions.HasFlag(SemanticAction.Scroll),
+            SemanticCommandKind.SelectText => _semantics!.Actions.HasFlag(
+                SemanticAction.SelectText
+            ),
+            SemanticCommandKind.ScrollTextIntoView => _semantics!.Actions.HasFlag(
+                SemanticAction.ScrollTextIntoView
+            ),
             _ => false,
         };
 

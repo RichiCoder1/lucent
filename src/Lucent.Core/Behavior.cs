@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using System.Text;
 
@@ -79,6 +80,12 @@ public enum SemanticAction
 
     /// <summary>Permits bounded scrolling.</summary>
     Scroll = 8,
+
+    /// <summary>Permits selecting a UTF-16 text range.</summary>
+    SelectText = 16,
+
+    /// <summary>Permits scrolling a text position into view.</summary>
+    ScrollTextIntoView = 32,
 }
 
 /// <summary>Finite portable requests accepted by retained semantic behaviors; platform adapters never receive control state.</summary>
@@ -98,6 +105,12 @@ public enum SemanticCommandKind
 
     /// <summary>Requests a scroll delta or endpoint.</summary>
     Scroll,
+
+    /// <summary>Requests a UTF-16 text selection.</summary>
+    SelectText,
+
+    /// <summary>Requests a text position to be brought into view.</summary>
+    ScrollTextIntoView,
 }
 
 /// <summary>Named destinations for semantic scrolling.</summary>
@@ -119,7 +132,10 @@ public readonly record struct SemanticCommand(
     string? Value = null,
     float Horizontal = 0,
     float Vertical = 0,
-    SemanticScrollEndpoint Endpoint = SemanticScrollEndpoint.None
+    SemanticScrollEndpoint Endpoint = SemanticScrollEndpoint.None,
+    int? Anchor = null,
+    int? Caret = null,
+    bool AlignToTop = false
 )
 {
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
@@ -139,6 +155,21 @@ public readonly record struct SemanticCommand(
                 Kind == SemanticCommandKind.Scroll
                 && Endpoint != SemanticScrollEndpoint.None
                 && (Horizontal != 0 || Vertical != 0)
+            )
+            || (
+                Kind
+                    is not SemanticCommandKind.SelectText
+                        and not SemanticCommandKind.ScrollTextIntoView
+                && (Anchor is not null || Caret is not null || AlignToTop)
+            )
+            || (
+                Kind is SemanticCommandKind.SelectText or SemanticCommandKind.ScrollTextIntoView
+                && (Anchor is null || Caret is null || Anchor < 0 || Caret < 0)
+            )
+            || (Kind == SemanticCommandKind.SelectText && AlignToTop)
+            || (
+                Kind is SemanticCommandKind.SelectText or SemanticCommandKind.ScrollTextIntoView
+                && (Horizontal != 0 || Vertical != 0 || Endpoint != SemanticScrollEndpoint.None)
             )
         )
             throw new ArgumentException(
@@ -174,7 +205,8 @@ public sealed class SemanticDeclaration
         bool focused = false,
         bool selected = false,
         SemanticAction actions = SemanticAction.None,
-        string? value = null
+        string? value = null,
+        SemanticTextSnapshot? text = null
     )
     {
         if (
@@ -186,6 +218,8 @@ public sealed class SemanticDeclaration
                     | SemanticAction.SetValue
                     | SemanticAction.Select
                     | SemanticAction.Scroll
+                    | SemanticAction.SelectText
+                    | SemanticAction.ScrollTextIntoView
                 )
             ) != 0
         )
@@ -199,6 +233,7 @@ public sealed class SemanticDeclaration
         Selected = selected;
         Actions = actions;
         Value = value;
+        Text = text;
     }
 
     /// <summary>Gets the accessible role.</summary>
@@ -221,6 +256,66 @@ public sealed class SemanticDeclaration
 
     /// <summary>Gets the optional accessible value.</summary>
     public string? Value { get; }
+
+    /// <summary>Gets the optional immutable editable-text snapshot used for range automation.</summary>
+    public SemanticTextSnapshot? Text { get; }
+}
+
+/// <summary>Immutable displayed text and UTF-16 selection state for semantic text automation.</summary>
+public sealed class SemanticTextSnapshot
+{
+    /// <summary>Initializes a coherent displayed-text snapshot and its grapheme-safe selection endpoints.</summary>
+    /// <param name="text">The exact UTF-16 text used by the matching shaped scene node.</param>
+    /// <param name="anchor">The selection anchor in <paramref name="text"/>.</param>
+    /// <param name="caret">The active selection endpoint in <paramref name="text"/>.</param>
+    /// <param name="anchorAffinity">The visual-line affinity of <paramref name="anchor"/>.</param>
+    /// <param name="caretAffinity">The visual-line affinity of <paramref name="caret"/>.</param>
+    /// <param name="isReadOnly">Whether automation must reject text mutations.</param>
+    public SemanticTextSnapshot(
+        string text,
+        int anchor,
+        int caret,
+        TextAffinity anchorAffinity = TextAffinity.Downstream,
+        TextAffinity caretAffinity = TextAffinity.Downstream,
+        bool isReadOnly = false
+    )
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        if (anchor < 0 || caret < 0 || anchor > text.Length || caret > text.Length)
+            throw new ArgumentOutOfRangeException(nameof(anchor));
+        var boundaries = StringInfo.ParseCombiningCharacters(text);
+        if (
+            anchor != text.Length && Array.BinarySearch(boundaries, anchor) < 0
+            || caret != text.Length && Array.BinarySearch(boundaries, caret) < 0
+        )
+            throw new ArgumentException("Text selection endpoints must be grapheme boundaries.");
+        if (!Enum.IsDefined(anchorAffinity) || !Enum.IsDefined(caretAffinity))
+            throw new ArgumentException("Text affinities must be finite.");
+        Text = text;
+        Anchor = anchor;
+        Caret = caret;
+        AnchorAffinity = anchorAffinity;
+        CaretAffinity = caretAffinity;
+        IsReadOnly = isReadOnly;
+    }
+
+    /// <summary>Gets the exact displayed UTF-16 text used by the matching shaped scene node.</summary>
+    public string Text { get; }
+
+    /// <summary>Gets the selection anchor in <see cref="Text"/>.</summary>
+    public int Anchor { get; }
+
+    /// <summary>Gets the active selection endpoint in <see cref="Text"/>.</summary>
+    public int Caret { get; }
+
+    /// <summary>Gets the anchor's visual-line affinity.</summary>
+    public TextAffinity AnchorAffinity { get; }
+
+    /// <summary>Gets the caret's visual-line affinity.</summary>
+    public TextAffinity CaretAffinity { get; }
+
+    /// <summary>Gets whether automation must reject text mutations.</summary>
+    public bool IsReadOnly { get; }
 }
 
 /// <summary>Stable identity for one semantic snapshot generation; commands become stale when any component changes.</summary>
@@ -240,7 +335,8 @@ public sealed record SemanticSnapshot(
     bool Focused,
     bool Selected,
     SemanticAction Actions,
-    IReadOnlyList<SemanticSnapshot> Children
+    IReadOnlyList<SemanticSnapshot> Children,
+    SemanticTextSnapshot? Text = null
 );
 
 /// <summary>Reusable interaction capability that owns input, focus, semantics, and cleanup for one element.</summary>

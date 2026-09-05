@@ -86,7 +86,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     internal int MaxCacheCount { get; private set; }
     internal int StaleCount { get; private set; }
     internal bool IsAvailable =>
-        Volatile.Read(ref _root._disposed) == 0 && (IsRoot || CurrentNode() is not null);
+        Volatile.Read(ref _disposed) == 0
+        && Volatile.Read(ref _root._disposed) == 0
+        && (IsRoot || CurrentNode() is not null);
 
     /// <summary>WndProc teardown only makes callbacks unavailable; owner disposal releases COM after it unwinds.</summary>
     internal void MarkUnavailable() => Interlocked.Exchange(ref _disposed, 1);
@@ -146,6 +148,21 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 RaiseProperty(node, 30010, old.Enabled, node.Enabled);
             if (old.Scroll != node.Scroll && node.Scroll is { } scroll)
                 RaiseProperty(node, 30055, ScrollPercent(old.Scroll), ScrollPercent(scroll));
+            if (
+                node.Actions.HasFlag(SemanticAction.SelectText)
+                && old.Text?.Text != node.Text?.Text
+            )
+                RaiseTextEvent(node, 20015);
+            if (
+                node.Actions.HasFlag(SemanticAction.SelectText)
+                && (
+                    old.Text?.Anchor != node.Text?.Anchor
+                    || old.Text?.Caret != node.Text?.Caret
+                    || old.Text?.AnchorAffinity != node.Text?.AnchorAffinity
+                    || old.Text?.CaretAffinity != node.Text?.CaretAffinity
+                )
+            )
+                RaiseTextEvent(node, 20014);
             if (!old.Focused && node.Focused)
                 RaiseFocus(node);
         }
@@ -191,17 +208,36 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             box => box.Bounds
         );
         var input = scene.Input.ToDictionary(item => item.Identity);
+        var textScenes = TextScenes(scene);
         var ordinal = 0L;
         foreach (var node in Flatten(root, null))
             yield return node;
         IEnumerable<Node> Flatten(SemanticSnapshot snapshot, NodeKey? parent)
         {
             var key = new NodeKey(snapshot.Identity.CompositionEpoch, snapshot.Identity.ElementId);
+            var elementIdentity = new ElementIdentity(
+                snapshot.Identity.CompositionEpoch,
+                snapshot.Identity.ElementId
+            );
             var scroll = snapshot.Actions.HasFlag(SemanticAction.Scroll)
-                ? _composition.Input.GetSemanticScroll(
-                    new(snapshot.Identity.CompositionEpoch, snapshot.Identity.ElementId)
-                )
+                ? _composition.Input.GetSemanticScroll(elementIdentity)
                 : null;
+            var text = snapshot.Text;
+            var textScene = text is null ? null : textScenes.GetValueOrDefault(elementIdentity);
+            var textSnapshot = text is null
+                ? null
+                : new TextSnapshot(
+                    text.Text,
+                    text.Anchor,
+                    text.Caret,
+                    text.AnchorAffinity,
+                    text.CaretAffinity,
+                    text.IsReadOnly,
+                    textScene?.Shape,
+                    textScene?.Bounds ?? bounds.GetValueOrDefault(key),
+                    textScene?.Clip
+                        ?? PointBounds(elementIdentity, bounds.GetValueOrDefault(key), input)
+                );
             yield return new(
                 key,
                 parent,
@@ -216,7 +252,8 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 snapshot.Actions,
                 bounds.GetValueOrDefault(key),
                 PointBounds(new(key.Epoch, key.Element), bounds.GetValueOrDefault(key), input),
-                scroll
+                scroll,
+                textSnapshot
             );
             foreach (var child in snapshot.Children)
             foreach (var node in Flatten(child, key))
@@ -264,7 +301,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     }
 
     private Node? CurrentNode(Snapshot snapshot) =>
-        Volatile.Read(ref _root._disposed) != 0 ? null
+        Volatile.Read(ref _disposed) != 0 || Volatile.Read(ref _root._disposed) != 0 ? null
         : _key is { } key && snapshot.Nodes.TryGetValue(key, out var node) ? node
         : null;
 
@@ -335,9 +372,14 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         {
             10000 when node.Actions.HasFlag(SemanticAction.Invoke) => UiaWrappers.Invoke,
             10001 when node.Role == SemanticRole.List => UiaWrappers.SelectionPattern,
-            10002 when node.Actions.HasFlag(SemanticAction.SetValue) => UiaWrappers.ValuePattern,
+            10002 when node.Actions.HasFlag(SemanticAction.SetValue) || node.Text is not null =>
+                UiaWrappers.ValuePattern,
             10004 when node.Actions.HasFlag(SemanticAction.Scroll) => UiaWrappers.Scroll,
             10010 when node.Actions.HasFlag(SemanticAction.Select) => UiaWrappers.SelectionItem,
+            10014 when node.Text is not null && node.Actions.HasFlag(SemanticAction.SelectText) =>
+                UiaWrappers.TextProvider,
+            10024 when node.Text is not null && node.Actions.HasFlag(SemanticAction.SelectText) =>
+                UiaWrappers.TextProvider2,
             _ => Guid.Empty,
         };
         if (iid != Guid.Empty)
@@ -399,8 +441,20 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             case 30037:
                 Bool(value, node.Role == SemanticRole.List);
                 break;
+            case 30040:
+                Bool(
+                    value,
+                    node.Text is not null && node.Actions.HasFlag(SemanticAction.SelectText)
+                );
+                break;
             case 30043:
-                Bool(value, node.Actions.HasFlag(SemanticAction.SetValue));
+                Bool(value, node.Actions.HasFlag(SemanticAction.SetValue) || node.Text is not null);
+                break;
+            case 30119:
+                Bool(
+                    value,
+                    node.Text is not null && node.Actions.HasFlag(SemanticAction.SelectText)
+                );
                 break;
             case 30045:
                 Bstr(value, node.Value ?? "");
@@ -624,6 +678,13 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         return value == 0 ? OutOfMemory : Ok;
     }
 
+    internal int ValueReadOnly(out int value)
+    {
+        var node = CurrentNode();
+        value = node?.Text?.IsReadOnly == true ? 1 : 0;
+        return node is null ? NotAvailable : Ok;
+    }
+
     internal int Selection(out nint value)
     {
         _dispatcher.RecordRead("Selection");
@@ -671,7 +732,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     internal int Selected(out int value)
     {
         var node = CurrentNode();
-        value = node?.Selected == true ? -1 : 0;
+        value = node?.Selected == true ? 1 : 0;
         return node is null ? NotAvailable : Ok;
     }
 
@@ -759,7 +820,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     internal int Scrollable(bool vertical, int* value)
     {
         var node = CurrentNode();
-        *value = vertical && node?.Scroll is { Maximum.Y: > 0 } ? -1 : 0;
+        *value = vertical && node?.Scroll is { Maximum.Y: > 0 } ? 1 : 0;
         return node is null ? NotAvailable : Ok;
     }
 
@@ -767,6 +828,12 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     {
         if (UiaClientsAreListening() && Provider(node) is { } provider)
             _ = UiaRaiseAutomationEvent(provider._simple, 20005);
+    }
+
+    private void RaiseTextEvent(Node node, int eventId)
+    {
+        if (UiaClientsAreListening() && Provider(node) is { } provider)
+            _ = UiaRaiseAutomationEvent(provider._simple, eventId);
     }
 
     private void RaiseStructure(WindowsUiaProvider provider, int change, Node changed)
@@ -908,7 +975,8 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         SemanticAction Actions,
         LayoutRect Bounds,
         LayoutRect PointBounds,
-        SemanticScrollState? Scroll
+        SemanticScrollState? Scroll,
+        TextSnapshot? Text
     );
 
     private sealed class Snapshot(FrozenDictionary<NodeKey, Node> nodes)

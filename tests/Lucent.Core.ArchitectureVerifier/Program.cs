@@ -109,6 +109,7 @@ static void VerifyLuiMetadata(
         ["Text"] = 2,
         ["Button"] = 1,
         ["TextField"] = 1,
+        ["TextArea"] = 1,
         ["Selectable"] = 2,
         ["ScrollViewport"] = 1,
         ["VirtualizedList"] = 1,

@@ -4,6 +4,11 @@ style EditorFieldStyle {
     Height: 28;
 }
 
+style EditorAreaStyle {
+    Width: 220;
+    Height: 160;
+}
+
 internal component EditorSessionView(EditorSessionFixtureModel model) {
     <Column>
         <Column style={Style.Empty.Height(32).Participation(() => model.Compact.Value ? ElementParticipation.Collapsed : ElementParticipation.Visible)}>
@@ -11,11 +16,19 @@ internal component EditorSessionView(EditorSessionFixtureModel model) {
         </Column>
         if (model.Compact.Value) {
             <Column name="compact-editor">
-                <TextField session={model.Session} label="Draft" style={EditorFieldStyle} />
+                if (model.Multiline) {
+                    <TextArea session={model.Session} label="Draft" style={EditorAreaStyle} />
+                } else {
+                    <TextField session={model.Session} label="Draft" style={EditorFieldStyle} />
+                }
             </Column>
         } else {
             <Row name="wide-editor">
-                <TextField session={model.Session} label="Draft" style={EditorFieldStyle} />
+                if (model.Multiline) {
+                    <TextArea session={model.Session} label="Draft" style={EditorAreaStyle} />
+                } else {
+                    <TextField session={model.Session} label="Draft" style={EditorFieldStyle} />
+                }
             </Row>
         }
     </Column>

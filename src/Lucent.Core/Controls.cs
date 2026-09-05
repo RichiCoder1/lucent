@@ -450,6 +450,11 @@ internal static class Controls
     {
         name = Required(name, nameof(name));
         TextFieldState.ValidateText(value);
+        if (session?.IsMultiline == true)
+            throw new ArgumentException(
+                "TextField requires a single-line editor session.",
+                nameof(session)
+            );
         var initialText = session?.Text ?? value;
         var component = TextFieldStyle
             .Set(ProjectionProperties.Text, initialText)
@@ -481,6 +486,76 @@ internal static class Controls
                 );
             },
             element.Name + ".text-value"
+        );
+        return state;
+    }
+
+    public static TextAreaState TextArea(
+        Element element,
+        ThemeContext theme,
+        string name,
+        string value = "",
+        Style? style = null,
+        EditorSession? session = null
+    )
+    {
+        name = Required(name, nameof(name));
+        TextFieldState.ValidateMultilineText(value);
+        if (session is not null && !session.IsMultiline)
+            throw new ArgumentException(
+                "TextArea requires a multiline editor session.",
+                nameof(session)
+            );
+        var editor =
+            session
+            ?? new EditorSession(
+                element.Scope,
+                element.Name,
+                value,
+                element.Name + ".editor",
+                multiline: true
+            );
+        var initialText = editor.Text;
+        var component = TextFieldStyle
+            .Set(ProjectionProperties.Text, initialText)
+            .Set(ProjectionProperties.TextMeasure, name)
+            .Set(ProjectionProperties.TextMultiline, true)
+            .Set(ProjectionProperties.TextCaretAffinity, editor.CaretAffinity)
+            .Set(TypographyProperties.TextWrap, TextWrap.WordWithGraphemeFallback)
+            .Set(LayoutProperties.Scroll, editor.Viewport.Offset);
+        Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
+        var state = new TextAreaState(element.Scope, element.Name + ".text", editor);
+        Configure(element, theme, component, style, new TextFieldBehavior(state, name));
+        _ = element.Scope.Effect(
+            () =>
+            {
+                element.UpdateControl(
+                    ProjectionProperties.Text,
+                    state.DisplayText.Length == 0 && !state.Focused ? name : state.DisplayText
+                );
+                element.UpdateControl(
+                    ProjectionProperties.TextSelectionStart,
+                    state.Focused ? state.DisplaySelectionStart : null
+                );
+                element.UpdateControl(
+                    ProjectionProperties.TextSelectionEnd,
+                    state.Focused ? state.DisplaySelectionEnd : null
+                );
+                element.UpdateControl(
+                    ProjectionProperties.TextCaret,
+                    state.Focused ? state.DisplayCaret : null
+                );
+                element.UpdateControl(ProjectionProperties.TextMultiline, state.IsMultiline);
+                element.UpdateControl(
+                    ProjectionProperties.TextCaretAffinity,
+                    state.Focused ? state.Session.CaretAffinity : TextAffinity.Downstream
+                );
+                element.UpdateControl(
+                    LayoutProperties.Scroll,
+                    state.ScrollState?.Offset ?? default
+                );
+            },
+            element.Name + ".text-area-value"
         );
         return state;
     }

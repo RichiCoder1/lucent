@@ -1,6 +1,6 @@
 # Editor sessions and responsive participation
 
-An `EditorSession` owns a single-line draft, selection, undo/redo history and associated `ViewportState` under an explicit `ReactiveScope`. Keep that owner above arrangement-specific branches. Pass the session into a `.lui` text field; moving between branches creates a fresh control mount while preserving the document state.
+An `EditorSession` owns a plain-text draft, selection, undo/redo history and associated `ViewportState` under an explicit `ReactiveScope`. Keep that owner above arrangement-specific branches. Pass the session into a `.lui` text field; moving between branches creates a fresh control mount while preserving the document state.
 
 ```lui
 internal component Editor(EditorSession session) {
@@ -8,7 +8,25 @@ internal component Editor(EditorSession session) {
 }
 ```
 
-Use `SwitchDocument` for an intentional document change or reset. `SynchronizeExternalText` applies an authoritative update to the current document: equal text is a no-op, changed text clamps selection and clears undo history. `SynchronizeExternalText` rejects a different document identifier, preventing a delayed result from switching the active document. Local changes through `Text` or editing commands remain undoable. The initial implementation is single-line; the multiline editor is separate work.
+Use `SwitchDocument` for an intentional document change or reset. `SynchronizeExternalText` applies an authoritative update to the current document: equal text is a no-op, changed text clamps selection and clears undo history. `SynchronizeExternalText` rejects a different document identifier, preventing a delayed result from switching the active document. Local changes through `Text` or editing commands remain undoable. Sessions default to single-line input. Create a multiline session with `new EditorSession(owner, documentId, initialText, multiline: true)` and bind it to `TextArea`; `TextField` retains its single-line contract.
+
+## Multiline editing
+
+```lui
+internal component NoteEditor(EditorSession body) {
+    <TextArea session={body} label="Note body" style={Style.Empty.Height(240)} />
+}
+```
+
+Keep the multiline session in the application model, above responsive branches. It owns canonical LF text, grapheme-safe UTF-16 selection, caret affinity, undo/redo and viewport continuity. CRLF and CR input normalize to LF. A tab remains one source grapheme and renders with a fixed four-space advance; elastic tab stops are not part of this contract. The mounted editor owns preedit, clipboard requests, pointer capture and native focus. Save models read the committed session text; IME preedit is not a durable edit.
+
+The first target is 20,000 UTF-16 code units. Immutable strings remain the document representation, with 64 retained history entries and a cached grapheme-boundary array for each retained text version. Navigation uses the index instead of rebuilding a whole-document grapheme map. A local edit creates one resulting document string; unchanged snapshots and their indices are shared through undo/redo. This bounded note workload does not justify a rope or piece table yet.
+
+Wrapped caret, selection and pointer placement use the paragraph line/cluster geometry. Up/Down preserve a desired x until a horizontal edit/move or changed paragraph layout resets it. Selection and caret updates reuse the shaped paragraph. The editor scrolls its owned viewport to reveal the caret; remounting does not transfer platform focus or in-progress composition.
+
+Timing and allocation results for the 20,000-unit workload are diagnostics in the affected tests, not new release gates. The supported direction/cluster model is the paragraph contract in [ADR 0004](adr/0004-layout-and-paragraphs.md); this is not exhaustive Unicode bidi or real-language IME certification.
+
+## Mount ownership
 
 Only one established text-field mount and one established viewport mount may use their respective state at a time. Transactional branch replacement may briefly prepare a new mount before retiring the old one; this does not move a retained element between parents.
 
