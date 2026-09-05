@@ -212,3 +212,7 @@ These primary sources informed the draft. Recheck exact versions and compatibili
 - [.NET Generic Host](https://learn.microsoft.com/en-us/dotnet/core/extensions/generic-host).
 - [Microsoft.Data.Sqlite](https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/).
 - [EF Core NativeAOT limitations](https://learn.microsoft.com/en-us/ef/core/performance/nativeaot-and-precompiled-queries).
+
+## Experience design
+
+The [experience design](../design/links-and-notes/README.md) expands this plan into responsive arrangements, keyboard and save flows, and clearly marked proposed `.lui` composition. See the [visual board](../design/links-and-notes/VISUAL.md) for the initial wide, medium, and compact designs. Exact APIs and final visual tokens remain implementation decisions.

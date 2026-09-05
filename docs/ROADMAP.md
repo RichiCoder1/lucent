@@ -22,7 +22,7 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 
 ## Next development: links and notes
 
-The [draft application and framework plan](plans/links-and-notes-draft.md) captures the agreed direction, proposed implementation sequence, and open technical choices. It is planning guidance; execution specifications and tickets belong in GitHub Issues and Project 4.
+The [draft application and framework plan](plans/links-and-notes-draft.md) captures the agreed direction, proposed implementation sequence, and open technical choices. The [experience design](design/links-and-notes/README.md) and [responsive visual board](design/links-and-notes/VISUAL.md) provide proposed application flows and authoring examples. Execution specifications and status belong in GitHub Issues and Project 4.
 
 Build a polished, local, single-user link inbox that also supports standalone notes. The owner and coding agents on the owner's Windows machine are the primary audience, with reproducible setup for other contributors. The application should make capture, editing, retrieval, opening, and archiving comfortable across wide, medium, and compact window arrangements.
 
@@ -32,7 +32,7 @@ Develop design quality alongside complete application slices. Deliver required `
 
 ## Recommended execution order
 
-The [architecture/code review](../plans/architecture-review.md) informs this sequence; it is a historical audit, not an acceptance gate. Source fixes are still pending.
+The [architecture/code review](../plans/architecture-review.md) informs this sequence; it is a historical audit, not an acceptance gate. GitHub records implementation status.
 
 1. Correct parser/tooling, empty-field, wake-delivery, and UIA defects; design the responsive experience in parallel.
 2. Establish retained current-item updates, `.lui` content composition, host shutdown/service ownership, editor sessions, and explicit responsive participation.

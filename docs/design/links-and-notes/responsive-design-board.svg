@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1180" viewBox="0 0 1600 1180" role="img" aria-labelledby="title desc">
+  <title id="title">Links and notes responsive design board</title>
+  <desc id="desc">Wide, medium, compact collection, and compact editor layouts for a Windows links-and-notes application.</desc>
+  <defs>
+    <filter id="shadow"><feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#17223b" flood-opacity=".16"/></filter>
+    <style>
+      .bg{fill:#e8edf6}.frame{fill:#f8faff;stroke:#2c3854;stroke-width:2}.nav{fill:#202a44}.rail{fill:#263250}.surface{fill:#f8faff}.selected{fill:#dce7ff}.accent{fill:#315bd6}.error{fill:#fff0f1;stroke:#b4233c}.rule{stroke:#c8d1e2}.ink{fill:#17223b;font-family:"Segoe UI",sans-serif}.muted{fill:#65708a;font-family:"Segoe UI",sans-serif}.inverse{fill:#f6f8ff;font-family:"Segoe UI",sans-serif}.label{fill:#46516a;font:700 16px "Segoe UI",sans-serif;letter-spacing:1.5px}.h{font-size:20px;font-weight:650}.b{font-size:14px}.s{font-size:12px}.field{fill:#fff;stroke:#aab5ca;stroke-width:1.5}.focus{fill:none;stroke:#315bd6;stroke-width:3}.button{fill:#315bd6}
+    </style>
+  </defs>
+  <rect class="bg" width="1600" height="1180"/>
+  <text x="60" y="55" class="ink" font-size="30" font-weight="700">Links + notes · responsive working surface</text>
+  <text x="60" y="83" class="muted b">Proposed hierarchy and density · final tokens, icons, and copy remain implementation decisions</text>
+
+  <text x="60" y="126" class="label">WIDE · 1,060+</text>
+  <g transform="translate(60 145)" filter="url(#shadow)">
+    <rect class="frame" width="1480" height="400" rx="8"/>
+    <rect class="field" x="18" y="11" width="1280" height="34" rx="5"/><text x="33" y="33" class="muted b">Capture a link or thought…</text>
+    <rect class="button" x="1310" y="11" width="152" height="34" rx="5"/><text x="1386" y="33" text-anchor="middle" class="inverse b" font-weight="650">Add</text>
+    <line class="rule" x1="0" y1="56" x2="1480" y2="56"/>
+    <rect class="nav" x="1" y="57" width="205" height="342"/><rect x="12" y="68" width="182" height="42" rx="5" fill="#344467"/>
+    <text x="24" y="95" class="inverse h">Inbox</text><text x="180" y="95" text-anchor="end" class="inverse b">18</text><text x="24" y="138" class="inverse b">Archive</text>
+    <text x="226" y="94" class="ink h">Inbox</text><text x="548" y="94" text-anchor="end" class="muted b">18 items</text>
+    <rect class="field" x="224" y="108" width="326" height="34" rx="5"/><text x="239" y="130" class="muted b">Search saved items…</text>
+    <rect class="selected" x="207" y="155" width="360" height="68"/><rect class="accent" x="207" y="155" width="4" height="68"/>
+    <text x="226" y="182" class="ink b" font-weight="650">SQLite is transactional</text><text x="226" y="207" class="muted s">LINK · edited 2m</text>
+    <text x="226" y="253" class="ink b" font-weight="650">Questions for the storage spike</text><text x="226" y="278" class="muted s">NOTE · edited 14m</text>
+    <line class="rule" x1="567" y1="57" x2="567" y2="399"/>
+    <text x="598" y="103" class="ink" font-size="25" font-weight="650">SQLite is transactional</text><text x="598" y="132" class="muted b">https://sqlite.org/lang_transaction.html</text><text x="1440" y="132" text-anchor="end" class="ink b" font-weight="650">Open</text>
+    <text x="598" y="174" class="ink b" font-weight="650">Notes</text><rect class="field" x="598" y="187" width="842" height="150" rx="6"/><rect class="focus" x="595" y="184" width="848" height="156" rx="8"/>
+    <text x="616" y="218" class="ink b">Use an application-owned write queue per record.</text><text x="616" y="245" class="ink b">A completed older write cannot replace a newer accepted edit.</text>
+    <text x="598" y="372" class="muted s">Saved just now</text><text x="1440" y="372" text-anchor="end" class="ink s" font-weight="650">Archive</text>
+  </g>
+
+  <text x="60" y="607" class="label">MEDIUM · 840–1,059</text>
+  <g transform="translate(60 626)" filter="url(#shadow)">
+    <rect class="frame" width="870" height="450" rx="8"/><rect class="field" x="14" y="10" width="718" height="32" rx="5"/><text x="28" y="31" class="muted s">Capture a link or thought…</text><rect class="button" x="743" y="10" width="112" height="32" rx="5"/><text x="799" y="31" text-anchor="middle" class="inverse s">Add</text>
+    <rect class="rail" x="1" y="53" width="64" height="396"/><circle cx="33" cy="87" r="19" fill="#40547f"/><text x="33" y="92" text-anchor="middle" class="inverse s">IN</text><text x="33" y="122" text-anchor="middle" class="inverse s">Inbox</text><circle cx="33" cy="160" r="19" fill="#2f3d5f"/><text x="33" y="165" text-anchor="middle" class="inverse s">AR</text>
+    <text x="83" y="88" class="ink h">Inbox</text><rect class="field" x="81" y="101" width="255" height="32" rx="5"/><text x="94" y="122" class="muted s">Search…</text>
+    <rect class="selected" x="66" y="146" width="287" height="64"/><rect class="accent" x="66" y="146" width="4" height="64"/><text x="83" y="173" class="ink b" font-weight="650">SQLite is transactional</text><text x="83" y="196" class="muted s">LINK · 2m</text>
+    <text x="83" y="241" class="ink b" font-weight="650">Questions for storage…</text><text x="83" y="264" class="muted s">NOTE · 14m</text><line class="rule" x1="353" y1="53" x2="353" y2="449"/>
+    <text x="375" y="94" class="ink h">SQLite is transactional</text><text x="375" y="121" class="muted s">https://sqlite.org/…</text><text x="847" y="121" text-anchor="end" class="ink s" font-weight="650">Open</text><text x="375" y="160" class="ink b" font-weight="650">Notes</text>
+    <rect class="field" x="375" y="173" width="472" height="190" rx="6"/><text x="391" y="204" class="ink s">Use an application-owned write queue per record.</text><text x="375" y="415" class="muted s">Saved 10:42</text><text x="847" y="415" text-anchor="end" class="ink s">Archive</text>
+  </g>
+
+  <text x="985" y="607" class="label">COMPACT · 480–839</text>
+  <g transform="translate(985 626)" filter="url(#shadow)">
+    <rect class="frame" width="254" height="450" rx="8"/><rect class="field" x="10" y="10" width="181" height="32" rx="5"/><text x="22" y="31" class="muted s">Capture…</text><rect class="button" x="199" y="10" width="45" height="32" rx="5"/><text x="221" y="31" text-anchor="middle" class="inverse s">Add</text>
+    <text x="16" y="81" class="ink h">Inbox</text><text x="238" y="80" text-anchor="end" class="ink s">Archive</text><rect class="field" x="14" y="94" width="226" height="32" rx="5"/><text x="26" y="115" class="muted s">Search saved items…</text>
+    <rect class="selected" x="1" y="139" width="252" height="66"/><rect class="accent" x="1" y="139" width="4" height="66"/><text x="16" y="166" class="ink b" font-weight="650">SQLite is transactional</text><text x="16" y="190" class="muted s">LINK · edited 2m</text>
+    <text x="16" y="238" class="ink b" font-weight="650">Questions for the</text><text x="16" y="258" class="ink b" font-weight="650">storage spike</text><text x="16" y="282" class="muted s">NOTE · edited 14m</text><text x="127" y="427" text-anchor="middle" class="muted s">COLLECTION</text>
+  </g>
+  <g transform="translate(1260 626)" filter="url(#shadow)">
+    <rect class="frame" width="280" height="450" rx="8"/><rect class="field" x="10" y="10" width="207" height="32" rx="5"/><text x="22" y="31" class="muted s">Capture…</text><rect class="button" x="225" y="10" width="45" height="32" rx="5"/><text x="247" y="31" text-anchor="middle" class="inverse s">Add</text>
+    <text x="16" y="73" class="ink s" font-weight="650">‹ Inbox</text><text x="264" y="73" text-anchor="end" class="muted s">Unsaved</text><text x="16" y="106" class="ink h">SQLite is transactional</text><text x="16" y="133" class="muted s">https://sqlite.org/…</text>
+    <text x="16" y="169" class="ink b" font-weight="650">Notes</text><rect class="field" x="14" y="180" width="252" height="160" rx="6"/><rect class="focus" x="11" y="177" width="258" height="166" rx="8"/><text x="28" y="210" class="ink s">Use an application-owned write</text><text x="28" y="232" class="ink s">queue per record.</text>
+    <rect class="error" x="14" y="354" width="252" height="52" rx="5"/><text x="25" y="375" class="ink s" font-weight="650">Couldn’t save this item</text><text x="252" y="396" text-anchor="end" fill="#8f1830" font-family="Segoe UI" font-size="12" font-weight="650">Retry</text><text x="140" y="430" text-anchor="middle" class="muted s">EDITOR · ERROR</text>
+  </g>
+</svg>
