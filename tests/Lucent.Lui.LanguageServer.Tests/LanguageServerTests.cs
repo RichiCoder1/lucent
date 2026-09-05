@@ -50,7 +50,7 @@ public sealed class LanguageServerTests
             );
             await File.WriteAllTextAsync(
                 helperPath,
-                "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString(); public static string AAAA(int value) => value.ToString(); public static ComponentRecipe UseCard() => Components.Card(\"\", \"\");\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; }"
+                "namespace Vendor.Deep { public class Marker {} } namespace Vendor.Deep.Child {} namespace Sample; using Lucent.Core; public static class Helpers {\n/// <summary>Formats <see cref=\"T:System.String\"/> for <paramref name=\"value\"/>.</summary>\n/// <remarks>Second section.</remarks>\npublic static string Format(int value) => value.ToString(); public static string AAAA(int value) => value.ToString(); public static ComponentRecipe UseCard() => Components.Card(\"\", \"\");\n}\npublic static class ImportedComponents { [LucentComponent] public static ComponentRecipe Choice(string first, int second = 42) => null!; [LucentComponent] public static ComponentRecipe Choice(int first) => null!; [LucentComponent] public static int ChoiceInvalid() => 1; }"
             );
             var source =
                 "namespace Sample;\r\nusing Lucent.Core;\r\nusing static Sample.Components;\r\nusing static Sample.ImportedComponents;\r\nstyle WidgetStyle { Background: Brush.Solid(default); }\r\ninternal component Widget(int count) { <Card content={Helpers.Format(count)} name=\"widget\" /> }";
@@ -896,9 +896,10 @@ public sealed class LanguageServerTests
             );
             Assert(
                 choiceTagCompletions.Any(item => item.Label == "Choice" && item.Kind == 2)
+                    && choiceTagCompletions.All(item => item.Label != "ChoiceInvalid")
                     && choiceParameters.Any(item => item.Label == "first")
                     && choiceParameters.Any(item => item.Label == "second"),
-                "LookupSymbols component completion lost using-static C# component candidates or parameters."
+                "Component completion lost eligible candidates/parameters or included an invalid return type."
             );
             var malformedImportedChoice = source.Replace(
                 "<Card content={Helpers.Format(count)} name=\"widget\" />",

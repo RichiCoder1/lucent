@@ -2686,6 +2686,8 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static bool IsComponent(IMethodSymbol method) =>
         method.IsStatic
+        && method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            == "global::Lucent.Core.ComponentRecipe"
         && method
             .GetAttributes()
             .Any(attribute =>

@@ -208,11 +208,13 @@ class MockProcess extends EventEmitter {
         this.exitCode = null;
         this.stdout = new EventEmitter();
         this.notifications = [];
-        this.stdin = { write: value => {
+        this.pid = 123;
+        this.stdin = Object.assign(new EventEmitter(), { write: value => {
             if (!Buffer.isBuffer(value)) return;
             const request = JSON.parse(value.toString());
             if (request.id === undefined) this.notifications.push(request);
             this.lastRequest = request;
+            if (this.holdRequests?.has(request.method)) return;
             if (request.method === "initialize") {
                 this.send({ jsonrpc: "2.0", method: "lucent/projectGraph", params: { directories: ["host", "referenced"] } });
             }
@@ -227,7 +229,7 @@ class MockProcess extends EventEmitter {
                     }]
                         : request.method === "textDocument/rename" ? null : {}
             });
-        } };
+        } });
     }
 
     kill() { this.exitCode = 0; this.emit("exit"); }
@@ -237,3 +239,108 @@ class MockProcess extends EventEmitter {
         this.stdout.emit("data", Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`), body]));
     }
 }
+
+function failureHarness(process) {
+    const resources = [];
+    const messages = [];
+    let generated;
+    const own = () => {
+        const resource = { disposed: 0, dispose() { this.disposed++; } };
+        resources.push(resource);
+        return resource;
+    };
+    const workspace = {
+        getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
+        textDocuments: [],
+        createFileSystemWatcher: () => Object.assign(own(), {
+            onDidCreate: own, onDidChange: own, onDidDelete: own
+        }),
+        onDidOpenTextDocument: own,
+        onDidChangeTextDocument: own,
+        onDidCloseTextDocument: own,
+        registerTextDocumentContentProvider: (_scheme, provider) => { generated = provider; return own(); }
+    };
+    const vscode = {
+        workspace,
+        window: { showErrorMessage: message => messages.push(message) },
+        Uri: { file: value => ({ toString: () => value }) },
+        RelativePattern: class {},
+        SemanticTokensLegend: class {},
+        commands: { registerCommand: own },
+        languages: new Proxy({}, { get: (_target, key) => key === "createDiagnosticCollection"
+            ? () => Object.assign(own(), { delete() {} }) : own })
+    };
+    const context = { subscriptions: [] };
+    const extension = loadExtension(vscode, process);
+    return { context, messages, resources, activate: () => extension.activate(context),
+        request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
+}
+
+test("missing dotnet rejects activation, reports setup guidance and disposes watchers", async () => {
+    const process = new MockProcess();
+    process.pid = undefined;
+    process.holdRequests = new Set(["initialize"]);
+    const harness = failureHarness(process);
+    const activation = harness.activate();
+    process.emit("error", new Error("spawn dotnet ENOENT"));
+    await assert.rejects(activation, /ENOENT/);
+    assert.equal(harness.messages.length, 1);
+    assert.match(harness.messages[0], /dotnet.*serverPath.*ENOENT/);
+    assert.ok(harness.resources.length > 1);
+    assert.ok(harness.resources.every(resource => resource.disposed === 1));
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    assert.ok(harness.resources.every(resource => resource.disposed === 1));
+    assert.equal(process.lastRequest.method, "initialize");
+});
+
+test("server startup exit is reported separately from process launch failure", async () => {
+    const process = new MockProcess();
+    process.holdRequests = new Set(["initialize"]);
+    const harness = failureHarness(process);
+    const activation = harness.activate();
+    process.exitCode = 1;
+    process.emit("exit", 1, null);
+    await assert.rejects(activation, /exited.*code 1/);
+    assert.equal(harness.messages.length, 1);
+    assert.match(harness.messages[0], /serverPath.*exited/);
+    assert.ok(harness.resources.every(resource => resource.disposed === 1));
+});
+
+test("runtime pipe failure rejects pending and later RPCs and releases registrations", async () => {
+    const process = new MockProcess();
+    const harness = failureHarness(process);
+    await harness.activate();
+    process.holdRequests = new Set(["lucent/generatedText"]);
+    const first = harness.request();
+    const second = harness.request();
+    process.stdin.emit("error", new Error("broken pipe"));
+    const settled = await Promise.allSettled([first, second]);
+    assert.ok(settled.every(result => result.status === "rejected" && /broken pipe/.test(result.reason.message)));
+    await assert.rejects(harness.request(), /broken pipe/);
+    assert.equal(harness.messages.length, 1);
+    assert.ok(harness.resources.every(resource => resource.disposed === 1));
+    process.emit("error", new Error("later process failure"));
+    assert.equal(harness.messages.length, 1);
+});
+
+test("failure immediately after initialize cannot register disposed providers", async () => {
+    const process = new MockProcess();
+    const harness = failureHarness(process);
+    const activation = harness.activate();
+    process.emit("error", new Error("early runtime failure"));
+    await activation;
+    assert.equal(harness.messages.length, 1);
+    assert.ok(harness.resources.every(resource => resource.disposed === 1));
+});
+
+test("normal disposal releases registrations once without reporting a server failure", async () => {
+    const process = new MockProcess();
+    const harness = failureHarness(process);
+    await harness.activate();
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+    process.kill();
+    await Promise.resolve();
+    assert.equal(harness.messages.length, 0);
+    assert.ok(harness.resources.every(resource => resource.disposed === 1));
+});

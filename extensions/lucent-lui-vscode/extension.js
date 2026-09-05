@@ -93,19 +93,35 @@ class Rpc {
         this.nextId = 1;
         this.pending = new Map();
         this.notifications = new Map();
-        process.stdout.on("data", chunk => this.read(chunk));
-        process.on("exit", () => this.rejectAll(new Error("Lucent language server exited.")));
+        this.failure = null;
+        this.onFailure = null;
+        process.stdout.on("data", chunk => {
+            try { this.read(chunk); }
+            catch (error) { this.fail(error); }
+        });
+        process.on("error", error => this.fail(new Error(`Lucent language server process failed: ${error.message}`)));
+        process.stdin.on("error", error => this.fail(error));
+        process.stdout.on("error", error => this.fail(error));
+        process.on("exit", (code, signal) => this.fail(new Error(
+            `Lucent language server exited (code ${code ?? "none"}, signal ${signal ?? "none"}).`
+        )));
     }
 
     request(method, params) {
+        if (this.failure) return Promise.reject(this.failure);
         const id = this.nextId++;
         return new Promise((resolve, reject) => {
             this.pending.set(id, { resolve, reject });
-            this.write({ jsonrpc: "2.0", id, method, params });
+            try { this.write({ jsonrpc: "2.0", id, method, params }); }
+            catch (error) { this.fail(error); }
         });
     }
 
-    notify(method, params) { this.write({ jsonrpc: "2.0", method, params }); }
+    notify(method, params) {
+        if (this.failure) return;
+        try { this.write({ jsonrpc: "2.0", method, params }); }
+        catch (error) { this.fail(error); }
+    }
 
     onNotification(method, handler) {
         const handlers = this.notifications.get(method) || [];
@@ -120,8 +136,10 @@ class Rpc {
     }
 
     read(chunk) {
+        if (this.failure) return;
         this.buffer = Buffer.concat([this.buffer, chunk]);
         for (;;) {
+            if (this.failure) return;
             const end = this.buffer.indexOf("\r\n\r\n");
             if (end < 0) return;
             const header = this.buffer.subarray(0, end).toString("ascii");
@@ -141,6 +159,15 @@ class Rpc {
             this.pending.delete(message.id);
             message.error ? pending.reject(new Error(message.error.message)) : pending.resolve(message.result);
         }
+    }
+
+    fail(error) {
+        if (this.failure) return;
+        this.failure = error;
+        this.notifications.clear();
+        this.buffer = Buffer.alloc(0);
+        this.rejectAll(error);
+        this.onFailure?.(error);
     }
 
     rejectAll(error) {
@@ -163,6 +190,8 @@ async function activate(context) {
         windowsHide: true
     });
     const rpc = new Rpc(process);
+    const subscriptions = [];
+    let stopped = false;
     const diagnostics = vscode.languages.createDiagnosticCollection("lucent-lui");
     rpc.onNotification("textDocument/publishDiagnostics", message => {
         const uri = vscode.Uri.parse(message.uri);
@@ -190,11 +219,27 @@ async function activate(context) {
         }));
     });
     const stop = { dispose: () => {
+        if (stopped) return;
+        stopped = true;
+        for (const subscription of subscriptions.splice(0).reverse()) subscription.dispose();
+        if (rpc.failure) {
+            if (process.exitCode === null && process.pid !== undefined) process.kill();
+            return;
+        }
         const timeout = setTimeout(() => process.exitCode === null && process.kill(), 1000);
         process.once("exit", () => clearTimeout(timeout));
         rpc.request("shutdown", {}).then(() => rpc.notify("exit", {})).catch(() => {});
     } };
-    context.subscriptions.push(stop, diagnostics);
+    const reportFailure = error => vscode.window.showErrorMessage(
+        `Lucent language server stopped. Check that dotnet is available and lucentLui.serverPath points to the server DLL. ${error.message}`
+    );
+    rpc.onFailure = error => {
+        if (stopped) return;
+        stop.dispose();
+        reportFailure(error);
+    };
+    context.subscriptions.push(stop);
+    subscriptions.push(diagnostics);
     const notifyWatchedFile = (uri, type) => rpc.notify("workspace/didChangeWatchedFiles", {
         changes: [{ uri: uri.toString(), type }]
     });
@@ -215,7 +260,7 @@ async function activate(context) {
                 ))
             ];
             for (const watcher of watchers) {
-                context.subscriptions.push(
+                subscriptions.push(
                     watcher,
                     watcher.onDidCreate(uri => notifyWatchedFile(uri, 1)),
                     watcher.onDidChange(uri => notifyWatchedFile(uri, 2)),
@@ -228,7 +273,11 @@ async function activate(context) {
     watchProjectDirectories([path.dirname(path.resolve(projectPath))]);
     const projectUri = vscode.Uri.file(path.resolve(projectPath)).toString();
     try { await rpc.request("initialize", { initializationOptions: { projectUri } }); }
-    catch (error) { stop.dispose(); throw error; }
+    catch (error) {
+        if (!stopped) { stop.dispose(); reportFailure(error); }
+        throw error;
+    }
+    if (stopped) return;
     rpc.notify("initialized", {});
     const isLucentDocument = document => document.languageId === "lui" || document.languageId === "csharp";
     const rename = async (document, position, newName) => toWorkspaceEdit(
@@ -242,7 +291,8 @@ async function activate(context) {
     for (const document of vscode.workspace.textDocuments.filter(isLucentDocument)) rpc.notify("textDocument/didOpen", {
         textDocument: { uri: document.uri.toString(), version: document.version, text: document.getText() }
     });
-    context.subscriptions.push(
+    if (stopped) return;
+    subscriptions.push(
         vscode.workspace.onDidOpenTextDocument(document => isLucentDocument(document) && rpc.notify("textDocument/didOpen", {
             textDocument: { uri: document.uri.toString(), version: document.version, text: document.getText() }
         })),
