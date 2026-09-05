@@ -109,18 +109,20 @@ internal sealed class ElementPresentation
         );
     }
 
-    internal ResolvedProperty<T> Resolve<T>(Property<T> property)
+    internal ResolvedProperty<T> Resolve<T>(Property<T> property) => _element.Resolve(property);
+
+    internal ResolvedProperty<T> ResolveLocal<T>(
+        Property<T> property,
+        ResolvedProperty<T>? inherited
+    )
     {
         ArgumentNullException.ThrowIfNull(property);
         var candidates = new List<(T Value, PropertyProvenance Provenance)>
         {
             (property.DefaultValue, new("default", 0)),
         };
-        if (property.Inherits && _element.Parent is not null)
-        {
-            var inherited = _element.Parent.Resolve(property);
+        if (property.Inherits && inherited is not null)
             candidates.Add((inherited.Value, new("inherited", inherited.Winner.Ordinal)));
-        }
         var conditional = _component
             .Concat(_author)
             .Any(item =>

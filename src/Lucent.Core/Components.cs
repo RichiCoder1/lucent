@@ -39,6 +39,60 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a container that publishes its assigned logical content constraints to a hoistable reader.</summary>
+    [LucentComponent]
+    public static ComponentRecipe ResponsiveContainer(
+        [DefaultContent] ComponentContent content,
+        ResponsiveConstraints constraints,
+        Style? style = null
+    )
+    {
+        content = Content(content);
+        ArgumentNullException.ThrowIfNull(constraints);
+        return ComponentRecipe.Create(
+            "responsive-container",
+            (context, root) =>
+            {
+                constraints.AcquireMount(root.Scope);
+                root.Present(
+                    context.Theme,
+                    author: Style.Compose(
+                        Style
+                            .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
+                            .Set(LayoutProperties.MainGrow, 1f),
+                        style ?? Style.Empty
+                    )
+                );
+                root.UpdateControl(ProjectionProperties.ResponsiveConstraints, constraints);
+                context.Mount(root, content);
+            }
+        );
+    }
+
+    /// <summary>Installs application key bindings for the supplied component subtree.</summary>
+    /// <remarks>A matching nearest binding consumes its chord even while its command is disabled or busy.</remarks>
+    [LucentComponent]
+    public static ComponentRecipe CommandScope(
+        [DefaultContent] ComponentContent content,
+        CommandBindings bindings
+    )
+    {
+        content = Content(content);
+        ArgumentNullException.ThrowIfNull(bindings);
+        return ComponentRecipe.Create(
+            "command-scope",
+            (context, root) =>
+            {
+                root.Present(
+                    context.Theme,
+                    author: Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
+                );
+                root.AttachBehaviors(new CommandScopeBehavior(bindings));
+                context.Mount(root, content);
+            }
+        );
+    }
+
     /// <summary>Creates a text component that displays the supplied string.</summary>
     [LucentComponent]
     public static ComponentRecipe Text([DefaultContent] string content, Style? style = null)

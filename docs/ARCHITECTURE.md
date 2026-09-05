@@ -101,7 +101,7 @@ Semantic tokens are typed declarations. A later build-time importer may normaliz
 
 ### Layout, text, semantics, and scene
 
-The first layout surface is bounded to the reference application: rows, columns, size constraints, spacing, alignment, scrolling, fixed-height keyed virtualization, clipping, and device-scale rounding. Layout consumes resolved arrangement values; it does not define a second property system.
+The first layout surface is bounded to the reference application: explicit fixed/content/fraction/minmax Grid tracks with placements and contiguous spans; shared Row/Column basis, grow, shrink, wrapping, gaps and alignment; size constraints; scrolling; fixed-height keyed virtualization against its assigned cell; clipping; and cumulative device-scale edge rounding. Unsupported authored combinations fail validation. Layout consumes resolved typed values and exposes assigned logical content constraints for one bounded responsive correction pass; it does not define a second property system or claim CSS Grid/Flex compatibility.
 
 Core owns the text-measurement request/result contract, Unicode-safe single-line text state, selection, editing commands, composition/preedit state, and caret geometry requests. `Lucent.Renderer.Skia` is the only `0.1` implementation of shaping and measurement and owns HarfBuzz/Skia font fallback and painting; Windows owns native composition transport and candidate positioning. Measurement and painting use the same shaped glyph identities and positions.
 

@@ -213,7 +213,7 @@ style PrimaryButton {
 
 `with` is the sole initial style composition syntax. It accepts named style values, nullable style parameters, and inline bodies; evaluation is left to right and the rightmost assignment wins. It lowers to ordered `Style.With` and `Style.When` calls. Compound variants use the real finite flags expression, for example `when Selected | FocusVisible`. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are internal to the document initially. `public style` is reserved as the fast-follow export syntax; shared styles remain ordinary public C# symbols until cross-document component binding/maps prove that feature. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
 
-The Lucent SDK supplies an opt-out ordinary `Lucent.Core` namespace using only. Built-in `Components` are tag-only, framework properties are style-left-hand-side-only, and `VariantState` is `when`-only; application and third-party modules may publish ordinary static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics.
+The Lucent SDK supplies an opt-out ordinary `Lucent.Core` namespace using only. Built-in `Components` are tag-only, framework properties are style-left-hand-side-only, and `VariantState` is `when`-only; application and third-party modules may publish ordinary static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics. A unique built-in style name is resolved only in the property position on the left of `:`. This lets `GridPlacement: new GridPlacement(...)` and `TextWrap: TextWrap.WordWithGraphemeFallback` use the normal C# type names on the value side; ordinary C# member access keeps its usual binding rules.
 
 Source-copied components become application-owned and therefore bind unqualified style tokens against the consuming project's `<RootNamespace>.Tokens`. Missing tokens are ordinary compilation errors. Components requiring a fixed token contract qualify their own token class explicitly.
 
@@ -237,11 +237,18 @@ The exact initial author-facing property surface is:
 
 | Group/member | Type | Default | Inherits |
 | --- | --- | --- | --- |
-| `LayoutProperties.Axis` | `LayoutAxis` | `Column` | no |
+| `LayoutProperties.Mode` | `LayoutMode` | `Flex` | no |
+| `Axis` | `LayoutAxis` | `Column` | no |
+| `Columns` / `Rows` | `GridTracks` | empty | no |
+| `ColumnGap` / `RowGap` | `float` | `0` | no |
+| `GridPlacement` | `GridPlacement?` | `null` | no |
 | `Width` / `Height` | `float?` | `null` | no |
 | `MinWidth` / `MinHeight` | `float` | `0` | no |
 | `MaxWidth` / `MaxHeight` | `float` | positive infinity | no |
 | `Spacing` | `float` | `0` | no |
+| `MainBasis` | `float?` | `null` | no |
+| `MainGrow` / `MainShrink` | `float` | `0` | no |
+| `Wrap` | `bool` | `false` | no |
 | `MainAlignment` | `LayoutAlignment` | `Start` | no |
 | `CrossAlignment` | `LayoutAlignment` | `Stretch` | no |
 | `Padding` | `Insets` | zero | no |
@@ -254,6 +261,9 @@ The exact initial author-facing property surface is:
 | `FontSize` | `float` | `14` | yes |
 | `Language` | `string` | `en` | yes |
 | `Direction` | `TextDirection` | `LeftToRight` | yes |
+| `TypographyProperties.TextWrap` | `TextWrap` | `NoWrap` | yes |
+| `MaxLines` | `int?` | `null` | yes |
+| `Overflow` | `TextOverflow` | `Clip` | yes |
 | `InputProperties.Enabled` / `Visible` | `bool` | `true` | no |
 
 `Arrangement`, public `SceneProperties`, `Fill`, and `Foreground` are removed during the unreleased API change. The typography inheritance table is an intentional behavior change from the current surface and receives resolution/dump/row-scale cost evidence. `TextColor` remains eligible for the existing manual `TransitionKind.Color` channel after that channel is retyped to `Color`; `Background : Brush` is transition-ineligible initially. Raw text, selection, caret, virtual-row metadata, and projection bookkeeping are internal/compiler-excluded. Portable retained-scene DTOs remain the explicit Core-to-renderer seam.
@@ -264,7 +274,53 @@ The exact initial author-facing property surface is:
 
 Padding participates in Lucent's own bounded algorithm: intrinsic outer size includes the insets; explicit/min/max constraints apply to the outer box; child layout uses an inner box clamped to zero when insets exceed available space; text/caret/selection origins and row/column alignment use that same inner box. A scroll viewport clips scrolled children to its inner content box; leading and trailing padding participate in scroll extent so content may rest at padded ends. Fixed virtual row height is the row's total outer extent; realization uses the viewport's inner height. Shared outer/inner edges round independently at each declared scale without cumulative drift.
 
+### Grid, Flex, paragraphs, and responsive constraints
+
+`LayoutMode.Grid` uses only explicitly declared tracks. `GridTrack.Fixed`, `Content`, `Fraction`, and `MinMax` cover the first framework slice. Every direct child requires a zero-based `GridPlacement`; spans are positive and contiguous. A placement outside the declared rows or columns fails projection. No implicit tracks, named lines, auto-placement, dense packing, or general CSS Grid compatibility are claimed.
+
+The default `LayoutMode.Flex` preserves Row/Column behavior. `MainBasis`, `MainGrow`, and opt-in `MainShrink` determine main-axis sizing without crossing min/max constraints. `Wrap` forms additional lines within the assigned main size; `Spacing` is the item gap and `RowGap` is the line gap. Overflow remains visible unless `Clip` is set.
+
+Wrapped text uses the final assigned inline width. `TextWrap.WordWithGraphemeFallback` keeps grapheme clusters intact when one word exceeds the line, while `ExplicitBreaks` honors authored breaks without automatic wrapping. `MaxLines`, the assigned block constraint, and `TextOverflow` produce one immutable paragraph result shared by measurement, paint, hit testing, caret placement, selection, and semantic geometry.
+
+A `ResponsiveConstraints` value is hoisted with application state and passed to `ResponsiveContainer`. Its `Current.Width` and `Current.Height` are logical content-box units. The container publishes one assigned value before the final projection pass. Retained branches bind `VisualProperties.Participation` to that value so hidden or collapsed arrangements preserve their owned sessions. A branch that changes the responsive container's own assigned constraints after the bounded correction pass fails with a feedback diagnostic. Keep the responsive containers themselves mounted: adding or removing one during that pass is rejected. Virtualized viewports inside their branches may mount or resize; a post-branch assignment pass supplies the actual cell bounds before rows are realized.
+
+~~~csharp
+using var constraints = new ResponsiveConstraints(applicationScope);
+
+var shell = Components.ResponsiveContainer(
+    [
+        Components.Column(content, style: Style.Empty
+            .Mode(LayoutMode.Grid)
+            .Columns(GridTracks.Create(
+                GridTrack.Fixed(184),
+                GridTrack.Fixed(320),
+                GridTrack.MinMax(482, GridTrack.Fraction())))
+            .Rows(GridTracks.Create(GridTrack.Fixed(48), GridTrack.Fraction()))
+            .ColumnGap(8))
+    ],
+    constraints);
+~~~
+
 Brush equality/hash/dumps are canonical. Gradient stops are finite, ordered, and box-relative; nested opacity multiplies and one group covers background, text, and descendants, including visible overflow when clipping is disabled. Brush alpha affects only that paint. Dumps contain no renderer object/cache identity.
+
+### Application commands and wheel scrolling
+
+Application models own `ApplicationCommand` instances in a `ReactiveScope`. `TryExecute()` accepts at most one execution while enabled; `IsEnabled`, `IsBusy`, and `Error` are reactive reads. Construction and observation do not start work. Owner disposal cancels pending work, and asynchronous completion returns through the graph's work queue. Supply an enabled predicate for application availability and expose failures as a useful retry state.
+
+A `CommandBindings` table pairs commands with exact `KeyChord.Ctrl(Key.N)`, `KeyChord.Ctrl(Key.F)`, or `KeyChord.Ctrl(Key.S)` gestures; explicit Meta gestures are also available. Duplicate gestures in one table are rejected. The nearest focused-ancestor `CommandScope` consumes its matching chord even while its command is disabled or busy, and ignores key repeats. Normal text entry, AltGr, editing commands, and IME keep their existing routes.
+
+~~~lui
+public component CaptureActions(CommandBindings bindings, ApplicationCommand capture) {
+    <CommandScope bindings={bindings}>
+        <Column>
+            <Button onInvoke={() => capture.TryExecute()} style={Style.Empty.Enabled(() => capture.IsEnabled)}>Capture</Button>
+            <Text content={() => capture.IsBusy ? "Working" : capture.Error == null ? "Ready" : "Retry"} />
+        </Column>
+    </CommandScope>
+}
+~~~
+
+Wheel input needs no application event handler. The Windows adapter preserves fractional deltas, maps a wheel unit to 40 logical pixels, and honors reversed-device direction. Core hit-tests at the pointer position, scrolls the nearest viewport, clamps each axis, and passes unconsumed deltas to scrollable ancestors. Trackpad hardware gestures beyond SDL wheel events are not a separate gesture API.
 
 ## Diagnostics, recovery, and formatting
 

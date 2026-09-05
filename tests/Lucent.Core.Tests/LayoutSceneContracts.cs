@@ -1155,6 +1155,590 @@ public sealed class LayoutSceneContracts
         }
     }
 
+    [TestMethod]
+    public void ExplicitGridTracksSpansGapsAndRounding()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "explicit-grid");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("explicit-grid"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Mode(LayoutMode.Grid)
+                .Columns(
+                    GridTracks.Create(
+                        GridTrack.Fixed(20),
+                        GridTrack.MinMax(30, GridTrack.Fraction())
+                    )
+                )
+                .Rows(GridTracks.Create(GridTrack.Fixed(10), GridTrack.Fraction()))
+                .ColumnGap(2)
+                .RowGap(1)
+        );
+        var spanning = composition.Child(composition.Root, "spanning");
+        spanning.Present(theme, author: Style.Empty.GridPlacement(new(0, 0, 1, 2)));
+        var left = composition.Child(composition.Root, "left");
+        left.Present(theme, author: Style.Empty.GridPlacement(new(1, 0)));
+        var right = composition.Child(composition.Root, "right");
+        right.Present(theme, author: Style.Empty.GridPlacement(new(1, 1)));
+
+        foreach (var scale in new[] { 1f, 1.5f, 2f })
+        {
+            var scene = SceneLayout.Project(composition, new(100, 50, scale), new ProbeShaper());
+            var boxes = scene.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);
+            var expectedRight = LayoutRect.Round(22, 11, 78, 39, scale);
+            Assert(
+                boxes[spanning.Id].Width == 100
+                    && boxes[left.Id].Width == 20
+                    && boxes[right.Id] == expectedRight,
+                "Explicit Grid tracks, gaps, spans, minmax/fr, or cumulative edges changed at scale "
+                    + scale
+            );
+        }
+
+        right.UpdateControl(LayoutProperties.GridPlacement, new GridPlacement(1, 2));
+        Expect<InvalidOperationException>(() =>
+            SceneLayout.Project(composition, new(100, 50, 1), new ProbeShaper())
+        );
+        right.UpdateControl(LayoutProperties.GridPlacement, default(GridPlacement));
+        Expect<InvalidOperationException>(() =>
+            SceneLayout.Project(composition, new(100, 50, 1), new ProbeShaper())
+        );
+        right.UpdateControl(
+            LayoutProperties.GridPlacement,
+            new GridPlacement(0, int.MaxValue, 1, int.MaxValue)
+        );
+        Expect<InvalidOperationException>(() =>
+            SceneLayout.Project(composition, new(100, 50, 1), new ProbeShaper())
+        );
+    }
+
+    [TestMethod]
+    public void NullGridTracksFailStyleValidation()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "null-grid-tracks");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("null-grid-tracks"));
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Set(LayoutProperties.Columns, (GridTracks)null!)
+        );
+        Expect<ArgumentOutOfRangeException>(() =>
+            SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper())
+        );
+    }
+
+    [TestMethod]
+    public void GridContentTrackAndCellAlignment()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "content-grid");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("content-grid"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Mode(LayoutMode.Grid)
+                .Columns(GridTracks.Create(GridTrack.Content(), GridTrack.Fraction()))
+                .Rows(GridTracks.Create(GridTrack.Fixed(20)))
+                .CrossAlignment(LayoutAlignment.Center)
+        );
+        var content = composition.Child(composition.Root, "content");
+        content.Present(theme, author: Style.Empty.Width(20).Height(10).GridPlacement(new(0, 0)));
+        var centered = composition.Child(composition.Root, "centered");
+        centered.Present(theme, author: Style.Empty.Width(10).Height(10).GridPlacement(new(0, 1)));
+
+        var scene = SceneLayout.Project(composition, new(100, 20, 1), new ProbeShaper());
+        var boxes = scene.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);
+        Assert(
+            boxes[content.Id] == new LayoutRect(0, 5, 20, 10)
+                && boxes[centered.Id] == new LayoutRect(55, 5, 10, 10),
+            "Grid content sizing or cell alignment changed."
+        );
+    }
+
+    [TestMethod]
+    public void FlexBasisGrowShrinkAndWrap()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "flex-wrap");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("flex-wrap"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Axis(LayoutAxis.Row)
+                .Spacing(5)
+                .RowGap(3)
+                .Wrap(true)
+                .CrossAlignment(LayoutAlignment.Start)
+        );
+        var children = Enumerable
+            .Range(0, 3)
+            .Select(index =>
+            {
+                var child = composition.Child(composition.Root, "item-" + index);
+                child.Present(theme, author: Style.Empty.Width(30).Height(10).MainBasis(30));
+                return child;
+            })
+            .ToArray();
+        var wrapped = SceneLayout.Project(composition, new(70, 40, 1), new ProbeShaper());
+        var boxes = wrapped.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);
+        Assert(
+            boxes[children[0].Id].X == 0
+                && boxes[children[1].Id].X == 35
+                && boxes[children[2].Id].X == 0
+                && boxes[children[2].Id].Y == 13,
+            "Flex wrapping did not preserve basis and line gaps."
+        );
+
+        var shrinkGraph = new ReactiveGraph();
+        using var shrinkComposition = new Composition(shrinkGraph, "flex-shrink");
+        var shrinkTheme = new ThemeContext(shrinkComposition.Root.Scope, new Theme("flex-shrink"));
+        shrinkComposition.Root.Present(
+            shrinkTheme,
+            author: Style.Empty.Axis(LayoutAxis.Row).CrossAlignment(LayoutAlignment.Start)
+        );
+        var shrinkChildren = Enumerable
+            .Range(0, 2)
+            .Select(index =>
+            {
+                var child = shrinkComposition.Child(shrinkComposition.Root, "shrink-" + index);
+                child.Present(
+                    shrinkTheme,
+                    author: Style
+                        .Empty.Width(30)
+                        .Height(10)
+                        .MainBasis(30)
+                        .MainShrink(1)
+                        .MinWidth(10)
+                );
+                return child;
+            })
+            .ToArray();
+        var shrunk = SceneLayout.Project(shrinkComposition, new(50, 20, 1), new ProbeShaper());
+        boxes = shrunk.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);
+        Assert(
+            boxes[shrinkChildren[0].Id].Width == 25 && boxes[shrinkChildren[1].Id].Width == 25,
+            "Flex shrink did not distribute negative space without crossing minimums."
+        );
+    }
+
+    [TestMethod]
+    public void CharacterizesWideAndDeepManagedScenes()
+    {
+        static (long Milliseconds, int Boxes) ProjectWide()
+        {
+            var graph = new ReactiveGraph();
+            using var composition = new Composition(graph, "wide-layout-characterization");
+            var theme = new ThemeContext(composition.Root.Scope, new Theme("wide-layout"));
+            composition.Root.Present(
+                theme,
+                author: Style.Empty.Axis(LayoutAxis.Row).CrossAlignment(LayoutAlignment.Start)
+            );
+            for (var index = 0; index < 200; index++)
+            {
+                var child = composition.Child(composition.Root, "wide-" + index);
+                child.Present(theme, author: Style.Empty.Width(4).Height(4));
+            }
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            var scene = SceneLayout.Project(composition, new(800, 20, 1), new ProbeShaper());
+            timer.Stop();
+            return (timer.ElapsedMilliseconds, scene.Boxes.Count);
+        }
+
+        static (long Milliseconds, int Boxes) ProjectDeep()
+        {
+            var graph = new ReactiveGraph();
+            using var composition = new Composition(graph, "deep-layout-characterization");
+            var theme = new ThemeContext(composition.Root.Scope, new Theme("deep-layout"));
+            var parent = composition.Root;
+            parent.Present(theme);
+            for (var index = 0; index < 200; index++)
+            {
+                parent = composition.Child(parent, "deep-" + index);
+                parent.Present(theme);
+            }
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            var scene = SceneLayout.Project(composition, new(800, 500, 1), new ProbeShaper());
+            timer.Stop();
+            return (timer.ElapsedMilliseconds, scene.Boxes.Count);
+        }
+
+        var wide = ProjectWide();
+        var deep = ProjectDeep();
+        Assert(
+            wide.Boxes == 201 && deep.Boxes == 201,
+            "Wide or deep managed layout characterization omitted retained boxes."
+        );
+        Console.WriteLine(
+            "Managed layout characterization: 200 wide siblings "
+                + wide.Milliseconds.ToString(CultureInfo.InvariantCulture)
+                + " ms; 200 nested elements "
+                + deep.Milliseconds.ToString(CultureInfo.InvariantCulture)
+                + " ms"
+        );
+    }
+
+    [TestMethod]
+    public void ResponsiveConstraintsSelectOnceAndRejectFeedback()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = graph.CreateScope("responsive-owner");
+        using var constraints = new ResponsiveConstraints(owner);
+        using var composition = new Composition(graph, "responsive");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("responsive"));
+        var container = composition.Child(composition.Root, "container");
+        container.Present(theme, author: Style.Empty.MainGrow(1));
+        constraints.AcquireMount(container.Scope);
+        container.UpdateControl(ProjectionProperties.ResponsiveConstraints, constraints);
+        var wide = composition.Child(container, "wide");
+        wide.Present(
+            theme,
+            author: Style.Empty.Bind(
+                VisualProperties.Participation,
+                () =>
+                    constraints.Current.Width >= 80
+                        ? ElementParticipation.Visible
+                        : ElementParticipation.Collapsed
+            )
+        );
+        var compact = composition.Child(container, "compact");
+        compact.Present(
+            theme,
+            author: Style.Empty.Bind(
+                VisualProperties.Participation,
+                () =>
+                    constraints.Current.Width < 80
+                        ? ElementParticipation.Visible
+                        : ElementParticipation.Collapsed
+            )
+        );
+
+        var wideScene = SceneLayout.Project(composition, new(100, 40, 1), new ProbeShaper());
+        Assert(
+            constraints.Current == new ContainerConstraints(100, 40)
+                && wideScene.Boxes.Single(box => box.Identity.ElementId == wide.Id).Bounds.Width
+                    == 100
+                && wideScene.Boxes.Single(box => box.Identity.ElementId == compact.Id).Bounds.Width
+                    == 0,
+            "Responsive constraints did not select the retained wide branch: constraints="
+                + constraints.Current
+                + " wide="
+                + wideScene.Boxes.Single(box => box.Identity.ElementId == wide.Id).Bounds
+                + " compact="
+                + wideScene.Boxes.Single(box => box.Identity.ElementId == compact.Id).Bounds
+        );
+        var compactScene = SceneLayout.Project(composition, new(70, 40, 1), new ProbeShaper());
+        Assert(
+            constraints.Current == new ContainerConstraints(70, 40)
+                && compactScene
+                    .Boxes.Single(box => box.Identity.ElementId == compact.Id)
+                    .Bounds.Width == 70,
+            "Responsive constraints did not update once for the compact assigned container."
+        );
+
+        var badGraph = new ReactiveGraph();
+        using var badOwner = badGraph.CreateScope("feedback-owner");
+        using var badConstraints = new ResponsiveConstraints(badOwner);
+        using var bad = new Composition(badGraph, "feedback");
+        var badTheme = new ThemeContext(bad.Root.Scope, new Theme("feedback"));
+        var feedback = bad.Child(bad.Root, "feedback-container");
+        feedback.Present(
+            badTheme,
+            author: Style.Empty.Bind(
+                LayoutProperties.Width,
+                () => badConstraints.Current.Width >= 80 ? 60 : 100
+            )
+        );
+        badConstraints.AcquireMount(feedback.Scope);
+        feedback.UpdateControl(ProjectionProperties.ResponsiveConstraints, badConstraints);
+        Expect<InvalidOperationException>(() =>
+            SceneLayout.Project(bad, new(100, 40, 1), new ProbeShaper())
+        );
+    }
+
+    [TestMethod]
+    public void ResponsiveConstraintPassRejectsNewNestedContainer()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = graph.CreateScope("responsive-structural-owner");
+        using var outerConstraints = new ResponsiveConstraints(owner, "outer");
+        using var nestedConstraints = new ResponsiveConstraints(owner, "nested");
+        using var composition = new Composition(graph, "responsive-structural");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("responsive-structural"));
+        var outer = composition.Child(composition.Root, "outer");
+        outer.Present(theme, author: Style.Empty.MainGrow(1));
+        outerConstraints.AcquireMount(outer.Scope);
+        outer.UpdateControl(ProjectionProperties.ResponsiveConstraints, outerConstraints);
+        _ = composition.When(
+            outer,
+            "wide-nested-responsive",
+            () => outerConstraints.Current.Width >= 80,
+            context =>
+            {
+                var nested = context.Element("nested");
+                nested.Present(theme);
+                nestedConstraints.AcquireMount(nested.Scope);
+                nested.UpdateControl(ProjectionProperties.ResponsiveConstraints, nestedConstraints);
+                return nested;
+            }
+        );
+        graph.Drain();
+
+        Expect<InvalidOperationException>(() =>
+            SceneLayout.Project(composition, new(100, 40, 1), new ProbeShaper())
+        );
+        Assert(
+            nestedConstraints.Current == default,
+            "A newly mounted nested responsive container observed a silently stale constraint."
+        );
+    }
+
+    [TestMethod]
+    public void VirtualizationUsesAssignedNestedGridViewport()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "assigned-viewport");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("assigned-viewport"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Mode(LayoutMode.Grid)
+                .Columns(GridTracks.Create(GridTrack.Fraction()))
+                .Rows(
+                    GridTracks.Create(
+                        GridTrack.Fixed(20),
+                        GridTrack.MinMax(0, GridTrack.Fraction())
+                    )
+                )
+                .RowGap(1)
+        );
+        var header = composition.Child(composition.Root, "header");
+        header.Present(theme, author: Style.Empty.GridPlacement(new(0, 0)));
+        var viewport = composition.Child(composition.Root, "viewport");
+        Controls.ScrollViewport(
+            viewport,
+            theme,
+            "Rows",
+            style: Style.Empty.GridPlacement(new(1, 0)).Clip(true)
+        );
+        var list = Controls.VirtualizedList(
+            viewport,
+            theme,
+            "rows",
+            "Rows",
+            () => Enumerable.Range(0, 100),
+            value => value,
+            (value, context) =>
+            {
+                var row = context.Element("row");
+                row.Present(theme);
+                return row;
+            },
+            10
+        );
+        graph.Drain();
+
+        var scene = SceneLayout.Project(composition, new(100, 100, 1), new ProbeShaper());
+        var viewportBox = scene.Boxes.Single(box => box.Identity.ElementId == viewport.Id).Bounds;
+        Assert(
+            viewportBox is { Y: 21, Height: 79 } && list.Items.Count == 10,
+            "Fixed virtualization did not realize from the assigned nested Grid viewport: viewport="
+                + viewportBox
+                + " items="
+                + list.Items.Count
+        );
+    }
+
+    [TestMethod]
+    public void ResponsiveVirtualizationUsesPostBranchAssignedCell()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = graph.CreateScope("responsive-virtual-owner");
+        using var constraints = new ResponsiveConstraints(owner);
+        using var composition = new Composition(graph, "responsive-virtual");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("responsive-virtual"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Mode(LayoutMode.Grid)
+                .Columns(GridTracks.Create(GridTrack.Fraction()))
+                .Bind(
+                    LayoutProperties.Rows,
+                    () =>
+                        constraints.Current.Width >= 80
+                            ? GridTracks.Create(
+                                GridTrack.Fixed(20),
+                                GridTrack.MinMax(0, GridTrack.Fraction())
+                            )
+                            : GridTracks.Create(
+                                GridTrack.Fixed(60),
+                                GridTrack.MinMax(0, GridTrack.Fraction())
+                            )
+                )
+        );
+        constraints.AcquireMount(composition.Root.Scope);
+        composition.Root.UpdateControl(ProjectionProperties.ResponsiveConstraints, constraints);
+        var header = composition.Child(composition.Root, "header");
+        header.Present(theme, author: Style.Empty.GridPlacement(new(0, 0)));
+        var viewport = composition.Child(composition.Root, "viewport");
+        Controls.ScrollViewport(
+            viewport,
+            theme,
+            "Rows",
+            style: Style.Empty.GridPlacement(new(1, 0)).Clip(true)
+        );
+        var list = Controls.VirtualizedList(
+            viewport,
+            theme,
+            "rows",
+            "Rows",
+            () => Enumerable.Range(0, 100),
+            value => value,
+            (value, context) =>
+            {
+                var row = context.Element("row");
+                row.Present(theme);
+                return row;
+            },
+            10
+        );
+        graph.Drain();
+
+        Expect<InvalidOperationException>(() =>
+            composition.RealizeVirtualized(new(100, 100, 1), new Dictionary<long, LayoutRect>())
+        );
+        var scene = SceneLayout.Project(composition, new(100, 100, 1), new ProbeShaper());
+        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == viewport.Id).Bounds;
+        Assert(
+            constraints.Current.Width == 100 && bounds.Height == 80 && list.Items.Count == 10,
+            "Responsive virtualization used stale pre-branch viewport geometry: "
+                + bounds
+                + " items="
+                + list.Items.Count
+        );
+    }
+
+    [TestMethod]
+    public void ParagraphGeometryUsesLinesAffinityRtlAndGraphemes()
+    {
+        static ShapedRun Run(
+            string id,
+            TextDirection direction,
+            float baseline,
+            params ShapedGlyph[] glyphs
+        ) =>
+            new(
+                id,
+                "probe",
+                400,
+                5,
+                0,
+                "fingerprint",
+                0,
+                "probe#0",
+                direction,
+                "en",
+                10,
+                0,
+                baseline,
+                -10,
+                0,
+                glyphs.Sum(glyph => glyph.XAdvance),
+                glyphs
+            );
+
+        const string source = "a\u0301b";
+        var first = Run(
+            "first",
+            TextDirection.LeftToRight,
+            10,
+            new ShapedGlyph(1, 0, 0, 0, 10, 0, 0)
+        );
+        var second = Run(
+            "second",
+            TextDirection.LeftToRight,
+            20,
+            new ShapedGlyph(2, 2, 0, 0, 10, 0, 0)
+        );
+        var paragraph = new ShapedText(
+            "paragraph",
+            10,
+            20,
+            [first, second],
+            [new(0, 2, 0, 10, -10, 0, 0, 10, 0, false), new(2, 1, 10, 20, -10, 0, 0, 10, 0, false)],
+            false,
+            new LayoutConstraint(10),
+            LayoutConstraint.Unbounded
+        );
+        Assert(
+            paragraph.CaretBounds(source, 2, TextAffinity.Upstream).Y == 0
+                && paragraph.CaretBounds(source, 2, TextAffinity.Downstream).Y == 10
+                && paragraph.SelectionBounds(source, 1, 2).Single().Width == 10,
+            "Wrapped-boundary affinity or grapheme-safe selection geometry changed."
+        );
+
+        const string rtlSource = "\u05d0\u05d1";
+        var rtl = Run(
+            "rtl",
+            TextDirection.RightToLeft,
+            10,
+            new ShapedGlyph(3, 1, 0, 0, 5, 0, 0),
+            new ShapedGlyph(4, 0, 5, 0, 5, 0, 0)
+        );
+        var rtlParagraph = new ShapedText(
+            "rtl-paragraph",
+            10,
+            10,
+            [rtl],
+            [new(0, 2, 0, 10, -10, 0, 0, 10, 0, false)],
+            false,
+            new LayoutConstraint(10),
+            LayoutConstraint.Unbounded
+        );
+        Assert(
+            rtlParagraph.CaretBounds(rtlSource, 0, TextAffinity.Downstream).X == 10
+                && rtlParagraph.CaretBounds(rtlSource, 2, TextAffinity.Upstream).X == 0
+                && rtlParagraph.HitTest(rtlSource, 9, 5).Utf16Offset == 0,
+            "Supported single-run RTL paragraph geometry did not preserve reversed logical endpoints."
+        );
+        Expect<ArgumentOutOfRangeException>(() =>
+            rtlParagraph.CaretBounds(rtlSource, 0, (TextAffinity)99)
+        );
+
+        var longSource = new string('a', 20_000);
+        var longGlyphs = Enumerable
+            .Range(0, longSource.Length)
+            .Select(index => new ShapedGlyph(1, (uint)index, index, 0, 1, 0, 0))
+            .ToArray();
+        var longRun = Run("long", TextDirection.LeftToRight, 10, longGlyphs);
+        var longParagraph = new ShapedText(
+            "long-paragraph",
+            longSource.Length,
+            10,
+            [longRun],
+            [new(0, longSource.Length, 0, 10, -10, 0, 0, longSource.Length, 0, false)],
+            false,
+            new LayoutConstraint(longSource.Length),
+            LayoutConstraint.Unbounded
+        );
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        for (var index = 0; index < 1000; index++)
+        {
+            var offset = index * 19;
+            Assert(
+                longParagraph.CaretBounds(longSource, offset, TextAffinity.Downstream).X == offset
+                    && longParagraph.HitTest(longSource, offset, 5).Utf16Offset == offset,
+                "Indexed paragraph geometry returned a wrong long-text boundary."
+            );
+        }
+        timer.Stop();
+        Console.WriteLine(
+            "20,000-unit indexed geometry characterization: 2,000 lookups in "
+                + timer.Elapsed.TotalMilliseconds.ToString("F1", CultureInfo.InvariantCulture)
+                + " ms"
+        );
+    }
+
     private sealed record VirtualRow(int Key, string Text);
 
     private sealed class ProbeShaper : ITextShaper

@@ -71,6 +71,21 @@ public sealed class Element : IDisposable
                     yield return property;
     }
 
+    private static ResolvedProperty<T> Default<T>(Property<T> property) =>
+        new(property.DefaultValue, new("default", 0), []);
+
+    private static ResolvedProperty<T> Inherit<T>(
+        Property<T> property,
+        ResolvedProperty<T>? inherited
+    ) =>
+        inherited is null
+            ? Default(property)
+            : new(
+                inherited.Value,
+                new("inherited", inherited.Winner.Ordinal),
+                [new PropertyProvenance("default", 0)]
+            );
+
     /// <summary>Associates the one typed property model with this retained element.</summary>
     public void Present(
         ThemeContext theme,
@@ -143,22 +158,20 @@ public sealed class Element : IDisposable
         Composition.CheckThread();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(property);
-        if (_presentation is not null)
-            return _presentation.Resolve(property);
-        if (property.Inherits && _parent is not null)
-        {
-            var inherited = _parent.Resolve(property);
-            return new ResolvedProperty<T>(
-                inherited.Value,
-                new PropertyProvenance("inherited", inherited.Winner.Ordinal),
-                [new PropertyProvenance("default", 0)]
-            );
-        }
-        return new ResolvedProperty<T>(
-            property.DefaultValue,
-            new PropertyProvenance("default", 0),
-            []
-        );
+        if (!property.Inherits)
+            return _presentation is null
+                ? Default(property)
+                : _presentation.ResolveLocal(property, null);
+
+        var lineage = new Stack<Element>();
+        for (Element? current = this; current is not null; current = current._parent)
+            lineage.Push(current);
+        ResolvedProperty<T>? resolved = null;
+        while (lineage.TryPop(out var current))
+            resolved = current._presentation is null
+                ? Inherit(property, resolved)
+                : current._presentation.ResolveLocal(property, resolved);
+        return resolved!;
     }
 
     /// <summary>Attaches interaction behavior transactionally; all cleanup remains in element-owned child scopes.</summary>

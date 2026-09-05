@@ -25,3 +25,5 @@ Run the managed tests:
 See [testing guidance](docs/TESTING.md) for focused tests, NativeAOT publication, desktop interactions, and accessibility scans.
 
 Prerelease distribution and independent application setup: [NuGet packages](docs/PACKAGES.md). Lucent is [MIT licensed](LICENSE).
+
+[Light Notes](https://github.com/RichiCoder1/light-notes) is the first independent package consumer. Its initial `.lui` startup is available; persistence and the complete inbox/editor remain planned application work.

@@ -47,6 +47,8 @@ internal sealed class WindowsInputAdapter : IDisposable
                 return Button(@event.Button, PointerCommandKind.Down);
             case SDL.EventType.MouseButtonUp:
                 return Button(@event.Button, PointerCommandKind.Up);
+            case SDL.EventType.MouseWheel:
+                return Wheel(@event.Wheel);
             case SDL.EventType.KeyDown:
             case SDL.EventType.KeyUp:
                 return Key(@event.Key);
@@ -171,6 +173,29 @@ internal sealed class WindowsInputAdapter : IDisposable
             else if (kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
                 _pointers.Remove(pointer);
         }
+        return true;
+    }
+
+    private bool Wheel(SDL.MouseWheelEvent @event)
+    {
+        if (
+            !float.IsFinite(@event.MouseX)
+            || !float.IsFinite(@event.MouseY)
+            || !float.IsFinite(@event.X)
+            || !float.IsFinite(@event.Y)
+        )
+            return false;
+        var direction = @event.Direction == SDL.MouseWheelDirection.Flipped ? -1f : 1f;
+        const float logicalPixelsPerWheelUnit = 40f;
+        var result = _router.DispatchWheel(
+            new(
+                @event.MouseX,
+                @event.MouseY,
+                @event.X * direction * logicalPixelsPerWheelUnit,
+                -@event.Y * direction * logicalPixelsPerWheelUnit
+            )
+        );
+        _repaintRequested |= result.Handled;
         return true;
     }
 
@@ -339,6 +364,9 @@ internal sealed class WindowsInputAdapter : IDisposable
             {
                 SDL.Keycode.A => Core.Key.A,
                 SDL.Keycode.C => Core.Key.C,
+                SDL.Keycode.F => Core.Key.F,
+                SDL.Keycode.N => Core.Key.N,
+                SDL.Keycode.S => Core.Key.S,
                 SDL.Keycode.V => Core.Key.V,
                 SDL.Keycode.X => Core.Key.X,
                 SDL.Keycode.Y => Core.Key.Y,

@@ -856,6 +856,75 @@ public sealed class InputContracts
         );
     }
 
+    [TestMethod]
+    public void FractionalWheelTargetsNearestViewportAndChainsOnlyResidualDelta()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "wheel");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("wheel"));
+        Present(composition.Root, theme, 100, 100, true);
+        var outer = composition.Child(composition.Root, "outer");
+        var outerState = Controls.ScrollViewport(
+            outer,
+            theme,
+            "Outer",
+            style: Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 100f)
+        );
+        var inner = composition.Child(outer, "inner");
+        var innerState = Controls.ScrollViewport(
+            inner,
+            theme,
+            "Inner",
+            style: Style
+                .Empty.Set(LayoutProperties.Width, 100f)
+                .Set(LayoutProperties.Height, 60f)
+                .Set(LayoutProperties.MainShrink, 0f)
+        );
+        var innerContent = composition.Child(inner, "inner-content");
+        innerContent.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Width, 100f)
+                .Set(LayoutProperties.Height, 260f)
+                .Set(LayoutProperties.MainShrink, 0f)
+        );
+        var outerTail = composition.Child(outer, "outer-tail");
+        outerTail.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Width, 100f)
+                .Set(LayoutProperties.Height, 140f)
+                .Set(LayoutProperties.MainShrink, 0f)
+        );
+        var router = composition.Input;
+        Assert(
+            router.SetScene(SceneLayout.Project(composition, new(100, 100, 1), new EmptyShaper())),
+            "Nested wheel scene was rejected."
+        );
+
+        var first = router.DispatchWheel(new(10, 10, 0, 220.5f));
+        Assert(
+            first.Handled
+                && first.Target?.ElementId == innerContent.Id
+                && innerState.Offset.Y == 200
+                && outerState.Offset.Y == 20.5f,
+            "Nearest viewport did not consume to its bound before chaining the fractional residual."
+        );
+
+        _ = router.DispatchWheel(new(10, 10, 0, 200.25f));
+        Assert(
+            innerState.Offset.Y == 200 && outerState.Offset.Y == 100,
+            "Nested wheel chaining exceeded a viewport bound."
+        );
+
+        _ = router.DispatchWheel(new(10, 10, 0, -250.25f));
+        Assert(
+            innerState.Offset.Y == 0 && outerState.Offset.Y == 49.75f,
+            "Reverse wheel chaining lost its fractional residual or skipped the nearest viewport."
+        );
+        Expect<ArgumentException>(() => router.DispatchWheel(new(10, 10, float.NaN, 1)));
+    }
+
     [System.Runtime.CompilerServices.MethodImpl(
         System.Runtime.CompilerServices.MethodImplOptions.NoInlining
     )]

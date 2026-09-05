@@ -1066,6 +1066,134 @@ public static class Harness
     }
 
     [TestMethod]
+    public void ApplicationCommandsAreTypedLuiParameters()
+    {
+        const string source =
+            "namespace CommandSample; using Lucent.Core; "
+            + "public component Shell(CommandBindings bindings, ApplicationCommand capture) { "
+            + "<CommandScope bindings={bindings}><Column>"
+            + "<Button onInvoke={() => capture.TryExecute()} style={Style.Empty.Enabled(() => capture.IsEnabled)}>Capture</Button>"
+            + "<Text content={() => capture.IsBusy ? \"Working\" : capture.Error == null ? \"Ready\" : \"Retry\"} />"
+            + "</Column></CommandScope> }";
+        var result = RunWithSource("", new TextFile("C:/consumer/Shell.lui", source, "Shell.lui"));
+        Assert(
+            result.Diagnostics.Length == 0,
+            "Command .lui diagnostics: " + string.Join(" | ", result.Diagnostics)
+        );
+        var generated = result.Results.Single().GeneratedSources.Single().SourceText.ToString();
+        var compilation = CSharpCompilation.Create(
+            "command-lui-runtime",
+            [CSharpSyntaxTree.ParseText(generated)],
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var stream = new MemoryStream();
+        var emitted = compilation.Emit(stream);
+        Assert(emitted.Success, "Command .lui emit: " + string.Join(" | ", emitted.Diagnostics));
+        var assembly = Assembly.Load(stream.ToArray());
+        using var composition = new Composition(new ReactiveGraph(), "command-lui");
+        var executions = 0;
+        using var capture = new ApplicationCommand(
+            composition.Root.Scope,
+            _ =>
+            {
+                executions++;
+                return Task.CompletedTask;
+            }
+        );
+        var bindings = new CommandBindings([new CommandBinding(capture, KeyChord.Ctrl(Key.N))]);
+        var recipe = (ComponentRecipe)
+            assembly
+                .GetType("CommandSample.Components")!
+                .GetMethod("Shell")!
+                .Invoke(null, [bindings, capture])!;
+        composition.Mount(
+            composition.Root,
+            new ThemeContext(composition.Root.Scope, ControlThemes.Light),
+            recipe
+        );
+        composition.Flush();
+        Assert(executions == 0, "Mounting or observing a .lui command started it eagerly.");
+        Assert(capture.TryExecute(), "Mounted .lui command was unavailable.");
+        composition.Flush();
+        Assert(executions == 1, "Explicit .lui-bound command did not execute once.");
+    }
+
+    [TestMethod]
+    public void GridAndResponsiveConstraintsWorkThroughLui()
+    {
+        const string source =
+            "namespace Lucent.Platform.Windows.TestHost.LuiFixtures; "
+            + "style GridStyle { Mode: LayoutMode.Grid; Columns: GridTracks.Create(GridTrack.Fixed(100), GridTrack.Fraction()); Rows: GridTracks.Create(GridTrack.Fixed(200)); Height: 200; } "
+            + "style First { GridPlacement: new GridPlacement(0, 0); TextWrap: TextWrap.WordWithGraphemeFallback; MaxLines: 3; } "
+            + "style Second { GridPlacement: new GridPlacement(0, 1); } "
+            + "public component Shell(ResponsiveConstraints constraints) { "
+            + "<ResponsiveContainer constraints={constraints} style={Style.Empty.Height(200)}>"
+            + "if (constraints.Current.Width >= 500) { <Column style={GridStyle}><Row style={First}/><Row style={Second}/></Column> } "
+            + "else { <Column style={Style.Empty.Height(200)}><Row/></Column> }"
+            + "</ResponsiveContainer> }";
+        var result = RunWithSource(
+            "global using Lucent.Core;",
+            new TextFile("C:/consumer/Grid.lui", source, "Grid.lui")
+        );
+        Assert(
+            result.Diagnostics.Length == 0,
+            "Grid .lui diagnostics: " + string.Join(" | ", result.Diagnostics)
+        );
+        var generated = result.Results.Single().GeneratedSources.Single().SourceText.ToString();
+        var compilation = CSharpCompilation.Create(
+            "grid-lui-runtime",
+            [
+                CSharpSyntaxTree.ParseText("global using Lucent.Core;"),
+                CSharpSyntaxTree.ParseText(generated),
+            ],
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var stream = new MemoryStream();
+        var emitted = compilation.Emit(stream);
+        Assert(emitted.Success, "Grid .lui emit: " + string.Join(" | ", emitted.Diagnostics));
+        var assembly = Assembly.Load(stream.ToArray());
+        using var composition = new Composition(new ReactiveGraph(), "grid-lui");
+        using var constraints = new ResponsiveConstraints(composition.Root.Scope);
+        var recipe = (ComponentRecipe)
+            assembly
+                .GetType("Lucent.Platform.Windows.TestHost.LuiFixtures.Components")!
+                .GetMethod("Shell")!
+                .Invoke(null, [constraints])!;
+        composition.Mount(
+            composition.Root,
+            new ThemeContext(composition.Root.Scope, ControlThemes.Light),
+            recipe
+        );
+        composition.Flush();
+        _ = SceneLayout.Project(
+            composition,
+            new LayoutViewport(600, 200, 1.5f),
+            new NoTextShaper()
+        );
+        Assert(
+            constraints.Current.Width == 600,
+            "Generated responsive content did not receive its wide logical constraint."
+        );
+        _ = SceneLayout.Project(
+            composition,
+            new LayoutViewport(420, 200, 1.5f),
+            new NoTextShaper()
+        );
+        Assert(
+            constraints.Current.Width == 420,
+            "Generated responsive content did not switch to compact constraints."
+        );
+    }
+
+    private sealed class NoTextShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request) =>
+            throw new InvalidOperationException("Unexpected text in layout-only .lui fixture.");
+    }
+
+    [TestMethod]
     public void InvalidSiblingDoesNotPoisonValidDocuments()
     {
         var parameterSiblingIsolation = Run(

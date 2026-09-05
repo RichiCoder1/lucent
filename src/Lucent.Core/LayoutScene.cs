@@ -10,6 +10,27 @@ public static class LayoutProperties
     /// <summary>Chooses whether children flow horizontally or vertically. The default is <see cref="LayoutAxis.Column"/>.</summary>
     public static readonly Property<LayoutAxis> Axis = new("layout-axis", LayoutAxis.Column);
 
+    /// <summary>Selects flex flow or the bounded explicit Grid algorithm.</summary>
+    public static readonly Property<LayoutMode> Mode = new("layout-mode", LayoutMode.Flex);
+
+    /// <summary>Declares explicit Grid columns. Grid containers require at least one row and column.</summary>
+    public static readonly Property<GridTracks> Columns = new("layout-columns", GridTracks.Empty);
+
+    /// <summary>Declares explicit Grid rows. Grid containers require at least one row and column.</summary>
+    public static readonly Property<GridTracks> Rows = new("layout-rows", GridTracks.Empty);
+
+    /// <summary>Sets the horizontal gap between Grid tracks.</summary>
+    public static readonly Property<float> ColumnGap = new("layout-column-gap", 0);
+
+    /// <summary>Sets the vertical gap between Grid tracks.</summary>
+    public static readonly Property<float> RowGap = new("layout-row-gap", 0);
+
+    /// <summary>Places a child in its parent's explicit Grid.</summary>
+    public static readonly Property<GridPlacement?> GridPlacement = new(
+        "layout-grid-placement",
+        null
+    );
+
     /// <summary>Sets an explicit width. Leave it unset to let the container determine the width.</summary>
     public static readonly Property<float?> Width = new("layout-width", null);
 
@@ -39,6 +60,15 @@ public static class LayoutProperties
 
     /// <summary>Sets the proportional share of positive unused space this element receives along its parent's main axis.</summary>
     public static readonly Property<float> MainGrow = new("layout-main-grow", 0);
+
+    /// <summary>Sets the flex basis; null uses the child's intrinsic or explicit main size.</summary>
+    public static readonly Property<float?> MainBasis = new("layout-main-basis", null);
+
+    /// <summary>Sets the proportional shrink share when a flex line exceeds its assigned main size.</summary>
+    public static readonly Property<float> MainShrink = new("layout-main-shrink", 0);
+
+    /// <summary>Allows children to form additional flex lines when the main size is constrained.</summary>
+    public static readonly Property<bool> Wrap = new("layout-wrap", false);
 
     /// <summary>Places children at the start, center, or end of the direction selected by <see cref="Axis"/>.</summary>
     public static readonly Property<LayoutAlignment> MainAlignment = new(
@@ -142,11 +172,36 @@ public static class TypographyProperties
         global::Lucent.Core.TextDirection.LeftToRight,
         inherits: true
     );
+
+    /// <summary>Controls bounded paragraph line breaking.</summary>
+    public static readonly Property<TextWrap> TextWrap = new(
+        "typography-text-wrap",
+        global::Lucent.Core.TextWrap.NoWrap,
+        inherits: true
+    );
+
+    /// <summary>Limits paragraph lines; null leaves the line count unrestricted.</summary>
+    public static readonly Property<int?> MaxLines = new(
+        "typography-max-lines",
+        null,
+        inherits: true
+    );
+
+    /// <summary>Controls how bounded paragraph overflow is reported and painted.</summary>
+    public static readonly Property<TextOverflow> Overflow = new(
+        "typography-overflow",
+        TextOverflow.Clip,
+        inherits: true
+    );
 }
 
 internal static class ProjectionProperties
 {
     internal static readonly Property<string?> Text = new("projection-text", null);
+    internal static readonly Property<ResponsiveConstraints?> ResponsiveConstraints = new(
+        "projection-responsive-constraints",
+        null
+    );
     internal static readonly Property<string?> TextMeasure = new("projection-text-measure", null);
     internal static readonly Property<int?> TextSelectionStart = new(
         "projection-text-selection-start",
@@ -358,7 +413,12 @@ public readonly record struct TextMeasureRequest(
     float FontSize,
     string Language,
     TextDirection Direction,
-    float Scale
+    float Scale,
+    LayoutConstraint InlineConstraint = default,
+    LayoutConstraint BlockConstraint = default,
+    TextWrap Wrap = TextWrap.NoWrap,
+    int? MaxLines = null,
+    TextOverflow Overflow = TextOverflow.Clip
 )
 {
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
@@ -373,6 +433,9 @@ public readonly record struct TextMeasureRequest(
             || !float.IsFinite(Scale)
             || Scale <= 0
             || !Enum.IsDefined(Direction)
+            || !Enum.IsDefined(Wrap)
+            || !Enum.IsDefined(Overflow)
+            || MaxLines is <= 0
         )
             throw new ArgumentException(
                 "Text requests require finite font/scale and explicit language/direction."
@@ -449,7 +512,7 @@ public sealed class ShapedRun
                 || !float.IsFinite(glyph.XOffset)
                 || !float.IsFinite(glyph.YOffset)
             )
-            || MathF.Abs(copy.Sum(glyph => glyph.XAdvance) - runWidth) > .001f
+            || Math.Abs(copy.Sum(glyph => (double)glyph.XAdvance) - runWidth) > .001
         )
             throw new ArgumentException(
                 "A shaped run requires finite non-missing glyphs.",
@@ -536,10 +599,45 @@ public sealed class ShapedRun
     public IReadOnlyList<ShapedGlyph> Glyphs => _glyphs;
 }
 
+/// <summary>One immutable constrained paragraph line in logical pixels.</summary>
+public readonly record struct ParagraphLine(
+    int Utf16Start,
+    int Utf16Length,
+    float Top,
+    float Baseline,
+    float Ascent,
+    float Descent,
+    float Leading,
+    float Advance,
+    float TrailingWhitespaceAdvance,
+    bool HardBreak
+);
+
+/// <summary>Affinity at a logical UTF-16 paragraph boundary.</summary>
+public enum TextAffinity
+{
+    /// <summary>Associates the boundary with preceding visual content.</summary>
+    Upstream,
+
+    /// <summary>Associates the boundary with following visual content.</summary>
+    Downstream,
+}
+
+/// <summary>A grapheme-safe paragraph hit-test result.</summary>
+public readonly record struct ParagraphHitTest(
+    int Utf16Offset,
+    TextAffinity Affinity,
+    int LineIndex
+);
+
 /// <summary>An immutable text-shaping result shared by layout, scene projection, and renderer adapters.</summary>
 public sealed class ShapedText
 {
     private readonly IReadOnlyList<ShapedRun> _runs;
+    private readonly IReadOnlyList<ParagraphLine> _lines;
+    private readonly object _geometryGate = new();
+    private string? _indexedSource;
+    private ParagraphGeometryIndex? _geometry;
 
     /// <summary>Initializes immutable shaped text metrics and ordered runs.</summary>
     public ShapedText(string identity, float width, float height, IReadOnlyList<ShapedRun> runs)
@@ -560,6 +658,49 @@ public sealed class ShapedText
         Width = width;
         Height = height;
         _runs = Array.AsReadOnly(copy);
+        _lines = Array.AsReadOnly(Array.Empty<ParagraphLine>());
+        InlineConstraint = default;
+        BlockConstraint = default;
+    }
+
+    /// <summary>Initializes immutable constrained paragraph metrics, lines, and ordered runs.</summary>
+    public ShapedText(
+        string identity,
+        float width,
+        float height,
+        IReadOnlyList<ShapedRun> runs,
+        IReadOnlyList<ParagraphLine> lines,
+        bool didOverflow,
+        LayoutConstraint inlineConstraint,
+        LayoutConstraint blockConstraint
+    )
+        : this(identity, width, height, runs)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+        var lineCopy = lines.ToArray();
+        if (
+            lineCopy.Any(line =>
+                line.Utf16Start < 0
+                || line.Utf16Length < 0
+                || !float.IsFinite(line.Top)
+                || !float.IsFinite(line.Baseline)
+                || !float.IsFinite(line.Ascent)
+                || !float.IsFinite(line.Descent)
+                || !float.IsFinite(line.Leading)
+                || !float.IsFinite(line.Advance)
+                || !float.IsFinite(line.TrailingWhitespaceAdvance)
+                || line.Advance < 0
+                || line.TrailingWhitespaceAdvance < 0
+            )
+        )
+            throw new ArgumentException(
+                "Paragraph lines must contain finite nonnegative geometry.",
+                nameof(lines)
+            );
+        _lines = Array.AsReadOnly(lineCopy);
+        DidOverflow = didOverflow;
+        InlineConstraint = inlineConstraint;
+        BlockConstraint = blockConstraint;
     }
 
     /// <summary>Gets the stable identity supplied by the producer.</summary>
@@ -574,9 +715,402 @@ public sealed class ShapedText
     /// <summary>Gets the immutable ordered shaped runs.</summary>
     public IReadOnlyList<ShapedRun> Runs => _runs;
 
+    /// <summary>Gets constrained paragraph line geometry.</summary>
+    public IReadOnlyList<ParagraphLine> Lines => _lines;
+
+    /// <summary>Gets whether inline, block, or line-count limits omitted content.</summary>
+    public bool DidOverflow { get; }
+
+    /// <summary>Gets the inline constraint that produced this result.</summary>
+    public LayoutConstraint InlineConstraint { get; }
+
+    /// <summary>Gets the block constraint that produced this result.</summary>
+    public LayoutConstraint BlockConstraint { get; }
+
+    /// <summary>Returns a grapheme-safe logical boundary for paragraph-local geometry.</summary>
+    public ParagraphHitTest HitTest(string source, float x, float y)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (!float.IsFinite(x) || !float.IsFinite(y))
+            throw new ArgumentOutOfRangeException(nameof(x));
+        var geometry = Geometry(source);
+        if (geometry.Lines.Length == 0)
+            return new(source.Length, TextAffinity.Downstream, 0);
+        var lineIndex = geometry.LineAtY(y);
+        var line = geometry.Lines[lineIndex];
+        var boundary = line.ClosestTo(x);
+        return new(
+            boundary.Offset,
+            x < boundary.X ? TextAffinity.Upstream : TextAffinity.Downstream,
+            lineIndex
+        );
+    }
+
+    /// <summary>Returns paragraph-local caret geometry for a grapheme-safe logical boundary.</summary>
+    public LayoutRect CaretBounds(
+        string source,
+        int utf16Offset,
+        TextAffinity affinity,
+        float caretWidth = 1
+    )
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (!Enum.IsDefined(affinity))
+            throw new ArgumentOutOfRangeException(nameof(affinity));
+        if (
+            utf16Offset < 0
+            || utf16Offset > source.Length
+            || !float.IsFinite(caretWidth)
+            || caretWidth <= 0
+        )
+            throw new ArgumentOutOfRangeException(nameof(utf16Offset));
+        var geometry = Geometry(source);
+        var normalized = geometry.Normalize(utf16Offset, affinity);
+        if (geometry.Lines.Length == 0)
+            return new(0, 0, caretWidth, 0);
+        var line = geometry.Lines[geometry.LineAtOffset(normalized, affinity)];
+        var height = Math.Max(0, line.Line.Descent - line.Line.Ascent + line.Line.Leading);
+        return new(line.Position(normalized), line.Line.Top, caretWidth, height);
+    }
+
+    /// <summary>Returns paragraph-local selection rectangles derived from the same line and run geometry.</summary>
+    public IReadOnlyList<LayoutRect> SelectionBounds(string source, int start, int end)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (start < 0 || end < start || end > source.Length)
+            throw new ArgumentOutOfRangeException(nameof(start));
+        var geometry = Geometry(source);
+        start = geometry.Normalize(start, TextAffinity.Upstream);
+        end = geometry.Normalize(end, TextAffinity.Downstream);
+        if (start == end || geometry.Lines.Length == 0)
+            return Array.Empty<LayoutRect>();
+
+        var result = new List<LayoutRect>();
+        for (
+            var index = geometry.LineAtOffset(start, TextAffinity.Downstream);
+            index < geometry.Lines.Length;
+            index++
+        )
+        {
+            var line = geometry.Lines[index];
+            var lineStart = line.Line.Utf16Start;
+            var lineEnd = lineStart + line.Line.Utf16Length;
+            if (lineStart >= end)
+                break;
+            var from = Math.Max(start, lineStart);
+            var to = Math.Min(end, lineEnd);
+            if (to <= from)
+                continue;
+            var left = line.Position(from);
+            var right = line.Position(to);
+            result.Add(
+                new(
+                    Math.Min(left, right),
+                    line.Line.Top,
+                    MathF.Abs(right - left),
+                    Math.Max(0, line.Line.Descent - line.Line.Ascent + line.Line.Leading)
+                )
+            );
+        }
+        return Array.AsReadOnly(result.ToArray());
+    }
+
+    private ParagraphGeometryIndex Geometry(string source)
+    {
+        lock (_geometryGate)
+        {
+            if (_geometry is not null)
+            {
+                if (!StringComparer.Ordinal.Equals(_indexedSource, source))
+                    throw new ArgumentException(
+                        "Paragraph geometry source must match the shaped text snapshot.",
+                        nameof(source)
+                    );
+                return _geometry;
+            }
+            _geometry = new ParagraphGeometryIndex(source, _lines, _runs);
+            _indexedSource = source;
+            return _geometry;
+        }
+    }
+
+    private sealed class ParagraphGeometryIndex
+    {
+        private readonly int[] _boundaries;
+        private readonly int[] _lineStarts;
+        private readonly float[] _lineBottoms;
+
+        internal ParagraphGeometryIndex(
+            string source,
+            IReadOnlyList<ParagraphLine> lines,
+            IReadOnlyList<ShapedRun> runs
+        )
+        {
+            _boundaries = StringInfo
+                .ParseCombiningCharacters(source)
+                .Append(source.Length)
+                .Distinct()
+                .Order()
+                .ToArray();
+            if (_boundaries.Length == 0)
+                _boundaries = [0];
+            if (
+                lines.Any(line =>
+                    line.Utf16Start < 0 || line.Utf16Start + line.Utf16Length > source.Length
+                )
+            )
+                throw new ArgumentException(
+                    "Paragraph geometry source does not cover its line ranges.",
+                    nameof(source)
+                );
+
+            var byBaseline = runs.GroupBy(run => run.Baseline)
+                .ToDictionary(group => group.Key, group => group.ToArray());
+            Lines = lines
+                .Select(line => new IndexedLine(
+                    line,
+                    byBaseline.TryGetValue(line.Baseline, out var lineRuns)
+                        ? lineRuns
+                        : Array.Empty<ShapedRun>(),
+                    _boundaries
+                ))
+                .ToArray();
+            _lineStarts = Lines.Select(line => line.Line.Utf16Start).ToArray();
+            _lineBottoms = Lines
+                .Select(line =>
+                    line.Line.Top + line.Line.Descent - line.Line.Ascent + line.Line.Leading
+                )
+                .ToArray();
+        }
+
+        internal IndexedLine[] Lines { get; }
+
+        internal int Normalize(int offset, TextAffinity affinity)
+        {
+            var index = Array.BinarySearch(_boundaries, offset);
+            if (index >= 0)
+                return _boundaries[index];
+            index = ~index;
+            return affinity == TextAffinity.Upstream
+                ? _boundaries[Math.Max(0, index - 1)]
+                : _boundaries[Math.Min(_boundaries.Length - 1, index)];
+        }
+
+        internal int LineAtY(float y)
+        {
+            var low = 0;
+            var high = _lineBottoms.Length;
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+                if (y < _lineBottoms[middle])
+                    high = middle;
+                else
+                    low = middle + 1;
+            }
+            return Math.Min(low, Lines.Length - 1);
+        }
+
+        internal int LineAtOffset(int offset, TextAffinity affinity)
+        {
+            var low = 0;
+            var high = _lineStarts.Length;
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+                if (_lineStarts[middle] <= offset)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+            var index = Math.Clamp(low - 1, 0, Lines.Length - 1);
+            if (
+                affinity == TextAffinity.Upstream
+                && index > 0
+                && Lines[index].Line.Utf16Start == offset
+                && Lines[index - 1].End == offset
+            )
+                return index - 1;
+            if (
+                affinity == TextAffinity.Downstream
+                && index + 1 < Lines.Length
+                && Lines[index].End == offset
+                && Lines[index + 1].Line.Utf16Start == offset
+            )
+                return index + 1;
+            if (offset > Lines[index].End && index + 1 < Lines.Length)
+                return affinity == TextAffinity.Downstream ? index + 1 : index;
+            return index;
+        }
+    }
+
+    private sealed class IndexedLine
+    {
+        private readonly int[] _offsets;
+        private readonly float[] _positions;
+        private readonly bool _descending;
+
+        internal IndexedLine(
+            ParagraphLine line,
+            IReadOnlyList<ShapedRun> runs,
+            IReadOnlyList<int> paragraphBoundaries
+        )
+        {
+            Line = line;
+            var end = checked(line.Utf16Start + line.Utf16Length);
+            _offsets = paragraphBoundaries
+                .Where(offset => offset >= line.Utf16Start && offset <= end)
+                .Append(line.Utf16Start)
+                .Append(end)
+                .Distinct()
+                .Order()
+                .ToArray();
+            var glyphs = runs.SelectMany(run =>
+                    run.Glyphs.Select(glyph => new IndexedGlyph(
+                        (int)glyph.Cluster,
+                        run.OriginX + glyph.X,
+                        run.OriginX + glyph.X + glyph.XAdvance
+                    ))
+                )
+                .OrderBy(glyph => glyph.Cluster)
+                .ToArray();
+            var rtl = runs.Count != 0 && runs[0].Direction == TextDirection.RightToLeft;
+            _positions = _offsets.Select(offset => Position(offset, line, glyphs, rtl)).ToArray();
+            _descending = _positions.Length > 1 && _positions[0] > _positions[^1];
+        }
+
+        internal ParagraphLine Line { get; }
+
+        internal int End => checked(Line.Utf16Start + Line.Utf16Length);
+
+        internal float Position(int offset)
+        {
+            offset = Math.Clamp(offset, Line.Utf16Start, End);
+            var index = Array.BinarySearch(_offsets, offset);
+            if (index >= 0)
+                return _positions[index];
+            index = ~index;
+            if (index == 0)
+                return _positions[0];
+            if (index == _positions.Length)
+                return _positions[^1];
+            return _positions[index];
+        }
+
+        internal (int Offset, float X) ClosestTo(float x)
+        {
+            var low = 0;
+            var high = _positions.Length;
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+                var value = _descending ? -_positions[middle] : _positions[middle];
+                var target = _descending ? -x : x;
+                if (value < target)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+            if (low == 0)
+                return (_offsets[0], _positions[0]);
+            if (low == _positions.Length)
+                return (_offsets[^1], _positions[^1]);
+            var before = low - 1;
+            return MathF.Abs(_positions[before] - x) <= MathF.Abs(_positions[low] - x)
+                ? (_offsets[before], _positions[before])
+                : (_offsets[low], _positions[low]);
+        }
+
+        private static float Position(
+            int offset,
+            ParagraphLine line,
+            IReadOnlyList<IndexedGlyph> glyphs,
+            bool rtl
+        )
+        {
+            if (offset <= line.Utf16Start)
+                return rtl ? line.Advance : 0;
+            var lineEnd = checked(line.Utf16Start + line.Utf16Length);
+            if (offset >= lineEnd)
+                return rtl ? 0 : line.Advance;
+            if (glyphs.Count == 0)
+                return 0;
+
+            var low = 0;
+            var high = glyphs.Count;
+            if (rtl)
+            {
+                while (low < high)
+                {
+                    var middle = low + (high - low) / 2;
+                    if (glyphs[middle].Cluster <= offset)
+                        low = middle + 1;
+                    else
+                        high = middle;
+                }
+                return low == 0 ? 0 : glyphs[low - 1].TrailingX;
+            }
+
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+                if (glyphs[middle].Cluster < offset)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+            return low == glyphs.Count ? line.Advance : glyphs[low].LeadingX;
+        }
+    }
+
+    private readonly record struct IndexedGlyph(int Cluster, float LeadingX, float TrailingX);
+
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate(TextMeasureRequest request)
     {
+        if (Lines.Count != 0)
+        {
+            if (
+                InlineConstraint != request.InlineConstraint
+                || BlockConstraint != request.BlockConstraint
+            )
+                throw new InvalidOperationException(
+                    "The paragraph constraints do not match its request."
+                );
+            var priorEnd = 0;
+            var priorTop = -1f;
+            foreach (var line in Lines)
+            {
+                var lineEnd = checked(line.Utf16Start + line.Utf16Length);
+                if (
+                    line.Utf16Start < priorEnd
+                    || lineEnd > request.Text.Length
+                    || line.Top < priorTop
+                    || MathF.Abs(line.Baseline - (line.Top - line.Ascent)) > .001f
+                )
+                    throw new InvalidOperationException(
+                        "The paragraph line geometry is inconsistent."
+                    );
+                priorEnd = lineEnd + (line.HardBreak && lineEnd < request.Text.Length ? 1 : 0);
+                priorTop = line.Top;
+            }
+            if (
+                Runs.Any(run =>
+                    !Lines.Any(line => MathF.Abs(line.Baseline - run.Baseline) <= .001f)
+                    || run.Glyphs.Any(glyph => glyph.Cluster >= request.Text.Length)
+                )
+            )
+                throw new InvalidOperationException(
+                    "The paragraph runs do not match its line geometry."
+                );
+            if (InlineConstraint.Limit is { } inline && !DidOverflow && Width > inline + .001f)
+                throw new InvalidOperationException(
+                    "The paragraph exceeded its inline constraint without overflow."
+                );
+            if (BlockConstraint.Limit is { } block && Height > block + .001f)
+                throw new InvalidOperationException("The paragraph exceeded its block constraint.");
+            return;
+        }
         if (
             request.Text.Length == 0
                 ? Runs.Count != 0 || Width != 0 || Height != 0
@@ -742,7 +1276,7 @@ public sealed class ClipSceneNode : SceneNode
         : base(identity, bounds)
     {
         _children = Array.AsReadOnly(
-            children?.Select(Clone).ToArray() ?? throw new ArgumentNullException(nameof(children))
+            children?.ToArray() ?? throw new ArgumentNullException(nameof(children))
         );
     }
 
@@ -791,8 +1325,7 @@ public sealed class OpacitySceneNode : SceneNode
             );
         Opacity = opacity;
         _children = Array.AsReadOnly(
-            children?.Select(ClipSceneNode.Clone).ToArray()
-                ?? throw new ArgumentNullException(nameof(children))
+            children?.ToArray() ?? throw new ArgumentNullException(nameof(children))
         );
     }
 
@@ -819,7 +1352,7 @@ public sealed class RetainedScene
         Generation = generation;
         Viewport = viewport;
         Boxes = Array.AsReadOnly(boxes.ToArray());
-        Nodes = Array.AsReadOnly(nodes.Select(ClipSceneNode.Clone).ToArray());
+        Nodes = Array.AsReadOnly(nodes.ToArray());
         Input = Array.AsReadOnly(input.ToArray());
         InputProjectionRevision = inputProjectionRevision;
         _collapsedElementIds = collapsedElementIds is null ? [] : [.. collapsedElementIds];

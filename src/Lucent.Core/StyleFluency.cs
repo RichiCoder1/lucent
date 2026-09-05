@@ -290,4 +290,52 @@ public static class StyleFluency
     /// <summary>Returns a style that reads retained subtree participation reactively.</summary>
     public static Style Participation(this Style style, Func<ElementParticipation> read) =>
         style.Bind(VisualProperties.Participation, read);
+
+    /// <summary>Returns a style with the typed Mode assignment.</summary>
+    public static Style Mode(this Style style, LayoutMode value) =>
+        style.Set(LayoutProperties.Mode, value);
+
+    /// <summary>Returns a style with the typed Columns assignment.</summary>
+    public static Style Columns(this Style style, GridTracks value) =>
+        style.Set(LayoutProperties.Columns, value);
+
+    /// <summary>Returns a style with the typed Rows assignment.</summary>
+    public static Style Rows(this Style style, GridTracks value) =>
+        style.Set(LayoutProperties.Rows, value);
+
+    /// <summary>Returns a style with the typed ColumnGap assignment.</summary>
+    public static Style ColumnGap(this Style style, float value) =>
+        style.Set(LayoutProperties.ColumnGap, value);
+
+    /// <summary>Returns a style with the typed RowGap assignment.</summary>
+    public static Style RowGap(this Style style, float value) =>
+        style.Set(LayoutProperties.RowGap, value);
+
+    /// <summary>Returns a style with the typed GridPlacement assignment.</summary>
+    public static Style GridPlacement(this Style style, GridPlacement? value) =>
+        style.Set(LayoutProperties.GridPlacement, value);
+
+    /// <summary>Returns a style with the typed MainBasis assignment.</summary>
+    public static Style MainBasis(this Style style, float? value) =>
+        style.Set(LayoutProperties.MainBasis, value);
+
+    /// <summary>Returns a style with the typed MainShrink assignment.</summary>
+    public static Style MainShrink(this Style style, float value) =>
+        style.Set(LayoutProperties.MainShrink, value);
+
+    /// <summary>Returns a style with the typed Wrap assignment.</summary>
+    public static Style Wrap(this Style style, bool value) =>
+        style.Set(LayoutProperties.Wrap, value);
+
+    /// <summary>Returns a style with the typed TextWrap assignment.</summary>
+    public static Style TextWrap(this Style style, TextWrap value) =>
+        style.Set(TypographyProperties.TextWrap, value);
+
+    /// <summary>Returns a style with the typed MaxLines assignment.</summary>
+    public static Style MaxLines(this Style style, int? value) =>
+        style.Set(TypographyProperties.MaxLines, value);
+
+    /// <summary>Returns a style with the typed TextOverflow assignment.</summary>
+    public static Style TextOverflow(this Style style, TextOverflow value) =>
+        style.Set(TypographyProperties.Overflow, value);
 }

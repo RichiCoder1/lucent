@@ -10,7 +10,7 @@ Use `Microsoft.NET.Sdk;Lucent.Lui.Sdk/<exact-version>` as the project SDK and ex
 
 Configure `https://nuget.pkg.github.com/RichiCoder1/index.json` as a named NuGet source and map `Lucent.*` to it. Keep nuget.org for ecosystem dependencies. [GitHub's NuGet registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-nuget-registry) requires authentication even for public packages. For local work, use a classic token with `read:packages` through the user credential configuration or `NuGetPackageSourceCredentials_<source-name>` environment variable. Never commit a token. For another repository's CI, grant that repository package read access and use its `GITHUB_TOKEN`.
 
-Package visibility initially follows GitHub's private default. Visibility and cross-repository Actions access are separate settings; publishing successfully does not claim those settings have been changed.
+The five Lucent packages are public, and Light Notes has Actions read access. GitHub defaults newly created package IDs to private; configure their visibility and cross-repository Actions access separately when adding a package. Public packages still require authentication.
 
 ## Local development
 

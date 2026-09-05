@@ -175,6 +175,61 @@ public sealed class InputRouter
         }
     }
 
+    /// <summary>Hit-tests and chains fractional logical-pixel wheel deltas through nearest scrollable ancestors.</summary>
+    public InputDispatchResult DispatchWheel(WheelCommand command)
+    {
+        Enter();
+        try
+        {
+            command.Validate();
+            var errors = new List<Exception>();
+            if (EnsureScene(errors) is { } rejection)
+                return Reject(rejection, "Wheel", errors);
+            var target = Hit(command.X, command.Y);
+            if (target is null)
+                return Reject(InputRejection.NoTarget, "Wheel", errors);
+            var route = Path(target.Value).Reverse().ToArray();
+            var remainingX = command.DeltaX;
+            var remainingY = command.DeltaY;
+            var handled = false;
+            foreach (var identity in route)
+            {
+                if (!_scrollable.TryGetValue(identity.ElementId, out var scrollable))
+                    continue;
+                var current = scrollable.State.Offset;
+                var bounds = ScrollBounds(identity, scrollable.InstalledOffset);
+                var next = new ScrollOffset(
+                    ClampScroll(current.X + remainingX, bounds.X),
+                    ClampScroll(current.Y + remainingY, bounds.Y)
+                );
+                var consumedX = next.X - current.X;
+                var consumedY = next.Y - current.Y;
+                if (consumedX == 0 && consumedY == 0)
+                    continue;
+                scrollable.State.Offset = next;
+                remainingX -= consumedX;
+                remainingY -= consumedY;
+                handled = true;
+                if (remainingX == 0 && remainingY == 0)
+                    break;
+            }
+            SetLast(
+                "Wheel",
+                InputDispatchStatus.Delivered,
+                InputRejection.None,
+                target,
+                route,
+                handled
+            );
+            Throw(errors);
+            return new(InputDispatchStatus.Delivered, InputRejection.None, target, route, handled);
+        }
+        finally
+        {
+            Exit();
+        }
+    }
+
     /// <summary>Routes a portable key command from the current focus target.</summary>
     public InputDispatchResult DispatchKey(KeyCommand command)
     {
@@ -1319,7 +1374,11 @@ public sealed class InputRouter
         var content = viewport.ChildClipBounds ?? viewport.Bounds;
         var right = content.X;
         var bottom = content.Y;
-        foreach (var child in _input.Values.Where(item => IsDescendantOf(item.Identity, identity)))
+        foreach (
+            var child in _input.Values.Where(item =>
+                IsScrollContentDescendant(item.Identity, identity)
+            )
+        )
         {
             right = Math.Max(right, child.Bounds.X + child.Bounds.Width + projectedOffset.X);
             bottom = Math.Max(bottom, child.Bounds.Y + child.Bounds.Height + projectedOffset.Y);
@@ -1328,6 +1387,22 @@ public sealed class InputRouter
             Math.Max(0, right - content.X - content.Width),
             Math.Max(0, bottom - content.Y - content.Height)
         );
+    }
+
+    private bool IsScrollContentDescendant(ElementIdentity identity, ElementIdentity ancestor)
+    {
+        while (
+            _input.TryGetValue(identity.ElementId, out var retained)
+            && retained.Parent is { } parent
+        )
+        {
+            if (parent == ancestor)
+                return true;
+            if (_scrollable.ContainsKey(parent.ElementId))
+                return false;
+            identity = parent;
+        }
+        return false;
     }
 
     private bool IsDescendantOf(ElementIdentity identity, ElementIdentity ancestor)

@@ -7,7 +7,8 @@ namespace Lucent.Core;
 
 internal interface IVirtualizedRegion
 {
-    void Realize(LayoutViewport viewport);
+    long ViewportId { get; }
+    void Realize(LayoutViewport viewport, LayoutRect? assignedBounds);
 }
 
 /// <summary>A fixed-height keyed region that owns only the visible rows plus two rows of overscan on each side.</summary>
@@ -153,9 +154,12 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         }
     }
 
-    void IVirtualizedRegion.Realize(LayoutViewport viewport) => Realize(viewport);
+    long IVirtualizedRegion.ViewportId => _viewport.Id;
 
-    public void Realize(LayoutViewport viewport)
+    void IVirtualizedRegion.Realize(LayoutViewport viewport, LayoutRect? assignedBounds) =>
+        Realize(viewport, assignedBounds);
+
+    public void Realize(LayoutViewport viewport, LayoutRect? assignedBounds = null)
     {
         _composition.CheckThread();
         _composition.RejectForeignFactory(Region);
@@ -166,12 +170,10 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
             throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
         var outerWidth = _viewport.Resolve(LayoutProperties.Width).Value ?? viewport.Width;
         var outerHeight = _viewport.Resolve(LayoutProperties.Height).Value ?? viewport.Height;
+        var outer =
+            assignedBounds ?? LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale);
         var viewportHeight = SceneLayout
-            .ContentBounds(
-                LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale),
-                _viewport.Resolve(LayoutProperties.Padding).Value,
-                viewport.Scale
-            )
+            .ContentBounds(outer, _viewport.Resolve(LayoutProperties.Padding).Value, viewport.Scale)
             .Height;
         var offset = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
         var first = Math.Max(0, (int)MathF.Floor(offset / RowHeight) - Overscan);

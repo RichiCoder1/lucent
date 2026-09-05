@@ -552,15 +552,30 @@ public sealed class Composition : IDisposable
         SemanticsChanged?.Invoke();
     }
 
+    internal bool HasVirtualizedRegions => _virtualized.Count != 0;
+
+    internal long[] VirtualizedViewportIds =>
+        _virtualized.Select(region => region.ViewportId).ToArray();
+
     internal void Register(IVirtualizedRegion region) => _virtualized.Add(region);
 
     internal void Unregister(IVirtualizedRegion region) => _virtualized.Remove(region);
 
-    internal void RealizeVirtualized(LayoutViewport viewport)
+    internal void RealizeVirtualized(
+        LayoutViewport viewport,
+        IReadOnlyDictionary<long, LayoutRect> assignedBounds
+    )
     {
         _graph.CheckThread();
+        ArgumentNullException.ThrowIfNull(assignedBounds);
         foreach (var region in _virtualized.ToArray())
-            region.Realize(viewport);
+        {
+            if (!assignedBounds.TryGetValue(region.ViewportId, out var bounds))
+                throw new InvalidOperationException(
+                    "A virtualized region has no assigned viewport in the bounded layout pass."
+                );
+            region.Realize(viewport, bounds);
+        }
     }
 
     internal Element? Find(ElementIdentity identity) =>

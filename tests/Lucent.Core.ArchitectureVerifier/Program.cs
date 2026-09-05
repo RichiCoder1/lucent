@@ -104,6 +104,8 @@ static void VerifyLuiMetadata(
     {
         ["Row"] = 1,
         ["Column"] = 1,
+        ["CommandScope"] = 1,
+        ["ResponsiveContainer"] = 1,
         ["Text"] = 2,
         ["Button"] = 1,
         ["TextField"] = 1,
@@ -186,7 +188,14 @@ static void VerifyPropertySurface(
         {
             ["Lucent.Core.LayoutProperties"] = new()
             {
+                ["Mode"] = "Lucent.Core.Property`1|Lucent.Core.LayoutMode",
                 ["Axis"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAxis",
+                ["Columns"] = "Lucent.Core.Property`1|Lucent.Core.GridTracks",
+                ["Rows"] = "Lucent.Core.Property`1|Lucent.Core.GridTracks",
+                ["ColumnGap"] = "Lucent.Core.Property`1|System.Single",
+                ["RowGap"] = "Lucent.Core.Property`1|System.Single",
+                ["GridPlacement"] =
+                    "Lucent.Core.Property`1|System.Nullable`1|Lucent.Core.GridPlacement",
                 ["Width"] = "Lucent.Core.Property`1|System.Nullable`1|System.Single",
                 ["Height"] = "Lucent.Core.Property`1|System.Nullable`1|System.Single",
                 ["MinWidth"] = "Lucent.Core.Property`1|System.Single",
@@ -195,6 +204,9 @@ static void VerifyPropertySurface(
                 ["MaxHeight"] = "Lucent.Core.Property`1|System.Single",
                 ["Spacing"] = "Lucent.Core.Property`1|System.Single",
                 ["MainGrow"] = "Lucent.Core.Property`1|System.Single",
+                ["MainBasis"] = "Lucent.Core.Property`1|System.Nullable`1|System.Single",
+                ["MainShrink"] = "Lucent.Core.Property`1|System.Single",
+                ["Wrap"] = "Lucent.Core.Property`1|System.Boolean",
                 ["MainAlignment"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAlignment",
                 ["CrossAlignment"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAlignment",
                 ["Padding"] = "Lucent.Core.Property`1|Lucent.Core.Insets",
@@ -214,6 +226,9 @@ static void VerifyPropertySurface(
                 ["FontSize"] = "Lucent.Core.Property`1|System.Single",
                 ["Language"] = "Lucent.Core.Property`1|System.String",
                 ["Direction"] = "Lucent.Core.Property`1|Lucent.Core.TextDirection",
+                ["TextWrap"] = "Lucent.Core.Property`1|Lucent.Core.TextWrap",
+                ["MaxLines"] = "Lucent.Core.Property`1|System.Nullable`1|System.Int32",
+                ["Overflow"] = "Lucent.Core.Property`1|Lucent.Core.TextOverflow",
             },
             ["Lucent.Core.InputProperties"] = new()
             {

@@ -45,6 +45,24 @@ public enum PointerButton
     Middle,
 }
 
+/// <summary>Portable logical-pixel wheel or trackpad deltas at the current pointer position.</summary>
+public readonly record struct WheelCommand(float X, float Y, float DeltaX, float DeltaY)
+{
+    /// <summary>Validates that the hit point and fractional deltas are finite.</summary>
+    public void Validate()
+    {
+        if (
+            !float.IsFinite(X)
+            || !float.IsFinite(Y)
+            || !float.IsFinite(DeltaX)
+            || !float.IsFinite(DeltaY)
+        )
+            throw new ArgumentException(
+                "Wheel commands require finite logical coordinates and deltas."
+            );
+    }
+}
+
 /// <summary>Portable modifier bits accompanying a key command.</summary>
 [Flags]
 public enum KeyModifiers
@@ -119,6 +137,15 @@ public enum Key
 
     /// <summary>Copy shortcut key.</summary>
     C,
+
+    /// <summary>Find application shortcut key.</summary>
+    F,
+
+    /// <summary>Capture application shortcut key.</summary>
+    N,
+
+    /// <summary>Save application shortcut key.</summary>
+    S,
 
     /// <summary>Paste shortcut key.</summary>
     V,

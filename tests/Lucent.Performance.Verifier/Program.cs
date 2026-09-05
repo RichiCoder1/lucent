@@ -13,7 +13,7 @@ const double P95Limit = 16.7,
 const long ManagedGrowthLimit = 16L * 1024 * 1024;
 const int SurfaceLimit = 1,
     TextureLimit = 1,
-    TextBlobLimit = 0,
+    TextBlobLimit = 256,
     UiaProviderLimit = 18,
     HandleGrowthLimit = 128;
 

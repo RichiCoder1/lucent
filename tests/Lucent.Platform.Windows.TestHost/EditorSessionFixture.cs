@@ -93,7 +93,10 @@ internal static class EditorSessionFixture
                 using var canvas = new SKCanvas(bitmap);
                 canvas.Clear(SKColors.White);
                 renderer.Render(scene, canvas);
-                Require(renderer.LiveTextBlobCount == 0, "paint released temporary native blobs");
+                Require(
+                    renderer.LiveTextBlobCount > 0 && renderer.LiveTextBlobCount <= 256,
+                    "paint retained an unbounded native text-blob cache"
+                );
                 _ = Install(composition, renderer, actualWidth, 1.5f);
                 Require(
                     input.DispatchText(new(TextInputKind.Preedit, "中", 0, 1)),

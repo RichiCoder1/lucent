@@ -976,17 +976,45 @@ public static class LuiCompiler
         var plans = new Dictionary<int, StylePropertyPlan>();
         foreach (var name in tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>())
         {
-            if (
-                model.GetSymbolInfo(name).Symbol is not IFieldSymbol property
-                || !IsStyleProperty(property.Type)
-            )
-                continue;
+            var symbol = model.GetSymbolInfo(name).Symbol;
+            var property = symbol as IFieldSymbol;
             var entry = map.Entries.FirstOrDefault(candidate =>
                 !candidate.Hidden
                 && candidate.Source.Start >= 0
                 && candidate.Generated.Start <= name.SpanStart
                 && candidate.Generated.End >= name.Span.End
             );
+            // A same-named type (for example GridPlacement) can hide a using-static
+            // property in C# lookup. Resolve a unique built-in only on the shorthand LHS.
+            if (
+                (
+                    symbol is INamedTypeSymbol
+                    || model
+                        .GetSymbolInfo(name)
+                        .CandidateSymbols.Any(candidate => candidate is INamedTypeSymbol)
+                )
+                && name.Parent is not MemberAccessExpressionSyntax
+                && entry is not null
+                && writer.StylePropertyNames.Contains(entry.Source.Start)
+                && entry.Source.Length == name.Identifier.Span.Length
+            )
+            {
+                var candidates = ImplicitStylePropertyTypes
+                    .Select(type => model.Compilation.GetTypeByMetadataName(type))
+                    .Where(type => type is not null)
+                    .SelectMany(type => type!.GetMembers(name.Identifier.ValueText))
+                    .OfType<IFieldSymbol>()
+                    .Where(field =>
+                        field.IsStatic
+                        && field.DeclaredAccessibility == Accessibility.Public
+                        && IsStyleProperty(field.Type)
+                    )
+                    .ToArray();
+                if (candidates.Length == 1)
+                    property = candidates[0];
+            }
+            if (property is null || !IsStyleProperty(property.Type))
+                continue;
             if (entry is not null)
                 plans[entry.Source.Start] = new StylePropertyPlan(
                     property.ToDisplayString(FullyQualifiedMemberFormat),

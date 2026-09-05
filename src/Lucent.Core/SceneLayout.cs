@@ -17,15 +17,86 @@ public static class SceneLayout
         ArgumentNullException.ThrowIfNull(composition);
         ArgumentNullException.ThrowIfNull(shaper);
         viewport.Validate();
-        composition.RealizeVirtualized(viewport);
-        composition.Flush(); // Virtual row factories may register effects; a projected scene must not precede their first commit.
-        composition.RealizeVirtualized(viewport);
+        composition.Flush();
+        var responsive = ResponsiveElements(composition);
+        Dictionary<long, LayoutRect>? realizedViewportBounds = null;
+        if (composition.HasVirtualizedRegions || responsive.Length != 0)
+        {
+            var assignedBoxes = new List<LayoutBox>();
+            _ = composition.WithoutProjectionTracking(() =>
+                Layout(
+                    composition.Root,
+                    new LayoutRect(0, 0, viewport.Width, viewport.Height),
+                    viewport,
+                    shaper,
+                    assignedBoxes,
+                    new ProjectionCache(),
+                    null,
+                    false,
+                    false
+                )
+            );
+            var assignedById = assignedBoxes.ToDictionary(
+                box => box.Identity.ElementId,
+                box => box.Bounds
+            );
+            foreach (var item in responsive)
+            {
+                var inner = ContentBounds(
+                    assignedById[item.Element.Id],
+                    item.Element.Resolve(LayoutProperties.Padding).Value,
+                    viewport.Scale
+                );
+                item.State!.Assign(new(inner.Width, inner.Height));
+            }
+            composition.Flush();
+            EnsureResponsiveElementsUnchanged(composition, responsive);
+            if (responsive.Length != 0)
+            {
+                assignedBoxes.Clear();
+                _ = composition.WithoutProjectionTracking(() =>
+                    Layout(
+                        composition.Root,
+                        new LayoutRect(0, 0, viewport.Width, viewport.Height),
+                        viewport,
+                        shaper,
+                        assignedBoxes,
+                        new ProjectionCache(),
+                        null,
+                        false,
+                        false
+                    )
+                );
+                assignedById = assignedBoxes.ToDictionary(
+                    box => box.Identity.ElementId,
+                    box => box.Bounds
+                );
+            }
+
+            var virtualizedViewportIds = composition.VirtualizedViewportIds;
+            composition.RealizeVirtualized(viewport, assignedById);
+            realizedViewportBounds = virtualizedViewportIds.ToDictionary(
+                id => id,
+                id =>
+                    assignedById.TryGetValue(id, out var bounds)
+                        ? bounds
+                        : throw new InvalidOperationException(
+                            "A virtualized region has no assigned viewport after responsive layout."
+                        )
+            );
+            composition.Flush(); // Responsive branches and newly realized rows commit before the final projection.
+            EnsureResponsiveElementsUnchanged(composition, responsive);
+            if (!composition.VirtualizedViewportIds.SequenceEqual(virtualizedViewportIds))
+                throw new InvalidOperationException(
+                    "A virtualized region was mounted or removed during its realization flush."
+                );
+        }
         var projected = composition.CaptureInputProjection(() =>
         {
             var elements = composition.Elements().ToArray();
             var signatures = elements.Select(InputSignature).ToArray();
             var boxes = new List<LayoutBox>();
-            var shapes = new Dictionary<long, ShapedText?>();
+            var cache = new ProjectionCache();
             var nodes = composition.WithoutProjectionTracking(() =>
                 Layout(
                     composition.Root,
@@ -33,7 +104,7 @@ public static class SceneLayout
                     viewport,
                     shaper,
                     boxes,
-                    shapes,
+                    cache,
                     null,
                     false,
                     false
@@ -79,6 +150,35 @@ public static class SceneLayout
             var collapsed = elements.Where(IsCollapsed).Select(element => element.Id).ToArray();
             return (Boxes: boxes, Nodes: nodes, Input: input, Collapsed: collapsed);
         });
+        var finalById = projected.Boxes.ToDictionary(
+            box => box.Identity.ElementId,
+            box => box.Bounds
+        );
+        if (realizedViewportBounds is not null)
+            foreach (var expected in realizedViewportBounds)
+                if (
+                    !finalById.TryGetValue(expected.Key, out var actual)
+                    || actual != expected.Value
+                )
+                    throw new InvalidOperationException(
+                        "Virtualized viewport geometry changed after its assigned realization pass."
+                    );
+        foreach (var item in responsive)
+        {
+            if (!finalById.TryGetValue(item.Element.Id, out var outer))
+                throw new InvalidOperationException(
+                    "Responsive container was removed during its constraint pass."
+                );
+            var inner = ContentBounds(
+                outer,
+                item.Element.Resolve(LayoutProperties.Padding).Value,
+                viewport.Scale
+            );
+            if (item.State!.Current != new ContainerConstraints(inner.Width, inner.Height))
+                throw new InvalidOperationException(
+                    "Responsive container feedback changed its own assigned constraints after the bounded correction pass."
+                );
+        }
         return new RetainedScene(
             composition.NextSceneGeneration(),
             viewport,
@@ -90,13 +190,39 @@ public static class SceneLayout
         );
     }
 
+    private static (Element Element, ResponsiveConstraints State)[] ResponsiveElements(
+        Composition composition
+    ) =>
+        composition
+            .Elements()
+            .Select(element =>
+                (
+                    Element: element,
+                    State: element.Resolve(ProjectionProperties.ResponsiveConstraints).Value
+                )
+            )
+            .Where(value => value.State is not null)
+            .Select(value => (value.Element, value.State!))
+            .ToArray();
+
+    private static void EnsureResponsiveElementsUnchanged(
+        Composition composition,
+        IReadOnlyList<(Element Element, ResponsiveConstraints State)> expected
+    )
+    {
+        if (!ResponsiveElements(composition).SequenceEqual(expected))
+            throw new InvalidOperationException(
+                "A responsive container was mounted or removed during the bounded constraint pass."
+            );
+    }
+
     private static IReadOnlyList<SceneNode> Layout(
         Element element,
         LayoutRect allotted,
         LayoutViewport viewport,
         ITextShaper shaper,
         List<LayoutBox> boxes,
-        Dictionary<long, ShapedText?> shapes,
+        ProjectionCache cache,
         LayoutAxis? parentAxis,
         bool crossAllotted,
         bool mainAllotted
@@ -107,9 +233,24 @@ public static class SceneLayout
             AddCollapsedBoxes(element, allotted.X, allotted.Y, boxes);
             return [];
         }
-        var style = Read(element);
-        var text = Shape(element, style, viewport.Scale, shaper, shapes);
-        var textMetrics = IntrinsicTextMetrics(style, text, viewport.Scale, shaper);
+        var style = cache.Read(element);
+        var text =
+            style.TextWrap == TextWrap.NoWrap
+                ? Shape(element, style, viewport.Scale, shaper, cache)
+                : Shape(
+                    element,
+                    style,
+                    viewport.Scale,
+                    shaper,
+                    cache,
+                    new LayoutConstraint(
+                        Math.Max(0, (style.Width ?? allotted.Width) - style.Padding.Horizontal)
+                    ),
+                    new LayoutConstraint(
+                        Math.Max(0, (style.Height ?? allotted.Height) - style.Padding.Vertical)
+                    )
+                );
+        var textMetrics = IntrinsicTextMetrics(style, text, viewport.Scale, shaper, cache);
         var width = Constrain(
             style.Width
                 ?? (
@@ -149,75 +290,188 @@ public static class SceneLayout
         var childNodes = new List<SceneNode>();
         if (element.Children.Count != 0)
         {
-            var axis = style.Axis;
-            var mainLimit = axis == LayoutAxis.Row ? inner.Width : inner.Height;
-            var crossLimit = axis == LayoutAxis.Row ? inner.Height : inner.Width;
-            var participatingChildren = element
-                .Children.Where(child => child.Participation != ElementParticipation.Collapsed)
+            var participating = element
+                .Children.Select((child, index) => (Child: child, Index: index))
+                .Where(value => value.Child.Participation != ElementParticipation.Collapsed)
                 .ToArray();
-            var measured = participatingChildren
-                .Select(child => Measure(child, axis, crossLimit, viewport.Scale, shaper, shapes))
+            var specs = participating
+                .Select(value =>
+                {
+                    var childStyle = cache.Read(value.Child);
+                    var childText = Shape(value.Child, childStyle, viewport.Scale, shaper, cache);
+                    var intrinsic = Intrinsic(
+                        value.Child,
+                        childStyle,
+                        childText,
+                        viewport.Scale,
+                        shaper,
+                        cache
+                    );
+                    var childWidth = Constrain(
+                        childStyle.Width ?? intrinsic.Width,
+                        childStyle.MinWidth,
+                        childStyle.MaxWidth
+                    );
+                    var childHeight = Constrain(
+                        childStyle.Height ?? intrinsic.Height,
+                        childStyle.MinHeight,
+                        childStyle.MaxHeight
+                    );
+                    return new LayoutItemSpec(
+                        value.Index,
+                        childWidth,
+                        childHeight,
+                        childStyle.MinWidth,
+                        childStyle.MinHeight,
+                        childStyle.MaxWidth,
+                        childStyle.MaxHeight,
+                        childStyle.Width is null,
+                        childStyle.Height is null,
+                        childStyle.MainBasis,
+                        childStyle.MainGrow,
+                        childStyle.MainShrink,
+                        childStyle.GridPlacement
+                    );
+                })
                 .ToArray();
-            var spacing = Finite(style.Spacing * Math.Max(0, participatingChildren.Length - 1));
-            var total = Finite(measured.Sum(item => item.Main) + spacing);
-            GrowMain(measured, Math.Max(0, mainLimit - total));
-            total = Finite(measured.Sum(item => item.Main) + spacing);
-            var cursor = style.MainAlignment switch
+
+            LayoutAssignment[] assignments;
+            if (style.VirtualRowHeight is { } virtualRowHeight)
             {
-                LayoutAlignment.Center => Math.Max(0, (mainLimit - total) / 2),
-                LayoutAlignment.End => Math.Max(0, mainLimit - total),
-                _ => 0,
-            };
-            var measuredIndex = 0;
-            foreach (var child in element.Children)
+                assignments = participating
+                    .Select(
+                        (value, itemIndex) =>
+                        {
+                            var childStyle = cache.Read(value.Child);
+                            var virtualIndex = childStyle.VirtualRowIndex;
+                            return new LayoutAssignment(
+                                value.Index,
+                                new LayoutRect(
+                                    0,
+                                    virtualIndex * virtualRowHeight,
+                                    inner.Width,
+                                    virtualRowHeight
+                                ),
+                                true,
+                                true
+                            );
+                        }
+                    )
+                    .ToArray();
+            }
+            else if (style.Mode == LayoutMode.Grid)
             {
+                assignments = ManagedLayout.ArrangeGrid(
+                    specs,
+                    style.Columns,
+                    style.Rows,
+                    inner.Width,
+                    inner.Height,
+                    style.ColumnGap,
+                    style.RowGap,
+                    style.CrossAlignment
+                );
+                var assignmentsByIndex = assignments.ToDictionary(value => value.Index);
+                var corrected = specs
+                    .Select(spec =>
+                    {
+                        var assignment = assignmentsByIndex[spec.Index];
+                        var child = element.Children[spec.Index];
+                        var childStyle = cache.Read(child);
+                        var constrained =
+                            childStyle.TextWrap == TextWrap.NoWrap
+                                ? Shape(child, childStyle, viewport.Scale, shaper, cache)
+                                : Shape(
+                                    child,
+                                    childStyle,
+                                    viewport.Scale,
+                                    shaper,
+                                    cache,
+                                    new LayoutConstraint(
+                                        Math.Max(
+                                            0,
+                                            assignment.Bounds.Width - childStyle.Padding.Horizontal
+                                        )
+                                    ),
+                                    new LayoutConstraint(
+                                        Math.Max(
+                                            0,
+                                            assignment.Bounds.Height - childStyle.Padding.Vertical
+                                        )
+                                    )
+                                );
+                        if (constrained is null || !spec.AutoHeight)
+                            return spec;
+                        return spec with
+                        {
+                            Height = Constrain(
+                                Finite(constrained.Height + childStyle.Padding.Vertical),
+                                childStyle.MinHeight,
+                                childStyle.MaxHeight
+                            ),
+                        };
+                    })
+                    .ToArray();
+                assignments = ManagedLayout.ArrangeGrid(
+                    corrected,
+                    style.Columns,
+                    style.Rows,
+                    inner.Width,
+                    inner.Height,
+                    style.ColumnGap,
+                    style.RowGap,
+                    style.CrossAlignment
+                );
+            }
+            else
+            {
+                assignments = ManagedLayout.ArrangeFlex(
+                    specs,
+                    style.Axis,
+                    inner.Width,
+                    inner.Height,
+                    style.Spacing,
+                    style.RowGap,
+                    style.Wrap,
+                    style.MainAlignment,
+                    style.CrossAlignment
+                );
+            }
+
+            var byIndex = assignments.ToDictionary(value => value.Index);
+            for (var index = 0; index < element.Children.Count; index++)
+            {
+                var child = element.Children[index];
                 if (child.Participation == ElementParticipation.Collapsed)
                 {
                     AddCollapsedBoxes(child, inner.X, inner.Y, boxes);
                     continue;
                 }
-                var item = measured[measuredIndex++];
-                var virtualIndex = style.VirtualRowHeight is null
-                    ? 0
-                    : Read(item.Element).VirtualRowIndex;
-                var cross =
-                    style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross
-                        ? crossLimit
-                        : item.Cross;
-                var crossOffset = style.CrossAlignment switch
-                {
-                    LayoutAlignment.Center => (crossLimit - cross) / 2,
-                    LayoutAlignment.End => crossLimit - cross,
-                    _ => 0,
-                };
-                var main = style.VirtualRowHeight is { } rowHeight
-                    ? virtualIndex * rowHeight
-                    : cursor;
-                var x = Finite(
-                    Finite(inner.X + (axis == LayoutAxis.Row ? main : crossOffset)) - style.Scroll.X
+                var assignment = byIndex[index];
+                var relative = assignment.Bounds;
+                var childBounds = new LayoutRect(
+                    Finite(inner.X + relative.X - style.Scroll.X),
+                    Finite(inner.Y + relative.Y - style.Scroll.Y),
+                    relative.Width,
+                    relative.Height
                 );
-                var y = Finite(
-                    Finite(inner.Y + (axis == LayoutAxis.Row ? crossOffset : main)) - style.Scroll.Y
-                );
-                var childBounds =
-                    axis == LayoutAxis.Row
-                        ? new LayoutRect(x, y, item.Main, cross)
-                        : new LayoutRect(x, y, cross, item.Main);
                 childNodes.AddRange(
                     Layout(
-                        item.Element,
+                        child,
                         childBounds,
                         viewport,
                         shaper,
                         boxes,
-                        shapes,
-                        axis,
-                        style.CrossAlignment == LayoutAlignment.Stretch && item.AutoCross,
-                        item.MainGrow > 0
+                        cache,
+                        style.Axis,
+                        style.Axis == LayoutAxis.Row
+                            ? assignment.HeightAssigned
+                            : assignment.WidthAssigned,
+                        style.Axis == LayoutAxis.Row
+                            ? assignment.WidthAssigned
+                            : assignment.HeightAssigned
                     )
                 );
-                if (style.VirtualRowHeight is null)
-                    cursor = Finite(cursor + item.Main + style.Spacing);
             }
         }
         if (element.Participation == ElementParticipation.Hidden)
@@ -361,12 +615,12 @@ public static class SceneLayout
         float crossLimit,
         float scale,
         ITextShaper shaper,
-        Dictionary<long, ShapedText?> shapes
+        ProjectionCache cache
     )
     {
-        var style = Read(element);
-        var text = Shape(element, style, scale, shaper, shapes);
-        var intrinsic = Intrinsic(element, style, text, scale, shaper, shapes);
+        var style = cache.Read(element);
+        var text = Shape(element, style, scale, shaper, cache);
+        var intrinsic = Intrinsic(element, style, text, scale, shaper, cache);
         var width = Constrain(style.Width ?? intrinsic.Width, style.MinWidth, style.MaxWidth);
         var height = Constrain(style.Height ?? intrinsic.Height, style.MinHeight, style.MaxHeight);
         return parentAxis == LayoutAxis.Row
@@ -377,7 +631,8 @@ public static class SceneLayout
                 style.Height is null,
                 style.MainGrow,
                 style.MinWidth,
-                style.MaxWidth
+                style.MaxWidth,
+                style.MainShrink
             )
             : new(
                 element,
@@ -386,7 +641,8 @@ public static class SceneLayout
                 style.Width is null,
                 style.MainGrow,
                 style.MinHeight,
-                style.MaxHeight
+                style.MaxHeight,
+                style.MainShrink
             );
     }
 
@@ -428,10 +684,10 @@ public static class SceneLayout
         ShapedText? text,
         float scale,
         ITextShaper shaper,
-        Dictionary<long, ShapedText?> shapes
+        ProjectionCache cache
     )
     {
-        var textMetrics = IntrinsicTextMetrics(style, text, scale, shaper);
+        var textMetrics = IntrinsicTextMetrics(style, text, scale, shaper, cache);
         var width = textMetrics?.Width ?? 0f;
         var height = textMetrics?.Height ?? 0f;
         var participatingChildren = element
@@ -445,7 +701,7 @@ public static class SceneLayout
                     : (width, height)
             );
         var children = participatingChildren
-            .Select(child => Measure(child, style.Axis, float.MaxValue, scale, shaper, shapes))
+            .Select(child => Measure(child, style.Axis, float.MaxValue, scale, shaper, cache))
             .ToArray();
         if (style.Axis == LayoutAxis.Row)
         {
@@ -501,23 +757,32 @@ public static class SceneLayout
         Values style,
         float scale,
         ITextShaper shaper,
-        Dictionary<long, ShapedText?> shapes
+        ProjectionCache cache,
+        LayoutConstraint inlineConstraint = default,
+        LayoutConstraint blockConstraint = default
     )
     {
-        if (shapes.TryGetValue(element.Id, out var cached))
-            return cached;
         if (string.IsNullOrEmpty(style.Text))
             return null;
-        var shaped = ShapeText(style.Text, style, scale, shaper);
-        shapes.Add(element.Id, shaped);
-        return shaped;
+        return ShapeText(
+            style.Text,
+            style,
+            scale,
+            shaper,
+            cache,
+            inlineConstraint,
+            blockConstraint
+        );
     }
 
     private static ShapedText? ShapeText(
         string? text,
         Values style,
         float scale,
-        ITextShaper shaper
+        ITextShaper shaper,
+        ProjectionCache cache,
+        LayoutConstraint inlineConstraint = default,
+        LayoutConstraint blockConstraint = default
     )
     {
         if (string.IsNullOrEmpty(text))
@@ -528,11 +793,19 @@ public static class SceneLayout
             style.FontSize,
             style.Language,
             style.Direction,
-            scale
+            scale,
+            inlineConstraint,
+            blockConstraint,
+            style.TextWrap,
+            style.MaxLines,
+            style.TextOverflow
         );
         request.Validate();
+        if (cache.Shapes.TryGetValue(request, out var cached))
+            return cached;
         var shaped = shaper.Shape(request);
         shaped.Validate(request);
+        cache.Shapes.Add(request, shaped);
         return shaped;
     }
 
@@ -540,13 +813,14 @@ public static class SceneLayout
         Values style,
         ShapedText? text,
         float scale,
-        ITextShaper shaper
+        ITextShaper shaper,
+        ProjectionCache cache
     )
     {
         var measuredText =
             style.TextMeasure == style.Text
                 ? text
-                : ShapeText(style.TextMeasure, style, scale, shaper);
+                : ShapeText(style.TextMeasure, style, scale, shaper, cache);
         if (text is null && measuredText is null)
             return null;
         return (
@@ -579,10 +853,16 @@ public static class SceneLayout
         return value;
     }
 
-    private static Values Read(Element element)
+    private static Values ReadResolved(Element element)
     {
         var values = new Values(
+            element.Resolve(LayoutProperties.Mode).Value,
             element.Resolve(LayoutProperties.Axis).Value,
+            element.Resolve(LayoutProperties.Columns).Value,
+            element.Resolve(LayoutProperties.Rows).Value,
+            element.Resolve(LayoutProperties.ColumnGap).Value,
+            element.Resolve(LayoutProperties.RowGap).Value,
+            element.Resolve(LayoutProperties.GridPlacement).Value,
             element.Resolve(LayoutProperties.Width).Value,
             element.Resolve(LayoutProperties.Height).Value,
             element.Resolve(LayoutProperties.MinWidth).Value,
@@ -591,6 +871,9 @@ public static class SceneLayout
             element.Resolve(LayoutProperties.MaxHeight).Value,
             element.Resolve(LayoutProperties.Spacing).Value,
             element.Resolve(LayoutProperties.MainGrow).Value,
+            element.Resolve(LayoutProperties.MainBasis).Value,
+            element.Resolve(LayoutProperties.MainShrink).Value,
+            element.Resolve(LayoutProperties.Wrap).Value,
             element.Resolve(LayoutProperties.MainAlignment).Value,
             element.Resolve(LayoutProperties.CrossAlignment).Value,
             element.Resolve(LayoutProperties.Clip).Value,
@@ -608,12 +891,18 @@ public static class SceneLayout
             element.Resolve(TypographyProperties.FontSize).Value,
             element.Resolve(TypographyProperties.Language).Value,
             element.Resolve(TypographyProperties.Direction).Value,
+            element.Resolve(TypographyProperties.TextWrap).Value,
+            element.Resolve(TypographyProperties.MaxLines).Value,
+            element.Resolve(TypographyProperties.Overflow).Value,
             element.Resolve(ProjectionProperties.TextSelectionStart).Value,
             element.Resolve(ProjectionProperties.TextSelectionEnd).Value,
             element.Resolve(ProjectionProperties.TextCaret).Value
         );
         if (
-            !Enum.IsDefined(values.Axis)
+            !Enum.IsDefined(values.Mode)
+            || !Enum.IsDefined(values.Axis)
+            || !Enum.IsDefined(values.TextWrap)
+            || !Enum.IsDefined(values.TextOverflow)
             || !Enum.IsDefined(values.MainAlignment)
             || !Enum.IsDefined(values.CrossAlignment)
             || !Enum.IsDefined(values.Direction)
@@ -621,6 +910,18 @@ public static class SceneLayout
             || values.Spacing < 0
             || !float.IsFinite(values.MainGrow)
             || values.MainGrow < 0
+            || values.MainBasis is { } basis && (!float.IsFinite(basis) || basis < 0)
+            || !float.IsFinite(values.MainShrink)
+            || values.MainShrink < 0
+            || !float.IsFinite(values.ColumnGap)
+            || values.ColumnGap < 0
+            || !float.IsFinite(values.RowGap)
+            || values.RowGap < 0
+            || values.MaxLines is <= 0
+            || values.Columns is null
+            || values.Rows is null
+            || values.Mode == LayoutMode.Grid
+                && (values.Columns.Count == 0 || values.Rows.Count == 0)
             || !float.IsFinite(values.Opacity)
             || values.Opacity < 0
             || values.Opacity > 1
@@ -649,11 +950,34 @@ public static class SceneLayout
         bool AutoCross,
         float MainGrow,
         float MinMain,
-        float MaxMain
+        float MaxMain,
+        float MainShrink
     );
 
+    private sealed class ProjectionCache
+    {
+        private readonly Dictionary<long, Values> _styles = [];
+
+        internal Dictionary<TextMeasureRequest, ShapedText> Shapes { get; } = [];
+
+        internal Values Read(Element element)
+        {
+            if (_styles.TryGetValue(element.Id, out var cached))
+                return cached;
+            var resolved = ReadResolved(element);
+            _styles.Add(element.Id, resolved);
+            return resolved;
+        }
+    }
+
     private readonly record struct Values(
+        LayoutMode Mode,
         LayoutAxis Axis,
+        GridTracks Columns,
+        GridTracks Rows,
+        float ColumnGap,
+        float RowGap,
+        GridPlacement? GridPlacement,
         float? Width,
         float? Height,
         float MinWidth,
@@ -662,6 +986,9 @@ public static class SceneLayout
         float MaxHeight,
         float Spacing,
         float MainGrow,
+        float? MainBasis,
+        float MainShrink,
+        bool Wrap,
         LayoutAlignment MainAlignment,
         LayoutAlignment CrossAlignment,
         bool Clip,
@@ -679,6 +1006,9 @@ public static class SceneLayout
         float FontSize,
         string Language,
         TextDirection Direction,
+        TextWrap TextWrap,
+        int? MaxLines,
+        TextOverflow TextOverflow,
         int? SelectionStart,
         int? SelectionEnd,
         int? Caret
@@ -746,7 +1076,18 @@ public static class SceneLayout
 
     internal static string InputSignature(Element element)
     {
+        var mode = element.Resolve(LayoutProperties.Mode).Value;
         var axis = element.Resolve(LayoutProperties.Axis).Value;
+        var columns = element.Resolve(LayoutProperties.Columns).Value;
+        var rows = element.Resolve(LayoutProperties.Rows).Value;
+        if (columns is null || rows is null)
+            throw new ArgumentOutOfRangeException(
+                nameof(element),
+                "Grid track collections must not be null."
+            );
+        var columnGap = element.Resolve(LayoutProperties.ColumnGap).Value;
+        var rowGap = element.Resolve(LayoutProperties.RowGap).Value;
+        var placement = element.Resolve(LayoutProperties.GridPlacement).Value;
         var width = element.Resolve(LayoutProperties.Width).Value;
         var height = element.Resolve(LayoutProperties.Height).Value;
         var minWidth = element.Resolve(LayoutProperties.MinWidth).Value;
@@ -755,6 +1096,9 @@ public static class SceneLayout
         var maxHeight = element.Resolve(LayoutProperties.MaxHeight).Value;
         var spacing = element.Resolve(LayoutProperties.Spacing).Value;
         var mainGrow = element.Resolve(LayoutProperties.MainGrow).Value;
+        var mainBasis = element.Resolve(LayoutProperties.MainBasis).Value;
+        var mainShrink = element.Resolve(LayoutProperties.MainShrink).Value;
+        var wrap = element.Resolve(LayoutProperties.Wrap).Value;
         var mainAlignment = element.Resolve(LayoutProperties.MainAlignment).Value;
         var crossAlignment = element.Resolve(LayoutProperties.CrossAlignment).Value;
         var clip = element.Resolve(LayoutProperties.Clip).Value;
@@ -769,6 +1113,9 @@ public static class SceneLayout
         var fontSize = element.Resolve(TypographyProperties.FontSize).Value;
         var language = element.Resolve(TypographyProperties.Language).Value;
         var direction = element.Resolve(TypographyProperties.Direction).Value;
+        var textWrap = element.Resolve(TypographyProperties.TextWrap).Value;
+        var maxLines = element.Resolve(TypographyProperties.MaxLines).Value;
+        var textOverflow = element.Resolve(TypographyProperties.Overflow).Value;
         var selectionStart = element.Resolve(ProjectionProperties.TextSelectionStart).Value;
         var selectionEnd = element.Resolve(ProjectionProperties.TextSelectionEnd).Value;
         var caret = element.Resolve(ProjectionProperties.TextCaret).Value;
@@ -777,7 +1124,20 @@ public static class SceneLayout
         var participation = element.Participation;
         return Hash(writer =>
         {
+            writer.Write((int)mode);
             writer.Write((int)axis);
+            WriteTracks(writer, columns);
+            WriteTracks(writer, rows);
+            writer.Write(columnGap);
+            writer.Write(rowGap);
+            writer.Write(placement.HasValue);
+            if (placement is { } grid)
+            {
+                writer.Write(grid.Row);
+                writer.Write(grid.Column);
+                writer.Write(grid.RowSpan);
+                writer.Write(grid.ColumnSpan);
+            }
             writer.Write(width.HasValue);
             if (width is { } resolvedWidth)
                 writer.Write(resolvedWidth);
@@ -790,6 +1150,11 @@ public static class SceneLayout
             writer.Write(maxHeight);
             writer.Write(spacing);
             writer.Write(mainGrow);
+            writer.Write(mainBasis.HasValue);
+            if (mainBasis is { } basis)
+                writer.Write(basis);
+            writer.Write(mainShrink);
+            writer.Write(wrap);
             writer.Write((int)mainAlignment);
             writer.Write((int)crossAlignment);
             writer.Write(clip);
@@ -814,6 +1179,11 @@ public static class SceneLayout
             writer.Write(fontSize);
             writer.Write(language);
             writer.Write((int)direction);
+            writer.Write((int)textWrap);
+            writer.Write(maxLines.HasValue);
+            if (maxLines is { } resolvedMaxLines)
+                writer.Write(resolvedMaxLines);
+            writer.Write((int)textOverflow);
             writer.Write(selectionStart.HasValue);
             if (selectionStart is { } resolvedSelectionStart)
                 writer.Write(resolvedSelectionStart);
@@ -827,6 +1197,18 @@ public static class SceneLayout
             writer.Write(visible);
             writer.Write((int)participation);
         });
+    }
+
+    private static void WriteTracks(BinaryWriter writer, GridTracks tracks)
+    {
+        writer.Write(tracks.Count);
+        foreach (var track in tracks)
+        {
+            writer.Write((int)track.Kind);
+            writer.Write(track.Minimum);
+            writer.Write(track.Maximum);
+            writer.Write(track.FractionWeight);
+        }
     }
 
     private static string Hash(Action<BinaryWriter> write)

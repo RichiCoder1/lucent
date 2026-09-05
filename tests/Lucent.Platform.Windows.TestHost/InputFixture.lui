@@ -1,0 +1,30 @@
+namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+style InputFixtureShell {
+    Width: 320;
+    Height: 300;
+    Spacing: 12;
+}
+
+style InputFixtureScroll {
+    Width: 280;
+    Height: 80;
+}
+
+style InputFixtureContent {
+    Width: 280;
+    Height: 240;
+    MainShrink: 0;
+}
+
+internal component InputFixtureView(InputFixtureModel model) {
+    <CommandScope bindings={model.Bindings}>
+        <Column name="input.container" style={InputFixtureShell}>
+            <Status content={() => model.Status.Value} />
+            <ScrollViewport label="Wheel target" viewport={model.Viewport} style={InputFixtureScroll}>
+                <Column style={InputFixtureContent}>
+                    <Text>Wheel content</Text>
+                </Column>
+            </ScrollViewport>
+        </Column>
+    </CommandScope>
+}

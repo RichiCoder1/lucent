@@ -9,6 +9,8 @@ internal static class Program
         args switch
         {
             ["--editor-session-proof"] => EditorSessionFixture.Run(),
+            ["--input-fixture"] => InputFixture.Run(),
+            ["--layout-fixture"] => LayoutFixture.Run(),
             ["--listener-proof"] => ListenerProof.Run(),
             ["--uia-fixture"] => UiaFixture.Run(),
             ["--virtualization-fixture"] => VirtualizationFixture.Run(),

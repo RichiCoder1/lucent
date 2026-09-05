@@ -130,6 +130,273 @@ public sealed class RendererTests
         );
         foreach (var box in scene.Boxes.Where(box => box.Text is not null))
             AssertPainted(bitmap, box.Bounds, scene.Viewport.Scale);
+
+        var retainedBlobCount = renderer.LiveTextBlobCount;
+        var retainedBlobBytes = renderer.RetainedTextBlobBytes;
+        Assert(
+            retainedBlobCount > 0
+                && retainedBlobBytes > 0
+                && retainedBlobBytes <= 16L * 1024 * 1024,
+            "The first paint did not retain bounded native text-blob payloads."
+        );
+        using (var secondCanvas = new SKCanvas(bitmap))
+        {
+            secondCanvas.Clear(SKColors.Transparent);
+            renderer.Render(scene, secondCanvas);
+        }
+        Assert(
+            renderer.LiveTextBlobCount == retainedBlobCount
+                && renderer.RetainedTextBlobBytes == retainedBlobBytes,
+            "An unchanged consecutive paint rebuilt or changed cached text blobs."
+        );
+        renderer.Dispose();
+        Assert(
+            renderer.LiveTextBlobCount == 0 && renderer.RetainedTextBlobBytes == 0,
+            "Disposing the renderer did not release retained native text blobs."
+        );
+    }
+
+    [TestMethod]
+    public void ShapesConstrainedParagraphsWithBreaksRangesAndGraphemeFallback()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var request = new TextMeasureRequest(
+            "alpha beta\ngamma",
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            InlineConstraint: new LayoutConstraint(60),
+            Wrap: TextWrap.WordWithGraphemeFallback
+        );
+
+        var shaped = renderer.Shape(request);
+        Assert(
+            shaped.Lines.Count >= 3,
+            "Word wrapping and the explicit break did not produce lines."
+        );
+        Assert(
+            shaped.Lines.All(line =>
+                line.Utf16Start >= 0
+                && line.Utf16Length >= 0
+                && line.Utf16Start + line.Utf16Length <= request.Text.Length
+                && float.IsFinite(line.Baseline)
+                && line.Advance >= 0
+            ),
+            "Paragraph lines did not preserve finite UTF-16 ranges and geometry."
+        );
+        Assert(
+            shaped.Lines.Any(line => line.HardBreak),
+            "The explicit newline was not represented as a hard break."
+        );
+        Assert(
+            shaped.Runs.Select(run => run.Baseline).Distinct().Count() > 1,
+            "Wrapped runs did not use the returned per-line baselines."
+        );
+        Assert(
+            ReferenceEquals(shaped, renderer.Shape(request)),
+            "The constrained request did not use the renderer shape cache."
+        );
+
+        var grapheme = renderer.Shape(
+            new TextMeasureRequest(
+                "a😀e\u0301",
+                "Segoe UI",
+                16,
+                "en",
+                TextDirection.LeftToRight,
+                1,
+                InlineConstraint: new LayoutConstraint(2),
+                Wrap: TextWrap.WordWithGraphemeFallback
+            )
+        );
+        Assert(
+            grapheme.Lines.Count == 3
+                && grapheme.Lines.All(line => line.Utf16Length is 1 or 2)
+                && grapheme.Lines.All(line =>
+                    line.Utf16Start == 0
+                    || line.Utf16Start + line.Utf16Length <= "a😀e\u0301".Length
+                ),
+            "Grapheme fallback split a surrogate pair or combining sequence."
+        );
+    }
+
+    [TestMethod]
+    public void ReportsConstrainedParagraphOverflowAndKeepsVisibleLines()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var request = new TextMeasureRequest(
+            "one two three four five six",
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            InlineConstraint: new LayoutConstraint(70),
+            BlockConstraint: new LayoutConstraint(20),
+            Wrap: TextWrap.WordWithGraphemeFallback,
+            MaxLines: 1
+        );
+        var first = renderer.Shape(request);
+        Assert(first.Lines.Count == 1, "MaxLines did not retain exactly one visible line.");
+        Assert(first.DidOverflow, "Line and block constraints did not report overflow.");
+        Assert(first.Height <= 20.001f, "Visible paragraph height exceeded the block constraint.");
+        Assert(
+            !ReferenceEquals(
+                first,
+                renderer.Shape(request with { BlockConstraint = LayoutConstraint.Unbounded })
+            ),
+            "Changing a paragraph constraint incorrectly reused the constrained cache entry."
+        );
+    }
+
+    [TestMethod]
+    public void RetainsEllipsisGlyphForOverflowingParagraph()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var request = new TextMeasureRequest(
+            "one two three four",
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            InlineConstraint: new LayoutConstraint(70),
+            Wrap: TextWrap.WordWithGraphemeFallback,
+            MaxLines: 1,
+            Overflow: TextOverflow.Ellipsis
+        );
+        var shaped = renderer.Shape(request);
+        var standaloneEllipsis = renderer
+            .Shape(new TextMeasureRequest("…", "Segoe UI", 16, "en", TextDirection.LeftToRight, 1))
+            .Runs.SelectMany(run => run.Glyphs)
+            .Single()
+            .GlyphId;
+
+        Assert(shaped.DidOverflow, "Ellipsis shaping did not retain overflow state.");
+        Assert(shaped.Lines.Count == 1, "Ellipsis shaping did not retain one visible line.");
+        Assert(
+            shaped.Width <= 70.001f,
+            "The visible ellipsis line exceeded its inline constraint."
+        );
+        Assert(
+            shaped
+                .Runs.SelectMany(run => run.Glyphs)
+                .Any(glyph => glyph.GlyphId == standaloneEllipsis),
+            "The visible overflow payload did not contain an ellipsis glyph."
+        );
+        Assert(
+            shaped.Lines[0].Utf16Start + shaped.Lines[0].Utf16Length <= request.Text.Length
+                && !shaped.Lines[0].HardBreak,
+            "Ellipsis line geometry escaped the source UTF-16 range."
+        );
+    }
+
+    [TestMethod]
+    public void ShapesTwentyThousandUnitsWithLinearWrapCharacterization()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var text = string.Join(' ', Enumerable.Repeat("word", 4000));
+        var request = new TextMeasureRequest(
+            text,
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            InlineConstraint: new LayoutConstraint(120),
+            Wrap: TextWrap.WordWithGraphemeFallback
+        );
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var shaped = renderer.Shape(request);
+        timer.Stop();
+
+        Assert(
+            text.Length == 19999
+                && shaped.Lines.Count > 100
+                && shaped.Lines.All(line =>
+                    line.Utf16Start >= 0 && line.Utf16Start + line.Utf16Length <= text.Length
+                )
+                && !shaped.DidOverflow,
+            "The 20,000-unit paragraph did not preserve bounded line geometry."
+        );
+        Assert(
+            ReferenceEquals(shaped, renderer.Shape(request)),
+            "The long constrained paragraph did not use the shape cache."
+        );
+        Console.WriteLine(
+            "20,000-unit wrap characterization: "
+                + timer.Elapsed.TotalMilliseconds.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+                + " ms; "
+                + shaped.Lines.Count
+                + " lines"
+        );
+        var ellipsisRequest = new TextMeasureRequest(
+            text,
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            InlineConstraint: new LayoutConstraint(70),
+            Wrap: TextWrap.NoWrap,
+            MaxLines: 1,
+            Overflow: TextOverflow.Ellipsis
+        );
+        var ellipsisTimer = System.Diagnostics.Stopwatch.StartNew();
+        var ellipsized = renderer.Shape(ellipsisRequest);
+        ellipsisTimer.Stop();
+        Assert(
+            ellipsized.DidOverflow && ellipsized.Lines.Count == 1 && ellipsized.Width <= 70.001f,
+            "The 20,000-unit narrow no-wrap ellipsis did not retain bounded output."
+        );
+        Console.WriteLine(
+            "20,000-unit ellipsis characterization: "
+                + ellipsisTimer.Elapsed.TotalMilliseconds.ToString(
+                    "F1",
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+                + " ms; "
+                + ellipsized.Lines[0].Utf16Length
+                + " UTF-16 units"
+        );
+    }
+
+    [TestMethod]
+    public void ShapeCacheEvictsLargeResultsAtTheByteBudget()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var text = new string('a', 20_000);
+        var request = new TextMeasureRequest(
+            text,
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1
+        );
+        var first = renderer.Shape(request);
+        var run = first.Runs.Single();
+        var advanceSum = run.Glyphs.Sum(glyph => (double)glyph.XAdvance);
+        var last = run.Glyphs[^1];
+        var finalPositionedEdge = last.X - last.XOffset + last.XAdvance;
+        Assert(
+            Math.Abs(advanceSum - run.RunWidth) <= .001
+                && MathF.Abs(finalPositionedEdge - run.RunWidth) <= .001f,
+            "The 20,000-unit run did not retain one canonical width for advances and positioned edges."
+        );
+        for (var index = 1; index <= 20; index++)
+            _ = renderer.Shape(request with { FontSize = 16 + index });
+
+        Assert(
+            !ReferenceEquals(first, renderer.Shape(request)),
+            "The byte-cost shape cache retained a large first result beyond its 16 MiB budget."
+        );
     }
 
     [TestMethod]

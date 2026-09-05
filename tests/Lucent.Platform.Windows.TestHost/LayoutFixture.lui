@@ -1,0 +1,42 @@
+namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+style LayoutFixtureShell {
+    Height: 520;
+    MainGrow: 1;
+}
+
+style WideGrid {
+    Mode: LayoutMode.Grid;
+    Columns: GridTracks.Create(
+        GridTrack.Fixed(200),
+        GridTrack.Fixed(180),
+        GridTrack.Fraction()
+    );
+    Rows: GridTracks.Create(GridTrack.Fraction());
+    ColumnGap: 12;
+    Padding: Insets.Uniform(18);
+    Height: 520;
+}
+
+style CompactGrid {
+    Mode: LayoutMode.Grid;
+    Columns: GridTracks.Create(GridTrack.Fraction());
+    Rows: GridTracks.Create(GridTrack.Fraction());
+    Padding: Insets.Uniform(18);
+    Height: 520;
+}
+
+internal component LayoutFixtureView(LayoutFixtureModel model) {
+    <ResponsiveContainer constraints={model.Constraints} style={LayoutFixtureShell}>
+        if (model.Constraints.Current.Width >= 700) {
+            <Column style={WideGrid}>
+                <Text name="layout.capture" style={Style.Empty.GridPlacement(new GridPlacement(0, 0)).FontSize(18)}>Capture column keeps its fixed grid track while the paragraph receives the remaining width.</Text>
+                <Text name="layout.metadata" style={Style.Empty.GridPlacement(new GridPlacement(0, 1)).FontSize(18)}>Metadata column remains stable across the responsive layout transition.</Text>
+                <Text name="layout.paragraph" style={Style.Empty.GridPlacement(new GridPlacement(0, 2)).FontSize(18).TextWrap(TextWrap.WordWithGraphemeFallback).TextOverflow(TextOverflow.Clip)}>This constrained paragraph demonstrates word wrapping, grapheme-safe fallback, and retained line geometry while a published responsive Grid changes from a wide three-track arrangement to a compact single-track arrangement during resize.</Text>
+            </Column>
+        } else {
+            <Column style={CompactGrid}>
+                <Text name="layout.paragraph" style={Style.Empty.GridPlacement(new GridPlacement(0, 0)).FontSize(18).TextWrap(TextWrap.WordWithGraphemeFallback).TextOverflow(TextOverflow.Clip)}>This constrained paragraph demonstrates word wrapping, grapheme-safe fallback, and retained line geometry while a published responsive Grid changes from a wide three-track arrangement to a compact single-track arrangement during resize.</Text>
+            </Column>
+        }
+    </ResponsiveContainer>
+}

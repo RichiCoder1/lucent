@@ -2,7 +2,7 @@
 
 ## Current direction
 
-Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. The next development effort is an independently consumed links-and-notes application that expands and refines the framework surface through daily use.
+Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. Its current published-package proof covers NativeAOT first startup and clean close; persistence, editing, and the daily-use flows remain application work.
 
 Production follows the decisions and contracts validated by the archived Native spike. The old implementation remains on [archive/avalonia-final](https://github.com/RichiCoder1/lucent/tree/archive/avalonia-final), and the complete spike record remains in the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). They are historical evidence, not active execution instructions.
 
@@ -13,23 +13,25 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 - Windows 11 24H2+, win-x64, .NET 10 LTS, NativeAOT, and trimming.
 - Typed C# composition and preview `.lui` over the same framework contracts. `.lui` is the primary UI authoring direction; C# remains the underlying semantic/runtime API.
 - Reactive state, derived state, batching, scopes, async generations, deterministic disposal, and stable keyed composition.
-- Bounded rows, columns, layout, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, finite variants, theme settings, reduced motion, and bounded transitions.
+- Bounded explicit Grid and Flex-style rows/columns, responsive logical constraints, constrained paragraphs, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, finite variants, theme settings, reduced motion, and bounded transitions.
 - Text, panel/layout primitives, button, single-line text field, selectable/list row, scroll viewport, virtualized list, loading/progress, and simple error state.
-- Basic international single-line editing with composition support, hoistable editor/viewport sessions, explicit hidden/collapsed participation, plus bounded UI Automation patterns and stale-node handling for the reference controls.
+- Basic international single-line editing with composition support, hoistable editor/viewport sessions, explicit hidden/collapsed participation, wheel/trackpad scrolling, application command scopes and chords, plus bounded UI Automation patterns and stale-node handling for the reference controls.
 - Optional Microsoft hosting integration with negotiated asynchronous shutdown and accepted-work recovery.
 - Deterministic tree, reactive, layout, style, semantic, scene, and timing dumps.
 - Persistent CPU Skia and SDL presentation with explicit backing-pixel scaling, deterministic local data, fake async behavior, and an optional live GitHub adapter.
 - External contract, published application, SDK, performance, and accessibility checks that keep proof orchestration out of the application.
 
-The [layout and paragraph decision](adr/0004-layout-and-paragraphs.md) selects a managed extension for the next Grid/Flex and wrapped-text implementation; these features are not yet implemented.
+The [layout and paragraph decision](adr/0004-layout-and-paragraphs.md) selects the managed extension now used for the bounded Grid/Flex, responsive constraints, constrained virtualization, and wrapped-text contracts.
 
-## Next development: links and notes
+## Next development: Light Notes
+
+The independent application lives in [RichiCoder1/light-notes](https://github.com/RichiCoder1/light-notes). Its first startup proof is established; the sections below describe the product and framework work that follows.
 
 The [draft application and framework plan](plans/links-and-notes-draft.md) captures the agreed direction, proposed implementation sequence, and open technical choices. The [experience design](design/links-and-notes/README.md) and [responsive visual board](design/links-and-notes/VISUAL.md) provide proposed application flows and authoring examples. Execution specifications and status belong in GitHub Issues and Project 4.
 
 Build a polished, local, single-user link inbox that also supports standalone notes. The owner and coding agents on the owner's Windows machine are the primary audience, with reproducible setup for other contributors. The application should make capture, editing, retrieval, opening, and archiving comfortable across wide, medium, and compact window arrangements.
 
-The first effort includes Grid, a coherent Flex-style Row/Column surface, responsive composition, and strong reusable layout, text, presentation, keyboard, and accessibility capabilities. Establish DI/hosting and local persistence through ecosystem components, with NativeAOT and the existing portable Core boundary intact. Exact APIs and dependencies remain implementation choices; Taffy and Microsoft.Data.Sqlite are candidates rather than adopted dependencies.
+The first effort includes Grid, a coherent Flex-style Row/Column surface, responsive composition, and strong reusable layout, text, presentation, keyboard, and accessibility capabilities. Establish DI/hosting and local persistence through ecosystem components, with NativeAOT and the existing portable Core boundary intact. The managed layout evaluation selected Lucent-owned Core code; Taffy remains a credited historical alternative rather than an adopted dependency. Microsoft.Data.Sqlite remains a future application persistence candidate.
 
 Develop design quality alongside complete application slices. Deliver required `.lui` content composition, live-data, command, and editor-session contracts with those slices; prioritize additional authoring conveniences from observed friction afterward. Higher-level source-owned component recipes can build on the foundations later. Continue using the current risk-based verification policy.
 

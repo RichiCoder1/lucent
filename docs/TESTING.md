@@ -38,6 +38,8 @@ Tooling measurements use [LuiTooling.Measurements.json](../tools/LuiTooling.Meas
 
 The published suite includes `Test-WindowsLifecycle.ps1`: a `.lui` application with controlled pending work verifies close rejection/retry, accepted-work drain, asynchronous service cleanup, and startup/stop/disposal failure paths through the real Windows host. `Lucent.Hosting.Tests` covers the portable Microsoft hosting adapter.
 
+The published Windows TestHost includes two focused fixtures for the new framework seams. The layout fixture resizes a responsive `.lui` Grid between wide and compact arrangements, checks constrained paragraph line geometry, and paints at synthetic 100%, 150%, and 200% viewport scales. The input fixture focuses its native viewport and receives physical wheel and Ctrl+N/F/S events through the Windows adapter. These are framework TestHost proofs, not Light Notes application workflows; Light Notes currently proves published-package NativeAOT startup and clean close separately.
+
 Desktop interaction checks require an interactive Windows session. They launch and close their own application processes. Keep desktop checks separate from unrelated work that changes focus or input.
 
 ## Desktop and accessibility coverage
