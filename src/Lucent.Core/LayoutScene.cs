@@ -126,6 +126,18 @@ public static class VisualProperties
         Brush.Solid(default)
     );
 
+    /// <summary>Paints an inset border independently of the element background.</summary>
+    public static readonly Property<Border> Border = new(
+        "visual-border",
+        global::Lucent.Core.Border.None
+    );
+
+    /// <summary>Paints an inset keyboard-focus ring over the element content.</summary>
+    public static readonly Property<FocusRing> FocusRing = new(
+        "visual-focus-ring",
+        global::Lucent.Core.FocusRing.None
+    );
+
     /// <summary>Sets transparency from 0 (invisible) to 1 (fully opaque).</summary>
     public static readonly Property<float> Opacity = new(
         "visual-opacity",
@@ -1217,6 +1229,12 @@ public enum SceneNodeKind
 
     /// <summary>Paints shaped text.</summary>
     Text,
+
+    /// <summary>Paints one or more inset border edges.</summary>
+    Border,
+
+    /// <summary>Paints an inset keyboard-focus ring.</summary>
+    FocusRing,
 
     /// <summary>Paints a selection highlight.</summary>
     Selection,

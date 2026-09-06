@@ -592,6 +592,64 @@ public sealed class RendererTests
     }
 
     [TestMethod]
+    public void RendersHairlineDividerAndInsetFocusRingAtDeclaredScale()
+    {
+        foreach (var scale in new[] { 1f, 1.25f, 1.5f, 2f })
+        {
+            using var composition = new Composition(new ReactiveGraph(), "decorations");
+            using var theme = new ThemeContext(composition.Root.Scope, new Theme("decorations"));
+            composition.Root.Present(
+                theme,
+                author: Style
+                    .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
+                    .Width(12)
+                    .Height(12)
+            );
+            var divider = composition.Child(composition.Root, "divider");
+            divider.Present(
+                theme,
+                author: Style
+                    .Empty.Width(12)
+                    .Height(4)
+                    .Border(Border.Hairline(Color.Parse("#CC2200"), BorderSides.Bottom))
+            );
+            var focused = composition.Child(composition.Root, "focused");
+            focused.Present(
+                theme,
+                author: Style
+                    .Empty.Width(12)
+                    .Height(8)
+                    .Clip(true)
+                    .FocusRing(FocusRing.Inset(Color.Parse("#2255CC"), 2))
+            );
+            using var renderer = new SkiaSceneRenderer();
+            var scene = SceneLayout.Project(composition, new(12, 12, scale), renderer);
+            using var bitmap = new SKBitmap(
+                (int)MathF.Ceiling(12 * scale),
+                (int)MathF.Ceiling(12 * scale),
+                SKColorType.Rgba8888,
+                SKAlphaType.Premul
+            );
+            using var canvas = new SKCanvas(bitmap);
+            canvas.Clear(SKColors.Transparent);
+            renderer.Render(scene, canvas);
+
+            var middleX = (int)MathF.Floor(6 * scale);
+            var redRows = Enumerable
+                .Range(0, bitmap.Height)
+                .Where(y => bitmap.GetPixel(middleX, y).Red > 180)
+                .ToArray();
+            var focusTop = (int)MathF.Round(4 * scale, MidpointRounding.AwayFromZero);
+            Assert(
+                redRows.Length == 1
+                    && bitmap.GetPixel(middleX, focusTop).Blue > 180
+                    && bitmap.GetPixel(middleX, focusTop).Alpha == byte.MaxValue,
+                "Projected hairline/focus pixels changed at scale " + scale
+            );
+        }
+    }
+
+    [TestMethod]
     public void RendersGradientStopsAndClipping()
     {
         using var renderer = new SkiaSceneRenderer();

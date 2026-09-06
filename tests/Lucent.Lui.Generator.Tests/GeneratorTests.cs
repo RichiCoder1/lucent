@@ -861,7 +861,7 @@ public static class Harness
         const string InlineProbe =
             "namespace Sample; public static class Probe { public static int Reads; public static float Read(global::Lucent.Core.Signal<float> signal) { Reads++; return signal.Value; } }";
         const string InlineConsumer =
-            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Lucent.Core.VisualProperties; public component Inline(Style? baseStyle, Signal<float> signal) { <Text style={baseStyle with { when Hover { Opacity: Sample.Probe.Read(signal); } }}>live</Text> }";
+            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; using static Lucent.Core.VisualProperties; public component Inline(Style? baseStyle, Signal<float> signal) { <Text style={baseStyle with { Border: Lucent.Core.Border.Hairline(Color.Parse(\"#D8DEE8\"), BorderSides.Bottom); when Hover { Opacity: Sample.Probe.Read(signal); FocusRing: Lucent.Core.FocusRing.Inset(Color.Parse(\"#2563EB\"), 2); } }}>live</Text> }";
         var inlineGeneratedResult = RunWithSource(
             InlineProbe,
             new TextFile("C:/consumer/Inline.lui", InlineConsumer, "Inline.lui")
@@ -869,7 +869,13 @@ public static class Harness
         Assert(
             inlineGeneratedResult.Diagnostics.Length == 0
                 && inlineGeneratedResult.Results.Single().GeneratedSources.Length == 1,
-            "inline generated consumer did not compile through the generator."
+            "inline generated consumer did not compile through the generator: "
+                + string.Join(
+                    " | ",
+                    inlineGeneratedResult.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
         );
         var inlineGenerated = inlineGeneratedResult
             .Results.Single()
@@ -925,8 +931,11 @@ public static class Harness
         inlineGraph.Drain();
         Assert(
             (int)probeReads.GetValue(null)! == 0
-                && inlineRoot.Resolve(VisualProperties.Opacity).Value == 1,
-            "inactive generated variant evaluated its binding."
+                && inlineRoot.Resolve(VisualProperties.Opacity).Value == 1
+                && inlineRoot.Resolve(VisualProperties.Border).Value
+                    == Border.Hairline(Color.Parse("#D8DEE8"), BorderSides.Bottom)
+                && inlineRoot.Resolve(VisualProperties.FocusRing).Value == FocusRing.None,
+            "inactive generated border/focus variant evaluated its binding."
         );
         inlineSignal.Value = .5f;
         inlineGraph.Drain();
@@ -939,8 +948,10 @@ public static class Harness
         inlineGraph.Drain();
         Assert(
             (int)probeReads.GetValue(null)! == 1
-                && inlineRoot.Resolve(VisualProperties.Opacity).Value == .5f,
-            "activating generated variant did not read the current source exactly once."
+                && inlineRoot.Resolve(VisualProperties.Opacity).Value == .5f
+                && inlineRoot.Resolve(VisualProperties.FocusRing).Value
+                    == FocusRing.Inset(Color.Parse("#2563EB"), 2),
+            "activating generated focus-ring variant did not resolve or read exactly once."
         );
         inlineSignal.Value = .75f;
         inlineGraph.Drain();

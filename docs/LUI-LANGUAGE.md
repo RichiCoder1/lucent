@@ -48,7 +48,7 @@ public static partial class Components
 
 `ComponentContent` accepts zero or more entries, validates and snapshots them when the owning recipe is created, and mounts them transactionally below that recipe's root. A component still creates exactly one stable root. Named slots reuse this content capability later, after a real compositional control proves their interface; the first implementation has default content only.
 
-The initial author-facing built-ins are `Row`, `Column`, `Text`, `Button`, `TextField`, `Selectable`, `ScrollViewport`, `VirtualizedList`, `Status`, and `Progress`. Redundant `Panel`, styled `Loading`, styled `Error`, mounted state handles, and duplicate public configurator overloads are not part of the ordinary recipe interface. The underlying element, presentation, behavior, and composition primitives remain the advanced custom-control seam.
+The initial author-facing built-ins are `Row`, `Column`, `Text`, `Button`, `TextField`, `TextArea`, `Selectable`, `ScrollViewport`, `VirtualizedList`, `Status`, and `Progress`. Redundant `Panel`, styled `Loading`, styled `Error`, mounted state handles, and duplicate public configurator overloads are not part of the ordinary recipe interface. The underlying element, presentation, behavior, and composition primitives remain the advanced custom-control seam.
 
 Ordinary parameters are validated and captured when a recipe is created. They are construction-time values unless their declared type is explicitly live. Common static-or-live inputs may expose focused `T` and `Func<T>` overloads; inherently live inputs use `Func<T>` directly. There is no `ReactiveValue<T>` wrapper or combinatorial overload matrix. Each mounted reader uses the existing scope-owned reactive graph and is released on disposal. Programmatic controlled text synchronization remains deferred.
 
@@ -347,3 +347,11 @@ Deferred work includes local state sugar, broader C# islands, relaxed live-reade
 Control-owned values outrank every component/author style candidate, including a binding. This preserves existing control-state authority for text, scroll, selection, and similar properties; dumps retain the overridden binding candidate and provenance.
 
 Source-copied components are ordinary project `.lui`/C# inputs with normal namespaces, metadata, maps, formatting, review, and ownership. Updates are manual file changes initially; no registry, installer, updater, manifest, or compatibility layer exists.
+
+## Application-owned control state
+
+Pass a model-owned `FocusTarget` to `TextField` or `TextArea` with `focusTarget={model.CaptureFocus}`. The model can request keyboard focus, optionally selecting all text, without traversing the mounted tree. A pending request waits for an eligible installed target; it does not make a collapsed pane visible. Route/participation changes remain application state.
+
+`VirtualizedList` accepts `viewport={model.ListViewport}` when the application needs scroll state to survive removal and later remounting. Editor controls continue to consume owned `EditorSession` values through `session`.
+
+Style property keys use the actual property names: for example `Overflow: TextOverflow.Ellipsis;`. A type can share the name of a statically imported property; use qualified value constructors such as `Lucent.Core.Border.Hairline(...)` or typed theme tokens. Prefer `BaseStyle with { Enabled: model.CanEdit; }` for declarative live style overrides.

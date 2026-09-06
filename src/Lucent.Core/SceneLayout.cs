@@ -612,6 +612,7 @@ public static class SceneLayout
             clipped.Add(new ClipSceneNode(new(identity, SceneNodeKind.Clip), inner, result));
             result = clipped;
         }
+        AddDecorations(result, element, identity, bounds, viewport.Scale, cache);
         return style.Opacity == 1 || result.Count == 0
             ? result
             :
@@ -623,6 +624,101 @@ public static class SceneLayout
                     result
                 ),
             ];
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(
+        System.Runtime.CompilerServices.MethodImplOptions.NoInlining
+    )]
+    private static void AddDecorations(
+        List<SceneNode> result,
+        Element element,
+        ElementIdentity identity,
+        LayoutRect bounds,
+        float scale,
+        ProjectionCache cache
+    )
+    {
+        var style = cache.ReadDecorations(element);
+        result.AddRange(
+            DecorationNodes(
+                identity,
+                SceneNodeKind.Border,
+                bounds,
+                style.Border.Brush,
+                style.Border.Widths,
+                style.Border.IsHairline,
+                scale
+            )
+        );
+        result.AddRange(
+            DecorationNodes(
+                identity,
+                SceneNodeKind.FocusRing,
+                bounds,
+                style.FocusRing.Brush,
+                Insets.Uniform(style.FocusRing.Thickness),
+                false,
+                scale
+            )
+        );
+    }
+
+    private static IReadOnlyList<SceneNode> DecorationNodes(
+        ElementIdentity identity,
+        SceneNodeKind kind,
+        LayoutRect bounds,
+        Brush? brush,
+        Insets widths,
+        bool hairline,
+        float scale
+    )
+    {
+        if (brush is null || brush.Color is { A: 0 } || widths == Insets.Zero)
+            return [];
+        if (hairline)
+        {
+            var devicePixel = 1 / scale;
+            widths = new Insets(
+                widths.Left > 0 ? devicePixel : 0,
+                widths.Top > 0 ? devicePixel : 0,
+                widths.Right > 0 ? devicePixel : 0,
+                widths.Bottom > 0 ? devicePixel : 0
+            );
+        }
+
+        var left = Math.Min(widths.Left, bounds.Width);
+        var top = Math.Min(widths.Top, bounds.Height);
+        var right = Math.Min(widths.Right, bounds.Width);
+        var bottom = Math.Min(widths.Bottom, bounds.Height);
+        var innerTop = Math.Min(bounds.Y + bounds.Height, bounds.Y + top);
+        var innerBottom = Math.Max(innerTop, bounds.Y + bounds.Height - bottom);
+        var candidates = new[]
+        {
+            new LayoutRect(bounds.X, bounds.Y, bounds.Width, top),
+            new LayoutRect(bounds.X, bounds.Y + bounds.Height - bottom, bounds.Width, bottom),
+            new LayoutRect(bounds.X, innerTop, left, innerBottom - innerTop),
+            new LayoutRect(
+                bounds.X + bounds.Width - right,
+                innerTop,
+                right,
+                innerBottom - innerTop
+            ),
+        };
+        return candidates
+            .Where(candidate => candidate.Width > 0 && candidate.Height > 0)
+            .Select(candidate =>
+            {
+                var rounded = LayoutRect.Round(
+                    candidate.X,
+                    candidate.Y,
+                    candidate.Width,
+                    candidate.Height,
+                    scale
+                );
+                return (SceneNode)new PaintSceneNode(new(identity, kind), rounded, brush);
+            })
+            .Where(node => node.Bounds.Width > 0 && node.Bounds.Height > 0)
+            .ToArray();
     }
 
     private static void AddCollapsedBoxes(Element element, float x, float y, List<LayoutBox> boxes)
@@ -1009,6 +1105,7 @@ public static class SceneLayout
     private sealed class ProjectionCache
     {
         private readonly Dictionary<long, Values> _styles = [];
+        private readonly Dictionary<long, DecorationValues> _decorations = [];
 
         internal Dictionary<TextMeasureRequest, ShapedText> Shapes { get; } = [];
 
@@ -1018,9 +1115,25 @@ public static class SceneLayout
                 return cached;
             var resolved = ReadResolved(element);
             _styles.Add(element.Id, resolved);
+            var decorations = new DecorationValues(
+                element.Resolve(VisualProperties.Border).Value,
+                element.Resolve(VisualProperties.FocusRing).Value
+            );
+            if (decorations != default)
+                _decorations.Add(element.Id, decorations);
             return resolved;
         }
+
+        internal DecorationValues ReadDecorations(Element element)
+        {
+            _ = Read(element);
+            return _decorations.TryGetValue(element.Id, out var decorations)
+                ? decorations
+                : default;
+        }
     }
+
+    private readonly record struct DecorationValues(Border Border, FocusRing FocusRing);
 
     private readonly record struct Values(
         LayoutMode Mode,

@@ -183,6 +183,30 @@ public static class StyleFluency
     public static Style Background(this Style style, Func<Brush> read) =>
         style.Bind(VisualProperties.Background, read);
 
+    /// <summary>Returns a style that sets an inset border.</summary>
+    public static Style Border(this Style style, Border value) =>
+        style.Set(VisualProperties.Border, value);
+
+    /// <summary>Returns a style that gets an inset border from the active theme token.</summary>
+    public static Style Border(this Style style, Token<Border> value) =>
+        style.Set(VisualProperties.Border, value);
+
+    /// <summary>Returns a style that gets an inset border from a live reader.</summary>
+    public static Style Border(this Style style, Func<Border> read) =>
+        style.Bind(VisualProperties.Border, read);
+
+    /// <summary>Returns a style that sets an inset keyboard-focus ring.</summary>
+    public static Style FocusRing(this Style style, FocusRing value) =>
+        style.Set(VisualProperties.FocusRing, value);
+
+    /// <summary>Returns a style that gets an inset keyboard-focus ring from the active theme token.</summary>
+    public static Style FocusRing(this Style style, Token<FocusRing> value) =>
+        style.Set(VisualProperties.FocusRing, value);
+
+    /// <summary>Returns a style that gets an inset keyboard-focus ring from a live reader.</summary>
+    public static Style FocusRing(this Style style, Func<FocusRing> read) =>
+        style.Bind(VisualProperties.FocusRing, read);
+
     /// <summary>Returns a style that sets transparency to <paramref name="value"/>.</summary>
     public static Style Opacity(this Style style, float value) =>
         style.Set(VisualProperties.Opacity, value);

@@ -15,6 +15,7 @@ public sealed class InputRouter
     private readonly Dictionary<long, Focusable> _focusable = [];
     private readonly Dictionary<long, Scrollable> _scrollable = [];
     private readonly Dictionary<long, TextFieldState> _textFields = [];
+    private readonly Dictionary<FocusTarget, FocusTargetRegistration> _focusTargets = [];
     private readonly Dictionary<TextClipboardRequest, ClipboardTicket> _clipboardTickets = [];
     private readonly Dictionary<int, Capture> _captures = [];
     private RetainedScene? _scene;
@@ -132,6 +133,14 @@ public sealed class InputRouter
             )
                 RequestFocus(null, FocusChangeReason.Reordered, errors);
             if (RevealEditorCaret() || _composition.InteractionVisualGeneration != visualGeneration)
+            {
+                _scene = null;
+                ClearInputCaches();
+                Throw(errors);
+                return false;
+            }
+            ProcessFocusTargets(errors);
+            if (_composition.InteractionVisualGeneration != visualGeneration)
             {
                 _scene = null;
                 ClearInputCaches();
@@ -693,6 +702,48 @@ public sealed class InputRouter
         });
     }
 
+    internal void RegisterFocusTarget(
+        long elementId,
+        ReactiveScope scope,
+        TextFieldState state,
+        FocusTarget target
+    )
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(target);
+        if (!ReferenceEquals(target.Graph, _composition.Graph))
+            throw new ArgumentException(
+                "A focus target and its mounted control must belong to the same reactive graph.",
+                nameof(target)
+            );
+        if (_focusTargets.ContainsKey(target))
+            throw new InvalidOperationException(
+                "A focus target can have only one live mounted text control."
+            );
+        var registration = new FocusTargetRegistration(elementId, state);
+        _focusTargets.Add(target, registration);
+        scope.OnDispose(() =>
+        {
+            if (
+                _focusTargets.TryGetValue(target, out var current)
+                && ReferenceEquals(current, registration)
+            )
+                _focusTargets.Remove(target);
+        });
+        _ = scope.Effect(
+            () =>
+            {
+                if (!target.TryGetPending(out _))
+                    return;
+                var errors = new List<Exception>();
+                TryFocusTarget(target, registration, errors);
+                Throw(errors);
+            },
+            scope.Name + ".focus-target"
+        );
+    }
+
     internal void RemoveElement(Element element, PointerCaptureLossReason reason)
     {
         var errors = new List<Exception>();
@@ -825,6 +876,7 @@ public sealed class InputRouter
         _focusable.Clear();
         _scrollable.Clear();
         _textFields.Clear();
+        _focusTargets.Clear();
         _clipboardTickets.Clear();
         _input.Clear();
         ClearInputCaches();
@@ -1020,6 +1072,41 @@ public sealed class InputRouter
             {
                 errors.Add(error);
             }
+    }
+
+    private void ProcessFocusTargets(List<Exception> errors)
+    {
+        foreach (var pair in _focusTargets.ToArray())
+            TryFocusTarget(pair.Key, pair.Value, errors);
+    }
+
+    private bool TryFocusTarget(
+        FocusTarget target,
+        FocusTargetRegistration registration,
+        List<Exception> errors
+    )
+    {
+        if (!target.TryGetPending(out var request) || _scene is null)
+            return false;
+        if (EnsureScene(errors) is not null)
+            return false;
+        if (
+            !_input.TryGetValue(registration.ElementId, out var retained)
+            || !Eligible(retained.Identity)
+            || !_focusable.ContainsKey(registration.ElementId)
+        )
+            return false;
+
+        SetModality(InputModality.Keyboard, errors);
+        RequestFocus(retained.Identity, FocusChangeReason.Keyboard, errors);
+        if (_focused?.Identity != retained.Identity)
+            return false;
+        if (request.SelectAll)
+        {
+            registration.State.CancelComposition();
+            registration.State.SelectAll();
+        }
+        return target.TryConsume(request.Generation);
     }
 
     private void SyncAvailability(List<Exception> errors)
@@ -1613,6 +1700,12 @@ public sealed class InputRouter
     {
         public bool TabStop { get; } = tabStop;
         public BehaviorContext Context { get; } = context;
+    }
+
+    private sealed class FocusTargetRegistration(long elementId, TextFieldState state)
+    {
+        public long ElementId { get; } = elementId;
+        public TextFieldState State { get; } = state;
     }
 
     private sealed class Scrollable(ScrollViewportState state)

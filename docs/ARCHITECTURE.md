@@ -76,7 +76,7 @@ Applications use `LucentApplication.CreateBuilder()` to snapshot a title, appear
 
 The session keeps asynchronous startup, close preparation, service stop and cleanup on the desktop event loop. A declined or failed preparation leaves the window and composition alive for recovery; repeated requests coalesce. Once preparation accepts close, stop and cleanup are terminal. Core disposes the composition before lifecycle resources, and failures remain observable across independently attempted cleanup stages. Accepted saves must be drained by the application service before acceptance; they are separate from cancellation of obsolete scope-owned reads.
 
-Core defines the portable host boundary without discovering a platform. The Windows adapter is selected explicitly with `UseWindows()` and pumps session continuations through the same wake transport as reactive work, even while minimized. Platform settings update `ThemeContext.Appearance` and `ReducedMotion`; the application lifecycle maps appearance to the effective theme.
+Core defines the portable host boundary without discovering a platform. The Windows adapter is selected explicitly with `UseWindows()` (optionally passing `WindowsWindowOptions` for initial and minimum logical client dimensions) and pumps session continuations through the same wake transport as reactive work, even while minimized. Platform settings update `ThemeContext.Appearance` and `ReducedMotion`; the application lifecycle maps appearance to the effective theme.
 
 Optional `Lucent.Hosting` references Core and Microsoft's Generic Host, independently of Windows. It owns one application DI scope, starts/stops hosted services, and resolves typed models at the application composition root. `.lui` components receive those models as parameters; there are no per-element DI scopes. [ADR 0003](adr/0003-application-services-and-shutdown.md) records recovery, service ownership and Microsoft container disposal boundaries.
 
@@ -189,3 +189,11 @@ The affected-check policy and repository test scopes are documented in TESTING.m
 ## Editor continuity and participation
 
 An application-owned `EditorSession` carries document text, caret, selection, undo history and viewport state across `.lui` arrangement mounts. Mount-local input and IME resources remain scoped to the retained element. `VisualProperties.Participation` explicitly separates visible, hidden and collapsed subtrees across layout, paint, input, focus and semantics. See [editor sessions](EDITOR-SESSIONS.md) for ownership, synchronization and focus handoff.
+
+## Application-owned focus and presentation
+
+`FocusTarget` records keyboard-focus intent for one mounted `TextField` or `TextArea`. An application owns it beside its editor sessions and passes `focusTarget={model.Target}` through `.lui`. `Request(selectAll: true)` does not replace the document or editor session. The router consumes the request only when that control is eligible in the installed scene; a collapsed or disabled target keeps the request pending. A target cannot bind two live controls. `Cancel()` withdraws pending intent; applications should cancel competing targets when navigation supersedes an earlier request. Mount disposal removes the registration, and a consumed request does not replay after resizing or remounting.
+
+`VirtualizedList` accepts an optional application-owned `ViewportState`. This makes list scroll retention explicit when conditional content temporarily removes the list; the application remains responsible for collection-change policy.
+
+`VisualProperties.Border` and `FocusRing` project inset edge paints through the existing retained scene. Border widths are logical except `Border.Hairline`, which resolves to one backing pixel per selected edge. Neither decoration changes measured size or input/semantic bounds. Focus rings paint above the element's content while respecting ancestor clipping; authors activate them through `FocusVisible`, independently of `Selected` backgrounds.

@@ -716,6 +716,80 @@ style Unused { Spacing: 1f; }
     }
 
     [TestMethod]
+    public void FluentStyleReceiverCountsAsUse()
+    {
+        const string source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Styled() {
+    <Row style={EditorPaneStyle.Padding(Insets.Uniform(4)).Participation(ElementParticipation.Visible)} />
+}
+style EditorPaneStyle { Opacity: .5f; }
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("fluent-style-use", references: References()),
+            new LuiFreshnessIdentity(
+                "fluent-style-use",
+                "fluent-style-use",
+                new LuiDocumentIdentity("FluentStyleUse.lui"),
+                "v1",
+                "preview"
+            )
+        );
+
+        Assert(
+            result.Success
+                && !result.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI5002")
+                && result.Source!.Contains("EditorPaneStyle.Padding(")
+                && result.Source.Contains(".Participation(")
+                && LuiFormatter.Format(source, LuiLineEnding.Lf)
+                    == LuiFormatter.Format(
+                        LuiFormatter.Format(source, LuiLineEnding.Lf),
+                        LuiLineEnding.Lf
+                    ),
+            "a private style used as a fluent-call receiver was reported unused: "
+                + string.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.Message
+                    )
+                )
+        );
+
+        const string shadowedSource = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Shadowed(Style EditorPaneStyle) {
+    <Row style={EditorPaneStyle} />
+}
+style EditorPaneStyle { Opacity: .5f; }
+""";
+        var shadowed = LuiCompiler.Compile(
+            LuiParser.Parse(shadowedSource),
+            CSharpCompilation.Create("shadowed-style-use", references: References()),
+            new LuiFreshnessIdentity(
+                "shadowed-style-use",
+                "shadowed-style-use",
+                new LuiDocumentIdentity("ShadowedStyleUse.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            shadowed.Success
+                && shadowed.Diagnostics.Any(diagnostic =>
+                    diagnostic.Id == "LUI5002"
+                    && diagnostic.Span.Start
+                        == shadowedSource.LastIndexOf("EditorPaneStyle", StringComparison.Ordinal)
+                ),
+            "a same-named parameter incorrectly counted as use of a private style."
+        );
+    }
+
+    [TestMethod]
     public void ParameterDiagnostics()
     {
         var rejectedParameters = LuiParser.Parse(

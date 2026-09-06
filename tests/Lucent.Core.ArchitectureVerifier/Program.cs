@@ -217,6 +217,8 @@ static void VerifyPropertySurface(
             ["Lucent.Core.VisualProperties"] = new()
             {
                 ["Background"] = "Lucent.Core.Property`1|Lucent.Core.Brush",
+                ["Border"] = "Lucent.Core.Property`1|Lucent.Core.Border",
+                ["FocusRing"] = "Lucent.Core.Property`1|Lucent.Core.FocusRing",
                 ["Opacity"] = "Lucent.Core.Property`1|System.Single",
                 ["Participation"] = "Lucent.Core.Property`1|Lucent.Core.ElementParticipation",
             },

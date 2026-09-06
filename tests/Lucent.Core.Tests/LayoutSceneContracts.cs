@@ -119,6 +119,79 @@ public sealed class LayoutSceneContracts
     }
 
     [TestMethod]
+    public void BordersAndFocusRingsProjectInsideClippedDeviceEdges()
+    {
+        var divider = Border.Hairline(Color.Parse("#445566"), BorderSides.Bottom);
+        var field = Border.Uniform(Color.Parse("#778899"), 1);
+        var focus = FocusRing.Inset(Color.Parse("#2255CC"), 2);
+        Assert(
+            divider == Border.Hairline(Color.Parse("#445566"), BorderSides.Bottom)
+                && field == Border.Edges(Color.Parse("#778899"), Insets.Uniform(1))
+                && focus == FocusRing.Inset(Color.Parse("#2255CC"), 2)
+                && Border.None == default
+                && FocusRing.None == default,
+            "Border or focus-ring value semantics changed."
+        );
+        Expect<ArgumentOutOfRangeException>(() => Border.Uniform(Color.Parse("#000000"), 0));
+        Expect<ArgumentOutOfRangeException>(() =>
+            Border.Hairline(Color.Parse("#000000"), BorderSides.None)
+        );
+        Expect<ArgumentOutOfRangeException>(() => FocusRing.Inset(Color.Parse("#000000"), -1));
+
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "decorations");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("decorations"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Width(20)
+                .Height(20)
+                .Padding(Insets.Uniform(3))
+                .Clip(true)
+                .Background(Color.Parse("#FFFFFF"))
+                .Border(divider)
+                .FocusRing(focus)
+        );
+        var child = composition.Child(composition.Root, "overflow");
+        child.Present(
+            theme,
+            author: Style.Empty.Width(30).Height(30).Background(Color.Parse("#FF0000"))
+        );
+
+        foreach (var scale in new[] { 1f, 1.25f, 1.5f, 2f })
+        {
+            var scene = SceneLayout.Project(composition, new(20, 20, scale), new ProbeShaper());
+            var nodes = scene.Nodes.ToList();
+            var clipIndex = nodes.FindIndex(node => node is ClipSceneNode);
+            var borderNodes = scene
+                .Nodes.OfType<PaintSceneNode>()
+                .Where(node => node.Identity.Kind == SceneNodeKind.Border)
+                .ToArray();
+            var focusNodes = scene
+                .Nodes.OfType<PaintSceneNode>()
+                .Where(node => node.Identity.Kind == SceneNodeKind.FocusRing)
+                .ToArray();
+            Assert(
+                clipIndex >= 0
+                    && borderNodes.Length == 1
+                    && focusNodes.Length == 4
+                    && nodes.IndexOf(borderNodes[0]) > clipIndex
+                    && nodes.IndexOf(focusNodes[0]) > clipIndex
+                    && MathF.Abs(borderNodes[0].Bounds.Height * scale - 1) < .001f
+                    && borderNodes[0].Bounds.Y + borderNodes[0].Bounds.Height == 20
+                    && focusNodes.All(node =>
+                        node.Bounds.X >= 0
+                        && node.Bounds.Y >= 0
+                        && node.Bounds.X + node.Bounds.Width <= 20
+                        && node.Bounds.Y + node.Bounds.Height <= 20
+                    ),
+                "Clipping hid a decoration or hairline geometry was not one device pixel at scale "
+                    + scale
+            );
+        }
+    }
+
+    [TestMethod]
     public void InsetsAndPadding()
     {
         var value = new Insets(1, 2, 3, 4);

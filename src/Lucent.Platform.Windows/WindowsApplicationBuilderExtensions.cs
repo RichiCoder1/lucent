@@ -6,18 +6,26 @@ namespace Lucent.Platform.Windows;
 public static class WindowsApplicationBuilderExtensions
 {
     /// <summary>Selects the Windows SDL, Skia, input, settings, and accessibility adapter.</summary>
-    public static LucentApplicationBuilder UseWindows(this LucentApplicationBuilder builder)
+    public static LucentApplicationBuilder UseWindows(
+        this LucentApplicationBuilder builder,
+        WindowsWindowOptions? window = null
+    )
     {
         ArgumentNullException.ThrowIfNull(builder);
-        return builder.UseHost(WindowsApplicationHost.Instance);
+        window?.Validate();
+        return builder.UseHost(
+            window is null ? WindowsApplicationHost.Instance : new WindowsApplicationHost(window)
+        );
     }
 
     private sealed class WindowsApplicationHost : IApplicationHost
     {
         internal static WindowsApplicationHost Instance { get; } = new();
 
-        private WindowsApplicationHost() { }
+        private readonly WindowsWindowOptions? _window;
 
-        public int Run(ApplicationSession session) => WindowsBootstrap.Run(session);
+        internal WindowsApplicationHost(WindowsWindowOptions? window = null) => _window = window;
+
+        public int Run(ApplicationSession session) => WindowsBootstrap.Run(session, _window);
     }
 }

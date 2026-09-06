@@ -39,21 +39,23 @@ public static class WindowsBootstrap
     /// <exception cref="InvalidOperationException">Windows DPI setup, SDL initialization, window creation, rendering, input projection, or native presentation fails.</exception>
     [STAThread]
     public static int Run(string title, Composition composition, ThemeContext? theme = null) =>
-        RunCore(title, composition, theme, null);
+        RunCore(title, composition, theme, null, null);
 
     /// <summary>Runs one portable application session through startup and negotiated asynchronous shutdown.</summary>
     [STAThread]
-    public static int Run(ApplicationSession session)
+    public static int Run(ApplicationSession session, WindowsWindowOptions? window = null)
     {
         ArgumentNullException.ThrowIfNull(session);
-        return RunCore(session.Title, session.Composition, session.Theme, session);
+        window?.Validate();
+        return RunCore(session.Title, session.Composition, session.Theme, session, window);
     }
 
     private static int RunCore(
         string title,
         Composition composition,
         ThemeContext? theme,
-        ApplicationSession? session
+        ApplicationSession? session,
+        WindowsWindowOptions? windowOptions
     )
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
@@ -87,8 +89,8 @@ public static class WindowsBootstrap
         {
             window = SDL.CreateWindow(
                 title,
-                InitialLogicalWidth,
-                InitialLogicalHeight,
+                windowOptions?.Width ?? InitialLogicalWidth,
+                windowOptions?.Height ?? InitialLogicalHeight,
                 SDL.WindowFlags.Resizable | SDL.WindowFlags.HighPixelDensity
             );
             if (window == 0)
@@ -126,6 +128,12 @@ public static class WindowsBootstrap
             _ = cursor.Activate();
             _ = ApplySettings(composition, settings, theme);
             diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
+            float configuredWindowScale = 0;
+            if (windowOptions is not null)
+            {
+                configuredWindowScale = GetViewport(window, sdlRenderer).Scale;
+                ApplyWindowDimensions(window, windowOptions, configuredWindowScale, initial: true);
+            }
             var recordedPerformanceBaseline = false;
             session?.Start();
             while (scheduler.IsOpen && session?.IsCompleted != true)
@@ -180,6 +188,16 @@ public static class WindowsBootstrap
                 }
 
                 var viewport = GetViewport(window, sdlRenderer);
+                if (windowOptions is not null && configuredWindowScale != viewport.Scale)
+                {
+                    configuredWindowScale = viewport.Scale;
+                    ApplyWindowDimensions(
+                        window,
+                        windowOptions,
+                        configuredWindowScale,
+                        initial: false
+                    );
+                }
                 if (!scheduler.TryBegin(viewport))
                     continue;
                 uiaDispatcher.SetOwnerPhase("frame");
@@ -340,6 +358,34 @@ public static class WindowsBootstrap
         if (errors.Count == 1)
             ExceptionDispatchInfo.Capture(errors[0]).Throw();
         throw new AggregateException("Windows host run and cleanup failed.", errors);
+    }
+
+    internal static void ApplyWindowDimensions(
+        nint window,
+        WindowsWindowOptions options,
+        float dpiScale,
+        bool initial
+    )
+    {
+        options.Validate();
+        var density = SDL.GetWindowPixelDensity(window);
+        int Units(int value) => WindowsWindowOptions.ToWindowUnits(value, dpiScale, density);
+        if (
+            !SDL.SetWindowMinimumSize(
+                window,
+                Units(options.MinimumWidth),
+                Units(options.MinimumHeight)
+            )
+        )
+            throw new InvalidOperationException($"SDL_SetWindowMinimumSize: {SDL.GetError()}");
+        if (
+            initial
+            && (
+                !SDL.SetWindowSize(window, Units(options.Width), Units(options.Height))
+                || !SDL.SyncWindow(window)
+            )
+        )
+            throw new InvalidOperationException($"SDL_SetWindowSize: {SDL.GetError()}");
     }
 
     private static WindowsViewport GetViewport(nint window, nint renderer)

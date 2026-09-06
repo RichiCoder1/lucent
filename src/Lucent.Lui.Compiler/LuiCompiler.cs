@@ -54,18 +54,9 @@ public static class LuiCompiler
         identity = Snapshot(identity, compilation);
         var rootTokens = RootTokens(compilation, identity.RootNamespace);
         var diagnostics = new List<LuiDiagnostic>(document.Diagnostics);
-        UnusedStyleLints(document, diagnostics);
         var writer = new Writer(document, identity, null, []);
         if (document.Component is not null)
             writer.Document(diagnostics);
-        if (HasErrors(diagnostics))
-            return new LuiCompilationResult(
-                identity,
-                null,
-                new LuiSourceMap(identity, writer.Entries),
-                diagnostics.OrderBy(item => item.Span.Start).ToArray(),
-                writer.Text
-            );
 
         var parseOptions =
             (CSharpParseOptions?)compilation.SyntaxTrees.FirstOrDefault()?.Options
@@ -74,6 +65,16 @@ public static class LuiCompiler
         var probeCompilation = compilation.AddSyntaxTrees(probeTree);
         var probeModel = probeCompilation.GetSemanticModel(probeTree);
         var probeMap = new LuiSourceMap(identity, writer.Entries);
+        UnusedStyleLints(document, probeModel, probeTree, diagnostics);
+        if (HasErrors(diagnostics))
+            return new LuiCompilationResult(
+                identity,
+                null,
+                probeMap,
+                diagnostics.OrderBy(item => item.Span.Start).ToArray(),
+                writer.Text
+            );
+
         var componentWriter = new Writer(document, identity, null, ["Lucent.Core.Components"]);
         componentWriter.Document(diagnostics);
         var componentTree = CSharpSyntaxTree.ParseText(
@@ -349,21 +350,37 @@ public static class LuiCompiler
 
     private static void UnusedStyleLints(
         LuiDocumentSyntax document,
+        SemanticModel model,
+        SyntaxTree tree,
         List<LuiDiagnostic> diagnostics
     )
     {
+        if (document.Styles.Count == 0)
+            return;
+        var root = tree.GetRoot();
+        var names = new HashSet<string>(
+            document.Styles.Select(style => style.Name.Text),
+            StringComparer.Ordinal
+        );
+        var fields = new HashSet<ISymbol>(
+            root.DescendantNodes()
+                .OfType<VariableDeclaratorSyntax>()
+                .Select(variable => model.GetDeclaredSymbol(variable) as IFieldSymbol)
+                .Where(field =>
+                    field is not null
+                    && names.Contains(field.Name)
+                    && field.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                        == "global::Lucent.Core.Style"
+                )
+                .Cast<ISymbol>(),
+            SymbolEqualityComparer.Default
+        );
         var used = new HashSet<string>(
-            Elements(document.Component?.Body ?? [])
-                .SelectMany(element => element.Attributes)
-                .Where(attribute => attribute.Name.Text == "style")
-                .Select(attribute =>
-                    attribute.Value switch
-                    {
-                        LuiStyleWithSyntax style => style.Name.Text,
-                        LuiExpressionSyntax expression => expression.Text.Trim(),
-                        _ => "",
-                    }
-                ),
+            root.DescendantNodes()
+                .OfType<IdentifierNameSyntax>()
+                .Select(identifier => model.GetSymbolInfo(identifier).Symbol)
+                .Where(symbol => symbol is not null && fields.Contains(symbol))
+                .Select(symbol => symbol!.Name),
             StringComparer.Ordinal
         );
         foreach (var style in document.Styles.Where(style => !used.Contains(style.Name.Text)))

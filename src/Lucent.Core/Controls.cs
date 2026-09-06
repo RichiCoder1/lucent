@@ -445,7 +445,8 @@ internal static class Controls
         string name,
         string value = "",
         Style? style = null,
-        EditorSession? session = null
+        EditorSession? session = null,
+        FocusTarget? focusTarget = null
     )
     {
         name = Required(name, nameof(name));
@@ -465,6 +466,13 @@ internal static class Controls
             ?? new EditorSession(element.Scope, element.Name, value, element.Name + ".editor");
         var state = new TextFieldState(element.Scope, element.Name + ".text", editor);
         Configure(element, theme, component, style, new TextFieldBehavior(state, name));
+        if (focusTarget is not null)
+            element.Composition.Input.RegisterFocusTarget(
+                element.Id,
+                element.Scope,
+                state,
+                focusTarget
+            );
         _ = element.Scope.Effect(
             () =>
             {
@@ -496,7 +504,8 @@ internal static class Controls
         string name,
         string value = "",
         Style? style = null,
-        EditorSession? session = null
+        EditorSession? session = null,
+        FocusTarget? focusTarget = null
     )
     {
         name = Required(name, nameof(name));
@@ -526,6 +535,13 @@ internal static class Controls
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
         var state = new TextAreaState(element.Scope, element.Name + ".text", editor);
         Configure(element, theme, component, style, new TextFieldBehavior(state, name));
+        if (focusTarget is not null)
+            element.Composition.Input.RegisterFocusTarget(
+                element.Id,
+                element.Scope,
+                state,
+                focusTarget
+            );
         _ = element.Scope.Effect(
             () =>
             {

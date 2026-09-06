@@ -154,7 +154,8 @@ public static class Components
         Action<string>? onChange = null,
         Style? style = null,
         string label = "Text field",
-        EditorSession? session = null
+        EditorSession? session = null,
+        FocusTarget? focusTarget = null
     )
     {
         TextFieldState.ValidateText(initialValue);
@@ -174,7 +175,8 @@ public static class Components
                     label,
                     initialValue,
                     style,
-                    session
+                    session,
+                    focusTarget
                 );
                 if (onChange is not null)
                 {
@@ -203,7 +205,8 @@ public static class Components
         Action<string>? onChange = null,
         Style? style = null,
         string label = "Text area",
-        EditorSession? session = null
+        EditorSession? session = null,
+        FocusTarget? focusTarget = null
     )
     {
         TextFieldState.ValidateMultilineText(initialValue);
@@ -223,7 +226,8 @@ public static class Components
                     label,
                     initialValue,
                     style,
-                    session
+                    session,
+                    focusTarget
                 );
                 if (onChange is not null)
                 {
@@ -330,7 +334,8 @@ public static class Components
         Func<CurrentItem<TItem>, ComponentRecipe> row,
         Func<float> rowHeight,
         string label = "Items",
-        Style? style = null
+        Style? style = null,
+        ViewportState? viewport = null
     )
         where TKey : notnull
     {
@@ -348,7 +353,13 @@ public static class Components
                     root.Name + ".row-height-read"
                 );
                 var height = rowHeightValue.Value;
-                var scroll = Controls.ScrollViewport(root, context.Theme, label, style: style);
+                var scroll = Controls.ScrollViewport(
+                    root,
+                    context.Theme,
+                    label,
+                    style: style,
+                    viewport: viewport
+                );
                 var region = context.Virtualize(
                     root,
                     "rows",

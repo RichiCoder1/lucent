@@ -13,9 +13,9 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 - Windows 11 24H2+, win-x64, .NET 10 LTS, NativeAOT, and trimming.
 - Typed C# composition and preview `.lui` over the same framework contracts. `.lui` is the primary UI authoring direction; C# remains the underlying semantic/runtime API.
 - Reactive state, derived state, batching, scopes, async generations, deterministic disposal, and stable keyed composition.
-- Bounded explicit Grid and Flex-style rows/columns, responsive logical constraints, constrained paragraphs, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, finite variants, theme settings, reduced motion, and bounded transitions.
+- Bounded explicit Grid and Flex-style rows/columns, responsive logical constraints, constrained paragraphs, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, inset borders/hairlines and independent focus rings, finite variants, theme settings, reduced motion, and bounded transitions.
 - Text, panel/layout primitives, button, single-line text field, multiline text area, selectable/list row, scroll viewport, virtualized list, loading/progress, and simple error state.
-- Plain-text editing with composition support and a bounded 20,000-unit multiline workload, hoistable editor/viewport sessions, explicit hidden/collapsed participation, wheel/trackpad scrolling, application command scopes and chords, plus bounded UI Automation patterns and stale-node handling for the reference controls.
+- Plain-text editing with composition support and a bounded 20,000-unit multiline workload, hoistable editor/viewport sessions, application-owned text focus targets, explicit hidden/collapsed participation, wheel/trackpad scrolling, application command scopes and chords, plus bounded UI Automation patterns and stale-node handling for the reference controls.
 - Optional Microsoft hosting integration with negotiated asynchronous shutdown and accepted-work recovery.
 - Deterministic tree, reactive, layout, style, semantic, scene, and timing dumps.
 - Persistent CPU Skia and SDL presentation with explicit backing-pixel scaling, deterministic local data, fake async behavior, and an optional live GitHub adapter.
@@ -43,7 +43,7 @@ The [architecture/code review](../plans/architecture-review.md) informs this seq
 2. Establish retained current-item updates, `.lui` content composition, host shutdown/service ownership, editor sessions, and explicit responsive participation.
 3. Resolve constrained paragraph measurement and the layout engine; prove pinned independent startup and ordered local persistence; reduce per-event input work.
 4. Implement shared Grid/Flex/wrapped text, constrained virtualization, multiline editing, wheel/trackpad routing, and application commands.
-5. Compose the responsive `.lui` inbox/editor and complete the durable capture/edit/find/open/archive/reopen loop.
+5. Compose the responsive `.lui` inbox/editor (#80), then review the app and framework/authoring experience with the owner before completing the durable capture/edit/find/open/archive/reopen loop (#81).
 6. Refine daily-use design, recovery and accessibility, then select further authoring QoL from observed friction.
 
 GitHub blocker relationships determine what must finish first. Independent fixes and the hosting/storage and layout tracks need not be serialized. Keep focused verification, NativeAOT/trimming correctness, and source-map/freshness guarantees; no new milestone gates or routine full-release runs.
