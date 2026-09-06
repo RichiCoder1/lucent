@@ -308,6 +308,51 @@ public abstract class LuiBodySyntax : LuiSyntaxNode
         : base(span) { }
 }
 
+/// <summary>Classification of a C#-shaped declaration authored before a component's markup root.</summary>
+public enum LuiMemberKind
+{
+    /// <summary>A field-shaped declaration whose reactive semantics are decided during lowering.</summary>
+    Field,
+
+    /// <summary>An ordinary component method visible to markup.</summary>
+    Method,
+
+    /// <summary>The component's optional synchronous setup block.</summary>
+    Setup,
+}
+
+/// <summary>A bounded Roslyn-parsed declaration authored before a component's markup root.</summary>
+public sealed class LuiMemberSyntax : LuiBodySyntax
+{
+    /// <summary>Creates a component member with exact authored text and its parsed C# shape.</summary>
+    public LuiMemberSyntax(
+        LuiSpan span,
+        string text,
+        LuiMemberKind kind,
+        MemberDeclarationSyntax declaration,
+        LuiToken? setupOwner = null
+    )
+        : base(span)
+    {
+        Text = text;
+        Kind = kind;
+        Declaration = declaration;
+        SetupOwner = setupOwner;
+    }
+
+    /// <summary>Exact authored member text, excluding surrounding component whitespace.</summary>
+    public string Text { get; }
+
+    /// <summary>The member's syntactic role. Field state classification remains a compiler concern.</summary>
+    public LuiMemberKind Kind { get; }
+
+    /// <summary>Roslyn declaration parsed from the member; Setup body offsets remain authored-text aligned.</summary>
+    public MemberDeclarationSyntax Declaration { get; }
+
+    /// <summary>The optional identifier from <c>Setup(owner)</c>, with its authored source span.</summary>
+    public LuiToken? SetupOwner { get; }
+}
+
 /// <summary>Literal text child preserved verbatim from the authored body.</summary>
 public sealed class LuiTextSyntax : LuiBodySyntax
 {

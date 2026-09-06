@@ -1683,6 +1683,54 @@ public static class Harness
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
+    [TestMethod]
+    public void StatefulComponentsGenerateThroughSiblingIndex()
+    {
+        const string source = """
+namespace StatefulGenerator;
+using Lucent.Core;
+public component Counter() {
+    int count = 0;
+    string label = count.ToString();
+    void Increment() { count++; }
+    <Column><Button onInvoke={Increment}>{label}</Button></Column>
+}
+""";
+        const string parent = """
+namespace StatefulGenerator;
+public component Parent() { <Column><Counter /><Counter /></Column> }
+""";
+        var result = RunWithSource(
+            "",
+            new TextFile("C:/trial/Counter.lui", source, "Counter.lui"),
+            new TextFile("C:/trial/Parent.lui", parent, "Parent.lui")
+        );
+        Assert(
+            !result.Diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error),
+            string.Join(" | ", result.Diagnostics)
+        );
+        Assert(
+            result.Results.Single().GeneratedSources.Length == 2,
+            "Stateful sibling components were not both generated."
+        );
+        var compilation = CSharpCompilation.Create(
+            "stateful-generator",
+            result
+                .Results.Single()
+                .GeneratedSources.Select(g =>
+                    CSharpSyntaxTree.ParseText(
+                        g.SourceText,
+                        new CSharpParseOptions(LanguageVersion.Preview)
+                    )
+                ),
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var output = new MemoryStream();
+        var emitted = compilation.Emit(output);
+        Assert(emitted.Success, string.Join(" | ", emitted.Diagnostics));
+    }
+
     static GeneratorDriverRunResult RunWithSource(string source, params AdditionalText[] texts)
     {
         var compilation = CSharpCompilation.Create(

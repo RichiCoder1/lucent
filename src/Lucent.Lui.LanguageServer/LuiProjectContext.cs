@@ -32,7 +32,18 @@ internal sealed class LuiProjectContext : IDisposable
         "Lucent.Core.TypographyProperties",
         "Lucent.Core.InputProperties",
     ];
+    private static readonly Lazy<MefHostServices> editorHost = new(() =>
+        MefHostServices.Create(
+            MefHostServices
+                .DefaultAssemblies.Concat([Assembly.Load("Microsoft.CodeAnalysis.CSharp.Features")])
+                .Distinct()
+        )
+    );
+    private readonly ConditionalWeakTable<Project, Project> editorProjects = new();
     private readonly object gate = new();
+    private readonly Dictionary<Uri, LuiCompilationResult> compiledDocuments = [];
+    private long compilationEpoch = -1;
+    private CachedHover? cachedHover;
     private MSBuildWorkspace workspace;
     private ProjectId projectId;
     private readonly string projectPath;
@@ -55,6 +66,15 @@ internal sealed class LuiProjectContext : IDisposable
         solution = project.Solution;
         projectDirectories = ProjectDirectories(project)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    internal long CompletionEpoch
+    {
+        get
+        {
+            lock (gate)
+                return epoch;
+        }
     }
 
     internal static async Task<LuiProjectContext> LoadAsync(
@@ -150,11 +170,7 @@ internal sealed class LuiProjectContext : IDisposable
             return null;
         if (!snapshot.Index.TryGet(snapshot.Document.Path, out _))
             return null;
-        var result = LuiCompiler.Compile(
-            snapshot.Document.Syntax,
-            snapshot.Compilation,
-            snapshot.Identity
-        );
+        var result = CompileSnapshot(snapshot);
         Track(result, snapshot);
         if (!result.Success)
             return null;
@@ -204,11 +220,7 @@ internal sealed class LuiProjectContext : IDisposable
                     : [metadata]
                 : null;
         }
-        var result = LuiCompiler.Compile(
-            snapshot.Document.Syntax,
-            snapshot.Compilation,
-            snapshot.Identity
-        );
+        var result = CompileSnapshot(snapshot);
         var diagnostics = result
             .Diagnostics.Select(diagnostic => EditorDiagnostic(snapshot.Compilation, diagnostic))
             .Where(diagnostic => diagnostic is not null)
@@ -241,12 +253,19 @@ internal sealed class LuiProjectContext : IDisposable
         CancellationToken cancellationToken
     )
     {
+        long captured;
         lock (gate)
+        {
             ThrowIfDisposed();
+            captured = epoch;
+        }
         if (!Owns(uri))
             return [];
-        var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
-        var syntax = snapshot.Document.Syntax;
+        var text = await GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
+        if (text is null)
+            return [];
+        // Outline symbols depend on authored syntax, not C# binding or generators.
+        var syntax = LuiParser.Parse(text);
         var symbols = new List<LuiDocumentSymbol>();
         if (syntax.Component is { } component)
         {
@@ -280,9 +299,8 @@ internal sealed class LuiProjectContext : IDisposable
             ))
         );
         var published = symbols.OrderBy(symbol => symbol.Span.Start).ToArray();
-        return await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
-            ? published
-            : null;
+        lock (gate)
+            return !disposed && !reloadFailed && epoch == captured ? published : null;
     }
 
     internal async Task<int[]?> SemanticTokensAsync(Uri uri, CancellationToken cancellationToken)
@@ -294,11 +312,7 @@ internal sealed class LuiProjectContext : IDisposable
         var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
         if (snapshot.MetadataDiagnostic is not null)
             return [];
-        var result = LuiCompiler.Compile(
-            snapshot.Document.Syntax,
-            snapshot.Compilation,
-            snapshot.Identity
-        );
+        var result = CompileSnapshot(snapshot);
         Track(result, snapshot);
         if (result.ProjectionSource is null)
             return [];
@@ -326,7 +340,14 @@ internal sealed class LuiProjectContext : IDisposable
             )
             .ConfigureAwait(false);
         var spans = SyntaxSemanticSpans(snapshot.Document.Syntax)
-            .Concat(ProjectClassifications(result.Map, classified))
+            .Concat(
+                ProjectClassifications(
+                    result.Map,
+                    classified,
+                    snapshot.Text,
+                    result.ProjectionSource
+                )
+            )
             .Where(span => span.Span.Length != 0 && span.Span.End <= snapshot.Text.Length)
             .OrderBy(span => span.Priority)
             .ThenBy(span => span.Span.Start)
@@ -353,7 +374,9 @@ internal sealed class LuiProjectContext : IDisposable
     internal async Task<IReadOnlyList<LuiCompletionItem>> CompletionsAsync(
         Uri uri,
         int offset,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool deferDocumentation = false,
+        string? descriptionLabel = null
     )
     {
         var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
@@ -368,7 +391,12 @@ internal sealed class LuiProjectContext : IDisposable
             return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
                 ? []
                 : null!;
-        var completions = await RoslynCompletionsAsync(semantic, cancellationToken)
+        var completions = await RoslynCompletionsAsync(
+                semantic,
+                cancellationToken,
+                deferDocumentation,
+                descriptionLabel
+            )
             .ConfigureAwait(false);
         if (
             StyleAssignmentAt(semantic.Document.Syntax, offset) is { } assignment
@@ -382,14 +410,12 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static async Task<IReadOnlyList<LuiCompletionItem>> RoslynCompletionsAsync(
         SemanticDocument semantic,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool deferDocumentation = false,
+        string? descriptionLabel = null
     )
     {
-        var host = MefHostServices.Create(
-            MefHostServices
-                .DefaultAssemblies.Concat([Assembly.Load("Microsoft.CodeAnalysis.CSharp.Features")])
-                .Distinct()
-        );
+        var host = editorHost.Value;
         using var workspace = new AdhocWorkspace(host);
         var projectId = ProjectId.CreateNewId();
         var documentId = DocumentId.CreateNewId(projectId);
@@ -439,9 +465,13 @@ internal sealed class LuiProjectContext : IDisposable
         var results = new List<LuiCompletionItem>();
         foreach (var item in list.ItemsList)
         {
-            var description = await service
-                .GetDescriptionAsync(document, item, cancellationToken)
-                .ConfigureAwait(false);
+            if (descriptionLabel is not null && item.DisplayText != descriptionLabel)
+                continue;
+            var description = deferDocumentation
+                ? null
+                : await service
+                    .GetDescriptionAsync(document, item, cancellationToken)
+                    .ConfigureAwait(false);
             var text = String
                 .Concat(description?.TaggedParts.Select(part => part.Text) ?? [])
                 .Trim();
@@ -517,6 +547,72 @@ internal sealed class LuiProjectContext : IDisposable
             .ToArray();
 
     internal async Task<LuiHover?> HoverAsync(
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!uri.IsFile || !uri.LocalPath.EndsWith(".lui", StringComparison.OrdinalIgnoreCase))
+            return await ComputeHoverAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        long captured;
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            captured = epoch;
+        }
+        var text = await GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        var anchor = text is null ? -1 : HoverAnchor(text, offset);
+        lock (gate)
+        {
+            if (
+                !disposed
+                && !reloadFailed
+                && epoch == captured
+                && anchor >= 0
+                && cachedHover is { } cached
+                && cached.Epoch == captured
+                && cached.Uri == uri
+                && cached.Anchor == anchor
+                && cached.Source == text
+            )
+                return cached.Value;
+        }
+        var result = await ComputeHoverAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        if (result is null || text is null || anchor < 0)
+            return result;
+        var canonical = LuiFormatter.Format(text, LuiLineEnding.Lf);
+        lock (gate)
+        {
+            if (disposed || reloadFailed || epoch != captured)
+                return null;
+            cachedHover = new CachedHover(uri, text, canonical, anchor, captured, result);
+        }
+        return result;
+    }
+
+    private static int HoverAnchor(string text, int offset)
+    {
+        if (offset < 0 || offset >= text.Length || Char.IsWhiteSpace(text[offset]))
+            return -1;
+        var anchor = 0;
+        for (var index = 0; index < offset; index++)
+            if (!Char.IsWhiteSpace(text[index]))
+                anchor++;
+        return anchor;
+    }
+
+    private sealed record CachedHover(
+        Uri Uri,
+        string Source,
+        string CanonicalSource,
+        int Anchor,
+        long Epoch,
+        LuiHover Value
+    );
+
+    private async Task<LuiHover?> ComputeHoverAsync(
         Uri uri,
         int offset,
         CancellationToken cancellationToken
@@ -1700,7 +1796,7 @@ internal sealed class LuiProjectContext : IDisposable
     }
 
     private void Track(LuiCompilationResult result, Snapshot snapshot) =>
-        resultEpochs.Add(result, new SnapshotEpoch(snapshot.Epoch, snapshot.Freshness));
+        resultEpochs.GetValue(result, _ => new SnapshotEpoch(snapshot.Epoch, snapshot.Freshness));
 
     private async Task<bool> IsCurrentAsync(
         LuiFreshnessTarget freshness,
@@ -1899,6 +1995,24 @@ internal sealed class LuiProjectContext : IDisposable
             else
                 overlays.Remove(FilePath(uri));
             epoch++;
+            // Reuse only tooltip text. Maps, diagnostics, and compiler results still
+            // invalidate normally because authored offsets have changed.
+            var changedText = text.ToString();
+            cachedHover =
+                overlay
+                && cachedHover is { } cached
+                && cached.Epoch == epoch - 1
+                && cached.Uri == uri
+                && cached
+                    .Source.Where(character => !Char.IsWhiteSpace(character))
+                    .SequenceEqual(changedText.Where(character => !Char.IsWhiteSpace(character)))
+                && cached.CanonicalSource == LuiFormatter.Format(changedText, LuiLineEnding.Lf)
+                    ? cached with
+                    {
+                        Source = changedText,
+                        Epoch = epoch,
+                    }
+                    : null;
             generated.Clear();
         }
     }
@@ -1994,6 +2108,36 @@ internal sealed class LuiProjectContext : IDisposable
         return false;
     }
 
+    private LuiCompilationResult CompileSnapshot(Snapshot snapshot)
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (compilationEpoch != epoch)
+            {
+                compiledDocuments.Clear();
+                compilationEpoch = epoch;
+            }
+            if (
+                snapshot.Epoch == epoch
+                && compiledDocuments.TryGetValue(snapshot.Uri, out var cached)
+                && cached.Identity.Equals(snapshot.Identity)
+            )
+                return cached;
+        }
+        var result = LuiCompiler.Compile(
+            snapshot.Document.Syntax,
+            snapshot.Compilation,
+            snapshot.Identity
+        );
+        lock (gate)
+        {
+            if (!disposed && snapshot.Epoch == epoch && compilationEpoch == epoch)
+                compiledDocuments[snapshot.Uri] = result;
+        }
+        return result;
+    }
+
     private Task<Snapshot> SnapshotAsync(Uri uri, CancellationToken cancellationToken) =>
         SnapshotAsync(null, uri, cancellationToken);
 
@@ -2072,8 +2216,25 @@ internal sealed class LuiProjectContext : IDisposable
             )
                 input = projectDocument;
         }
+        // The editor builds its own LUI projection below. Running the build-time LUI
+        // generator first duplicates that work; keep all other project generators.
         var compilation =
-            await project.GetCompilationAsync(cancellationToken).ConfigureAwait(false)
+            await editorProjects
+                .GetValue(
+                    project,
+                    static original =>
+                        original.WithAnalyzerReferences(
+                            original.AnalyzerReferences.Where(reference =>
+                                !String.Equals(
+                                    Path.GetFileName(reference.FullPath),
+                                    "Lucent.Lui.Generator.dll",
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
+                        )
+                )
+                .GetCompilationAsync(cancellationToken)
+                .ConfigureAwait(false)
             ?? throw new InvalidOperationException("The evaluated project has no compilation.");
         compilation = compilation.RemoveSyntaxTrees(
             compilation.SyntaxTrees.Where(tree =>
@@ -2246,11 +2407,7 @@ internal sealed class LuiProjectContext : IDisposable
         var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
         if (snapshot.MetadataDiagnostic is not null)
             return null;
-        var result = LuiCompiler.Compile(
-            snapshot.Document.Syntax,
-            snapshot.Compilation,
-            snapshot.Identity
-        );
+        var result = CompileSnapshot(snapshot);
         Track(result, snapshot);
         if (
             result.ProjectionSource is null
@@ -2395,6 +2552,7 @@ internal sealed class LuiProjectContext : IDisposable
     private static IEnumerable<LuiDocumentSymbol> StructureSymbols(LuiBodySyntax node) =>
         node switch
         {
+            LuiMemberSyntax member => ComponentMemberSymbols(member),
             LuiElementSyntax element =>
             [
                 new LuiDocumentSymbol(
@@ -2441,6 +2599,44 @@ internal sealed class LuiProjectContext : IDisposable
             ],
             _ => [],
         };
+
+    private static IEnumerable<LuiDocumentSymbol> ComponentMemberSymbols(LuiMemberSyntax member)
+    {
+        if (member.Kind == LuiMemberKind.Setup)
+        {
+            yield return new LuiDocumentSymbol(
+                "Setup",
+                6,
+                member.Span,
+                new LuiSpan(member.Span.Start, "Setup".Length),
+                []
+            );
+            yield break;
+        }
+        if (member.Declaration is FieldDeclarationSyntax field)
+            foreach (var variable in field.Declaration.Variables)
+                yield return new LuiDocumentSymbol(
+                    variable.Identifier.ValueText,
+                    8,
+                    member.Span,
+                    new LuiSpan(
+                        member.Span.Start + variable.Identifier.SpanStart,
+                        variable.Identifier.Span.Length
+                    ),
+                    []
+                );
+        else if (member.Declaration is MethodDeclarationSyntax method)
+            yield return new LuiDocumentSymbol(
+                method.Identifier.ValueText,
+                6,
+                member.Span,
+                new LuiSpan(
+                    member.Span.Start + method.Identifier.SpanStart,
+                    method.Identifier.Span.Length
+                ),
+                []
+            );
+    }
 
     private static IEnumerable<LuiDocumentSymbol> StyleSymbols(LuiStyleMemberSyntax member) =>
         member switch
@@ -2490,11 +2686,7 @@ internal sealed class LuiProjectContext : IDisposable
         string generatedText
     )
     {
-        var host = MefHostServices.Create(
-            MefHostServices
-                .DefaultAssemblies.Concat([Assembly.Load("Microsoft.CodeAnalysis.CSharp.Features")])
-                .Distinct()
-        );
+        var host = editorHost.Value;
         var workspace = new AdhocWorkspace(host);
         var projectId = ProjectId.CreateNewId();
         var documentId = DocumentId.CreateNewId(projectId);
@@ -2703,7 +2895,9 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static IEnumerable<LuiSemanticSpan> ProjectClassifications(
         LuiSourceMap map,
-        IEnumerable<ClassifiedSpan> classified
+        IEnumerable<ClassifiedSpan> classified,
+        SourceText source,
+        string generatedSource
     )
     {
         foreach (var item in classified)
@@ -2717,6 +2911,21 @@ internal sealed class LuiProjectContext : IDisposable
                     .Where(entry => !entry.Hidden && entry.Generated.Length != 0)
             )
             {
+                // Navigation relations can expand a tag into a qualified call. Only
+                // verbatim, equal-length mappings support character-offset projection.
+                if (
+                    entry.Source.Length != entry.Generated.Length
+                    || !source
+                        .ToString(new TextSpan(entry.Source.Start, entry.Source.Length))
+                        .Equals(
+                            generatedSource.Substring(
+                                entry.Generated.Start,
+                                entry.Generated.Length
+                            ),
+                            StringComparison.Ordinal
+                        )
+                )
+                    continue;
                 var start = Math.Max(generated.Start, entry.Generated.Start);
                 var end = Math.Min(generated.End, entry.Generated.End);
                 if (start >= end)
@@ -3048,6 +3257,8 @@ internal sealed class LuiProjectContext : IDisposable
             disposed = true;
             epoch++;
             generated.Clear();
+            compiledDocuments.Clear();
+            cachedHover = null;
             workspace.Dispose();
         }
     }

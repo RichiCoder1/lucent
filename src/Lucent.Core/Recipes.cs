@@ -8,18 +8,24 @@ namespace Lucent.Core;
 public sealed class ComponentRecipe
 {
     private readonly Action<CompositionContext, Element> _content;
+    private readonly Func<ReactiveScope, ComponentRecipe>? _deferred;
     private readonly string? _name;
 
     private ComponentRecipe(
         string kind,
         Action<CompositionContext, Element> content,
-        string? name = null
+        string? name = null,
+        Func<ReactiveScope, ComponentRecipe>? deferred = null
     )
     {
         Kind = kind;
         _content = content;
         _name = name;
+        _deferred = deferred;
     }
+
+    private ComponentRecipe(string kind, Func<ReactiveScope, ComponentRecipe> deferred)
+        : this(kind, static (_, _) => { }, deferred: deferred) { }
 
     /// <summary>The diagnostic kind used by unnamed mounts.</summary>
     public string Kind { get; }
@@ -32,11 +38,20 @@ public sealed class ComponentRecipe
         return new ComponentRecipe(kind, content);
     }
 
+    /// <summary>Creates a recipe whose setup and authored recipe construction run once for each mount.</summary>
+    /// <remarks>The returned recipe is applied to this recipe's single root; deferred composition never adds a wrapper element.</remarks>
+    public static ComponentRecipe Defer(string kind, Func<ReactiveScope, ComponentRecipe> build)
+    {
+        ReactiveGraph.ValidateName(kind, nameof(kind));
+        ArgumentNullException.ThrowIfNull(build);
+        return new ComponentRecipe(kind, build);
+    }
+
     /// <summary>Returns this recipe with an explicit local diagnostic name.</summary>
     public ComponentRecipe Named(string name)
     {
         ReactiveGraph.ValidateName(name, nameof(name));
-        return new ComponentRecipe(Kind, _content, name);
+        return new ComponentRecipe(Kind, _content, name, _deferred);
     }
 
     /// <summary>Converts one root recipe into one content contribution.</summary>
@@ -49,9 +64,55 @@ public sealed class ComponentRecipe
     internal Element Mount(CompositionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        if (_deferred is not null)
+        {
+            var owner = context.BeginDeferredScope(Kind, _name);
+            var recipe = ResolveDeferred(context, owner, this, out var preferredName);
+            var deferredRoot = context.RecipeElement(
+                recipe.Kind,
+                preferredName ?? recipe._name,
+                owner
+            );
+            recipe.Apply(context, deferredRoot);
+            return deferredRoot;
+        }
         var root = context.RecipeElement(Kind, _name);
         _content(context, root);
         return root;
+    }
+
+    private static ComponentRecipe ResolveDeferred(
+        CompositionContext context,
+        ReactiveScope owner,
+        ComponentRecipe recipe,
+        out string? preferredName
+    )
+    {
+        preferredName = recipe._name;
+        var seen = new HashSet<ComponentRecipe>();
+        while (recipe._deferred is not null)
+        {
+            if (!seen.Add(recipe))
+                throw new InvalidOperationException(
+                    "A deferred recipe factory returned a recursive recipe."
+                );
+            var next = context.RunDeferred(owner, () => recipe._deferred(owner));
+            ArgumentNullException.ThrowIfNull(next);
+            preferredName ??= next._name;
+            recipe = next;
+        }
+        return recipe;
+    }
+
+    internal void Apply(CompositionContext context, Element root)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(root);
+        if (_deferred is not null)
+            throw new InvalidOperationException(
+                "Deferred recipes must be resolved before mounting."
+            );
+        _content(context, root);
     }
 }
 

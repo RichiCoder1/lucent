@@ -118,10 +118,11 @@ test("activation preserves current diagnostics and clears closed documents", asy
             registerSignatureHelpProvider: disposable
         },
         commands: { registerCommand: (_name, command) => { lucentRename = command; return disposable(); } },
-        window: { showErrorMessage() {}, showInputBox: async () => "Renamed" },
+        window: { createOutputChannel: () => ({ info() {}, warn() {}, error() {}, dispose() {} }), showErrorMessage() {}, showInputBox: async () => "Renamed" },
         workspace: {
             applyEdit: async () => true,
             createFileSystemWatcher: () => ({ onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable, dispose() {} }),
+            workspaceFolders: [{ uri: { fsPath: path.resolve("workspace") } }],
             getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
             onDidChangeTextDocument: disposable,
             onDidCloseTextDocument: disposable,
@@ -207,6 +208,7 @@ class MockProcess extends EventEmitter {
         super();
         this.exitCode = null;
         this.stdout = new EventEmitter();
+        this.stderr = new EventEmitter();
         this.notifications = [];
         this.pid = 123;
         this.stdin = Object.assign(new EventEmitter(), { write: value => {
@@ -221,13 +223,13 @@ class MockProcess extends EventEmitter {
             if (request.id !== undefined) this.send({
                 jsonrpc: "2.0",
                 id: request.id,
-                result: request.method === "textDocument/semanticTokens/full" ? { data: [0, 0, 3, 0, 0] }
+                result: this.responses?.[request.method] ?? (request.method === "textDocument/semanticTokens/full" ? { data: [0, 0, 3, 0, 0] }
                     : request.method === "textDocument/references"
                         ? request.params.textDocument.uri.endsWith("Helpers.cs") ? null : [{
                         uri: "file:///Widget.lui",
                         range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }
                     }]
-                        : request.method === "textDocument/rename" ? null : {}
+                        : request.method === "textDocument/rename" ? null : {})
             });
         } });
     }
@@ -241,6 +243,8 @@ class MockProcess extends EventEmitter {
 }
 
 function failureHarness(process) {
+    let completionProvider;
+    const logs = [];
     const resources = [];
     const messages = [];
     let generated;
@@ -250,7 +254,8 @@ function failureHarness(process) {
         return resource;
     };
     const workspace = {
-        getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
+        workspaceFolders: [{ uri: { fsPath: path.resolve("workspace") } }],
+            getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
         textDocuments: [],
         createFileSystemWatcher: () => Object.assign(own(), {
             onDidCreate: own, onDidChange: own, onDidDelete: own
@@ -262,17 +267,21 @@ function failureHarness(process) {
     };
     const vscode = {
         workspace,
-        window: { showErrorMessage: message => messages.push(message) },
+        window: { createOutputChannel: () => ({ info: text => logs.push(text), warn: text => logs.push(text), error: text => logs.push(text), dispose() {} }), showErrorMessage: message => messages.push(message) },
         Uri: { file: value => ({ toString: () => value }) },
         RelativePattern: class {},
         SemanticTokensLegend: class {},
         commands: { registerCommand: own },
+        CompletionItem: class { constructor(label, kind) { this.label = label; this.kind = kind; } },
+        CompletionItemKind: { Field: "field" },
+        MarkdownString: class { appendText(text) { this.value = text; } },
         languages: new Proxy({}, { get: (_target, key) => key === "createDiagnosticCollection"
-            ? () => Object.assign(own(), { delete() {} }) : own })
+            ? () => Object.assign(own(), { delete() {} }) : key === "registerCompletionItemProvider"
+                ? (_selector, provider) => { completionProvider = provider; return own(); } : own })
     };
     const context = { subscriptions: [] };
     const extension = loadExtension(vscode, process);
-    return { context, messages, resources, activate: () => extension.activate(context),
+    return { context, messages, resources, logs, completion: () => completionProvider, activate: () => extension.activate(context),
         request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
 }
 
@@ -343,4 +352,42 @@ test("normal disposal releases registrations once without reporting a server fai
     await Promise.resolve();
     assert.equal(harness.messages.length, 0);
     assert.ok(harness.resources.every(resource => resource.disposed === 1));
+});
+
+
+test("output channel records request timing and server stderr without document contents", async () => {
+    const process = new MockProcess();
+    const harness = failureHarness(process);
+    await harness.activate();
+    process.stderr.emit("data", Buffer.from("example server diagnostic"));
+    await harness.request();
+    assert.ok(harness.logs.some(text => /initialize #1 completed in \d+ ms/.test(text)));
+    assert.ok(harness.logs.includes("example server diagnostic"));
+    assert.ok(harness.logs.some(text => text.includes(path.resolve("workspace", "host/Host.csproj"))));
+    assert.ok(harness.logs.some(text => text.includes("lucent/generatedText")));
+    assert.ok(!harness.logs.some(text => text.includes("lucent-lui:test")));
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
+
+
+test("completion defers documentation and preserves insertion fields on resolve", async () => {
+    const process = new MockProcess();
+    const item = { label: "DividerRight", kind: 5, data: { uri: "file:///Widget.lui", epoch: 1, offset: 10 } };
+    process.responses = {
+        "textDocument/completion": { items: [item] },
+        "completionItem/resolve": { ...item, detail: "Token<Border>", documentation: { value: "Right border" } }
+    };
+    const harness = failureHarness(process);
+    await harness.activate();
+    const [completion] = await harness.completion().provideCompletionItems({ uri: { toString: () => "file:///Widget.lui" } }, { line: 0, character: 10 });
+    assert.equal(completion.documentation, undefined);
+    assert.equal(process.lastRequest.method, "textDocument/completion");
+    completion.insertText = "DividerRight";
+    const resolved = await harness.completion().resolveCompletionItem(completion);
+    assert.equal(resolved, completion);
+    assert.equal(resolved.documentation.value, "Right border");
+    assert.equal(resolved.insertText, "DividerRight");
+    assert.equal(process.lastRequest.params.kind, 5);
+    assert.deepEqual(process.lastRequest.params.data, item.data);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
 });

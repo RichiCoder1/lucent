@@ -84,11 +84,47 @@ public component FilterBar(Query query, Action clear, Style? style = null) {
 }
 ```
 
-A component lowers to a `[LucentComponent]` method returning `ComponentRecipe` in the namespace's partial static `Components` class. Default accessibility is `internal`; `public` is explicit. An adjacent C# partial may provide normal helpers. The first release has no local state declaration, component instance, generic `.lui` declaration, method body, statement block, or embedded `code` block.
+A component lowers to a `[LucentComponent]` method returning `ComponentRecipe` in the namespace's partial static `Components` class. Default accessibility is `internal`; `public` is explicit. An adjacent C# partial may provide normal helpers. Component-level state declarations, ordinary methods, and synchronous `Setup` are supported by the language extension below. Generic `.lui` declarations and a general embedded `code` block remain deferred; generated implementation objects are not public mounted-component handles.
 
-Component parameters use normal C# types, nullability, camel-case names, and constant default values. `ref`, `out`, `in`, `params`, generic declarations, parameter attributes, and destructuring are deferred. Ordinary parameters are construction-time values. Explicitly live component inputs use signal-bearing models or typed readers such as `Func<T>`; `.lui` supplies an actual target-typed lambda rather than silently wrapping an ordinary expression. Generated code never reruns a component to make values reactive.
+Component parameters use normal C# types, nullability, camel-case names, and constant default values. `ref`, `out`, `in`, `params`, generic declarations, parameter attributes, and destructuring are deferred. Ordinary parameters are construction-time values. Explicitly live component inputs use signal-bearing models or typed readers such as `Func<T>`; At compatible live value inputs, `.lui` supplies a target-typed reader for an ordinary value expression; an already compatible delegate remains unchanged. Generated code never reruns a component to make values reactive.
 
 Every component body has one component-element root for its mounted lifetime. A caller may choose between recipes from construction-time C# or place a component inside a retained `if`; reactively replacing the component document's own root is deferred. There is no duck-typed recipe scan or string registry.
+
+## Component-local state
+
+See [ADR 0005](adr/0005-component-local-state.md). These mechanisms require the matching compiler and Core runtime; older published packages do not recognize the new declarations.
+
+```lui
+public component Counter() {
+    int count = 0;
+    string label = count.ToString();
+
+    void Increment() { count++; }
+
+    Setup(owner) {
+        // Register external subscriptions explicitly with owner.Own(...).
+    }
+
+    <Column><Button onInvoke={Increment}>{label}</Button></Column>
+}
+```
+
+Before its one markup root, a component can declare typed initialized fields, ordinary C# methods, and one `Setup()` or `Setup(owner)` block. Component methods are visible to markup. Setup locals and local functions keep their normal lexical scope and are not exported.
+
+| Declaration | Meaning |
+| --- | --- |
+| `int count = 6 * 7;` | A C# compile-time constant initializes writable per-mount state. |
+| `string label = Format(count);` | Other unmarked expressions are read-only derived values, evaluated through tracked reads. |
+| `[Once] string draft = model.Title;` | Writable state initialized once for each mount. |
+| `readonly string initial = model.Title;` | A read-only initial snapshot; `readonly` does not make a referenced object deeply immutable. |
+
+Ordinary locals inside methods and setup are not reactive declarations. Methods assign writable component values using ordinary C# assignment. Derived/snapshot assignments produce authored diagnostics. Task-valued inferred derived declarations require an explicit async-state facility; setup itself cannot await. Lucent `AsyncValue<T>` remains the explicit asynchronous resource contract.
+
+The compiler uses `ComponentRecipe.Defer` and generated private implementation code. Recipe creation captures its ordinary inputs; mounting allocates its state. Initializers run in declaration order, derived computations are lazy, and setup runs before authored children mount. Setup is not an after-layout callback. Independently mounting the same recipe creates independent state without an extra layout or accessibility element.
+
+Local state survives collapse and retained same-key updates. Removal disposes it; longer-lived drafts and accepted writes must remain above replaceable views. Lucent resources use owner-aware APIs, including `owner` for declaration initializers. External subscriptions use explicit ownership such as `owner.Own(source.Subscribe(OnChanged))`; passing an existing session does not transfer its ownership.
+
+A stateless component has no local writable application/interaction state, but may still observe changing inputs or contain stateful children. Both forms return the same reusable recipe type. Stateful root switching, automatic state retention, parallel mounting, and implicit asynchronous components are not added by this extension.
 
 ## Elements, parameters, and content
 
@@ -101,7 +137,7 @@ Unwrapped children map only to the declared `[DefaultContent]` scalar or `Compon
 <Text>{Label(state, issue)}</Text>
 ```
 
-Quoted attributes are string literals; all other element expression islands use braces. Bare Boolean attributes, spread attributes, directive prefixes, and implicit string conversion are deferred. Simple body text is a trimmed string literal whose internal characters are preserved. A scalar-content body contains exactly one text or expression child, which lowers as the selected scalar `[DefaultContent]` argument with ordinary C# conversion and construction-time semantics. Formatting-only whitespace around component children is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Scalar bodies reject mixed text, multiple expressions, and structural siblings; combine scalar values in one C# expression:
+Quoted attributes are string literals; all other element expression islands use braces. Bare Boolean attributes, spread attributes, directive prefixes, and implicit string conversion are deferred. Simple body text is a trimmed string literal whose internal characters are preserved. A scalar-content body contains exactly one text or expression child, which lowers as the selected scalar `[DefaultContent]` argument with ordinary C# conversion and the selected input's static or live-reader semantics. Formatting-only whitespace around component children is ignored. Whitespace-sensitive or multiline content uses an explicit C# string expression. Scalar bodies reject mixed text, multiple expressions, and structural siblings; combine scalar values in one C# expression:
 
 ```lui
 <Text content={"  exact\ntext  "} />
@@ -175,7 +211,7 @@ foreach (var issue in state.Issues) keyed by issue.Id {
 }
 ```
 
-These examples assume the receiving component declares a live reader parameter, such as `Func<Issue> issue`. A structural local still has the authored record's type: `issue.Title` is ordinary member access. Body reads lower through a scope-owned current-item reader, so `() => issue.Title` reads the latest same-key record without remounting the row. An ordinary attribute such as `issue={issue}` is still evaluated once when that row's recipe is constructed; it does not become live automatically. Styles and explicit live component inputs retain their existing dependency-tracking rules.
+These examples assume the receiving component declares a live reader parameter, such as `Func<Issue> issue`. A structural local still has the authored record's type: `issue.Title` is ordinary member access. Body reads lower through a scope-owned current-item reader, so `() => issue.Title` reads the latest same-key record without remounting the row. An attribute such as `issue={issue}` becomes a live reader when the receiving parameter accepts a compatible `Func<Issue>`; a plain `Issue` parameter remains a construction-time value. Styles and live component inputs retain their existing dependency-tracking rules.
 
 Pattern locals carried into a retained conditional body use the same current-item rule. A compatible same-branch update replaces the matched payload while preserving the mounted root and local state. Branch changes mount a fresh root. The compiler must reject unsupported pattern-local capture shapes instead of silently retaining a stale value.
 
@@ -342,7 +378,7 @@ Enhanced `#line` directives map compiler/debugger diagnostics and C# expression 
 
 `<LucentLuiLangVersion>` defaults to `preview` from the installed SDK. Unknown/newer versions fail clearly. Numeric versions begin only when Lucent intentionally retains an older syntax contract.
 
-Deferred work includes local state sugar, broader C# islands, relaxed live-reader sugar, two-way binding shorthand, textual color sugar, `public style`, named slots, generic declarations, general element references, reactive component-root switching, implicit/unkeyed dynamic loops, spread/directive syntax, service injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
+Deferred work includes explicit async-resource sugar, record declarations in `.lui`, broader C# islands, two-way binding shorthand, textual color sugar, `public style`, named slots, generic declarations, general element references, reactive component-root switching, implicit/unkeyed dynamic loops, spread/directive syntax, service injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
 
 Control-owned values outrank every component/author style candidate, including a binding. This preserves existing control-state authority for text, scroll, selection, and similar properties; dumps retain the overridden binding candidate and provenance.
 
@@ -355,3 +391,7 @@ Pass a model-owned `FocusTarget` to `TextField` or `TextArea` with `focusTarget=
 `VirtualizedList` accepts `viewport={model.ListViewport}` when the application needs scroll state to survive removal and later remounting. Editor controls continue to consume owned `EditorSession` values through `session`.
 
 Style property keys use the actual property names: for example `Overflow: TextOverflow.Ellipsis;`. A type can share the name of a statically imported property; use qualified value constructors such as `Lucent.Core.Border.Hairline(...)` or typed theme tokens. Prefer `BaseStyle with { Enabled: model.CanEdit; }` for declarative live style overrides.
+
+### Target-typed construction in styles
+
+Style properties accept both values and `Token<T>` references. A bare `new(...)` in a style assignment can therefore be ambiguous (`LUI2012`). Specify the value type explicitly, such as `Padding: new Insets(16, 8, 16, 8);`. For the common two-value horizontal/vertical form, prefer `Padding: Insets.Symmetric(16, 8);`; the `Insets` constructor takes four arguments in left, top, right, bottom order. The diagnostic highlights the construction expression rather than the containing component.

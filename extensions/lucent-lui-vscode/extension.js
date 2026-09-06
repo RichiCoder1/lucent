@@ -87,7 +87,8 @@ function toTextEdits(changes) {
 }
 
 class Rpc {
-    constructor(process) {
+    constructor(process, log) {
+        this.log = log;
         this.process = process;
         this.buffer = Buffer.alloc(0);
         this.nextId = 1;
@@ -111,7 +112,10 @@ class Rpc {
         if (this.failure) return Promise.reject(this.failure);
         const id = this.nextId++;
         return new Promise((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            const started = Date.now();
+            const timer = setTimeout(() => this.log?.warn(`${method} #${id} still pending after 5 seconds (${this.pending.size} pending requests).`), 5000);
+            this.log?.info(`Request ${method} #${id}`);
+            this.pending.set(id, { resolve, reject, method, started, timer });
             try { this.write({ jsonrpc: "2.0", id, method, params }); }
             catch (error) { this.fail(error); }
         });
@@ -157,6 +161,9 @@ class Rpc {
             const pending = this.pending.get(message.id);
             if (!pending) continue;
             this.pending.delete(message.id);
+            clearTimeout(pending.timer);
+            this.log?.info(`${pending.method} #${message.id} completed in ${Date.now() - pending.started} ms`);
+            if (message.error) this.log?.error(`${pending.method}: ${message.error.message}`);
             message.error ? pending.reject(new Error(message.error.message)) : pending.resolve(message.result);
         }
     }
@@ -171,25 +178,34 @@ class Rpc {
     }
 
     rejectAll(error) {
-        for (const pending of this.pending.values()) pending.reject(error);
+        for (const pending of this.pending.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(error);
+        }
         this.pending.clear();
     }
 }
 
 async function activate(context) {
-    const projectPath = vscode.workspace.getConfiguration("lucentLui").get("projectPath");
-    if (!projectPath) { vscode.window.showErrorMessage("Set lucentLui.projectPath to the evaluated .csproj."); return; }
+    const projectSetting = vscode.workspace.getConfiguration("lucentLui").get("projectPath");
+    if (!projectSetting) { vscode.window.showErrorMessage("Set lucentLui.projectPath to the evaluated .csproj."); return; }
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const projectPath = workspaceRoot ? path.resolve(workspaceRoot, projectSetting) : path.resolve(projectSetting);
     const configured = vscode.workspace.getConfiguration("lucentLui").get("serverPath");
     if (!configured) {
         vscode.window.showErrorMessage("Set lucentLui.serverPath to Lucent.Lui.LanguageServer.dll.");
         return;
     }
+    const log = vscode.window.createOutputChannel("Lucent LUI", { log: true });
+    context.subscriptions.push(log);
+    log.info(`Starting language server: ${configured}; project: ${projectPath}`);
     const server = path.resolve(configured);
     const process = childProcess.spawn("dotnet", [server], {
-        stdio: ["pipe", "pipe", "inherit"],
+        stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true
     });
-    const rpc = new Rpc(process);
+    process.stderr.on("data", chunk => log.error(chunk.toString("utf8").trimEnd()));
+    const rpc = new Rpc(process, log);
     const subscriptions = [];
     let stopped = false;
     const diagnostics = vscode.languages.createDiagnosticCollection("lucent-lui");
@@ -230,9 +246,12 @@ async function activate(context) {
         process.once("exit", () => clearTimeout(timeout));
         rpc.request("shutdown", {}).then(() => rpc.notify("exit", {})).catch(() => {});
     } };
-    const reportFailure = error => vscode.window.showErrorMessage(
-        `Lucent language server stopped. Check that dotnet is available and lucentLui.serverPath points to the server DLL. ${error.message}`
-    );
+    const reportFailure = error => {
+        log.error(error.message);
+        return vscode.window.showErrorMessage(
+            `Lucent language server stopped. Check that dotnet is available and lucentLui.serverPath points to the server DLL. ${error.message} See Output > Lucent LUI.`
+        );
+    };
     rpc.onFailure = error => {
         if (stopped) return;
         stop.dispose();
@@ -279,6 +298,7 @@ async function activate(context) {
     }
     if (stopped) return;
     rpc.notify("initialized", {});
+    const completionData = new WeakMap();
     const isLucentDocument = document => document.languageId === "lui" || document.languageId === "csharp";
     const rename = async (document, position, newName) => toWorkspaceEdit(
         await rpc.request("textDocument/rename", {
@@ -368,19 +388,31 @@ async function activate(context) {
             )
         }),
         vscode.languages.registerCompletionItemProvider("lui", {
-            provideCompletionItems: async (document, position) => {
+            provideCompletionItems: async (document, position, token) => {
+                if (token?.isCancellationRequested) return [];
                 const result = await rpc.request("textDocument/completion", {
                     textDocument: { uri: document.uri.toString() }, position
                 });
-                return result.items.map(item => {
+                if (token?.isCancellationRequested) return [];
+                return (result?.items ?? []).map(item => {
                     const completion = new vscode.CompletionItem(
                         item.label,
                         toVsCodeCompletionKind(item.kind, vscode.CompletionItemKind)
                     );
                     completion.detail = item.detail;
                     completion.documentation = item.documentation && plaintext(item.documentation.value);
+                    if (item.data && !item.documentation) completionData.set(completion, item);
                     return completion;
                 });
+            },
+            resolveCompletionItem: async (completion, token) => {
+                const original = completionData.get(completion);
+                if (!original || token?.isCancellationRequested) return completion;
+                const result = await rpc.request("completionItem/resolve", original);
+                if (token?.isCancellationRequested || !result) return completion;
+                completion.detail = result.detail;
+                completion.documentation = result.documentation && plaintext(result.documentation.value);
+                return completion;
             }
         }, "<", " ", ".", ":", "{"),
         vscode.languages.registerHoverProvider([{ language: "lui" }, { scheme: "lucent-lui" }], {

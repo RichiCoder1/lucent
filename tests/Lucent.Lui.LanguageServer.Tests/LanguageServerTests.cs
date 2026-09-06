@@ -31,6 +31,87 @@ public sealed class LanguageServerTests
     }
 
     [TestMethod]
+    public async Task StatefulDeclarationsExposeAuthoredEditorInformation()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-stateful-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "Stateful.csproj");
+            var path = Path.Combine(root, "Counter.lui");
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            await File.WriteAllTextAsync(
+                project,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\"{core}\"/><AdditionalFiles Include=\"Counter.lui\"/></ItemGroup></Project>"
+            );
+            const string source = """
+namespace StatefulEditor;
+public component Counter() {
+    int count = 0;
+    string label = count.ToString();
+    void Increment() { count++; }
+    Setup(owner) { var local = "setup"; _ = local.Length; }
+    <Column><Button onInvoke={Increment}>{label}</Button></Column>
+}
+""";
+            await File.WriteAllTextAsync(path, source);
+            var uri = new Uri(path);
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+            var use = source.LastIndexOf("{label}", StringComparison.Ordinal) + 1;
+            var hover = await context.HoverAsync(uri, use, CancellationToken.None);
+            Assert(
+                hover is not null
+                    && hover.Value.Contains("label", StringComparison.Ordinal)
+                    && (
+                        hover.Documentation?.Contains("derived", StringComparison.OrdinalIgnoreCase)
+                        ?? false
+                    ),
+                "Derived field hover did not explain its authored semantics: "
+                    + hover?.Value
+                    + " / "
+                    + hover?.Documentation
+            );
+            var definition = await context.DefinitionAsync(uri, use, CancellationToken.None);
+            Assert(
+                definition is not null
+                    && definition.Uri == uri
+                    && definition.Span.Start == source.IndexOf("label =", StringComparison.Ordinal),
+                "Derived field navigation did not return its authored declaration."
+            );
+            var symbols = await context.DocumentSymbolsAsync(uri, CancellationToken.None);
+            var names = symbols!
+                .Single(symbol => symbol.Name == "Counter")
+                .Children.Select(child => child.Name)
+                .ToArray();
+            Assert(
+                names.Contains("count")
+                    && names.Contains("label")
+                    && names.Contains("Increment")
+                    && names.Contains("Setup"),
+                "Stateful outline omitted authored declarations."
+            );
+            var completions = await context.CompletionsAsync(
+                uri,
+                source.IndexOf("local.Length", StringComparison.Ordinal) + "local.".Length,
+                CancellationToken.None
+            );
+            Assert(
+                completions.Any(item => item.Label == "Length"),
+                "Setup local completion lost C# type information."
+            );
+            var tokens = await context.SemanticTokensAsync(uri, CancellationToken.None);
+            Assert(tokens is { Length: > 0 }, "Stateful source has no semantic highlighting.");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task ProjectContextFormattingNavigationCompletionDiagnosticsAndProtocol()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-lsp-" + Guid.NewGuid().ToString("N"));
@@ -100,6 +181,58 @@ public sealed class LanguageServerTests
                 "LSP document/range formatting diverged from compiler/CLI policy."
             );
             context.ReplaceText(sourceUri, source);
+            var whitespaceHoverOffset =
+                source.IndexOf("Helpers.Format", StringComparison.Ordinal) + "Helpers.".Length;
+            var beforeWhitespaceHover = await context.HoverAsync(
+                sourceUri,
+                whitespaceHoverOffset,
+                CancellationToken.None
+            );
+            Assert(beforeWhitespaceHover is not null, "The whitespace hover fixture did not bind.");
+            context.ReplaceText(sourceUri, "\n  " + source);
+            var afterWhitespaceHover = await context.HoverAsync(
+                sourceUri,
+                whitespaceHoverOffset + 3,
+                CancellationToken.None
+            );
+            Assert(
+                ReferenceEquals(beforeWhitespaceHover, afterWhitespaceHover),
+                "A structural whitespace edit unnecessarily recalculated the hovered symbol."
+            );
+            context.ReplaceText(
+                sourceUri,
+                source.Replace("widget\"", "wid get\"", StringComparison.Ordinal)
+            );
+            var literalWhitespaceHover = await context.HoverAsync(
+                sourceUri,
+                whitespaceHoverOffset,
+                CancellationToken.None
+            );
+            Assert(
+                literalWhitespaceHover is not null
+                    && !ReferenceEquals(afterWhitespaceHover, literalWhitespaceHover),
+                "Whitespace inside a string literal incorrectly reused the tooltip."
+            );
+            context.ReplaceText(sourceUri, source);
+            var originalHelperText = await File.ReadAllTextAsync(helperPath);
+            context.ReplaceText(
+                new Uri(helperPath),
+                originalHelperText.Replace("Formats <see", "Updated <see", StringComparison.Ordinal)
+            );
+            var changedDocumentationHover = await context.HoverAsync(
+                sourceUri,
+                whitespaceHoverOffset,
+                CancellationToken.None
+            );
+            Assert(
+                changedDocumentationHover?.Documentation?.Contains(
+                    "Updated",
+                    StringComparison.Ordinal
+                ) == true,
+                "A C# documentation edit reused an obsolete tooltip."
+            );
+            context.ReplaceText(new Uri(helperPath), originalHelperText);
+            context.ReplaceText(sourceUri, source);
             var published = await context.CompileAsync(sourceUri, CancellationToken.None);
             Assert(
                 published is not null,
@@ -113,6 +246,23 @@ public sealed class LanguageServerTests
             );
             var compiled =
                 published ?? throw new InvalidOperationException("Missing compiled document.");
+            var repeated = await context.CompileAsync(sourceUri, CancellationToken.None);
+            Assert(
+                ReferenceEquals(compiled.Result, repeated?.Result),
+                "Unchanged editor operations did not reuse the same compilation result."
+            );
+            context.ReplaceText(sourceUri, source + "\n// cache invalidation");
+            var edited = await context.CompileAsync(sourceUri, CancellationToken.None);
+            Assert(
+                edited is not null
+                    && !ReferenceEquals(compiled.Result, edited.Result)
+                    && edited.Result.Identity.DocumentVersion
+                        == LuiDocumentIdentity.Hash(source + "\n// cache invalidation"),
+                "An editor change reused an obsolete compilation result."
+            );
+            context.ReplaceText(sourceUri, source);
+            compiled = (await context.CompileAsync(sourceUri, CancellationToken.None))!;
+
             Assert(
                 compiled.Result.Identity.RootNamespace == "Sample",
                 "evaluated RootNamespace was not retained."
@@ -1677,19 +1827,36 @@ public sealed class LanguageServerTests
                         },
                     }
                 );
-                await lsp.NotifyAsync(
-                    "textDocument/didChange",
-                    new
-                    {
-                        textDocument = new { uri = lspSourceUri, version = 2 },
-                        contentChanges = new[]
+                for (var version = 2; version <= 11; version++)
+                {
+                    await lsp.NotifyAsync(
+                        "textDocument/didChange",
+                        new
                         {
-                            new
+                            textDocument = new { uri = lspSourceUri, version },
+                            contentChanges = new[]
                             {
-                                text = source.Replace("Card", "Missing", StringComparison.Ordinal),
+                                new
+                                {
+                                    text = source.Replace(
+                                        "Card",
+                                        "Missing",
+                                        StringComparison.Ordinal
+                                    ),
+                                },
                             },
-                        },
-                    }
+                        }
+                    );
+                }
+                using var idleDiagnostics = await lsp.WaitForNotificationAsync(
+                    "textDocument/publishDiagnostics"
+                );
+                Assert(
+                    idleDiagnostics
+                        .RootElement.GetProperty("params")
+                        .GetProperty("version")
+                        .GetInt32() == 11,
+                    "Idle diagnostics did not publish the latest edit without a follow-up request."
                 );
                 using var diagnostics = await lsp.RequestAsync(
                     "textDocument/diagnostic",
@@ -1719,7 +1886,7 @@ public sealed class LanguageServerTests
                         && pushedDiagnostics
                             .RootElement.GetProperty("params")
                             .GetProperty("version")
-                            .GetInt32() == 2
+                            .GetInt32() == 11
                         && pushedDiagnostics
                             .RootElement.GetProperty("params")
                             .GetProperty("diagnostics")
@@ -1820,7 +1987,7 @@ public sealed class LanguageServerTests
                         && closeClear
                             .RootElement.GetProperty("params")
                             .GetProperty("version")
-                            .GetInt32() == 2
+                            .GetInt32() == 11
                         && closeClear
                             .RootElement.GetProperty("params")
                             .GetProperty("diagnostics")
@@ -1856,6 +2023,11 @@ public sealed class LanguageServerTests
                         },
                     }
                 );
+                // Await server reads before replacing the project file on Windows.
+                using var beforeInvalidProject = await lsp.RequestAsync(
+                    "textDocument/diagnostic",
+                    new { textDocument = new { uri = lspSourceUri } }
+                );
                 await File.WriteAllTextAsync(projectPath, "not xml");
                 await lsp.NotifyAsync(
                     "workspace/didChangeWatchedFiles",
@@ -1868,6 +2040,10 @@ public sealed class LanguageServerTests
                         textDocument = new { uri = lspSourceUri, version = 4 },
                         contentChanges = new[] { new { text = recoveryText } },
                     }
+                );
+                using var afterInvalidProject = await lsp.RequestAsync(
+                    "textDocument/diagnostic",
+                    new { textDocument = new { uri = lspSourceUri } }
                 );
                 await File.WriteAllTextAsync(projectPath, lspProjectText);
                 await lsp.NotifyAsync(
@@ -2604,10 +2780,81 @@ public sealed class LanguageServerTests
                 issueRowDocument,
                 issueRowText
             );
+            foreach (var literal in new[] { "Issues</Text>", "Density: Comfortable/Compact" })
+            {
+                var start = headerText.IndexOf(literal, StringComparison.Ordinal);
+                Assert(
+                    !headerTokens.Any(token =>
+                        token.Start < start + literal.Length && token.Start + token.Length > start
+                    ),
+                    "Generated C# semantic tokens leaked into authored text or closing markup: "
+                        + literal
+                );
+            }
             AssertSemanticToken(headerTokens, headerText, "Width", "property");
             AssertSemanticToken(headerTokens, headerText, "IssueBrowserState", "type");
             AssertSemanticToken(errorTokens, errorText, "LayoutAxis", "type");
             AssertSemanticToken(errorTokens, errorText, "Column", "enumMember");
+            var enumPosition = Position(
+                errorText,
+                errorText.IndexOf("LayoutAxis.", StringComparison.Ordinal) + "LayoutAxis.".Length
+            );
+            using var lazyCompletion = await browserLsp.RequestAsync(
+                "textDocument/completion",
+                new
+                {
+                    textDocument = new { uri = VsCodeUri(errorDocument) },
+                    position = new { line = enumPosition.Line, character = enumPosition.Character },
+                }
+            );
+            var columnItem = lazyCompletion
+                .RootElement.GetProperty("result")
+                .GetProperty("items")
+                .EnumerateArray()
+                .First(item => item.GetProperty("label").GetString() == "Column");
+            Assert(
+                columnItem.GetProperty("documentation").ValueKind == JsonValueKind.Null,
+                "Completion eagerly produced Roslyn documentation before selection."
+            );
+            using var resolvedColumn = await browserLsp.RequestAsync(
+                "completionItem/resolve",
+                columnItem
+            );
+            Assert(
+                resolvedColumn
+                    .RootElement.GetProperty("result")
+                    .GetProperty("documentation")
+                    .GetProperty("value")
+                    .GetString()!
+                    .Contains("LayoutAxis.Column", StringComparison.Ordinal),
+                "Resolving the selected completion lost its symbol description."
+            );
+            await browserLsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri = VsCodeUri(errorDocument),
+                        version = 1,
+                        text = errorText + "\n// edited",
+                    },
+                }
+            );
+            using var staleColumn = await browserLsp.RequestAsync(
+                "completionItem/resolve",
+                columnItem
+            );
+            Assert(
+                staleColumn.RootElement.GetProperty("result").GetProperty("documentation").ValueKind
+                    == JsonValueKind.Null,
+                "A completion from an earlier document epoch was resolved after an edit."
+            );
+            await browserLsp.NotifyAsync(
+                "textDocument/didClose",
+                new { textDocument = new { uri = VsCodeUri(errorDocument) } }
+            );
+
             AssertSemanticToken(browserTokens, browserText, "var", "keyword");
             var inKeyword = browserText.IndexOf(" in ", StringComparison.Ordinal) + 1;
             Assert(
@@ -4292,7 +4539,10 @@ public sealed class LanguageServerTests
             process.Dispose();
         }
 
-        private async Task<JsonDocument> ReadAsync()
+        internal Task<JsonDocument> WaitForNotificationAsync(string method) =>
+            ReadAsync(method).WaitAsync(TimeSpan.FromSeconds(15));
+
+        private async Task<JsonDocument> ReadAsync(string? notificationMethod = null)
         {
             while (true)
             {
@@ -4320,6 +4570,8 @@ public sealed class LanguageServerTests
                 if (message.RootElement.TryGetProperty("id", out _))
                     return message;
                 notifications.Enqueue(message);
+                if (message.RootElement.GetProperty("method").GetString() == notificationMethod)
+                    return JsonDocument.Parse(message.RootElement.GetRawText());
             }
         }
     }

@@ -720,6 +720,207 @@ public sealed class CompositionContracts
     }
 
     [TestMethod]
+    public void DeferredRecipeIsTransparentPerMountAndRollsBack()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "deferred-recipe-root");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var setups = 0;
+        var cleanups = 0;
+        var owners = new List<ReactiveScope>();
+        var childScopes = new List<ReactiveScope>();
+        var values = new List<Signal<int>>();
+        ThemeContext? bodyTheme = null;
+        var recipe = ComponentRecipe.Defer(
+            "stateful-component",
+            owner =>
+            {
+                setups++;
+                owners.Add(owner);
+                var value = owner.Signal(0, "value");
+                values.Add(value);
+                var child = owner.CreateChild("state-child");
+                childScopes.Add(child);
+                _ = child.Signal(0, "child-value");
+                owner.OnDispose(() => cleanups++);
+                return ComponentRecipe
+                    .Create(
+                        "authored-root",
+                        (context, root) =>
+                        {
+                            bodyTheme = context.Theme;
+                            Assert(
+                                ReferenceEquals(owner, root.Scope),
+                                "The authored body did not receive the setup owner's root scope."
+                            );
+                            Controls.Text(root, context.Theme, value.Value.ToString());
+                        }
+                    )
+                    .Named("authored-name");
+            }
+        );
+
+        var first = composition.Mount(composition.Root, theme, recipe);
+        var second = composition.Mount(composition.Root, theme, recipe);
+        graph.Drain();
+        Assert(
+            setups == 2
+                && owners.Count == 2
+                && values.Count == 2
+                && !ReferenceEquals(owners[0], owners[1])
+                && !ReferenceEquals(first, second)
+                && ReferenceEquals(first.Scope, owners[0])
+                && ReferenceEquals(second.Scope, owners[1])
+                && first.Name == "authored-name"
+                && second.Name == "authored-name"
+                && first.Scope.Name == first.Name
+                && first.Children.Count == 0
+                && second.Children.Count == 0
+                && ReferenceEquals(bodyTheme, theme),
+            "Deferred mounts did not preserve the authored root identity, theme, or per-mount scope."
+        );
+        values[0].Value = 1;
+        graph.Drain();
+        Assert(
+            values[0].Value == 1
+                && values[1].Value == 0
+                && first.Resolve(ProjectionProperties.Text).Value == "0"
+                && second.Resolve(ProjectionProperties.Text).Value == "0",
+            "Deferred state was shared between mounts."
+        );
+        var postMountChildValue = childScopes[0].Signal(0, "post-mount-value");
+        postMountChildValue.Value = 1;
+        graph.Drain();
+        var unrelated = ComponentRecipe.Create(
+            "unrelated-factory",
+            (_, _) =>
+            {
+                Expect<InvalidOperationException>(() => childScopes[0].Signal(0, "foreign-value"));
+            }
+        );
+        var unrelatedRoot = composition.Mount(composition.Root, theme, unrelated);
+        unrelatedRoot.Dispose();
+
+        first.Dispose();
+        Assert(
+            cleanups == 1 && owners[0].IsDisposed && !owners[1].IsDisposed,
+            "Disposing one deferred mount did not release exactly its owner."
+        );
+        second.Dispose();
+        Assert(cleanups == 2 && owners[1].IsDisposed, "Deferred owner cleanup was not exact.");
+
+        var setupFailureCleanup = 0;
+        var beforeSetupFailure = composition.Dump();
+        var setupFailure = ComponentRecipe.Defer(
+            "setup-failure",
+            owner =>
+            {
+                owner.OnDispose(() => setupFailureCleanup++);
+                throw new InvalidOperationException("setup failure");
+            }
+        );
+        Expect<InvalidOperationException>(() =>
+            composition.Mount(composition.Root, theme, setupFailure)
+        );
+        Assert(
+            setupFailureCleanup == 1 && composition.Dump() == beforeSetupFailure,
+            "A setup failure left deferred ownership or structure behind."
+        );
+
+        var bodyFailureCleanup = 0;
+        var beforeBodyFailure = composition.Dump();
+        var bodyFailure = ComponentRecipe.Defer(
+            "body-failure",
+            owner =>
+            {
+                owner.OnDispose(() => bodyFailureCleanup++);
+                return ComponentRecipe.Create(
+                    "body-failure-root",
+                    (_, _) => throw new InvalidOperationException("body failure")
+                );
+            }
+        );
+        Expect<InvalidOperationException>(() =>
+            composition.Mount(composition.Root, theme, bodyFailure)
+        );
+        Assert(
+            bodyFailureCleanup == 1 && composition.Dump() == beforeBodyFailure,
+            "An authored body failure did not roll back the deferred root and owner."
+        );
+
+        var nestedOwnerSeen = false;
+        var nested = ComponentRecipe.Defer(
+            "outer-forward",
+            owner =>
+                ComponentRecipe.Defer(
+                    "inner-forward",
+                    inner =>
+                    {
+                        nestedOwnerSeen = ReferenceEquals(owner, inner);
+                        return ComponentRecipe
+                            .Create("forwarded-kind", (_, _) => { })
+                            .Named("forwarded-name");
+                    }
+                )
+        );
+        var forwarded = composition.Mount(composition.Root, theme, nested);
+        Assert(
+            nestedOwnerSeen && forwarded.Name == "forwarded-name" && forwarded.Children.Count == 0,
+            "Nested deferred recipes added a wrapper or replaced the forwarded owner."
+        );
+        forwarded.Dispose();
+    }
+
+    [TestMethod]
+    public void LiveButtonLabelUpdatesTextSemanticsAndInvocation()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "live-button");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var label = graph.Signal("Disclosure", "live-button-label");
+        var invoked = 0;
+        var button = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Button(() => label.Value, () => invoked++, Style.Empty.Width(80).Height(20))
+        );
+        graph.Drain();
+        var before = Descendants(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == button.Id);
+        Assert(
+            before.Role == SemanticRole.Button
+                && before.Name == "Disclosure"
+                && button.Resolve(ProjectionProperties.Text).Value == "Disclosure"
+                && button.Resolve(LayoutProperties.Width).Value == 80f,
+            "The live button did not publish its initial label, text, or style."
+        );
+
+        label.Value = "Expanded";
+        graph.Drain();
+        var after = Descendants(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == button.Id);
+        Assert(
+            after.Role == SemanticRole.Button
+                && after.Name == "Expanded"
+                && button.Resolve(ProjectionProperties.Text).Value == "Expanded"
+                && button.Resolve(LayoutProperties.Width).Value == 80f
+                && after.Identity.Generation != before.Identity.Generation,
+            "The live button did not update retained text and semantics while preserving style."
+        );
+        Assert(
+            composition.ExecuteSemanticCommand(after.Identity, new(SemanticCommandKind.Invoke))
+                == SemanticCommandResult.Applied
+                && invoked == 1,
+            "The live button lost its Invoke behavior when its label changed."
+        );
+
+        button.Dispose();
+        label.Value = "Disposed";
+        graph.Drain();
+        Assert(button.IsDisposed, "Disposing the live button did not release its retained root.");
+    }
+
+    [TestMethod]
     public void BuiltinRecipeContracts()
     {
         Expect<ArgumentException>(() => Components.Text(" "));

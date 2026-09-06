@@ -345,7 +345,8 @@ public sealed class Composition : IDisposable
         Element parent,
         string name,
         bool attach,
-        CompositionContext? factory = null
+        CompositionContext? factory = null,
+        ReactiveScope? scope = null
     )
     {
         _graph.CheckThread();
@@ -362,8 +363,24 @@ public sealed class Composition : IDisposable
                 nameof(parent)
             );
         parent.ThrowIfDisposed();
-        var scope = parent.Scope.CreateElementChild(name);
-        var element = new Element(this, parent, scope, NextId(), name);
+        if (scope is not null)
+        {
+            if (!ReferenceEquals(scope.Parent, parent.Scope))
+                throw new ArgumentException(
+                    "The supplied element scope must be owned by the parent scope.",
+                    nameof(scope)
+                );
+            if (!ReferenceEquals(scope.Graph, _graph))
+                throw new ArgumentException(
+                    "The supplied element scope belongs to another reactive graph.",
+                    nameof(scope)
+                );
+            ObjectDisposedException.ThrowIf(scope.IsDisposed, scope);
+        }
+        var elementScope = scope ?? parent.Scope.CreateElementChild(name);
+        var element = new Element(this, parent, elementScope, NextId(), name);
+        if (scope is not null)
+            scope.SetFactoryGuardTree(() => ValidateFactoryMutation(element));
         parent.Scope.OwnElement(element);
         if (attach)
             parent.Attach(element);

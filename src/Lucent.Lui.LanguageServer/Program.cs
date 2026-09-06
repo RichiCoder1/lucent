@@ -19,10 +19,35 @@ internal static class Program
         var initialized = false;
         var shutdown = false;
         var exitCode = 1;
+        var diagnosticsPending = false;
+        Task<JsonDocument?>? read = null;
         try
         {
-            while (await ReadMessageAsync().ConfigureAwait(false) is { } message)
+            while (true)
             {
+                // Console header reads are blocking; keep one reader off the dispatch loop.
+                read ??= Task.Run(ReadMessageAsync);
+                if (diagnosticsPending && !read.IsCompleted)
+                {
+                    await Task.WhenAny(read, Task.Delay(150)).ConfigureAwait(false);
+                    if (!read.IsCompleted && project is not null)
+                    {
+                        diagnosticsPending = false;
+                        try
+                        {
+                            await PublishOpenDiagnosticsAsync(project, openDocuments)
+                                .ConfigureAwait(false);
+                        }
+                        catch (Exception exception)
+                        {
+                            Console.Error.WriteLine($"Idle diagnostics: {exception}");
+                        }
+                    }
+                }
+                var message = await read.ConfigureAwait(false);
+                read = null;
+                if (message is null)
+                    break;
                 using (message)
                 {
                     var root = message.RootElement;
@@ -95,6 +120,16 @@ internal static class Program
                     }
                     try
                     {
+                        if (
+                            methodName == "textDocument/diagnostic"
+                            && diagnosticsPending
+                            && project is not null
+                        )
+                        {
+                            diagnosticsPending = false;
+                            await PublishOpenDiagnosticsAsync(project, openDocuments)
+                                .ConfigureAwait(false);
+                        }
                         var result = await HandleAsync(
                                 methodName,
                                 root.TryGetProperty("params", out var parameters)
@@ -111,6 +146,7 @@ internal static class Program
                             initializeReceived = true;
                             openDocuments.Clear();
                         }
+                        diagnosticsPending |= result.DiagnosticsChanged;
                         if (id is not null)
                             WriteResponse(id, result.Value);
                     }
@@ -118,7 +154,10 @@ internal static class Program
                     {
                         WriteError(id, exception.Message);
                     }
-                    catch (Exception) { }
+                    catch (Exception exception)
+                    {
+                        Console.Error.WriteLine($"{methodName}: {exception}");
+                    }
                 }
             }
         }
@@ -167,7 +206,11 @@ internal static class Program
                             definitionProvider = true,
                             hoverProvider = true,
                             signatureHelpProvider = new { triggerCharacters = signatureTriggers },
-                            completionProvider = new { triggerCharacters = completionTriggers },
+                            completionProvider = new
+                            {
+                                triggerCharacters = completionTriggers,
+                                resolveProvider = true,
+                            },
                             documentSymbolProvider = true,
                             semanticTokensProvider = new
                             {
@@ -211,7 +254,7 @@ internal static class Program
                         return new HandlerResult(null, null);
                     openDocuments[DocumentKey(openedUri)] = version;
                     project.ReplaceText(openedUri, opened.GetProperty("text").GetString()!);
-                    await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
+                    return new HandlerResult(null, null, diagnosticsChanged: true);
                 }
                 return new HandlerResult(null, null);
             case "textDocument/didChange":
@@ -235,7 +278,7 @@ internal static class Program
                         changedUri,
                         parameters.GetProperty("contentChanges")[0].GetProperty("text").GetString()!
                     );
-                    await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
+                    return new HandlerResult(null, null, diagnosticsChanged: true);
                 }
                 return new HandlerResult(null, null);
             case "textDocument/didClose":
@@ -248,7 +291,7 @@ internal static class Program
                     if (project.CanEdit(closedUri))
                         project.Close(closedUri);
                     PublishEmptyDiagnostics(closedUri, version);
-                    await PublishOpenDiagnosticsAsync(project, openDocuments).ConfigureAwait(false);
+                    return new HandlerResult(null, null, diagnosticsChanged: true);
                 }
                 return new HandlerResult(null, null);
             case "workspace/didChangeWatchedFiles":
@@ -418,16 +461,19 @@ internal static class Program
                 var completionUri = new Uri(
                     parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                 );
+                var completionOffset = await OffsetAsync(
+                        project,
+                        completionUri,
+                        parameters.GetProperty("position")
+                    )
+                    .ConfigureAwait(false);
+                var completionEpoch = project.CompletionEpoch;
                 var completion = await project
                     .CompletionsAsync(
                         completionUri,
-                        await OffsetAsync(
-                                project,
-                                completionUri,
-                                parameters.GetProperty("position")
-                            )
-                            .ConfigureAwait(false),
-                        CancellationToken.None
+                        completionOffset,
+                        CancellationToken.None,
+                        deferDocumentation: true
                     )
                     .ConfigureAwait(false);
                 return new HandlerResult(
@@ -440,12 +486,51 @@ internal static class Program
                             label = item.Label,
                             kind = item.Kind,
                             detail = item.Detail,
+                            data = new
+                            {
+                                uri = completionUri.AbsoluteUri,
+                                offset = completionOffset,
+                                epoch = completionEpoch,
+                            },
                             documentation = item.Documentation is null
                                 ? null
                                 : new { kind = "plaintext", value = item.Documentation },
                         }),
                     }
                 );
+            case "completionItem/resolve":
+                if (
+                    project is null
+                    || !parameters.TryGetProperty("data", out var completionData)
+                    || completionData.GetProperty("epoch").GetInt64() != project.CompletionEpoch
+                )
+                    return new HandlerResult(null, parameters.Clone());
+                var resolutionEpoch = project.CompletionEpoch;
+                var resolvedItems = await project
+                    .CompletionsAsync(
+                        new Uri(completionData.GetProperty("uri").GetString()!),
+                        completionData.GetProperty("offset").GetInt32(),
+                        CancellationToken.None,
+                        descriptionLabel: parameters.GetProperty("label").GetString()
+                    )
+                    .ConfigureAwait(false);
+                var resolved = resolvedItems?.FirstOrDefault(item =>
+                    item.Label == parameters.GetProperty("label").GetString()
+                    && item.Kind == parameters.GetProperty("kind").GetInt32()
+                );
+                if (resolved is null || project.CompletionEpoch != resolutionEpoch)
+                    return new HandlerResult(null, parameters.Clone());
+                var resolvedResponse = System.Text.Json.Nodes.JsonNode.Parse(
+                    parameters.GetRawText()
+                )!;
+                resolvedResponse["detail"] = resolved.Detail;
+                if (resolved.Documentation is not null)
+                    resolvedResponse["documentation"] = new System.Text.Json.Nodes.JsonObject
+                    {
+                        ["kind"] = "plaintext",
+                        ["value"] = resolved.Documentation,
+                    };
+                return new HandlerResult(null, resolvedResponse);
             case "textDocument/hover":
                 if (project is null)
                     return new HandlerResult(null, null);
@@ -832,9 +917,14 @@ internal static class Program
         }
     }
 
-    private sealed class HandlerResult(LuiProjectContext? project, object? value)
+    private sealed class HandlerResult(
+        LuiProjectContext? project,
+        object? value,
+        bool diagnosticsChanged = false
+    )
     {
         internal LuiProjectContext? Project { get; } = project;
         internal object? Value { get; } = value;
+        internal bool DiagnosticsChanged { get; } = diagnosticsChanged;
     }
 }

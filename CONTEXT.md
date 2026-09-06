@@ -36,6 +36,14 @@ _Avoid_: Template expansion, render tree, layout
 A reusable typed C# capability returned by a `[LucentComponent]` method. Each mount creates and owns exactly one stable retained root; the value is not a runtime template instance, virtual node, component object, or rerender function. `.lui` components lower to the same `ComponentRecipe` interface used by handwritten C#.
 _Avoid_: Template, widget class, render function
 
+**Stateful component**:
+A component that owns local writable application or interaction state for each mount. The reusable recipe is distinct from that mounted state.
+_Avoid_: Stateful recipe, rerender function
+
+**Stateless component**:
+A component that owns no local writable application or interaction state. It may observe changing inputs and compose stateful descendants.
+_Avoid_: Static component, nonreactive component
+
 **Content recipe**:
 A typed capability that contributes zero or more retained components or structural regions below an existing component root. Immutable ordered `ComponentContent` groups content recipes transactionally; an ordinary component recipe converts safely to one content recipe.
 _Avoid_: Fragment element, child template, virtual children

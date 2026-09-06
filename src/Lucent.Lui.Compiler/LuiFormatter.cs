@@ -137,6 +137,8 @@ public static class LuiFormatter
             Pad(output, indent);
             if (node is LuiTextSyntax text)
                 output.Append(text.Text).Append(nl);
+            else if (node is LuiMemberSyntax member)
+                output.Append(member.Text).Append(nl);
             else if (node is LuiExpressionBodySyntax expression)
                 output.Append('{').Append(expression.Text).Append('}').Append(nl);
             else if (node is LuiCommentSyntax comment)

@@ -1825,15 +1825,9 @@ public sealed class Eligibility
             )
         );
         Assert(
-            !implicitDelegate.Success
-                && implicitDelegate.Diagnostics.Any(diagnostic =>
-                    diagnostic.Id == "LUI2000"
-                    && diagnostic.Message.Contains(
-                        "cannot convert",
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                ),
-            "a plain scalar expression was implicitly converted into a live delegate."
+            implicitDelegate.Success,
+            "A compatible scalar expression should become a live reader: "
+                + string.Join(" | ", implicitDelegate.Diagnostics.Select(d => d.Message))
         );
         var ambiguousExpressionSource =
             "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Test() { <Ambiguous>{null}</Ambiguous> }";
@@ -3120,6 +3114,65 @@ internal component Current(IEnumerable<Row> rows, IEnumerable<Style> styles, obj
                 ),
             "rewritten foreach local lost its authored source map."
         );
+    }
+
+    [TestMethod]
+    public void TargetTypedStyleConstructionExplainsValueTokenAmbiguity()
+    {
+        var compilation = CSharpCompilation.Create("insets-diagnostic", references: References());
+        foreach (var value in new[] { "new(16, 8)", "new(16, 8, 16, 8)" })
+        {
+            var source =
+                "using Lucent.Core; style Panel { Padding: "
+                + value
+                + "; } internal component Test() { <Row style={Panel} /> }";
+            var result = LuiCompiler.Compile(
+                LuiParser.Parse(source),
+                compilation,
+                new LuiFreshnessIdentity(
+                    "1",
+                    "test",
+                    new LuiDocumentIdentity("Insets.lui"),
+                    "1",
+                    "preview"
+                )
+            );
+            var diagnostic = result.Diagnostics.Single(item => item.Id == "LUI2012");
+            Assert(
+                !result.Success
+                    && diagnostic.Span.Start == source.IndexOf(value, StringComparison.Ordinal)
+                    && diagnostic.Span.Length == value.Length
+                    && diagnostic.Message.Contains("Insets.Symmetric", StringComparison.Ordinal)
+                    && diagnostic.Message.Contains("new Insets", StringComparison.Ordinal)
+                    && !result.Diagnostics.Any(item =>
+                        item.Message.Contains("Style.Set", StringComparison.Ordinal)
+                    ),
+                "Target-typed style construction did not report an actionable error on its expression."
+            );
+        }
+        foreach (var value in new[] { "Insets.Symmetric(16, 8)", "new Insets(16, 8, 16, 8)" })
+        {
+            var source =
+                "using Lucent.Core; style Panel { Padding: "
+                + value
+                + "; } internal component Test() { <Row style={Panel} /> }";
+            var result = LuiCompiler.Compile(
+                LuiParser.Parse(source),
+                compilation,
+                new LuiFreshnessIdentity(
+                    "1",
+                    "test",
+                    new LuiDocumentIdentity("Insets.lui"),
+                    "1",
+                    "preview"
+                )
+            );
+            Assert(
+                result.Success,
+                "Explicit Insets construction stopped compiling: "
+                    + String.Join("; ", result.Diagnostics.Select(item => item.Message))
+            );
+        }
     }
 
     static string Diagnostics(LuiDocumentSyntax document) =>

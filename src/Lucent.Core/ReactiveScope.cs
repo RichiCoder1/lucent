@@ -30,8 +30,8 @@ public sealed class ReactiveScope : IDisposable
     /// <summary>Gets the stable identifier assigned at creation.</summary>
     public int Id { get; }
 
-    /// <summary>Gets the diagnostic name assigned at creation.</summary>
-    public string Name { get; }
+    /// <summary>Gets the current diagnostic name assigned to this scope.</summary>
+    public string Name { get; private set; }
 
     /// <summary>Gets the parent lifetime scope, or null for a root scope.</summary>
     public ReactiveScope? Parent => _parent;
@@ -39,6 +39,14 @@ public sealed class ReactiveScope : IDisposable
     /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
     internal ReactiveGraph Graph => _graph;
+
+    internal void Rename(string name)
+    {
+        _graph.CheckThread();
+        ReactiveGraph.ValidateName(name, nameof(name));
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        Name = name;
+    }
 
     internal bool DescendsFrom(ReactiveScope ancestor)
     {
@@ -182,6 +190,14 @@ public sealed class ReactiveScope : IDisposable
 
     internal void SetFactoryGuard(Action guard) =>
         _factoryGuard = guard ?? throw new ArgumentNullException(nameof(guard));
+
+    internal void SetFactoryGuardTree(Action guard)
+    {
+        SetFactoryGuard(guard);
+        foreach (var owned in _owned.ToArray())
+            if (owned is ReactiveScope child)
+                child.SetFactoryGuardTree(guard);
+    }
 
     internal void SetFactoryRollback(Action<Action> register) =>
         _factoryRollback = register ?? throw new ArgumentNullException(nameof(register));

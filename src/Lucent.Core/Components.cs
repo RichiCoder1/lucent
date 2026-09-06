@@ -147,6 +147,39 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a button whose label follows the supplied reader. Use <paramref name="onInvoke"/> to respond when the user activates it.</summary>
+    [LucentComponent]
+    public static ComponentRecipe Button(
+        [DefaultContent] Func<string> content,
+        Action? onInvoke = null,
+        Style? style = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        return ComponentRecipe.Create(
+            "button",
+            (context, root) =>
+            {
+                var label = root.Scope.Derived(
+                    () => Required(content(), nameof(content)),
+                    root.Name + ".button-label"
+                );
+                Controls.Button(root, context.Theme, label.Value, onInvoke, style);
+                _ = root.Scope.Effect(
+                    () =>
+                    {
+                        var nextLabel = label.Value;
+                        root.UpdateControl(ProjectionProperties.Text, nextLabel);
+                        root.UpdateControlSemantics(
+                            new(SemanticRole.Button, nextLabel, actions: SemanticAction.Invoke)
+                        );
+                    },
+                    root.Name + ".button"
+                );
+            }
+        );
+    }
+
     /// <summary>Creates a single-line text editor. Supply <paramref name="session"/> to retain its document state across mounts; otherwise <paramref name="initialValue"/> seeds mount-owned state.</summary>
     [LucentComponent]
     public static ComponentRecipe TextField(

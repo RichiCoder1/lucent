@@ -1,7 +1,7 @@
 {
   "name": "lucent-lui",
   "displayName": "Lucent .lui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "lucent",
   "engines": { "vscode": "^1.95.0" },
   "main": "./extension.js",
@@ -30,7 +30,7 @@
           "default": "",
           "description": "Path to the separately installed Lucent.Lui.LanguageServer.dll."
         }
-        ,"lucentLui.projectPath": { "type": "string", "default": "", "description": "Evaluated .csproj owned by this LUI host." }
+        ,"lucentLui.projectPath": { "type": "string", "default": "", "description": "Evaluated .csproj, absolute or relative to the first workspace folder." }
       }
     }
   }

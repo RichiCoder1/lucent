@@ -1,0 +1,9 @@
+# Component-local state in `.lui`
+
+Status: Accepted; initial implementation and focused trial complete in the working tree. Extends the local-state deferral in ADR 0002 without changing the retained runtime model.
+
+Components may declare per-mount state and ordinary C# methods alongside markup. Constant-expression initializers create writable state; other unmarked initializers describe read-only derived values. `[Once]` creates a writable initial copy, while `readonly` captures a read-only initial value. This inference favors concise authoring over explicit signal objects, so compiler diagnostics and editor information must make each declaration's behavior visible. Locals inside methods and setup retain ordinary C# semantics.
+
+`Setup` runs synchronously once after declaration initialization and before children mount. Component methods are visible to markup; setup locals are private and there is no setup export object. Lucent resources use owner-aware APIs; arbitrary external subscriptions require explicit ownership. Mount failure and removal dispose owned resources. Collapse and retained same-key updates preserve local state; removal resets it unless a future explicit retention mechanism applies. Accepted application writes retain their longer-lived ownership under ADR 0003.
+
+Stateful and stateless components share the recipe contract: the distinction is ownership of local writable state, not whether they observe reactive inputs. Live markup is the intended default at supported value-binding positions; callbacks remain callbacks and snapshot-only inputs must not silently discard reactivity. Setup must preserve the authored root without adding layout or accessibility wrappers. Explicit async resource sugar and future root-switching syntax are separate extensions; this decision does not authorize parallel component mounting.

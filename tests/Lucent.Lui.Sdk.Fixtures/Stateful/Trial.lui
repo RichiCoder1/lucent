@@ -1,0 +1,22 @@
+namespace StatefulTrial;
+using System;
+using Lucent.Core;
+using static StatefulTrial.TestComponents;
+public component Trial(Func<string> initial) {
+    int count = Constants.Start;
+    [Once] string draft = initial();
+    readonly string snapshot = initial();
+    string label = count.ToString() + ":" + draft + ":" + snapshot + ":" + initial();
+
+    void Toggle() {
+        count += 1;
+        draft = "edited";
+    }
+
+    Setup(owner) {
+        Harness.Setups++;
+        owner.OnDispose(() => Harness.Cleanups++);
+    }
+
+    <Probe toggle={Toggle}>{label}</Probe>
+}

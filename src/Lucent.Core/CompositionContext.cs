@@ -12,6 +12,8 @@ public sealed class CompositionContext : IDisposable
     private readonly Element _parent;
     private Element? _root;
     private readonly List<Element> _created = [];
+    private readonly List<ReactiveScope> _deferredScopes = [];
+    private ReactiveScope? _activeDeferredOwner;
     private bool _committed;
     private bool _disposed;
     private List<Action>? _rollback;
@@ -244,6 +246,7 @@ public sealed class CompositionContext : IDisposable
         if (_committed)
         {
             _rollback = null;
+            _deferredScopes.Clear();
             return;
         }
         List<Exception>? errors = null;
@@ -256,6 +259,17 @@ public sealed class CompositionContext : IDisposable
         {
             errors = [exception];
         }
+        foreach (var scope in _deferredScopes.AsEnumerable().Reverse())
+            if (!scope.IsDisposed)
+                try
+                {
+                    scope.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    (errors ??= []).Add(exception);
+                }
+        _deferredScopes.Clear();
         if (_rollback is not null)
             foreach (var cleanup in _rollback.AsEnumerable().Reverse())
                 try
@@ -276,6 +290,53 @@ public sealed class CompositionContext : IDisposable
         return _composition.RunFactory(this, factory);
     }
 
+    internal T RunDeferred<T>(ReactiveScope owner, Func<T> factory)
+    {
+        ThrowIfActiveFactory();
+        if (!_deferredScopes.Contains(owner))
+            throw new InvalidOperationException(
+                "The deferred owner does not belong to this composition context."
+            );
+        var prior = _activeDeferredOwner;
+        _activeDeferredOwner = owner;
+        try
+        {
+            // The containing mount factory is already active. Re-entering Run would
+            // look like an unrelated nested factory before the provisional root exists.
+            return _composition.Graph.Untracked(factory);
+        }
+        finally
+        {
+            _activeDeferredOwner = prior;
+        }
+    }
+
+    internal ReactiveScope BeginDeferredScope(string kind, string? name)
+    {
+        ThrowIfActiveFactory();
+        ReactiveGraph.ValidateName(kind, nameof(kind));
+        var ownerName = name ?? kind + ".setup";
+        ReactiveGraph.ValidateName(ownerName, nameof(name));
+        var owner = _parent.Scope.CreateElementChild(ownerName);
+        owner.SetFactoryGuard(() => ValidateDeferredOwner(owner));
+        _deferredScopes.Add(owner);
+        return owner;
+    }
+
+    private void ValidateDeferredOwner(ReactiveScope owner)
+    {
+        if (_disposed)
+            return;
+        ThrowIfInactive();
+        if (
+            !ReferenceEquals(_composition.Factory, this)
+            || !ReferenceEquals(_activeDeferredOwner, owner)
+        )
+            throw new InvalidOperationException(
+                "Deferred setup may only access its owner while its factory is executing."
+            );
+    }
+
     internal void Record(Element element) => _created.Add(element);
 
     internal void RegisterRollback(Action cleanup)
@@ -287,14 +348,16 @@ public sealed class CompositionContext : IDisposable
 
     private void PromoteRollback()
     {
-        if (_rollback is null)
-            return;
-        foreach (var cleanup in _rollback)
-            _composition.RegisterFactoryRollback(cleanup);
-        _rollback = null;
+        if (_rollback is not null)
+        {
+            foreach (var cleanup in _rollback)
+                _composition.RegisterFactoryRollback(cleanup);
+            _rollback = null;
+        }
+        _deferredScopes.Clear();
     }
 
-    internal Element RecipeElement(string kind, string? name)
+    internal Element RecipeElement(string kind, string? name, ReactiveScope? scope = null)
     {
         ThrowIfActiveFactory();
         if (_root is not null)
@@ -302,12 +365,17 @@ public sealed class CompositionContext : IDisposable
                 "A content factory creates exactly one root element."
             );
         var ordinal = _parent.NextRecipeOrdinal();
-        _root = _composition.Create(
-            _parent,
-            name ?? kind + "-" + ordinal.ToString(CultureInfo.InvariantCulture),
-            attach: false,
-            this
-        );
+        var rootName = name ?? kind + "-" + ordinal.ToString(CultureInfo.InvariantCulture);
+        if (scope is not null)
+        {
+            if (!_deferredScopes.Contains(scope))
+                throw new ArgumentException(
+                    "The supplied deferred scope does not belong to this mount.",
+                    nameof(scope)
+                );
+            scope.Rename(rootName);
+        }
+        _root = _composition.Create(_parent, rootName, attach: false, this, scope);
         return _root;
     }
 

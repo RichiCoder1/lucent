@@ -183,7 +183,7 @@ public static class LuiParser
             var parameters = Parameters(parameterStart, parameterEnd);
             var closeParameters = Expect(')');
             var open = Expect('{');
-            var body = open.IsMissing ? Array.Empty<LuiBodySyntax>() : Body('}', true);
+            var body = open.IsMissing ? Array.Empty<LuiBodySyntax>() : Body('}', true, true);
             var close = open.IsMissing ? Missing("}") : Expect('}');
             if (
                 !name.IsMissing
@@ -193,7 +193,12 @@ public static class LuiParser
                 )
             )
                 Error("LUI1000", "Invalid C# component identifier.", name.Span);
-            if (body.Count(node => !(node is LuiCommentSyntax)) != 1)
+            var setupMembers = body.OfType<LuiMemberSyntax>()
+                .Where(member => member.Kind == LuiMemberKind.Setup)
+                .ToArray();
+            foreach (var duplicate in setupMembers.Skip(1))
+                Error("LUI1019", "A component may declare only one Setup block.", duplicate.Span);
+            if (body.Count(node => !(node is LuiCommentSyntax || node is LuiMemberSyntax)) != 1)
                 Error(
                     "LUI1004",
                     "A component body requires exactly one root construct.",
@@ -395,9 +400,14 @@ public static class LuiParser
             return new LuiToken(value, new LuiSpan(start + leading, value.Length), false);
         }
 
-        private IReadOnlyList<LuiBodySyntax> Body(char end, bool stopTopLevel = false)
+        private IReadOnlyList<LuiBodySyntax> Body(
+            char end,
+            bool stopTopLevel = false,
+            bool allowMembers = false
+        )
         {
             var result = new List<LuiBodySyntax>();
+            var memberPrefix = allowMembers;
             while (
                 !End
                 && Current != end
@@ -417,7 +427,8 @@ public static class LuiParser
                 )
                     break;
                 if (
-                    !(
+                    !memberPrefix
+                    && !(
                         Current == '<'
                         || Current == '{'
                         || Starts("{/*")
@@ -427,20 +438,37 @@ public static class LuiParser
                 )
                     position = white;
                 var before = position;
-                if (Starts("{/*"))
+                if (memberPrefix && TryMember(out var member))
+                {
+                    result.Add(member);
+                }
+                else if (Starts("{/*"))
                 {
                     result.Add(Comment());
                 }
                 else if (Current == '<')
+                {
+                    memberPrefix = false;
                     result.Add(Element());
+                }
                 else if (Current == '{')
+                {
+                    memberPrefix = false;
                     result.Add(ExpressionBody());
+                }
                 else if (PeekRegion("if"))
+                {
+                    memberPrefix = false;
                     result.Add(If());
+                }
                 else if (PeekRegion("foreach"))
+                {
+                    memberPrefix = false;
                     result.Add(ForEach());
+                }
                 else
                 {
+                    memberPrefix = false;
                     var start = position;
                     while (
                         !End
@@ -464,6 +492,162 @@ public static class LuiParser
                 }
             }
             return result;
+        }
+
+        private bool TryMember(out LuiMemberSyntax member)
+        {
+            var start = position;
+            if (PeekRegion("Setup"))
+                return TrySetup(start, out member);
+
+            var declaration = SyntaxFactory.ParseMemberDeclaration(
+                text.Substring(start),
+                options: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
+                consumeFullText: false
+            );
+            if (
+                declaration == null
+                || declaration.ContainsDiagnostics
+                || declaration.SpanStart != 0
+                || declaration.Span.Length == 0
+            )
+            {
+                member = null!;
+                return false;
+            }
+
+            var kind = declaration switch
+            {
+                FieldDeclarationSyntax _ => LuiMemberKind.Field,
+                MethodDeclarationSyntax _ => LuiMemberKind.Method,
+                _ => (LuiMemberKind?)null,
+            };
+            position = start + declaration.Span.End;
+            if (kind == null)
+                Error(
+                    "LUI1020",
+                    "Component declarations support fields, methods, and Setup only.",
+                    LuiSpan.From(start, position)
+                );
+            member = new LuiMemberSyntax(
+                LuiSpan.From(start, position),
+                text.Substring(start, position - start),
+                kind ?? LuiMemberKind.Method,
+                declaration
+            );
+            return true;
+        }
+
+        private bool TrySetup(int start, out LuiMemberSyntax member)
+        {
+            position += "Setup".Length;
+            White();
+            position++;
+            var parameterStart = position;
+            var parameterEnd = IslandScanner.End(text, position, ')');
+            position = parameterEnd;
+            var parameterText = text.Substring(parameterStart, parameterEnd - parameterStart);
+            var trimmedParameter = parameterText.Trim();
+            LuiToken? owner = null;
+            var validParameter = trimmedParameter.Length == 0;
+            if (trimmedParameter.Length != 0)
+            {
+                var leading = parameterText.IndexOf(trimmedParameter, StringComparison.Ordinal);
+                var parsedOwner = SyntaxFactory.ParseName(trimmedParameter);
+                validParameter =
+                    parsedOwner is IdentifierNameSyntax
+                    && !parsedOwner.ContainsDiagnostics
+                    && parsedOwner.Span.Length == trimmedParameter.Length;
+                if (validParameter)
+                    owner = new LuiToken(
+                        trimmedParameter,
+                        new LuiSpan(parameterStart + leading, trimmedParameter.Length),
+                        false
+                    );
+            }
+            if (Current == ')')
+                position++;
+            else
+                validParameter = false;
+            White();
+            if (Current != '{')
+            {
+                Error(
+                    "LUI1020",
+                    "Setup requires Setup() or Setup(owner) followed by a synchronous block.",
+                    LuiSpan.From(start, position)
+                );
+                member = null!;
+                position = start;
+                return false;
+            }
+
+            var blockStart = position;
+            var block =
+                SyntaxFactory.ParseStatement(
+                    text.Substring(blockStart),
+                    options: CSharpParseOptions.Default.WithLanguageVersion(
+                        LanguageVersion.Preview
+                    ),
+                    consumeFullText: false
+                ) as BlockSyntax;
+            if (block == null || block.ContainsDiagnostics || block.CloseBraceToken.IsMissing)
+            {
+                Error(
+                    "LUI1020",
+                    "Setup requires a complete synchronous C# block.",
+                    new LuiSpan(start, Math.Max(1, text.Length - start))
+                );
+                member = null!;
+                position = start;
+                return false;
+            }
+            position = blockStart + block.Span.End;
+            var raw = text.Substring(start, position - start);
+            var headerLength = blockStart - start;
+            var normalized =
+                "int S()"
+                + new string(' ', Math.Max(0, headerLength - 7))
+                + raw.Substring(headerLength);
+            var declaration =
+                SyntaxFactory.ParseMemberDeclaration(
+                    normalized,
+                    options: CSharpParseOptions.Default.WithLanguageVersion(
+                        LanguageVersion.Preview
+                    ),
+                    consumeFullText: true
+                ) as MethodDeclarationSyntax;
+            if (!validParameter || declaration == null || declaration.ContainsDiagnostics)
+                Error(
+                    "LUI1020",
+                    "Setup requires Setup() or Setup(owner) followed by a synchronous block.",
+                    LuiSpan.From(start, blockStart)
+                );
+            declaration ??= SyntaxFactory
+                .MethodDeclaration(
+                    SyntaxFactory.PredefinedType(SyntaxFactory.Token(SyntaxKind.VoidKeyword)),
+                    "Setup"
+                )
+                .WithBody(block);
+            foreach (
+                var awaitExpression in declaration.DescendantNodes().OfType<AwaitExpressionSyntax>()
+            )
+                Error(
+                    "LUI1021",
+                    "Setup is synchronous and cannot contain await.",
+                    new LuiSpan(
+                        start + awaitExpression.AwaitKeyword.SpanStart,
+                        awaitExpression.AwaitKeyword.Span.Length
+                    )
+                );
+            member = new LuiMemberSyntax(
+                LuiSpan.From(start, position),
+                raw,
+                LuiMemberKind.Setup,
+                declaration,
+                owner
+            );
+            return true;
         }
 
         private LuiExpressionBodySyntax ExpressionBody()
