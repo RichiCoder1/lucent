@@ -107,7 +107,7 @@ static void VerifyLuiMetadata(
         ["CommandScope"] = 1,
         ["ResponsiveContainer"] = 1,
         ["Text"] = 2,
-        ["Button"] = 1,
+        ["Button"] = 2,
         ["TextField"] = 1,
         ["TextArea"] = 1,
         ["Selectable"] = 2,
