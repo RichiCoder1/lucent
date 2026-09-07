@@ -650,6 +650,127 @@ public sealed class RendererTests
     }
 
     [TestMethod]
+    public void ResolvesFontWeightInShapeCacheAndPaintsAntialiasedTextAtDeclaredScales()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var regularRequest = new TextMeasureRequest(
+            "Weighted heading",
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            FontWeight: FontWeight.Regular
+        );
+        var boldRequest = regularRequest with { FontWeight = FontWeight.Bold };
+        var regular = renderer.Shape(regularRequest);
+        var bold = renderer.Shape(boldRequest);
+        Assert(
+            !ReferenceEquals(regular, bold)
+                && ReferenceEquals(bold, renderer.Shape(boldRequest))
+                && regular.Identity != bold.Identity
+                && regular.Runs.All(run => run.Weight < (int)FontWeight.Bold)
+                && bold.Runs.All(run => run.Weight >= (int)FontWeight.SemiBold),
+            "Requested font weight did not select a distinct face or shape-cache entry."
+        );
+
+        foreach (var scale in new[] { 1f, 1.5f, 2f })
+        {
+            using var bitmap = new SKBitmap(
+                (int)MathF.Ceiling(160 * scale),
+                (int)MathF.Ceiling(28 * scale),
+                SKColorType.Rgba8888,
+                SKAlphaType.Premul
+            );
+            using var canvas = new SKCanvas(bitmap);
+            canvas.Clear(SKColors.Transparent);
+            renderer.Render(
+                new RetainedScene(
+                    1,
+                    new(160, 28, scale),
+                    [],
+                    [
+                        new TextSceneNode(
+                            new(new(1, 1), SceneNodeKind.Text),
+                            new(0, 0, 160, 28),
+                            Color.Parse("#111111"),
+                            bold
+                        ),
+                    ],
+                    []
+                ),
+                canvas
+            );
+            var alphas = Enumerable
+                .Range(0, bitmap.Height)
+                .SelectMany(y =>
+                    Enumerable.Range(0, bitmap.Width).Select(x => bitmap.GetPixel(x, y).Alpha)
+                )
+                .ToArray();
+            Assert(
+                alphas.Any(alpha => alpha is > 0 and < byte.MaxValue)
+                    && alphas.Any(alpha => alpha > 220),
+                "Explicit antialiased font edging did not produce stable edge and interior coverage at scale "
+                    + scale
+            );
+        }
+    }
+
+    [TestMethod]
+    public void RendersRoundedBackgroundFocusAndChildClipAtDeclaredScales()
+    {
+        foreach (var scale in new[] { 1f, 1.5f, 2f })
+        {
+            using var composition = new Composition(new ReactiveGraph(), "rounded");
+            using var theme = new ThemeContext(composition.Root.Scope, new Theme("rounded"));
+            composition.Root.Present(
+                theme,
+                author: Style
+                    .Empty.Width(20)
+                    .Height(20)
+                    .Background(Color.Parse("#22AA44"))
+                    .CornerRadius(6)
+                    .Clip(true)
+                    .FocusRing(FocusRing.Inset(Color.Parse("#2255CC"), 1))
+            );
+            var child = composition.Child(composition.Root, "child");
+            child.Present(
+                theme,
+                author: Style.Empty.Width(20).Height(20).Background(Color.Parse("#E8D24A"))
+            );
+            using var renderer = new SkiaSceneRenderer();
+            var scene = SceneLayout.Project(composition, new(20, 20, scale), renderer);
+            using var bitmap = new SKBitmap(
+                (int)MathF.Ceiling(20 * scale),
+                (int)MathF.Ceiling(20 * scale),
+                SKColorType.Rgba8888,
+                SKAlphaType.Premul
+            );
+            using var canvas = new SKCanvas(bitmap);
+            canvas.Clear(SKColors.Transparent);
+            renderer.Render(scene, canvas);
+
+            var corner = bitmap.GetPixel(0, 0);
+            var center = bitmap.GetPixel(
+                (int)MathF.Floor(10 * scale),
+                (int)MathF.Floor(10 * scale)
+            );
+            var focus = bitmap.GetPixel(
+                (int)MathF.Floor(10 * scale),
+                Math.Max(0, (int)MathF.Floor(.5f * scale))
+            );
+            Assert(
+                corner.Alpha == 0
+                    && center.Red > 180
+                    && center.Green > 170
+                    && focus.Blue > focus.Red
+                    && focus.Blue > focus.Green,
+                $"Rounded fill/focus/clip pixels were incoherent at scale {scale}: corner={corner}, center={center}, focus={focus}."
+            );
+        }
+    }
+
+    [TestMethod]
     public void RendersGradientStopsAndClipping()
     {
         using var renderer = new SkiaSceneRenderer();

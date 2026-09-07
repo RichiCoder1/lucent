@@ -436,10 +436,12 @@ public sealed class PresentationContracts
                 .Clip(true)
                 .Scroll(new ScrollOffset(1, 2))
                 .Background((Brush)color)
+                .CornerRadius(6f)
                 .Opacity(.5f)
                 .TextColor(color)
                 .FontFamily("Fluent")
                 .FontSize(12f)
+                .FontWeight(FontWeight.SemiBold)
                 .Language("fr")
                 .Direction(TextDirection.RightToLeft)
                 .Enabled(false)
@@ -461,10 +463,12 @@ public sealed class PresentationContracts
                 && element.Resolve(LayoutProperties.Clip).Value
                 && element.Resolve(LayoutProperties.Scroll).Value == new ScrollOffset(1, 2)
                 && element.Resolve(VisualProperties.Background).Value.Color == color
+                && element.Resolve(VisualProperties.CornerRadius).Value == 6f
                 && element.Resolve(VisualProperties.Opacity).Value == .5f
                 && element.Resolve(TypographyProperties.TextColor).Value == color
                 && element.Resolve(TypographyProperties.FontFamily).Value == "Fluent"
                 && element.Resolve(TypographyProperties.FontSize).Value == 12f
+                && element.Resolve(TypographyProperties.FontWeight).Value == FontWeight.SemiBold
                 && element.Resolve(TypographyProperties.Language).Value == "fr"
                 && element.Resolve(TypographyProperties.Direction).Value
                     == TextDirection.RightToLeft

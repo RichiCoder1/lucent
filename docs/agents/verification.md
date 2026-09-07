@@ -9,6 +9,8 @@ Use risk-based verification for pre-release work so routine changes stay fast an
 - Reuse passing checks when the intervening changes cannot affect them. Re-run for source changes, failures, or a concrete unresolved concern; do not repeat the same check solely to add ceremony to every commit.
 - Record the commands/results and any known limitation briefly in the issue. Keep large logs and binaries as artifacts.
 
+The managed repository check runs the inexpensive Core architecture/public API preflight after restore/build and before managed test execution. The negative dependency/public-API fixtures still run after the managed tests, preserving both fast failure and negative evidence. For VS Code extension changes, also run `node --test extensions/lucent-lui-vscode/extension.test.cjs`.
+
 ## Add checks when the change reaches them
 
 - Compiler/language/editor changes: affected parser/compiler/generator/LSP/extension tests. Use the SDK/NativeAOT consumer proof when lowering, packaging, or generated-runtime behavior changes. Measure the affected tooling operation for a credible performance regression.

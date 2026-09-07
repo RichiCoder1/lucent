@@ -95,6 +95,15 @@ public sealed class AsyncValue<T> : ReactiveNode
         }
     }
 
+    /// <summary>Invalidates the current load for retry or refresh. The next read starts a new generation and retains the last successful value.</summary>
+    public void Refresh()
+    {
+        Graph.CheckThread();
+        CheckScopeMutationGuard();
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        DependencyChanged();
+    }
+
     private void EnsureStarted()
     {
         if (!_dirty)

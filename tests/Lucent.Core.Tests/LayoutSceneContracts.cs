@@ -8,6 +8,55 @@ namespace Lucent.Core.Tests;
 public sealed class LayoutSceneContracts
 {
     [TestMethod]
+    public void CornerRadiusAndFontWeightValidateAndFlowThroughProjection()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "rounded-weighted");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("rounded-weighted"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Width(20)
+                .Height(20)
+                .CornerRadius(6)
+                .FontWeight(FontWeight.Bold)
+                .Background(Color.Parse("#FFFFFF"))
+        );
+        var child = composition.Child(composition.Root, "text");
+        child.Present(theme, author: Style.Empty.Set(ProjectionProperties.Text, "weighted"));
+        var shaper = new ProbeShaper();
+        var scene = SceneLayout.Project(composition, new(20, 20, 1), shaper);
+
+        Assert(
+            shaper.LastRequest is { FontWeight: FontWeight.Bold }
+                && scene.Nodes.OfType<PaintSceneNode>().First().CornerRadius == 6,
+            "Inherited font weight or rounded background did not reach the retained scene."
+        );
+        Expect<ArgumentException>(() =>
+            new TextMeasureRequest(
+                "invalid",
+                "probe",
+                12,
+                "en",
+                TextDirection.LeftToRight,
+                1,
+                FontWeight: (FontWeight)450
+            ).Validate()
+        );
+
+        var invalidGraph = new ReactiveGraph();
+        using var invalidComposition = new Composition(invalidGraph, "invalid-radius");
+        using var invalidTheme = new ThemeContext(
+            invalidComposition.Root.Scope,
+            new Theme("invalid-radius")
+        );
+        invalidComposition.Root.Present(invalidTheme, author: Style.Empty.CornerRadius(float.NaN));
+        Expect<ArgumentOutOfRangeException>(() =>
+            SceneLayout.Project(invalidComposition, new(20, 20, 1), shaper)
+        );
+    }
+
+    [TestMethod]
     public void ColorAndBrushValues()
     {
         var color = Color.Parse("#12345678");
@@ -148,6 +197,7 @@ public sealed class LayoutSceneContracts
                 .Height(20)
                 .Padding(Insets.Uniform(3))
                 .Clip(true)
+                .CornerRadius(6)
                 .Background(Color.Parse("#FFFFFF"))
                 .Border(divider)
                 .FocusRing(focus)
@@ -163,30 +213,37 @@ public sealed class LayoutSceneContracts
             var scene = SceneLayout.Project(composition, new(20, 20, scale), new ProbeShaper());
             var nodes = scene.Nodes.ToList();
             var clipIndex = nodes.FindIndex(node => node is ClipSceneNode);
-            var borderNodes = scene
-                .Nodes.OfType<PaintSceneNode>()
-                .Where(node => node.Identity.Kind == SceneNodeKind.Border)
-                .ToArray();
-            var focusNodes = scene
-                .Nodes.OfType<PaintSceneNode>()
-                .Where(node => node.Identity.Kind == SceneNodeKind.FocusRing)
-                .ToArray();
+            var clip = nodes.OfType<ClipSceneNode>().Single();
+            var border = nodes
+                .OfType<PaintSceneNode>()
+                .Single(node => node.Identity.Kind == SceneNodeKind.Border);
+            var focusNode = nodes
+                .OfType<PaintSceneNode>()
+                .Single(node => node.Identity.Kind == SceneNodeKind.FocusRing);
+            var clipInset = Math.Max(
+                Math.Max(clip.Bounds.X, clip.Bounds.Y),
+                Math.Max(
+                    20 - clip.Bounds.X - clip.Bounds.Width,
+                    20 - clip.Bounds.Y - clip.Bounds.Height
+                )
+            );
             Assert(
                 clipIndex >= 0
-                    && borderNodes.Length == 1
-                    && focusNodes.Length == 4
-                    && nodes.IndexOf(borderNodes[0]) > clipIndex
-                    && nodes.IndexOf(focusNodes[0]) > clipIndex
-                    && MathF.Abs(borderNodes[0].Bounds.Height * scale - 1) < .001f
-                    && borderNodes[0].Bounds.Y + borderNodes[0].Bounds.Height == 20
-                    && focusNodes.All(node =>
-                        node.Bounds.X >= 0
-                        && node.Bounds.Y >= 0
-                        && node.Bounds.X + node.Bounds.Width <= 20
-                        && node.Bounds.Y + node.Bounds.Height <= 20
-                    ),
-                "Clipping hid a decoration or hairline geometry was not one device pixel at scale "
-                    + scale
+                    && nodes.IndexOf(border) > clipIndex
+                    && nodes.IndexOf(focusNode) > clipIndex
+                    && border.Bounds == new LayoutRect(0, 0, 20, 20)
+                    && border.InsetWidths is { } borderWidths
+                    && borderWidths.Left == 0
+                    && borderWidths.Top == 0
+                    && borderWidths.Right == 0
+                    && MathF.Abs(borderWidths.Bottom * scale - 1) < .001f
+                    && border.CornerRadius == 6
+                    && focusNode.Bounds == new LayoutRect(0, 0, 20, 20)
+                    && focusNode.InsetWidths == Insets.Uniform(2)
+                    && focusNode.CornerRadius == 6
+                    && nodes.OfType<PaintSceneNode>().First().CornerRadius == 6
+                    && MathF.Abs(clip.CornerRadius - Math.Max(0, 6 - clipInset)) < .001f,
+                "Clipping hid a decoration or rounded hairline geometry changed at scale " + scale
             );
         }
     }
@@ -1818,9 +1875,12 @@ public sealed class LayoutSceneContracts
     {
         public int Requests { get; private set; }
 
+        public TextMeasureRequest? LastRequest { get; private set; }
+
         public ShapedText Shape(TextMeasureRequest request)
         {
             Requests++;
+            LastRequest = request;
             var runWidth = request.Text.Length * request.FontSize / 2;
             var glyphs = new[] { new ShapedGlyph(1, 0, 0, 0, runWidth, 0, 0) };
             var run = new ShapedRun(

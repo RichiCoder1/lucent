@@ -582,10 +582,29 @@ internal static class Controls
         string label,
         Action? activate = null,
         Style? style = null
+    ) => ConfigureSelectable(element, theme, label, activate, style, projectLabel: true);
+
+    internal static ControlState ComposedSelectable(
+        Element element,
+        ThemeContext theme,
+        string label,
+        Action? activate = null,
+        Style? style = null
+    ) => ConfigureSelectable(element, theme, label, activate, style, projectLabel: false);
+
+    private static ControlState ConfigureSelectable(
+        Element element,
+        ThemeContext theme,
+        string label,
+        Action? activate,
+        Style? style,
+        bool projectLabel
     )
     {
         label = Required(label, nameof(label));
-        var component = SelectableStyle.Set(ProjectionProperties.Text, label);
+        var component = projectLabel
+            ? SelectableStyle.Set(ProjectionProperties.Text, label)
+            : SelectableStyle;
         var behavior = new RowActionBehavior(
             "selectable",
             new(SemanticRole.ListItem, label, actions: SemanticAction.Select)
@@ -607,7 +626,11 @@ internal static class Controls
         Bind(
             element,
             state,
-            value => element.UpdateControl(ProjectionProperties.Text, value.Label),
+            value =>
+            {
+                if (projectLabel)
+                    element.UpdateControl(ProjectionProperties.Text, value.Label);
+            },
             value => new(SemanticRole.ListItem, value.Label, actions: SemanticAction.Select)
         );
         return state;

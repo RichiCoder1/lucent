@@ -6,7 +6,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>Hierarchical lifetime ownership for graph nodes, subscriptions, and cleanup.</summary>
-public sealed class ReactiveScope : IDisposable
+public sealed partial class ReactiveScope : IDisposable
 {
     private readonly ReactiveGraph _graph;
     private readonly List<IDisposable> _owned = [];
@@ -130,6 +130,46 @@ public sealed class ReactiveScope : IDisposable
         return Own(new AsyncValue<T>(_graph, load, staleValue, true, name, this));
     }
 
+    /// <summary>Creates lazy latest-generation asynchronous state from an explicit tracked source. Fetcher reads do not become dependencies.</summary>
+    public AsyncValue<T> Async<TSource, T>(
+        Func<TSource> source,
+        Func<TSource, CancellationToken, Task<T>> load,
+        string name
+    )
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(load);
+        return Async(
+            token =>
+            {
+                var input = source();
+                return _graph.Untracked(() => load(input, token));
+            },
+            name
+        );
+    }
+
+    /// <summary>Creates source-driven asynchronous state with a value available before its first successful load.</summary>
+    public AsyncValue<T> Async<TSource, T>(
+        Func<TSource> source,
+        Func<TSource, CancellationToken, Task<T>> load,
+        T staleValue,
+        string name
+    )
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(load);
+        return Async(
+            token =>
+            {
+                var input = source();
+                return _graph.Untracked(() => load(input, token));
+            },
+            staleValue,
+            name
+        );
+    }
+
     /// <summary>Transfers a disposable resource into this scope lifetime.</summary>
     public T Own<T>(T value)
         where T : IDisposable
@@ -162,6 +202,7 @@ public sealed class ReactiveScope : IDisposable
         if (IsDisposed)
             return;
         IsDisposed = true;
+        CancelPosted();
         var owned = _owned.ToArray();
         _owned.Clear();
         List<Exception>? errors = null;

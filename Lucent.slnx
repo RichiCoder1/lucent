@@ -11,7 +11,9 @@
   <Project Path="tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj" />
   <Project Path="src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
   <Project Path="src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
+  <Project Path="src/Lucent.Reactive.R3/Lucent.Reactive.R3.csproj" />
   <Project Path="tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj" />
+  <Project Path="tests/Lucent.Reactive.R3.Tests/Lucent.Reactive.R3.Tests.csproj" />
   <Project Path="tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj" />
   <Project Path="tests/Lucent.Core.ArchitectureVerifier/Lucent.Core.ArchitectureVerifier.csproj" />
   <Project Path="tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj" />

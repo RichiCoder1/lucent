@@ -21,13 +21,29 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: VS Code extension tests
+        shell: pwsh
+        run: node --test extensions/lucent-lui-vscode/extension.test.cjs
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
       - name: Managed tests
         shell: pwsh
         run: ./tools/Test-Repository.ps1 -Suite Managed
-
+      - name: Summarize managed verification
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          @(
+            '## Managed verification'
+            '- Result: ${{ job.status }}'
+            '- NuGet packages use the setup-dotnet cache keyed by packages.lock.json files.'
+            '- Core architecture/public API preflight runs before managed tests; negative fixture proof runs after them.'
+            '- VS Code extension contract: node --test extensions/lucent-lui-vscode/extension.test.cjs'
+          ) -join [Environment]::NewLine | Add-Content -Path $env:GITHUB_STEP_SUMMARY
   packages:
     needs: managed
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -43,6 +59,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
           global-json-file: global.json
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
       - name: Pack and consume prerelease packages
         shell: pwsh
         run: |

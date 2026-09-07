@@ -207,6 +207,18 @@ public static class StyleFluency
     public static Style FocusRing(this Style style, Func<FocusRing> read) =>
         style.Bind(VisualProperties.FocusRing, read);
 
+    /// <summary>Returns a style that rounds backgrounds, inset decorations, and enabled content clips.</summary>
+    public static Style CornerRadius(this Style style, float value) =>
+        style.Set(VisualProperties.CornerRadius, value);
+
+    /// <summary>Returns a style that gets corner radius from the active theme token.</summary>
+    public static Style CornerRadius(this Style style, Token<float> value) =>
+        style.Set(VisualProperties.CornerRadius, value);
+
+    /// <summary>Returns a style that gets corner radius from a live reader.</summary>
+    public static Style CornerRadius(this Style style, Func<float> read) =>
+        style.Bind(VisualProperties.CornerRadius, read);
+
     /// <summary>Returns a style that sets transparency to <paramref name="value"/>.</summary>
     public static Style Opacity(this Style style, float value) =>
         style.Set(VisualProperties.Opacity, value);
@@ -254,6 +266,18 @@ public static class StyleFluency
     /// <summary>Returns a style that gets font size from a live reader.</summary>
     public static Style FontSize(this Style style, Func<float> read) =>
         style.Bind(TypographyProperties.FontSize, read);
+
+    /// <summary>Returns a style that sets the requested font weight.</summary>
+    public static Style FontWeight(this Style style, FontWeight value) =>
+        style.Set(TypographyProperties.FontWeight, value);
+
+    /// <summary>Returns a style that gets font weight from the active theme token.</summary>
+    public static Style FontWeight(this Style style, Token<FontWeight> value) =>
+        style.Set(TypographyProperties.FontWeight, value);
+
+    /// <summary>Returns a style that gets font weight from a live reader.</summary>
+    public static Style FontWeight(this Style style, Func<FontWeight> read) =>
+        style.Bind(TypographyProperties.FontWeight, read);
 
     /// <summary>Returns a style that sets text language to <paramref name="value"/>.</summary>
     public static Style Language(this Style style, string value) =>

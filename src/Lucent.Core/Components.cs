@@ -332,6 +332,48 @@ public static class Components
         );
     }
 
+    /// <summary>Creates a selectable list item with composed visual content and a live accessible label and selected state.</summary>
+    [LucentComponent]
+    public static ComponentRecipe Selectable(
+        [DefaultContent] ComponentContent content,
+        Func<string> label,
+        Func<bool> selected,
+        Action? onSelect = null,
+        Style? style = null
+    )
+    {
+        content = Content(content);
+        ArgumentNullException.ThrowIfNull(label);
+        ArgumentNullException.ThrowIfNull(selected);
+        return ComponentRecipe.Create(
+            "selectable",
+            (context, root) =>
+            {
+                var accessibleLabel = root.Scope.Derived(
+                    () => Required(label(), nameof(label)),
+                    root.Name + ".selectable-label"
+                );
+                var isSelected = root.Scope.Derived(selected, root.Name + ".selectable-selected");
+                var state = Controls.ComposedSelectable(
+                    root,
+                    context.Theme,
+                    accessibleLabel.Value,
+                    onSelect,
+                    style
+                );
+                _ = root.Scope.Effect(
+                    () =>
+                    {
+                        state.Label = accessibleLabel.Value;
+                        state.Selected = isSelected.Value;
+                    },
+                    root.Name + ".selectable"
+                );
+                context.Mount(root, content);
+            }
+        );
+    }
+
     /// <summary>Creates a scrollable viewport that clips its content. Supply <paramref name="viewport"/> to retain its offset across mounts.</summary>
     [LucentComponent]
     public static ComponentRecipe ScrollViewport(

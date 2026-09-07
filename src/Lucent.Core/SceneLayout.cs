@@ -480,7 +480,12 @@ public static class SceneLayout
         var result = new List<SceneNode>();
         if (style.Background.Color is not { A: 0 })
             result.Add(
-                new PaintSceneNode(new(identity, SceneNodeKind.Paint), bounds, style.Background)
+                new PaintSceneNode(
+                    new(identity, SceneNodeKind.Paint),
+                    bounds,
+                    style.Background,
+                    style.CornerRadius
+                )
             );
         if (text is not null)
         {
@@ -609,7 +614,14 @@ public static class SceneLayout
                 clipped.Add(background);
                 result.RemoveAt(0);
             }
-            clipped.Add(new ClipSceneNode(new(identity, SceneNodeKind.Clip), inner, result));
+            clipped.Add(
+                new ClipSceneNode(
+                    new(identity, SceneNodeKind.Clip),
+                    inner,
+                    result,
+                    InnerCornerRadius(style.CornerRadius, bounds, inner)
+                )
+            );
             result = clipped;
         }
         AddDecorations(result, element, identity, bounds, viewport.Scale, cache);
@@ -647,7 +659,8 @@ public static class SceneLayout
                 style.Border.Brush,
                 style.Border.Widths,
                 style.Border.IsHairline,
-                scale
+                scale,
+                style.CornerRadius
             )
         );
         result.AddRange(
@@ -658,7 +671,8 @@ public static class SceneLayout
                 style.FocusRing.Brush,
                 Insets.Uniform(style.FocusRing.Thickness),
                 false,
-                scale
+                scale,
+                style.CornerRadius
             )
         );
     }
@@ -670,7 +684,8 @@ public static class SceneLayout
         Brush? brush,
         Insets widths,
         bool hairline,
-        float scale
+        float scale,
+        float cornerRadius
     )
     {
         if (brush is null || brush.Color is { A: 0 } || widths == Insets.Zero)
@@ -690,35 +705,20 @@ public static class SceneLayout
         var top = Math.Min(widths.Top, bounds.Height);
         var right = Math.Min(widths.Right, bounds.Width);
         var bottom = Math.Min(widths.Bottom, bounds.Height);
-        var innerTop = Math.Min(bounds.Y + bounds.Height, bounds.Y + top);
-        var innerBottom = Math.Max(innerTop, bounds.Y + bounds.Height - bottom);
-        var candidates = new[]
-        {
-            new LayoutRect(bounds.X, bounds.Y, bounds.Width, top),
-            new LayoutRect(bounds.X, bounds.Y + bounds.Height - bottom, bounds.Width, bottom),
-            new LayoutRect(bounds.X, innerTop, left, innerBottom - innerTop),
-            new LayoutRect(
-                bounds.X + bounds.Width - right,
-                innerTop,
-                right,
-                innerBottom - innerTop
-            ),
-        };
-        return candidates
-            .Where(candidate => candidate.Width > 0 && candidate.Height > 0)
-            .Select(candidate =>
-            {
-                var rounded = LayoutRect.Round(
-                    candidate.X,
-                    candidate.Y,
-                    candidate.Width,
-                    candidate.Height,
-                    scale
-                );
-                return (SceneNode)new PaintSceneNode(new(identity, kind), rounded, brush);
-            })
-            .Where(node => node.Bounds.Width > 0 && node.Bounds.Height > 0)
-            .ToArray();
+        var resolved = new Insets(left, top, right, bottom);
+        return [new PaintSceneNode(new(identity, kind), bounds, brush, cornerRadius, resolved)];
+    }
+
+    private static float InnerCornerRadius(float radius, LayoutRect outer, LayoutRect inner)
+    {
+        var inset = Math.Max(
+            Math.Max(inner.X - outer.X, inner.Y - outer.Y),
+            Math.Max(
+                outer.X + outer.Width - inner.X - inner.Width,
+                outer.Y + outer.Height - inner.Y - inner.Height
+            )
+        );
+        return Math.Max(0, radius - Math.Max(0, inset));
     }
 
     private static void AddCollapsedBoxes(Element element, float x, float y, List<LayoutBox> boxes)
@@ -944,7 +944,8 @@ public static class SceneLayout
             style.Multiline ? default : blockConstraint,
             style.TextWrap,
             style.MaxLines,
-            style.TextOverflow
+            style.TextOverflow,
+            style.FontWeight
         );
         request.Validate();
         if (cache.Shapes.TryGetValue(request, out var cached))
@@ -1029,12 +1030,14 @@ public static class SceneLayout
             element.Resolve(LayoutProperties.VirtualItemCount).Value,
             element.Resolve(LayoutProperties.VirtualRowIndex).Value,
             element.Resolve(VisualProperties.Background).Value,
+            element.Resolve(VisualProperties.CornerRadius).Value,
             element.Resolve(VisualProperties.Opacity).Value,
             element.Resolve(TypographyProperties.TextColor).Value,
             element.Resolve(ProjectionProperties.Text).Value,
             element.Resolve(ProjectionProperties.TextMeasure).Value,
             element.Resolve(TypographyProperties.FontFamily).Value,
             element.Resolve(TypographyProperties.FontSize).Value,
+            element.Resolve(TypographyProperties.FontWeight).Value,
             element.Resolve(TypographyProperties.Language).Value,
             element.Resolve(TypographyProperties.Direction).Value,
             element.Resolve(TypographyProperties.TextWrap).Value,
@@ -1073,6 +1076,9 @@ public static class SceneLayout
             || !float.IsFinite(values.Opacity)
             || values.Opacity < 0
             || values.Opacity > 1
+            || !float.IsFinite(values.CornerRadius)
+            || values.CornerRadius < 0
+            || !Enum.IsDefined(values.FontWeight)
             || values.Width is { } width && (!float.IsFinite(width) || width < 0)
             || values.Height is { } height && (!float.IsFinite(height) || height < 0)
             || values.VirtualRowHeight is { } rowHeight
@@ -1117,7 +1123,8 @@ public static class SceneLayout
             _styles.Add(element.Id, resolved);
             var decorations = new DecorationValues(
                 element.Resolve(VisualProperties.Border).Value,
-                element.Resolve(VisualProperties.FocusRing).Value
+                element.Resolve(VisualProperties.FocusRing).Value,
+                element.Resolve(VisualProperties.CornerRadius).Value
             );
             if (decorations != default)
                 _decorations.Add(element.Id, decorations);
@@ -1133,7 +1140,11 @@ public static class SceneLayout
         }
     }
 
-    private readonly record struct DecorationValues(Border Border, FocusRing FocusRing);
+    private readonly record struct DecorationValues(
+        Border Border,
+        FocusRing FocusRing,
+        float CornerRadius
+    );
 
     private readonly record struct Values(
         LayoutMode Mode,
@@ -1163,12 +1174,14 @@ public static class SceneLayout
         int VirtualItemCount,
         int VirtualRowIndex,
         Brush Background,
+        float CornerRadius,
         float Opacity,
         Color TextColor,
         string? Text,
         string? TextMeasure,
         string FontFamily,
         float FontSize,
+        FontWeight FontWeight,
         string Language,
         TextDirection Direction,
         TextWrap TextWrap,
@@ -1278,6 +1291,7 @@ public static class SceneLayout
         var textMeasure = element.Resolve(ProjectionProperties.TextMeasure).Value;
         var fontFamily = element.Resolve(TypographyProperties.FontFamily).Value;
         var fontSize = element.Resolve(TypographyProperties.FontSize).Value;
+        var fontWeight = element.Resolve(TypographyProperties.FontWeight).Value;
         var language = element.Resolve(TypographyProperties.Language).Value;
         var direction = element.Resolve(TypographyProperties.Direction).Value;
         var textWrap = element.Resolve(TypographyProperties.TextWrap).Value;
@@ -1346,6 +1360,7 @@ public static class SceneLayout
                 writer.Write(resolvedTextMeasure);
             writer.Write(fontFamily);
             writer.Write(fontSize);
+            writer.Write((int)fontWeight);
             writer.Write(language);
             writer.Write((int)direction);
             writer.Write((int)textWrap);

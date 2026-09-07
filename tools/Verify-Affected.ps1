@@ -35,7 +35,8 @@ try {
         }
         if ($relative -match '^(docs/|[^/]+\.md$)') { continue }
         $selected = switch -Regex ($relative) {
-            '^tests/(Lucent\.(Core|Hosting|Renderer\.Skia|Platform\.Windows|IssueBrowser|Lui\.(Compiler|Generator|LanguageServer))\.Tests)/' { $Matches[1]; break }
+            '^tests/(Lucent\.(Core|Reactive\.R3|Hosting|Renderer\.Skia|Platform\.Windows|IssueBrowser|Lui\.(Compiler|Generator|LanguageServer))\.Tests)/' { $Matches[1]; break }
+            '^src/Lucent\.Reactive\.R3/' { 'Lucent.Reactive.R3.Tests'; break }
             '^src/Lucent\.Hosting/' { 'Lucent.Hosting.Tests'; break }
             '^src/Lucent\.Renderer\.Skia/' { 'Lucent.Renderer.Skia.Tests'; 'Lucent.IssueBrowser.Tests'; break }
             '^src/Lucent\.Platform\.Windows/' { 'Lucent.Platform.Windows.Tests'; 'Lucent.IssueBrowser.Tests'; break }

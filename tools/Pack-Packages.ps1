@@ -8,7 +8,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root "artifacts/packa
 $null = New-Item -ItemType Directory -Force -Path $OutputDirectory
 $commit = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE) { throw 'Cannot resolve package source identity.' }
-$names = @('Lucent.Core', 'Lucent.Renderer.Skia', 'Lucent.Platform.Windows', 'Lucent.Hosting', 'Lucent.Lui.Sdk')
+$names = @('Lucent.Core', 'Lucent.Renderer.Skia', 'Lucent.Platform.Windows', 'Lucent.Hosting', 'Lucent.Lui.Sdk', 'Lucent.Reactive.R3')
 foreach ($name in $names) {
     $project = Join-Path $root "src/$name/$name.csproj"
     & dotnet restore $project --locked-mode
@@ -22,6 +22,7 @@ foreach ($name in $names) {
     $zip = [IO.Compression.ZipFile]::OpenRead($path)
     try {
         if (-not $zip.GetEntry('LICENSE') -or -not $zip.GetEntry('README.md')) { throw "Missing package attribution: $name" }
+        if ($name -eq 'Lucent.Reactive.R3' -and -not $zip.GetEntry('buildTransitive/notices/R3-LICENSE.txt')) { throw 'R3 package omitted upstream license notice.' }
         $entry = $zip.GetEntry("$name.nuspec")
         $reader = [IO.StreamReader]::new($entry.Open())
         try { [xml]$spec = $reader.ReadToEnd() } finally { $reader.Dispose() }

@@ -138,6 +138,9 @@ public static class VisualProperties
         global::Lucent.Core.FocusRing.None
     );
 
+    /// <summary>Rounds the element background, inset decorations, and enabled content clip.</summary>
+    public static readonly Property<float> CornerRadius = new("visual-corner-radius", 0);
+
     /// <summary>Sets transparency from 0 (invisible) to 1 (fully opaque).</summary>
     public static readonly Property<float> Opacity = new(
         "visual-opacity",
@@ -168,6 +171,13 @@ public static class TypographyProperties
     public static readonly Property<float> FontSize = new(
         "typography-font-size",
         14,
+        inherits: true
+    );
+
+    /// <summary>Sets the requested font weight used for shaping and painting text.</summary>
+    public static readonly Property<FontWeight> FontWeight = new(
+        "typography-font-weight",
+        global::Lucent.Core.FontWeight.Regular,
         inherits: true
     );
 
@@ -205,6 +215,37 @@ public static class TypographyProperties
         TextOverflow.Clip,
         inherits: true
     );
+}
+
+/// <summary>Standard font weights with CSS-aligned numeric identities.</summary>
+public enum FontWeight
+{
+    /// <summary>Specifies a thin face with weight 100.</summary>
+    Thin = 100,
+
+    /// <summary>Specifies an extra-light face with weight 200.</summary>
+    ExtraLight = 200,
+
+    /// <summary>Specifies a light face with weight 300.</summary>
+    Light = 300,
+
+    /// <summary>Specifies the regular face with weight 400.</summary>
+    Regular = 400,
+
+    /// <summary>Specifies a medium face with weight 500.</summary>
+    Medium = 500,
+
+    /// <summary>Specifies a semi-bold face with weight 600.</summary>
+    SemiBold = 600,
+
+    /// <summary>Specifies a bold face with weight 700.</summary>
+    Bold = 700,
+
+    /// <summary>Specifies an extra-bold face with weight 800.</summary>
+    ExtraBold = 800,
+
+    /// <summary>Specifies a black face with weight 900.</summary>
+    Black = 900,
 }
 
 internal static class ProjectionProperties
@@ -435,7 +476,8 @@ public readonly record struct TextMeasureRequest(
     LayoutConstraint BlockConstraint = default,
     TextWrap Wrap = TextWrap.NoWrap,
     int? MaxLines = null,
-    TextOverflow Overflow = TextOverflow.Clip
+    TextOverflow Overflow = TextOverflow.Clip,
+    FontWeight FontWeight = global::Lucent.Core.FontWeight.Regular
 )
 {
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
@@ -452,6 +494,7 @@ public readonly record struct TextMeasureRequest(
             || !Enum.IsDefined(Direction)
             || !Enum.IsDefined(Wrap)
             || !Enum.IsDefined(Overflow)
+            || !Enum.IsDefined(FontWeight)
             || MaxLines is <= 0
         )
             throw new ArgumentException(
@@ -1263,11 +1306,44 @@ public abstract class SceneNode(SceneNodeIdentity identity, LayoutRect bounds)
 }
 
 /// <summary>A box-local brush paint operation in a retained scene.</summary>
-public sealed class PaintSceneNode(SceneNodeIdentity identity, LayoutRect bounds, Brush brush)
-    : SceneNode(identity, bounds)
+public sealed class PaintSceneNode : SceneNode
 {
+    /// <summary>Initializes a box paint or inset decoration operation.</summary>
+    public PaintSceneNode(
+        SceneNodeIdentity identity,
+        LayoutRect bounds,
+        Brush brush,
+        float cornerRadius = 0,
+        Insets? insetWidths = null
+    )
+        : base(identity, bounds)
+    {
+        if (!float.IsFinite(cornerRadius) || cornerRadius < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(cornerRadius),
+                "Corner radius must be finite and nonnegative."
+            );
+        if (
+            insetWidths is not null
+            && identity.Kind is not (SceneNodeKind.Border or SceneNodeKind.FocusRing)
+        )
+            throw new ArgumentException(
+                "Inset widths are supported only by border and focus-ring paint nodes.",
+                nameof(insetWidths)
+            );
+        Brush = brush ?? throw new ArgumentNullException(nameof(brush));
+        CornerRadius = cornerRadius;
+        InsetWidths = insetWidths;
+    }
+
     /// <summary>Gets the box-local brush to paint.</summary>
-    public Brush Brush { get; } = brush ?? throw new ArgumentNullException(nameof(brush));
+    public Brush Brush { get; }
+
+    /// <summary>Gets the uniform logical-pixel radius for this box paint.</summary>
+    public float CornerRadius { get; }
+
+    /// <summary>Gets inset edge widths when this node paints a border or focus ring.</summary>
+    public Insets? InsetWidths { get; }
 }
 
 /// <summary>A shaped text paint operation in a retained scene.</summary>
@@ -1294,10 +1370,17 @@ public sealed class ClipSceneNode : SceneNode
     public ClipSceneNode(
         SceneNodeIdentity identity,
         LayoutRect bounds,
-        IReadOnlyList<SceneNode> children
+        IReadOnlyList<SceneNode> children,
+        float cornerRadius = 0
     )
         : base(identity, bounds)
     {
+        if (!float.IsFinite(cornerRadius) || cornerRadius < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(cornerRadius),
+                "Corner radius must be finite and nonnegative."
+            );
+        CornerRadius = cornerRadius;
         _children = Array.AsReadOnly(
             children?.ToArray() ?? throw new ArgumentNullException(nameof(children))
         );
@@ -1306,17 +1389,31 @@ public sealed class ClipSceneNode : SceneNode
     /// <summary>Gets the immutable copied child scene nodes.</summary>
     public IReadOnlyList<SceneNode> Children => _children;
 
+    /// <summary>Gets the uniform logical-pixel radius applied to this clip.</summary>
+    public float CornerRadius { get; }
+
     internal static SceneNode Clone(SceneNode node) =>
         node switch
         {
-            PaintSceneNode paint => new PaintSceneNode(paint.Identity, paint.Bounds, paint.Brush),
+            PaintSceneNode paint => new PaintSceneNode(
+                paint.Identity,
+                paint.Bounds,
+                paint.Brush,
+                paint.CornerRadius,
+                paint.InsetWidths
+            ),
             TextSceneNode text => new TextSceneNode(
                 text.Identity,
                 text.Bounds,
                 text.Color,
                 text.Text
             ),
-            ClipSceneNode clip => new ClipSceneNode(clip.Identity, clip.Bounds, clip.Children),
+            ClipSceneNode clip => new ClipSceneNode(
+                clip.Identity,
+                clip.Bounds,
+                clip.Children,
+                clip.CornerRadius
+            ),
             OpacitySceneNode opacity => new OpacitySceneNode(
                 opacity.Identity,
                 opacity.Bounds,
@@ -1530,7 +1627,15 @@ public sealed class RetainedScene
                 .Append(" bounds=")
                 .Append(Format(node.Bounds));
             if (node is PaintSceneNode paint)
+            {
                 output.Append(" brush=").Append(paint.Brush);
+                if (paint.CornerRadius > 0)
+                    output
+                        .Append(" radius=")
+                        .Append(paint.CornerRadius.ToString("R", CultureInfo.InvariantCulture));
+                if (paint.InsetWidths is { } widths)
+                    output.Append(" insets=").Append(widths);
+            }
             if (node is TextSceneNode text)
                 output
                     .Append(" color=")
@@ -1541,6 +1646,10 @@ public sealed class RetainedScene
                 output
                     .Append(" opacity=")
                     .Append(opacity.Opacity.ToString("R", CultureInfo.InvariantCulture));
+            if (node is ClipSceneNode { CornerRadius: > 0 } clipNode)
+                output
+                    .Append(" radius=")
+                    .Append(clipNode.CornerRadius.ToString("R", CultureInfo.InvariantCulture));
             output.Append('\n');
             if (node is ClipSceneNode clip)
                 Append(clip.Children, output, depth + 1, node.Identity.Element.ElementId);

@@ -2,6 +2,8 @@
 
 Status: Revised execution direction, September 4, 2026. Incorporates the architecture/code review and the decision to make `.lui` the primary UI authoring surface. Capabilities below are planned unless explicitly described as current. GitHub Issues and Project 4 own implementation scope, dependencies, status, and acceptance.
 
+Current decisions and implementation are summarized in the [roadmap](../ROADMAP.md) and [daily-use execution](daily-use-execution.md). Light Notes is a public MIT application with exact Lucent package pins, Microsoft.Data.Sqlite storage, and the Lucent-owned managed layout engine. The candidate and readiness tables below preserve the original planning context; they are not the current execution queue.
+
 ## Outcome
 
 Build a first-party Windows desktop application that makes it easy to capture a link or thought, add notes, find it later, and open or archive it. The application should be useful enough for regular personal use and excellent in design and interaction quality.

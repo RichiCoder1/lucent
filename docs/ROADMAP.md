@@ -2,7 +2,7 @@
 
 ## Current direction
 
-Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The designed responsive daily-use shell is the next work.
+Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Current work completes daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement.
 
 Production follows the decisions and contracts validated by the archived Native spike. The old implementation remains on [archive/avalonia-final](https://github.com/RichiCoder1/lucent/tree/archive/avalonia-final), and the complete spike record remains in the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). They are historical evidence, not active execution instructions.
 
@@ -12,10 +12,11 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 
 - Windows 11 24H2+, win-x64, .NET 10 LTS, NativeAOT, and trimming.
 - Typed C# composition and preview `.lui` over the same framework contracts. `.lui` is the primary UI authoring direction; C# remains the underlying semantic/runtime API.
-- Reactive state, derived state, batching, scopes, async generations, deterministic disposal, and stable keyed composition.
-- Bounded explicit Grid and Flex-style rows/columns, responsive logical constraints, constrained paragraphs, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, inset borders/hairlines and independent focus rings, finite variants, theme settings, reduced motion, and bounded transitions.
+- Reactive state, derived state, batching, scopes, explicit source-driven async resources and retry, owned external callback dispatch, deterministic disposal, and stable keyed composition.
+- Bounded explicit Grid and Flex-style rows/columns, responsive logical constraints, constrained paragraphs, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, inset borders/hairlines and independent focus rings, rounded surfaces/clips, font weights, finite variants, theme settings, reduced motion, and bounded transitions.
 - Text, panel/layout primitives, button, single-line text field, multiline text area, selectable/list row, scroll viewport, virtualized list, loading/progress, and simple error state.
 - Plain-text editing with composition support and a bounded 20,000-unit multiline workload, hoistable editor/viewport sessions, application-owned text focus targets, explicit hidden/collapsed participation, wheel/trackpad scrolling, application command scopes and chords, plus bounded UI Automation patterns and stale-node handling for the reference controls.
+- Optional R3 debounce integration with explicit clocks and owner-thread callbacks.
 - Optional Microsoft hosting integration with negotiated asynchronous shutdown and accepted-work recovery.
 - Deterministic tree, reactive, layout, style, semantic, scene, and timing dumps.
 - Persistent CPU Skia and SDL presentation with explicit backing-pixel scaling, deterministic local data, fake async behavior, and an optional live GitHub adapter.
@@ -35,7 +36,11 @@ The first effort includes Grid, a coherent Flex-style Row/Column surface, respon
 
 Develop design quality alongside complete application slices. Deliver required `.lui` content composition, live-data, command, and editor-session contracts with those slices; prioritize additional authoring conveniences from observed friction afterward. Higher-level source-owned component recipes can build on the foundations later. Continue using the current risk-based verification policy.
 
-## Recommended execution order
+## Current execution
+
+See [daily-use execution](plans/daily-use-execution.md): #80 native closeout, #81 autosave and complete workflow, #82 targeted polish with #85 safe restore, #84 CI/review efficiency, #87 optional ecosystem debounce, #88 mockup fidelity, and #83/#86 explicit async-resource authoring with #89 multi-file helper correctness. Autosave uses an owner-approved 750 ms debounce with explicit save and switch/close flush. Records, expression-bodied markup and a component registry remain deferred.
+
+## Original foundation sequence
 
 The [architecture/code review](../plans/architecture-review.md) informs this sequence; it is a historical audit, not an acceptance gate. GitHub records implementation status.
 

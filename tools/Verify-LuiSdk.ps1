@@ -163,8 +163,8 @@ try {
     # The published consumer also exercises content forwarding and retained payloads through the packed SDK.
     Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Content/*.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Content/ContentConsumer.cs') $matrix
     Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/Retained.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Retained/RetainedConsumer.cs') $matrix
-    Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Stateful/Trial.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Stateful/StatefulConsumer.cs') $matrix
-    Set-Content (Join-Path $matrix 'Program.cs') 'Consumer.ContentConsumer.Run(); Consumer.RetainedConsumer.Run(); if (StatefulTrial.Harness.Run() != "42:first:first:first|42:first:first:first;43:edited:first:next|42:first:first:next;2:2") throw new InvalidOperationException("Stateful component contract failed."); Console.WriteLine("stateful component SDK proof: PASS"); Console.WriteLine("lui sdk consumer");'
+    Copy-Item (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Stateful/*.lui'), (Join-Path $root 'tests/Lucent.Lui.Sdk.Fixtures/Stateful/*.cs') $matrix
+    Set-Content (Join-Path $matrix 'Program.cs') 'Consumer.ContentConsumer.Run(); Consumer.RetainedConsumer.Run(); if (StatefulTrial.Harness.Run() != "42:first:first:first|42:first:first:first;43:edited:first:next|42:first:first:next;2:2") throw new InvalidOperationException("Stateful component contract failed."); Console.WriteLine("stateful component SDK proof: PASS"); StatefulTrial.AsyncHarness.Run(); Console.WriteLine("lui sdk consumer");'
 
     # Publish/run is the runtime-asset boundary proof; analyzers must not enter the app.
     $publish = Join-Path $artifacts 'publish'
@@ -177,7 +177,7 @@ try {
     if (!(Test-Path $exe)) { throw 'NativeAOT consumer executable is missing.' }
     $consumerOutput = @(& $exe)
     $consumerOutput | Write-Output
-    if ($LASTEXITCODE -ne 0 -or ($consumerOutput -join "`n") -notmatch 'content forwarding SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'retained payload SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'stateful component SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not pass its runtime contracts.' }
+    if ($LASTEXITCODE -ne 0 -or ($consumerOutput -join "`n") -notmatch 'content forwarding SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'retained payload SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'stateful component SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'source-driven async SDK proof: PASS' -or ($consumerOutput -join "`n") -notmatch 'lui sdk consumer') { throw 'NativeAOT consumer did not pass its runtime contracts.' }
     $actual = Get-ChildItem $publish -Recurse -File | ForEach-Object { $_.FullName.Substring($publish.Length + 1).Replace('\', '/') } | Sort-Object
     $allowed = @('Consumer.exe', 'Consumer.pdb', 'Lucent.Core.pdb', 'Lucent.Core.xml')
     if ((Compare-Object $allowed $actual)) { throw "NativeAOT runtime inventory differs from its fail-closed allowlist: $($actual -join ', ')." }

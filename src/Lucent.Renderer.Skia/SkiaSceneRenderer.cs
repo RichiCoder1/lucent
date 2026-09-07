@@ -443,7 +443,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         foreach (var piece in Itemize(request, request.Text, sourceOffset))
         {
             using var face = ResolveFace(request, piece.Text, out var collectionIndex);
-            using var font = new SKFont(face, request.FontSize);
+            using var font = CreateFont(face, request.FontSize);
             using var shaper = new SKShaper(face);
             using var buffer = new HbBuffer();
             buffer.AddUtf16(piece.Text);
@@ -548,7 +548,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     )
     {
         using var face = ResolveFace(request, " ", out _);
-        using var font = new SKFont(face, request.FontSize);
+        using var font = CreateFont(face, request.FontSize);
         var metrics = font.Metrics;
         return (metrics.Ascent, metrics.Descent, MathF.Max(0, metrics.Leading));
     }
@@ -681,7 +681,15 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                 canvas.Save();
                 try
                 {
-                    canvas.ClipRect(Rect(clip.Bounds));
+                    if (clip.CornerRadius > 0)
+                    {
+                        var bounds = Rect(clip.Bounds);
+                        var radius = Radius(clip.CornerRadius, clip.Bounds);
+                        using var rounded = new SKRoundRect(bounds, radius, radius);
+                        canvas.ClipRoundRect(rounded, SKClipOperation.Intersect, antialias: true);
+                    }
+                    else
+                        canvas.ClipRect(Rect(clip.Bounds));
                     Paint(clip.Children, canvas);
                 }
                 finally
@@ -691,8 +699,12 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             }
             else if (node is PaintSceneNode paint)
             {
-                using var brush = Paint(paint.Brush, paint.Bounds);
-                canvas.DrawRect(Rect(paint.Bounds), brush);
+                using var brush = Paint(
+                    paint.Brush,
+                    paint.Bounds,
+                    antialias: paint.CornerRadius > 0
+                );
+                PaintBox(canvas, paint, brush);
             }
             else if (node is TextSceneNode text)
             {
@@ -737,7 +749,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             throw new InvalidOperationException(
                 "Scene face fingerprint did not match its shaped run."
             );
-        using var font = new SKFont(face, run.FontSize);
+        using var font = CreateFont(face, run.FontSize);
         using var builder = new SKTextBlobBuilder();
         builder.AddPositionedRun(
             run.Glyphs.Select(glyph => checked((ushort)glyph.GlyphId)).ToArray(),
@@ -809,7 +821,12 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         out int collectionIndex
     )
     {
-        var requested = SKTypeface.FromFamilyName(request.FontFamily);
+        var requested = SKTypeface.FromFamilyName(
+            request.FontFamily,
+            (int)request.FontWeight,
+            (int)SKFontStyleWidth.Normal,
+            SKFontStyleSlant.Upright
+        );
         if (requested is not null && Covers(requested, request, text))
         {
             collectionIndex = CollectionIndex(requested);
@@ -818,7 +835,14 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         requested?.Dispose();
         foreach (var rune in text.EnumerateRunes())
         {
-            var fallback = SKFontManager.Default.MatchCharacter(rune.Value);
+            var fallback = SKFontManager.Default.MatchCharacter(
+                request.FontFamily,
+                (int)request.FontWeight,
+                (int)SKFontStyleWidth.Normal,
+                SKFontStyleSlant.Upright,
+                [request.Language],
+                rune.Value
+            );
             if (fallback is null)
                 continue;
             if (Covers(fallback, request, text))
@@ -833,7 +857,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 
     private static bool Covers(SKTypeface face, TextMeasureRequest request, string text)
     {
-        using var font = new SKFont(face, request.FontSize);
+        using var font = CreateFont(face, request.FontSize);
         using var shaper = new SKShaper(face);
         using var buffer = new HbBuffer();
         buffer.AddUtf16(text);
@@ -1193,10 +1217,59 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private static SKRect Rect(LayoutRect value) =>
         new(value.X, value.Y, value.X + value.Width, value.Y + value.Height);
 
-    private static SKPaint Paint(Brush brush, LayoutRect bounds)
+    private static void PaintBox(SKCanvas canvas, PaintSceneNode node, SKPaint brush)
+    {
+        var bounds = Rect(node.Bounds);
+        var radius = Radius(node.CornerRadius, node.Bounds);
+        if (node.InsetWidths is not { } widths)
+        {
+            if (radius > 0)
+                canvas.DrawRoundRect(bounds, radius, radius, brush);
+            else
+                canvas.DrawRect(bounds, brush);
+            return;
+        }
+
+        using var builder = new SKPathBuilder { FillType = SKPathFillType.EvenOdd };
+        builder.AddRoundRect(bounds, radius, radius, SKPathDirection.Clockwise);
+        var inner = new SKRect(
+            bounds.Left + widths.Left,
+            bounds.Top + widths.Top,
+            bounds.Right - widths.Right,
+            bounds.Bottom - widths.Bottom
+        );
+        if (inner.Width > 0 && inner.Height > 0)
+        {
+            var innerRadius = Math.Max(
+                0,
+                radius
+                    - Math.Max(
+                        Math.Max(widths.Left, widths.Top),
+                        Math.Max(widths.Right, widths.Bottom)
+                    )
+            );
+            innerRadius = Math.Min(innerRadius, Math.Min(inner.Width, inner.Height) / 2);
+            builder.AddRoundRect(inner, innerRadius, innerRadius, SKPathDirection.Clockwise);
+        }
+        using var path = builder.Detach();
+        canvas.DrawPath(path, brush);
+    }
+
+    private static float Radius(float value, LayoutRect bounds) =>
+        Math.Min(value, Math.Min(bounds.Width, bounds.Height) / 2);
+
+    private static SKFont CreateFont(SKTypeface face, float size) =>
+        new(face, size)
+        {
+            Edging = SKFontEdging.Antialias,
+            Hinting = SKFontHinting.Normal,
+            Subpixel = true,
+        };
+
+    private static SKPaint Paint(Brush brush, LayoutRect bounds, bool antialias = false)
     {
         if (brush.Color is { } color)
-            return new SKPaint { Color = Color(color), IsAntialias = false };
+            return new SKPaint { Color = Color(color), IsAntialias = antialias };
         var gradient = brush.Gradient!;
         var start = new SKPoint(
             bounds.X + gradient.Start.X * bounds.Width,
@@ -1213,7 +1286,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             gradient.Stops.Select(stop => stop.Position).ToArray(),
             SKShaderTileMode.Clamp
         );
-        return new SKPaint { Shader = shader, IsAntialias = false };
+        return new SKPaint { Shader = shader, IsAntialias = antialias };
     }
 
     private static SKColor Color(global::Lucent.Core.Color value) =>

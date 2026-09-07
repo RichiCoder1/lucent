@@ -1,0 +1,21 @@
+namespace StatefulTrial;
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Lucent.Core;
+using static StatefulTrial.TestComponents;
+style PreviewStyle {
+    CornerRadius: 6;
+    FontWeight: FontWeight.SemiBold;
+}
+
+public component AsyncTrial(Func<string> source, Func<string, CancellationToken, Task<string>> load) {
+    readonly AsyncValue<string> resource = owner.Async(source, load, "lookup");
+    string label = resource.IsPending ? "Loading" : resource.Error != null ? "Try again" : resource.Value ?? "Empty";
+
+    void Retry() {
+        resource.Refresh();
+    }
+
+    <Probe toggle={Retry} style={PreviewStyle}>{label}</Probe>
+}

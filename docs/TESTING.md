@@ -34,6 +34,14 @@ The affected-file helper includes relevant downstream suites and falls back to a
 ./tools/Test-Repository.ps1 -Suite Accessibility
 ```
 
+The VS Code client has a dependency-free Node test harness. Run it when changing the extension or its protocol/client boundary:
+
+```powershell
+node --test extensions/lucent-lui-vscode/extension.test.cjs
+```
+
+Windows CI runs this short contract check before the managed .NET suite. The managed check performs the Core architecture/public API preflight after restore/build and before the longer tests; its negative fixture proof remains after those tests.
+
 Tooling measurements use [LuiTooling.Measurements.json](../tools/LuiTooling.Measurements.json). Results distinguish whole-corpus timings from completion, diagnostics, and rename operation timings. Builds happen before measurement; timing limits are optional configuration, not a frozen milestone baseline.
 
 The published suite includes `Test-WindowsLifecycle.ps1`: a `.lui` application with controlled pending work verifies close rejection/retry, accepted-work drain, asynchronous service cleanup, and startup/stop/disposal failure paths through the real Windows host. `Lucent.Hosting.Tests` covers the portable Microsoft hosting adapter.

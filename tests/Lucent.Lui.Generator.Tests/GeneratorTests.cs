@@ -1731,6 +1731,109 @@ public component Parent() { <Column><Counter /><Counter /></Column> }
         Assert(emitted.Success, string.Join(" | ", emitted.Diagnostics));
     }
 
+    [TestMethod]
+    public void StatefulComponentsInOneNamespaceUseDistinctStableStateTypes()
+    {
+        const string alpha = """
+namespace StatefulCollision;
+using Lucent.Core;
+using static StatefulCollision.TestComponents;
+public component Alpha() {
+    int count = 1;
+    string label = count.ToString();
+    void Increment() { count++; }
+    <Probe increment={Increment}>{label}</Probe>
+}
+""";
+        const string beta = """
+namespace StatefulCollision;
+using Lucent.Core;
+using static StatefulCollision.TestComponents;
+public component Beta() {
+    int count = 10;
+    string label = count.ToString();
+    void Increment() { count++; }
+    <Probe increment={Increment}>{label}</Probe>
+}
+""";
+        const string api = """
+namespace StatefulCollision;
+using System;
+using System.Collections.Generic;
+using Lucent.Core;
+public sealed record Capture(Func<string> Read, Action Increment);
+public static class TestComponents {
+    [LucentComponent]
+    public static ComponentRecipe Probe([DefaultContent] Func<string> content, Action increment) =>
+        ComponentRecipe.Create("probe", (_, _) => Harness.Captures.Add(new(content, increment)));
+}
+public static class Harness {
+    public static readonly List<Capture> Captures = new();
+    public static string Run() {
+        using var composition = new Composition(new ReactiveGraph(), "stateful-collision");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("stateful-collision"));
+        composition.Mount(composition.Root, theme, Components.Alpha());
+        composition.Mount(composition.Root, theme, Components.Beta());
+        composition.Flush();
+        var before = Captures[0].Read() + "|" + Captures[1].Read();
+        Captures[0].Increment();
+        var afterAlpha = Captures[0].Read() + "|" + Captures[1].Read();
+        Captures[1].Increment();
+        return before + ";" + afterAlpha + ";" + Captures[0].Read() + "|" + Captures[1].Read();
+    }
+}
+""";
+        var result = RunWithSource(
+            api,
+            new TextFile("C:/trial/Alpha.lui", alpha, "Alpha.lui"),
+            new TextFile("C:/trial/Beta.lui", beta, "Beta.lui")
+        );
+        Assert(
+            !result.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+                && result.Results.Single().GeneratedSources.Length == 2,
+            string.Join(" | ", result.Diagnostics)
+        );
+        var generated = result.Results.Single().GeneratedSources;
+        var alphaState = "__luiState_" + LuiDocumentIdentity.Hash("Alpha.lui\0Alpha") + "_";
+        var betaState = "__luiState_" + LuiDocumentIdentity.Hash("Beta.lui\0Beta") + "_";
+        Assert(
+            alphaState != betaState
+                && generated.Any(source =>
+                    source.SourceText.ToString().Contains(alphaState, StringComparison.Ordinal)
+                )
+                && generated.Any(source =>
+                    source.SourceText.ToString().Contains(betaState, StringComparison.Ordinal)
+                ),
+            "State type identities were not stable across independent documents."
+        );
+
+        var compilation = CSharpCompilation.Create(
+            "stateful-collision-" + Guid.NewGuid().ToString("N"),
+            generated
+                .Select(source =>
+                    CSharpSyntaxTree.ParseText(
+                        source.SourceText,
+                        new CSharpParseOptions(LanguageVersion.Preview)
+                    )
+                )
+                .Prepend(
+                    CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))
+                ),
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var output = new MemoryStream();
+        var emitted = compilation.Emit(output);
+        Assert(emitted.Success, string.Join(" | ", emitted.Diagnostics));
+        var assembly = Assembly.Load(output.ToArray());
+        var value = (string)
+            assembly.GetType("StatefulCollision.Harness")!.GetMethod("Run")!.Invoke(null, null)!;
+        Assert(
+            value == "1|10;2|10;2|11",
+            "Independent generated state types did not retain isolated values: " + value
+        );
+    }
+
     static GeneratorDriverRunResult RunWithSource(string source, params AdditionalText[] texts)
     {
         var compilation = CSharpCompilation.Create(

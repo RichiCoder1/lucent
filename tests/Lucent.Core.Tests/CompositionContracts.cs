@@ -921,6 +921,114 @@ public sealed class CompositionContracts
     }
 
     [TestMethod]
+    public void ComposedSelectableOwnsVisualContentAndLiveSelectionSemantics()
+    {
+        static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes)
+        {
+            foreach (var node in nodes)
+            {
+                yield return node;
+                var children = node switch
+                {
+                    ClipSceneNode clip => clip.Children,
+                    OpacitySceneNode opacity => opacity.Children,
+                    _ => [],
+                };
+                foreach (var child in Flatten(children))
+                    yield return child;
+            }
+        }
+
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "composed-selectable");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var label = graph.Signal("First note", "composed-selectable-label");
+        var selected = graph.Signal(false, "composed-selectable-selected");
+        var labelReads = 0;
+        var selectedReads = 0;
+        var activations = 0;
+        var contentDisposals = 0;
+        var contentRecipe = ComponentRecipe.Create(
+            "selectable-content",
+            (context, contentRoot) =>
+            {
+                Controls.Text(contentRoot, context.Theme, "Visual title");
+                contentRoot.Scope.OnDispose(() => contentDisposals++);
+            }
+        );
+        var selectable = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Selectable(
+                [contentRecipe],
+                () =>
+                {
+                    labelReads++;
+                    return label.Value;
+                },
+                () =>
+                {
+                    selectedReads++;
+                    return selected.Value;
+                },
+                () => activations++,
+                Style.Empty.Width(100).Height(24)
+            )
+        );
+        graph.Drain();
+        var contentRoot = selectable.Children.Single();
+        var scene = SceneLayout.Project(composition, new(100, 30, 1), new EmptyShaper());
+        var semantic = Descendants(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == selectable.Id);
+        var paintedText = Flatten(scene.Nodes).OfType<TextSceneNode>().ToArray();
+
+        Assert(
+            selectable.Resolve(ProjectionProperties.Text).Value is null
+                && paintedText.Length == 1
+                && paintedText[0].Identity.Element.ElementId == contentRoot.Id
+                && semantic.Name == "First note"
+                && !semantic.Selected
+                && semantic.Actions.HasFlag(SemanticAction.Select),
+            "Composed selectable duplicated visual text or lost its accessible selection contract."
+        );
+        Assert(
+            composition.ExecuteSemanticCommand(semantic.Identity, new(SemanticCommandKind.Select))
+                == SemanticCommandResult.Applied
+                && activations == 1,
+            "Composed selectable did not preserve selection activation."
+        );
+
+        label.Value = "Updated note";
+        selected.Value = true;
+        graph.Drain();
+        var updated = Descendants(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == selectable.Id);
+        Assert(
+            updated.Name == "Updated note"
+                && updated.Selected
+                && selectable.Resolve(ProjectionProperties.Text).Value is null
+                && labelReads == 2
+                && selectedReads == 2,
+            "Composed selectable did not publish one live label/selection update."
+        );
+
+        selectable.Dispose();
+        var detachedLabelReads = labelReads;
+        var detachedSelectedReads = selectedReads;
+        label.Value = "Detached";
+        selected.Value = false;
+        graph.Drain();
+        Assert(
+            selectable.IsDisposed
+                && contentRoot.IsDisposed
+                && contentDisposals == 1
+                && labelReads == detachedLabelReads
+                && selectedReads == detachedSelectedReads,
+            "Composed selectable did not dispose its content and live readers exactly once."
+        );
+    }
+
+    [TestMethod]
     public void BuiltinRecipeContracts()
     {
         Expect<ArgumentException>(() => Components.Text(" "));

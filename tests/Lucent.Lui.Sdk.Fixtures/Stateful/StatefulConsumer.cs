@@ -14,10 +14,18 @@ public sealed record Capture(Func<string> Read, Action Toggle, Element Root);
 public static class TestComponents
 {
     [LucentComponent]
-    public static ComponentRecipe Probe([DefaultContent] Func<string> content, Action toggle) =>
+    public static ComponentRecipe Probe(
+        [DefaultContent] Func<string> content,
+        Action toggle,
+        Style? style = null
+    ) =>
         ComponentRecipe.Create(
             "probe",
-            (_, root) => Harness.Mounts.Add(new Capture(content, toggle, root))
+            (context, root) =>
+            {
+                root.Present(context.Theme, author: style ?? Style.Empty);
+                Harness.Mounts.Add(new Capture(content, toggle, root));
+            }
         );
 }
 

@@ -9,6 +9,45 @@ $proof = Join-Path $root ("artifacts/package-consumer/" + [Guid]::NewGuid().ToSt
 $null = New-Item -ItemType Directory -Path $proof
 # Consume the maintained real app through packages in a fresh, isolated directory.
 Get-ChildItem (Join-Path $root 'apps/Lucent.IssueBrowser') -File | Where-Object { $_.Extension -in '.cs', '.lui' } | Copy-Item -Destination $proof
+@'
+using Lucent.Core;
+using Lucent.Reactive.R3;
+
+namespace Lucent.IssueBrowser;
+
+internal static class R3PackageProbe
+{
+    public static void Run()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("package-r3");
+        using var scheduler = new OwnedDebouncedAction(scope, TimeProvider.System);
+        var delivered = 0;
+        scheduler.Restart(TimeSpan.Zero, () => delivered++);
+        var deadline = Environment.TickCount64 + 2000;
+        while (Volatile.Read(ref delivered) == 0 && Environment.TickCount64 < deadline)
+        {
+            graph.Drain();
+            Thread.Sleep(1);
+        }
+        if (Volatile.Read(ref delivered) != 1)
+            throw new InvalidOperationException("R3 NativeAOT package probe did not deliver its owner-thread callback.");
+    }
+}
+'@ | Set-Content (Join-Path $proof 'R3PackageProbe.cs')
+$programPath = Join-Path $proof 'Program.cs'
+$program = Get-Content -Raw $programPath
+if (-not $program.Contains('R3PackageProbe.Run();', [StringComparison]::Ordinal)) {
+    $anchor = '(?m)^        try\r?\n        \{\r?\n'
+    $replacement = "        try`r`n        {`r`n            R3PackageProbe.Run();`r`n"
+    $updated = [Text.RegularExpressions.Regex]::Replace($program, $anchor, $replacement, 1)
+    if ($updated -eq $program) { throw 'Package consumer probe anchor was not found in the maintained Program.cs.' }
+    $program = $updated
+    Set-Content $programPath $program
+}
+if (-not (Get-Content -Raw $programPath).Contains('R3PackageProbe.Run();', [StringComparison]::Ordinal)) {
+    throw 'Package consumer R3 probe was not injected.'
+}
 @"
 <Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/$Version">
   <PropertyGroup>
@@ -20,6 +59,7 @@ Get-ChildItem (Join-Path $root 'apps/Lucent.IssueBrowser') -File | Where-Object 
   <ItemGroup>
     <PackageReference Include="Lucent.Platform.Windows" Version="[$Version]" />
     <PackageReference Include="Lucent.Hosting" Version="[$Version]" />
+    <PackageReference Include="Lucent.Reactive.R3" Version="[$Version]" />
   </ItemGroup>
 </Project>
 "@ | Set-Content (Join-Path $proof 'Consumer.csproj')
@@ -40,7 +80,7 @@ try {
     & dotnet publish Consumer.csproj -c Release --no-restore -o publish -warnaserror
     if ($LASTEXITCODE) { throw 'Package-only NativeAOT publish failed.' }
     $published = Join-Path $proof 'publish'
-    foreach ($file in 'SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'vcruntime140.dll', 'notices/SDL3-CS.txt', 'notices/Microsoft.Extensions-LICENSE.txt') {
+    foreach ($file in 'SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'vcruntime140.dll', 'notices/SDL3-CS.txt', 'notices/Microsoft.Extensions-LICENSE.txt', 'notices/R3-LICENSE.txt') {
         if (-not (Test-Path -LiteralPath (Join-Path $published $file))) { throw "Missing published asset: $file" }
     }
     $stdout = Join-Path $proof 'stdout.log'; $stderr = Join-Path $proof 'stderr.log'

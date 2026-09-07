@@ -15,6 +15,7 @@ if (-not (Test-Path $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $configuration = 'Release'
 $managedProjects = @(
     'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj',
+    'tests/Lucent.Reactive.R3.Tests/Lucent.Reactive.R3.Tests.csproj',
     'tests/Lucent.Hosting.Tests/Lucent.Hosting.Tests.csproj',
     'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj',
     'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj',
@@ -56,6 +57,7 @@ function Assert-DiscoveredTests([string] $TestProject) {
 
 function Invoke-Managed {
     $selected = @(Resolve-ManagedProjects)
+    $runCoreArchitecture = $Project.Count -eq 0 -or $selected -contains 'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj'
     if ($Project.Count -eq 0) {
         & (Join-Path $PSScriptRoot 'Verify-Formatting.ps1')
         if ($LASTEXITCODE) { throw 'Formatting check failed.' }
@@ -68,17 +70,23 @@ function Invoke-Managed {
             Invoke-Dotnet @('build', $testProject, '--no-restore', '-c', $configuration)
         }
     }
+    if ($runCoreArchitecture -and $Project.Count -ne 0) {
+        Invoke-Dotnet @('restore', 'tests/Lucent.Core.ArchitectureVerifier/Lucent.Core.ArchitectureVerifier.csproj', '--locked-mode')
+        Invoke-Dotnet @('build', 'tests/Lucent.Core.ArchitectureVerifier/Lucent.Core.ArchitectureVerifier.csproj', '--no-restore', '-c', $configuration)
+    }
+    if ($runCoreArchitecture) {
+        Write-Output 'Running Core architecture/public API preflight before managed tests.'
+        & (Join-Path $PSScriptRoot 'Verify-CoreArchitecture.ps1') -Configuration $configuration
+        if ($LASTEXITCODE) { throw 'Core architecture preflight failed.' }
+    }
     foreach ($testProject in $selected) {
         Assert-DiscoveredTests $testProject
         $arguments = @('test', '--project', $testProject, '--no-build', '--no-restore', '-c', $configuration)
         if (-not [string]::IsNullOrWhiteSpace($Filter)) { $arguments += @('--filter', $Filter) }
         Invoke-Dotnet $arguments
     }
-    if ($Project.Count -eq 0 -or $selected -contains 'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj') {
-        if ($Project.Count -ne 0) {
-            Invoke-Dotnet @('restore', 'tests/Lucent.Core.ArchitectureVerifier/Lucent.Core.ArchitectureVerifier.csproj', '--locked-mode')
-            Invoke-Dotnet @('build', 'tests/Lucent.Core.ArchitectureVerifier/Lucent.Core.ArchitectureVerifier.csproj', '--no-restore', '-c', $configuration)
-        }
+    if ($runCoreArchitecture) {
+        Write-Output 'Running Core architecture negative fixture proof after managed tests.'
         & (Join-Path $PSScriptRoot 'Verify-CoreArchitecture.ps1') -Configuration $configuration -Negative
         if ($LASTEXITCODE) { throw 'Core architecture proof failed.' }
     }
@@ -125,6 +133,7 @@ function Invoke-Published {
     Invoke-DesktopTests $published 'FullyQualifiedName~FlaUi'
     foreach ($testProject in @(
         'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj',
+        'tests/Lucent.Reactive.R3.Tests/Lucent.Reactive.R3.Tests.csproj',
         'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj',
         'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj'
     )) {

@@ -1983,7 +1983,12 @@ public static class LuiCompiler
         {
             var members = component.Body.OfType<LuiMemberSyntax>().ToArray();
             var stateful = members.Length != 0;
-            var stateClass = stateful ? UniqueGeneratedName("__luiState") : "";
+            var stateIdentity = LuiDocumentIdentity.Hash(
+                identity.Document.LogicalPath + "\0" + component.Name.Text
+            );
+            var stateClass = stateful
+                ? UniqueGeneratedName("__luiState_" + stateIdentity + "_")
+                : "";
             var stateBuild = stateful ? UniqueGeneratedName("__luiBuild") : "";
             var stateOwner = stateful ? UniqueGeneratedName("__luiOwner") : "";
             Hidden(

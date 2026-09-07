@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lucent.Core/Lucent.Core.csproj" />
+    <PackageReference Include="R3" />
+    <None
+      Include="notices/R3-LICENSE.txt"
+      Link="notices/R3-LICENSE.txt"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+      Pack="true"
+      PackagePath="buildTransitive/notices/R3-LICENSE.txt"
+    />
+    <None
+      Include="buildTransitive/Lucent.Reactive.R3.targets"
+      Pack="true"
+      PackagePath="buildTransitive/Lucent.Reactive.R3.targets"
+    />
+  </ItemGroup>
+</Project>
