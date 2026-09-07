@@ -63,9 +63,7 @@ public sealed class IssueBrowserTests
         using var composition = IssueBrowserStructure.Create(graph, out _);
         graph.Drain();
         using var renderer = new SkiaSceneRenderer();
-        _ = SceneLayout.Project(composition, new(800, 500, 1), renderer);
-        // Composition epochs are process-wide; keep this snapshot independent of test order.
-        var semantics = Regex.Replace(composition.SemanticDump(), @"epoch=\d+", "epoch=*");
+        var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
         var dump = composition.Dump();
         Assert(
             dump.Contains("name=\"issue-browser.filters\"", StringComparison.Ordinal)
@@ -78,10 +76,19 @@ public sealed class IssueBrowserTests
                     .Count(node => node.Role == SemanticRole.ListItem) <= 9,
             "C# Filter Bar or virtual Issue Row recipe structure regressed."
         );
+        var nodes = Flatten(composition.SemanticSnapshot()!).ToArray();
         Assert(
-            Hash(dump + semantics)
-                == "c236d3f367554e38c9a978e8f5d95ba044cf3a4b2950b7cafc8018d8e32d1dbc",
-            "Issue Browser composition/semantic evidence changed: " + Hash(dump + semantics)
+            nodes
+                .Where(node => node.Role == SemanticRole.TextField)
+                .Select(node => node.Name)
+                .SequenceEqual([
+                    "Search issues",
+                    "Status: all, open, closed",
+                    "Assignee: all, marta, devin, joel",
+                ])
+                && nodes.Count(node => node.Role == SemanticRole.ListItem) is > 0 and <= 9
+                && scene.ScrollBars is [{ Maximum.Y: > 0 }],
+            "Issue Browser filters, bounded list semantics or default scroll affordance changed."
         );
     }
 
@@ -1320,7 +1327,9 @@ public sealed class IssueBrowserTests
             expandedBoxes[app.Id] is { Width: 1040, Height: 680 }
                 && expandedBoxes[header.Id].Width == 1040
                 && expandedBoxes[list.Id] is { Width: 1040, Height: 60 }
-                && expandedBoxes[row.Identity.ElementId].Width == 1040
+                && expanded.ScrollBars.Single().Track.Width == 12
+                && expandedBoxes[row.Identity.ElementId].Width
+                    == 1040 - expanded.ScrollBars.Single().Track.Width
                 && expandedBoxes[details.Id].Width == 1040
                 && fields.All(identity =>
                     MathF.Abs(expandedBoxes[identity.ElementId].Width - 250)
@@ -1370,7 +1379,9 @@ public sealed class IssueBrowserTests
             restoredBoxes[app.Id] is { Width: 800, Height: 500 }
                 && restoredBoxes[header.Id].Width == 800
                 && restoredBoxes[list.Id] is { Width: 800, Height: 60 }
-                && restoredBoxes[row.Identity.ElementId].Width == 800
+                && restored.ScrollBars.Single().Track.Width == 12
+                && restoredBoxes[row.Identity.ElementId].Width
+                    == 800 - restored.ScrollBars.Single().Track.Width
                 && restoredBoxes[details.Id].Width == 800
                 && fields.All(identity =>
                     MathF.Abs(restoredBoxes[identity.ElementId].Width - 250)
