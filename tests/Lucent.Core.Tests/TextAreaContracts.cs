@@ -171,6 +171,40 @@ public sealed class TextAreaContracts
     }
 
     [TestMethod]
+    public void MultilineSemanticScrollUsesItsRegisteredViewport()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "text-area-semantic-scroll");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var element = composition.Child(composition.Root, "area");
+        var state = Controls.TextArea(
+            element,
+            theme,
+            "Note",
+            "overflow",
+            Style.Empty.Set(LayoutProperties.Width, 100f).Set(LayoutProperties.Height, 40f)
+        );
+        graph.Drain();
+        var semantic = FindTextArea(composition.SemanticSnapshot()!);
+        Assert.IsTrue(semantic.Actions.HasFlag(SemanticAction.Scroll));
+
+        var scene = SceneLayout.Project(composition, new(100, 40, 1), new TallShaper());
+        Assert.IsTrue(composition.Input.SetScene(scene));
+        var inputIdentity = scene
+            .Input.Single(item => item.Identity.ElementId == element.Id)
+            .Identity;
+        Assert.IsTrue(composition.Input.GetSemanticScroll(inputIdentity)?.Maximum.Y > 0);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(
+                semantic.Identity,
+                new(SemanticCommandKind.Scroll, Vertical: 20)
+            )
+        );
+        Assert.IsTrue(state.ScrollState!.Offset.Y > 0);
+    }
+
+    [TestMethod]
     public void TextAreaRequiresMultilineSessionAndSingleLineStillRejectsBreaks()
     {
         var graph = new ReactiveGraph();
@@ -189,6 +223,34 @@ public sealed class TextAreaContracts
         Assert.IsFalse(TextInputCommand.TryNormalizeSingleLine("a\n", out _));
         Assert.IsTrue(TextInputCommand.TryNormalizeMultiline("a\r\nb", out var normalized));
         Assert.AreEqual("a\nb", normalized);
+    }
+
+    private sealed class TallShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            var glyph = new ShapedGlyph(1, 0, 0, 0, 80, 0, 0);
+            var run = new ShapedRun(
+                "tall",
+                "tall",
+                400,
+                5,
+                0,
+                "tall#0",
+                0,
+                "tall#0",
+                request.Direction,
+                request.Language,
+                request.FontSize,
+                0,
+                200,
+                -200,
+                0,
+                80,
+                [glyph]
+            );
+            return new("tall", 80, 200, [run]);
+        }
     }
 
     private sealed class FixedShaper : ITextShaper

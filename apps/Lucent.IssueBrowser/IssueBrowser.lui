@@ -8,6 +8,14 @@ style IssueBrowserStyle {
 
 style VirtualizedListStyle {
     Height: 60;
+    Visibility: ScrollBarVisibility.Auto;
+    Thickness: 12;
+    MinimumThumbLength: 24;
+    TrackBrush: ScrollbarTrack;
+    ThumbBrush: ScrollbarThumb;
+    HoverThumbBrush: ScrollbarThumbHover;
+    PressedThumbBrush: ScrollbarThumbPressed;
+    ThumbCornerRadius: 6;
 }
 
 public component IssueBrowser(IssueBrowserState browser) {

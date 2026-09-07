@@ -97,3 +97,13 @@ This ledger carries no copied source. CsWin32 output is generated from Microsoft
 ## Desktop interaction references
 
 Consulted September 6, 2026: [Avalonia TextPresenter](https://github.com/AvaloniaUI/avalonia-docs/blob/main/api/avalonia/controls/presenters/textpresenter.mdx) (MIT) for explicit caret visibility and configurable blink intervals, and [Flutter Scrollbar](https://api.flutter.dev/flutter/material/Scrollbar-class.html) (BSD-3-Clause) for shared scroll position, thumb dragging, track paging, and replaceable hover/drag styling. These are behavioral/architectural references; no source is copied and neither framework is a dependency. Windows caret timing uses [GetCaretBlinkTime](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-getcaretblinktime); existing SDL supplies system cursors and timed event waits on the owner thread.
+
+## Text rasterization references
+
+Consulted September 6, 2026 for the offscreen text-rasterization review. These are primary Skia documentation and source references; no source is copied and no new dependency is introduced.
+
+| Source | Consulted identity | License or status | Influence |
+| --- | --- | --- | --- |
+| [Skia: The Raster Tragedy at Low-DPI](https://docs.skia.org/docs/dev/design/raster_tragedy/) | Skia documentation, consulted 2026-09-06 | BSD-3-Clause project; no dependency | Grayscale versus LCD coverage, gamma, hinting, and color-fringe tradeoffs |
+| [SkSurfaceProps API](https://api.skia.org/SkSurfaceProps_8h.html) and [SkFont API](https://api.skia.org/classSkFont.html) | Skia API documentation, consulted 2026-09-06 | BSD-3-Clause project; no dependency | Pixel geometry declarations and the distinction between LCD edging and fractional glyph positioning |
+| [Skia surface test](https://skia.googlesource.com/skia/+/762b0e485189/gm/surface.cpp), [SkCanvas layer implementation](https://skia.googlesource.com/skia/+/2daf164f6d51/src/core/SkCanvas.cpp), and [SkFont implementation](https://skia.googlesource.com/skia/+/34c67453a5d032b2f5416564a8c80aa5dca05c9f/src/core/SkFont.cpp) | Skia source commits 762b0e485189, 2daf164f6d51, and 34c67453a5d032b2f5416564a8c80aa5dca05c9f | BSD-3-Clause project; no source reused | Opaque-target requirements, saved-layer pixel geometry, and separate edging/subpixel-positioning flags |

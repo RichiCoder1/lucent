@@ -1,6 +1,19 @@
 namespace Lucent.IssueBrowser;
 style IssueRowStyle {
     Background: RowSurface;
+    TextColor: PageForeground;
+    when Hover {
+        Background: RowHoverSurface;
+        TextColor: PageForeground;
+    }
+    when Pressed {
+        Background: RowPressedSurface;
+        TextColor: PageForeground;
+    }
+    when Hover | Pressed {
+        Background: RowPressedSurface;
+        TextColor: PageForeground;
+    }
     when FocusVisible {
         Background: FocusSurface;
         TextColor: FocusForeground;

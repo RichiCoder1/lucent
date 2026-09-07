@@ -133,7 +133,7 @@ public sealed class IssueBrowserTests
             + generatedRow.Dump
             + generatedRow.Semantics;
         Assert(
-            Hash(evidence) == "3ca9bd05b388a07f8ff9b196cbded96f98021a1f0a2e42f89fc6fb120c022b48",
+            Hash(evidence) == "85374dc3430fea48250fb2c65179ddc503580a593a98826f914d100da0d3a021",
             "Direct-root parity evidence changed: " + Hash(evidence)
         );
     }
@@ -1717,6 +1717,23 @@ public sealed class IssueBrowserTests
             ArgumentNullException.ThrowIfNull(issue);
             var style = Style
                 .Empty.Background(Tokens.RowSurface)
+                .TextColor(Tokens.PageForeground)
+                .When(
+                    VariantState.Hover,
+                    Style.Empty.Background(Tokens.RowHoverSurface).TextColor(Tokens.PageForeground)
+                )
+                .When(
+                    VariantState.Pressed,
+                    Style
+                        .Empty.Background(Tokens.RowPressedSurface)
+                        .TextColor(Tokens.PageForeground)
+                )
+                .When(
+                    VariantState.Hover | VariantState.Pressed,
+                    Style
+                        .Empty.Background(Tokens.RowPressedSurface)
+                        .TextColor(Tokens.PageForeground)
+                )
                 .When(
                     VariantState.FocusVisible,
                     Style.Empty.Background(Tokens.FocusSurface).TextColor(Tokens.FocusForeground)

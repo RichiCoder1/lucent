@@ -787,16 +787,19 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         )
             return InvalidArgument;
         return Run(node =>
-            node.Scroll is not { } scroll ? SemanticCommandResult.Rejected
-            : vertical == -1 ? SemanticCommandResult.Applied
-            : _composition.ExecuteSemanticCommand(
+        {
+            if (node.Scroll is not { } scroll)
+                return SemanticCommandResult.Rejected;
+            if (vertical == -1)
+                return SemanticCommandResult.Applied;
+            var target = (float)(scroll.Maximum.Y * vertical / 100d);
+            if (target == scroll.Offset.Y)
+                return SemanticCommandResult.Applied;
+            return _composition.ExecuteSemanticCommand(
                 node.Identity,
-                new(
-                    SemanticCommandKind.Scroll,
-                    Vertical: (float)(scroll.Maximum.Y * vertical / 100d - scroll.Offset.Y)
-                )
-            )
-        );
+                new(SemanticCommandKind.Scroll, Vertical: target - scroll.Offset.Y)
+            );
+        });
     }
 
     internal int ScrollMetric(bool vertical, bool size, double* value)
@@ -880,18 +883,17 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     }
 
     private static int Type(Node node) =>
-        node.Actions.HasFlag(SemanticAction.Scroll)
-            ? 50033
-            : node.Role switch
-            {
-                SemanticRole.Button => 50000,
-                SemanticRole.TextField => 50004,
-                SemanticRole.List => 50008,
-                SemanticRole.ListItem => 50007,
-                SemanticRole.Text => 50020,
-                SemanticRole.Status => 50017,
-                _ => 50026,
-            };
+        node.Role switch
+        {
+            SemanticRole.Button => 50000,
+            SemanticRole.TextField => 50004,
+            SemanticRole.List => 50008,
+            SemanticRole.ListItem => 50007,
+            SemanticRole.Text => 50020,
+            SemanticRole.Status => 50017,
+            SemanticRole.Group when node.Actions.HasFlag(SemanticAction.Scroll) => 50033,
+            _ => 50026,
+        };
 
     private static double ScrollPercent(SemanticScrollState? scroll) =>
         scroll is not { Maximum.Y: > 0 } state ? -1 : state.Offset.Y * 100d / state.Maximum.Y;

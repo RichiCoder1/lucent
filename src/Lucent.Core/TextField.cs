@@ -436,7 +436,10 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
         ArgumentNullException.ThrowIfNull(state);
         var actions = SemanticAction.SetValue;
         if (state.IsMultiline)
-            actions |= SemanticAction.SelectText | SemanticAction.ScrollTextIntoView;
+            actions |=
+                SemanticAction.Scroll
+                | SemanticAction.SelectText
+                | SemanticAction.ScrollTextIntoView;
         context.SetSemantics(
             new(
                 SemanticRole.TextField,
@@ -467,6 +470,8 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                 state.Value = value;
                 return true;
             }
+            if (command.Kind == SemanticCommandKind.Scroll && state.IsMultiline)
+                return context.CompositionInput().ScrollSemantic(context.Identity, command);
             if (
                 command.Kind == SemanticCommandKind.SelectText
                 && state.IsMultiline

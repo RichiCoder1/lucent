@@ -19,7 +19,9 @@ public sealed unsafe partial class UiaLifecycleContracts
             using var composition = new Composition(graph, "uia-text");
             var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
             var element = composition.Child(composition.Root, "editor");
-            var source = "A😀\nCafe\u0301\nlast";
+            var source =
+                "A😀\nCafe\u0301\nlast\n"
+                + string.Join('\n', Enumerable.Range(4, 20).Select(line => $"line {line}"));
             using var session = new EditorSession(
                 composition.Root.Scope,
                 "uia-document",
@@ -28,7 +30,7 @@ public sealed unsafe partial class UiaLifecycleContracts
                 multiline: true
             );
             session.SetSelection(1, 3);
-            _ = Controls.TextArea(
+            var state = Controls.TextArea(
                 element,
                 theme,
                 "Notes",
@@ -57,11 +59,24 @@ public sealed unsafe partial class UiaLifecycleContracts
                 editorFragment = nested;
             }
             var simple = Query(editorFragment, UiaWrappers.Simple);
+            WindowsUiaProvider.RawVariant controlType = default;
+            Assert(
+                Simple(simple, 5, 30003, &controlType) == WindowsUiaProvider.Ok
+                    && controlType.Type == 3
+                    && controlType.Value == 50004,
+                "Scrollable TextArea did not retain the UIA Edit control type."
+            );
             nint textProvider = 0;
             Assert(
                 Simple(simple, 4, 10014, &textProvider) == WindowsUiaProvider.Ok
                     && textProvider != 0,
                 "TextArea did not expose TextPattern."
+            );
+            nint scrollProvider = 0;
+            Assert(
+                Simple(simple, 4, 10004, &scrollProvider) == WindowsUiaProvider.Ok
+                    && scrollProvider != 0,
+                "TextArea did not expose ScrollPattern."
             );
             var textProvider2 = Query(simple, UiaWrappers.TextProvider2);
             nint document = 0,
@@ -71,6 +86,22 @@ public sealed unsafe partial class UiaLifecycleContracts
                 pointRange = 0;
             try
             {
+                double verticalPercent = -2;
+                Assert(
+                    ScrollMetric(scrollProvider, 6, &verticalPercent) == WindowsUiaProvider.Ok
+                        && verticalPercent >= 0,
+                    "Scrollable TextArea did not expose its vertical percent."
+                );
+                Assert(
+                    SetScrollPercent(scrollProvider, 4, -1, verticalPercent)
+                        == WindowsUiaProvider.Ok,
+                    "Setting the already-current vertical percent was not a successful no-op."
+                );
+                Assert(
+                    SetScrollPercent(scrollProvider, 4, -1, 100) == WindowsUiaProvider.Ok
+                        && state.ScrollState!.Offset.Y > 0,
+                    "ScrollPattern did not dispatch through the TextArea viewport."
+                );
                 var supportedSelection = -1;
                 Assert(
                     TextProviderSelection(textProvider, 8, &supportedSelection)
@@ -215,6 +246,7 @@ public sealed unsafe partial class UiaLifecycleContracts
                     Release(wholeDocument);
                 }
 
+                state.ScrollState!.Offset = default;
                 session.Text = "e\u0301😀";
                 composition.Flush();
                 var replacementScene = SceneLayout.Project(composition, new(160, 80, 1), renderer);
@@ -245,6 +277,7 @@ public sealed unsafe partial class UiaLifecycleContracts
                 if (selectionArray != 0)
                     _ = SafeArrayDestroy(selectionArray);
                 Release(document);
+                Release(scrollProvider);
                 Release(textProvider2);
                 Release(textProvider);
                 Release(simple);
@@ -322,6 +355,24 @@ public sealed unsafe partial class UiaLifecycleContracts
         Assert(SafeArrayGetUBound(array, 1, out var upper) >= 0, "SAFEARRAY upper bound failed.");
         return upper < lower ? 0 : upper - lower + 1;
     }
+
+    private static int SetScrollPercent(
+        nint pointer,
+        int slot,
+        double horizontal,
+        double vertical
+    ) =>
+        ((delegate* unmanaged[Stdcall]<nint, double, double, int>)(*(nint**)pointer)[slot])(
+            pointer,
+            horizontal,
+            vertical
+        );
+
+    private static int ScrollMetric(nint pointer, int slot, double* value) =>
+        ((delegate* unmanaged[Stdcall]<nint, double*, int>)(*(nint**)pointer)[slot])(
+            pointer,
+            value
+        );
 
     private static int TextProvider(nint pointer, int slot, nint* value) =>
         ((delegate* unmanaged[Stdcall]<nint, nint*, int>)(*(nint**)pointer)[slot])(pointer, value);
