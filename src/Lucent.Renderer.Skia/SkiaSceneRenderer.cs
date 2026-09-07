@@ -19,7 +19,7 @@ namespace Lucent.Renderer.Skia;
 /// text and Arabic/Hebrew right-to-left text; full Unicode bidirectional reordering is not provided.
 ///
 /// An instance is confined to the managed thread that created it. Call <see cref="Shape"/>,
-/// <see cref="Render"/>, and <see cref="Dispose"/> from that thread; instances are not
+/// <see cref="Render(RetainedScene, SKCanvas)"/>, and <see cref="Dispose"/> from that thread; instances are not
 /// synchronized for concurrent use. Dispose the renderer after the final frame to release its
 /// cache and fingerprint data.
 /// </remarks>
@@ -48,6 +48,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private long _textBlobBytes;
     private long _textBlobCreationCount;
     private bool _disposed;
+    internal long ParagraphShapeCount { get; private set; }
 
     /// <summary>Gets the number of retained native text blobs owned by this renderer.</summary>
     /// <remarks>The bounded cache is released by <see cref="Dispose"/>; this count is zero afterward.</remarks>
@@ -77,15 +78,30 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         }
 
         var drafts = new List<LineDraft>();
+        var spanCache = new Dictionary<(string Text, bool HardBreak), SpanDraft>();
         foreach (var span in ParagraphSpans(request.Text))
         {
+            var source = request.Text.Substring(span.Start, span.Length);
+            var key = (source, span.HardBreak);
+            if (spanCache.TryGetValue(key, out var cachedSpan))
+            {
+                var offset = checked(span.Start - cachedSpan.Start);
+                foreach (var draft in cachedSpan.Lines)
+                    drafts.Add(Rebase(draft, offset));
+                continue;
+            }
+
+            ParagraphShapeCount++;
+            IReadOnlyList<LineDraft> shapedSpan;
             if (
                 request.Wrap is TextWrap.NoWrap or TextWrap.ExplicitBreaks
                 || !request.InlineConstraint.IsBounded
             )
-                drafts.Add(ShapeLine(request, span.Start, span.Length, span.HardBreak));
+                shapedSpan = [ShapeLine(request, span.Start, span.Length, span.HardBreak)];
             else
-                drafts.AddRange(Wrap(request, span.Start, span.Length, span.HardBreak));
+                shapedSpan = Wrap(request, span.Start, span.Length, span.HardBreak);
+            drafts.AddRange(shapedSpan);
+            spanCache.Add(key, new SpanDraft(span.Start, shapedSpan));
         }
 
         if (drafts.Count == 0)
@@ -630,7 +646,11 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="scene"/> or <paramref name="canvas"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The owner thread is not calling the renderer, or a scene face cannot be recreated for painting.</exception>
     /// <exception cref="ObjectDisposedException">The renderer has been disposed.</exception>
-    public void Render(RetainedScene scene, SKCanvas canvas)
+    public void Render(RetainedScene scene, SKCanvas canvas) =>
+        Render(scene, canvas, showCaret: true);
+
+    /// <summary>Paints the scene with host-controlled caret visibility, without changing layout or accessibility geometry.</summary>
+    public void Render(RetainedScene scene, SKCanvas canvas, bool showCaret)
     {
         CheckThread();
         ThrowIfDisposed();
@@ -640,7 +660,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         try
         {
             canvas.Scale(scene.Viewport.Scale, scene.Viewport.Scale);
-            Paint(scene.Nodes, canvas);
+            Paint(scene.Nodes, canvas, showCaret);
         }
         finally
         {
@@ -648,7 +668,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         }
     }
 
-    private void Paint(IEnumerable<SceneNode> nodes, SKCanvas canvas)
+    private void Paint(IEnumerable<SceneNode> nodes, SKCanvas canvas, bool showCaret)
     {
         foreach (var node in nodes)
         {
@@ -669,7 +689,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                 try
                 {
                     canvas.ClipRect(bounds);
-                    Paint(opacity.Children, canvas);
+                    Paint(opacity.Children, canvas, showCaret);
                 }
                 finally
                 {
@@ -690,7 +710,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                     }
                     else
                         canvas.ClipRect(Rect(clip.Bounds));
-                    Paint(clip.Children, canvas);
+                    Paint(clip.Children, canvas, showCaret);
                 }
                 finally
                 {
@@ -699,6 +719,8 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             }
             else if (node is PaintSceneNode paint)
             {
+                if (!showCaret && paint.Identity.Kind == SceneNodeKind.Caret)
+                    continue;
                 using var brush = Paint(
                     paint.Brush,
                     paint.Bounds,
@@ -1377,6 +1399,33 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         float Height,
         float TrailingWhitespaceAdvance
     );
+
+    private static LineDraft Rebase(LineDraft draft, int offset)
+    {
+        if (offset == 0)
+            return draft;
+        return draft with
+        {
+            Start = checked(draft.Start + offset),
+            Pending = draft
+                .Pending.Select(run =>
+                    run with
+                    {
+                        Glyphs = run
+                            .Glyphs.Select(glyph =>
+                                glyph with
+                                {
+                                    Cluster = checked((uint)((long)glyph.Cluster + offset)),
+                                }
+                            )
+                            .ToArray(),
+                    }
+                )
+                .ToArray(),
+        };
+    }
+
+    private sealed record SpanDraft(int Start, IReadOnlyList<LineDraft> Lines);
 
     private readonly record struct ShapeCacheEntry(TextMeasureRequest Request, long Bytes);
 

@@ -28,7 +28,8 @@ internal sealed class CpuSkiaPresenter : IDisposable
     public PresenterPhaseTimestamps Present(
         RetainedScene scene,
         WindowsViewport viewport,
-        SkiaSceneRenderer renderer
+        SkiaSceneRenderer renderer,
+        bool showCaret = true
     )
     {
         CheckThread();
@@ -41,7 +42,7 @@ internal sealed class CpuSkiaPresenter : IDisposable
         var rasterStarted = Stopwatch.GetTimestamp();
         var canvas = _surface!.Canvas;
         canvas.Clear(SKColors.Transparent);
-        renderer.Render(scene, canvas);
+        renderer.Render(scene, canvas, showCaret);
         var rasterized = Stopwatch.GetTimestamp();
         using var pixels =
             _surface.PeekPixels()

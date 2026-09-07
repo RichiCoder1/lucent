@@ -128,11 +128,7 @@ public static class SceneLayout
                         var bounds = byId[element.Id].Bounds;
                         var clip = element.Resolve(LayoutProperties.Clip).Value;
                         LayoutRect? childClipBounds = clip
-                            ? ContentBounds(
-                                bounds,
-                                element.Resolve(LayoutProperties.Padding).Value,
-                                viewport.Scale
-                            )
+                            ? ContentBounds(element, bounds, viewport.Scale)
                             : null;
                         var childClipCornerRadius = childClipBounds is { } childClip
                             ? InnerCornerRadius(
@@ -190,15 +186,239 @@ public static class SceneLayout
                     "Responsive container feedback changed its own assigned constraints after the bounded correction pass."
                 );
         }
+        var scrollBars = BuildScrollBars(composition, projected.Boxes, viewport);
+        var nodes = InsertScrollBars(projected.Nodes, scrollBars);
         return new RetainedScene(
             composition.NextSceneGeneration(),
             viewport,
             projected.Boxes,
-            projected.Nodes,
+            nodes,
             projected.Input,
             composition.InputProjectionRevision,
-            projected.Collapsed
+            projected.Collapsed,
+            scrollBars
         );
+    }
+
+    private static IReadOnlyList<SceneNode> InsertScrollBars(
+        IReadOnlyList<SceneNode> nodes,
+        IReadOnlyList<RetainedScrollBar> scrollBars
+    )
+    {
+        if (scrollBars.Count == 0)
+            return nodes;
+        var byViewport = scrollBars
+            .GroupBy(scrollBar => scrollBar.Viewport.ElementId)
+            .ToDictionary(group => group.Key, group => group.ToArray());
+        return InsertScrollBars(nodes, byViewport);
+    }
+
+    private static IReadOnlyList<SceneNode> InsertScrollBars(
+        IReadOnlyList<SceneNode> nodes,
+        IReadOnlyDictionary<long, RetainedScrollBar[]> byViewport
+    )
+    {
+        var result = new List<SceneNode>(nodes.Count);
+        foreach (var node in nodes)
+        {
+            switch (node)
+            {
+                case ClipSceneNode clip:
+                {
+                    result.Add(
+                        new ClipSceneNode(
+                            clip.Identity,
+                            clip.Bounds,
+                            InsertScrollBars(clip.Children, byViewport),
+                            clip.CornerRadius
+                        )
+                    );
+                    // The gutter is outside this viewport's content clip, but remains
+                    // inside the ancestor's clip and opacity group.
+                    if (byViewport.TryGetValue(clip.Identity.Element.ElementId, out var bars))
+                        foreach (var bar in bars)
+                        {
+                            result.Add(
+                                new PaintSceneNode(
+                                    new(bar.Viewport, SceneNodeKind.ScrollBarTrack),
+                                    bar.Track,
+                                    bar.TrackBrush,
+                                    bar.CornerRadius
+                                )
+                            );
+                            result.Add(
+                                new PaintSceneNode(
+                                    new(bar.Viewport, SceneNodeKind.ScrollBarThumb),
+                                    bar.Thumb,
+                                    bar.ThumbBrush,
+                                    bar.CornerRadius
+                                )
+                            );
+                        }
+                    break;
+                }
+                case OpacitySceneNode opacity:
+                    result.Add(
+                        new OpacitySceneNode(
+                            opacity.Identity,
+                            opacity.Bounds,
+                            opacity.Opacity,
+                            InsertScrollBars(opacity.Children, byViewport)
+                        )
+                    );
+                    break;
+                default:
+                    result.Add(node);
+                    break;
+            }
+        }
+        return result;
+    }
+
+    private static RetainedScrollBar[] BuildScrollBars(
+        Composition composition,
+        IReadOnlyList<LayoutBox> boxes,
+        LayoutViewport viewport
+    )
+    {
+        var input = composition.InputIfCreated;
+        if (input is null)
+            return [];
+        var elements = composition.Elements().ToArray();
+        var scrollableIds = elements
+            .Where(element =>
+                input.IsScrollable(new ElementIdentity(composition.Epoch, element.Id))
+            )
+            .Select(element => element.Id)
+            .ToHashSet();
+        if (scrollableIds.Count == 0)
+            return [];
+        var boxesById = boxes.ToDictionary(box => box.Identity.ElementId);
+        var bars = new List<RetainedScrollBar>();
+        foreach (var element in elements)
+        {
+            if (
+                !scrollableIds.Contains(element.Id)
+                || !boxesById.TryGetValue(element.Id, out var box)
+            )
+                continue;
+            var visibility = element.Resolve(ScrollBarProperties.Visibility).Value;
+            if (!Enum.IsDefined(visibility) || visibility == ScrollBarVisibility.Hidden)
+                continue;
+            var thickness = element.Resolve(ScrollBarProperties.Thickness).Value;
+            var minimumThumb = element.Resolve(ScrollBarProperties.MinimumThumbLength).Value;
+            var cornerRadius = element.Resolve(ScrollBarProperties.ThumbCornerRadius).Value;
+            var trackBrush = element.Resolve(ScrollBarProperties.TrackBrush).Value;
+            var thumbBrush = element.Resolve(ScrollBarProperties.ThumbBrush).Value;
+            var hoverThumbBrush = element.Resolve(ScrollBarProperties.HoverThumbBrush).Value;
+            var pressedThumbBrush = element.Resolve(ScrollBarProperties.PressedThumbBrush).Value;
+            if (
+                !float.IsFinite(thickness)
+                || thickness < 0
+                || !float.IsFinite(minimumThumb)
+                || minimumThumb <= 0
+                || !float.IsFinite(cornerRadius)
+                || cornerRadius < 0
+            )
+                throw new ArgumentOutOfRangeException(
+                    nameof(boxes),
+                    "Scrollbar dimensions must be finite and nonnegative."
+                );
+            var padded = ContentBounds(
+                box.Bounds,
+                element.Resolve(LayoutProperties.Padding).Value,
+                viewport.Scale
+            );
+            if (thickness <= 0 || padded.Width <= thickness)
+                continue;
+            var content = ContentBounds(element, box.Bounds, viewport.Scale);
+            if (thickness <= 0 || content.Width <= 0 || content.Height <= 0)
+                continue;
+            var offset = element.Resolve(LayoutProperties.Scroll).Value;
+            var right = content.X;
+            var bottom = content.Y;
+            foreach (var candidate in boxes)
+            {
+                if (
+                    candidate.Identity.ElementId == element.Id
+                    || !boxesById.ContainsKey(candidate.Identity.ElementId)
+                    || composition.Find(candidate.Identity) is not { } child
+                    || !IsScrollContentDescendant(child, element, scrollableIds)
+                )
+                    continue;
+                right = Math.Max(right, candidate.Bounds.X + candidate.Bounds.Width + offset.X);
+                bottom = Math.Max(bottom, candidate.Bounds.Y + candidate.Bounds.Height + offset.Y);
+            }
+            if (element.Resolve(ProjectionProperties.TextMultiline).Value && box.Text is { } text)
+            {
+                right = Math.Max(right, content.X + text.Width);
+                bottom = Math.Max(bottom, content.Y + text.Height);
+            }
+            var maximum = new ScrollOffset(
+                Math.Max(0, right - content.X - content.Width),
+                Math.Max(0, bottom - content.Y - content.Height)
+            );
+            if (visibility == ScrollBarVisibility.Auto && maximum.Y <= 0)
+                continue;
+            var track = LayoutRect.Round(
+                content.X + content.Width,
+                content.Y,
+                thickness,
+                content.Height,
+                viewport.Scale
+            );
+            var thumbHeight =
+                maximum.Y <= 0
+                    ? track.Height
+                    : Math.Clamp(
+                        track.Height * content.Height / (content.Height + maximum.Y),
+                        Math.Min(minimumThumb, track.Height),
+                        track.Height
+                    );
+            var travel = Math.Max(0, track.Height - thumbHeight);
+            var thumbTop =
+                track.Y + travel * (maximum.Y <= 0 ? 0 : Math.Clamp(offset.Y / maximum.Y, 0, 1));
+            var thumb = LayoutRect.Round(
+                track.X,
+                thumbTop,
+                track.Width,
+                thumbHeight,
+                viewport.Scale
+            );
+            bars.Add(
+                new(
+                    new(composition.Epoch, element.Id),
+                    track,
+                    thumb,
+                    maximum,
+                    trackBrush,
+                    input.IsScrollbarPressed(new(composition.Epoch, element.Id)) ? pressedThumbBrush
+                        : input.IsScrollbarHovered(new(composition.Epoch, element.Id))
+                            ? hoverThumbBrush
+                        : thumbBrush,
+                    hoverThumbBrush,
+                    pressedThumbBrush,
+                    Math.Min(cornerRadius, Math.Min(track.Width, track.Height) / 2)
+                )
+            );
+        }
+        return bars.ToArray();
+    }
+
+    private static bool IsScrollContentDescendant(
+        Element candidate,
+        Element ancestor,
+        IReadOnlySet<long> scrollableIds
+    )
+    {
+        for (var parent = candidate.Parent; parent is not null; parent = parent.Parent)
+        {
+            if (parent.Id == ancestor.Id)
+                return true;
+            if (scrollableIds.Contains(parent.Id))
+                return false;
+        }
+        return false;
     }
 
     private static (Element Element, ResponsiveConstraints State)[] ResponsiveElements(
@@ -255,7 +475,11 @@ public static class SceneLayout
                     shaper,
                     cache,
                     new LayoutConstraint(
-                        Math.Max(0, (style.Width ?? allotted.Width) - style.Padding.Horizontal)
+                        ContentBounds(
+                            element,
+                            new LayoutRect(0, 0, style.Width ?? allotted.Width, 0),
+                            viewport.Scale
+                        ).Width
                     ),
                     new LayoutConstraint(
                         Math.Max(0, (style.Height ?? allotted.Height) - style.Padding.Vertical)
@@ -296,7 +520,7 @@ public static class SceneLayout
             height = allotted.Height;
         }
         var bounds = LayoutRect.Round(allotted.X, allotted.Y, width, height, viewport.Scale);
-        var inner = ContentBounds(bounds, style.Padding, viewport.Scale);
+        var inner = ContentBounds(element, bounds, viewport.Scale);
         boxes.Add(new(new(element.Composition.Epoch, element.Id), bounds, text));
         var childNodes = new List<SceneNode>();
         if (element.Children.Count != 0)
@@ -399,10 +623,11 @@ public static class SceneLayout
                                     shaper,
                                     cache,
                                     new LayoutConstraint(
-                                        Math.Max(
-                                            0,
-                                            assignment.Bounds.Width - childStyle.Padding.Horizontal
-                                        )
+                                        ContentBounds(
+                                            child,
+                                            assignment.Bounds,
+                                            viewport.Scale
+                                        ).Width
                                     ),
                                     new LayoutConstraint(
                                         Math.Max(
@@ -465,7 +690,7 @@ public static class SceneLayout
                             shaper,
                             cache,
                             new LayoutConstraint(
-                                Math.Max(0, assignment.Bounds.Width - childStyle.Padding.Horizontal)
+                                ContentBounds(child, assignment.Bounds, viewport.Scale).Width
                             )
                         );
                         if (constrained is null)
@@ -547,9 +772,10 @@ public static class SceneLayout
             var viewOffset = style.Caret is { } caretOffset
                 ? TextViewOffset(text, style.Text!, caretOffset, inner.Width)
                 : 0;
+            var textOffset = LeafTextOffset(element, style, inner, text);
             var textBounds = new LayoutRect(
-                inner.X - viewOffset - style.Scroll.X,
-                inner.Y - style.Scroll.Y,
+                inner.X + textOffset.X - viewOffset - style.Scroll.X,
+                inner.Y + textOffset.Y - style.Scroll.Y,
                 inner.Width + viewOffset + style.Scroll.X,
                 Math.Max(inner.Height, text.Height)
             );
@@ -692,6 +918,34 @@ public static class SceneLayout
                 ),
             ];
     }
+
+    private static (float X, float Y) LeafTextOffset(
+        Element element,
+        in Values style,
+        LayoutRect inner,
+        ShapedText text
+    )
+    {
+        if (element.Children.Count != 0)
+            return default;
+
+        var horizontalAlignment =
+            style.Axis == LayoutAxis.Row ? style.MainAlignment : style.CrossAlignment;
+        var verticalAlignment =
+            style.Axis == LayoutAxis.Row ? style.CrossAlignment : style.MainAlignment;
+        return (
+            AlignmentOffset(horizontalAlignment, inner.Width, text.Width),
+            AlignmentOffset(verticalAlignment, inner.Height, text.Height)
+        );
+    }
+
+    private static float AlignmentOffset(LayoutAlignment alignment, float available, float size) =>
+        alignment switch
+        {
+            LayoutAlignment.Center => Math.Max(0, available - size) / 2,
+            LayoutAlignment.End => Math.Max(0, available - size),
+            _ => 0,
+        };
 
     [System.Runtime.CompilerServices.MethodImpl(
         System.Runtime.CompilerServices.MethodImplOptions.NoInlining
@@ -881,7 +1135,7 @@ public static class SceneLayout
 
     private static (float Width, float Height) Intrinsic(
         Element element,
-        Values style,
+        in Values style,
         ShapedText? text,
         float scale,
         ITextShaper shaper,
@@ -901,9 +1155,16 @@ public static class SceneLayout
                     ? (width, Finite(emptyRowHeight * style.VirtualItemCount))
                     : (width, height)
             );
-        var children = participatingChildren
-            .Select(child => Measure(child, style.Axis, float.MaxValue, scale, shaper, cache))
-            .ToArray();
+        var children = new Measurement[participatingChildren.Length];
+        for (var index = 0; index < participatingChildren.Length; index++)
+            children[index] = Measure(
+                participatingChildren[index],
+                style.Axis,
+                float.MaxValue,
+                scale,
+                shaper,
+                cache
+            );
         if (style.Axis == LayoutAxis.Row)
         {
             foreach (var child in children)
@@ -926,7 +1187,7 @@ public static class SceneLayout
     }
 
     private static (float Width, float Height) Outer(
-        Values style,
+        in Values style,
         (float Width, float Height) content
     ) =>
         (
@@ -953,9 +1214,25 @@ public static class SceneLayout
         return new(left, top, right - left, bottom - top);
     }
 
+    internal static LayoutRect ContentBounds(Element element, LayoutRect outer, float scale)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        var content = ContentBounds(outer, element.Resolve(LayoutProperties.Padding).Value, scale);
+        var visibility = element.Resolve(ScrollBarProperties.Visibility).Value;
+        if (!Enum.IsDefined(visibility) || visibility == ScrollBarVisibility.Hidden)
+            return content;
+        var thickness = element.Resolve(ScrollBarProperties.Thickness).Value;
+        if (!float.IsFinite(thickness) || thickness < 0)
+            throw new ArgumentOutOfRangeException(nameof(element));
+        if (thickness == 0 || content.Width <= thickness)
+            return content;
+        var right = Math.Max(content.X, content.X + content.Width - thickness);
+        return new(content.X, content.Y, right - content.X, content.Height);
+    }
+
     private static ShapedText? Shape(
         Element element,
-        Values style,
+        in Values style,
         float scale,
         ITextShaper shaper,
         ProjectionCache cache,
@@ -978,7 +1255,7 @@ public static class SceneLayout
 
     private static ShapedText? ShapeText(
         string? text,
-        Values style,
+        in Values style,
         float scale,
         ITextShaper shaper,
         ProjectionCache cache,
@@ -1012,7 +1289,7 @@ public static class SceneLayout
     }
 
     private static (float Width, float Height)? IntrinsicTextMetrics(
-        Values style,
+        in Values style,
         ShapedText? text,
         float scale,
         ITextShaper shaper,
@@ -1340,6 +1617,8 @@ public static class SceneLayout
         var cornerRadius = element.Resolve(VisualProperties.CornerRadius).Value;
         var padding = element.Resolve(LayoutProperties.Padding).Value;
         var scroll = element.Resolve(LayoutProperties.Scroll).Value;
+        var scrollbarVisibility = element.Resolve(ScrollBarProperties.Visibility).Value;
+        var scrollbarThickness = element.Resolve(ScrollBarProperties.Thickness).Value;
         var virtualRowHeight = element.Resolve(LayoutProperties.VirtualRowHeight).Value;
         var virtualItemCount = element.Resolve(LayoutProperties.VirtualItemCount).Value;
         var virtualRowIndex = element.Resolve(LayoutProperties.VirtualRowIndex).Value;
@@ -1404,6 +1683,8 @@ public static class SceneLayout
             writer.Write(padding.Bottom);
             writer.Write(scroll.X);
             writer.Write(scroll.Y);
+            writer.Write((int)scrollbarVisibility);
+            writer.Write(scrollbarThickness);
             writer.Write(virtualRowHeight.HasValue);
             if (virtualRowHeight is { } rowHeight)
                 writer.Write(rowHeight);

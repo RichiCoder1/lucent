@@ -521,6 +521,8 @@ public sealed class Element : IDisposable
         var variants = VariantState.None;
         foreach (var behavior in _behaviors)
         {
+            if (behavior.State.GetValueOrDefault(BehaviorState.Hover))
+                variants |= VariantState.Hover;
             if (behavior.State.GetValueOrDefault(BehaviorState.Pressed))
                 variants |= VariantState.Pressed;
             if (behavior.State.GetValueOrDefault(BehaviorState.Selected))

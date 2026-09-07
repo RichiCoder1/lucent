@@ -172,9 +172,7 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         var outerHeight = _viewport.Resolve(LayoutProperties.Height).Value ?? viewport.Height;
         var outer =
             assignedBounds ?? LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale);
-        var viewportHeight = SceneLayout
-            .ContentBounds(outer, _viewport.Resolve(LayoutProperties.Padding).Value, viewport.Scale)
-            .Height;
+        var viewportHeight = SceneLayout.ContentBounds(_viewport, outer, viewport.Scale).Height;
         var offset = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
         var first = Math.Max(0, (int)MathF.Floor(offset / RowHeight) - Overscan);
         var last = Math.Min(

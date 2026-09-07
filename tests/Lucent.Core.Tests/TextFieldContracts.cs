@@ -523,6 +523,80 @@ public sealed class TextFieldContracts
     }
 
     [TestMethod]
+    public void CenteredMultilineEditorUsesShiftedTextForHitAndCaret()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "centered-editor-alignment");
+        var theme = new ThemeContext(
+            composition.Root.Scope,
+            new Theme("centered-editor-alignment")
+        );
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Width(200).Height(40).Axis(LayoutAxis.Row)
+        );
+        var field = composition.Child(composition.Root, "field");
+        var state = Controls.TextArea(
+            field,
+            theme,
+            "Notes",
+            style: Style
+                .Empty.Width(80)
+                .Height(30)
+                .Axis(LayoutAxis.Row)
+                .MainAlignment(LayoutAlignment.Center)
+                .CrossAlignment(LayoutAlignment.Center)
+                .Set(ScrollBarProperties.Visibility, ScrollBarVisibility.Hidden)
+        );
+        state.Value = "abcd";
+
+        var router = composition.Input;
+        var scene = Install(composition, router, new HitMetricShaper());
+        var box = scene.Boxes.Single(item => item.Identity.ElementId == field.Id).Bounds;
+        var text = Flatten(scene.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == field.Id);
+        Assert(
+            MathF.Abs(text.Bounds.X - (box.X + 20)) < .001f
+                && MathF.Abs(text.Bounds.Y - (box.Y + 8)) < .001f,
+            "The centered multiline editor did not retain the shifted text origin."
+        );
+
+        var pointerX = text.Bounds.X + 35;
+        var fieldIdentity = new ElementIdentity(composition.Epoch, field.Id);
+        var pointerY = text.Bounds.Y + 7;
+        var hit =
+            router.HitTestText(fieldIdentity, pointerX, pointerY)
+            ?? throw new InvalidOperationException(
+                "Centered multiline editor text did not accept hit testing."
+            );
+        Assert(
+            router
+                .DispatchPointer(
+                    new(PointerCommandKind.Down, 1, pointerX, pointerY, PointerButton.Primary)
+                )
+                .Handled
+                && state.Caret == hit.Utf16Offset
+                && state.Anchor == hit.Utf16Offset,
+            "Multiline pointer selection did not use the shifted retained text origin."
+        );
+
+        scene = Install(composition, router, new HitMetricShaper());
+        var caret = Flatten(scene.Nodes)
+            .OfType<PaintSceneNode>()
+            .Single(node =>
+                node.Identity.Element.ElementId == field.Id
+                && node.Identity.Kind == SceneNodeKind.Caret
+            );
+        Assert(
+            router.TryGetCaretGeometry(out var reportedCaret)
+                && reportedCaret == caret.Bounds
+                && MathF.Abs(reportedCaret.X - (text.Bounds.X + state.Caret * 10)) < .001f,
+            "Caret reporting did not preserve the centered editor's shifted horizontal origin."
+        );
+    }
+
+    [TestMethod]
     public void SetupRollback()
     {
         var graph = new ReactiveGraph();
@@ -671,6 +745,75 @@ public sealed class TextFieldContracts
                 glyphs
             );
             return new("metric", x, request.FontSize, [run]);
+        }
+    }
+
+    private sealed class HitMetricShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            if (request.Text.Length == 0)
+                return new(
+                    "empty-hit",
+                    0,
+                    0,
+                    [],
+                    [],
+                    false,
+                    request.InlineConstraint,
+                    request.BlockConstraint
+                );
+            var glyphs = new List<ShapedGlyph>();
+            var x = 0f;
+            var offset = 0;
+            foreach (var rune in request.Text.EnumerateRunes())
+            {
+                glyphs.Add(new(1, (uint)offset, x, 0, 10, 0, 0));
+                x += 10;
+                offset += rune.Utf16SequenceLength;
+            }
+            var run = new ShapedRun(
+                "hit-metric",
+                "metric",
+                400,
+                5,
+                0,
+                "hit-metric",
+                0,
+                "hit-metric#0",
+                request.Direction,
+                request.Language,
+                request.FontSize,
+                0,
+                request.FontSize,
+                -request.FontSize,
+                0,
+                x,
+                glyphs
+            );
+            return new(
+                "hit-metric",
+                x,
+                request.FontSize,
+                [run],
+                [
+                    new(
+                        0,
+                        request.Text.Length,
+                        0,
+                        request.FontSize,
+                        -request.FontSize,
+                        0,
+                        0,
+                        x,
+                        0,
+                        false
+                    ),
+                ],
+                false,
+                request.InlineConstraint,
+                request.BlockConstraint
+            );
         }
     }
 

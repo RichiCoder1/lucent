@@ -35,6 +35,9 @@ public enum BehaviorState
 
     /// <summary>Marks selection by a containing control.</summary>
     Selected,
+
+    /// <summary>Marks the current pointer hit target.</summary>
+    Hover,
 }
 
 /// <summary>Portable accessibility roles emitted in retained semantic snapshots.</summary>

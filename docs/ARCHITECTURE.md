@@ -105,6 +105,8 @@ The first layout surface is bounded to the reference application: explicit fixed
 
 Core owns the text-measurement request/result contract, Unicode-safe single-line text state, selection, editing commands, composition/preedit state, and caret geometry requests. `Lucent.Renderer.Skia` is the only `0.1` implementation of shaping and measurement and owns HarfBuzz/Skia font fallback and painting; Windows owns native composition transport and candidate positioning. Measurement and painting use the same shaped glyph identities and positions.
 
+The Windows host resolves the system I-beam from current available/clipped text input hit regions. It owns and reuses cursor handles. Caret blinking follows Windows timing, resets on input and focus, and stops when the host is inactive/minimized or no text caret is present. A blink-only wake repaints the existing retained scene with a visibility flag; it does not repeat layout, input installation or UIA projection, and the stored IME/accessibility caret geometry remains available while the painted caret is hidden.
+
 The bounded `0.1` guarantee is scalar-safe storage, grapheme-boundary movement and deletion, deterministic ligature/combining-mark/fallback/emoji/mixed-direction shaping checks, and basic international composition. Text shaping itemizes common LTR plus Arabic/Hebrew RTL runs with deterministic neutral attachment, text-element fallback, and bounded RTL block reversal; it is not a full Unicode bidi or visual-caret implementation. Full bidirectional visual-caret editing, exhaustive font/platform matrices, IME certification, and mandatory real-language manual smokes are deferred.
 
 Core emits a retained semantic tree with stable identity, roles, names, values, enabled/focus/selection state, actions, bounds, hierarchy, and stale-generation rejection. Windows maps that tree to UIA fragments, patterns, and events. Accessibility never derives from pixels.
@@ -197,3 +199,25 @@ An application-owned `EditorSession` carries document text, caret, selection, un
 `VirtualizedList` accepts an optional application-owned `ViewportState`. This makes list scroll retention explicit when conditional content temporarily removes the list; the application remains responsible for collection-change policy.
 
 `VisualProperties.Border` and `FocusRing` project inset edge paints through the existing retained scene. Border widths are logical except `Border.Hairline`, which resolves to one backing pixel per selected edge. Neither decoration changes measured size or input/semantic bounds. Focus rings paint above the element's content while respecting ancestor clipping; authors activate them through `FocusVisible`, independently of `Selected` backgrounds.
+
+
+## Scrollbar presentation
+
+`ScrollViewport`, `VirtualizedList`, and `TextArea` use the same viewport offset for wheel, keyboard, accessibility, track paging, and thumb dragging. The initial default scrollbar is vertical. `ScrollBarVisibility.Auto` reserves a stable gutter and paints the bar when content overflows; `Always` also paints without overflow, and `Hidden` removes the gutter. Horizontal scrolling retains its existing input APIs; a horizontal visual scrollbar is future work.
+
+`ScrollBarProperties` exposes visibility, thickness, minimum thumb length, corner radius, and track/default/hover/pressed brushes. These are ordinary typed style values, so application or platform theme selection can replace the appearance without a second scroll controller or platform branches in Core. `.lui` resolves these keys in style declarations:
+
+```csharp
+style NotesScroll {
+    Visibility: ScrollBarVisibility.Auto;
+    Thickness: 12;
+    MinimumThumbLength: 24;
+    ThumbCornerRadius: 6;
+    TrackBrush: Brush.Solid(Color.Parse("#edeae4"));
+    ThumbBrush: Brush.Solid(Color.Parse("#77746e"));
+    HoverThumbBrush: Brush.Solid(Color.Parse("#59564f"));
+    PressedThumbBrush: Brush.Solid(Color.Parse("#403e38"));
+}
+```
+
+The default implementation is rendered by Lucent. Platform-specific styling is a theme choice, not a claim that an operating-system scrollbar widget is embedded. The viewport continues to expose the existing UI Automation Scroll pattern.

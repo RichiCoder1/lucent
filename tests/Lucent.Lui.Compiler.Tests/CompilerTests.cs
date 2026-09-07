@@ -35,6 +35,47 @@ style Panel { Padding: Insets.All(2); when Hover { Opacity: .5; } }
 """;
 
     [TestMethod]
+    public void ScrollbarStyleHooksBindWithoutStaticImports()
+    {
+        var source = """
+namespace Sample;
+using Lucent.Core;
+style Scrolling {
+    Visibility: ScrollBarVisibility.Auto;
+    Thickness: 10;
+    MinimumThumbLength: 28;
+    ThumbCornerRadius: 5;
+    TrackBrush: Brush.Solid(Color.Parse("#eeeeee"));
+    ThumbBrush: Brush.Solid(Color.Parse("#666666"));
+    HoverThumbBrush: Brush.Solid(Color.Parse("#444444"));
+    PressedThumbBrush: Brush.Solid(Color.Parse("#222222"));
+    CornerRadius: 6;
+}
+internal component Example() { <Text style={Scrolling}>Scrollbar theme</Text> }
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("scrollbar-styles", references: References()),
+            new LuiFreshnessIdentity(
+                "1",
+                "scrollbar",
+                new LuiDocumentIdentity("Scrollbar.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(result.Success, string.Join(" | ", result.Diagnostics.Select(d => d.Message)));
+        Assert(
+            result.Source!.Contains("global::Lucent.Core.ScrollBarProperties.ThumbCornerRadius")
+                && result.Source.Contains("global::Lucent.Core.VisualProperties.CornerRadius")
+                && result.Source.Contains(
+                    "global::Lucent.Core.ScrollBarProperties.PressedThumbBrush"
+                ),
+            "Scrollbar hooks and the control corner radius did not retain distinct typed owners."
+        );
+    }
+
+    [TestMethod]
     public void ParserAndFormatting()
     {
         var document = LuiParser.Parse(Complete);

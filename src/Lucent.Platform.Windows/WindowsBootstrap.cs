@@ -122,6 +122,9 @@ public static class WindowsBootstrap
             using var sessionContext = session?.EnterContext();
             performanceDiagnostics = new PerformanceDiagnostics();
             var scheduler = new WindowsFrameScheduler();
+            var caretBlink = new WindowsCaretBlink(WindowsCaretBlink.GetCaretBlinkTime());
+            RetainedScene? lastScene = null;
+            static long NowMilliseconds() => (long)Stopwatch.GetElapsedTime(0).TotalMilliseconds;
             input = new WindowsInputAdapter(composition, window, clipboard);
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
@@ -142,16 +145,25 @@ public static class WindowsBootstrap
                 var refreshSettings = false;
                 if (scheduler.ShouldWaitForEvent)
                 {
-                    if (!SDL.WaitEvent(out var @event))
+                    var timeout = scheduler.IsVisible
+                        ? caretBlink.WaitMilliseconds(NowMilliseconds())
+                        : -1;
+                    SDL.Event @event;
+                    var received =
+                        timeout < 0
+                            ? SDL.WaitEvent(out @event)
+                            : SDL.WaitEventTimeout(out @event, timeout);
+                    if (!received && timeout < 0)
                         throw new InvalidOperationException($"SDL_WaitEvent: {SDL.GetError()}");
-                    refreshSettings |= Observe(
-                        scheduler,
-                        input,
-                        workDispatcher,
-                        composition,
-                        session,
-                        @event
-                    );
+                    if (received)
+                        refreshSettings |= Observe(
+                            scheduler,
+                            input,
+                            workDispatcher,
+                            composition,
+                            session,
+                            @event
+                        );
                 }
                 while (SDL.PollEvent(out var @event))
                     refreshSettings |= Observe(
@@ -182,6 +194,13 @@ public static class WindowsBootstrap
                 refreshSettings |= settingsListener.TakePending();
                 if (refreshSettings)
                 {
+                    if (
+                        caretBlink.SetInterval(
+                            WindowsCaretBlink.GetCaretBlinkTime(),
+                            NowMilliseconds()
+                        )
+                    )
+                        scheduler.Request();
                     if (ApplySettings(composition, settings, theme))
                         scheduler.Request();
                     diagnostics = ReportDiagnostics(settings, diagnostics, Console.Error.WriteLine);
@@ -198,20 +217,45 @@ public static class WindowsBootstrap
                         initial: false
                     );
                 }
+                var caretOnly = scheduler.RequestCaretFrame(
+                    caretBlink,
+                    input.WindowFocused,
+                    input.CaretActivity,
+                    NowMilliseconds(),
+                    lastScene is not null
+                );
                 if (!scheduler.TryBegin(viewport))
                     continue;
                 uiaDispatcher.SetOwnerPhase("frame");
                 uiaDispatcher.RecordFrame();
                 var started = Stopwatch.GetTimestamp();
-                var scene = ProjectAndInstall(
-                    composition,
-                    new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
-                    sceneRenderer
-                );
-                uiaProvider.Refresh(scene);
-                input.RefreshTextInput();
+                var scene = caretOnly
+                    ? lastScene!
+                    : ProjectAndInstall(
+                        composition,
+                        new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
+                        sceneRenderer
+                    );
+                if (!caretOnly)
+                {
+                    lastScene = scene;
+                    uiaProvider.Refresh(scene);
+                    input.RefreshTextInput();
+                    var hasCaret = composition.Input.TryGetCaretGeometry(out var caretBounds);
+                    caretBlink.SetTarget(
+                        hasCaret ? composition.Input.FocusedElement : null,
+                        caretBounds,
+                        NowMilliseconds()
+                    );
+                    _ = cursor.Activate(
+                        input.PointerPosition is { } point
+                            && composition.Input.IsTextInputAt(point.X, point.Y)
+                    );
+                }
                 var projected = Stopwatch.GetTimestamp();
-                var phase = presenter.Present(scene, viewport, sceneRenderer);
+                caretBlink.BeforePresent(NowMilliseconds());
+                var phase = presenter.Present(scene, viewport, sceneRenderer, caretBlink.Visible);
+                caretBlink.Presented(NowMilliseconds());
                 var timing = FrameTiming.FromTimestamps(
                     started,
                     projected,

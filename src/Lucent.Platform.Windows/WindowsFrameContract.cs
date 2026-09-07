@@ -93,7 +93,7 @@ internal enum WindowsFrameEvent
     Closed,
 }
 
-/// <summary>Coalesces SDL window notifications into at most one frame; idle has no timer and therefore no frames.</summary>
+/// <summary>Coalesces SDL window notifications into at most one frame; idle has no frames except separately requested active caret presentation.</summary>
 internal sealed class WindowsFrameScheduler
 {
     private bool _requested = true;
@@ -103,6 +103,7 @@ internal sealed class WindowsFrameScheduler
 
     public bool IsOpen { get; private set; } = true;
     public bool IsFrameRequested => _requested;
+    internal bool IsVisible => !_minimized && !_awaitingRenderable;
     public bool ShouldWaitForEvent => !_requested || _awaitingRenderable;
     public int PresentedFrames { get; private set; }
     public FrameTiming LastTiming { get; private set; }
@@ -116,6 +117,22 @@ internal sealed class WindowsFrameScheduler
         _requested = true;
         _awaitingRenderable = false;
         RecordRequest(operation, timestamp);
+    }
+
+    internal bool RequestCaretFrame(
+        WindowsCaretBlink blink,
+        bool focused,
+        long activity,
+        long now,
+        bool hasScene
+    )
+    {
+        var changed = blink.UpdateActivity(focused && IsVisible, activity, now);
+        changed |= blink.Tick(now);
+        var reuseScene = changed && IsVisible && !_requested && hasScene;
+        if (changed)
+            Request();
+        return reuseScene;
     }
 
     public void Observe(WindowsFrameEvent @event, long? timestamp = null)

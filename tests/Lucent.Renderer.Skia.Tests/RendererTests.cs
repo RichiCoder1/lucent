@@ -433,6 +433,83 @@ public sealed class RendererTests
     }
 
     [TestMethod]
+    public void ShapesLongNoteReviewSampleWithoutRepeatedParagraphWork()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var paragraph =
+            "A quiet place to think. Keep the useful detail and leave room for the next idea.\n\nUnicode samples: café, e\u0301, 👩🏽‍💻, العربية, עברית.\n\tA tab-indented line.\n\n";
+        var text = string.Concat(Enumerable.Repeat(paragraph, 160));
+        text = text[..(char.IsHighSurrogate(text[19_999]) ? 19_999 : 20_000)];
+        var request = new TextMeasureRequest(
+            text,
+            "Segoe UI",
+            15,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            InlineConstraint: new LayoutConstraint(500),
+            BlockConstraint: LayoutConstraint.Unbounded,
+            Wrap: TextWrap.WordWithGraphemeFallback
+        );
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var shaped = renderer.Shape(request);
+        timer.Stop();
+
+        Assert(
+            shaped.Lines.Count > 100
+                && shaped.Lines.All(line =>
+                    line.Utf16Start >= 0 && line.Utf16Start + line.Utf16Length <= text.Length
+                )
+                && !shaped.DidOverflow,
+            "The synthetic Long note did not preserve its complete wrapped geometry."
+        );
+        Assert(
+            renderer.ParagraphShapeCount <= 10,
+            "Repeated review paragraphs performed redundant shaping work."
+        );
+        Console.WriteLine($"Review long note shaping: {timer.Elapsed.TotalMilliseconds:F1} ms.");
+    }
+
+    [TestMethod]
+    public void ShapesUniqueLongNoteWithCompleteGeometry()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var text = string.Concat(
+            Enumerable
+                .Range(0, 320)
+                .Select(index =>
+                    $"Line {index:D4} keeps distinct words and numbers {index * 17:D6} so no paragraph payload repeats during this measurement.\n"
+                )
+        )[..20_000];
+        var request = new TextMeasureRequest(
+            text,
+            "Segoe UI",
+            15,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            InlineConstraint: new LayoutConstraint(500),
+            BlockConstraint: LayoutConstraint.Unbounded,
+            Wrap: TextWrap.WordWithGraphemeFallback
+        );
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        var shaped = renderer.Shape(request);
+        timer.Stop();
+
+        Assert(
+            shaped.Lines.Count > 250
+                && shaped.Lines[^1].Utf16Start + shaped.Lines[^1].Utf16Length == text.Length
+                && shaped.Lines.All(line =>
+                    line.Utf16Start >= 0 && line.Utf16Start + line.Utf16Length <= text.Length
+                ),
+            "The unique Long note did not preserve its complete wrapped geometry."
+        );
+        Console.WriteLine($"Unique long note shaping: {timer.Elapsed.TotalMilliseconds:F1} ms.");
+    }
+
+    [TestMethod]
     public void LongWrappedParagraphReusesTextBlobsAcrossClippedPaints()
     {
         using var renderer = new SkiaSceneRenderer();

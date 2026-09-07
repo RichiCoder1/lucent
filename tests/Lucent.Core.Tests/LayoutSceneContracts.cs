@@ -462,6 +462,166 @@ public sealed class LayoutSceneContracts
     }
 
     [TestMethod]
+    public void LeafTextAlignmentUsesOwnAxisAndPreservesEditingGeometry()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "leaf-text-alignment");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("leaf-text-alignment"));
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Axis(LayoutAxis.Column).CrossAlignment(LayoutAlignment.Start)
+        );
+
+        var centeredRow = composition.Child(composition.Root, "centered-row");
+        centeredRow.Present(
+            theme,
+            author: Style
+                .Empty.Width(80)
+                .Height(30)
+                .Axis(LayoutAxis.Row)
+                .MainAlignment(LayoutAlignment.Center)
+                .CrossAlignment(LayoutAlignment.Center)
+                .Set(ProjectionProperties.Text, "A")
+        );
+        var centeredColumn = composition.Child(composition.Root, "centered-column");
+        centeredColumn.Present(
+            theme,
+            author: Style
+                .Empty.Width(80)
+                .Height(50)
+                .Axis(LayoutAxis.Column)
+                .MainAlignment(LayoutAlignment.Center)
+                .CrossAlignment(LayoutAlignment.Center)
+                .Set(ProjectionProperties.Text, "Long")
+        );
+        var endedRow = composition.Child(composition.Root, "ended-row");
+        endedRow.Present(
+            theme,
+            author: Style
+                .Empty.Width(70)
+                .Height(24)
+                .Axis(LayoutAxis.Row)
+                .MainAlignment(LayoutAlignment.End)
+                .CrossAlignment(LayoutAlignment.End)
+                .Set(ProjectionProperties.Text, "ABCD")
+        );
+        var editable = composition.Child(composition.Root, "editable");
+        editable.Present(
+            theme,
+            author: Style
+                .Empty.Width(80)
+                .Height(30)
+                .Axis(LayoutAxis.Row)
+                .MainAlignment(LayoutAlignment.Center)
+                .CrossAlignment(LayoutAlignment.Center)
+                .Set(ProjectionProperties.Text, "abcd")
+                .Set(ProjectionProperties.TextSelectionStart, 1)
+                .Set(ProjectionProperties.TextSelectionEnd, 3)
+                .Set(ProjectionProperties.TextCaret, 2)
+        );
+        var container = composition.Child(composition.Root, "container");
+        container.Present(
+            theme,
+            author: Style
+                .Empty.Width(80)
+                .Height(30)
+                .Axis(LayoutAxis.Row)
+                .MainAlignment(LayoutAlignment.Center)
+                .CrossAlignment(LayoutAlignment.Center)
+                .Set(ProjectionProperties.Text, "container")
+        );
+        var containerChild = composition.Child(container, "container-child");
+        containerChild.Present(theme, author: Style.Empty.Width(10).Height(10));
+
+        var scene = SceneLayout.Project(composition, new(120, 200, 1), new ProbeShaper());
+        TextSceneNode TextFor(long elementId) =>
+            Flatten(scene.Nodes)
+                .OfType<TextSceneNode>()
+                .Single(node => node.Identity.Element.ElementId == elementId);
+        LayoutRect BoundsFor(long elementId) =>
+            scene.Boxes.Single(box => box.Identity.ElementId == elementId).Bounds;
+        PaintSceneNode PaintFor(long elementId, SceneNodeKind kind) =>
+            Flatten(scene.Nodes)
+                .OfType<PaintSceneNode>()
+                .Single(node =>
+                    node.Identity.Element.ElementId == elementId && node.Identity.Kind == kind
+                );
+
+        var centeredRowBounds = BoundsFor(centeredRow.Id);
+        var centeredColumnBounds = BoundsFor(centeredColumn.Id);
+        var endedRowBounds = BoundsFor(endedRow.Id);
+        var editableBounds = BoundsFor(editable.Id);
+        var containerBounds = BoundsFor(container.Id);
+        var centeredRowText = TextFor(centeredRow.Id);
+        var centeredColumnText = TextFor(centeredColumn.Id);
+        var endedRowText = TextFor(endedRow.Id);
+        var editableText = TextFor(editable.Id);
+        var containerText = TextFor(container.Id);
+        var selection = PaintFor(editable.Id, SceneNodeKind.Selection);
+        var caret = PaintFor(editable.Id, SceneNodeKind.Caret);
+
+        Assert(
+            MathF.Abs(centeredRowText.Bounds.X - (centeredRowBounds.X + 36.5f)) < .001f
+                && MathF.Abs(centeredRowText.Bounds.Y - (centeredRowBounds.Y + 8)) < .001f
+                && MathF.Abs(centeredColumnText.Bounds.X - (centeredColumnBounds.X + 26)) < .001f
+                && MathF.Abs(centeredColumnText.Bounds.Y - (centeredColumnBounds.Y + 18)) < .001f
+                && MathF.Abs(endedRowText.Bounds.X - (endedRowBounds.X + 42)) < .001f
+                && MathF.Abs(endedRowText.Bounds.Y - (endedRowBounds.Y + 10)) < .001f,
+            "Leaf text did not honor main/cross alignment for row and column axes."
+        );
+        Assert(
+            MathF.Abs(editableText.Bounds.X - (editableBounds.X + 26)) < .001f
+                && MathF.Abs(editableText.Bounds.Y - (editableBounds.Y + 8)) < .001f
+                && MathF.Abs(selection.Bounds.X - (editableBounds.X + 33)) < .001f
+                && selection.Bounds.Y == editableBounds.Y
+                && selection.Bounds.Height == editableBounds.Height
+                && MathF.Abs(caret.Bounds.X - (editableBounds.X + 40)) < .001f
+                && caret.Bounds.Y == editableBounds.Y
+                && caret.Bounds.Height == editableBounds.Height,
+            "Leaf alignment shifted editable text without preserving no-wrap selection/caret geometry."
+        );
+        Assert(
+            containerText.Bounds.X == containerBounds.X
+                && containerText.Bounds.Y == containerBounds.Y,
+            "A container's own text was aligned as though it were a leaf."
+        );
+
+        var wrappingGraph = new ReactiveGraph();
+        using var wrapping = new Composition(wrappingGraph, "wrapped-leaf-alignment");
+        var wrappingTheme = new ThemeContext(
+            wrapping.Root.Scope,
+            new Theme("wrapped-leaf-alignment")
+        );
+        wrapping.Root.Present(wrappingTheme);
+        var wrapped = wrapping.Child(wrapping.Root, "wrapped");
+        wrapped.Present(
+            wrappingTheme,
+            author: Style
+                .Empty.Width(20)
+                .Height(50)
+                .Axis(LayoutAxis.Column)
+                .MainAlignment(LayoutAlignment.End)
+                .CrossAlignment(LayoutAlignment.End)
+                .TextWrap(TextWrap.WordWithGraphemeFallback)
+                .MaxLines(3)
+                .Set(ProjectionProperties.Text, new string('x', 25))
+        );
+        var wrappedScene = SceneLayout.Project(wrapping, new(20, 60, 1), new WrappingProbeShaper());
+        var wrappedText = Flatten(wrappedScene.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == wrapped.Id);
+        var wrappedBox = wrappedScene.Boxes.Single(box => box.Identity.ElementId == wrapped.Id);
+        var wrappedParagraph = wrappedBox.Text;
+        Assert(
+            wrappedParagraph is not null
+                && wrappedParagraph.Lines.Count == 2
+                && wrappedParagraph.InlineConstraint.Limit == 20
+                && MathF.Abs(wrappedText.Bounds.Y - (wrappedBox.Bounds.Y + 30)) < .001f,
+            "Wrapped leaf alignment changed the shaping constraint or vertical end offset."
+        );
+    }
+
+    [TestMethod]
     public void OpacityGroups()
     {
         foreach (
@@ -1161,7 +1321,7 @@ public sealed class LayoutSceneContracts
             scene.Input.Single(item => item.Identity.ElementId == viewport.Id).Identity
         );
         Assert(
-            initialScroll is { Maximum.Y: 299_980, Viewport.Width: 116, Viewport.Height: 20 }
+            initialScroll is { Maximum.Y: 299_980, Viewport.Width: 104, Viewport.Height: 20 }
                 && list.SourceCount == 10_000
                 && list.Items.Count == 3
                 && scene.Boxes.Single(box => box.Identity.ElementId == list.Region.Id).Bounds.Height

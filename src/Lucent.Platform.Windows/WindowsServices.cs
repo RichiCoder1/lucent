@@ -165,40 +165,72 @@ internal readonly record struct ClipboardReadResult(bool Succeeded, string? Text
 
 internal readonly record struct ClipboardWriteResult(bool Succeeded, string? Error);
 
-/// <summary>Host-owned default cursor; its SDL resource is destroyed before SDL shutdown.</summary>
+/// <summary>Host-owned arrow and I-beam cursors, released before SDL shutdown.</summary>
 internal sealed class WindowsCursor(
-    Func<nint> create,
+    Func<bool, nint> create,
     Func<nint, bool> set,
     Action<nint> destroy,
     Func<string> error
 ) : IDisposable
 {
-    private nint _cursor;
+    private readonly Dictionary<bool, nint> _cursors = [];
+    private bool? _active;
+    private bool _disposed;
+
+    internal WindowsCursor(
+        Func<nint> create,
+        Func<nint, bool> set,
+        Action<nint> destroy,
+        Func<string> error
+    )
+        : this(_ => create(), set, destroy, error) { }
 
     internal WindowsCursor()
         : this(
-            () => SDL.CreateSystemCursor(SDL.SystemCursor.Default),
+            text => SDL.CreateSystemCursor(text ? SDL.SystemCursor.Text : SDL.SystemCursor.Default),
             SDL.SetCursor,
             SDL.DestroyCursor,
             SDL.GetError
         ) { }
 
-    internal bool Activate()
+    internal bool Activate(bool text = false)
     {
-        if (_cursor == 0)
-            _cursor = create();
-        if (_cursor == 0)
-            throw new InvalidOperationException("SDL_CreateSystemCursor: " + Error());
-        if (!set(_cursor))
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_active == text)
+            return true;
+        if (!_cursors.TryGetValue(text, out var cursor))
+        {
+            cursor = create(text);
+            if (cursor == 0)
+                throw new InvalidOperationException("SDL_CreateSystemCursor: " + Error());
+            _cursors.Add(text, cursor);
+        }
+        if (!set(cursor))
             throw new InvalidOperationException("SDL_SetCursor: " + Error());
+        _active = text;
         return true;
     }
 
     public void Dispose()
     {
-        var cursor = Interlocked.Exchange(ref _cursor, 0);
-        if (cursor != 0)
-            destroy(cursor);
+        if (_disposed)
+            return;
+        _disposed = true;
+        var handles = _cursors.Values.Distinct().ToArray();
+        _cursors.Clear();
+        _active = null;
+        List<Exception>? errors = null;
+        foreach (var cursor in handles)
+            try
+            {
+                destroy(cursor);
+            }
+            catch (Exception failure)
+            {
+                (errors ??= []).Add(failure);
+            }
+        if (errors is not null)
+            throw new AggregateException("Windows cursor cleanup failed.", errors);
     }
 
     private string Error() => string.IsNullOrWhiteSpace(error()) ? "unknown error" : error();

@@ -410,6 +410,60 @@ public sealed class ControlsContracts
     }
 
     [TestMethod]
+    public void PointerMovePublishesHoverVariantToSelectable()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "hover-variant");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(
+            composition.Root,
+            theme,
+            "root",
+            Style
+                .Empty.Set(LayoutProperties.Width, 100f)
+                .Set(LayoutProperties.Height, 80f)
+                .Set(LayoutProperties.Clip, true)
+        );
+        var baseBrush = Brush.Solid(Color.Parse("#ffffff"));
+        var hoverBrush = Brush.Solid(Color.Parse("#eeeeee"));
+        var row = composition.Child(composition.Root, "row");
+        Controls.Selectable(
+            row,
+            theme,
+            "Row",
+            style: Style
+                .Empty.Set(LayoutProperties.Width, 100f)
+                .Set(LayoutProperties.Height, 40f)
+                .Set(VisualProperties.Background, baseBrush)
+                .When(VariantState.Hover, Style.Empty.Set(VisualProperties.Background, hoverBrush))
+        );
+        graph.Drain();
+
+        var router = composition.Input;
+        var scene = SceneLayout.Project(composition, new(100, 80, 1), new EmptyShaper());
+        Assert(router.SetScene(scene), "Hover scene was rejected.");
+        var box = scene.Boxes.Single(candidate => candidate.Identity.ElementId == row.Id).Bounds;
+        Assert(
+            row.Resolve(VisualProperties.Background).Value.Equals(baseBrush),
+            "Selectable did not start from its authored base background."
+        );
+
+        router.DispatchPointer(new(PointerCommandKind.Move, 1, box.X + 1, box.Y + 1));
+
+        Assert(
+            row.Resolve(VisualProperties.Background).Value.Equals(hoverBrush),
+            "Pointer move did not activate the authored hover style."
+        );
+
+        router.DispatchPointer(new(PointerCommandKind.Move, 1, 1, 60));
+
+        Assert(
+            row.Resolve(VisualProperties.Background).Value.Equals(baseBrush),
+            "Moving to a noninteractive sibling did not clear the prior hover style."
+        );
+    }
+
+    [TestMethod]
     public void CaptureContinuityAcrossReprojection()
     {
         var graph = new ReactiveGraph();
@@ -900,8 +954,8 @@ public sealed class ControlsContracts
         graph.Drain();
         Assert(
             !router.SetScene(SceneLayout.Project(composition, new(100, 20, 1), new EmptyShaper()))
-                && state.Offset == default
-                && router.DispatchKey(new(KeyCommandKind.Down, Key.Down)).Rejection
+                && state.Offset == new ScrollOffset(12, 0)
+                && router.DispatchPointer(new(PointerCommandKind.Move, 30, 0, 0)).Rejection
                     == InputRejection.NoScene,
             "Content shrink accepted an immediately stale scroll scene."
         );
@@ -998,21 +1052,21 @@ public sealed class ControlsContracts
             _ = router.DispatchKey(new(KeyCommandKind.Down, Key.Down));
         }
         Assert(
-            state.Offset == new ScrollOffset(80, 80),
+            state.Offset == new ScrollOffset(92, 80),
             "Burst Right/Down exceeded the installed content extent before reprojection."
         );
         _ = router.DispatchKey(new(KeyCommandKind.Down, Key.Home));
         Assert(state.Offset == default, "Home did not return both axes to start.");
         _ = router.DispatchKey(new(KeyCommandKind.Down, Key.End));
         Assert(
-            state.Offset == new ScrollOffset(80, 80),
+            state.Offset == new ScrollOffset(92, 80),
             "End did not use the installed content extent."
         );
         theme.Theme = theme.Theme.Set(contentWidth, 20f).Set(contentHeight, 20f);
         graph.Drain();
         Assert(
             !router.SetScene(SceneLayout.Project(composition, new(20, 20, 1), new EmptyShaper()))
-                && state.Offset == default,
+                && state.Offset == new ScrollOffset(12, 0),
             "Content shrink accepted an out-of-range installed offset."
         );
         graph.Drain();

@@ -29,10 +29,23 @@ internal sealed class WindowsInputAdapter : IDisposable
         _textInput = textInput ?? TextInputTransport.Sdl;
     }
 
+    internal bool WindowFocused => _windowFocused;
+    internal (float X, float Y)? PointerPosition { get; private set; }
+    internal long CaretActivity { get; private set; }
+
     internal bool Dispatch(SDL.Event @event)
     {
         if (_disposed)
             return false;
+        if (
+            (SDL.EventType)@event.Type
+            is SDL.EventType.KeyDown
+                or SDL.EventType.TextInput
+                or SDL.EventType.TextEditing
+                or SDL.EventType.MouseButtonDown
+                or SDL.EventType.WindowFocusGained
+        )
+            CaretActivity++;
         switch ((SDL.EventType)@event.Type)
         {
             case SDL.EventType.MouseMotion:
@@ -67,11 +80,20 @@ internal sealed class WindowsInputAdapter : IDisposable
                 );
             case SDL.EventType.WindowFocusLost:
                 _windowFocused = false;
+                _repaintRequested = true;
+                PointerPosition = null;
+                _router.ClearPointerHover();
                 CleanupInput();
                 return false;
             case SDL.EventType.WindowFocusGained:
                 _windowFocused = true;
+                _repaintRequested = true;
                 SyncTextInput();
+                return false;
+            case SDL.EventType.WindowMouseLeave:
+                PointerPosition = null;
+                _router.ClearPointerHover();
+                _repaintRequested = true;
                 return false;
             default:
                 return false;
@@ -160,6 +182,7 @@ internal sealed class WindowsInputAdapter : IDisposable
         if (source > int.MaxValue || !float.IsFinite(x) || !float.IsFinite(y))
             return false;
         var pointer = (int)source;
+        PointerPosition = (x, y);
         try
         {
             _ = _router.DispatchPointer(new(kind, pointer, x, y, button));

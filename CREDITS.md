@@ -93,3 +93,7 @@ This ledger carries no copied source. CsWin32 output is generated from Microsoft
 ## Optional reactive event integration
 
 [R3 1.3.1](https://github.com/Cysharp/R3/tree/1.3.1) (Cysharp, MIT) supplies debounce/event-stream operators for the optional Lucent.Reactive.R3 adapter. Its explicit TimeProvider support enables deterministic timing tests. R3 does not replace Lucent's dependency-tracked retained graph, enter portable Core's dependencies, or own accepted application writes. NativeAOT compatibility of the selected adapter path is verified by its consumer proof rather than assumed for every R3 operator. The adapter ships the upstream license as `notices/R3-LICENSE.txt`.
+
+## Desktop interaction references
+
+Consulted September 6, 2026: [Avalonia TextPresenter](https://github.com/AvaloniaUI/avalonia-docs/blob/main/api/avalonia/controls/presenters/textpresenter.mdx) (MIT) for explicit caret visibility and configurable blink intervals, and [Flutter Scrollbar](https://api.flutter.dev/flutter/material/Scrollbar-class.html) (BSD-3-Clause) for shared scroll position, thumb dragging, track paging, and replaceable hover/drag styling. These are behavioral/architectural references; no source is copied and neither framework is a dependency. Windows caret timing uses [GetCaretBlinkTime](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-getcaretblinktime); existing SDL supplies system cursors and timed event waits on the owner thread.

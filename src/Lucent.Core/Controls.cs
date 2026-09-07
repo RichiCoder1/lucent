@@ -32,6 +32,22 @@ public static class ControlThemes
         "control-disabled",
         Color.Parse("#94a3b8")
     );
+    internal static readonly Token<Brush> ScrollTrack = new(
+        "control-scrollbar-track",
+        Color.Parse("#00000040")
+    );
+    internal static readonly Token<Brush> ScrollThumb = new(
+        "control-scrollbar-thumb",
+        Color.Parse("#64748b")
+    );
+    internal static readonly Token<Brush> ScrollThumbHover = new(
+        "control-scrollbar-thumb-hover",
+        Color.Parse("#475569")
+    );
+    internal static readonly Token<Brush> ScrollThumbPressed = new(
+        "control-scrollbar-thumb-pressed",
+        Color.Parse("#334155")
+    );
 
     /// <summary>Gets a light palette for controls.</summary>
     public static Theme Light { get; } =
@@ -95,7 +111,11 @@ public static class ControlThemes
             .Set(Selected, (Brush)selected)
             .Set(Focus, (Brush)focus)
             .Set(FocusForeground, focusForeground)
-            .Set(Disabled, (Brush)disabled);
+            .Set(Disabled, (Brush)disabled)
+            .Set(ScrollTrack, (Brush)Color.FromArgb(0x40, foreground.R, foreground.G, foreground.B))
+            .Set(ScrollThumb, (Brush)foreground)
+            .Set(ScrollThumbHover, (Brush)accent)
+            .Set(ScrollThumbPressed, (Brush)pressed);
 }
 
 /// <summary>Scope-owned mutable state for a single control recipe.</summary>
@@ -263,6 +283,15 @@ internal static class Controls
             VariantState.Disabled,
             Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
         );
+    private static readonly Style ScrollBarStyle = Style
+        .Empty.Set(ScrollBarProperties.Visibility, ScrollBarVisibility.Auto)
+        .Set(ScrollBarProperties.Thickness, 12f)
+        .Set(ScrollBarProperties.MinimumThumbLength, 24f)
+        .Set(ScrollBarProperties.TrackBrush, ControlThemes.ScrollTrack)
+        .Set(ScrollBarProperties.ThumbBrush, ControlThemes.ScrollThumb)
+        .Set(ScrollBarProperties.HoverThumbBrush, ControlThemes.ScrollThumbHover)
+        .Set(ScrollBarProperties.PressedThumbBrush, ControlThemes.ScrollThumbPressed)
+        .Set(ScrollBarProperties.ThumbCornerRadius, 6f);
     private static readonly Style SelectableStyle = RowStyle
         .Set(LayoutProperties.Clip, true)
         .When(
@@ -363,6 +392,7 @@ internal static class Controls
         offset.Validate();
         var initialOffset = viewport?.Offset ?? offset;
         var component = PanelStyle
+            .With(ScrollBarStyle)
             .Set(LayoutProperties.Clip, true)
             .Set(LayoutProperties.Scroll, initialOffset);
         Preflight(element, theme, component, style, new ScrollViewportBehavior(name, null!));
@@ -526,6 +556,7 @@ internal static class Controls
             );
         var initialText = editor.Text;
         var component = TextFieldStyle
+            .With(ScrollBarStyle)
             .Set(ProjectionProperties.Text, initialText)
             .Set(ProjectionProperties.TextMeasure, name)
             .Set(ProjectionProperties.TextMultiline, true)

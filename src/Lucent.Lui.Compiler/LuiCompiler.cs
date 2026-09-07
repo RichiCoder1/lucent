@@ -20,6 +20,7 @@ public static class LuiCompiler
         "Lucent.Core.VisualProperties",
         "Lucent.Core.TypographyProperties",
         "Lucent.Core.InputProperties",
+        "Lucent.Core.ScrollBarProperties",
     ];
     private static readonly SymbolDisplayFormat FullyQualifiedNullableFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(

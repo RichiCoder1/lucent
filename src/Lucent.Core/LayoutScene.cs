@@ -1286,6 +1286,12 @@ public enum SceneNodeKind
     /// <summary>Paints a text caret.</summary>
     Caret,
 
+    /// <summary>Paints a vertical scrollbar track.</summary>
+    ScrollBarTrack,
+
+    /// <summary>Paints a vertical scrollbar thumb.</summary>
+    ScrollBarThumb,
+
     /// <summary>Clips a child scene group.</summary>
     Clip,
 
@@ -1467,7 +1473,8 @@ public sealed class RetainedScene
         IReadOnlyList<SceneNode> nodes,
         IReadOnlyList<RetainedInputElement> input,
         long inputProjectionRevision = 0,
-        IReadOnlyCollection<long>? collapsedElementIds = null
+        IReadOnlyCollection<long>? collapsedElementIds = null,
+        IReadOnlyList<RetainedScrollBar>? scrollBars = null
     )
     {
         Generation = generation;
@@ -1475,6 +1482,7 @@ public sealed class RetainedScene
         Boxes = Array.AsReadOnly(boxes.ToArray());
         Nodes = Array.AsReadOnly(nodes.ToArray());
         Input = Array.AsReadOnly(input.ToArray());
+        ScrollBars = Array.AsReadOnly((scrollBars ?? []).ToArray());
         InputProjectionRevision = inputProjectionRevision;
         _collapsedElementIds = collapsedElementIds is null ? [] : [.. collapsedElementIds];
         InputSignature = Signature(Input);
@@ -1494,6 +1502,9 @@ public sealed class RetainedScene
 
     /// <summary>Retained hit/focus metadata matched to this scene generation.</summary>
     public IReadOnlyList<RetainedInputElement> Input { get; }
+
+    /// <summary>Gets the vertical scrollbar affordances projected for overflowing viewports.</summary>
+    public IReadOnlyList<RetainedScrollBar> ScrollBars { get; }
 
     /// <summary>Gets the composition projection revision captured with this scene.</summary>
     internal long InputProjectionRevision { get; }

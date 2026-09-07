@@ -14,17 +14,22 @@ public sealed class InputRouter
     private readonly List<Registration<Action<PointerCaptureLoss>>> _captureLoss = [];
     private readonly Dictionary<long, Focusable> _focusable = [];
     private readonly Dictionary<long, Scrollable> _scrollable = [];
+    private readonly Dictionary<long, RetainedScrollBar> _scrollBars = [];
     private readonly Dictionary<long, TextFieldState> _textFields = [];
     private readonly Dictionary<FocusTarget, FocusTargetRegistration> _focusTargets = [];
     private readonly Dictionary<TextClipboardRequest, ClipboardTicket> _clipboardTickets = [];
     private readonly Dictionary<int, Capture> _captures = [];
+    private readonly Dictionary<int, ScrollBarDrag> _scrollBarDrags = [];
     private RetainedScene? _scene;
     private Dictionary<long, RetainedInputElement> _input = [];
     private Dictionary<long, bool> _available = [];
     private Dictionary<long, ElementIdentity[]> _paths = [];
     private Dictionary<long, InputClip[]> _effectiveClips = [];
     private RetainedInputElement[] _hitOrder = [];
+    private RetainedScrollBar[] _scrollBarHitOrder = [];
     private FocusState? _focused;
+    private ElementIdentity? _hovered;
+    private ElementIdentity? _hoveredScrollBar;
     private PendingFocus? _pendingFocus;
     private int _publicDepth;
     private bool _focusing;
@@ -95,6 +100,8 @@ public sealed class InputRouter
                 var rejectedErrors = new List<Exception>();
                 if (_scene is not null)
                     ReleaseAll(PointerCaptureLossReason.SceneChanged, rejectedErrors);
+                ClearHover(rejectedErrors);
+                UpdateScrollBarHover(null);
                 if (
                     _focused is { } focused
                     && (
@@ -118,11 +125,25 @@ public sealed class InputRouter
                 if (_input.ContainsKey(scrollable.Key))
                     scrollable.Value.InstalledOffset = scrollable.Value.State.Offset;
             foreach (var capture in _captures.ToArray())
-                if (SameStructuralPath(capture.Value.Owner, priorInput))
+                if (
+                    _scrollBarDrags.TryGetValue(capture.Key, out var drag)
+                    && !_scrollBars.ContainsKey(drag.Viewport.ElementId)
+                )
+                    Release(capture.Key, PointerCaptureLossReason.SceneChanged, errors);
+                else if (SameStructuralPath(capture.Value.Owner, priorInput))
                     _captures[capture.Key] = capture.Value with { Generation = scene.Generation };
                 else
                     Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
+            if (
+                _hoveredScrollBar is { } hoveredScrollBar
+                && !_scrollBars.ContainsKey(hoveredScrollBar.ElementId)
+            )
+                _hoveredScrollBar = null;
             SyncAvailability(errors);
+            if (_hovered is { } hovered && !Eligible(hovered))
+                ClearHover(errors);
+            if (_hoveredScrollBar is { } hoveredBar && !Eligible(hoveredBar))
+                UpdateScrollBarHover(null);
             if (
                 _focused is { } focus
                 && (
@@ -168,6 +189,22 @@ public sealed class InputRouter
                 return Reject(rejection, "Pointer/" + command.Kind, errors);
             if (command.Kind == PointerCommandKind.Down)
                 SetModality(InputModality.Pointer, errors);
+            var scrollbar = HitScrollBar(command.X, command.Y);
+            var scrollbarCapture = _scrollBarDrags.ContainsKey(command.PointerId);
+            var hadCapture = _captures.ContainsKey(command.PointerId);
+            RetainedScrollBar? capturedScrollBar = null;
+            if (scrollbarCapture)
+            {
+                var drag = _scrollBarDrags[command.PointerId];
+                if (_scrollBars.TryGetValue(drag.Viewport.ElementId, out var retained))
+                    capturedScrollBar = retained;
+                else
+                {
+                    Release(command.PointerId, PointerCaptureLossReason.SceneChanged, errors);
+                    scrollbarCapture = false;
+                    hadCapture = _captures.ContainsKey(command.PointerId);
+                }
+            }
             ElementIdentity? target = null;
             if (_captures.TryGetValue(command.PointerId, out var capture))
             {
@@ -176,9 +213,34 @@ public sealed class InputRouter
                 else
                     Release(command.PointerId, PointerCaptureLossReason.SceneChanged, errors);
             }
-            target ??= Hit(command.X, command.Y);
+            target ??=
+                scrollbarCapture ? _scrollBarDrags[command.PointerId].Viewport
+                : scrollbar is { } bar && !hadCapture ? bar.Viewport
+                : Hit(command.X, command.Y);
+            UpdateHover(
+                command.Kind == PointerCommandKind.Cancel ? null
+                    : scrollbar is { } hoveredBar ? hoveredBar.Viewport
+                    : Hit(command.X, command.Y),
+                errors
+            );
+            UpdateScrollBarHover(
+                command.Kind == PointerCommandKind.Cancel ? null : scrollbar?.Viewport
+            );
             if (target is null)
                 return Reject(InputRejection.NoTarget, "Pointer/" + command.Kind, errors);
+            if (scrollbarCapture || (!hadCapture && scrollbar is not null))
+            {
+                var barForRoute = scrollbarCapture
+                    ? capturedScrollBar.GetValueOrDefault()
+                    : scrollbar.GetValueOrDefault();
+                var scrollbarResult = RouteScrollbarPointer(command, barForRoute, errors);
+                if (command.Kind == PointerCommandKind.Up)
+                    Release(command.PointerId, PointerCaptureLossReason.Released, errors);
+                if (command.Kind == PointerCommandKind.Cancel)
+                    Release(command.PointerId, PointerCaptureLossReason.Cancelled, errors);
+                Throw(errors);
+                return scrollbarResult;
+            }
             var result = RoutePointer(command, target.Value, errors);
             if (command.Kind == PointerCommandKind.Up)
                 Release(command.PointerId, PointerCaptureLossReason.Released, errors);
@@ -393,6 +455,30 @@ public sealed class InputRouter
             )
                 return false;
             return ticket.State.CompleteClipboard(request, succeeded, text);
+        }
+        finally
+        {
+            Exit();
+        }
+    }
+
+    /// <summary>Reports whether an available text editor owns the hit point in the current installed scene.</summary>
+    public bool IsTextInputAt(float x, float y)
+    {
+        Enter();
+        try
+        {
+            if (
+                !float.IsFinite(x)
+                || !float.IsFinite(y)
+                || _scene is null
+                || !ValidateScene(_scene)
+            )
+                return false;
+            if (HitScrollBar(x, y) is not null)
+                return false;
+            return Hit(x, y) is { } hit
+                && Path(hit).Any(item => _textFields.ContainsKey(item.ElementId));
         }
         finally
         {
@@ -684,6 +770,10 @@ public sealed class InputRouter
         });
     }
 
+    internal bool IsScrollable(ElementIdentity identity) =>
+        identity.CompositionEpoch == _composition.Epoch
+        && _scrollable.ContainsKey(identity.ElementId);
+
     internal void RegisterTextField(long elementId, ReactiveScope scope, TextFieldState state)
     {
         if (_textFields.ContainsKey(elementId))
@@ -747,14 +837,22 @@ public sealed class InputRouter
     internal void RemoveElement(Element element, PointerCaptureLossReason reason)
     {
         var errors = new List<Exception>();
+        var removed = new ElementIdentity(_composition.Epoch, element.Id);
+        if (_hovered is { } hovered && (IsWithin(hovered, removed) || IsWithin(removed, hovered)))
+            ClearHover(errors);
+        if (
+            _hoveredScrollBar is { } hoveredScrollBar
+            && (IsWithin(hoveredScrollBar, removed) || IsWithin(removed, hoveredScrollBar))
+        )
+            UpdateScrollBarHover(null);
         foreach (
             var pointer in _captures
-                .Where(pair => pair.Value.Owner.ElementId == element.Id)
+                .Where(pair => IsWithin(pair.Value.Owner, removed))
                 .Select(pair => pair.Key)
                 .ToArray()
         )
             Release(pointer, reason, errors);
-        if (_focused is { } focus && focus.Identity.ElementId == element.Id)
+        if (_focused is { } focus && IsWithin(focus.Identity, removed))
             RequestFocus(null, FocusChangeReason.Disposed, errors);
         Throw(errors);
     }
@@ -854,6 +952,8 @@ public sealed class InputRouter
             return;
         var errors = new List<Exception>();
         ReleaseAll(PointerCaptureLossReason.Disposed, errors);
+        ClearHover(errors);
+        UpdateScrollBarHover(null);
         RequestFocus(null, FocusChangeReason.Disposed, errors);
         foreach (var focusable in _focusable.Values.ToArray())
         {
@@ -875,6 +975,8 @@ public sealed class InputRouter
         _captureLoss.Clear();
         _focusable.Clear();
         _scrollable.Clear();
+        _scrollBars.Clear();
+        _scrollBarDrags.Clear();
         _textFields.Clear();
         _focusTargets.Clear();
         _clipboardTickets.Clear();
@@ -912,6 +1014,88 @@ public sealed class InputRouter
         }
         SetLast(
             "Pointer/" + command.Kind,
+            InputDispatchStatus.Delivered,
+            InputRejection.None,
+            target,
+            route,
+            handled
+        );
+        return new(InputDispatchStatus.Delivered, InputRejection.None, target, route, handled);
+    }
+
+    private InputDispatchResult RouteScrollbarPointer(
+        PointerCommand command,
+        RetainedScrollBar scrollBar,
+        List<Exception> errors
+    )
+    {
+        var target = scrollBar.Viewport;
+        var route = Path(target).Reverse().ToArray();
+        var handled = false;
+        if (_scrollable.TryGetValue(target.ElementId, out var scrollable))
+        {
+            switch (command.Kind)
+            {
+                case PointerCommandKind.Down when command.Button == PointerButton.Primary:
+                    if (Contains(scrollBar.Thumb, command.X, command.Y))
+                    {
+                        if (
+                            scrollBar.Maximum.Y > 0
+                            && scrollBar.Track.Height > scrollBar.Thumb.Height
+                        )
+                        {
+                            _scrollBarDrags[command.PointerId] = new(
+                                target,
+                                command.Y,
+                                scrollable.State.Offset.Y
+                            );
+                            _captures[command.PointerId] = new(target, _scene!.Generation);
+                            SetPressedVisual(target, true, errors);
+                        }
+                        handled = true;
+                    }
+                    else if (Contains(scrollBar.Track, command.X, command.Y))
+                    {
+                        var page = _input.TryGetValue(target.ElementId, out var viewport)
+                            ? (viewport.ChildClipBounds ?? viewport.Bounds).Height
+                            : scrollBar.Track.Height;
+                        var direction = command.Y < scrollBar.Thumb.Y ? -1 : 1;
+                        handled = SetScroll(
+                            target,
+                            scrollable,
+                            scrollable.State.Offset.X,
+                            scrollable.State.Offset.Y + direction * page,
+                            scrollable.State.Offset
+                        );
+                        if (!handled)
+                            handled = true;
+                    }
+                    break;
+                case PointerCommandKind.Move
+                    when _scrollBarDrags.TryGetValue(command.PointerId, out var drag):
+                    var travel = scrollBar.Track.Height - scrollBar.Thumb.Height;
+                    if (travel > 0 && scrollBar.Maximum.Y > 0)
+                    {
+                        var next =
+                            drag.StartOffsetY
+                            + (command.Y - drag.StartPointerY) / travel * scrollBar.Maximum.Y;
+                        handled = SetScroll(
+                            target,
+                            scrollable,
+                            scrollable.State.Offset.X,
+                            next,
+                            scrollable.State.Offset
+                        );
+                    }
+                    break;
+                case PointerCommandKind.Up
+                or PointerCommandKind.Cancel when _scrollBarDrags.ContainsKey(command.PointerId):
+                    handled = true;
+                    break;
+            }
+        }
+        SetLast(
+            "Scrollbar/" + command.Kind,
             InputDispatchStatus.Delivered,
             InputRejection.None,
             target,
@@ -1028,6 +1212,89 @@ public sealed class InputRouter
         }
     }
 
+    /// <summary>Clears pointer hover while preserving any active pointer capture.</summary>
+    public void ClearPointerHover()
+    {
+        Enter();
+        try
+        {
+            var errors = new List<Exception>();
+            ClearHover(errors);
+            UpdateScrollBarHover(null);
+            Throw(errors);
+        }
+        finally
+        {
+            Exit();
+        }
+    }
+
+    private void UpdateHover(ElementIdentity? hit, List<Exception> errors)
+    {
+        ElementIdentity? next = null;
+        if (hit is { } identity && Eligible(identity))
+        {
+            var path = Path(identity);
+            for (var index = path.Count - 1; index >= 0; index--)
+                if (_focusable.ContainsKey(path[index].ElementId) && Eligible(path[index]))
+                {
+                    next = path[index];
+                    break;
+                }
+        }
+        if (_hovered == next)
+            return;
+        var prior = _hovered;
+        _hovered = next;
+        if (prior is { } old)
+            SetHoverVisual(old, false, errors);
+        if (next is { } current)
+            SetHoverVisual(current, true, errors);
+    }
+
+    private void ClearHover(List<Exception> errors) => UpdateHover(null, errors);
+
+    private void UpdateScrollBarHover(ElementIdentity? viewport)
+    {
+        if (_hoveredScrollBar == viewport)
+            return;
+        _hoveredScrollBar = viewport;
+        _composition.InvalidateInteractionVisuals();
+    }
+
+    private void SetHoverVisual(ElementIdentity identity, bool hovered, List<Exception> errors)
+    {
+        if (!_focusable.TryGetValue(identity.ElementId, out var focusable))
+            return;
+        try
+        {
+            focusable.Context.SetState(BehaviorState.Hover, hovered);
+        }
+        catch (Exception error)
+        {
+            errors.Add(error);
+        }
+    }
+
+    internal bool IsScrollbarHovered(ElementIdentity identity) => _hoveredScrollBar == identity;
+
+    internal bool IsScrollbarPressed(ElementIdentity identity) =>
+        _scrollBarDrags.Values.Any(drag => drag.Viewport == identity);
+
+    private void SetPressedVisual(ElementIdentity identity, bool pressed, List<Exception> errors)
+    {
+        if (!_focusable.TryGetValue(identity.ElementId, out var focusable))
+            return;
+        try
+        {
+            focusable.Context.SetState(BehaviorState.Pressed, pressed);
+        }
+        catch (Exception error)
+        {
+            errors.Add(error);
+        }
+    }
+
     private void InvokeFocus(ElementIdentity target, FocusCommand command, List<Exception> errors)
     {
         foreach (
@@ -1054,7 +1321,10 @@ public sealed class InputRouter
 
     private void Release(int pointerId, PointerCaptureLossReason reason, List<Exception> errors)
     {
-        if (!_captures.Remove(pointerId, out var capture))
+        var hadCapture = _captures.Remove(pointerId, out var capture);
+        if (_scrollBarDrags.Remove(pointerId, out var drag))
+            SetPressedVisual(drag.Viewport, false, errors);
+        if (!hadCapture)
             return;
         _lastCaptureLoss = reason.ToString();
         var loss = new PointerCaptureLoss(pointerId, reason, capture.Owner);
@@ -1133,6 +1403,8 @@ public sealed class InputRouter
             Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
         if (_focused is { } focus)
             RequestFocus(null, FocusReason(focus.Identity), errors);
+        ClearHover(errors);
+        UpdateScrollBarHover(null);
         _scene = null;
         _input.Clear();
         ClearInputCaches();
@@ -1174,6 +1446,18 @@ public sealed class InputRouter
                 && ClippedIn(candidate.Identity, x, y)
             )
                 return candidate.Identity;
+        return null;
+    }
+
+    private RetainedScrollBar? HitScrollBar(float x, float y)
+    {
+        foreach (var scrollBar in _scrollBarHitOrder)
+            if (
+                Eligible(scrollBar.Viewport)
+                && Contains(scrollBar.Track, x, y)
+                && ClippedIn(scrollBar.Viewport, x, y)
+            )
+                return scrollBar;
         return null;
     }
 
@@ -1291,6 +1575,10 @@ public sealed class InputRouter
         _available = new Dictionary<long, bool>(scene.Input.Count);
         _paths = new Dictionary<long, ElementIdentity[]>(scene.Input.Count);
         _effectiveClips = new Dictionary<long, InputClip[]>(scene.Input.Count);
+        _scrollBars.Clear();
+        foreach (var scrollBar in scene.ScrollBars)
+            _scrollBars.Add(scrollBar.Viewport.ElementId, scrollBar);
+        _scrollBarHitOrder = scene.ScrollBars.Reverse().ToArray();
         foreach (var retained in scene.Input)
         {
             var parentAvailable = true;
@@ -1337,6 +1625,8 @@ public sealed class InputRouter
         _paths.Clear();
         _effectiveClips.Clear();
         _hitOrder = [];
+        _scrollBars.Clear();
+        _scrollBarHitOrder = [];
     }
 
     private static bool Contains(LayoutRect bounds, float x, float y) =>
@@ -1657,6 +1947,9 @@ public sealed class InputRouter
         return false;
     }
 
+    private bool IsWithin(ElementIdentity identity, ElementIdentity ancestor) =>
+        identity == ancestor || IsDescendantOf(identity, ancestor);
+
     private bool IsDescendantOf(ElementIdentity identity, ElementIdentity ancestor)
     {
         while (
@@ -1746,6 +2039,12 @@ public sealed class InputRouter
         public ScrollOffset InstalledOffset { get; set; } = state.Offset;
         public EditorCaretStamp? CaretStamp { get; set; }
     }
+
+    private readonly record struct ScrollBarDrag(
+        ElementIdentity Viewport,
+        float StartPointerY,
+        float StartOffsetY
+    );
 
     private readonly record struct EditorCaretStamp(
         long EditGeneration,
