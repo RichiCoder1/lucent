@@ -1,6 +1,6 @@
 # Light Notes daily-use execution
 
-Status: implementation and background verification complete; official package delivery follows, with focused native interaction closeout paused, September 6, 2026. Starting identities: Lucent d6e7913, packages 0.3.0-dev.19.1, Light Notes 67d0729.
+Status: delivered and focused native closeout complete, September 6, 2026. Lucent b070cd4, packages 0.3.0-dev.21.1, and Light Notes application 6a44350. The next step is owner product/framework review.
 
 ## Outcomes and order
 
@@ -22,7 +22,7 @@ State stays where its lifetime belongs: collection viewport/presentation in the 
 
 ## Verification and review
 
-Use focused race/failure/storage tests while implementing, then affected warning-clean suites. Publish and consume exact Lucent packages before updating Light Notes pins. Render representative wide/medium/compact and error states in one inspection batch, fix found defects together, and confirm once. The owner explicitly paused all focus-taking work on September 6: do not launch application windows, desktop tests, or UI automation until the owner explicitly releases the pause. Background compilation, offscreen rendering, and non-interactive tests may continue. Run the published FlaUI/Axe batch only after that release. Exercise backup/restore/export on temporary data using the published executable. Record automated, manually observed and remaining limits separately. Keep logs/captures under ignored artifacts and short results in tickets.
+Use focused race/failure/storage tests while implementing, then affected warning-clean suites. Publish and consume exact Lucent packages before updating Light Notes pins. Render representative wide/medium/compact and error states in one inspection batch, fix found defects together, and confirm once. The owner released the focus pause for the published FlaUI/Axe batch on September 6. That batch is complete. Coordinate any future focus-taking checks with the owner. Exercise backup/restore/export on temporary data using the published executable. Record automated, manually observed and remaining limits separately. Keep logs/captures under ignored artifacts and short results in tickets.
 
 ## Additional tickets
 
@@ -53,12 +53,12 @@ Defer record sugar, expression-bodied/root-switching markup, additional style-sh
 
 [#89](https://github.com/RichiCoder1/lucent/issues/89) fixes a compiler defect exposed by the #86 packed consumer: two stateful authored files in one namespace generated the same private helper type. The fix must use deterministic document/component identity and retain a two-file runtime regression. This is required for ordinary application growth, not an additional language feature.
 
-## Implemented result and remaining closeout
+## Delivered result and verification
 
 The selected compiler/runtime, R3, restore, autosave and presentation work is implemented. Final review aligned rounded ancestor clips with pointer/point lookup and fixed the wrapped flex paragraph measurement exposed by the minimum-size startup error view (#90). Independent review found and corrected both in-flight-save/undo status handling and dependency tracking after undo, as well as a debounce completion-flush mistake during development. Regression tests retain those cases.
 
 Background evidence: 195 Core/compiler/generator/language-server/reference-app tests, 15 renderer tests, 7 R3 tests under both managed execution and NativeAOT, 11 extension tests, and the full packed SDK matrix including NativeAOT passed. An isolated Light Notes consumer of the six local development packages passed 17 storage and 16 application/offscreen tests. Wide/medium/compact and 150-percent minimum-size images were inspected; confirmation fixes the URL row and disabled control backgrounds. Three rounded-input regressions and the nested wrapped-paragraph regression pass; the final offscreen minimum-size error capture shows wrapped recovery guidance and visible Retry. Local package proof is development evidence; official package and application source identities belong in the delivery comments on the linked issues.
 
-The owner's three-minute visual-test window expired before the new build was ready. No focus-taking check ran in that window. Keep #80/#81/#82 open for the coordinated real-input, autosave/reopen and targeted accessibility batch after a fresh release of the focus pause. The published console-only maintenance check passed backup/export/restore with 23 equal records, corrupt/existing-destination rejection, default-workspace isolation and source preservation. Do not turn the pending batch into a broader release gate or describe earlier manual results as fresh evidence.
+The owner subsequently authorized the native batch: both maintained desktop tests passed against the published 6a44350 application. Physical capture, SQLite-confirmed autosave before close, reopen, responsive navigation/draft retention, minimum size and Ctrl+N focus passed. Three Axe.Windows scans reported zero errors. Settled desktop captures were inspected at wide, medium, compact and minimum widths. The test now expects Save now to be disabled after autosave and allows presentation to settle before screenshots. The published console-only maintenance check passed backup/export/restore with 23 equal records, corrupt/existing-destination rejection, default-workspace isolation and source preservation. The later screenshot-confirmation run passed the responsive test; its capture process exited during keyboard input, so the earlier successful unchanged persistence test remains the evidence. Native wheel interaction, a broad DPI/theme pass, screen-reader and manual Accessibility Insights walkthroughs were not repeated. Owner feedback remains the next step, not a release gate.
 
 [#90](https://github.com/RichiCoder1/lucent/issues/90) records the auto-height flex paragraph correction. Error-state inspection showed that finite-width wrapping could retain an earlier one-line intrinsic height and hide recovery guidance. Keep the correction in shared measurement, with explicit height/block limits preserved, rather than requiring application-specific paragraph heights.

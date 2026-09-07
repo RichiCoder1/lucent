@@ -2,7 +2,7 @@
 
 ## Current direction
 
-Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Current work completes daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement.
+Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The next step is owner review of the app, framework and .lui experience.
 
 Production follows the decisions and contracts validated by the archived Native spike. The old implementation remains on [archive/avalonia-final](https://github.com/RichiCoder1/lucent/tree/archive/avalonia-final), and the complete spike record remains in the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). They are historical evidence, not active execution instructions.
 
@@ -38,7 +38,7 @@ Develop design quality alongside complete application slices. Deliver required `
 
 ## Current execution
 
-See [daily-use execution](plans/daily-use-execution.md): #80 native closeout, #81 autosave and complete workflow, #82 targeted polish with #85 safe restore, #84 CI/review efficiency, #87 optional ecosystem debounce, #88 mockup fidelity, and #83/#86 explicit async-resource authoring with #89 multi-file helper correctness, and #90 wrapped flex paragraph measurement. Autosave uses an owner-approved 750 ms debounce with explicit save and switch/close flush. Records, expression-bodied markup and a component registry remain deferred.
+The [daily-use execution](plans/daily-use-execution.md) is delivered: #80–#90 cover the responsive shell, 750 ms autosave, complete workflow, safe restoration, presentation, explicit async resources, optional R3 integration and CI/review improvements. Published native interaction and targeted accessibility checks are complete. Use the [Light Notes review guide](https://github.com/RichiCoder1/light-notes/blob/main/docs/MANUAL-REVIEW.md) to collect concrete product, framework and .lui feedback before selecting the next chunk. Records, expression-bodied markup and a component registry remain deferred.
 
 ## Original foundation sequence
 
