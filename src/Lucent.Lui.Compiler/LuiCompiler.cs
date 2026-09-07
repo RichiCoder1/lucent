@@ -100,7 +100,8 @@ public static class LuiCompiler
         var propertyMap = new LuiSourceMap(identity, propertyWriter.Entries);
         IReadOnlyDictionary<int, StyleValuePlan> styleValues =
             new Dictionary<int, StyleValuePlan>();
-        var tokenExpressions = new HashSet<int>();
+        var styleValueExpressions = new HashSet<int>();
+        var styleValueBranches = new Dictionary<int, IReadOnlyList<StyleValueBranchPlan>>();
         if (rootTokens is not null)
         {
             var tokenWriter = new Writer(document, identity, null, [rootTokens.ToDisplayString()]);
@@ -119,7 +120,9 @@ public static class LuiCompiler
                 tokenMap,
                 tokenWriter,
                 rootTokens,
-                tokenExpressions
+                styleValueExpressions,
+                styleValueBranches,
+                document.Source
             );
             TokenAmbiguityDiagnostics(
                 tokenModel,
@@ -138,7 +141,9 @@ public static class LuiCompiler
                 probeMap,
                 writer,
                 null,
-                tokenExpressions
+                styleValueExpressions,
+                styleValueBranches,
+                document.Source
             );
         }
         var contentPlans = ContentPlans(
@@ -192,7 +197,8 @@ public static class LuiCompiler
             PropertyPlans(propertyModel, propertyTree, propertyMap, propertyWriter),
             styleValues,
             contentContributions,
-            tokenExpressions,
+            styleValueExpressions,
+            styleValueBranches,
             NullChecks(probeModel, probeTree, document),
             statePlans,
             liveValues
@@ -1436,6 +1442,7 @@ public static class LuiCompiler
                 new Dictionary<int, StyleValuePlan>(),
                 contentContributions,
                 new HashSet<int>(),
+                new Dictionary<int, IReadOnlyList<StyleValueBranchPlan>>(),
                 new HashSet<int>()
             ),
             [parameter.ContainingSymbol.ContainingType.ToDisplayString()],
@@ -1562,36 +1569,63 @@ public static class LuiCompiler
         LuiSourceMap map,
         Writer writer,
         INamedTypeSymbol? rootTokens,
-        HashSet<int> tokenExpressions
+        HashSet<int> styleValueExpressions,
+        Dictionary<int, IReadOnlyList<StyleValueBranchPlan>> styleValueBranches,
+        string documentSource
     )
     {
         var plans = new Dictionary<int, StyleValuePlan>();
-        foreach (var lambda in tree.GetRoot().DescendantNodes().OfType<LambdaExpressionSyntax>())
+        foreach (var expression in tree.GetRoot().DescendantNodes().OfType<ExpressionSyntax>())
         {
-            if (lambda.Body is not ExpressionSyntax body)
+            if (!IsStyleExpressionRoot(expression))
                 continue;
-            var tokenType = model.GetTypeInfo(body).Type;
-            // An invalid target conversion can leave a conditional's type unresolved during
-            // the probe. Its matching token branches still identify the intended overload.
-            if (!IsToken(tokenType!) && body is ConditionalExpressionSyntax conditional)
-            {
-                var whenTrue = model.GetTypeInfo(conditional.WhenTrue).Type;
-                var whenFalse = model.GetTypeInfo(conditional.WhenFalse).Type;
-                if (
-                    IsToken(whenTrue!) && SymbolEqualityComparer.Default.Equals(whenTrue, whenFalse)
+            var translated = Translate(
+                map,
+                new LuiSpan(expression.SpanStart, expression.Span.Length)
+            );
+            if (translated is not { } generatedSource)
+                continue;
+            var styleSpan = writer
+                .StyleExpressionSpans.Where(span =>
+                    span.Start <= generatedSource.Start && span.End >= generatedSource.End
                 )
-                    tokenType = whenTrue;
-            }
-            if (!IsToken(tokenType!))
-                continue;
-            var source = Translate(map, new LuiSpan(body.SpanStart, body.Span.Length));
+                .OrderBy(span => span.Length)
+                .FirstOrDefault();
             if (
-                source is { } span
-                && writer.StyleExpressionSpans.Any(style =>
-                    style.Start <= span.Start && style.End >= span.End
+                styleSpan.Length == 0
+                && !writer.StyleExpressionSpans.Any(span =>
+                    span.Start <= generatedSource.Start && span.End >= generatedSource.End
                 )
             )
-                tokenExpressions.Add(span.Start);
+                continue;
+            var source = TrimStyleExpression(styleSpan, documentSource);
+            if (source.Start != generatedSource.Start || source.End != generatedSource.End)
+                continue;
+            if (TryTokenValueBranches(model, expression) is { } branches)
+            {
+                var mappedBranches = branches
+                    .Select(branch =>
+                        Translate(
+                            map,
+                            new LuiSpan(branch.Expression.SpanStart, branch.Expression.Span.Length)
+                        )
+                            is { } branchSource
+                            ? new StyleValueBranchPlan(branchSource, branch.IsToken)
+                            : null
+                    )
+                    .Where(branch => branch is not null)
+                    .Cast<StyleValueBranchPlan>()
+                    .ToArray();
+                if (mappedBranches.Length == branches.Count)
+                {
+                    styleValueExpressions.Add(source.Start);
+                    styleValueBranches[source.Start] = mappedBranches;
+                }
+            }
+            else if (TryTokenType(model, expression) is not null)
+            {
+                styleValueExpressions.Add(source.Start);
+            }
         }
         if (rootTokens is null)
             return plans;
@@ -1627,6 +1661,84 @@ public static class LuiCompiler
             );
         }
         return plans;
+    }
+
+    private static bool IsStyleExpressionRoot(ExpressionSyntax expression) =>
+        expression.Parent is ArgumentSyntax or LambdaExpressionSyntax;
+
+    private static LuiSpan TrimStyleExpression(LuiSpan span, string source)
+    {
+        var start = span.Start;
+        var end = span.End;
+        while (start < end && Char.IsWhiteSpace(source[start]))
+            start++;
+        while (end > start && Char.IsWhiteSpace(source[end - 1]))
+            end--;
+        return new LuiSpan(start, end - start);
+    }
+
+    private static ExpressionSyntax StripParentheses(ExpressionSyntax expression)
+    {
+        while (expression is ParenthesizedExpressionSyntax parenthesized)
+            expression = parenthesized.Expression;
+        return expression;
+    }
+
+    private static ITypeSymbol? TryTokenType(SemanticModel model, ExpressionSyntax expression)
+    {
+        expression = StripParentheses(expression);
+        // These branches take the property's value type, not a token type inferred by
+        // the provisional conditional expression before it has its final context.
+        if (
+            expression is ImplicitObjectCreationExpressionSyntax
+            || expression.IsKind(SyntaxKind.DefaultLiteralExpression)
+            || expression.IsKind(SyntaxKind.NullLiteralExpression)
+        )
+            return null;
+        var type = model.GetTypeInfo(expression).Type;
+        if (type is not null && IsToken(type))
+            return type;
+        var symbol = model.GetSymbolInfo(StripParentheses(expression)).Symbol;
+        var symbolType = symbol switch
+        {
+            IFieldSymbol field when field.IsStatic => field.Type,
+            IPropertySymbol property when property.IsStatic => property.Type,
+            _ => null,
+        };
+        return symbolType is not null && IsToken(symbolType) ? symbolType : null;
+    }
+
+    private static IReadOnlyList<(
+        ExpressionSyntax Expression,
+        bool IsToken
+    )>? TryTokenValueBranches(SemanticModel model, ExpressionSyntax expression)
+    {
+        expression = StripParentheses(expression);
+        if (expression is not ConditionalExpressionSyntax)
+            return null;
+        var leaves = new List<ExpressionSyntax>();
+        AddStyleValueLeaves(expression, leaves);
+        var branches = leaves
+            .Select(leaf => (Expression: leaf, IsToken: TryTokenType(model, leaf) is not null))
+            .ToArray();
+        // Contextualize every branch against the property type. Roslyn validates conversions,
+        // null/default, target-typed construction, and incompatible tokens in the final tree.
+        return branches.Any(branch => branch.IsToken) ? branches : null;
+    }
+
+    private static void AddStyleValueLeaves(
+        ExpressionSyntax expression,
+        List<ExpressionSyntax> leaves
+    )
+    {
+        expression = StripParentheses(expression);
+        if (expression is ConditionalExpressionSyntax conditional)
+        {
+            AddStyleValueLeaves(conditional.WhenTrue, leaves);
+            AddStyleValueLeaves(conditional.WhenFalse, leaves);
+        }
+        else
+            leaves.Add(expression);
     }
 
     private static void TokenAmbiguityDiagnostics(
@@ -1796,6 +1908,18 @@ public static class LuiCompiler
         internal string Name { get; }
     }
 
+    private sealed class StyleValueBranchPlan
+    {
+        internal StyleValueBranchPlan(LuiSpan source, bool isToken)
+        {
+            Source = source;
+            IsToken = isToken;
+        }
+
+        internal LuiSpan Source { get; }
+        internal bool IsToken { get; }
+    }
+
     private enum StateKind
     {
         Writable,
@@ -1826,7 +1950,8 @@ public static class LuiCompiler
             IReadOnlyDictionary<int, StylePropertyPlan> properties,
             IReadOnlyDictionary<int, StyleValuePlan> values,
             IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
-            HashSet<int> tokenExpressions,
+            HashSet<int> styleValueExpressions,
+            IReadOnlyDictionary<int, IReadOnlyList<StyleValueBranchPlan>> styleValueBranches,
             HashSet<int> nullChecks,
             IReadOnlyDictionary<string, StatePlan>? states = null,
             HashSet<int>? liveValues = null
@@ -1837,7 +1962,8 @@ public static class LuiCompiler
             Properties = properties;
             Values = values;
             ContentContributions = contentContributions;
-            TokenExpressions = tokenExpressions;
+            StyleValueExpressions = styleValueExpressions;
+            StyleValueBranches = styleValueBranches;
             NullChecks = nullChecks;
             States = states ?? new Dictionary<string, StatePlan>();
             LiveValues = liveValues ?? [];
@@ -1848,7 +1974,11 @@ public static class LuiCompiler
         internal IReadOnlyDictionary<int, StylePropertyPlan> Properties { get; }
         internal IReadOnlyDictionary<int, StyleValuePlan> Values { get; }
         internal IReadOnlyDictionary<int, ContentContributionKind> ContentContributions { get; }
-        internal HashSet<int> TokenExpressions { get; }
+        internal HashSet<int> StyleValueExpressions { get; }
+        internal IReadOnlyDictionary<
+            int,
+            IReadOnlyList<StyleValueBranchPlan>
+        > StyleValueBranches { get; }
         internal HashSet<int> NullChecks { get; }
         internal IReadOnlyDictionary<string, StatePlan> States { get; }
         internal HashSet<int> LiveValues { get; }
@@ -3167,34 +3297,40 @@ public static class LuiCompiler
                 assignment.Expression.Span.Start + leading,
                 assignment.Expression.Text.Trim().Length
             );
-            var bind = live && plans?.TokenExpressions.Contains(expression.Start) != true;
+            var styleValue = plans?.StyleValueExpressions.Contains(expression.Start) == true;
+            var bind = live;
             var property =
                 plans is not null
                 && plans.Properties.TryGetValue(assignment.Property.Span.Start, out var resolved)
                     ? resolved
                     : new StylePropertyPlan(assignment.Property.Text, "");
-            Write(bind ? ".Bind" : ".Set");
-            if (bind && property.ValueType.Length != 0)
+            Write(styleValue ? (live ? ".BindValue" : ".SetValue") : (bind ? ".Bind" : ".Set"));
+            if ((styleValue || bind) && property.ValueType.Length != 0)
                 Write("<" + property.ValueType + ">");
             Write("(");
             Mapped(property.Name, assignment.Property.Span, LuiMapKind.Symbol);
             Write(", ");
-            if (bind)
+            if ((styleValue && live) || bind)
                 Write("() => ");
-            Expression(assignment.Expression);
+            Expression(assignment.Expression, null, styleValue ? property.ValueType : null);
             Write(")");
             Mark(assignment.Colon.Span, LuiMapKind.Structure);
             Mark(assignment.Terminator.Span, LuiMapKind.Structure);
         }
 
-        private LuiSpan Expression(LuiExpressionSyntax expression, string? excludedLocal = null) =>
+        private LuiSpan Expression(
+            LuiExpressionSyntax expression,
+            string? excludedLocal = null,
+            string? styleValueType = null
+        ) =>
             Expression(
                 expression.Span,
                 expression.Text,
                 expression.Expression,
                 expression.OpenBrace,
                 expression.CloseBrace,
-                excludedLocal
+                excludedLocal,
+                styleValueType
             );
 
         private LuiSpan Expression(LuiExpressionBodySyntax expression) =>
@@ -3204,6 +3340,7 @@ public static class LuiCompiler
                 expression.Expression,
                 expression.OpenBrace,
                 expression.CloseBrace,
+                null,
                 null
             );
 
@@ -3213,7 +3350,8 @@ public static class LuiCompiler
             ExpressionSyntax expressionSyntax,
             LuiToken openBrace,
             LuiToken closeBrace,
-            string? excludedLocal
+            string? excludedLocal,
+            string? styleValueType
         )
         {
             var leading = expressionText.Length - expressionText.TrimStart().Length;
@@ -3242,7 +3380,8 @@ public static class LuiCompiler
                     string Text,
                     LuiMapKind Kind,
                     string Suffix,
-                    int Priority
+                    int Priority,
+                    bool Hidden
                 )>();
             var values =
                 plans
@@ -3253,7 +3392,44 @@ public static class LuiCompiler
                     .ToArray()
                 ?? Array.Empty<StyleValuePlan>();
             foreach (var plan in values)
-                replacements.Add((plan.Source, plan.Name, LuiMapKind.Symbol, "", 1));
+                replacements.Add((plan.Source, plan.Name, LuiMapKind.Symbol, "", 1, false));
+            if (styleValueType is not null && plans is not null)
+            {
+                foreach (
+                    var branch in plans
+                        .StyleValueBranches.Values.SelectMany(branches => branches)
+                        .Where(branch =>
+                            branch.Source.Start >= source.Start && branch.Source.End <= source.End
+                        )
+                )
+                {
+                    var factory = branch.IsToken ? "FromToken" : "FromValue";
+                    replacements.Add(
+                        (
+                            new LuiSpan(branch.Source.Start, 0),
+                            "global::Lucent.Core.StyleValue."
+                                + factory
+                                + "<"
+                                + styleValueType
+                                + ">(",
+                            LuiMapKind.Scaffolding,
+                            "",
+                            -1,
+                            true
+                        )
+                    );
+                    replacements.Add(
+                        (
+                            new LuiSpan(branch.Source.End, 0),
+                            "",
+                            LuiMapKind.Scaffolding,
+                            ")",
+                            2,
+                            true
+                        )
+                    );
+                }
+            }
             foreach (
                 var designation in expressionSyntax
                     .DescendantNodesAndSelf()
@@ -3269,7 +3445,8 @@ public static class LuiCompiler
                         designation.Identifier.Text,
                         LuiMapKind.Local,
                         "",
-                        0
+                        0,
+                        false
                     )
                 );
             foreach (
@@ -3299,7 +3476,8 @@ public static class LuiCompiler
                         inNameOf ? local.NameOfReader : local.Reader,
                         LuiMapKind.Local,
                         inNameOf ? local.NameOfAccessor : local.Accessor,
-                        0
+                        0,
+                        false
                     )
                 );
             }
@@ -3322,7 +3500,10 @@ public static class LuiCompiler
                         LuiMapKind.Expression
                     );
                 }
-                Mapped(replacement.Text, replacement.Source, replacement.Kind);
+                if (replacement.Hidden)
+                    Hidden(replacement.Text);
+                else
+                    Mapped(replacement.Text, replacement.Source, replacement.Kind);
                 if (replacement.Suffix.Length != 0)
                     Hidden(replacement.Suffix);
                 offset = replacement.Source.End;

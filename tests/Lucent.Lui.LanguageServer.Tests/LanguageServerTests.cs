@@ -112,6 +112,87 @@ public component Counter() {
     }
 
     [TestMethod]
+    public async Task LiveTokenChoiceHasProjectDiagnosticsHoverAndNavigation()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-token-choice-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "TokenChoice.csproj");
+            var helperPath = Path.Combine(root, "Helpers.cs");
+            var luiPath = Path.Combine(root, "MenuButton.lui");
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            await File.WriteAllTextAsync(
+                project,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\"{core}\"/><AdditionalFiles Include=\"MenuButton.lui\"/></ItemGroup></Project>"
+            );
+            const string helper = """
+namespace TokenChoice;
+using Lucent.Core;
+public static class Helpers
+{
+    public static readonly Token<FocusRing> KeyboardFocus = new("keyboard-focus", FocusRing.None);
+}
+""";
+            const string lui = """
+namespace TokenChoice;
+using Lucent.Core;
+public component MenuButton() {
+    bool menuOpen = false;
+    void OpenMenu() { menuOpen = true; }
+    <Button onInvoke={OpenMenu} style={Style.Empty with {
+        FocusRing: menuOpen ? Helpers.KeyboardFocus : FocusRing.None;
+    }}>Menu</Button>
+}
+""";
+            await File.WriteAllTextAsync(helperPath, helper);
+            await File.WriteAllTextAsync(luiPath, lui);
+            var uri = new Uri(luiPath);
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+
+            var diagnostics = await context.DiagnosticsAsync(uri, CancellationToken.None);
+            Assert(
+                diagnostics is { Count: 0 },
+                "A live token/concrete style choice produced project diagnostics: "
+                    + string.Join(
+                        " | ",
+                        diagnostics?.Select(item => item.Code + ":" + item.Message) ?? []
+                    )
+            );
+            Assert(
+                await context.CompileAsync(uri, CancellationToken.None) is not null,
+                "The clean live token-choice document did not compile."
+            );
+            var tokenUse = lui.IndexOf("KeyboardFocus", StringComparison.Ordinal);
+            var tokenDeclaration = helper.IndexOf("KeyboardFocus", StringComparison.Ordinal);
+            var hover = await context.HoverAsync(uri, tokenUse, CancellationToken.None);
+            var definition = await context.DefinitionAsync(uri, tokenUse, CancellationToken.None);
+            Assert(
+                hover is not null
+                    && hover.Value.Contains("KeyboardFocus", StringComparison.Ordinal)
+                    && hover.Value.Contains("Token", StringComparison.Ordinal),
+                "The authored token branch lost typed hover information: " + hover?.Value
+            );
+            Assert(
+                definition is not null
+                    && definition.Uri == new Uri(helperPath)
+                    && definition.Span.Start == tokenDeclaration,
+                "The authored token branch did not navigate to its C# declaration: "
+                    + definition?.Uri
+                    + "@"
+                    + definition?.Span.Start
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task ProjectContextFormattingNavigationCompletionDiagnosticsAndProtocol()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-lsp-" + Guid.NewGuid().ToString("N"));

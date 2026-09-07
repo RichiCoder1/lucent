@@ -251,7 +251,15 @@ style PrimaryButton {
 
 The Lucent SDK supplies an opt-out ordinary `Lucent.Core` namespace using only. Built-in `Components` are tag-only, framework properties are style-left-hand-side-only, and `VariantState` is `when`-only; application and third-party modules may publish ordinary static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics. A unique built-in style name is resolved only in the property position on the left of `:`. This lets `GridPlacement: new GridPlacement(...)` and `TextWrap: TextWrap.WordWithGraphemeFallback` use the normal C# type names on the value side; ordinary C# member access keeps its usual binding rules.
 
-Token-valued expressions choose a token when the style is constructed; subsequent changes to that token's themed value remain live. A conditional that switches token identity is not a live value binding. For a component-local visual state, use a live concrete property-value expression; do not assume wrapping entire style values in a C# conditional will recompose an already-mounted style.
+An individual style assignment can evaluate to either a concrete value or a `Token<T>`. When that assignment is already live, the complete token-valued expression is tracked: a conditional can switch token identity reactively, and the mounted element's theme resolves whichever token is currently selected. Mixed token/concrete branches use the same target-typed value contract. For example:
+
+```lui
+<Button onInvoke={OpenMenu} style={MenuButtonStyle with {
+    FocusRing: menuOpen ? LightNotesTheme.KeyboardFocus : FocusRing.None;
+}}>Menu</Button>
+```
+
+The corresponding C# surface uses `Style.BindValue<T>` for a live `StyleValue<T>` reader and `Style.SetValue<T>` for construction-time selection. A token choice made by a `readonly` component declaration is an initial per-mount snapshot. A named/static style or other standalone C# construction also chooses its token once when that style is constructed. In both cases, the chosen token's value still responds to the mounted element's theme. These rules apply to individual property assignments; reactively replacing an entire `Style` value remains deferred.
 
 Source-copied components become application-owned and therefore bind unqualified style tokens against the consuming project's `<RootNamespace>.Tokens`. Missing tokens are ordinary compilation errors. Components requiring a fixed token contract qualify their own token class explicitly.
 

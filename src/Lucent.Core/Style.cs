@@ -24,6 +24,14 @@ public sealed class Style
     public Style Bind<T>(Property<T> property, Func<T> read) =>
         Add(new BindingAssignment<T>(property, read));
 
+    /// <summary>Returns a style that selects a concrete value or theme token during construction.</summary>
+    public Style SetValue<T>(Property<T> property, StyleValue<T> value) =>
+        value.Token is { } token ? Set(property, token) : Set(property, value.Value);
+
+    /// <summary>Returns a style that observes a concrete value or selected theme token while its variant applies.</summary>
+    public Style BindValue<T>(Property<T> property, Func<StyleValue<T>> read) =>
+        Add(new ValueBindingAssignment<T>(property, read));
+
     /// <summary>Returns a new style with the assignments from <paramref name="style"/> appended.</summary>
     public Style With(Style? style) => style is null ? this : new([.. _nodes, .. style._nodes]);
 

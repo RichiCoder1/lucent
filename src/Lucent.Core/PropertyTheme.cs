@@ -291,10 +291,12 @@ public sealed class ThemeContext : IDisposable
 
     private TokenSlot<T> Add<T>(Token<T> token)
     {
+        // A first read tracks this token slot, not every change to the theme that seeds it.
+        var theme = Graph.Untracked(() => _theme.Value);
         var slot = new TokenSlot<T>(
             _scope,
             _scope.SignalForFramework(
-                new TokenState<T>(_theme.Value.Resolve(token), _theme.Value.Has(token)),
+                new TokenState<T>(theme.Resolve(token), theme.Has(token)),
                 "token." + token.Name
             ),
             token

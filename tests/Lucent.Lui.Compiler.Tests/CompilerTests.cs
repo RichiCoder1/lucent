@@ -2195,13 +2195,13 @@ public sealed class Eligibility
         Assert(
             parenthesizedToken.Success
                 && parenthesizedToken.Source!.Contains(
-                    ".Set(global::Lucent.Core.LayoutProperties.Spacing,"
+                    ".BindValue<float>(global::Lucent.Core.LayoutProperties.Spacing,"
                 )
                 && parenthesizedToken.Source.Contains("(global::App.Tokens.DensitySpacing)")
                 && !parenthesizedToken.Source.Contains(
                     ".Bind<float>(global::Lucent.Core.LayoutProperties.Spacing"
                 ),
-            "parenthesized root Token<T> did not retain static token semantics: "
+            "parenthesized root Token<T> did not retain live token semantics: "
                 + string.Join(
                     " | ",
                     parenthesizedToken.Diagnostics.Select(diagnostic => diagnostic.Message)
@@ -3094,7 +3094,7 @@ internal component MenuContent(ApplicationCommand command, Action action, Func<b
     }
 
     [TestMethod]
-    public void QualifiedConditionalTokensRemainStaticWithoutRootTokens()
+    public void QualifiedConditionalTokensRemainLiveWithoutRootTokens()
     {
         const string api = """
 namespace App;
@@ -3139,13 +3139,264 @@ internal component NoteRow(bool menuOpen)
         );
         Assert(
             result.Success
-                && result.Source!.Contains(".Set(global::Lucent.Core.VisualProperties.FocusRing, ")
-                && !result.Source.Contains(
-                    ".Bind<global::Lucent.Core.FocusRing>(global::Lucent.Core.VisualProperties.FocusRing"
+                && result.Source!.Contains(
+                    ".BindValue<global::Lucent.Core.FocusRing>(global::Lucent.Core.VisualProperties.FocusRing, () =>"
+                )
+                && result.Source.Contains(
+                    "global::Lucent.Core.StyleValue.FromToken<global::Lucent.Core.FocusRing>(LightNotesTheme.KeyboardFocus)"
+                )
+                && result.Source.Contains(
+                    "global::Lucent.Core.StyleValue.FromToken<global::Lucent.Core.FocusRing>(LightNotesTheme.NoFocusRing)"
                 ),
-            "qualified conditional Token<T> without App.Tokens did not retain static style semantics: "
+            "qualified conditional Token<T> without App.Tokens did not lower through BindValue: "
                 + string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message))
                 + "\n"
+                + result.Source
+        );
+    }
+
+    [TestMethod]
+    public void MixedTokenValueConditionalsUseBindValueAndSetValue()
+    {
+        const string api = """
+namespace App;
+using Lucent.Core;
+internal static class LightNotesTheme
+{
+    internal static bool UseDense = true;
+    internal static readonly Token<float> DenseSpacing = new("dense-spacing", 8f);
+}
+""";
+        const string source = """
+namespace App.Views;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component InlineMixed(bool menuOpen)
+{
+    <Row style={NamedMixed with { Opacity: menuOpen ? LightNotesTheme.DenseSpacing : 1; }} />
+}
+style NamedMixed {
+    Opacity: LightNotesTheme.UseDense ? LightNotesTheme.DenseSpacing : 1;
+}
+
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create(
+                "mixed-token-value",
+                [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "1",
+                "mixed-token-value",
+                new LuiDocumentIdentity("MixedTokenValue.lui"),
+                "v1",
+                "",
+                "",
+                "preview",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "App"
+            )
+        );
+        Assert(
+            result.Success
+                && result.Source!.Contains(
+                    ".BindValue<float>(global::Lucent.Core.VisualProperties.Opacity, () =>"
+                )
+                && result.Source.Contains(
+                    "global::Lucent.Core.StyleValue.FromToken<float>(LightNotesTheme.DenseSpacing)"
+                )
+                && result.Source.Contains("global::Lucent.Core.StyleValue.FromValue<float>(1)")
+                && result.Source.Contains(
+                    ".SetValue<float>(global::Lucent.Core.VisualProperties.Opacity, "
+                ),
+            "mixed token/value conditionals did not lower through typed StyleValue bindings: "
+                + string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message))
+                + "\n"
+                + result.Source
+        );
+    }
+
+    [TestMethod]
+    public void TokenChoicesPreserveContextualConversionsAndAuthoredDiagnostics()
+    {
+        const string api = """
+namespace Sample;
+using Lucent.Core;
+public static class Palette {
+    public static readonly Token<FocusRing> Ring = new("ring", FocusRing.None);
+    public static readonly Token<Brush> Surface = new("surface", Color.Parse("#123456"));
+    public static readonly Token<Insets> Padding = new("padding", Insets.Uniform(4));
+    public static FocusRing Resolve(Token<FocusRing> token) => token.Fallback;
+}
+""";
+        var compilation = CSharpCompilation.Create(
+            "token-conversions",
+            [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
+            References()
+        );
+        foreach (
+            var (property, expression) in new[]
+            {
+                ("FocusRing", "active ? Palette.Ring : default"),
+                ("FocusRing", "active ? Palette.Ring : default(FocusRing)"),
+                ("FocusRing", "active ? (active ? Palette.Ring : default) : FocusRing.None"),
+                ("Background", "active ? Palette.Surface : Color.Parse(\"#ABCDEF\")"),
+                ("Background", "active ? Palette.Surface : null"),
+                ("Padding", "active ? Palette.Padding : new(1, 2, 3, 4)"),
+            }
+        )
+        {
+            var source =
+                "namespace Sample; using Lucent.Core; public component Demo(bool active) { <Row style={Style.Empty with { "
+                + property
+                + ": "
+                + expression
+                + "; }} /> }";
+            var result = LuiCompiler.Compile(
+                LuiParser.Parse(source),
+                compilation,
+                new LuiFreshnessIdentity(
+                    "1",
+                    "tokens",
+                    new LuiDocumentIdentity("Token.lui"),
+                    "v1",
+                    "preview"
+                )
+            );
+            Assert(
+                result.Success,
+                expression
+                    + ": "
+                    + string.Join(" | ", result.Diagnostics.Select(item => item.Message))
+                    + "\n"
+                    + result.Source
+            );
+            Assert(
+                result.Source!.Contains(".BindValue<"),
+                "Token choice lost its live binding: " + expression
+            );
+            var tokenName =
+                expression.Contains("Palette.Ring") ? "Palette.Ring"
+                : expression.Contains("Palette.Surface") ? "Palette.Surface"
+                : "Palette.Padding";
+            var span = new LuiSpan(
+                source.IndexOf(tokenName, StringComparison.Ordinal),
+                tokenName.Length
+            );
+            Assert(
+                result.Map.FromSource(span).Any(entry => entry.Kind != LuiMapKind.Scaffolding),
+                "Author token branch lost its source map: " + expression
+            );
+        }
+        foreach (var invalid in new[] { "\"wrong\"", "Palette.Padding", "null" })
+        {
+            var source =
+                "namespace Sample; using Lucent.Core; public component Demo(bool active) { <Row style={Style.Empty with { FocusRing: active ? Palette.Ring : "
+                + invalid
+                + "; }} /> }";
+            var result = LuiCompiler.Compile(
+                LuiParser.Parse(source),
+                compilation,
+                new LuiFreshnessIdentity(
+                    "1",
+                    "tokens",
+                    new LuiDocumentIdentity("Token.lui"),
+                    "v1",
+                    "preview"
+                )
+            );
+            var start = source.LastIndexOf(invalid, StringComparison.Ordinal);
+            Assert(
+                !result.Success
+                    && result.Diagnostics.Any(item =>
+                        item.Span.Start >= start && item.Span.End <= start + invalid.Length
+                    ),
+                "Invalid concrete/token branch did not retain an authored diagnostic: "
+                    + invalid
+                    + " | "
+                    + string.Join(
+                        " | ",
+                        result.Diagnostics.Select(item =>
+                            item.Id + "@" + item.Span + ":" + item.Message
+                        )
+                    )
+            );
+        }
+    }
+
+    [TestMethod]
+    public void DirectTokenStateIsLiveAndNestedTokenArgumentsDoNotRetypeConcreteValues()
+    {
+        const string source = """
+namespace Sample;
+using Lucent.Core;
+public component Demo() {
+    [Once] Token<FocusRing> selected = Palette.Ring;
+    readonly Token<FocusRing> initial = Palette.Ring;
+    void Change() { selected = Palette.Other; }
+    <Column>
+        <Button onInvoke={Change} style={Style.Empty with { FocusRing: selected; }}>Change</Button>
+        <Row style={Style.Empty with { FocusRing: initial; }} />
+        <Row style={Style.Empty with { FocusRing: Palette.Resolve(Palette.Ring); }} />
+    </Column>
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create(
+                "direct-token",
+                [
+                    CSharpSyntaxTree.ParseText(
+                        """
+namespace Sample; using Lucent.Core;
+public static class Palette {
+    public static readonly Token<FocusRing> Ring = new("ring", FocusRing.None);
+    public static readonly Token<FocusRing> Other = new("other", FocusRing.None);
+    public static FocusRing Resolve(Token<FocusRing> token) => token.Fallback;
+}
+""",
+                        new CSharpParseOptions(LanguageVersion.Preview)
+                    ),
+                ],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "1",
+                "tokens",
+                new LuiDocumentIdentity("Direct.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            string.Join(" | ", result.Diagnostics.Select(item => item.Message))
+                + "\n"
+                + result.Source
+        );
+        var normalized = System.Text.RegularExpressions.Regex.Replace(
+            result.Source!,
+            @"(?m)^#line.*$",
+            ""
+        );
+        normalized = System.Text.RegularExpressions.Regex.Replace(normalized, @"\s+", " ");
+        Assert(
+            normalized.Contains(
+                ".BindValue<global::Lucent.Core.FocusRing>(global::Lucent.Core.VisualProperties.FocusRing, () => selected "
+            ),
+            "Mutable token state lost its live reader: " + result.Source
+        );
+        Assert(
+            normalized.Contains(
+                ".Bind<global::Lucent.Core.FocusRing>(global::Lucent.Core.VisualProperties.FocusRing, () => Palette.Resolve(Palette.Ring)"
+            ),
+            "A nested token argument changed an ordinary concrete expression's target type: "
                 + result.Source
         );
     }
