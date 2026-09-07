@@ -2480,20 +2480,26 @@ public component Counter() {
                 issueRow,
                 CancellationToken.None
             );
-            var variant = LuiParser
+            var variants = LuiParser
                 .Parse(issueRowText)
                 .Styles.Single()
                 .Members.OfType<LuiVariantGroupSyntax>()
-                .Single();
-            var variantSymbol = issueRowSymbols!
+                .ToArray();
+            var variantSymbols = issueRowSymbols!
                 .Single(symbol => symbol.Name == "IssueRowStyle")
-                .Children.Single(symbol =>
-                    symbol.Name.StartsWith("when ", StringComparison.Ordinal)
-                );
+                .Children.Where(symbol => symbol.Name.StartsWith("when ", StringComparison.Ordinal))
+                .ToArray();
             Assert(
-                variantSymbol.SelectionSpan.Equals(variant.Condition.Span),
-                "variant document-symbol selection range did not select its condition."
+                variantSymbols.Length == variants.Length,
+                "variant document symbols did not cover every authored state rule."
             );
+            foreach (var variant in variants)
+                Assert(
+                    variantSymbols.Any(symbol =>
+                        symbol.SelectionSpan.Equals(variant.Condition.Span)
+                    ),
+                    "variant document-symbol selection range did not select its condition."
+                );
             Assert(
                 issueRowSymbols!
                     .SelectMany(symbol => symbol.Children)
