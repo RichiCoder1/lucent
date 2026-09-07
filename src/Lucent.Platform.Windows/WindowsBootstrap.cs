@@ -88,6 +88,7 @@ public static class WindowsBootstrap
         WindowsPopupHost? popup = null;
         var popupInputGate = new WindowsPopupInputGate();
         ContextMenuRequest? pendingPopup = null;
+        InputRouter? contextMenuRouter = null;
         Action<ContextMenuRequest>? popupRequested = null;
         var errors = new List<Exception>();
         try
@@ -136,7 +137,8 @@ public static class WindowsBootstrap
                 pendingPopup?.Dispose();
                 pendingPopup = request;
             };
-            composition.Input.ContextMenuRequested += popupRequested;
+            contextMenuRouter = composition.Input;
+            contextMenuRouter.ContextMenuRequested += popupRequested;
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
             _ = cursor.Activate();
@@ -448,8 +450,12 @@ public static class WindowsBootstrap
         finally
         {
             Capture(errors, () => liveResize?.Dispose());
-            if (popupRequested is not null)
-                Capture(errors, () => composition.Input.ContextMenuRequested -= popupRequested);
+            if (popupRequested is not null && contextMenuRouter is not null)
+            {
+                var handler = popupRequested;
+                var router = contextMenuRouter;
+                Capture(errors, () => router.ContextMenuRequested -= handler);
+            }
             Capture(errors, () => pendingPopup?.Dispose());
             Capture(errors, () => popup?.Dispose());
             Capture(errors, () => input?.Dispose());

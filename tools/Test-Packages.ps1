@@ -93,7 +93,9 @@ try {
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($process.MainWindowTitle -ne 'Lucent Issue Browser') { throw 'Published app did not create its window.' }
-    if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw 'Published app failed ordinary shutdown.' }
+    if (-not $process.CloseMainWindow()) { throw "Published app rejected the close request. $(Get-Content $stderr -Raw)" }
+    if (-not $process.WaitForExit(10000)) { throw "Published app did not exit within 10 seconds. $(Get-Content $stderr -Raw)" }
+    if ($process.ExitCode -ne 0) { throw "Published app shutdown exited with code $($process.ExitCode). $(Get-Content $stderr -Raw)" }
     Write-Output "Package-only real application restore/NativeAOT/startup/close: PASS ($Version)"
 } finally {
     if ($process) { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }; $process.Dispose() }
