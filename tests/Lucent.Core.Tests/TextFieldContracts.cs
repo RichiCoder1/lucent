@@ -58,8 +58,10 @@ public sealed class TextFieldContracts
                     )
                 )
                 .Handled
-                && router.FocusedElement?.ElementId == field.Id,
-            "Primary text-field pointer down did not focus and handle without caret hit testing."
+                && router.FocusedElement?.ElementId == field.Id
+                && state.Caret == 0
+                && state.Anchor == 0,
+            "Primary text-field pointer down did not focus and place the caret at the field start."
         );
         scene = Install(composition, router);
         Assert(
@@ -76,7 +78,7 @@ public sealed class TextFieldContracts
                 && initialCaret == initialCaretNode.Bounds
                 && initialCaret.X == fieldBox.Bounds.X + 2
                 && initialCaret.Y == fieldBox.Bounds.Y + 3
-                && initialCaret.Height == 12,
+                && initialCaret.Height == 14,
             "Focused padded text field did not expose its rendered inner caret geometry."
         );
 
@@ -495,7 +497,7 @@ public sealed class TextFieldContracts
                         && router.TryGetCaretGeometry(out var caret)
                         && caret.X == focused.X
                         && caret.Y == focused.Y
-                        && caret.Height == focused.Height,
+                        && MathF.Abs(caret.Height - 14) < .001f,
                     $"Focused empty {axis} text field changed size, painted its placeholder, or lost caret geometry at {scale}x."
                 );
 
@@ -619,6 +621,238 @@ public sealed class TextFieldContracts
             "Failed text-field setup retained presentation state."
         );
         _ = Controls.TextField(field, theme, "Field");
+    }
+
+    [TestMethod]
+    public void SingleLinePointerPlacesCaretAndDragSelectsAcrossPaddingOverflowAndGraphemes()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "text-field-pointer");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var field = composition.Child(composition.Root, "field");
+        var state = Controls.TextField(
+            field,
+            theme,
+            "Search",
+            "a😀b",
+            Style
+                .Empty.Set(LayoutProperties.Width, 50f)
+                .Set(LayoutProperties.Height, 40f)
+                .Set(LayoutProperties.Padding, new Insets(5, 6, 5, 6))
+        );
+        state.MoveHome();
+
+        var router = composition.Input;
+        var scene = Install(composition, router, new HitMetricShaper());
+        var bounds = scene.Boxes.Single(item => item.Identity.ElementId == field.Id).Bounds;
+        var text = Flatten(scene.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == field.Id);
+
+        Assert(
+            router
+                .DispatchPointer(
+                    new(
+                        PointerCommandKind.Down,
+                        1,
+                        text.Bounds.X + 25,
+                        text.Bounds.Y + 7,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled
+                && state.Caret == 3
+                && state.Anchor == 3,
+            "Single-line pointer down did not place the caret at a grapheme boundary."
+        );
+        Assert(
+            router
+                .DispatchPointer(
+                    new(PointerCommandKind.Move, 1, bounds.X + bounds.Width + 40, text.Bounds.Y + 7)
+                )
+                .Handled
+                && state.Anchor == 3
+                && state.Caret == 4,
+            "Single-line pointer capture did not extend the selection outside the field bounds."
+        );
+        Assert(
+            router
+                .DispatchPointer(
+                    new(PointerCommandKind.Up, 1, bounds.X + bounds.Width + 40, text.Bounds.Y + 7)
+                )
+                .Handled,
+            "Single-line pointer capture did not release on pointer up."
+        );
+
+        state.Value = "";
+        scene = Install(composition, router, new HitMetricShaper());
+        bounds = scene.Boxes.Single(item => item.Identity.ElementId == field.Id).Bounds;
+        var inner = scene
+            .Input.Single(item => item.Identity.ElementId == field.Id)
+            .ChildClipBounds!.Value;
+        Assert(
+            router
+                .DispatchPointer(
+                    new(
+                        PointerCommandKind.Down,
+                        2,
+                        inner.X + inner.Width / 2,
+                        inner.Y + 7,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled
+                && state.Caret == 0
+                && state.Anchor == 0,
+            "An empty single-line field did not accept a pointer caret placement."
+        );
+        Assert(
+            router
+                .DispatchPointer(new(PointerCommandKind.Up, 2, bounds.X - 20, inner.Y + 7))
+                .Handled,
+            "An empty single-line field did not preserve pointer capture through release."
+        );
+
+        state.Value = "abcdefgh";
+        state.MoveEnd();
+        scene = Install(composition, router, new HitMetricShaper());
+        bounds = scene.Boxes.Single(item => item.Identity.ElementId == field.Id).Bounds;
+        inner = scene
+            .Input.Single(item => item.Identity.ElementId == field.Id)
+            .ChildClipBounds!.Value;
+        Assert(
+            Flatten(scene.Nodes)
+                .OfType<TextSceneNode>()
+                .Single(node => node.Identity.Element.ElementId == field.Id)
+                .Bounds.X < inner.X,
+            "The overflowed single-line text did not retain its horizontally scrolled origin."
+        );
+        Assert(
+            router
+                .DispatchPointer(
+                    new(
+                        PointerCommandKind.Down,
+                        3,
+                        inner.X + inner.Width - 2,
+                        inner.Y + 7,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled
+                && state.Caret == state.Value.Length
+                && state.Anchor == state.Value.Length,
+            "Pointer hit testing did not follow the horizontally scrolled single-line text."
+        );
+        router.DispatchPointer(
+            new(PointerCommandKind.Up, 3, inner.X + inner.Width - 2, inner.Y + 7)
+        );
+
+        state.MoveHome();
+        state.SetPreedit("中", 0, 1);
+        scene = Install(composition, router, new HitMetricShaper());
+        bounds = scene.Boxes.Single(item => item.Identity.ElementId == field.Id).Bounds;
+        Assert(
+            router
+                .DispatchPointer(
+                    new(
+                        PointerCommandKind.Down,
+                        4,
+                        bounds.X + 10,
+                        bounds.Y + 10,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled && !state.HasPreedit,
+            "A single-line pointer down did not cancel the active preedit composition."
+        );
+    }
+
+    [TestMethod]
+    public void SingleLineCaretAndSelectionUseTextLineMetricsIncludingEmptyText()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "text-field-metrics");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var field = composition.Child(composition.Root, "field");
+        var padding = new Insets(5, 4, 7, 6);
+        var state = Controls.TextField(
+            field,
+            theme,
+            "Field",
+            "abcd",
+            Style
+                .Empty.Set(LayoutProperties.Width, 120f)
+                .Set(LayoutProperties.Height, 60f)
+                .Set(LayoutProperties.Padding, padding)
+                .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
+        );
+
+        var router = composition.Input;
+        var scene = Install(composition, router, new HitMetricShaper());
+        var bounds = scene.Boxes.Single(item => item.Identity.ElementId == field.Id).Bounds;
+        var text = Flatten(scene.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == field.Id);
+        Assert(
+            router
+                .DispatchPointer(
+                    new(
+                        PointerCommandKind.Down,
+                        1,
+                        text.Bounds.X + 5,
+                        text.Bounds.Y + 7,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled,
+            "Could not focus the metric geometry text field."
+        );
+        state.MoveHome();
+        state.MoveRight(extend: true);
+        scene = Install(composition, router, new HitMetricShaper());
+        text = Flatten(scene.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == field.Id);
+        var caret = Flatten(scene.Nodes)
+            .OfType<PaintSceneNode>()
+            .Single(node =>
+                node.Identity.Element.ElementId == field.Id
+                && node.Identity.Kind == SceneNodeKind.Caret
+            );
+        var selection = Flatten(scene.Nodes)
+            .OfType<PaintSceneNode>()
+            .Single(node =>
+                node.Identity.Element.ElementId == field.Id
+                && node.Identity.Kind == SceneNodeKind.Selection
+            );
+        Assert(
+            MathF.Abs(caret.Bounds.Y - text.Bounds.Y) < .001f
+                && MathF.Abs(caret.Bounds.Height - 14) < .001f
+                && MathF.Abs(selection.Bounds.Y - text.Bounds.Y) < .001f
+                && MathF.Abs(selection.Bounds.Height - 14) < .001f,
+            "Single-line caret and selection geometry ignored shaped line metrics."
+        );
+        Assert(
+            router.TryGetCaretGeometry(out var reportedCaret) && reportedCaret == caret.Bounds,
+            "Single-line native caret geometry did not match its rendered metric geometry."
+        );
+
+        state.Value = "";
+        scene = Install(composition, router, new HitMetricShaper());
+        bounds = scene.Boxes.Single(item => item.Identity.ElementId == field.Id).Bounds;
+        var inner = SceneLayout.ContentBounds(bounds, padding, 1);
+        caret = Flatten(scene.Nodes)
+            .OfType<PaintSceneNode>()
+            .Single(node =>
+                node.Identity.Element.ElementId == field.Id
+                && node.Identity.Kind == SceneNodeKind.Caret
+            );
+        var expectedEmptyY = inner.Y + (inner.Height - 14) / 2;
+        Assert(
+            MathF.Abs(caret.Bounds.Y - expectedEmptyY) < .001f
+                && MathF.Abs(caret.Bounds.Height - 14) < .001f,
+            "Empty single-line caret geometry did not use the explicit text line-height rule."
+        );
     }
 
     private static void AssertMergedEdit(

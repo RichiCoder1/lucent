@@ -559,6 +559,8 @@ public sealed class LayoutSceneContracts
         var containerText = TextFor(container.Id);
         var selection = PaintFor(editable.Id, SceneNodeKind.Selection);
         var caret = PaintFor(editable.Id, SceneNodeKind.Caret);
+        const float editableLineTop = 0;
+        const float editableLineHeight = 14;
 
         Assert(
             MathF.Abs(centeredRowText.Bounds.X - (centeredRowBounds.X + 36.5f)) < .001f
@@ -573,11 +575,11 @@ public sealed class LayoutSceneContracts
             MathF.Abs(editableText.Bounds.X - (editableBounds.X + 26)) < .001f
                 && MathF.Abs(editableText.Bounds.Y - (editableBounds.Y + 8)) < .001f
                 && MathF.Abs(selection.Bounds.X - (editableBounds.X + 33)) < .001f
-                && selection.Bounds.Y == editableBounds.Y
-                && selection.Bounds.Height == editableBounds.Height
+                && selection.Bounds.Y == editableText.Bounds.Y + editableLineTop
+                && selection.Bounds.Height == editableLineHeight
                 && MathF.Abs(caret.Bounds.X - (editableBounds.X + 40)) < .001f
-                && caret.Bounds.Y == editableBounds.Y
-                && caret.Bounds.Height == editableBounds.Height,
+                && caret.Bounds.Y == editableText.Bounds.Y + editableLineTop
+                && caret.Bounds.Height == editableLineHeight,
             "Leaf alignment shifted editable text without preserving no-wrap selection/caret geometry."
         );
         Assert(

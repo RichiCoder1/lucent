@@ -4,7 +4,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>Composition-owned UI-thread router. It accepts only retained Core metadata and portable commands.</summary>
-public sealed class InputRouter
+public sealed partial class InputRouter
 {
     private readonly Composition _composition;
     private readonly List<Registration<Action<PointerRoute>>> _pointer = [];
@@ -227,7 +227,11 @@ public sealed class InputRouter
                 command.Kind == PointerCommandKind.Cancel ? null : scrollbar?.Viewport
             );
             if (target is null)
+            {
+                if (command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
+                    _contextPointer = null;
                 return Reject(InputRejection.NoTarget, "Pointer/" + command.Kind, errors);
+            }
             if (scrollbarCapture || (!hadCapture && scrollbar is not null))
             {
                 var barForRoute = scrollbarCapture
@@ -241,7 +245,15 @@ public sealed class InputRouter
                 Throw(errors);
                 return scrollbarResult;
             }
-            var result = RoutePointer(command, target.Value, errors);
+            var result = HandleContextPointer(command, target.Value)
+                ? new InputDispatchResult(
+                    InputDispatchStatus.Delivered,
+                    InputRejection.None,
+                    target,
+                    Path(target.Value),
+                    true
+                )
+                : RoutePointer(command, target.Value, errors);
             if (command.Kind == PointerCommandKind.Up)
                 Release(command.PointerId, PointerCaptureLossReason.Released, errors);
             if (command.Kind == PointerCommandKind.Cancel)
@@ -328,7 +340,15 @@ public sealed class InputRouter
                     : new ElementIdentity(_composition.Epoch, _composition.Root.Id);
             if (!Eligible(target))
                 return Reject(InputRejection.Ineligible, "Key/" + command.Kind, errors);
-            var result = RouteKey(command, target, errors);
+            var result = HandleContextKey(command, target)
+                ? new InputDispatchResult(
+                    InputDispatchStatus.Delivered,
+                    InputRejection.None,
+                    target,
+                    Path(target),
+                    true
+                )
+                : RouteKey(command, target, errors);
             if (!result.Handled && command is { Kind: KeyCommandKind.Down, Key: Key.Tab })
             {
                 MoveFocusCore(
@@ -948,6 +968,10 @@ public sealed class InputRouter
     internal void Cleanup()
     {
         _composition.CheckThread();
+        _activeMenu?.Dismiss();
+        _activeMenu = null;
+        _contextPointer = null;
+        ContextMenuRequested = null;
         if (_disposed)
             return;
         var errors = new List<Exception>();

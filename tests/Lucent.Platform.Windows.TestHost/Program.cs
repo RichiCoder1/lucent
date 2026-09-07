@@ -11,6 +11,7 @@ internal static class Program
             ["--editor-session-proof"] => EditorSessionFixture.Run(),
             ["--input-fixture"] => InputFixture.Run(),
             ["--layout-fixture"] => LayoutFixture.Run(),
+            ["--live-layout-fixture"] => LayoutFixture.RunLive(),
             ["--listener-proof"] => ListenerProof.Run(),
             ["--uia-fixture"] => UiaFixture.Run(),
             ["--virtualization-fixture"] => VirtualizationFixture.Run(),

@@ -889,6 +889,8 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             SemanticRole.TextField => 50004,
             SemanticRole.List => 50008,
             SemanticRole.ListItem => 50007,
+            SemanticRole.Menu => 50009,
+            SemanticRole.MenuItem => 50011,
             SemanticRole.Text => 50020,
             SemanticRole.Status => 50017,
             SemanticRole.Group when node.Actions.HasFlag(SemanticAction.Scroll) => 50033,

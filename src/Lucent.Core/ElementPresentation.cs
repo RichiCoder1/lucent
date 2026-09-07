@@ -7,6 +7,7 @@ internal sealed class ElementPresentation
 {
     private readonly Element _element;
     private readonly ThemeContext _theme;
+    internal ThemeContext Theme => _theme;
     private readonly FlatAssignment[] _component;
     private readonly FlatAssignment[] _author;
     private readonly Transition[] _transitions;

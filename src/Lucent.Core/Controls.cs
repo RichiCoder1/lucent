@@ -612,16 +612,28 @@ internal static class Controls
         ThemeContext theme,
         string label,
         Action? activate = null,
-        Style? style = null
-    ) => ConfigureSelectable(element, theme, label, activate, style, projectLabel: true);
+        Style? style = null,
+        bool controlled = false
+    ) =>
+        ConfigureSelectable(element, theme, label, activate, style, projectLabel: true, controlled);
 
     internal static ControlState ComposedSelectable(
         Element element,
         ThemeContext theme,
         string label,
         Action? activate = null,
-        Style? style = null
-    ) => ConfigureSelectable(element, theme, label, activate, style, projectLabel: false);
+        Style? style = null,
+        bool controlled = false
+    ) =>
+        ConfigureSelectable(
+            element,
+            theme,
+            label,
+            activate,
+            style,
+            projectLabel: false,
+            controlled
+        );
 
     private static ControlState ConfigureSelectable(
         Element element,
@@ -629,7 +641,8 @@ internal static class Controls
         string label,
         Action? activate,
         Style? style,
-        bool projectLabel
+        bool projectLabel,
+        bool controlled
     )
     {
         label = Required(label, nameof(label));
@@ -651,7 +664,8 @@ internal static class Controls
                 "selectable",
                 new(SemanticRole.ListItem, label, actions: SemanticAction.Select),
                 activate,
-                state
+                state,
+                controlled
             )
         );
         Bind(

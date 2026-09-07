@@ -43,6 +43,12 @@ public enum BehaviorState
 /// <summary>Portable accessibility roles emitted in retained semantic snapshots.</summary>
 public enum SemanticRole
 {
+    /// <summary>Exposes a menu command container.</summary>
+    Menu,
+
+    /// <summary>Exposes an invokable menu command.</summary>
+    MenuItem,
+
     /// <summary>Exposes a noninteractive container.</summary>
     Group,
 
@@ -387,6 +393,12 @@ public sealed class BehaviorContext
     internal ElementIdentity Identity => new(_composition.Epoch, ElementId);
 
     internal InputRouter CompositionInput() => _composition.Input;
+
+    internal void RegisterContextMenu(
+        Func<ComponentRecipe> menu,
+        ThemeContext theme,
+        Action<bool>? onOpenChanged
+    ) => _composition.Input.RegisterContextMenu(ElementId, _scope, menu, theme, onOpenChanged);
 
     internal bool SelectSemantic() => _composition.SelectSemantic(Identity);
 

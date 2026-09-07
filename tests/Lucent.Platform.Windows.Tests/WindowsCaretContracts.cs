@@ -198,4 +198,23 @@ public sealed class WindowsCaretContracts
         Assert.IsTrue(activated.SequenceEqual([(nint)1, 2, 1]));
         Assert.IsTrue(destroyed.Order().SequenceEqual([(nint)1, 2]));
     }
+
+    [TestMethod]
+    public void CursorMapsPortablePointerIntentAndRejectsUnresolvedAuto()
+    {
+        var created = new List<CursorIntent>();
+        using var cursor = new WindowsCursor(
+            (CursorIntent intent) =>
+            {
+                created.Add(intent);
+                return intent == CursorIntent.Pointer ? 3 : 1;
+            },
+            _ => true,
+            _ => { },
+            () => "error"
+        );
+        cursor.Activate(CursorIntent.Pointer);
+        Assert.IsTrue(created.SequenceEqual([CursorIntent.Pointer]));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => cursor.Activate(CursorIntent.Auto));
+    }
 }

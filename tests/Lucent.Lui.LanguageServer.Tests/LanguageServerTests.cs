@@ -2373,6 +2373,18 @@ public component Counter() {
             {
                 (new Uri(columnDeclarationPath), new LuiSpan(columnDeclaration, "Column".Length)),
             };
+            var menuSourcePath = Path.GetFullPath("src/Lucent.Core/ContextMenus.cs");
+            var menuColumnReference = (await File.ReadAllTextAsync(menuSourcePath)).IndexOf(
+                "Column(",
+                StringComparison.Ordinal
+            );
+            Assert(
+                menuColumnReference >= 0,
+                "The menu separator Column reference fixture disappeared."
+            );
+            expectedColumnLocations.Add(
+                (new Uri(menuSourcePath), new LuiSpan(menuColumnReference, 6))
+            );
             foreach (var path in Directory.GetFiles("apps/Lucent.IssueBrowser", "*.lui"))
             {
                 var text = await File.ReadAllTextAsync(path);
@@ -2412,7 +2424,7 @@ public component Counter() {
                     && actualColumnLocations.SetEquals(expectedColumnLocations)
                     && actualColumnEdits is not null
                     && actualColumnEdits.SetEquals(expectedColumnLocations),
-                $"Issue Browser Column references/rename did not cover every paired tag and the Core project-reference declaration exactly. Missing references: {String.Join(", ", missingColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected references: {String.Join(", ", unexpectedColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; missing edits: {String.Join(", ", missingColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected edits: {String.Join(", ", unexpectedColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}."
+                $"Issue Browser Column references/rename did not cover every paired tag and the Core project declaration and usage exactly. Missing references: {String.Join(", ", missingColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected references: {String.Join(", ", unexpectedColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; missing edits: {String.Join(", ", missingColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected edits: {String.Join(", ", unexpectedColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}."
             );
             Assert(
                 tagCompletions.Any(item =>
@@ -2629,7 +2641,19 @@ public component Counter() {
                 .RootElement.GetProperty("result")
                 .GetProperty("changes");
             Assert(
-                rpcColumnReferences.Length == 9
+                rpcColumnReferences.Length == 10
+                    && rpcColumnReferences.Count(location =>
+                        location
+                            .GetProperty("uri")
+                            .GetString()!
+                            .EndsWith("ContextMenus.cs", StringComparison.Ordinal)
+                    ) == 1
+                    && rpcColumnChanges
+                        .EnumerateObject()
+                        .Single(change =>
+                            change.Name.EndsWith("ContextMenus.cs", StringComparison.Ordinal)
+                        )
+                        .Value.GetArrayLength() == 1
                     && rpcColumnReferences.Count(location =>
                         location
                             .GetProperty("uri")
@@ -2648,7 +2672,7 @@ public component Counter() {
                             change.Name.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
                         )
                         .Sum(change => change.Value.GetArrayLength()) == 8,
-                "Issue Browser Column RPC references/rename did not preserve all paired tags and Core declaration."
+                "Issue Browser Column RPC references/rename did not preserve all paired tags and Core declaration/usage."
             );
             var columnSource = new Uri(Path.GetFullPath("src/Lucent.Core/Components.cs"));
             var columnSourceText = await File.ReadAllTextAsync(columnSource.LocalPath);
@@ -2704,7 +2728,7 @@ public component Counter() {
                 }
             );
             Assert(
-                insertedLineReferences.RootElement.GetProperty("result").GetArrayLength() == 9
+                insertedLineReferences.RootElement.GetProperty("result").GetArrayLength() == 10
                     && sameLineRename
                         .RootElement.GetProperty("result")
                         .GetProperty("changes")

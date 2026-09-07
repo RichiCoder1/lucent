@@ -48,9 +48,9 @@ public static partial class Components
 
 `ComponentContent` accepts zero or more entries, validates and snapshots them when the owning recipe is created, and mounts them transactionally below that recipe's root. A component still creates exactly one stable root. Named slots reuse this content capability later, after a real compositional control proves their interface; the first implementation has default content only.
 
-The initial author-facing built-ins are `Row`, `Column`, `Text`, `Button`, `TextField`, `TextArea`, `Selectable`, `ScrollViewport`, `VirtualizedList`, `Status`, and `Progress`. Redundant `Panel`, styled `Loading`, styled `Error`, mounted state handles, and duplicate public configurator overloads are not part of the ordinary recipe interface. The underlying element, presentation, behavior, and composition primitives remain the advanced custom-control seam.
+The initial author-facing built-ins are `Row`, `Column`, `Text`, `Button`, `TextField`, `TextArea`, `Selectable`, `ScrollViewport`, `VirtualizedList`, `Status`, `Progress`, `ContextMenu`, `Menu`, `MenuItem`, and `MenuSeparator`. Redundant `Panel`, styled `Loading`, styled `Error`, mounted state handles, and duplicate public configurator overloads are not part of the ordinary recipe interface. The underlying element, presentation, behavior, and composition primitives remain the advanced custom-control seam.
 
-Ordinary parameters are validated and captured when a recipe is created. They are construction-time values unless their declared type is explicitly live. Common static-or-live inputs may expose focused `T` and `Func<T>` overloads; inherently live inputs use `Func<T>` directly. There is no `ReactiveValue<T>` wrapper or combinatorial overload matrix. Each mounted reader uses the existing scope-owned reactive graph and is released on disposal. Programmatic controlled text synchronization remains deferred.
+Ordinary parameters are validated and captured when a recipe is created. They are construction-time values unless their declared type is explicitly live. Common static-or-live inputs may expose focused `T` and `Func<T>` overloads; inherently live inputs use `Func<T>` directly. There is no `ReactiveValue<T>` wrapper or combinatorial overload matrix. Each mounted reader uses the existing scope-owned reactive graph and is released on disposal. Programmatic controlled text synchronization uses the application-owned `EditorSession` contract described below.
 
 Styles are immutable recipe inputs. Standard properties have typed fluent methods over `Style.Set`/`Bind`; custom properties retain those universal methods. `Style.With(Style?)` composes left-to-right, treats null as no additional override, and lets an intentionally styleable component forward caller overrides. A component exposes `Style? style` only when its declared interface supports root restyling; the compiler adds no magical style parameter.
 
@@ -251,6 +251,8 @@ style PrimaryButton {
 
 The Lucent SDK supplies an opt-out ordinary `Lucent.Core` namespace using only. Built-in `Components` are tag-only, framework properties are style-left-hand-side-only, and `VariantState` is `when`-only; application and third-party modules may publish ordinary static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics. A unique built-in style name is resolved only in the property position on the left of `:`. This lets `GridPlacement: new GridPlacement(...)` and `TextWrap: TextWrap.WordWithGraphemeFallback` use the normal C# type names on the value side; ordinary C# member access keeps its usual binding rules.
 
+Token-valued expressions choose a token when the style is constructed; subsequent changes to that token's themed value remain live. A conditional that switches token identity is not a live value binding. For a component-local visual state, use a live concrete property-value expression; do not assume wrapping entire style values in a C# conditional will recompose an already-mounted style.
+
 Source-copied components become application-owned and therefore bind unqualified style tokens against the consuming project's `<RootNamespace>.Tokens`. Missing tokens are ordinary compilation errors. Components requiring a fixed token contract qualify their own token class explicitly.
 
 An explicit `Style? style` component parameter is the initial styleability capability: it declares that callers may override the component root. Lucent does not define layout/text/input traits or concrete-control style targets. If real invalid property/component combinations later justify applicability checks, property metadata may declare inferred requirements; no syntax or public trait contract is reserved yet.
@@ -265,7 +267,7 @@ The compiler targets the framework contracts rather than defining them:
 - two to sixteen finite ordered opaque gradient stops and native sRGB interpolation;
 - physical logical-pixel four-edge `Insets` (`Left`, `Top`, `Right`, `Bottom`), finite and nonnegative, and `Padding` that constrains child content while background covers the arranged box;
 - composited subtree `Opacity`; opacity zero does not change layout, hit testing, focus, or semantics;
-- separate `Clip`; no image, background layers, border, radius, blend mode, repeating/radial/conic gradient, or runtime textual color parser in `.lui`.
+- separate `Clip`; no image, background layers, blend mode, repeating/radial/conic gradient, or runtime textual color parser in `.lui`.
 
 Future `.lui` color literals parse at compile time. A shared golden corpus keeps compile-time conversion identical to public `Color.Parse`/`TryParse` behavior.
 
@@ -373,6 +375,56 @@ Component identity is resolved namespace plus declared name. Stable generated hi
 Generated sources live under Roslyn/`obj`, are inspectable on demand, and are not checked in. Only the declared `[LucentComponent]` method on the namespace's partial static `Components` class is a callable contract. Helpers and maps are generated implementation details hidden from completion where practical.
 
 Enhanced `#line` directives map compiler/debugger diagnostics and C# expression spans. A compact deterministic compiler-owned map covers every syntax and generated construct bidirectionally for completion, hover, diagnostics, rename/references, formatting, semantic navigation, and generated-code navigation. There is no runtime mapping service.
+
+## Discovering control-state style winners
+
+Component defaults participate in the same finite state priority as authored styles: Disabled > Invalid > Pressed > Selected > FocusVisible > Hover. A compound state wins over a single state at the same leading priority. Author assignments replace component assignments at the same priority; an authored single-state rule does not automatically override a component compound-state rule.
+
+For example, a selected `Selectable` with keyboard focus may use its component-provided `Selected | FocusVisible` background even when the document declares `when Selected` and `when FocusVisible`. This is valid composition, not a compiler error. To replace that combination, author it explicitly:
+
+```lui
+style NoteStyle {
+    when Selected | FocusVisible {
+        Background: LightNotesTheme.Selection;
+        TextColor: LightNotesTheme.Ink;
+        FocusRing: LightNotesTheme.KeyboardFocus;
+    }
+}
+```
+
+Use the resolved style diagnostic dump/provenance to identify the winning property and state combination when reviewing a control. Preserve the visible keyboard focus cue when replacing its background. Light Notes `NoteRow.lui` and `Navigation.lui` provide concrete combined-state overrides; a dedicated editor winner inspector remains a possible later convenience.
+
+## Context menus and pointer intent
+
+`ContextMenu` supplies a lazy menu factory for its content subtree. On Windows, Lucent renders the menu in a separate popup window that can extend beyond the application client. Right-click targets the clicked subtree without invoking its primary action or changing application selection. Shift+F10 and the context-menu key target the focused control.
+
+```lui
+public component NoteActions(ApplicationCommand open, ApplicationCommand archive) {
+    <Menu>
+        <MenuItem command={open}>Open note</MenuItem>
+        <MenuSeparator />
+        <MenuItem command={archive}>Archive</MenuItem>
+    </Menu>
+}
+```
+
+Use the menu from a separate `NoteTarget.lui` document:
+
+```lui
+public component NoteTarget(ApplicationCommand open, ApplicationCommand archive) {
+    <ContextMenu menu={() => NoteActions(open, archive)}>
+        <Button onInvoke={() => open.TryExecute()}>Note title</Button>
+    </ContextMenu>
+}
+```
+
+`MenuItem` accepts an application-owned `command`, or `onInvoke` with an optional `enabled` reader. Availability remains reactive and is checked again before invocation. Accepted work keeps its application owner when the popup closes. Arrow keys move among enabled items; Home/End move to the boundaries; Enter/Space invoke; Escape or Tab dismiss. Dismissal restores retained focus when appropriate without overriding focus deliberately moved by a command.
+
+`ContextMenu` also accepts `onOpenChanged`, so a component can retain a local menu-open flag and show an outline around the invocation target independently of selection. The callback closes once when the menu is dismissed while its target is still alive; callbacks are not sent into disposed components. Light Notes `NoteRow.lui` demonstrates this pattern.
+
+TextField and TextArea provide undo, redo, cut, copy, paste and select-all menus by default. Opening their menu preserves the existing text selection. An explicit `ContextMenu` ancestor replaces that default. The initial menu surface supports flat groups and separators; submenus, arbitrary menu widgets and opt-in native Windows presentation remain later work.
+
+`Cursor: CursorIntent.Auto;` is the default. Eligible buttons, selectable items and menu items use a hand cursor; editors use a text cursor. Override with `CursorIntent.Default`, `Text`, or `Pointer` in an ordinary style when the control's interaction calls for it. Disabled controls do not advertise an unavailable action.
 
 ## Version and deferred surface
 

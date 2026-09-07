@@ -223,10 +223,18 @@ public sealed class WindowsHostContracts
             )
         )
         {
+            Assert(
+                textRouter.TryGetCaretGeometry(out var expectedCaret),
+                "Focused Core caret was unavailable."
+            );
             textAdapter.RefreshTextInput();
             Assert(
-                starts == 1 && area is { W: 1, H: 20 },
-                "Focused text field did not start SDL input with its Core caret rectangle."
+                starts == 1
+                    && area is { W: 1 } actual
+                    && actual.H == Math.Max(1, (int)MathF.Ceiling(expectedCaret.Height))
+                    && actual.X == (int)MathF.Round(expectedCaret.X)
+                    && actual.Y == (int)MathF.Round(expectedCaret.Y),
+                "Focused text field did not start SDL input with its text-derived Core caret rectangle."
             );
             Assert(
                 textAdapter.DispatchText(new(TextInputKind.Preedit, "中", 0, 1))

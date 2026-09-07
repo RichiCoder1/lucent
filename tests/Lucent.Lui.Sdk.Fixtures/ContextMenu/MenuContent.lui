@@ -1,0 +1,10 @@
+namespace SdkMenus;
+using System;
+using Lucent.Core;
+public component MenuContent(ApplicationCommand command, Action action, Func<bool> actionEnabled, bool archived) {
+    <Menu>
+        <MenuItem command={command}>Command</MenuItem>
+        <MenuSeparator />
+        <MenuItem onInvoke={action} enabled={actionEnabled}>{archived ? "Restore" : "Action"}</MenuItem>
+    </Menu>
+}

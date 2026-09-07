@@ -237,7 +237,7 @@ internal sealed class WindowsInputAdapter : IDisposable
             )
         );
         if (@event.Down)
-            Clipboard();
+            ProcessClipboardRequests();
         return true;
     }
 
@@ -277,7 +277,8 @@ internal sealed class WindowsInputAdapter : IDisposable
         }
     }
 
-    private void Clipboard()
+    /// <summary>Completes clipboard work requested by portable commands, including popup menu actions.</summary>
+    internal void ProcessClipboardRequests()
     {
         if (_clipboard is null || !_router.TryTakeClipboardRequest(out var request))
             return;
@@ -364,6 +365,8 @@ internal sealed class WindowsInputAdapter : IDisposable
     internal static Key? MapKey(SDL.Keycode key) =>
         key switch
         {
+            SDL.Keycode.F10 => Core.Key.F10,
+            SDL.Keycode.Application => Core.Key.ContextMenu,
             SDL.Keycode.Tab => Core.Key.Tab,
             SDL.Keycode.Return or SDL.Keycode.KpEnter => Core.Key.Enter,
             SDL.Keycode.Space => Core.Key.Space,

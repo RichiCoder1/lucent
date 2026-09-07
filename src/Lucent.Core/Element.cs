@@ -576,7 +576,7 @@ public sealed class Element : IDisposable
         && Participation == ElementParticipation.Visible
         && (_parent is null || _parent.ParticipatesInInput());
 
-    private bool InputAvailable() =>
+    internal bool InputAvailable() =>
         !IsDisposed
         && (_parent is null || _parent.InputAvailable())
         && Resolve(InputProperties.Enabled).Value

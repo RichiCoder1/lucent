@@ -1,0 +1,46 @@
+# Desktop host research: live sizing and popup menus
+
+Consulted 2026-09-07 for the Windows desktop capability work. This comparison keeps Lucent's existing Windows-first, CPU Skia, SDL3 and NativeAOT boundaries. It does not select a GPU migration or revive the archived Avalonia implementation.
+
+## Supported SDL3 mechanisms
+
+SDL documents why the ordinary event loop stalls during interactive move/resize on Windows: `SDL_PollEvent`, `SDL_WaitEvent`, `SDL_WaitEventTimeout` or `SDL_PumpEvents` can remain inside the native sizing loop instead of returning to application code. SDL supports two callback paths for progress: the `SDL_main.h` application callbacks, or an `SDL_AddEventWatch` handler that redraws on `SDL_EVENT_WINDOW_EXPOSED`. SDL notes that the callback improves the experience but does not guarantee perfectly smooth sizing. See [SDL: AppFreezeDuringDrag](https://wiki.libsdl.org/SDL3/AppFreezeDuringDrag).
+
+SDL's application-callback loop is the broadest mechanism because it runs both event and iteration callbacks while sizing. It is a poor fit for Lucent's current public `WindowsBootstrap.Run(...)` contract: SDL requires `SDL_EnterAppMainCallbacks` to be the only call in `SDL_main`, while Lucent is a library entered from an application's already-running managed `Main`. Requiring generated SDL entry points in every application would widen the authoring and hosting contract.
+
+The event watch is the bounded fit. Lucent registers one rooted watch for the owner window, accepts only owner-thread exposed events, prevents recursive frames, and contains exceptions before they cross the native callback. The callback reprojects Core at the current logical viewport and DPI, refreshes the installed input and UIA scene, drains already-accepted application work and UIA requests, then rasterizes and presents through the existing CPU surface/streaming-texture presenter. The normal outer loop remains authoritative for queued input, close negotiation, settings, pacing diagnostics and final disposal. The watch is removed before any dependency it can reach is disposed.
+
+This path deliberately recreates the CPU surface and SDL texture when backing dimensions change. Merely stretching the last texture would conceal exposed black pixels but would retain stale layout during the drag. Reprojection gives controls the current geometry. The focused callback contracts cover owner-window filtering, foreign-thread refusal, recursion, exception containment and removal. A published Windows smoke held the physical left button on the native resize border, crossed the responsive 700-pixel branch threshold, and observed the wide branch disappear through UIA before releasing the border. That establishes current-size Core reprojection during the native modal loop; visual cadence still depends on Windows' exposure frequency.
+
+## Popup hosting comparison
+
+| Approach | Outside-owner bounds and interaction | Performance and lifetime | Pit of success and developer experience | Decision |
+| --- | --- | --- | --- | --- |
+| SDL3 child popup window with Lucent rendering | [`SDL_CreatePopupWindow`](https://wiki.libsdl.org/SDL3/SDL_CreatePopupWindow) creates a parent-associated `SDL_WINDOW_POPUP_MENU`, positions it relative to the parent, gives the topmost popup keyboard focus, and constrains it to display bounds by default. Each popup gets its own Lucent composition, input adapter, renderer and UIA root. | A menu allocates one small CPU surface and streaming texture only while open. There is no blocking native menu loop. Parent hide/destruction recursively hides/destroys children, but Lucent still disposes explicitly so focus restoration and managed ownership are deterministic. | Reuses Lucent styles, text shaping, behaviors and semantics. The host API stays narrow: observe a `ContextMenuRequest`, measure it against available logical space, create the child, route by SDL window ID, dismiss, restore focus and dispose. | Selected first slice. |
+| Avalonia platform popup | Avalonia's `Popup` offers placement callbacks and light dismiss. Its Win32 host uses a separate `PopupImpl` unless overlay popups are configured; see [Avalonia Popup documentation](https://docs.avaloniaui.net/docs/reference/controls/popup) and [`WindowImpl.CreatePopup`](https://github.com/AvaloniaUI/Avalonia/blob/main/src/Windows/Avalonia.Win32/WindowImpl.cs). | Mature compositor and platform abstractions handle many edge cases, but adopting them would duplicate Lucent's window, render, input, styling and accessibility ownership. Separate top-level construction has framework-wide invalidation risks that require its own profiling. | Strong application-facing API, but it is a full framework dependency and an architectural compatibility path to the unreleased archived implementation. | Conceptual comparison only. |
+| Same-owner overlay | Keeps one renderer/surface and makes dismissal simple. | Lowest host resource cost. | Cannot satisfy the accepted requirement that menus extend beyond owner client bounds. | Rejected for this capability. |
+| Native Win32 menu | Naturally extends beyond the client and brings mature Windows menu behavior. | The native menu loop and callback lifetime would need proof that accepted work, UIA, repaint and close negotiation continue. Styling and Lucent composition do not transfer. | Could become a platform-specific opt-in style/defaults layer behind the portable menu model. | Explicitly deferred. |
+| SkiaSharp view hosted by MAUI/WPF/WinUI, or Uno Skia Desktop | SkiaSharp's [`SKCanvasView`](https://github.com/mono/SkiaSharp-API-docs/blob/main/SkiaSharpAPI/SkiaSharp.Views.Maui.Controls/SKCanvasView.xml) supplies a software drawing surface and invalidation API, not popup/window ownership. [Uno Skia Desktop](https://github.com/unoplatform/uno/blob/master/doc/articles/features/using-skia-desktop.md) supplies full platform hosts and normally selects accelerated rendering with software fallback. | Both delegate sizing, focus, DPI and popups to a larger host framework. Their renderer defaults and dependency graphs do not match Lucent's bounded CPU presenter. | Useful evidence that Skia itself is not the popup abstraction. Adopting either stack would replace rather than deepen Lucent's existing host seam. | No adoption. |
+
+## Windows ownership constraints
+
+The popup is created and destroyed on the SDL owner thread after portable input dispatch returns. It never opens a nested native loop. SDL events are routed by `WindowID`, preventing popup coordinates from reaching the owner composition. The popup uses its actual renderer output size and HWND DPI for projection; its request is measured against available logical display bounds before creation, and the returned native size remains authoritative.
+
+SDL documents implicit keyboard focus for the topmost popup menu. The observed Windows backend kept `SDL_GetKeyboardFocus` on the owner and delivered Escape with the owner's WindowID while the popup was visible. The host therefore forwards owner-ID keyboard and text events to the active topmost popup while retaining exact WindowID routing for pointer and window events. Stale popup focus, leave and close events are discarded before owner input, and the owner pointer-down used for light dismissal is consumed so it cannot arm content underneath.
+
+Dismissal, command state, focus return and portable menu semantics stay with Core. Windows owns the child window, renderer, CPU presenter, clipboard/cursor adapter and UIA root. A dismissed or invalid request closes before further input. Owner close and disposal close popups first. Pending accepted application work remains owned by the application session and continues through the shared dispatcher; popup teardown does not cancel it. Native menu styling/default selection is outside this first slice.
+
+UIA remains attached while the popup HWND is destroyed, so WM_NCDESTROY first makes the provider unavailable and releases the window subclass. Only then does the host disconnect and release the provider. This follows Microsoft's [server-side provider lifecycle](https://learn.microsoft.com/windows/win32/winauto/uiauto-serversideprovider) and avoids returning the provider from a re-entrant WM_GETOBJECT during [UiaDisconnectProvider](https://learn.microsoft.com/windows/win32/api/uiautomationcoreapi/nf-uiautomationcoreapi-uiadisconnectprovider).
+
+## Focused evidence
+
+The implementation should establish these independently:
+
+- event-watch callback filtering, thread affinity, non-reentrancy, exception containment and teardown order;
+- popup creation flags, parent-relative physical placement, display clamping and per-window event routing;
+- popup keyboard focus, Escape/outside-click dismissal, action invocation and owner focus restoration;
+- independent owner/popup DPI and backing-size changes;
+- UIA menu/menu-item roles and popup-root lifetime;
+- owner close, popup close and accepted asynchronous work completion without leaks.
+
+Headless contracts prove routing and ownership. Published interaction tests prove held-border responsive reprojection, physical caret placement and drag selection, popup bounds, UIA invocation, clipboard actions, dismissal, focus restoration and owner close.

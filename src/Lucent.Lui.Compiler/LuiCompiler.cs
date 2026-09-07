@@ -130,6 +130,17 @@ public static class LuiCompiler
                 diagnostics
             );
         }
+        else
+        {
+            styleValues = StyleValuePlans(
+                probeModel,
+                probeTree,
+                probeMap,
+                writer,
+                null,
+                tokenExpressions
+            );
+        }
         var contentPlans = ContentPlans(
                 probeModel,
                 probeTree,
@@ -1179,6 +1190,28 @@ public static class LuiCompiler
                 .ToArray();
             if (methods.Length == 0)
                 continue;
+            // Named attributes are overload discriminators when multiple component methods
+            // expose the same [DefaultContent] type. Keep the original set when no method
+            // accepts the authored names so Roslyn still owns the ordinary attribute diagnostic.
+            var authoredAttributeNames =
+                ElementAt(document, mapped.Source.Start)
+                    ?.Attributes.Select(attribute => attribute.Name.Text.TrimStart('@'))
+                    .Where(name => name != "name")
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray()
+                ?? Array.Empty<string>();
+            if (authoredAttributeNames.Length != 0)
+            {
+                var attributedMethods = methods
+                    .Where(method =>
+                        authoredAttributeNames.All(attributeName =>
+                            method.Parameters.Any(parameter => parameter.Name == attributeName)
+                        )
+                    )
+                    .ToArray();
+                if (attributedMethods.Length != 0)
+                    methods = attributedMethods;
+            }
             var defaults = new List<IParameterSymbol>();
             foreach (var method in methods)
             {
@@ -1347,6 +1380,14 @@ public static class LuiCompiler
         int start
     )
     {
+        return ElementAt(document, start)
+                ?.Children.Where(child => child is not LuiCommentSyntax)
+                .ToArray()
+            ?? Array.Empty<LuiBodySyntax>();
+    }
+
+    private static LuiElementSyntax? ElementAt(LuiDocumentSyntax document, int start)
+    {
         var pending = new Stack<LuiBodySyntax>(
             document.Component?.Body.Reverse() ?? Enumerable.Empty<LuiBodySyntax>()
         );
@@ -1356,7 +1397,7 @@ public static class LuiCompiler
             if (node is LuiElementSyntax element)
             {
                 if (element.Name.Span.Start == start)
-                    return element.Children.Where(child => child is not LuiCommentSyntax).ToArray();
+                    return element;
                 foreach (var child in element.Children.Reverse())
                     pending.Push(child);
             }
@@ -1371,7 +1412,7 @@ public static class LuiCompiler
                 foreach (var child in loop.Body.Reverse())
                     pending.Push(child);
         }
-        return Array.Empty<LuiBodySyntax>();
+        return null;
     }
 
     private static bool BindsContentCandidate(
@@ -1525,11 +1566,23 @@ public static class LuiCompiler
     )
     {
         var plans = new Dictionary<int, StyleValuePlan>();
-        if (rootTokens is null)
-            return plans;
         foreach (var lambda in tree.GetRoot().DescendantNodes().OfType<LambdaExpressionSyntax>())
         {
-            if (lambda.Body is not ExpressionSyntax body || !IsToken(model.GetTypeInfo(body).Type!))
+            if (lambda.Body is not ExpressionSyntax body)
+                continue;
+            var tokenType = model.GetTypeInfo(body).Type;
+            // An invalid target conversion can leave a conditional's type unresolved during
+            // the probe. Its matching token branches still identify the intended overload.
+            if (!IsToken(tokenType!) && body is ConditionalExpressionSyntax conditional)
+            {
+                var whenTrue = model.GetTypeInfo(conditional.WhenTrue).Type;
+                var whenFalse = model.GetTypeInfo(conditional.WhenFalse).Type;
+                if (
+                    IsToken(whenTrue!) && SymbolEqualityComparer.Default.Equals(whenTrue, whenFalse)
+                )
+                    tokenType = whenTrue;
+            }
+            if (!IsToken(tokenType!))
                 continue;
             var source = Translate(map, new LuiSpan(body.SpanStart, body.Span.Length));
             if (
@@ -1540,6 +1593,8 @@ public static class LuiCompiler
             )
                 tokenExpressions.Add(span.Start);
         }
+        if (rootTokens is null)
+            return plans;
         foreach (var name in tree.GetRoot().DescendantNodes().OfType<IdentifierNameSyntax>())
         {
             if (name.Parent is MemberAccessExpressionSyntax member && member.Name == name)

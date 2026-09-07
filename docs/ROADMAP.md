@@ -2,7 +2,7 @@
 
 ## Current direction
 
-Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The next step is owner review of the app, framework and .lui experience.
+Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.
 
 Production follows the decisions and contracts validated by the archived Native spike. The old implementation remains on [archive/avalonia-final](https://github.com/RichiCoder1/lucent/tree/archive/avalonia-final), and the complete spike record remains in the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). They are historical evidence, not active execution instructions.
 
@@ -14,8 +14,8 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 - Typed C# composition and preview `.lui` over the same framework contracts. `.lui` is the primary UI authoring direction; C# remains the underlying semantic/runtime API.
 - Reactive state, derived state, batching, scopes, explicit source-driven async resources and retry, owned external callback dispatch, deterministic disposal, and stable keyed composition.
 - Bounded explicit Grid and Flex-style rows/columns, responsive logical constraints, constrained paragraphs, scrolling, fixed-height keyed virtualization, typed styles, semantic tokens, inset borders/hairlines and independent focus rings, rounded surfaces/clips, font weights, finite variants, theme settings, reduced motion, and bounded transitions.
-- Text, panel/layout primitives, button, single-line text field, multiline text area, selectable/list row, scroll viewport, virtualized list, loading/progress, and simple error state.
-- Plain-text editing with composition support and a bounded 20,000-unit multiline workload, hoistable editor/viewport sessions, application-owned text focus targets, explicit hidden/collapsed participation, wheel/trackpad scrolling, application command scopes and chords, plus bounded UI Automation patterns and stale-node handling for the reference controls.
+- Text, panel/layout primitives, button, single-line text field, multiline text area, selectable/list row, scroll viewport, virtualized list, loading/progress, simple error state, and context menus with flat command groups and separators.
+- Plain-text editing with composition support and a bounded 20,000-unit multiline workload, hoistable editor/viewport sessions, application-owned text focus targets, explicit hidden/collapsed participation, wheel/trackpad scrolling, application command scopes and chords, portable cursor intent, Lucent-rendered popup menus beyond the owner client, live native resizing, plus bounded UI Automation patterns and stale-node handling for the reference controls.
 - Optional R3 debounce integration with explicit clocks and owner-thread callbacks.
 - Optional Microsoft hosting integration with negotiated asynchronous shutdown and accepted-work recovery.
 - Deterministic tree, reactive, layout, style, semantic, scene, and timing dumps.
@@ -38,6 +38,8 @@ Develop design quality alongside complete application slices. Deliver required `
 
 ## Current execution
 
+The accepted [desktop capabilities plan](plans/desktop-capabilities.md) applies the fresh review through #96–#100: controlled selection, single-line editing, durable drafts and collection continuity, live sizing/cursor intent, and Lucent-rendered menus that extend beyond the owner window. #95 covers observed authoring friction and documentation consistency. Package identities and focused verification are recorded in the tickets. Draft persistence uses one ordered writer per note; popup commands retain their application owner after dismissal. Opt-in native platform presentation remains #101.
+
 Owner interaction review exposed a new refinement batch: [#91 long-note freeze and Archive exit](https://github.com/RichiCoder1/lucent/issues/91), [#92 hover/pressed and app presentation](https://github.com/RichiCoder1/lucent/issues/92), [#93 Windows caret/cursor](https://github.com/RichiCoder1/lucent/issues/93), and [#94 default themeable scrollbars](https://github.com/RichiCoder1/lucent/issues/94). The interaction changes and Issue Browser theme adoption are implemented; the local NativeAOT app passed its four maintained desktop checks. Final package/app delivery is recorded in those issues. The original intermittent Archive exit remains under investigation with bounded crash diagnostics; successful round trips do not establish its cause. The previous closeout covered its recorded automated paths; it did not validate every interaction state. See [interaction refinement](plans/desktop-interaction-refinement.md).
 
 The [daily-use execution](plans/daily-use-execution.md) is delivered: #80–#90 cover the responsive shell, 750 ms autosave, complete workflow, safe restoration, presentation, explicit async resources, optional R3 integration and CI/review improvements. Published native interaction and targeted accessibility checks are complete. Use the [Light Notes review guide](https://github.com/RichiCoder1/light-notes/blob/main/docs/MANUAL-REVIEW.md) to collect concrete product, framework and .lui feedback before selecting the next chunk. Records, expression-bodied markup and a component registry remain deferred.
@@ -59,11 +61,13 @@ Track execution in [#63](https://github.com/RichiCoder1/lucent/issues/63), its 2
 
 ## Deferred directions
 
+- Opt-in platform styles, defaults and native presentation for menus, scrollbars and related behaviors ([#101](https://github.com/RichiCoder1/lucent/issues/101)); the selected first menu slice uses Lucent-rendered popup windows.
+
 - Additional substantial samples and maintained ports after the first useful links-and-notes application.
 - Stable API and package compatibility, a 1.0 contract, and a broader control catalog.
 - Runtime CSS/selectors, general templates, runtime token/theme import, and Linux desktop theme integration.
 - Sync, automatic page extraction, rich-text editing, and elaborate organization for the links-and-notes application.
-- Exhaustive IME or accessibility certification, password input, drag/drop, tables, trees, tabs, menus, dialogs, and plugin loading until a selected application flow justifies their scope.
+- Exhaustive IME or accessibility certification, password input, drag/drop, tables, trees, tabs, broader menu capabilities, dialogs, and plugin loading until a selected application flow justifies their scope.
 - Production GPU presentation, win-arm64, macOS, and Wayland until measured demand and new platform evidence justify them.
 - .NET 11 experiments after GA only when dependency support, warning-clean NativeAOT publication, reproducible tooling, and measured benefit are established.
 

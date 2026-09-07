@@ -486,6 +486,10 @@ public static class SceneLayout
                     )
                 );
         var textMetrics = IntrinsicTextMetrics(style, text, viewport.Scale, shaper, cache);
+        var emptyCaretText =
+            text is null && style.Text is "" && style.Caret == 0
+                ? EmptyCaretText(style, viewport.Scale, shaper, cache)
+                : null;
         var width = Constrain(
             style.Width
                 ?? (
@@ -789,16 +793,15 @@ public static class SceneLayout
             {
                 if (style.TextWrap == TextWrap.NoWrap)
                 {
-                    var left = TextPosition(text, style.Text!, start);
-                    var right = TextPosition(text, style.Text!, end);
+                    var selection = SingleLineSelectionBounds(text, style.Text!, start, end);
                     result.Add(
                         new PaintSceneNode(
                             new(identity, SceneNodeKind.Selection),
                             new(
-                                textBounds.X + Math.Min(left, right),
-                                inner.Y,
-                                MathF.Abs(right - left),
-                                inner.Height
+                                textBounds.X + selection.X,
+                                textBounds.Y + selection.Y,
+                                selection.Width,
+                                selection.Height
                             ),
                             Color.FromArgb(0x66, 0x3b, 0x82, 0xf6)
                         )
@@ -838,14 +841,20 @@ public static class SceneLayout
             {
                 if (style.TextWrap == TextWrap.NoWrap)
                 {
+                    var caretBounds = SingleLineCaretBounds(
+                        text,
+                        style.Text!,
+                        caret,
+                        1 / viewport.Scale
+                    );
                     result.Add(
                         new PaintSceneNode(
                             new(identity, SceneNodeKind.Caret),
                             new(
-                                textBounds.X + TextPosition(text, style.Text!, caret),
-                                inner.Y,
-                                1 / viewport.Scale,
-                                inner.Height
+                                textBounds.X + caretBounds.X,
+                                textBounds.Y + caretBounds.Y,
+                                caretBounds.Width,
+                                Math.Max(caretBounds.Height, 1 / viewport.Scale)
                             ),
                             style.TextColor
                         )
@@ -875,13 +884,23 @@ public static class SceneLayout
             }
         }
         else if (style.Text is "" && style.Caret == 0)
+        {
+            var metrics = GetTextLineMetrics(emptyCaretText, style.FontSize);
+            var verticalAlignment =
+                style.Axis == LayoutAxis.Row ? style.CrossAlignment : style.MainAlignment;
             result.Add(
                 new PaintSceneNode(
                     new(identity, SceneNodeKind.Caret),
-                    new(inner.X, inner.Y, 1 / viewport.Scale, inner.Height),
+                    new(
+                        inner.X,
+                        inner.Y + AlignmentOffset(verticalAlignment, inner.Height, metrics.Height),
+                        1 / viewport.Scale,
+                        Math.Max(metrics.Height, 1 / viewport.Scale)
+                    ),
                     style.TextColor
                 )
             );
+        }
         result.AddRange(childNodes);
         if (style.Clip)
         {
@@ -1525,6 +1544,66 @@ public static class SceneLayout
         bool Multiline,
         TextAffinity CaretAffinity
     );
+
+    private static ShapedText? EmptyCaretText(
+        in Values style,
+        float scale,
+        ITextShaper shaper,
+        ProjectionCache cache
+    ) =>
+        string.IsNullOrEmpty(style.TextMeasure)
+            ? null
+            : ShapeText(style.TextMeasure, style, scale, shaper, cache);
+
+    private static LayoutRect SingleLineCaretBounds(
+        ShapedText text,
+        string source,
+        int utf16Offset,
+        float caretWidth
+    )
+    {
+        var metrics = GetTextLineMetrics(text, 0);
+        return new(
+            TextPosition(text, source, utf16Offset),
+            metrics.Top,
+            caretWidth,
+            metrics.Height
+        );
+    }
+
+    private static LayoutRect SingleLineSelectionBounds(
+        ShapedText text,
+        string source,
+        int start,
+        int end
+    )
+    {
+        var metrics = GetTextLineMetrics(text, 0);
+        var leftPosition = TextPosition(text, source, start);
+        var rightPosition = TextPosition(text, source, end);
+        return new(
+            Math.Min(leftPosition, rightPosition),
+            metrics.Top,
+            MathF.Abs(rightPosition - leftPosition),
+            metrics.Height
+        );
+    }
+
+    private static TextLineMetrics GetTextLineMetrics(ShapedText? text, float fallbackHeight)
+    {
+        if (text is not null && text.Lines.Count != 0)
+        {
+            var line = text.Lines[0];
+            return new(line.Top, Math.Max(0, line.Descent - line.Ascent + line.Leading));
+        }
+        if (text is null || text.Runs.Count == 0)
+            return new(0, Math.Max(0, fallbackHeight));
+        var ascent = text.Runs.Min(run => run.Ascent);
+        var descent = text.Runs.Max(run => run.Descent);
+        return new(text.Runs[0].Baseline + ascent, Math.Max(0, descent - ascent));
+    }
+
+    private readonly record struct TextLineMetrics(float Top, float Height);
 
     /// <summary>Returns a bounded LTR caret position; it interpolates grapheme boundaries inside one ligature cluster and does not implement full bidi caret ordering.</summary>
     internal static float TextPosition(ShapedText text, string source, int utf16Offset)

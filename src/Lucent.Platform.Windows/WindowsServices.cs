@@ -167,15 +167,23 @@ internal readonly record struct ClipboardWriteResult(bool Succeeded, string? Err
 
 /// <summary>Host-owned arrow and I-beam cursors, released before SDL shutdown.</summary>
 internal sealed class WindowsCursor(
-    Func<bool, nint> create,
+    Func<CursorIntent, nint> create,
     Func<nint, bool> set,
     Action<nint> destroy,
     Func<string> error
 ) : IDisposable
 {
-    private readonly Dictionary<bool, nint> _cursors = [];
-    private bool? _active;
+    private readonly Dictionary<CursorIntent, nint> _cursors = [];
+    private CursorIntent? _active;
     private bool _disposed;
+
+    internal WindowsCursor(
+        Func<bool, nint> create,
+        Func<nint, bool> set,
+        Action<nint> destroy,
+        Func<string> error
+    )
+        : this(intent => create(intent == CursorIntent.Text), set, destroy, error) { }
 
     internal WindowsCursor(
         Func<nint> create,
@@ -183,31 +191,44 @@ internal sealed class WindowsCursor(
         Action<nint> destroy,
         Func<string> error
     )
-        : this(_ => create(), set, destroy, error) { }
+        : this((CursorIntent _) => create(), set, destroy, error) { }
 
     internal WindowsCursor()
         : this(
-            text => SDL.CreateSystemCursor(text ? SDL.SystemCursor.Text : SDL.SystemCursor.Default),
+            (CursorIntent intent) =>
+                SDL.CreateSystemCursor(
+                    intent switch
+                    {
+                        CursorIntent.Text => SDL.SystemCursor.Text,
+                        CursorIntent.Pointer => SDL.SystemCursor.Pointer,
+                        _ => SDL.SystemCursor.Default,
+                    }
+                ),
             SDL.SetCursor,
             SDL.DestroyCursor,
             SDL.GetError
         ) { }
 
-    internal bool Activate(bool text = false)
+    internal bool Activate(bool text = false) =>
+        Activate(text ? CursorIntent.Text : CursorIntent.Default);
+
+    internal bool Activate(CursorIntent intent)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_active == text)
+        if (!Enum.IsDefined(intent) || intent == CursorIntent.Auto)
+            throw new ArgumentOutOfRangeException(nameof(intent));
+        if (_active == intent)
             return true;
-        if (!_cursors.TryGetValue(text, out var cursor))
+        if (!_cursors.TryGetValue(intent, out var cursor))
         {
-            cursor = create(text);
+            cursor = create(intent);
             if (cursor == 0)
                 throw new InvalidOperationException("SDL_CreateSystemCursor: " + Error());
-            _cursors.Add(text, cursor);
+            _cursors.Add(intent, cursor);
         }
         if (!set(cursor))
             throw new InvalidOperationException("SDL_SetCursor: " + Error());
-        _active = text;
+        _active = intent;
         return true;
     }
 

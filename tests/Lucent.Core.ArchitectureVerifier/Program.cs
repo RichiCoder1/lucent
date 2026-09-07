@@ -115,6 +115,10 @@ static void VerifyLuiMetadata(
         ["VirtualizedList"] = 1,
         ["Status"] = 2,
         ["Progress"] = 2,
+        ["ContextMenu"] = 1,
+        ["Menu"] = 1,
+        ["MenuItem"] = 2,
+        ["MenuSeparator"] = 1,
     };
     if (
         !annotated
@@ -237,6 +241,7 @@ static void VerifyPropertySurface(
             },
             ["Lucent.Core.InputProperties"] = new()
             {
+                ["Cursor"] = "Lucent.Core.Property`1|Lucent.Core.CursorIntent",
                 ["Enabled"] = "Lucent.Core.Property`1|System.Boolean",
                 ["Visible"] = "Lucent.Core.Property`1|System.Boolean",
             },

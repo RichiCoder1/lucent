@@ -1,0 +1,13 @@
+namespace SdkMenus;
+using System;
+using Lucent.Core;
+style PointerTarget {
+    Cursor: CursorIntent.Pointer;
+    Height: 40;
+}
+
+public component Surface(ApplicationCommand command, Action action, Func<bool> actionEnabled, bool archived) {
+    <ContextMenu menu={() => MenuContent(command, action, actionEnabled, archived)}>
+        <Button style={PointerTarget}>Target</Button>
+    </ContextMenu>
+}

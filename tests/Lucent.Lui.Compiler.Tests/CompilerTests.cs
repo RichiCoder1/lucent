@@ -3037,6 +3037,120 @@ public sealed class Eligibility
     }
 
     [TestMethod]
+    public void NamedAttributesChooseDefaultContentOverload()
+    {
+        const string source = """
+namespace Sample;
+using System;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component MenuContent(ApplicationCommand command, Action action, Func<bool> enabled, bool archived) {
+    <Menu>
+        <MenuItem command={command}>Command</MenuItem>
+        <MenuSeparator />
+        <MenuItem onInvoke={action} enabled={enabled}>{archived ? "Restore to Inbox" : "Archive"}</MenuItem>
+    </Menu>
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create(
+                "menu-overloads",
+                [
+                    CSharpSyntaxTree.ParseText(
+                        "internal class C {}",
+                        new CSharpParseOptions(LanguageVersion.Preview)
+                    ),
+                ],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "1",
+                "menu-overloads",
+                new LuiDocumentIdentity("MenuOverloads.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "named MenuItem attributes did not select their overloads: "
+                + string.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.Message
+                    )
+                )
+        );
+        var generated = result.Source!;
+        Assert(
+            generated.Contains("MenuItem(command:")
+                && generated.Contains(", content: \"Command\")")
+                && generated.Contains("MenuItem(onInvoke:")
+                && generated.Contains(", enabled:")
+                && generated.Contains("archived ? \"Restore to Inbox\" : \"Archive\""),
+            "named MenuItem overloads did not retain their authored default content and attributes."
+        );
+    }
+
+    [TestMethod]
+    public void QualifiedConditionalTokensRemainStaticWithoutRootTokens()
+    {
+        const string api = """
+namespace App;
+using Lucent.Core;
+internal static class LightNotesTheme
+{
+    internal static readonly Token<FocusRing> KeyboardFocus = new("keyboard-focus", FocusRing.None);
+    internal static readonly Token<FocusRing> NoFocusRing = new("no-focus-ring", FocusRing.None);
+}
+""";
+        const string source = """
+namespace App.Views;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component NoteRow(bool menuOpen)
+{
+    <Row style={Style.Empty with { FocusRing: menuOpen ? LightNotesTheme.KeyboardFocus : LightNotesTheme.NoFocusRing; }} />
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create(
+                "qualified-token-expression",
+                [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "1",
+                "qualified-token-expression",
+                new LuiDocumentIdentity("QualifiedTokenExpression.lui"),
+                "v1",
+                "",
+                "",
+                "preview",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "App"
+            )
+        );
+        Assert(
+            result.Success
+                && result.Source!.Contains(".Set(global::Lucent.Core.VisualProperties.FocusRing, ")
+                && !result.Source.Contains(
+                    ".Bind<global::Lucent.Core.FocusRing>(global::Lucent.Core.VisualProperties.FocusRing"
+                ),
+            "qualified conditional Token<T> without App.Tokens did not retain static style semantics: "
+                + string.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message))
+                + "\n"
+                + result.Source
+        );
+    }
+
+    [TestMethod]
     public void RetainedStructuralLocalsLowerToCurrentReaders()
     {
         const string api = """

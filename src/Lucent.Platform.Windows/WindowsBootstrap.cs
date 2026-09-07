@@ -84,6 +84,11 @@ public static class WindowsBootstrap
         WindowsWorkDispatcher? workDispatcher = null;
         PerformanceDiagnostics? performanceDiagnostics = null;
         WindowsInputAdapter? input = null;
+        WindowsLiveResize? liveResize = null;
+        WindowsPopupHost? popup = null;
+        var popupInputGate = new WindowsPopupInputGate();
+        ContextMenuRequest? pendingPopup = null;
+        Action<ContextMenuRequest>? popupRequested = null;
         var errors = new List<Exception>();
         try
         {
@@ -126,6 +131,12 @@ public static class WindowsBootstrap
             RetainedScene? lastScene = null;
             static long NowMilliseconds() => (long)Stopwatch.GetElapsedTime(0).TotalMilliseconds;
             input = new WindowsInputAdapter(composition, window, clipboard);
+            popupRequested = request =>
+            {
+                pendingPopup?.Dispose();
+                pendingPopup = request;
+            };
+            composition.Input.ContextMenuRequested += popupRequested;
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
             _ = cursor.Activate();
@@ -139,8 +150,132 @@ public static class WindowsBootstrap
             }
             var recordedPerformanceBaseline = false;
             session?.Start();
+            bool ObserveHostEvent(SDL.Event @event)
+            {
+                if (popup?.Dispatch(@event) == true)
+                {
+                    if (
+                        popup.IsDismissed
+                        && (SDL.EventType)@event.Type == SDL.EventType.WindowFocusLost
+                    )
+                        popupInputGate.LostFocus();
+                    input.ProcessClipboardRequests();
+                    return false;
+                }
+                var type = (SDL.EventType)@event.Type;
+                if (IsForeignWindowEvent(@event, SDL.GetWindowID(window)))
+                    return false;
+                if (
+                    type == SDL.EventType.MouseButtonDown
+                    && popup is null
+                    && popupInputGate.ConsumeOwnerPointerDown(popupOpen: false)
+                )
+                    return false;
+                if (
+                    popup is not null
+                    && WindowsPopupHost.EventWindowId(@event) == SDL.GetWindowID(window)
+                    && type
+                        is SDL.EventType.MouseButtonDown
+                            or SDL.EventType.WindowResized
+                            or SDL.EventType.WindowPixelSizeChanged
+                            or SDL.EventType.WindowMinimized
+                            or SDL.EventType.WindowCloseRequested
+                )
+                {
+                    popup.Dismiss();
+                    popup.Dispose();
+                    popup = null;
+                    if (
+                        type == SDL.EventType.MouseButtonDown
+                        && popupInputGate.ConsumeOwnerPointerDown(popupOpen: true)
+                    )
+                        return false;
+                }
+                var refresh = Observe(
+                    scheduler,
+                    input,
+                    workDispatcher,
+                    composition,
+                    session,
+                    @event
+                );
+                return refresh;
+            }
+
+            void SynchronizePopup()
+            {
+                if (popup?.IsDismissed == true)
+                {
+                    popup.Dispose();
+                    popup = null;
+                }
+                if (pendingPopup is not { } request)
+                    return;
+                pendingPopup = null;
+                popup?.Dispose();
+                popup = null;
+                if (!request.IsValid || request.IsDismissed)
+                {
+                    request.Dispose();
+                    return;
+                }
+                popup = new WindowsPopupHost(window, request, uiaDispatcher, clipboard, cursor);
+                popupInputGate.Opened();
+            }
+
+            liveResize = new WindowsLiveResize(
+                SDL.GetWindowID(window),
+                () =>
+                {
+                    popup?.Dismiss();
+                    if (session?.IsCompleted == true || composition.IsDisposed)
+                        return;
+                    _ = workDispatcher.Process();
+                    if (session?.IsCompleted == true || composition.IsDisposed)
+                        return;
+                    _ = uiaDispatcher.Process();
+                    input.ProcessClipboardRequests();
+                    var liveViewport = GetViewport(window, sdlRenderer);
+                    if (!liveViewport.IsRenderable)
+                        return;
+                    var liveScene = ProjectAndInstall(
+                        composition,
+                        new(
+                            liveViewport.LogicalWidth,
+                            liveViewport.LogicalHeight,
+                            liveViewport.Scale
+                        ),
+                        sceneRenderer
+                    );
+                    lastScene = liveScene;
+                    uiaProvider.Refresh(liveScene);
+                    input.RefreshTextInput();
+                    var hasLiveCaret = composition.Input.TryGetCaretGeometry(
+                        out var liveCaretBounds
+                    );
+                    caretBlink.SetTarget(
+                        hasLiveCaret ? composition.Input.FocusedElement : null,
+                        liveCaretBounds,
+                        NowMilliseconds()
+                    );
+                    _ = cursor.Activate(
+                        input.PointerPosition is { } point
+                            ? composition.Input.CursorAt(point.X, point.Y)
+                            : CursorIntent.Default
+                    );
+                    caretBlink.BeforePresent(NowMilliseconds());
+                    _ = presenter.Present(
+                        liveScene,
+                        liveViewport,
+                        sceneRenderer,
+                        caretBlink.Visible
+                    );
+                    caretBlink.Presented(NowMilliseconds());
+                }
+            );
             while (scheduler.IsOpen && session?.IsCompleted != true)
             {
+                liveResize.ThrowIfFailed();
                 uiaDispatcher.SetOwnerPhase("events");
                 var refreshSettings = false;
                 if (scheduler.ShouldWaitForEvent)
@@ -149,35 +284,48 @@ public static class WindowsBootstrap
                         ? caretBlink.WaitMilliseconds(NowMilliseconds())
                         : -1;
                     SDL.Event @event;
-                    var received =
-                        timeout < 0
-                            ? SDL.WaitEvent(out @event)
-                            : SDL.WaitEventTimeout(out @event, timeout);
+                    bool received;
+                    liveResize.EnterPump();
+                    try
+                    {
+                        received =
+                            timeout < 0
+                                ? SDL.WaitEvent(out @event)
+                                : SDL.WaitEventTimeout(out @event, timeout);
+                    }
+                    finally
+                    {
+                        liveResize.ExitPump();
+                    }
                     if (!received && timeout < 0)
                         throw new InvalidOperationException($"SDL_WaitEvent: {SDL.GetError()}");
                     if (received)
-                        refreshSettings |= Observe(
-                            scheduler,
-                            input,
-                            workDispatcher,
-                            composition,
-                            session,
-                            @event
-                        );
+                        refreshSettings |= ObserveHostEvent(@event);
                 }
-                while (SDL.PollEvent(out var @event))
-                    refreshSettings |= Observe(
-                        scheduler,
-                        input,
-                        workDispatcher,
-                        composition,
-                        session,
-                        @event
-                    );
+                bool PollEvent(out SDL.Event @event)
+                {
+                    liveResize.EnterPump();
+                    try
+                    {
+                        return SDL.PollEvent(out @event);
+                    }
+                    finally
+                    {
+                        liveResize.ExitPump();
+                    }
+                }
+                while (PollEvent(out var @event))
+                    refreshSettings |= ObserveHostEvent(@event);
+                liveResize.ThrowIfFailed();
+                SynchronizePopup();
 
                 uiaDispatcher.SetOwnerPhase("dispatch");
                 if (workDispatcher.Process())
+                {
                     scheduler.Request();
+                    popup?.Refresh();
+                }
+                SynchronizePopup();
                 if (
                     session?.IsCompleted == true
                     || !scheduler.IsOpen
@@ -189,8 +337,14 @@ public static class WindowsBootstrap
                     scheduler.Observe(WindowsFrameEvent.Minimized);
                     continue;
                 }
-                if (uiaDispatcher.Process() != 0)
+                var uiaActions = uiaDispatcher.Process();
+                if (uiaActions != 0)
+                {
+                    input.ProcessClipboardRequests();
                     scheduler.Request();
+                    popup?.Refresh();
+                    SynchronizePopup();
+                }
                 refreshSettings |= settingsListener.TakePending();
                 if (refreshSettings)
                 {
@@ -247,10 +401,12 @@ public static class WindowsBootstrap
                         caretBounds,
                         NowMilliseconds()
                     );
-                    _ = cursor.Activate(
-                        input.PointerPosition is { } point
-                            && composition.Input.IsTextInputAt(point.X, point.Y)
-                    );
+                    if (popup is null || popup.IsDismissed)
+                        _ = cursor.Activate(
+                            input.PointerPosition is { } point
+                                ? composition.Input.CursorAt(point.X, point.Y)
+                                : CursorIntent.Default
+                        );
                 }
                 var projected = Stopwatch.GetTimestamp();
                 caretBlink.BeforePresent(NowMilliseconds());
@@ -291,15 +447,24 @@ public static class WindowsBootstrap
         }
         finally
         {
+            Capture(errors, () => liveResize?.Dispose());
+            if (popupRequested is not null)
+                Capture(errors, () => composition.Input.ContextMenuRequested -= popupRequested);
+            Capture(errors, () => pendingPopup?.Dispose());
+            Capture(errors, () => popup?.Dispose());
             Capture(errors, () => input?.Dispose());
             Capture(errors, () => workDispatcher?.Dispose());
             Capture(errors, () => settingsListener?.Dispose());
             Capture(errors, () => clipboard?.Dispose());
             Capture(errors, () => cursor?.Dispose());
-            Capture(errors, () => uiaListener?.Dispose());
-            Capture(errors, () => uiaProvider?.Dispose());
             Capture(errors, () => presenter?.Dispose());
             Capture(errors, () => sceneRenderer?.Dispose());
+            if (sdlRenderer != 0)
+                Capture(errors, () => SDL.DestroyRenderer(sdlRenderer));
+            if (window != 0)
+                Capture(errors, () => SDL.DestroyWindow(window));
+            Capture(errors, () => uiaListener?.Dispose());
+            Capture(errors, () => uiaProvider?.Dispose());
             if (performanceDiagnostics is not null)
                 Capture(
                     errors,
@@ -313,15 +478,18 @@ public static class WindowsBootstrap
                 );
             Capture(errors, () => performanceDiagnostics?.Dispose());
             Capture(errors, () => uiaDispatcher?.Dispose());
-            if (sdlRenderer != 0)
-                Capture(errors, () => SDL.DestroyRenderer(sdlRenderer));
-            if (window != 0)
-                Capture(errors, () => SDL.DestroyWindow(window));
             Capture(errors, SDL.Quit);
         }
 
         ThrowAll(errors);
         return 0;
+    }
+
+    internal static bool IsForeignWindowEvent(SDL.Event @event, uint ownerWindowId)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(ownerWindowId);
+        var eventWindowId = WindowsPopupHost.EventWindowId(@event);
+        return eventWindowId != 0 && eventWindowId != ownerWindowId;
     }
 
     private static bool Observe(

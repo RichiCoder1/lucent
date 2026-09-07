@@ -63,6 +63,7 @@ public sealed class Composition : IDisposable
         }
     }
     internal ReactiveGraph Graph => _graph;
+    internal ContextMenuRequest? MenuSession { get; set; }
     internal CompositionContext? Factory => _factory;
     internal long Epoch => _epoch;
     internal TransitionController Transitions => _transitions;

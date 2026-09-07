@@ -12,6 +12,28 @@ internal static class LayoutFixture
     private const int WideWidth = 1060;
     private const int CompactWidth = 480;
 
+    internal static int RunLive()
+    {
+        try
+        {
+            var graph = new ReactiveGraph();
+            using var composition = new Composition(graph, "live-layout-proof");
+            var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            var model = new LayoutFixtureModel(composition.Root.Scope);
+            composition.Mount(
+                composition.Root,
+                theme,
+                LuiFixtures.Components.LayoutFixtureView(model)
+            );
+            return WindowsBootstrap.Run("Lucent Live Layout Fixture", composition, theme);
+        }
+        catch (Exception error)
+        {
+            Console.Error.WriteLine("live-layout-fixture: " + error.Message);
+            return 1;
+        }
+    }
+
     internal static int Run()
     {
         nint window = 0;

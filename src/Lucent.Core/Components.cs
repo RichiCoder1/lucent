@@ -1,7 +1,7 @@
 namespace Lucent.Core;
 
 /// <summary>Built-in component recipes for ordinary typed composition.</summary>
-public static class Components
+public static partial class Components
 {
     /// <summary>Creates a horizontal container for the supplied content. Use it to place child components in a row.</summary>
     [LucentComponent]
@@ -317,7 +317,14 @@ public static class Components
                     root.Name + ".selectable-label"
                 );
                 var isSelected = root.Scope.Derived(selected, root.Name + ".selectable-selected");
-                var state = Controls.Selectable(root, context.Theme, label.Value, onSelect, style);
+                var state = Controls.Selectable(
+                    root,
+                    context.Theme,
+                    label.Value,
+                    onSelect,
+                    style,
+                    controlled: true
+                );
                 _ = root.Scope.Effect(
                     () =>
                     {
@@ -359,7 +366,8 @@ public static class Components
                     context.Theme,
                     accessibleLabel.Value,
                     onSelect,
-                    style
+                    style,
+                    controlled: true
                 );
                 _ = root.Scope.Effect(
                     () =>

@@ -6,11 +6,30 @@ namespace Lucent.Core;
 /// <summary>Typed presentation properties that determine whether an element participates in routing and scene input.</summary>
 public static class InputProperties
 {
+    /// <summary>Optional pointer appearance; Auto derives intent from the eligible control.</summary>
+    public static readonly Property<CursorIntent> Cursor = new("input-cursor", CursorIntent.Auto);
+
     /// <summary>When false, the element ignores pointer, keyboard, and focus input.</summary>
     public static readonly Property<bool> Enabled = new("input-enabled", true);
 
     /// <summary>When false, the element is hidden from hit testing and input.</summary>
     public static readonly Property<bool> Visible = new("input-visible", true);
+}
+
+/// <summary>Portable pointer appearance resolved by the host.</summary>
+public enum CursorIntent
+{
+    /// <summary>Use the eligible control's default.</summary>
+    Auto,
+
+    /// <summary>Use the ordinary arrow.</summary>
+    Default,
+
+    /// <summary>Indicate editable text.</summary>
+    Text,
+
+    /// <summary>Indicate a clickable target.</summary>
+    Pointer,
 }
 
 /// <summary>The portable phases of one pointer sequence.</summary>
@@ -96,6 +115,12 @@ public enum KeyCommandKind
 /// <summary>The bounded portable key set handled by Core controls.</summary>
 public enum Key
 {
+    /// <summary>Opens the focused context menu with Shift.</summary>
+    F10,
+
+    /// <summary>Opens the focused context menu.</summary>
+    ContextMenu,
+
     /// <summary>Moves focus to the next tab stop.</summary>
     Tab,
 

@@ -10,12 +10,13 @@ public readonly record struct SemanticScrollState(
     LayoutRect Viewport
 );
 
-/// <summary>Reusable selectable action; selection is behavior state, not application-side routing state.</summary>
+/// <summary>Reusable selectable action with either behavior-owned or application-controlled selection.</summary>
 internal sealed class RowActionBehavior(
     string name,
     SemanticDeclaration semantics,
     Action? activate = null,
-    ControlState? state = null
+    ControlState? state = null,
+    bool controlled = false
 ) : Behavior
 {
     public override string Name => name;
@@ -43,7 +44,9 @@ internal sealed class RowActionBehavior(
             context.Effect(
                 () =>
                 {
-                    if (state.Selected)
+                    if (controlled)
+                        context.SetState(BehaviorState.Selected, state.Selected);
+                    else if (state.Selected)
                         context.SelectSemantic();
                     else
                         context.SetState(BehaviorState.Selected, false);
@@ -98,13 +101,15 @@ internal sealed class RowActionBehavior(
 
         bool Select()
         {
-            if (!context.SelectSemantic())
+            if (!controlled && !context.SelectSemantic())
                 return false;
             activate?.Invoke();
             return true;
         }
         void ApplySelection(bool value)
         {
+            if (controlled)
+                return;
             context.SetState(BehaviorState.Selected, value);
             if (state is not null)
                 state.Selected = value;

@@ -420,7 +420,7 @@ internal class TextFieldState
     );
 }
 
-/// <summary>Text behavior bridges portable key/text commands to scope-owned field state; pointer down focuses but intentionally does not place a caret.</summary>
+/// <summary>Text behavior bridges portable key/text commands to scope-owned field state and pointer editing.</summary>
 internal sealed class TextFieldBehavior(TextFieldState state, string name) : Behavior
 {
     private int? _dragPointer;
@@ -533,39 +533,35 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
             if (route.Command is { Kind: PointerCommandKind.Down, Button: PointerButton.Primary })
             {
                 route.Focus();
-                if (state.IsMultiline)
+                if (state.HasPreedit)
                 {
-                    if (state.HasPreedit)
-                    {
-                        state.CancelComposition();
-                        route.Handled = true;
-                        return;
-                    }
-                    if (
-                        context
-                            .CompositionInput()
-                            .HitTestText(context.Identity, route.Command.X, route.Command.Y) is
-                        { } hit
-                    )
-                    {
-                        _dragPointer = route.Command.PointerId;
-                        _dragAnchor = hit.Utf16Offset;
-                        _dragAnchorAffinity = hit.Affinity;
-                        state.SetSelection(
-                            hit.Utf16Offset,
-                            hit.Utf16Offset,
-                            hit.Affinity,
-                            hit.Affinity
-                        );
-                        route.Capture();
-                    }
+                    state.CancelComposition();
+                    route.Handled = true;
+                    return;
+                }
+                if (
+                    context
+                        .CompositionInput()
+                        .HitTestText(context.Identity, route.Command.X, route.Command.Y) is
+                    { } hit
+                )
+                {
+                    _dragPointer = route.Command.PointerId;
+                    _dragAnchor = hit.Utf16Offset;
+                    _dragAnchorAffinity = hit.Affinity;
+                    state.SetSelection(
+                        hit.Utf16Offset,
+                        hit.Utf16Offset,
+                        hit.Affinity,
+                        hit.Affinity
+                    );
+                    route.Capture();
                 }
                 route.Handled = true;
                 return;
             }
             if (
-                state.IsMultiline
-                && _dragPointer == route.Command.PointerId
+                _dragPointer == route.Command.PointerId
                 && route.Command.Kind is PointerCommandKind.Move or PointerCommandKind.Up
             )
             {
