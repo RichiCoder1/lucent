@@ -22,7 +22,7 @@ public sealed class InputRouter
     private Dictionary<long, RetainedInputElement> _input = [];
     private Dictionary<long, bool> _available = [];
     private Dictionary<long, ElementIdentity[]> _paths = [];
-    private Dictionary<long, LayoutRect?> _effectiveClips = [];
+    private Dictionary<long, InputClip[]> _effectiveClips = [];
     private RetainedInputElement[] _hitOrder = [];
     private FocusState? _focused;
     private PendingFocus? _pendingFocus;
@@ -1233,9 +1233,12 @@ public sealed class InputRouter
 
     private bool ClippedIn(ElementIdentity identity, float x, float y)
     {
-        return !_effectiveClips.TryGetValue(identity.ElementId, out var clip)
-            || clip is null
-            || Contains(clip.Value, x, y);
+        if (!_effectiveClips.TryGetValue(identity.ElementId, out var clips))
+            return true;
+        foreach (var clip in clips)
+            if (!Contains(clip, x, y))
+                return false;
+        return true;
     }
 
     private static PaintSceneNode? FindCaret(IEnumerable<SceneNode> nodes, ElementIdentity identity)
@@ -1287,12 +1290,12 @@ public sealed class InputRouter
     {
         _available = new Dictionary<long, bool>(scene.Input.Count);
         _paths = new Dictionary<long, ElementIdentity[]>(scene.Input.Count);
-        _effectiveClips = new Dictionary<long, LayoutRect?>(scene.Input.Count);
+        _effectiveClips = new Dictionary<long, InputClip[]>(scene.Input.Count);
         foreach (var retained in scene.Input)
         {
             var parentAvailable = true;
             ElementIdentity[] path;
-            LayoutRect? effectiveClip = null;
+            InputClip[] effectiveClips;
             if (retained.Parent is { } parent)
             {
                 parentAvailable = _available.GetValueOrDefault(parent.ElementId);
@@ -1300,18 +1303,30 @@ public sealed class InputRouter
                 path = new ElementIdentity[parentPath.Length + 1];
                 parentPath.CopyTo(path, 0);
                 path[^1] = retained.Identity;
-                effectiveClip = _effectiveClips[parent.ElementId];
+                var inherited = _effectiveClips[parent.ElementId];
                 if (_input[parent.ElementId].ChildClipBounds is { } parentClip)
-                    effectiveClip = Intersect(effectiveClip, parentClip);
+                {
+                    effectiveClips = new InputClip[inherited.Length + 1];
+                    inherited.CopyTo(effectiveClips, 0);
+                    effectiveClips[^1] = new(
+                        parentClip,
+                        _input[parent.ElementId].ChildClipCornerRadius
+                    );
+                }
+                else
+                    effectiveClips = inherited;
             }
             else
+            {
                 path = [retained.Identity];
+                effectiveClips = [];
+            }
             _available.Add(
                 retained.Identity.ElementId,
                 parentAvailable && retained.Enabled && retained.Visible
             );
             _paths.Add(retained.Identity.ElementId, path);
-            _effectiveClips.Add(retained.Identity.ElementId, effectiveClip);
+            _effectiveClips.Add(retained.Identity.ElementId, effectiveClips);
         }
         _hitOrder = scene.Input.OrderByDescending(item => item.Order).ToArray();
     }
@@ -1324,17 +1339,6 @@ public sealed class InputRouter
         _hitOrder = [];
     }
 
-    private static LayoutRect Intersect(LayoutRect? first, LayoutRect second)
-    {
-        if (first is null)
-            return second;
-        var left = Math.Max(first.Value.X, second.X);
-        var top = Math.Max(first.Value.Y, second.Y);
-        var right = Math.Min(first.Value.X + first.Value.Width, second.X + second.Width);
-        var bottom = Math.Min(first.Value.Y + first.Value.Height, second.Y + second.Height);
-        return new(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
-    }
-
     private static bool Contains(LayoutRect bounds, float x, float y) =>
         bounds.Width > 0
         && bounds.Height > 0
@@ -1342,6 +1346,34 @@ public sealed class InputRouter
         && y >= bounds.Y
         && x < bounds.X + bounds.Width
         && y < bounds.Y + bounds.Height;
+
+    private static bool Contains(InputClip clip, float x, float y)
+    {
+        if (!Contains(clip.Bounds, x, y))
+            return false;
+        if (!float.IsFinite(clip.CornerRadius) || clip.CornerRadius < 0)
+            return false;
+        var radius = Math.Min(
+            clip.CornerRadius,
+            Math.Min(clip.Bounds.Width, clip.Bounds.Height) / 2
+        );
+        if (radius == 0)
+            return true;
+
+        var left = clip.Bounds.X;
+        var top = clip.Bounds.Y;
+        var right = left + clip.Bounds.Width;
+        var bottom = top + clip.Bounds.Height;
+        var dx =
+            x < left + radius ? left + radius - x
+            : x >= right - radius ? x - (right - radius)
+            : 0;
+        var dy =
+            y < top + radius ? top + radius - y
+            : y >= bottom - radius ? y - (bottom - radius)
+            : 0;
+        return dx * dx + dy * dy <= radius * radius;
+    }
 
     private InputDispatchResult Reject(
         InputRejection rejection,
@@ -1723,6 +1755,8 @@ public sealed class InputRouter
         float Width,
         float Height
     );
+
+    private readonly record struct InputClip(LayoutRect Bounds, float CornerRadius);
 
     private readonly record struct ClipboardTicket(
         ElementIdentity Origin,

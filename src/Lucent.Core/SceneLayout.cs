@@ -125,24 +125,35 @@ public static class SceneLayout
                             throw new InvalidOperationException(
                                 "Input projection state changed while the scene was being produced."
                             );
+                        var bounds = byId[element.Id].Bounds;
+                        var clip = element.Resolve(LayoutProperties.Clip).Value;
+                        LayoutRect? childClipBounds = clip
+                            ? ContentBounds(
+                                bounds,
+                                element.Resolve(LayoutProperties.Padding).Value,
+                                viewport.Scale
+                            )
+                            : null;
+                        var childClipCornerRadius = childClipBounds is { } childClip
+                            ? InnerCornerRadius(
+                                element.Resolve(VisualProperties.CornerRadius).Value,
+                                bounds,
+                                childClip
+                            )
+                            : 0;
                         return new RetainedInputElement(
                             new(composition.Epoch, element.Id),
                             element.Parent is null
                                 ? null
                                 : new(composition.Epoch, element.Parent.Id),
-                            byId[element.Id].Bounds,
-                            element.Resolve(LayoutProperties.Clip).Value
-                                ? ContentBounds(
-                                    byId[element.Id].Bounds,
-                                    element.Resolve(LayoutProperties.Padding).Value,
-                                    viewport.Scale
-                                )
-                                : null,
+                            bounds,
+                            childClipBounds,
                             order,
                             element.Resolve(InputProperties.Enabled).Value,
                             element.Resolve(InputProperties.Visible).Value
                                 && element.ParticipatesInInput(),
-                            signature
+                            signature,
+                            childClipCornerRadius
                         );
                     }
                 )
@@ -427,6 +438,50 @@ public static class SceneLayout
             {
                 assignments = ManagedLayout.ArrangeFlex(
                     specs,
+                    style.Axis,
+                    inner.Width,
+                    inner.Height,
+                    style.Spacing,
+                    style.RowGap,
+                    style.Wrap,
+                    style.MainAlignment,
+                    style.CrossAlignment
+                );
+                var assignmentsByIndex = assignments.ToDictionary(value => value.Index);
+                var corrected = specs
+                    .Select(spec =>
+                    {
+                        if (!spec.AutoHeight)
+                            return spec;
+                        var assignment = assignmentsByIndex[spec.Index];
+                        var child = element.Children[spec.Index];
+                        var childStyle = cache.Read(child);
+                        if (childStyle.TextWrap == TextWrap.NoWrap)
+                            return spec;
+                        var constrained = Shape(
+                            child,
+                            childStyle,
+                            viewport.Scale,
+                            shaper,
+                            cache,
+                            new LayoutConstraint(
+                                Math.Max(0, assignment.Bounds.Width - childStyle.Padding.Horizontal)
+                            )
+                        );
+                        if (constrained is null)
+                            return spec;
+                        return spec with
+                        {
+                            Height = Constrain(
+                                Finite(constrained.Height + childStyle.Padding.Vertical),
+                                childStyle.MinHeight,
+                                childStyle.MaxHeight
+                            ),
+                        };
+                    })
+                    .ToArray();
+                assignments = ManagedLayout.ArrangeFlex(
+                    corrected,
                     style.Axis,
                     inner.Width,
                     inner.Height,
@@ -1282,6 +1337,7 @@ public static class SceneLayout
         var mainAlignment = element.Resolve(LayoutProperties.MainAlignment).Value;
         var crossAlignment = element.Resolve(LayoutProperties.CrossAlignment).Value;
         var clip = element.Resolve(LayoutProperties.Clip).Value;
+        var cornerRadius = element.Resolve(VisualProperties.CornerRadius).Value;
         var padding = element.Resolve(LayoutProperties.Padding).Value;
         var scroll = element.Resolve(LayoutProperties.Scroll).Value;
         var virtualRowHeight = element.Resolve(LayoutProperties.VirtualRowHeight).Value;
@@ -1341,6 +1397,7 @@ public static class SceneLayout
             writer.Write((int)mainAlignment);
             writer.Write((int)crossAlignment);
             writer.Write(clip);
+            writer.Write(cornerRadius);
             writer.Write(padding.Left);
             writer.Write(padding.Top);
             writer.Write(padding.Right);

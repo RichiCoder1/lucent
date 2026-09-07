@@ -1261,7 +1261,8 @@ public readonly record struct RetainedInputElement(
     int Order,
     bool Enabled,
     bool Visible,
-    string Signature
+    string Signature,
+    float ChildClipCornerRadius = 0
 );
 
 /// <summary>The finite renderer operation represented by a retained scene node.</summary>
@@ -1529,6 +1530,8 @@ public sealed class RetainedScene
                 .Append(Format(input.Bounds))
                 .Append(" childClip=")
                 .Append(input.ChildClipBounds is { } clip ? Format(clip) : "-")
+                .Append(" childClipRadius=")
+                .Append(input.ChildClipCornerRadius.ToString("R", CultureInfo.InvariantCulture))
                 .Append(" enabled=")
                 .Append(input.Enabled ? "true" : "false")
                 .Append(" visible=")
@@ -1696,6 +1699,7 @@ public sealed class RetainedScene
                     writer.Write(clip.Width);
                     writer.Write(clip.Height);
                 }
+                writer.Write(item.ChildClipCornerRadius);
                 writer.Write(item.Order);
                 writer.Write(item.Enabled);
                 writer.Write(item.Visible);

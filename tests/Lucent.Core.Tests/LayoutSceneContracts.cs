@@ -1453,6 +1453,55 @@ public sealed class LayoutSceneContracts
     }
 
     [TestMethod]
+    public void FlexColumnRemeasuresWrappedAutoHeightAtAssignedWidth()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "flex-paragraph");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("flex-paragraph"));
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Axis(LayoutAxis.Column).CrossAlignment(LayoutAlignment.Stretch)
+        );
+        var panel = composition.Child(composition.Root, "panel");
+        panel.Present(
+            theme,
+            author: Style
+                .Empty.Axis(LayoutAxis.Column)
+                .CrossAlignment(LayoutAlignment.Stretch)
+                .MainGrow(1)
+        );
+        var paragraph = composition.Child(panel, "paragraph");
+        paragraph.Present(
+            theme,
+            author: Style
+                .Empty.Set(ProjectionProperties.Text, "one two three four five")
+                .TextWrap(TextWrap.WordWithGraphemeFallback)
+                .MaxLines(3)
+                .TextOverflow(TextOverflow.Ellipsis)
+        );
+        var following = composition.Child(panel, "following");
+        following.Present(theme, author: Style.Empty.Height(10));
+        var shaper = new WrappingProbeShaper();
+
+        var scene = SceneLayout.Project(composition, new(10, 100, 1), shaper);
+        var boxes = scene.Boxes.ToDictionary(box => box.Identity.ElementId);
+
+        Assert(
+            boxes[panel.Id].Bounds == new LayoutRect(0, 0, 10, 100)
+                && boxes[paragraph.Id].Bounds == new LayoutRect(0, 0, 10, 30)
+                && boxes[paragraph.Id].Text?.Lines.Count == 3
+                && boxes[following.Id].Bounds.Y == 30,
+            "Flex did not remeasure wrapped auto-height text before placing its sibling."
+        );
+        Assert(
+            shaper.Requests.Any(request =>
+                request.InlineConstraint.Limit == 10 && request.BlockConstraint.Limit is null
+            ),
+            "Flex must measure the desired wrapped height without inheriting its provisional block height."
+        );
+    }
+
+    [TestMethod]
     public void CharacterizesWideAndDeepManagedScenes()
     {
         static (long Milliseconds, int Boxes) ProjectWide()
@@ -1870,6 +1919,47 @@ public sealed class LayoutSceneContracts
     }
 
     private sealed record VirtualRow(int Key, string Text);
+
+    private sealed class WrappingProbeShaper : ITextShaper
+    {
+        public List<TextMeasureRequest> Requests { get; } = [];
+
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            Requests.Add(request);
+            var charactersPerLine = request.InlineConstraint.Limit is { } inline
+                ? Math.Max(1, (int)MathF.Floor(inline))
+                : request.Text.Length;
+            var desiredLineCount = Math.Max(
+                1,
+                (int)Math.Ceiling((double)request.Text.Length / charactersPerLine)
+            );
+            var lineCount = Math.Min(desiredLineCount, request.MaxLines ?? int.MaxValue);
+            if (request.BlockConstraint.Limit is { } block)
+                lineCount = Math.Min(lineCount, Math.Max(1, (int)MathF.Floor(block / 10)));
+            var lines = new List<ParagraphLine>(lineCount);
+            var offset = 0;
+            for (var index = 0; index < lineCount; index++)
+            {
+                var length = Math.Min(charactersPerLine, request.Text.Length - offset);
+                lines.Add(
+                    new(offset, length, index * 10, index * 10 + 10, -10, 0, 0, length, 0, false)
+                );
+                offset += length;
+            }
+            var width = Math.Min(request.Text.Length, charactersPerLine);
+            return new ShapedText(
+                "wrap-" + charactersPerLine.ToString(CultureInfo.InvariantCulture),
+                width,
+                lineCount * 10,
+                [],
+                lines,
+                lineCount < desiredLineCount,
+                request.InlineConstraint,
+                request.BlockConstraint
+            );
+        }
+    }
 
     private sealed class ProbeShaper : ITextShaper
     {

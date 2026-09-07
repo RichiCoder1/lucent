@@ -1,6 +1,6 @@
 # Light Notes daily-use execution
 
-Status: implementation and background verification complete; package delivery and focused native interaction closeout remain, September 6, 2026. Starting identities: Lucent d6e7913, packages 0.3.0-dev.19.1, Light Notes 67d0729.
+Status: implementation and background verification complete; official package delivery follows, with focused native interaction closeout paused, September 6, 2026. Starting identities: Lucent d6e7913, packages 0.3.0-dev.19.1, Light Notes 67d0729.
 
 ## Outcomes and order
 
@@ -55,8 +55,10 @@ Defer record sugar, expression-bodied/root-switching markup, additional style-sh
 
 ## Implemented result and remaining closeout
 
-The selected compiler/runtime, R3, restore, autosave and presentation work is implemented. Independent review found and corrected both in-flight-save/undo status handling and dependency tracking after undo, as well as a debounce completion-flush mistake during development. Regression tests retain those cases.
+The selected compiler/runtime, R3, restore, autosave and presentation work is implemented. Final review aligned rounded ancestor clips with pointer/point lookup and fixed the wrapped flex paragraph measurement exposed by the minimum-size startup error view (#90). Independent review found and corrected both in-flight-save/undo status handling and dependency tracking after undo, as well as a debounce completion-flush mistake during development. Regression tests retain those cases.
 
-Background evidence: 195 Core/compiler/generator/language-server/reference-app tests, 15 renderer tests, 7 R3 tests under both managed execution and NativeAOT, 11 extension tests, and the full packed SDK matrix including NativeAOT passed. An isolated Light Notes consumer of the six local development packages passed 17 storage and 15 application/offscreen tests. Wide/medium/compact and 150-percent minimum-size images were inspected; the confirmation fixes the URL row and disabled Open action backgrounds. Local package proof is development evidence; official package and application source identities belong in the delivery comments on the linked issues.
+Background evidence: 195 Core/compiler/generator/language-server/reference-app tests, 15 renderer tests, 7 R3 tests under both managed execution and NativeAOT, 11 extension tests, and the full packed SDK matrix including NativeAOT passed. An isolated Light Notes consumer of the six local development packages passed 17 storage and 16 application/offscreen tests. Wide/medium/compact and 150-percent minimum-size images were inspected; confirmation fixes the URL row and disabled control backgrounds. Three rounded-input regressions and the nested wrapped-paragraph regression pass; the final offscreen minimum-size error capture shows wrapped recovery guidance and visible Retry. Local package proof is development evidence; official package and application source identities belong in the delivery comments on the linked issues.
 
 The owner's three-minute visual-test window expired before the new build was ready. No focus-taking check ran in that window. Keep #80/#81/#82 open for the coordinated real-input, autosave/reopen and targeted accessibility batch after a fresh release of the focus pause. The published console-only maintenance check passed backup/export/restore with 23 equal records, corrupt/existing-destination rejection, default-workspace isolation and source preservation. Do not turn the pending batch into a broader release gate or describe earlier manual results as fresh evidence.
+
+[#90](https://github.com/RichiCoder1/lucent/issues/90) records the auto-height flex paragraph correction. Error-state inspection showed that finite-width wrapping could retain an earlier one-line intrinsic height and hide recovery guidance. Keep the correction in shared measurement, with explicit height/block limits preserved, rather than requiring application-specific paragraph heights.

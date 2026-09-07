@@ -38,7 +38,7 @@ Develop design quality alongside complete application slices. Deliver required `
 
 ## Current execution
 
-See [daily-use execution](plans/daily-use-execution.md): #80 native closeout, #81 autosave and complete workflow, #82 targeted polish with #85 safe restore, #84 CI/review efficiency, #87 optional ecosystem debounce, #88 mockup fidelity, and #83/#86 explicit async-resource authoring with #89 multi-file helper correctness. Autosave uses an owner-approved 750 ms debounce with explicit save and switch/close flush. Records, expression-bodied markup and a component registry remain deferred.
+See [daily-use execution](plans/daily-use-execution.md): #80 native closeout, #81 autosave and complete workflow, #82 targeted polish with #85 safe restore, #84 CI/review efficiency, #87 optional ecosystem debounce, #88 mockup fidelity, and #83/#86 explicit async-resource authoring with #89 multi-file helper correctness, and #90 wrapped flex paragraph measurement. Autosave uses an owner-approved 750 ms debounce with explicit save and switch/close flush. Records, expression-bodied markup and a component registry remain deferred.
 
 ## Original foundation sequence
 
