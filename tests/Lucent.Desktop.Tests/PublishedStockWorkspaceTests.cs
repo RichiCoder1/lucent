@@ -279,7 +279,7 @@ public sealed partial class PublishedIssueBrowserTests
         return null;
     }
 
-    private static void TypeNavigation(params VirtualKeyShort[] keys)
+    internal static void TypeNavigation(params VirtualKeyShort[] keys)
     {
         // SDL uses the physical scan code to distinguish the navigation cluster
         // from keypad keys. Supply that code and its extended-key bit explicitly.
@@ -290,7 +290,7 @@ public sealed partial class PublishedIssueBrowserTests
     [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "MapVirtualKeyW")]
     private static extern uint MapVirtualKey(uint code, uint mapType);
 
-    private static void ActivateOwnedWindow(Process process, UiElement root, nint owner)
+    internal static void ActivateOwnedWindow(Process process, UiElement root, nint owner)
     {
         root.SetForeground();
         if (GetForegroundWindow() != owner)
