@@ -2,6 +2,12 @@
 
 Lucent applications start with a stock surface and readable foreground. Built-in layout containers and ordinary `Text` inherit surrounding paint, so composed selectable content keeps the parent's pressed and selected colors. Apply `PresentationStyles.Surface` when a panel deliberately starts a new surface.
 
+Stock focus rings and disabled text keep contrast against their resolved control state, including pressed and high-contrast states. The Windows host updates `ThemeContext.Appearance` when system settings change; applications that map appearance to a theme therefore update mounted controls without remounting them.
+
+## Experimental transitions
+
+The current manual transition facilities are experimental. They do not provide complete production animation scheduling, automatic style-winner interpolation, interruption or reduced-motion handling. Applications should use immediate stock hover, focus and pressed states for supported behavior. Declarative `.lui` transitions remain unavailable pending the dedicated transition design and its implementation; manual samples are not a substitute for that contract. The [full transition design (#142)](https://github.com/RichiCoder1/lucent/issues/142) is an immediate follow-up to the correctness work in [#119](https://github.com/RichiCoder1/lucent/issues/119), coordinated with [#140](https://github.com/RichiCoder1/lucent/issues/140).
+
 ## Text roles and density
 
 `PresentationStyles.Body`, `Title`, `Secondary` and `Caption` combine framework typography with themed foreground colors. Inside an interactive control, use `PresentationStyles.Typography(TextRole.Body)` or another role to select font metrics while retaining the control's inherited state color. An explicitly authored foreground takes precedence.
