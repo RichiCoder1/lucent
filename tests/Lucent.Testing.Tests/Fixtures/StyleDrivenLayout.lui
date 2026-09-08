@@ -1,0 +1,27 @@
+namespace HeadlessFixtures;
+using Lucent.Core;
+
+public component StyleDrivenLayout(ResponsiveConstraints bounds) {
+    bool wide = bounds.Current.Width >= 600;
+
+    <ResponsiveContainer constraints={bounds}>
+        <Column style={Style.Empty with {
+            MainGrow: 1;
+            Mode: wide ? LayoutMode.Grid : LayoutMode.Flex;
+            Axis: LayoutAxis.Column;
+            Columns: GridTracks.Create(GridTrack.Fixed(180), GridTrack.Fraction());
+            Rows: GridTracks.Create(GridTrack.Fraction());
+            ColumnGap: 8;
+            CrossAlignment: LayoutAlignment.Stretch;
+        }}>
+            <TextField label="Navigation" initialValue="filter" style={Style.Empty with {
+                GridPlacement: new GridPlacement(0, 0);
+                Participation: wide ? ElementParticipation.Visible : ElementParticipation.Collapsed;
+            }} />
+            <TextField label="Draft" initialValue="seed" style={Style.Empty with {
+                GridPlacement: new GridPlacement(0, 1);
+                MainGrow: 1;
+            }} />
+        </Column>
+    </ResponsiveContainer>
+}

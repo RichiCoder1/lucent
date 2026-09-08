@@ -589,7 +589,8 @@ public static class SceneLayout
                         childText,
                         viewport.Scale,
                         shaper,
-                        cache
+                        cache,
+                        style.Axis == LayoutAxis.Column ? inner.Width : null
                     );
                     var childWidth = Constrain(
                         childStyle.Width ?? intrinsic.Width,
@@ -662,35 +663,21 @@ public static class SceneLayout
                         var assignment = assignmentsByIndex[spec.Index];
                         var child = element.Children[spec.Index];
                         var childStyle = cache.Read(child);
-                        var constrained =
-                            childStyle.TextWrap == TextWrap.NoWrap
-                                ? Shape(child, childStyle, viewport.Scale, shaper, cache)
-                                : Shape(
-                                    child,
-                                    childStyle,
-                                    viewport.Scale,
-                                    shaper,
-                                    cache,
-                                    new LayoutConstraint(
-                                        ContentBounds(
-                                            child,
-                                            assignment.Bounds,
-                                            viewport.Scale
-                                        ).Width
-                                    ),
-                                    new LayoutConstraint(
-                                        Math.Max(
-                                            0,
-                                            assignment.Bounds.Height - childStyle.Padding.Vertical
-                                        )
-                                    )
-                                );
-                        if (constrained is null || !spec.AutoHeight)
+                        if (!spec.AutoHeight)
                             return spec;
+                        var constrained = Intrinsic(
+                            child,
+                            childStyle,
+                            Shape(child, childStyle, viewport.Scale, shaper, cache),
+                            viewport.Scale,
+                            shaper,
+                            cache,
+                            assignment.Bounds.Width
+                        );
                         return spec with
                         {
                             Height = Constrain(
-                                Finite(constrained.Height + childStyle.Padding.Vertical),
+                                constrained.Height,
                                 childStyle.MinHeight,
                                 childStyle.MaxHeight
                             ),
@@ -730,24 +717,19 @@ public static class SceneLayout
                         var assignment = assignmentsByIndex[spec.Index];
                         var child = element.Children[spec.Index];
                         var childStyle = cache.Read(child);
-                        if (childStyle.TextWrap == TextWrap.NoWrap)
-                            return spec;
-                        var constrained = Shape(
+                        var constrained = Intrinsic(
                             child,
                             childStyle,
+                            Shape(child, childStyle, viewport.Scale, shaper, cache),
                             viewport.Scale,
                             shaper,
                             cache,
-                            new LayoutConstraint(
-                                ContentBounds(child, assignment.Bounds, viewport.Scale).Width
-                            )
+                            assignment.Bounds.Width
                         );
-                        if (constrained is null)
-                            return spec;
                         return spec with
                         {
                             Height = Constrain(
-                                Finite(constrained.Height + childStyle.Padding.Vertical),
+                                constrained.Height,
                                 childStyle.MinHeight,
                                 childStyle.MaxHeight
                             ),
@@ -1131,7 +1113,7 @@ public static class SceneLayout
     private static Measurement Measure(
         Element element,
         LayoutAxis parentAxis,
-        float crossLimit,
+        float? outerWidthLimit,
         float scale,
         ITextShaper shaper,
         ProjectionCache cache
@@ -1139,7 +1121,15 @@ public static class SceneLayout
     {
         var style = cache.Read(element);
         var text = Shape(element, style, scale, shaper, cache);
-        var intrinsic = Intrinsic(element, style, text, scale, shaper, cache);
+        var intrinsic = Intrinsic(
+            element,
+            style,
+            text,
+            scale,
+            shaper,
+            cache,
+            parentAxis == LayoutAxis.Column ? outerWidthLimit : null
+        );
         var width = Constrain(style.Width ?? intrinsic.Width, style.MinWidth, style.MaxWidth);
         var height = Constrain(style.Height ?? intrinsic.Height, style.MinHeight, style.MaxHeight);
         return parentAxis == LayoutAxis.Row
@@ -1203,9 +1193,23 @@ public static class SceneLayout
         ShapedText? text,
         float scale,
         ITextShaper shaper,
-        ProjectionCache cache
+        ProjectionCache cache,
+        float? outerWidthLimit = null
     )
     {
+        var constrainedOuterWidth =
+            style.Width is { } authoredWidth
+                ? Constrain(authoredWidth, style.MinWidth, style.MaxWidth)
+            : outerWidthLimit is { } availableWidth
+                ? Constrain(availableWidth, style.MinWidth, style.MaxWidth)
+            : (float?)null;
+        var constrainedContentWidth = constrainedOuterWidth is { } outerWidth
+            ? Math.Max(0, Finite(outerWidth - style.Padding.Horizontal))
+            : (float?)null;
+        if (cache.TryReadIntrinsic(element.Id, constrainedOuterWidth, out var cachedIntrinsic))
+            return cachedIntrinsic;
+        if (style.TextWrap != TextWrap.NoWrap && constrainedContentWidth is { } textWidth)
+            text = Shape(element, style, scale, shaper, cache, new LayoutConstraint(textWidth));
         var textMetrics = IntrinsicTextMetrics(style, text, scale, shaper, cache);
         var width = textMetrics?.Width ?? 0f;
         var height = textMetrics?.Height ?? 0f;
@@ -1214,23 +1218,31 @@ public static class SceneLayout
         // otherwise nested auto layout can realize the entire source as visible.
         // Explicit dimensions and flex/grid assignments are applied by callers.
         if (element.Composition.IsVirtualizedViewport(element.Id))
-            return Outer(style, (width, height));
+            return cache.WriteIntrinsic(
+                element.Id,
+                constrainedOuterWidth,
+                Outer(style, (width, height))
+            );
         var participatingChildren = element
             .Children.Where(child => child.Participation != ElementParticipation.Collapsed)
             .ToArray();
         if (participatingChildren.Length == 0)
-            return Outer(
-                style,
-                style.VirtualRowHeight is { } emptyRowHeight
-                    ? (width, Finite(emptyRowHeight * style.VirtualItemCount))
-                    : (width, height)
+            return cache.WriteIntrinsic(
+                element.Id,
+                constrainedOuterWidth,
+                Outer(
+                    style,
+                    style.VirtualRowHeight is { } emptyRowHeight
+                        ? (width, Finite(emptyRowHeight * style.VirtualItemCount))
+                        : (width, height)
+                )
             );
         var children = new Measurement[participatingChildren.Length];
         for (var index = 0; index < participatingChildren.Length; index++)
             children[index] = Measure(
                 participatingChildren[index],
                 style.Axis,
-                float.MaxValue,
+                style.Axis == LayoutAxis.Column ? constrainedContentWidth : null,
                 scale,
                 shaper,
                 cache
@@ -1240,8 +1252,91 @@ public static class SceneLayout
             foreach (var child in children)
                 width = Finite(width + child.Main);
             width = Finite(width + Finite(style.Spacing * Math.Max(0, children.Length - 1)));
-            foreach (var child in children)
-                height = Math.Max(height, child.Cross);
+            if (style.Wrap && constrainedContentWidth is { } wrapWidth)
+            {
+                var specs = children
+                    .Select(
+                        (child, index) =>
+                        {
+                            var childStyle = cache.Read(child.Element);
+                            return new LayoutItemSpec(
+                                index,
+                                child.Main,
+                                child.Cross,
+                                child.MinMain,
+                                childStyle.MinHeight,
+                                child.MaxMain,
+                                childStyle.MaxHeight,
+                                false,
+                                child.AutoCross,
+                                childStyle.MainBasis,
+                                child.MainGrow,
+                                child.MainShrink,
+                                childStyle.GridPlacement
+                            );
+                        }
+                    )
+                    .ToArray();
+                var wrapped = ManagedLayout.ArrangeFlex(
+                    specs,
+                    LayoutAxis.Row,
+                    wrapWidth,
+                    0,
+                    style.Spacing,
+                    style.RowGap,
+                    true,
+                    style.MainAlignment,
+                    style.CrossAlignment
+                );
+                var byIndex = wrapped.ToDictionary(assignment => assignment.Index);
+                specs = specs
+                    .Select(spec =>
+                    {
+                        if (!spec.AutoHeight)
+                            return spec;
+                        var child = participatingChildren[spec.Index];
+                        var childStyle = cache.Read(child);
+                        var assignedWidth = byIndex[spec.Index].Bounds.Width;
+                        var childIntrinsic = Intrinsic(
+                            child,
+                            childStyle,
+                            Shape(child, childStyle, scale, shaper, cache),
+                            scale,
+                            shaper,
+                            cache,
+                            assignedWidth
+                        );
+                        return spec with
+                        {
+                            Height = Constrain(
+                                childIntrinsic.Height,
+                                childStyle.MinHeight,
+                                childStyle.MaxHeight
+                            ),
+                        };
+                    })
+                    .ToArray();
+                wrapped = ManagedLayout.ArrangeFlex(
+                    specs,
+                    LayoutAxis.Row,
+                    wrapWidth,
+                    0,
+                    style.Spacing,
+                    style.RowGap,
+                    true,
+                    style.MainAlignment,
+                    style.CrossAlignment
+                );
+                foreach (var assignment in wrapped)
+                    height = Math.Max(
+                        height,
+                        Finite(assignment.Bounds.Y + assignment.Bounds.Height)
+                    );
+                width = Math.Min(width, wrapWidth);
+            }
+            else
+                foreach (var child in children)
+                    height = Math.Max(height, child.Cross);
         }
         else
         {
@@ -1253,7 +1348,11 @@ public static class SceneLayout
         }
         if (style.VirtualRowHeight is { } rowHeight)
             height = Finite(rowHeight * style.VirtualItemCount);
-        return Outer(style, (Finite(width), Finite(height)));
+        return cache.WriteIntrinsic(
+            element.Id,
+            constrainedOuterWidth,
+            Outer(style, (Finite(width), Finite(height)))
+        );
     }
 
     private static (float Width, float Height) Outer(
@@ -1514,8 +1613,28 @@ public static class SceneLayout
     {
         private readonly Dictionary<long, Values> _styles = [];
         private readonly Dictionary<long, DecorationValues> _decorations = [];
+        private readonly Dictionary<
+            (long ElementId, float? Width),
+            (float Width, float Height)
+        > _intrinsics = [];
 
         internal Dictionary<TextMeasureRequest, ShapedText> Shapes { get; } = [];
+
+        internal bool TryReadIntrinsic(
+            long elementId,
+            float? width,
+            out (float Width, float Height) intrinsic
+        ) => _intrinsics.TryGetValue((elementId, width), out intrinsic);
+
+        internal (float Width, float Height) WriteIntrinsic(
+            long elementId,
+            float? width,
+            (float Width, float Height) intrinsic
+        )
+        {
+            _intrinsics.Add((elementId, width), intrinsic);
+            return intrinsic;
+        }
 
         internal Values Read(Element element)
         {

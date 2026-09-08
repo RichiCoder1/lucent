@@ -7,6 +7,7 @@ namespace Lucent.Testing;
 /// <summary>Runs one production Lucent application on an isolated, deterministic owner thread.</summary>
 public sealed class HeadlessApplication : IAsyncDisposable
 {
+    private const int InstallAttempts = 3;
     private readonly HeadlessApplicationOptions _options;
     private readonly Func<HeadlessContext, ComponentRecipe>? _recipeFactory;
     private readonly IApplicationLifecycle? _lifecycle;
@@ -394,19 +395,24 @@ public sealed class HeadlessApplication : IAsyncDisposable
     private void Project()
     {
         var context = _context!;
-        var scene = SceneLayout.Project(
-            context.Composition,
-            context.Viewport,
-            _shaper!,
-            _options.MaximumWorkItems
-        );
-        if (!context.Input.SetScene(scene))
-            throw new InvalidOperationException(
-                "The production input router rejected freshly projected scene generation "
-                    + scene.Generation
-                    + "."
+        for (var attempt = 0; attempt < InstallAttempts; attempt++)
+        {
+            context.Composition.Flush(_options.MaximumWorkItems);
+            var scene = SceneLayout.Project(
+                context.Composition,
+                context.Viewport,
+                _shaper!,
+                _options.MaximumWorkItems
             );
-        context.SetScene(scene);
+            if (context.Input.SetScene(scene))
+            {
+                context.SetScene(scene);
+                return;
+            }
+        }
+        throw new InvalidOperationException(
+            $"The production input router rejected {InstallAttempts} consecutive projected scenes."
+        );
     }
 
     private InvalidOperationException LimitExceeded(string operation)

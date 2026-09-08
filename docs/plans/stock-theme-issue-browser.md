@@ -22,7 +22,7 @@ Develop directly in Lucent. Validate desktop and narrow layouts, long content, e
 
 The implementation tickets record the final API scope. Do not expand this into a full native-widget hierarchy or a general component catalog. The no-theme-override constraint applies to Issue Browser; Light Notes keeps its own accepted design.
 
-The design pass exposed a separate auto-height limitation for wrapping rows inside constrained ancestors, tracked in [#108](https://github.com/RichiCoder1/lucent/issues/108). Issue Browser uses deliberate wide/narrow filter arrangements; the framework follow-up should correct general wrapped-row measurement within the existing bounded layout budget.
+The design pass exposed the wrapped-row auto-height issue corrected in [#108](https://github.com/RichiCoder1/lucent/issues/108): nested auto-sized ancestors now receive the wrapped height at the constrained width. Issue Browser retains its deliberate wide/narrow filter arrangements. The separate [style-driven layout discussion](style-driven-layout-draft.md) explores a generic container and ergonomic container conditions over these existing layout properties; it is not an accepted implementation plan.
 
 ## Verification and ownership
 

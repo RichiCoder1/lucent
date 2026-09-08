@@ -1,0 +1,16 @@
+namespace HeadlessFixtures;
+using Lucent.Core;
+
+public component WrappedToolbar() {
+    <Column style={Style.Empty with { Padding: Insets.Uniform(8); Spacing: 6; CrossAlignment: LayoutAlignment.Stretch; }}>
+        <Column style={Style.Empty with { Padding: Insets.Uniform(5); CrossAlignment: LayoutAlignment.Stretch; }}>
+            <Row style={Style.Empty with { Wrap: true; Spacing: 8; RowGap: 7; }}>
+                <Button style={Style.Empty.Width(140)}>Open issues</Button>
+                <Button style={Style.Empty.Width(140)}>Assigned to me</Button>
+                <Button style={Style.Empty.Width(100)}>Clear filters</Button>
+            </Row>
+        </Column>
+        <Divider />
+        <Text>Following content</Text>
+    </Column>
+}
