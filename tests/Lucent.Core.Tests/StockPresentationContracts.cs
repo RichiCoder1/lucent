@@ -87,7 +87,7 @@ public sealed class StockPresentationContracts
         var button = composition.Child(composition.Root, "button");
         Controls.Button(button, theme, "Action");
         var field = composition.Child(composition.Root, "field");
-        Controls.TextField(field, theme, "Search");
+        Controls.TextField(field, theme, "Search", placeholder: "");
         var row = composition.Child(composition.Root, "row");
         Controls.Selectable(row, theme, "Issue");
         graph.Drain();
@@ -142,7 +142,7 @@ public sealed class StockPresentationContracts
         var button = composition.Child(composition.Root, "button");
         Controls.Button(button, theme, "Action");
         var field = composition.Child(composition.Root, "field");
-        Controls.TextField(field, theme, "Search");
+        Controls.TextField(field, theme, "Search", placeholder: "");
         var selected = composition.Child(composition.Root, "selected");
         Controls.Selectable(selected, theme, "Issue");
         var disabled = composition.Child(composition.Root, "disabled");
