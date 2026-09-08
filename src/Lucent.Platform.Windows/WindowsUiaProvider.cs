@@ -94,6 +94,10 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     /// <summary>WndProc teardown only makes callbacks unavailable; owner disposal releases COM after it unwinds.</summary>
     internal void MarkUnavailable() => Interlocked.Exchange(ref _disposed, 1);
 
+    // Counts detected semantic changes, even when no external UIA client is listening.
+    internal long DetectedStructureChanges { get; private set; }
+    internal long DetectedPropertyChanges { get; private set; }
+
     /// <summary>Called only at the Bootstrap safe point after Core projects a scene.</summary>
     internal void Refresh(RetainedScene scene)
     {
@@ -104,6 +108,10 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             .ToFrozenDictionary(node => node.Key);
         var prior = Volatile.Read(ref _snapshot);
         var snapshot = new Snapshot(next);
+        if (!HasAcyclicTree(snapshot))
+            throw new InvalidOperationException(
+                "UIA fragment navigation does not match the retained semantic tree."
+            );
         Volatile.Write(ref _snapshot, snapshot);
         var cache =
             _cache ?? throw new InvalidOperationException("Only the UIA root owns a cache.");
@@ -216,36 +224,20 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             if (!old.Focused && node.Focused)
                 RaiseFocus(node);
         }
-        if (!HasAcyclicTree(snapshot))
-            throw new InvalidOperationException(
-                "UIA fragment navigation does not match the retained semantic tree."
-            );
     }
 
-    /// <summary>Owner-thread assertion: each retained semantic node has one acyclic parent path from the synthetic root.</summary>
+    /// <summary>Owner-thread assertion: each retained node has one acyclic path from the synthetic root.</summary>
     private static bool HasAcyclicTree(Snapshot snapshot)
     {
         var visited = new HashSet<NodeKey>();
-        bool Visit(Node node)
+        var pending = new Stack<Node>(snapshot.Roots);
+        while (pending.TryPop(out var node))
         {
             if (!visited.Add(node.Key))
                 return false;
-            foreach (
-                var child in snapshot
-                    .Nodes.Values.Where(value => value.Parent == node.Key)
-                    .OrderBy(value => value.Ordinal)
-            )
-                if (!Visit(child))
-                    return false;
-            return true;
+            foreach (var child in snapshot.Children(node.Key))
+                pending.Push(child);
         }
-        foreach (
-            var top in snapshot
-                .Nodes.Values.Where(value => value.Parent is null)
-                .OrderBy(value => value.Ordinal)
-        )
-            if (!Visit(top))
-                return false;
         return visited.Count == snapshot.Nodes.Count;
     }
 
@@ -594,35 +586,22 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     private Node? NavigateSnapshot(Snapshot snapshot, int direction, Node? current)
     {
         if (IsRoot)
-        {
-            var top = snapshot
-                .Nodes.Values.Where(value => value.Parent is null)
-                .OrderBy(value => value.Ordinal)
-                .ToArray();
-            return direction == 3 ? top.FirstOrDefault()
-                : direction == 4 ? top.LastOrDefault()
+            return direction == 3 ? snapshot.Roots.FirstOrDefault()
+                : direction == 4 ? snapshot.Roots.LastOrDefault()
                 : null;
-        }
-        var node = current;
-        if (node is null)
+        if (current is null)
             return null;
         if (direction == 0)
-            return node.Parent is { } parent && snapshot.Nodes.TryGetValue(parent, out var value)
+            return current.Parent is { } parent && snapshot.Nodes.TryGetValue(parent, out var value)
                 ? value
                 : null;
-        var children = snapshot
-            .Nodes.Values.Where(value => value.Parent == node.Key)
-            .OrderBy(value => value.Ordinal)
-            .ToArray();
+        var children = snapshot.Children(current.Key);
         if (direction == 3)
             return children.FirstOrDefault();
         if (direction == 4)
             return children.LastOrDefault();
-        var siblings = snapshot
-            .Nodes.Values.Where(value => value.Parent == node.Parent)
-            .OrderBy(value => value.Ordinal)
-            .ToArray();
-        var at = Array.FindIndex(siblings, value => value.Key == node.Key);
+        var siblings = current.Parent is { } key ? snapshot.Children(key) : snapshot.Roots;
+        var at = snapshot.SiblingPositions[current.Key];
         return direction == 1 && at + 1 < siblings.Length ? siblings[at + 1]
             : direction == 2 && at > 0 ? siblings[at - 1]
             : null;
@@ -842,9 +821,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         var node = CurrentNode(snapshot);
         if (node is null)
             return NotAvailable;
-        var selected = snapshot
-            .Nodes.Values.Where(child => child.Parent == node.Key && child.Selected)
-            .ToArray();
+        var selected = snapshot.Children(node.Key).Where(child => child.Selected).ToArray();
         value = SafeArrayCreateVector(VtUnknown, 0, (uint)selected.Length);
         if (value == 0)
             return OutOfMemory;
@@ -990,6 +967,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
 
     private void RaiseStructure(WindowsUiaProvider provider, int change, Node changed)
     {
+        DetectedStructureChanges++;
         if (!UiaClientsAreListening())
             return;
         var runtimeId = stackalloc int[]
@@ -1003,6 +981,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
 
     private void RaiseProperty(Node node, int id, object oldValue, object newValue)
     {
+        DetectedPropertyChanges++;
         if (!UiaClientsAreListening() || Provider(node) is not { } provider)
             return;
         var oldVariant = Variant(oldValue);
@@ -1145,12 +1124,38 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         SemanticRangeSnapshot? Range
     );
 
-    private sealed class Snapshot(FrozenDictionary<NodeKey, Node> nodes)
+    // Immutable after construction: COM readers use one snapshot for every navigation step.
+    private sealed class Snapshot
     {
         internal static readonly Snapshot Empty = new(
             new Dictionary<NodeKey, Node>().ToFrozenDictionary()
         );
-        internal FrozenDictionary<NodeKey, Node> Nodes { get; } = nodes;
+        private readonly Dictionary<NodeKey, Node[]> _children;
+        internal FrozenDictionary<NodeKey, Node> Nodes { get; }
+        internal Node[] Roots { get; }
+        internal Dictionary<NodeKey, int> SiblingPositions { get; } = [];
+
+        internal Snapshot(FrozenDictionary<NodeKey, Node> nodes)
+        {
+            Nodes = nodes;
+            var roots = new List<Node>();
+            var children = new Dictionary<NodeKey, List<Node>>();
+            foreach (var node in nodes.Values.OrderBy(node => node.Ordinal))
+            {
+                var siblings = roots;
+                if (node.Parent is { } parent)
+                {
+                    if (!children.TryGetValue(parent, out siblings))
+                        children.Add(parent, siblings = []);
+                }
+                SiblingPositions.Add(node.Key, siblings.Count);
+                siblings.Add(node);
+            }
+            Roots = roots.ToArray();
+            _children = children.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray());
+        }
+
+        internal Node[] Children(NodeKey key) => _children.GetValueOrDefault(key) ?? [];
     }
 
     [StructLayout(LayoutKind.Explicit, Size = 24)]

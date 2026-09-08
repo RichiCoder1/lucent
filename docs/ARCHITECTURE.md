@@ -115,6 +115,8 @@ The bounded `0.1` guarantee is scalar-safe storage, grapheme-boundary movement a
 
 Core emits a retained semantic tree with stable identity, roles, names, values, enabled/focus/selection state, actions, bounds, hierarchy, and stale-generation rejection. Windows maps that tree to UIA fragments, patterns, and events. Accessibility never derives from pixels.
 
+Each Windows semantic snapshot indexes ordered children and sibling positions once. Tree validation and fragment navigation use those indexes; validation completes before the snapshot is published to COM readers. Unchanged refreshes retain provider identity and produce no structure/property notifications, while changed payloads still produce property events. Snapshot materialization remains a full projection; broader incremental projection is tracked separately in #114. UIA action processing examines at most 32 queued requests per owner-loop pass, including canceled requests, and wakes the loop again for remaining work.
+
 The retained scene contains renderer-facing paint commands without SDL, HWND, framebuffer, or GPU handles. Shaping measurement and painting share the same glyph identities and positions.
 
 ## Rendering and presentation
