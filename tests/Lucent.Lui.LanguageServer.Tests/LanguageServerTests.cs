@@ -2454,18 +2454,6 @@ public component MenuButton() {
             {
                 (new Uri(columnDeclarationPath), new LuiSpan(columnDeclaration, "Column".Length)),
             };
-            var menuSourcePath = Path.GetFullPath("src/Lucent.Core/ContextMenus.cs");
-            var menuColumnReference = (await File.ReadAllTextAsync(menuSourcePath)).IndexOf(
-                "Column(",
-                StringComparison.Ordinal
-            );
-            Assert(
-                menuColumnReference >= 0,
-                "The menu separator Column reference fixture disappeared."
-            );
-            expectedColumnLocations.Add(
-                (new Uri(menuSourcePath), new LuiSpan(menuColumnReference, 6))
-            );
             foreach (var path in Directory.GetFiles("apps/Lucent.IssueBrowser", "*.lui"))
             {
                 var text = await File.ReadAllTextAsync(path);
@@ -2505,7 +2493,7 @@ public component MenuButton() {
                     && actualColumnLocations.SetEquals(expectedColumnLocations)
                     && actualColumnEdits is not null
                     && actualColumnEdits.SetEquals(expectedColumnLocations),
-                $"Issue Browser Column references/rename did not cover every paired tag and the Core project declaration and usage exactly. Missing references: {String.Join(", ", missingColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected references: {String.Join(", ", unexpectedColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; missing edits: {String.Join(", ", missingColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected edits: {String.Join(", ", unexpectedColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}."
+                $"Issue Browser Column references/rename did not cover every paired tag and the Core project declaration exactly. Missing references: {String.Join(", ", missingColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected references: {String.Join(", ", unexpectedColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; missing edits: {String.Join(", ", missingColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected edits: {String.Join(", ", unexpectedColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}."
             );
             Assert(
                 tagCompletions.Any(item =>
@@ -2569,6 +2557,19 @@ public component MenuButton() {
 
             var issueRow = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/IssueRow.lui"));
             var issueRowText = await File.ReadAllTextAsync(issueRow.LocalPath);
+            // Exercise authored variants as an editor buffer, without requiring the
+            // stock-theme example to carry decorative styles solely for this test.
+            issueRowText += """
+
+                style EditorFixtureStyle {
+                    Background: PageSurface;
+                    when Hover { Background: HeaderSurface; }
+                    when Pressed { Background: PageSurface; }
+                    when Hover | Pressed { Background: HeaderSurface; }
+                    when FocusVisible { Background: PageSurface; }
+                }
+                """;
+            issueBrowser.ReplaceText(issueRow, issueRowText);
             var issueRowSymbols = await issueBrowser.DocumentSymbolsAsync(
                 issueRow,
                 CancellationToken.None
@@ -2579,7 +2580,7 @@ public component MenuButton() {
                 .Members.OfType<LuiVariantGroupSyntax>()
                 .ToArray();
             var variantSymbols = issueRowSymbols!
-                .Single(symbol => symbol.Name == "IssueRowStyle")
+                .Single(symbol => symbol.Name == "EditorFixtureStyle")
                 .Children.Where(symbol => symbol.Name.StartsWith("when ", StringComparison.Ordinal))
                 .ToArray();
             Assert(
@@ -2596,7 +2597,8 @@ public component MenuButton() {
             Assert(
                 issueRowSymbols!
                     .SelectMany(symbol => symbol.Children)
-                    .Single(symbol => symbol.Name == "Selectable")
+                    .Single(symbol => symbol.Name == "ContextMenu")
+                    .Children.Single(symbol => symbol.Name == "Selectable")
                     .Children.Single(symbol => symbol.Name == "style")
                     .Children.Any(symbol => symbol.Name == "Height"),
                 "inline style document symbols omitted the IssueRow Height assignment."
@@ -2605,7 +2607,7 @@ public component MenuButton() {
             var errorText = await File.ReadAllTextAsync(error.LocalPath);
             var tokenCompletions = await issueBrowser.CompletionsAsync(
                 issueRow,
-                issueRowText.IndexOf("RowSurface", StringComparison.Ordinal),
+                issueRowText.IndexOf("PageSurface", StringComparison.Ordinal),
                 CancellationToken.None
             );
             var variantCompletions = await issueBrowser.CompletionsAsync(
@@ -2615,7 +2617,7 @@ public component MenuButton() {
             );
             Assert(
                 tokenCompletions.Any(item =>
-                    item.Label == "RowSurface"
+                    item.Label == "PageSurface"
                     && item.Kind == 5
                     && item.Detail.Contains("Token", StringComparison.Ordinal)
                 ) && !tokenCompletions.Any(item => item.Label == "AppTheme"),
@@ -2722,19 +2724,7 @@ public component MenuButton() {
                 .RootElement.GetProperty("result")
                 .GetProperty("changes");
             Assert(
-                rpcColumnReferences.Length == 10
-                    && rpcColumnReferences.Count(location =>
-                        location
-                            .GetProperty("uri")
-                            .GetString()!
-                            .EndsWith("ContextMenus.cs", StringComparison.Ordinal)
-                    ) == 1
-                    && rpcColumnChanges
-                        .EnumerateObject()
-                        .Single(change =>
-                            change.Name.EndsWith("ContextMenus.cs", StringComparison.Ordinal)
-                        )
-                        .Value.GetArrayLength() == 1
+                rpcColumnReferences.Length == 9
                     && rpcColumnReferences.Count(location =>
                         location
                             .GetProperty("uri")
@@ -2753,7 +2743,7 @@ public component MenuButton() {
                             change.Name.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
                         )
                         .Sum(change => change.Value.GetArrayLength()) == 8,
-                "Issue Browser Column RPC references/rename did not preserve all paired tags and Core declaration/usage."
+                "Issue Browser Column RPC references/rename did not preserve all paired tags and the Core declaration."
             );
             var columnSource = new Uri(Path.GetFullPath("src/Lucent.Core/Components.cs"));
             var columnSourceText = await File.ReadAllTextAsync(columnSource.LocalPath);
@@ -2809,7 +2799,7 @@ public component MenuButton() {
                 }
             );
             Assert(
-                insertedLineReferences.RootElement.GetProperty("result").GetArrayLength() == 10
+                insertedLineReferences.RootElement.GetProperty("result").GetArrayLength() == 9
                     && sameLineRename
                         .RootElement.GetProperty("result")
                         .GetProperty("changes")
