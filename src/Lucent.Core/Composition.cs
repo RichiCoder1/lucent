@@ -190,6 +190,35 @@ public sealed class Composition : IDisposable
         Func<CompositionContext, Element> content
     )
     {
+        var theme = RequirePresentedRegionTheme(parent, nameof(When));
+        return When(parent, theme, name, active, content);
+    }
+
+    /// <summary>Creates a zero-or-one structural region with an explicit theme for nested recipes.</summary>
+    public ConditionalRegion When(
+        Element parent,
+        ThemeContext theme,
+        string name,
+        Func<bool> active,
+        Func<CompositionContext, Element> content
+    )
+    {
+        ThrowIfFactoryCreation();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(active);
+        ArgumentNullException.ThrowIfNull(content);
+        ValidateRegionTheme(parent, theme);
+        return new ConditionalRegion(this, parent, name, active, content, theme: theme);
+    }
+
+    /// <summary>Creates an explicitly theme-independent zero-or-one region for raw element factories.</summary>
+    public ConditionalRegion WhenStructure(
+        Element parent,
+        string name,
+        Func<bool> active,
+        Func<CompositionContext, Element> content
+    )
+    {
         ThrowIfFactoryCreation();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(active);
@@ -199,6 +228,33 @@ public sealed class Composition : IDisposable
 
     /// <summary>Creates one retained branch selected by a single reactive recipe evaluation.</summary>
     public ConditionalRegion Switch(Element parent, string name, Func<ConditionalChoice> select)
+    {
+        var theme = RequirePresentedRegionTheme(parent, nameof(Switch));
+        return Switch(parent, theme, name, select);
+    }
+
+    /// <summary>Creates one retained branch with an explicit theme for nested recipes.</summary>
+    public ConditionalRegion Switch(
+        Element parent,
+        ThemeContext theme,
+        string name,
+        Func<ConditionalChoice> select
+    )
+    {
+        ThrowIfFactoryCreation();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(select);
+        ValidateRegionTheme(parent, theme);
+        return new ConditionalRegion(this, parent, name, select, theme: theme);
+    }
+
+    /// <summary>Creates an explicitly theme-independent retained branch for raw element recipes.</summary>
+    public ConditionalRegion SwitchStructure(
+        Element parent,
+        string name,
+        Func<ConditionalChoice> select
+    )
     {
         ThrowIfFactoryCreation();
         ThrowIfDisposed();
@@ -220,12 +276,94 @@ public sealed class Composition : IDisposable
     )
         where TKey : notnull
     {
+        var theme = RequirePresentedRegionTheme(parent, nameof(ForEach));
+        return ForEach(parent, theme, name, source, key, content);
+    }
+
+    /// <summary>Creates a keyed structural region with an explicit theme for nested recipes.</summary>
+    public KeyedRegion<TKey, TItem> ForEach<TKey, TItem>(
+        Element parent,
+        ThemeContext theme,
+        string name,
+        Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key,
+        Func<CurrentItem<TItem>, CompositionContext, Element> content
+    )
+        where TKey : notnull
+    {
+        ThrowIfFactoryCreation();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(content);
+        ValidateRegionTheme(parent, theme);
+        return new KeyedRegion<TKey, TItem>(this, parent, name, source, key, content, theme: theme);
+    }
+
+    /// <summary>Creates an explicitly theme-independent keyed region for raw element factories.</summary>
+    public KeyedRegion<TKey, TItem> ForEachStructure<TKey, TItem>(
+        Element parent,
+        string name,
+        Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key,
+        Func<CurrentItem<TItem>, CompositionContext, Element> content
+    )
+        where TKey : notnull
+    {
         ThrowIfFactoryCreation();
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(content);
         return new KeyedRegion<TKey, TItem>(this, parent, name, source, key, content);
+    }
+
+    private ThemeContext RequirePresentedRegionTheme(Element parent, string operation)
+    {
+        ThrowIfFactoryCreation();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(parent);
+        if (!ReferenceEquals(parent.Composition, this))
+            throw new ArgumentException(
+                "The parent belongs to another composition.",
+                nameof(parent)
+            );
+        parent.ThrowIfDisposed();
+        var theme = parent.Presentation?.Theme;
+        if (theme is null)
+            throw new InvalidOperationException(
+                "Composition."
+                    + operation
+                    + " requires a ThemeContext when the parent has no presentation. "
+                    + "Use the overload accepting ThemeContext for themed recipes or "
+                    + operation
+                    + "Structure for raw structural elements."
+            );
+        ValidateRegionTheme(parent, theme);
+        return theme;
+    }
+
+    private void ValidateRegionTheme(Element parent, ThemeContext theme)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(theme);
+        if (!ReferenceEquals(parent.Composition, this))
+            throw new ArgumentException(
+                "The parent belongs to another composition.",
+                nameof(parent)
+            );
+        parent.ThrowIfDisposed();
+        if (!ReferenceEquals(theme.Graph, _graph))
+            throw new ArgumentException(
+                "Theme context belongs to another reactive graph.",
+                nameof(theme)
+            );
+        if (!theme.Scope.DescendsFrom(Root.Scope))
+            throw new ArgumentException(
+                "Theme context must be owned by this composition.",
+                nameof(theme)
+            );
+        theme.ValidateLive();
     }
 
     /// <summary>Creates a fixed-height keyed region whose mounted entries are derived from its containing viewport.</summary>

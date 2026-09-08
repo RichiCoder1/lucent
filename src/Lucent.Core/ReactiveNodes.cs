@@ -174,8 +174,8 @@ public abstract class ReactiveNode : IDisposable
         _scope?.CheckMutationGuard();
     }
 
-    /// <summary>Checks owner and factory constraints while allowing guarded lazy evaluation.</summary>
-    protected void CheckScopeEvaluationGuard() => _scope?.CheckEvaluationGuard();
+    /// <summary>Checks owner constraints while allowing lazy evaluation to read across provisional subtrees.</summary>
+    protected void CheckScopeEvaluationGuard() => Graph.CheckThread();
 }
 
 /// <summary>Writable graph state.</summary>

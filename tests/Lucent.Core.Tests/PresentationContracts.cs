@@ -567,7 +567,7 @@ public sealed class PresentationContracts
         var active = composition.Root.Scope.Signal(false, "captured-region-active");
         CompositionContext? captured = null;
         Element? capturedRoot = null;
-        var conditional = composition.When(
+        var conditional = composition.WhenStructure(
             composition.Root,
             "captured-conditional",
             () => active.Value,
@@ -578,7 +578,7 @@ public sealed class PresentationContracts
             }
         );
         var rows = composition.Root.Scope.Signal(new[] { 1 }, "captured-rows");
-        var keyed = composition.ForEach(
+        var keyed = composition.ForEachStructure(
             composition.Root,
             "captured-keyed",
             () => rows.Value,

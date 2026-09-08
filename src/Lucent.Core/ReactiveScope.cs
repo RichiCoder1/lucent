@@ -256,13 +256,6 @@ public sealed partial class ReactiveScope : IDisposable
         _factoryGuard?.Invoke();
     }
 
-    internal void CheckEvaluationGuard()
-    {
-        _graph.CheckThread();
-        _mutationGuard?.Invoke();
-        _factoryGuard?.Invoke();
-    }
-
     private void CheckActive(bool skipFactoryGuard = false)
     {
         _graph.CheckThread();

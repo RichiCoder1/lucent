@@ -12,7 +12,7 @@ public sealed class CompositionContracts
         var active = graph.Signal(false, "conditional-active");
         using var composition = new Composition(graph, "conditional-root");
         var cleanup = 0;
-        var region = composition.When(
+        var region = composition.WhenStructure(
             composition.Root,
             "conditional-region",
             () => active.Value,
@@ -58,7 +58,7 @@ public sealed class CompositionContracts
         var rows = graph.Signal(new[] { "a", "b" }, "keyed-rows");
         using var composition = new Composition(graph, "keyed-root");
         var cleanup = new Dictionary<string, int>();
-        var region = composition.ForEach(
+        var region = composition.ForEachStructure(
             composition.Root,
             "keyed-region",
             () => rows.Value,
@@ -123,7 +123,7 @@ public sealed class CompositionContracts
         var observed = "";
         CurrentItem<CurrentRow>? reader = null;
         Signal<int>? local = null;
-        var region = composition.ForEach(
+        var region = composition.ForEachStructure(
             composition.Root,
             "current-keyed-region",
             () => rows.Value,
@@ -199,7 +199,7 @@ public sealed class CompositionContracts
         using var composition = new Composition(graph, "current-keyed-batch-root");
         var readers = new Dictionary<int, CurrentItem<CurrentRow>>();
         var observed = "";
-        _ = composition.ForEach(
+        _ = composition.ForEachStructure(
             composition.Root,
             "current-keyed-batch-region",
             () => rows.Value,
@@ -330,7 +330,7 @@ public sealed class CompositionContracts
                 throw new InvalidOperationException("switch factory");
             }
         );
-        var region = composition.Switch(
+        var region = composition.SwitchStructure(
             composition.Root,
             "switch-region",
             () =>
@@ -1406,7 +1406,7 @@ public sealed class CompositionContracts
         var cleanup = 0;
         foreign.Scope.OnDispose(() => cleanup++);
         var active = graph.Signal(false, "factory-mutation-active");
-        var region = composition.When(
+        var region = composition.WhenStructure(
             composition.Root,
             "factory-mutation-region",
             () => active.Value,
@@ -1445,7 +1445,7 @@ public sealed class CompositionContracts
         var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var conditionalReads = 0;
         var keyedReads = 0;
-        var conditional = composition.When(
+        var conditional = composition.WhenStructure(
             composition.Root,
             "live-conditional",
             () =>
@@ -1455,7 +1455,7 @@ public sealed class CompositionContracts
             },
             context => context.Element("live-child")
         );
-        var keyed = composition.ForEach(
+        var keyed = composition.ForEachStructure(
             composition.Root,
             "live-keyed",
             () =>
@@ -1712,7 +1712,7 @@ public sealed class CompositionContracts
         using var composition = new Composition(graph, "facet-root");
         var cleanup = 0;
         var cancelled = 0;
-        var region = composition.ForEach(
+        var region = composition.ForEachStructure(
             composition.Root,
             "facet-region",
             () => rows.Value,
@@ -1765,7 +1765,7 @@ public sealed class CompositionContracts
         using var composition = new Composition(graph, "failure-root");
         var provisionalCleanup = 0;
         var throwingCleanup = 0;
-        var region = composition.ForEach(
+        var region = composition.ForEachStructure(
             composition.Root,
             "failure-region",
             () => rows.Value,
@@ -1812,7 +1812,7 @@ public sealed class CompositionContracts
         var trigger = disposalGraph.Signal(false, "dispose-during-factory");
         var disposal = new Composition(disposalGraph, "dispose-root");
         var disposalCleanup = 0;
-        _ = disposal.When(
+        _ = disposal.WhenStructure(
             disposal.Root,
             "dispose-region",
             () => trigger.Value,
@@ -1845,7 +1845,7 @@ public sealed class CompositionContracts
         var active = graph.Signal(false, "invalid-parent-active");
         using var composition = new Composition(graph, "invalid-parent-root");
         var unrelated = composition.Child(composition.Root, "unrelated");
-        var region = composition.When(
+        var region = composition.WhenStructure(
             composition.Root,
             "invalid-parent-region",
             () => active.Value,
@@ -1876,7 +1876,7 @@ public sealed class CompositionContracts
         var disposedActive = disposedGraph.Signal(false, "disposed-context-active");
         using var disposedComposition = new Composition(disposedGraph, "disposed-context-root");
         var contextUsedAfterDispose = false;
-        var disposedRegion = disposedComposition.When(
+        var disposedRegion = disposedComposition.WhenStructure(
             disposedComposition.Root,
             "disposed-context-region",
             () => disposedActive.Value,
@@ -1903,7 +1903,7 @@ public sealed class CompositionContracts
         var rootGraph = new ReactiveGraph();
         var rootActive = rootGraph.Signal(false, "disposed-root-active");
         using var rootComposition = new Composition(rootGraph, "disposed-root-composition");
-        var rootRegion = rootComposition.When(
+        var rootRegion = rootComposition.WhenStructure(
             rootComposition.Root,
             "disposed-root-region",
             () => rootActive.Value,
@@ -1925,7 +1925,7 @@ public sealed class CompositionContracts
         var keyedGraph = new ReactiveGraph();
         var rows = keyedGraph.Signal(new[] { 1 }, "disposed-keyed-rows");
         using var keyedComposition = new Composition(keyedGraph, "disposed-keyed-root");
-        var keyed = keyedComposition.ForEach(
+        var keyed = keyedComposition.ForEachStructure(
             keyedComposition.Root,
             "disposed-keyed-region",
             () => rows.Value,
@@ -1946,7 +1946,7 @@ public sealed class CompositionContracts
             descendantGraph,
             "disposed-descendant-root"
         );
-        var descendantRegion = descendantComposition.When(
+        var descendantRegion = descendantComposition.WhenStructure(
             descendantComposition.Root,
             "disposed-descendant-region",
             () => descendantActive.Value,
@@ -1971,7 +1971,7 @@ public sealed class CompositionContracts
             conditionalGraph,
             "joint-conditional-root"
         );
-        _ = conditionalComposition.When(
+        _ = conditionalComposition.WhenStructure(
             conditionalComposition.Root,
             "joint-conditional-region",
             () => conditionalActive.Value,
@@ -1995,7 +1995,7 @@ public sealed class CompositionContracts
         var failureGraph = new ReactiveGraph();
         var failureRows = failureGraph.Signal(Array.Empty<int>(), "joint-keyed-rows");
         using var failureComposition = new Composition(failureGraph, "joint-keyed-root");
-        var failureRegion = failureComposition.ForEach(
+        var failureRegion = failureComposition.ForEachStructure(
             failureComposition.Root,
             "joint-keyed-region",
             () => failureRows.Value,
@@ -2042,7 +2042,7 @@ public sealed class CompositionContracts
             false,
             "when",
             composition =>
-                composition.When(
+                composition.WhenStructure(
                     composition.Root,
                     "escaped-when",
                     () => false,
@@ -2052,13 +2052,14 @@ public sealed class CompositionContracts
         AssertPublicFactoryGuard(
             false,
             "switch",
-            composition => composition.Switch(composition.Root, "escaped-switch", () => default)
+            composition =>
+                composition.SwitchStructure(composition.Root, "escaped-switch", () => default)
         );
         AssertPublicFactoryGuard(
             false,
             "foreach",
             composition =>
-                composition.ForEach(
+                composition.ForEachStructure(
                     composition.Root,
                     "escaped-foreach",
                     Array.Empty<int>,
@@ -2075,7 +2076,7 @@ public sealed class CompositionContracts
             true,
             "when",
             composition =>
-                composition.When(
+                composition.WhenStructure(
                     composition.Root,
                     "escaped-when",
                     () => false,
@@ -2085,13 +2086,14 @@ public sealed class CompositionContracts
         AssertPublicFactoryGuard(
             true,
             "switch",
-            composition => composition.Switch(composition.Root, "escaped-switch", () => default)
+            composition =>
+                composition.SwitchStructure(composition.Root, "escaped-switch", () => default)
         );
         AssertPublicFactoryGuard(
             true,
             "foreach",
             composition =>
-                composition.ForEach(
+                composition.ForEachStructure(
                     composition.Root,
                     "escaped-foreach",
                     Array.Empty<int>,
@@ -2104,7 +2106,7 @@ public sealed class CompositionContracts
         var active = graph.Signal(false, "switch-foreign-active");
         using var composition = new Composition(graph, "switch-foreign-root");
         var foreign = composition.Child(composition.Root, "switch-foreign-parent");
-        var region = composition.When(
+        var region = composition.WhenStructure(
             composition.Root,
             "switch-foreign-region",
             () => active.Value,
@@ -2144,7 +2146,7 @@ public sealed class CompositionContracts
         ConditionalRegion? conditional = null;
         KeyedRegion<int, int>? keyedRegion = null;
         if (keyed)
-            keyedRegion = composition.ForEach(
+            keyedRegion = composition.ForEachStructure(
                 composition.Root,
                 "factory-guard-keyed-" + api,
                 () => rows.Value,
@@ -2152,7 +2154,7 @@ public sealed class CompositionContracts
                 (_, context) => content(context)
             );
         else
-            conditional = composition.When(
+            conditional = composition.WhenStructure(
                 composition.Root,
                 "factory-guard-conditional-" + api,
                 () => active.Value,
@@ -2182,7 +2184,7 @@ public sealed class CompositionContracts
         var active = graph.Signal(true, "manual-scope-conditional-active");
         using var composition = new Composition(graph, "manual-scope-conditional-root");
         var cleanup = 0;
-        var region = composition.When(
+        var region = composition.WhenStructure(
             composition.Root,
             "manual-scope-conditional-region",
             () => active.Value,
@@ -2217,7 +2219,7 @@ public sealed class CompositionContracts
         var keyedGraph = new ReactiveGraph();
         var rows = keyedGraph.Signal(new[] { 1 }, "manual-scope-keyed-rows");
         using var keyedComposition = new Composition(keyedGraph, "manual-scope-keyed-root");
-        var keyed = keyedComposition.ForEach(
+        var keyed = keyedComposition.ForEachStructure(
             keyedComposition.Root,
             "manual-scope-keyed-region",
             () => rows.Value,
@@ -2260,7 +2262,7 @@ public sealed class CompositionContracts
         var graph = new ReactiveGraph();
         var rows = graph.Signal(new[] { 1 }, "manual-scope-release-rows");
         var composition = new Composition(graph, "manual-scope-release-root");
-        var keyed = composition.ForEach(
+        var keyed = composition.ForEachStructure(
             composition.Root,
             "manual-scope-release-region",
             () => rows.Value,
@@ -2284,7 +2286,7 @@ public sealed class CompositionContracts
         Element? firstRoot = null;
         Element? firstLeaf = null;
         var cleanup = 0;
-        var region = composition.ForEach(
+        var region = composition.ForEachStructure(
             composition.Root,
             "keyed-transaction-region",
             () => rows.Value,
@@ -2332,7 +2334,7 @@ public sealed class CompositionContracts
         var reentrantGraph = new ReactiveGraph();
         var reentrantRows = reentrantGraph.Signal(new[] { 1 }, "keyed-reentrant-rows");
         using var reentrantComposition = new Composition(reentrantGraph, "keyed-reentrant-root");
-        var reentrant = reentrantComposition.ForEach(
+        var reentrant = reentrantComposition.ForEachStructure(
             reentrantComposition.Root,
             "keyed-reentrant-region",
             () => reentrantRows.Value,
@@ -2369,7 +2371,7 @@ public sealed class CompositionContracts
         var rows = graph.Signal(new[] { 1 }, "keyed-retained-rows");
         using var composition = new Composition(graph, "keyed-retained-root");
         Element? retained = null;
-        var region = composition.ForEach(
+        var region = composition.ForEachStructure(
             composition.Root,
             "keyed-retained-region",
             () => rows.Value,
@@ -2415,7 +2417,7 @@ public sealed class CompositionContracts
         var weak = new List<WeakReference>();
         var cleanup = 0;
         var composition = new Composition(graph, "keyed-ordering-root");
-        var region = composition.ForEach(
+        var region = composition.ForEachStructure(
             composition.Root,
             "keyed-ordering-region",
             () => rows.Value,
@@ -2479,7 +2481,7 @@ public sealed class CompositionContracts
         var rows = graph.Signal(new[] { 1 }, "release-rows");
         var weak = new List<WeakReference>();
         var composition = new Composition(graph, "release-root");
-        _ = composition.ForEach(
+        _ = composition.ForEachStructure(
             composition.Root,
             "release-region",
             () => rows.Value,
@@ -2517,7 +2519,7 @@ public sealed class CompositionContracts
         var elementWeak = new WeakReference(element);
         element.Dispose();
 
-        var conditional = composition.When(
+        var conditional = composition.WhenStructure(
             composition.Root,
             "manual-conditional",
             () => false,
@@ -2527,7 +2529,7 @@ public sealed class CompositionContracts
         var conditionalWeak = new WeakReference(conditional);
         conditional.Dispose();
 
-        var keyed = composition.ForEach(
+        var keyed = composition.ForEachStructure(
             composition.Root,
             "manual-keyed",
             Array.Empty<int>,
