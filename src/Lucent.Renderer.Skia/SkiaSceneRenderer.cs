@@ -12,8 +12,8 @@ namespace Lucent.Renderer.Skia;
 
 /// <summary>Shapes Core text with HarfBuzz and paints retained scenes through Skia.</summary>
 /// <remarks>
-/// The renderer owns bounded LRU shape and native text-blob caches (16 MiB estimated retained
-/// payload per cache; 32 MiB combined) and the typeface fingerprints used to
+/// The renderer owns bounded LRU caches for complete shapes (12 MiB), reusable paragraphs
+/// (4 MiB), and native text blobs (16 MiB estimated retained payload; 32 MiB combined), and the typeface fingerprints used to
 /// verify that cached glyph data still identifies the face that produced it. Shape results are immutable Core values and do
 /// not retain Skia resources. Itemization supports common left-to-right
 /// text and Arabic/Hebrew right-to-left text; full Unicode bidirectional reordering is not provided.
@@ -30,11 +30,18 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     // Pinned SKShaper encodes HarfBuzz positions against this source constant.
     private const float FontSizeScale = 512f;
     private const int ShapeCacheCapacity = 256;
-    private const long ShapeCacheByteBudget = 16L * 1024 * 1024;
+    private const long ShapeCacheByteBudget = 12L * 1024 * 1024;
+    private const long ParagraphCacheByteBudget = 4L * 1024 * 1024;
     private const long TextBlobCacheByteBudget = 16L * 1024 * 1024;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly Dictionary<FaceKey, string> _faceFingerprints = [];
     private readonly Dictionary<TextMeasureRequest, ShapedText> _shapes = [];
+    private readonly Dictionary<
+        ParagraphCacheKey,
+        LinkedListNode<ParagraphCacheEntry>
+    > _paragraphs = [];
+    private readonly LinkedList<ParagraphCacheEntry> _paragraphLru = [];
+    private long _paragraphBytes;
     private readonly LinkedList<ShapeCacheEntry> _shapeLru = [];
     private readonly Dictionary<
         TextMeasureRequest,
@@ -51,6 +58,10 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private long _textBlobCreationCount;
     private bool _disposed;
     internal long ParagraphShapeCount { get; private set; }
+    internal long ShaperCreationCount { get; private set; }
+    internal long CoverageProbeCount { get; private set; }
+    internal long FingerprintByteCount { get; private set; }
+    internal long RetainedParagraphBytes => _paragraphBytes;
 
     /// <summary>Gets the number of retained native text blobs owned by this renderer.</summary>
     /// <remarks>The bounded cache is released by <see cref="Dispose"/>; this count is zero afterward.</remarks>
@@ -93,17 +104,10 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                 continue;
             }
 
-            ParagraphShapeCount++;
-            IReadOnlyList<LineDraft> shapedSpan;
-            if (
-                request.Wrap is TextWrap.NoWrap or TextWrap.ExplicitBreaks
-                || !request.InlineConstraint.IsBounded
-            )
-                shapedSpan = [ShapeLine(request, span.Start, span.Length, span.HardBreak)];
-            else
-                shapedSpan = Wrap(request, span.Start, span.Length, span.HardBreak);
-            drafts.AddRange(shapedSpan);
-            spanCache.Add(key, new SpanDraft(span.Start, shapedSpan));
+            var shapedSpan = ShapeParagraph(request with { Text = source }, span.HardBreak);
+            foreach (var draft in shapedSpan)
+                drafts.Add(Rebase(draft, span.Start));
+            spanCache.Add(key, new SpanDraft(0, shapedSpan));
         }
 
         if (drafts.Count == 0)
@@ -231,6 +235,54 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                 request.BlockConstraint
             )
         );
+    }
+
+    private IReadOnlyList<LineDraft> ShapeParagraph(TextMeasureRequest request, bool hardBreak)
+    {
+        var key = new ParagraphCacheKey(request, hardBreak);
+        if (_paragraphs.TryGetValue(key, out var cached))
+        {
+            _paragraphLru.Remove(cached);
+            _paragraphLru.AddLast(cached);
+            return cached.Value.Lines;
+        }
+        ParagraphShapeCount++;
+        IReadOnlyList<LineDraft> lines =
+            request.Wrap is TextWrap.NoWrap or TextWrap.ExplicitBreaks
+            || !request.InlineConstraint.IsBounded
+                ? [ShapeLine(request, 0, request.Text.Length, hardBreak)]
+                : Wrap(request, 0, request.Text.Length, hardBreak);
+        var bytes = checked(
+            256L + 2L * (request.Text.Length + request.FontFamily.Length + request.Language.Length)
+        );
+        foreach (var line in lines)
+        {
+            bytes = checked(bytes + 128);
+            foreach (var run in line.Pending)
+                bytes = checked(
+                    bytes
+                    + 256
+                    + 48L * run.Glyphs.Length
+                    + 2L * (run.Family.Length + run.Fingerprint.Length + run.SourceIdentity.Length)
+                );
+        }
+        if (bytes > ParagraphCacheByteBudget)
+            return lines;
+        while (
+            _paragraphLru.First is { } oldest
+            && (
+                _paragraphs.Count >= ShapeCacheCapacity
+                || _paragraphBytes + bytes > ParagraphCacheByteBudget
+            )
+        )
+        {
+            _paragraphLru.RemoveFirst();
+            _paragraphs.Remove(oldest.Value.Key);
+            _paragraphBytes -= oldest.Value.Bytes;
+        }
+        _paragraphs.Add(key, _paragraphLru.AddLast(new ParagraphCacheEntry(key, lines, bytes)));
+        _paragraphBytes += bytes;
+        return lines;
     }
 
     private LineDraft ShapeLine(TextMeasureRequest request, int start, int length, bool hardBreak)
@@ -463,6 +515,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             using var face = ResolveFace(request, piece.Text, out var collectionIndex);
             using var font = CreateFont(face, request.FontSize);
             using var shaper = new SKShaper(face);
+            ShaperCreationCount++;
             using var buffer = new HbBuffer();
             buffer.AddUtf16(piece.Text);
             buffer.GuessSegmentProperties();
@@ -542,10 +595,11 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                     "SKShaper positioned glyph edges do not match its reported width."
                 );
             var metrics = font.Metrics;
+            using var faceStyle = face.FontStyle;
             pending.Add(
                 new(
                     face.FamilyName,
-                    face.FontStyle,
+                    new FaceStyle(faceStyle.Weight, faceStyle.Width, faceStyle.Slant),
                     FaceFingerprint(face, collectionIndex),
                     collectionIndex,
                     face.FamilyName + "#" + collectionIndex.ToString(CultureInfo.InvariantCulture),
@@ -561,9 +615,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         return pending;
     }
 
-    private static (float Ascent, float Descent, float Leading) EmptyMetrics(
-        TextMeasureRequest request
-    )
+    private (float Ascent, float Descent, float Leading) EmptyMetrics(TextMeasureRequest request)
     {
         using var face = ResolveFace(request, " ", out _);
         using var font = CreateFont(face, request.FontSize);
@@ -839,18 +891,14 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private static long EstimateTextBlobBytes(ShapedRun run) =>
         checked(128L + 2L * run.Identity.Length + 64L * run.Glyphs.Count);
 
-    private static SKTypeface ResolveFace(
-        TextMeasureRequest request,
-        string text,
-        out int collectionIndex
-    )
+    private SKTypeface ResolveFace(TextMeasureRequest request, string text, out int collectionIndex)
     {
         var resolved = TryResolveFace(request, text, out collectionIndex);
         return resolved
             ?? throw new InvalidOperationException("No font fallback covers the text element.");
     }
 
-    private static SKTypeface? TryResolveFace(
+    private SKTypeface? TryResolveFace(
         TextMeasureRequest request,
         string text,
         out int collectionIndex
@@ -891,8 +939,10 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         return null;
     }
 
-    private static bool Covers(SKTypeface face, TextMeasureRequest request, string text)
+    private bool Covers(SKTypeface face, TextMeasureRequest request, string text)
     {
+        CoverageProbeCount++;
+        ShaperCreationCount++;
         using var font = CreateFont(face, request.FontSize);
         using var shaper = new SKShaper(face);
         using var buffer = new HbBuffer();
@@ -1058,6 +1108,9 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         _shapeLru.Clear();
         _shapeLruNodes.Clear();
         _shapeBytes = 0;
+        _paragraphs.Clear();
+        _paragraphLru.Clear();
+        _paragraphBytes = 0;
         DisposeTextBlobs();
         _faceFingerprints.Clear();
     }
@@ -1207,7 +1260,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private static string RunIdentity(
         TextMeasureRequest request,
         string family,
-        SKFontStyle style,
+        FaceStyle style,
         string fingerprint,
         int collectionIndex,
         TextDirection direction,
@@ -1361,7 +1414,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 
     private string FaceFingerprint(SKTypeface face, int collectionIndex)
     {
-        var style = face.FontStyle;
+        using var style = face.FontStyle;
         var key = new FaceKey(
             face.FamilyName,
             style.Weight,
@@ -1384,6 +1437,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                 "Typeface OpenStream produced no fingerprintable bytes."
             );
         fingerprint = Hash(Convert.ToHexString(data.ToArray()));
+        FingerprintByteCount += data.Size;
         _faceFingerprints.Add(key, fingerprint);
         return fingerprint;
     }
@@ -1406,7 +1460,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 
     private sealed record PendingRun(
         string Family,
-        SKFontStyle Style,
+        FaceStyle Style,
         string Fingerprint,
         int CollectionIndex,
         string SourceIdentity,
@@ -1457,6 +1511,16 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     }
 
     private sealed record SpanDraft(int Start, IReadOnlyList<LineDraft> Lines);
+
+    private readonly record struct FaceStyle(int Weight, int Width, SKFontStyleSlant Slant);
+
+    private readonly record struct ParagraphCacheKey(TextMeasureRequest Request, bool HardBreak);
+
+    private sealed record ParagraphCacheEntry(
+        ParagraphCacheKey Key,
+        IReadOnlyList<LineDraft> Lines,
+        long Bytes
+    );
 
     private readonly record struct ShapeCacheEntry(TextMeasureRequest Request, long Bytes);
 
