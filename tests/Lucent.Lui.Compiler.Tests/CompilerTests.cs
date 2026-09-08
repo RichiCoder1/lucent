@@ -821,6 +821,76 @@ style Workspace(float width) {
     }
 
     [TestMethod]
+    public void ParameterizedStyleNullableNullsUseResolvedPropertyTypes()
+    {
+        const string propertyApi = """
+namespace Sample;
+using Lucent.Core;
+public static class Props {
+    public static readonly Property<string?> Optional = new("optional", null);
+    public static readonly Property<string?> OptionalFromConst = new("optional-from-const", null);
+    public const string? NullValue = null;
+}
+""";
+        const string source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static Lucent.Core.LayoutProperties;
+using static Sample.Props;
+internal component Example() { <Row style={Workspace(1)} /> }
+style Workspace(int value) {
+    Width: null;
+    Optional: (null);
+    OptionalFromConst: NullValue;
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create(
+                "parameterized-style-null",
+                [
+                    CSharpSyntaxTree.ParseText(
+                        propertyApi,
+                        new CSharpParseOptions(LanguageVersion.Preview)
+                    ),
+                ],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "parameterized-style-null",
+                "parameterized-style-null",
+                new LuiDocumentIdentity("ParameterizedStyleNull.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "nullable static style nulls did not compile: "
+                + String.Join(" | ", result.Diagnostics.Select(item => item.Message))
+        );
+        Assert(
+            result.Source!.Contains(
+                ".Set(global::Lucent.Core.LayoutProperties.Width, (float?)",
+                StringComparison.Ordinal
+            )
+                && result.Source.Contains(
+                    ".Set(global::Sample.Props.Optional, (string?)",
+                    StringComparison.Ordinal
+                )
+                && result.Source.Contains("(null)", StringComparison.Ordinal)
+                && result.Source.Contains(
+                    ".Set(global::Sample.Props.OptionalFromConst, (string?)",
+                    StringComparison.Ordinal
+                )
+                && result.Source.Contains("NullValue", StringComparison.Ordinal),
+            "nullable static style nulls were not emitted with resolved property casts.\n"
+                + result.Source
+        );
+    }
+
+    [TestMethod]
     public void GrammarRecoveryAndFormatterContracts()
     {
         const string members = """
