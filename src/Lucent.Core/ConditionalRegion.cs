@@ -31,6 +31,7 @@ public sealed class ConditionalRegion : IDisposable
     {
         _composition = composition;
         Region = composition.Create(parent, name, attach: true, factory);
+        Region.IsConditionalRegion = true;
         Theme = theme;
         _active = active;
         _content = content;

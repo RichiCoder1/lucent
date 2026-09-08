@@ -14,6 +14,14 @@ public static class ControlThemes
         "control-foreground",
         Color.Parse("#0f172a")
     );
+    internal static readonly Token<Color> SecondaryForeground = new(
+        "control-secondary-foreground",
+        Color.Parse("#475569")
+    );
+    internal static readonly Token<Color> DisabledForeground = new(
+        "control-disabled-foreground",
+        Color.Parse("#475569")
+    );
     internal static readonly Token<Brush> Accent = new("control-accent", Color.Parse("#2563eb"));
     internal static readonly Token<Brush> AccentPressed = new(
         "control-accent-pressed",
@@ -24,6 +32,10 @@ public static class ControlThemes
         Color.Parse("#dbeafe")
     );
     internal static readonly Token<Brush> Focus = new("control-focus", Color.Parse("#ffff00"));
+    internal static readonly Token<global::Lucent.Core.FocusRing> FocusRing = new(
+        "control-focus-ring",
+        global::Lucent.Core.FocusRing.Inset(Color.Parse("#ffff00"), 2)
+    );
     internal static readonly Token<Color> FocusForeground = new(
         "control-focus-foreground",
         Color.Parse("#000000")
@@ -32,6 +44,12 @@ public static class ControlThemes
         "control-disabled",
         Color.Parse("#94a3b8")
     );
+    internal static readonly Token<Brush> Border = new("control-border", Color.Parse("#cbd5e1"));
+    internal static readonly Token<Brush> BorderHover = new(
+        "control-border-hover",
+        Color.Parse("#94a3b8")
+    );
+    internal static readonly Token<Brush> Divider = new("control-divider", Color.Parse("#cbd5e1"));
     internal static readonly Token<Brush> ScrollTrack = new(
         "control-scrollbar-track",
         Color.Parse("#00000040")
@@ -55,12 +73,17 @@ public static class ControlThemes
             "controls-light",
             Color.Parse("#ffffff"),
             Color.Parse("#0f172a"),
+            Color.Parse("#475569"),
+            Color.Parse("#475569"),
             Color.Parse("#2563eb"),
             Color.Parse("#1d4ed8"),
             Color.Parse("#dbeafe"),
             Color.Parse("#ffff00"),
             Color.Parse("#000000"),
-            Color.Parse("#94a3b8")
+            Color.Parse("#94a3b8"),
+            Color.Parse("#cbd5e1"),
+            Color.Parse("#94a3b8"),
+            Color.Parse("#cbd5e1")
         );
 
     /// <summary>Gets a dark palette for controls.</summary>
@@ -69,12 +92,17 @@ public static class ControlThemes
             "controls-dark",
             Color.Parse("#111827"),
             Color.Parse("#f8fafc"),
+            Color.Parse("#cbd5e1"),
+            Color.Parse("#cbd5e1"),
             Color.Parse("#60a5fa"),
             Color.Parse("#3b82f6"),
             Color.Parse("#1e3a5f"),
             Color.Parse("#facc15"),
             Color.Parse("#000000"),
-            Color.Parse("#64748b")
+            Color.Parse("#64748b"),
+            Color.Parse("#475569"),
+            Color.Parse("#94a3b8"),
+            Color.Parse("#475569")
         );
 
     /// <summary>Gets a high-contrast palette for controls.</summary>
@@ -84,34 +112,50 @@ public static class ControlThemes
             Color.Parse("#000000"),
             Color.Parse("#ffffff"),
             Color.Parse("#ffffff"),
+            Color.Parse("#808080"),
+            Color.Parse("#ffffff"),
             Color.Parse("#ffff00"),
             Color.Parse("#0000ff"),
             Color.Parse("#ffff00"),
             Color.Parse("#000000"),
-            Color.Parse("#808080")
+            Color.Parse("#808080"),
+            Color.Parse("#ffffff"),
+            Color.Parse("#ffff00"),
+            Color.Parse("#ffffff")
         );
 
     private static Theme Palette(
         string name,
         Color surface,
         Color foreground,
+        Color secondaryForeground,
+        Color disabledForeground,
         Color accent,
         Color pressed,
         Color selected,
         Color focus,
         Color focusForeground,
-        Color disabled
+        Color disabled,
+        Color border,
+        Color borderHover,
+        Color divider
     ) =>
         new Theme(name)
             .Set(Surface, (Brush)surface)
             .Set(SurfaceColor, surface)
             .Set(Foreground, foreground)
+            .Set(SecondaryForeground, secondaryForeground)
+            .Set(DisabledForeground, disabledForeground)
             .Set(Accent, (Brush)accent)
             .Set(AccentPressed, (Brush)pressed)
             .Set(Selected, (Brush)selected)
             .Set(Focus, (Brush)focus)
+            .Set(FocusRing, global::Lucent.Core.FocusRing.Inset((Brush)focus, 2))
             .Set(FocusForeground, focusForeground)
             .Set(Disabled, (Brush)disabled)
+            .Set(Border, (Brush)border)
+            .Set(BorderHover, (Brush)borderHover)
+            .Set(Divider, (Brush)divider)
             .Set(ScrollTrack, (Brush)Color.FromArgb(0x40, foreground.R, foreground.G, foreground.B))
             .Set(ScrollThumb, (Brush)foreground)
             .Set(ScrollThumbHover, (Brush)accent)
@@ -242,47 +286,17 @@ internal sealed class ScrollViewportState
 /// <summary>Internal implementations used by the built-in components to configure their elements.</summary>
 internal static class Controls
 {
-    private static readonly Style TextStyle = Style.Empty.Set(
-        TypographyProperties.TextColor,
-        ControlThemes.Foreground
+    // Text and structural containers deliberately inherit their paint from the
+    // surrounding presentation. This keeps composed controls (for example a
+    // Selectable containing a Row and Text) from painting over the owner's
+    // state background or text color. Applications opt into an explicit stock
+    // surface at their shell/container boundary with PresentationStyles.Surface.
+    private static readonly Style TextStyle = Style.Empty;
+    private static readonly Style PanelStyle = Style.Empty.Set(
+        LayoutProperties.Axis,
+        LayoutAxis.Column
     );
-    private static readonly Style PanelStyle = Style
-        .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
-        .Set(VisualProperties.Background, ControlThemes.Surface);
-    private static readonly Style RowStyle = Style
-        .Empty.Set(LayoutProperties.Axis, LayoutAxis.Row)
-        .Set(VisualProperties.Background, ControlThemes.Surface);
-    private static readonly Style ButtonStyle = RowStyle
-        .Set(LayoutProperties.Clip, true)
-        .Set(VisualProperties.Background, ControlThemes.Accent)
-        .Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor)
-        .When(
-            VariantState.Pressed,
-            Style.Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
-        )
-        .When(
-            VariantState.FocusVisible,
-            Style
-                .Empty.Set(VisualProperties.Background, ControlThemes.Focus)
-                .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
-        )
-        .When(
-            VariantState.Disabled,
-            Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
-        );
-    private static readonly Style TextFieldStyle = RowStyle
-        .Set(LayoutProperties.Clip, true)
-        .Set(VisualProperties.Background, ControlThemes.Surface)
-        .When(
-            VariantState.FocusVisible,
-            Style
-                .Empty.Set(VisualProperties.Background, ControlThemes.Focus)
-                .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
-        )
-        .When(
-            VariantState.Disabled,
-            Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
-        );
+    private static readonly Style RowStyle = Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Row);
     private static readonly Style ScrollBarStyle = Style
         .Empty.Set(ScrollBarProperties.Visibility, ScrollBarVisibility.Auto)
         .Set(ScrollBarProperties.Thickness, 12f)
@@ -292,33 +306,154 @@ internal static class Controls
         .Set(ScrollBarProperties.HoverThumbBrush, ControlThemes.ScrollThumbHover)
         .Set(ScrollBarProperties.PressedThumbBrush, ControlThemes.ScrollThumbPressed)
         .Set(ScrollBarProperties.ThumbCornerRadius, 6f);
-    private static readonly Style SelectableStyle = RowStyle
-        .Set(LayoutProperties.Clip, true)
-        .When(
-            VariantState.Selected,
-            Style.Empty.Set(VisualProperties.Background, ControlThemes.Selected)
-        )
-        .When(
-            VariantState.Pressed,
-            Style
-                .Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
-                .Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor)
-        )
-        .When(
-            VariantState.FocusVisible,
-            Style
+
+    private static Style ButtonStyle(ThemeContext theme) =>
+        RowStyle
+            .Set(LayoutProperties.Clip, true)
+            .Set(LayoutProperties.Padding, Insets.Symmetric(12, 8))
+            .Set(LayoutProperties.MinHeight, 36f)
+            .Set(LayoutProperties.MainAlignment, LayoutAlignment.Center)
+            .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
+            .Set(VisualProperties.CornerRadius, 6f)
+            .Bind(
+                VisualProperties.Background,
+                () => ResolveBrush(theme, ControlThemes.Accent, PresentationStyles.TransparentBrush)
+            )
+            .Bind(
+                TypographyProperties.TextColor,
+                () => ResolveButtonText(theme, ControlThemes.SurfaceColor)
+            )
+            .Bind(VisualProperties.Border, () => ResolveBorder(theme, ControlThemes.Border))
+            .When(
+                VariantState.Hover,
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
+                    .Bind(
+                        VisualProperties.Border,
+                        () => ResolveBorder(theme, ControlThemes.BorderHover)
+                    )
+            )
+            .When(
+                VariantState.Pressed,
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
+                    .Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor)
+            )
+            .When(VariantState.FocusVisible, FocusStyle(theme))
+            .When(
+                VariantState.Disabled,
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
+                    .Set(TypographyProperties.TextColor, ControlThemes.DisabledForeground)
+                    .Bind(
+                        VisualProperties.Border,
+                        () => ResolveBorder(theme, ControlThemes.Disabled)
+                    )
+            );
+
+    private static Style TextFieldStyle(ThemeContext theme) =>
+        RowStyle
+            .Set(LayoutProperties.Clip, true)
+            .Set(LayoutProperties.Padding, Insets.Symmetric(12, 8))
+            .Set(LayoutProperties.MainAlignment, LayoutAlignment.Start)
+            .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
+            .Set(VisualProperties.CornerRadius, 6f)
+            .Bind(
+                VisualProperties.Background,
+                () =>
+                    ResolveBrush(theme, ControlThemes.Surface, PresentationStyles.TransparentBrush)
+            )
+            .Bind(TypographyProperties.TextColor, () => theme.Token(ControlThemes.Foreground))
+            .Bind(VisualProperties.Border, () => ResolveBorder(theme, ControlThemes.Border))
+            .When(
+                VariantState.Hover,
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.Selected)
+                    .Bind(
+                        VisualProperties.Border,
+                        () => ResolveBorder(theme, ControlThemes.BorderHover)
+                    )
+            )
+            .When(VariantState.FocusVisible, FocusStyle(theme))
+            .When(
+                VariantState.Disabled,
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
+                    .Set(TypographyProperties.TextColor, ControlThemes.DisabledForeground)
+                    .Bind(
+                        VisualProperties.Border,
+                        () => ResolveBorder(theme, ControlThemes.Disabled)
+                    )
+            );
+
+    private static Style SelectableStyle(ThemeContext theme) =>
+        RowStyle
+            .Set(LayoutProperties.Clip, true)
+            .Set(LayoutProperties.Padding, Insets.Symmetric(10, 6))
+            .Set(LayoutProperties.MinHeight, 32f)
+            .Set(LayoutProperties.MainAlignment, LayoutAlignment.Start)
+            .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
+            .Set(VisualProperties.CornerRadius, 4f)
+            .Bind(
+                VisualProperties.Background,
+                () =>
+                    ResolveBrush(theme, ControlThemes.Surface, PresentationStyles.TransparentBrush)
+            )
+            .Bind(TypographyProperties.TextColor, () => theme.Token(ControlThemes.Foreground))
+            .When(
+                VariantState.Hover,
+                Style.Empty.Set(VisualProperties.Background, ControlThemes.Selected)
+            )
+            .When(
+                VariantState.Selected,
+                Style.Empty.Set(VisualProperties.Background, ControlThemes.Selected)
+            )
+            .When(
+                VariantState.Pressed,
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
+                    .Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor)
+            )
+            .When(VariantState.FocusVisible, FocusStyle(theme))
+            .When(VariantState.Selected | VariantState.FocusVisible, FocusStyle(theme))
+            .When(
+                VariantState.Disabled,
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
+                    .Set(TypographyProperties.TextColor, ControlThemes.DisabledForeground)
+                    .Bind(
+                        VisualProperties.Border,
+                        () => ResolveBorder(theme, ControlThemes.Disabled)
+                    )
+            );
+
+    private static Brush ResolveBrush(ThemeContext theme, Token<Brush> standard, Brush minimal) =>
+        theme.PresentationMode == ControlPresentationMode.Minimal ? minimal : theme.Token(standard);
+
+    private static Border ResolveBorder(ThemeContext theme, Token<Brush> standard) =>
+        theme.PresentationMode == ControlPresentationMode.Minimal
+            ? Border.None
+            : Border.Hairline(theme.Token(standard));
+
+    private static Color ResolveButtonText(ThemeContext theme, Token<Color> standard) =>
+        theme.PresentationMode == ControlPresentationMode.Minimal
+            ? theme.Token(ControlThemes.Foreground)
+            : theme.Token(standard);
+
+    private static Style FocusStyle(ThemeContext theme) =>
+        theme.PresentationMode != ControlPresentationMode.Minimal && IsHighContrast(theme)
+            ? Style
                 .Empty.Set(VisualProperties.Background, ControlThemes.Focus)
                 .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
-        )
-        .When(
-            VariantState.Selected | VariantState.FocusVisible,
-            Style
-                .Empty.Set(VisualProperties.Background, ControlThemes.Focus)
-                .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
-        )
-        .When(
-            VariantState.Disabled,
-            Style.Empty.Set(VisualProperties.Background, ControlThemes.Disabled)
+                .Set(VisualProperties.FocusRing, ControlThemes.FocusRing)
+            : Style.Empty.Set(VisualProperties.FocusRing, ControlThemes.FocusRing);
+
+    private static bool IsHighContrast(ThemeContext theme) =>
+        theme.Appearance.Contrast == ThemeContrast.High
+        || string.Equals(
+            theme.CurrentTheme.Name,
+            ControlThemes.HighContrast.Name,
+            StringComparison.Ordinal
         );
 
     public static void Text(
@@ -459,7 +594,7 @@ internal static class Controls
         Configure(
             element,
             theme,
-            ButtonStyle.Set(ProjectionProperties.Text, label),
+            ButtonStyle(theme).Set(ProjectionProperties.Text, label),
             style,
             new ButtonBehavior(
                 "button",
@@ -487,7 +622,7 @@ internal static class Controls
                 nameof(session)
             );
         var initialText = session?.Text ?? value;
-        var component = TextFieldStyle
+        var component = TextFieldStyle(theme)
             .Set(ProjectionProperties.Text, initialText)
             .Set(ProjectionProperties.TextMeasure, name);
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
@@ -555,7 +690,7 @@ internal static class Controls
                 multiline: true
             );
         var initialText = editor.Text;
-        var component = TextFieldStyle
+        var component = TextFieldStyle(theme)
             .With(ScrollBarStyle)
             .Set(ProjectionProperties.Text, initialText)
             .Set(ProjectionProperties.TextMeasure, name)
@@ -646,9 +781,8 @@ internal static class Controls
     )
     {
         label = Required(label, nameof(label));
-        var component = projectLabel
-            ? SelectableStyle.Set(ProjectionProperties.Text, label)
-            : SelectableStyle;
+        var styleBase = SelectableStyle(theme);
+        var component = projectLabel ? styleBase.Set(ProjectionProperties.Text, label) : styleBase;
         var behavior = new RowActionBehavior(
             "selectable",
             new(SemanticRole.ListItem, label, actions: SemanticAction.Select)

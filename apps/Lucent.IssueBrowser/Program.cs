@@ -19,6 +19,10 @@ internal static class Program
                 .UseWindows(
                     new WindowsWindowOptions
                     {
+                        Width = 1120,
+                        Height = 760,
+                        MinimumWidth = 420,
+                        MinimumHeight = 360,
                         MenuPresentation =
                             args.Length == 0
                                 ? WindowsMenuPresentation.Lucent
@@ -26,7 +30,6 @@ internal static class Program
                     }
                 )
                 .SetTitle("Lucent Issue Browser")
-                .SetTheme(AppTheme.Create)
                 .Build()
                 .Run(IssueBrowserStructure.Create());
         }

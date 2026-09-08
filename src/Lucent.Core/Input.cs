@@ -30,6 +30,12 @@ public enum CursorIntent
 
     /// <summary>Indicate a clickable target.</summary>
     Pointer,
+
+    /// <summary>Indicate horizontal pane resizing.</summary>
+    ResizeHorizontal,
+
+    /// <summary>Indicate vertical pane resizing.</summary>
+    ResizeVertical,
 }
 
 /// <summary>The portable phases of one pointer sequence.</summary>

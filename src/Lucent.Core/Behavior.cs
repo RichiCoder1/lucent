@@ -69,6 +69,9 @@ public enum SemanticRole
 
     /// <summary>Exposes noninteractive status text.</summary>
     Status,
+
+    /// <summary>Exposes an adjustable split boundary or other numeric range.</summary>
+    Splitter,
 }
 
 /// <summary>Semantic commands a retained target declares that it handles.</summary>
@@ -95,6 +98,12 @@ public enum SemanticAction
 
     /// <summary>Permits scrolling a text position into view.</summary>
     ScrollTextIntoView = 32,
+
+    /// <summary>Permits expanding and collapsing nested content.</summary>
+    ExpandCollapse = 64,
+
+    /// <summary>Permits setting a finite numeric range value.</summary>
+    SetRangeValue = 128,
 }
 
 /// <summary>Finite portable requests accepted by retained semantic behaviors; platform adapters never receive control state.</summary>
@@ -120,6 +129,15 @@ public enum SemanticCommandKind
 
     /// <summary>Requests a text position to be brought into view.</summary>
     ScrollTextIntoView,
+
+    /// <summary>Requests expansion of nested content.</summary>
+    Expand,
+
+    /// <summary>Requests collapse of nested content.</summary>
+    Collapse,
+
+    /// <summary>Requests a finite numeric range value.</summary>
+    SetRangeValue,
 }
 
 /// <summary>Named destinations for semantic scrolling.</summary>
@@ -144,7 +162,8 @@ public readonly record struct SemanticCommand(
     SemanticScrollEndpoint Endpoint = SemanticScrollEndpoint.None,
     int? Anchor = null,
     int? Caret = null,
-    bool AlignToTop = false
+    bool AlignToTop = false,
+    double? NumericValue = null
 )
 {
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
@@ -156,6 +175,8 @@ public readonly record struct SemanticCommand(
             || !float.IsFinite(Horizontal)
             || !float.IsFinite(Vertical)
             || (Kind != SemanticCommandKind.SetValue && Value is not null)
+            || (Kind == SemanticCommandKind.SetRangeValue) != NumericValue.HasValue
+            || NumericValue is { } numericValue && !double.IsFinite(numericValue)
             || (
                 Kind != SemanticCommandKind.Scroll
                 && (Horizontal != 0 || Vertical != 0 || Endpoint != SemanticScrollEndpoint.None)
@@ -215,7 +236,9 @@ public sealed class SemanticDeclaration
         bool selected = false,
         SemanticAction actions = SemanticAction.None,
         string? value = null,
-        SemanticTextSnapshot? text = null
+        SemanticTextSnapshot? text = null,
+        bool? expanded = null,
+        SemanticRangeSnapshot? range = null
     )
     {
         if (
@@ -229,8 +252,13 @@ public sealed class SemanticDeclaration
                     | SemanticAction.Scroll
                     | SemanticAction.SelectText
                     | SemanticAction.ScrollTextIntoView
+                    | SemanticAction.ExpandCollapse
+                    | SemanticAction.SetRangeValue
                 )
             ) != 0
+            || actions.HasFlag(SemanticAction.ExpandCollapse) != expanded.HasValue
+            || (range is { IsReadOnly: false }) != actions.HasFlag(SemanticAction.SetRangeValue)
+            || role == SemanticRole.Splitter && range is null
         )
             throw new ArgumentException("Semantic role/actions must be finite.");
         if (string.IsNullOrWhiteSpace(name))
@@ -243,6 +271,8 @@ public sealed class SemanticDeclaration
         Actions = actions;
         Value = value;
         Text = text;
+        Expanded = expanded;
+        Range = range;
     }
 
     /// <summary>Gets the accessible role.</summary>
@@ -268,6 +298,66 @@ public sealed class SemanticDeclaration
 
     /// <summary>Gets the optional immutable editable-text snapshot used for range automation.</summary>
     public SemanticTextSnapshot? Text { get; }
+
+    /// <summary>Gets whether nested content is expanded, or <see langword="null"/> when unsupported.</summary>
+    public bool? Expanded { get; }
+
+    /// <summary>Gets the optional immutable numeric range exposed to automation.</summary>
+    public SemanticRangeSnapshot? Range { get; }
+}
+
+/// <summary>Immutable finite numeric range state exposed to platform automation.</summary>
+public sealed class SemanticRangeSnapshot
+{
+    /// <summary>Initializes a coherent finite numeric range.</summary>
+    public SemanticRangeSnapshot(
+        double value,
+        double minimum,
+        double maximum,
+        double smallChange,
+        double largeChange,
+        bool isReadOnly = false
+    )
+    {
+        if (
+            !double.IsFinite(value)
+            || !double.IsFinite(minimum)
+            || !double.IsFinite(maximum)
+            || !double.IsFinite(smallChange)
+            || !double.IsFinite(largeChange)
+            || minimum > value
+            || value > maximum
+            || smallChange <= 0
+            || largeChange <= 0
+        )
+            throw new ArgumentException(
+                "Numeric range values and positive changes must be finite and ordered."
+            );
+        Value = value;
+        Minimum = minimum;
+        Maximum = maximum;
+        SmallChange = smallChange;
+        LargeChange = largeChange;
+        IsReadOnly = isReadOnly;
+    }
+
+    /// <summary>Gets the current value.</summary>
+    public double Value { get; }
+
+    /// <summary>Gets the inclusive minimum.</summary>
+    public double Minimum { get; }
+
+    /// <summary>Gets the inclusive maximum.</summary>
+    public double Maximum { get; }
+
+    /// <summary>Gets the preferred small adjustment.</summary>
+    public double SmallChange { get; }
+
+    /// <summary>Gets the preferred large adjustment.</summary>
+    public double LargeChange { get; }
+
+    /// <summary>Gets whether automation must reject mutation.</summary>
+    public bool IsReadOnly { get; }
 }
 
 /// <summary>Immutable displayed text and UTF-16 selection state for semantic text automation.</summary>
@@ -345,7 +435,9 @@ public sealed record SemanticSnapshot(
     bool Selected,
     SemanticAction Actions,
     IReadOnlyList<SemanticSnapshot> Children,
-    SemanticTextSnapshot? Text = null
+    SemanticTextSnapshot? Text = null,
+    bool? Expanded = null,
+    SemanticRangeSnapshot? Range = null
 );
 
 /// <summary>Reusable interaction capability that owns input, focus, semantics, and cleanup for one element.</summary>
@@ -394,11 +486,22 @@ public sealed class BehaviorContext
 
     internal InputRouter CompositionInput() => _composition.Input;
 
+    internal Composition Composition => _composition;
+    internal string SemanticName =>
+        _semantic?.Name
+        ?? throw new InvalidOperationException("A semantic declaration has not been registered.");
+
     internal void RegisterContextMenu(
         Func<ComponentRecipe> menu,
         ThemeContext theme,
         Action<bool>? onOpenChanged
     ) => _composition.Input.RegisterContextMenu(ElementId, _scope, menu, theme, onOpenChanged);
+
+    internal void RegisterMenuSubmenu(
+        Func<ComponentRecipe> menu,
+        ThemeContext theme,
+        Func<bool>? enabled
+    ) => _composition.MenuSession?.RegisterSubmenu(Identity, this, menu, theme, enabled);
 
     internal bool SelectSemantic() => _composition.SelectSemantic(Identity);
 
@@ -475,6 +578,12 @@ public sealed class BehaviorContext
         _composition
             .Find(new ElementIdentity(_composition.Epoch, ElementId))
             ?.UpdateControlSemantics(semantics);
+    }
+
+    internal void UpdateControl<T>(Property<T> property, T value)
+    {
+        CheckLive();
+        _composition.Find(Identity)?.UpdateControl(property, value);
     }
 
     /// <summary>Registers a pointer callback for this action-owning behavior.</summary>

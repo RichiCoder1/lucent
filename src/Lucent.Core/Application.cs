@@ -16,6 +16,7 @@ public sealed class LucentApplicationBuilder
 {
     private string _title = "Lucent";
     private Func<ThemeAppearance, Theme> _themeFactory = DefaultTheme;
+    private ControlPresentationMode _presentationMode = ControlPresentationMode.Standard;
     private IApplicationHost? _host;
 
     internal LucentApplicationBuilder() { }
@@ -36,6 +37,14 @@ public sealed class LucentApplicationBuilder
         return this;
     }
 
+    /// <summary>Sets the composition-scoped stock control presentation mode.</summary>
+    public LucentApplicationBuilder SetPresentationMode(ControlPresentationMode mode)
+    {
+        ValidatePresentationMode(mode, nameof(mode));
+        _presentationMode = mode;
+        return this;
+    }
+
     /// <summary>Sets the platform host for subsequently built applications.</summary>
     public LucentApplicationBuilder UseHost(IApplicationHost host)
     {
@@ -50,6 +59,7 @@ public sealed class LucentApplicationBuilder
         new(
             _title,
             _themeFactory,
+            _presentationMode,
             _host ?? throw new InvalidOperationException("An application host must be selected.")
         );
 
@@ -57,6 +67,15 @@ public sealed class LucentApplicationBuilder
         appearance.Contrast == ThemeContrast.High ? ControlThemes.HighContrast
         : appearance.ColorScheme == ThemeColorScheme.Dark ? ControlThemes.Dark
         : ControlThemes.Light;
+
+    private static void ValidatePresentationMode(
+        ControlPresentationMode value,
+        string parameterName
+    )
+    {
+        if (!Enum.IsDefined(value))
+            throw new ArgumentOutOfRangeException(parameterName);
+    }
 }
 
 /// <summary>Owns the portable lifecycle for one Lucent application session.</summary>
@@ -64,17 +83,20 @@ public sealed class LucentApplication
 {
     private readonly string _title;
     private readonly Func<ThemeAppearance, Theme> _themeFactory;
+    private readonly ControlPresentationMode _presentationMode;
     private readonly IApplicationHost _host;
     private int _started;
 
     internal LucentApplication(
         string title,
         Func<ThemeAppearance, Theme> themeFactory,
+        ControlPresentationMode presentationMode,
         IApplicationHost host
     )
     {
         _title = title;
         _themeFactory = themeFactory;
+        _presentationMode = presentationMode;
         _host = host;
     }
 
@@ -104,7 +126,8 @@ public sealed class LucentApplication
             var theme = new ThemeContext(
                 composition.Root.Scope,
                 RequireTheme(_themeFactory(initialAppearance)),
-                appearance: initialAppearance
+                appearance: initialAppearance,
+                presentationMode: _presentationMode
             );
             var appliedAppearance = initialAppearance;
             _ = composition.Root.Scope.Effect(

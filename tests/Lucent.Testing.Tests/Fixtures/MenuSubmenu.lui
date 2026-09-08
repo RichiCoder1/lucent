@@ -1,0 +1,11 @@
+namespace HeadlessFixtures;
+
+using System;
+using Lucent.Core;
+
+public component MenuSubmenuContent(Func<ComponentRecipe> submenu, Action onRoot) {
+    <Menu>
+        <MenuSubmenu menu={submenu}>More</MenuSubmenu>
+        <MenuItem onInvoke={onRoot}>Root command</MenuItem>
+    </Menu>
+}

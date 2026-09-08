@@ -16,6 +16,7 @@ internal static partial class WindowsNativeMenuHost
 {
     private const uint MiimState = 0x00000001;
     private const uint MiimId = 0x00000002;
+    private const uint MiimSubMenu = 0x00000004;
     private const uint MiimFtype = 0x00000100;
     private const uint MiimString = 0x00000040;
     private const uint MftString = 0x0000;
@@ -27,6 +28,8 @@ internal static partial class WindowsNativeMenuHost
     private const uint TpmReturnCommand = 0x0100;
     private const uint WmCancelMode = 0x001F;
     private const uint WmNull = 0x0000;
+    private const int MaximumNativeDepth = 8;
+    private const int MaximumNativeEntries = 512;
 
     /// <summary>
     /// Attempts one standard menu invocation. A return value of <see langword="false"/> means
@@ -58,16 +61,7 @@ internal static partial class WindowsNativeMenuHost
         }
         if (descriptor is null)
             return false;
-        if (
-            descriptor.Entries.Count == 0
-            || descriptor.Entries.Any(entry =>
-                entry.Kind is not (StandardMenuEntryKind.Command or StandardMenuEntryKind.Separator)
-                || entry.Kind == StandardMenuEntryKind.Command
-                    && (entry.Identity is null || entry.Label is null)
-                || entry.Kind == StandardMenuEntryKind.Command
-                    && !TryEscapeNativeLabel(entry.Label!, out _)
-            )
-        )
+        if (!TryValidateNativeDescriptor(descriptor, out _))
             return false;
 
         nint menu = 0;
@@ -79,37 +73,7 @@ internal static partial class WindowsNativeMenuHost
 
             var commandIdentities = new Dictionary<nuint, SemanticIdentity>();
             nuint nextCommand = 1;
-            uint position = 0;
-            foreach (var entry in descriptor.Entries)
-            {
-                switch (entry.Kind)
-                {
-                    case StandardMenuEntryKind.Separator:
-                        InsertSeparator(menu, position);
-                        position++;
-                        break;
-
-                    case StandardMenuEntryKind.Command:
-                        if (nextCommand == 0)
-                            throw new InvalidOperationException(
-                                "The native menu command ID space was exhausted."
-                            );
-                        if (!TryEscapeNativeLabel(entry.Label!, out var label))
-                            throw new InvalidOperationException(
-                                "The standard menu label contains native shortcut markup."
-                            );
-                        InsertCommand(menu, position, nextCommand, label, entry.Enabled);
-                        commandIdentities.Add(nextCommand, entry.Identity!.Value);
-                        position++;
-                        nextCommand++;
-                        break;
-
-                    default:
-                        throw new InvalidOperationException(
-                            "The Core menu descriptor contained an unknown entry kind."
-                        );
-                }
-            }
+            BuildNativeMenu(menu, descriptor, ref nextCommand, commandIdentities, depth: 1);
 
             var point = AnchorInScreenPixels(ownerHwnd, request.Anchor);
             // The owner is already the foreground window for an input-originated context menu.
@@ -178,6 +142,128 @@ internal static partial class WindowsNativeMenuHost
         return true;
     }
 
+    /// <summary>Validates a recursively projected descriptor before any native menu is created.</summary>
+    /// <remarks>The bounded check keeps malformed or unexpectedly deep authoring on the Lucent path.</remarks>
+    internal static bool TryValidateNativeDescriptor(
+        StandardMenuDescriptor descriptor,
+        out int leafCount
+    )
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        var count = 0;
+        leafCount = 0;
+        var valid = Validate(descriptor, depth: 1);
+        leafCount = count;
+        return valid;
+
+        bool Validate(StandardMenuDescriptor current, int depth)
+        {
+            if (depth > MaximumNativeDepth || current.Entries.Count == 0)
+                return false;
+            foreach (var entry in current.Entries)
+            {
+                switch (entry.Kind)
+                {
+                    case StandardMenuEntryKind.Separator:
+                        if (
+                            entry.Label is not null
+                            || entry.Identity is not null
+                            || entry.Submenu is not null
+                        )
+                            return false;
+                        break;
+                    case StandardMenuEntryKind.Command:
+                        if (
+                            entry.Identity is null
+                            || entry.Label is null
+                            || entry.Submenu is not null
+                            || !TryEscapeNativeLabel(entry.Label, out _)
+                        )
+                            return false;
+                        if (++count > MaximumNativeEntries)
+                            return false;
+                        break;
+                    case StandardMenuEntryKind.Submenu:
+                        if (
+                            entry.Label is null
+                            || entry.Submenu is null
+                            || !TryEscapeNativeLabel(entry.Label, out _)
+                            || !Validate(entry.Submenu, depth + 1)
+                        )
+                            return false;
+                        break;
+                    default:
+                        return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    private static void BuildNativeMenu(
+        nint menu,
+        StandardMenuDescriptor descriptor,
+        ref nuint nextCommand,
+        Dictionary<nuint, SemanticIdentity> commandIdentities,
+        int depth
+    )
+    {
+        if (depth > MaximumNativeDepth)
+            throw new InvalidOperationException("The native menu depth limit was exceeded.");
+        uint position = 0;
+        foreach (var entry in descriptor.Entries)
+        {
+            switch (entry.Kind)
+            {
+                case StandardMenuEntryKind.Separator:
+                    InsertSeparator(menu, position++);
+                    break;
+                case StandardMenuEntryKind.Command:
+                    if (nextCommand == 0)
+                        throw new InvalidOperationException(
+                            "The native menu command ID space was exhausted."
+                        );
+                    if (!TryEscapeNativeLabel(entry.Label!, out var label))
+                        throw new InvalidOperationException(
+                            "The standard menu label contains native shortcut markup."
+                        );
+                    InsertCommand(menu, position++, nextCommand, label, entry.Enabled);
+                    commandIdentities.Add(nextCommand, entry.Identity!.Value);
+                    nextCommand++;
+                    break;
+                case StandardMenuEntryKind.Submenu:
+                    if (!TryEscapeNativeLabel(entry.Label!, out var submenuLabel))
+                        throw new InvalidOperationException(
+                            "The standard submenu label contains native shortcut markup."
+                        );
+                    var child = CreatePopupMenu();
+                    if (child == 0)
+                        throw LastError("CreatePopupMenu(submenu)");
+                    try
+                    {
+                        BuildNativeMenu(
+                            child,
+                            entry.Submenu!,
+                            ref nextCommand,
+                            commandIdentities,
+                            depth + 1
+                        );
+                        InsertSubmenu(menu, position++, submenuLabel, child, entry.Enabled);
+                    }
+                    catch
+                    {
+                        _ = DestroyMenu(child);
+                        throw;
+                    }
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        "The Core menu descriptor contained an unknown entry kind."
+                    );
+            }
+        }
+    }
+
     private static unsafe void InsertCommand(
         nint menu,
         uint position,
@@ -213,6 +299,31 @@ internal static partial class WindowsNativeMenuHost
         };
         if (!InsertMenuItem(menu, position, true, ref info))
             throw LastError("InsertMenuItem(separator)");
+    }
+
+    private static unsafe void InsertSubmenu(
+        nint menu,
+        uint position,
+        string label,
+        nint submenu,
+        bool enabled
+    )
+    {
+        fixed (char* text = label)
+        {
+            var info = new MenuItemInfo
+            {
+                cbSize = (uint)sizeof(MenuItemInfo),
+                fMask = MiimState | MiimFtype | MiimString | MiimSubMenu,
+                fType = MftString,
+                fState = enabled ? MfsEnabled : MfsGray,
+                hSubMenu = submenu,
+                dwTypeData = (nint)text,
+                cch = checked((uint)label.Length),
+            };
+            if (!InsertMenuItem(menu, position, true, ref info))
+                throw LastError("InsertMenuItem(submenu)");
+        }
     }
 
     internal static (int X, int Y) AnchorInClientPixels(LayoutRect anchor, uint dpi)

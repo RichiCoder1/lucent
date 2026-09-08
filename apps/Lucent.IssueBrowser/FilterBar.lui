@@ -1,13 +1,56 @@
 namespace Lucent.IssueBrowser;
-style TextFieldStyle {
-    Width: 250;
-    Height: 24;
+
+style FilterColumnStyle {
+    Width: 160;
+    Spacing: 6;
+    MainShrink: 0;
 }
 
-public component FilterBar(IssueBrowserState browser, Style? style = null) {
-    <Row style={Style.Empty.Height(() => browser.Density == IssueDensity.Comfortable ? 28f : 22f).Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f).With(style)}>
-        <TextField name="issue-browser.search" onChange={browser.SetSearch} style={TextFieldStyle} label="Search issues" />
-        <TextField name="issue-browser.status" onChange={browser.SetStatus} style={TextFieldStyle} label="Status: all, open, closed" />
-        <TextField name="issue-browser.assignee" onChange={browser.SetAssignee} style={TextFieldStyle} label="Assignee: all, marta, devin, joel" />
-    </Row>
+style FilterBarWideStyle {
+    Spacing: 12;
+    CrossAlignment: LayoutAlignment.End;
+}
+
+style FilterBarNarrowStyle {
+    Spacing: 8;
+}
+
+public component FilterBar(IssueBrowserState browser, IssueBrowserViewState view, Style? style = null) {
+    <Column style={Style.Empty.With(style)}>
+        if (view.IsWide) {
+        <Row style={FilterBarWideStyle}>
+            <Column style={FilterColumnStyle with { Width: 240; MainGrow: 1; }}>
+                <Text style={PresentationStyles.Caption}>Search issues</Text>
+                <TextField session={view.SearchEditor} name="issue-browser.search" onChange={browser.SetSearch} label="Search issues" />
+            </Column>
+            <Column style={FilterColumnStyle with { Width: 120; }}>
+                <Text style={PresentationStyles.Caption}>Status</Text>
+                <TextField session={view.StatusEditor} name="issue-browser.status" onChange={browser.SetStatus} label="Status: all, open, closed" />
+            </Column>
+            <Column style={FilterColumnStyle}>
+                <Text style={PresentationStyles.Caption}>Assignee</Text>
+                <TextField session={view.AssigneeEditor} name="issue-browser.assignee" onChange={browser.SetAssignee} label="Assignee: all, marta, devin, joel" />
+            </Column>
+            <Button onInvoke={view.ClearFilters}>Clear filters</Button>
+        </Row>
+        } else {
+        <Column style={FilterBarNarrowStyle}>
+            <Column style={Style.Empty with { Spacing: 6; }}>
+                <Text style={PresentationStyles.Caption}>Search issues</Text>
+                <TextField session={view.SearchEditor} name="issue-browser.search" onChange={browser.SetSearch} label="Search issues" />
+            </Column>
+            <Row style={FilterBarWideStyle}>
+                <Column style={FilterColumnStyle with { Width: 120; MainGrow: 1; }}>
+                    <Text style={PresentationStyles.Caption}>Status</Text>
+                    <TextField session={view.StatusEditor} name="issue-browser.status" onChange={browser.SetStatus} label="Status: all, open, closed" />
+                </Column>
+                <Column style={FilterColumnStyle with { Width: 160; MainGrow: 1; }}>
+                    <Text style={PresentationStyles.Caption}>Assignee</Text>
+                    <TextField session={view.AssigneeEditor} name="issue-browser.assignee" onChange={browser.SetAssignee} label="Assignee: all, marta, devin, joel" />
+                </Column>
+                <Button onInvoke={view.ClearFilters}>Clear filters</Button>
+            </Row>
+        </Column>
+        }
+    </Column>
 }

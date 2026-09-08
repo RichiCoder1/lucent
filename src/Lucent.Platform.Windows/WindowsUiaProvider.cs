@@ -72,6 +72,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     internal bool IsRoot => _key is null;
     internal SemanticRole? ProviderRole => CurrentNode()?.Role;
     internal SemanticAction ProviderActions => CurrentNode()?.Actions ?? SemanticAction.None;
+    internal bool ProviderHasRange => CurrentNode()?.Range is not null;
     internal int CacheCount
     {
         get
@@ -146,6 +147,55 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 RaiseProperty(node, 30079, old.Selected, node.Selected);
             if (old.Enabled != node.Enabled)
                 RaiseProperty(node, 30010, old.Enabled, node.Enabled);
+            if (old.Expanded != node.Expanded)
+                RaiseProperty(
+                    node,
+                    30023,
+                    ExpandCollapseStateValue(old.Expanded),
+                    ExpandCollapseStateValue(node.Expanded)
+                );
+            if (old.Range?.Value != node.Range?.Value)
+                RaiseProperty(
+                    node,
+                    30047,
+                    old.Range?.Value ?? double.NaN,
+                    node.Range?.Value ?? double.NaN
+                );
+            if (old.Range?.IsReadOnly != node.Range?.IsReadOnly)
+                RaiseProperty(
+                    node,
+                    30048,
+                    old.Range?.IsReadOnly ?? true,
+                    node.Range?.IsReadOnly ?? true
+                );
+            if (old.Range?.Maximum != node.Range?.Maximum)
+                RaiseProperty(
+                    node,
+                    30049,
+                    old.Range?.Maximum ?? double.NaN,
+                    node.Range?.Maximum ?? double.NaN
+                );
+            if (old.Range?.Minimum != node.Range?.Minimum)
+                RaiseProperty(
+                    node,
+                    30050,
+                    old.Range?.Minimum ?? double.NaN,
+                    node.Range?.Minimum ?? double.NaN
+                );
+            if (old.Range?.LargeChange != node.Range?.LargeChange)
+                RaiseProperty(
+                    node,
+                    30051,
+                    old.Range?.LargeChange ?? double.NaN,
+                    node.Range?.LargeChange ?? double.NaN
+                );
+            if (old.Range?.SmallChange != node.Range?.SmallChange)
+                RaiseProperty(
+                    node,
+                    30052,
+                    old.Range?.SmallChange ?? double.NaN,
+                    node.Range?.SmallChange ?? double.NaN
+                );
             if (old.Scroll != node.Scroll && node.Scroll is { } scroll)
                 RaiseProperty(node, 30055, ScrollPercent(old.Scroll), ScrollPercent(scroll));
             if (
@@ -253,7 +303,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 bounds.GetValueOrDefault(key),
                 PointBounds(new(key.Epoch, key.Element), bounds.GetValueOrDefault(key), input),
                 scroll,
-                textSnapshot
+                textSnapshot,
+                snapshot.Expanded,
+                snapshot.Range
             );
             foreach (var child in snapshot.Children)
             foreach (var node in Flatten(child, key))
@@ -375,6 +427,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             10002 when node.Actions.HasFlag(SemanticAction.SetValue) || node.Text is not null =>
                 UiaWrappers.ValuePattern,
             10004 when node.Actions.HasFlag(SemanticAction.Scroll) => UiaWrappers.Scroll,
+            10005 when node.Actions.HasFlag(SemanticAction.ExpandCollapse) =>
+                UiaWrappers.ExpandCollapse,
+            10003 when node.Range is not null => UiaWrappers.RangeValue,
             10010 when node.Actions.HasFlag(SemanticAction.Select) => UiaWrappers.SelectionItem,
             10014 when node.Text is not null && node.Actions.HasFlag(SemanticAction.SelectText) =>
                 UiaWrappers.TextProvider,
@@ -421,6 +476,27 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 break;
             case 30010:
                 Bool(value, node.Enabled);
+                break;
+            case 30023:
+                I4(value, ExpandCollapseStateValue(node.Expanded));
+                break;
+            case 30047 when node.Range is { } range:
+                R8(value, range.Value);
+                break;
+            case 30048 when node.Range is { } range:
+                Bool(value, range.IsReadOnly);
+                break;
+            case 30049 when node.Range is { } range:
+                R8(value, range.Maximum);
+                break;
+            case 30050 when node.Range is { } range:
+                R8(value, range.Minimum);
+                break;
+            case 30051 when node.Range is { } range:
+                R8(value, range.LargeChange);
+                break;
+            case 30052 when node.Range is { } range:
+                R8(value, range.SmallChange);
                 break;
             case 30011:
                 Bstr(value, "lucent." + node.Key.Epoch + "." + node.Key.Element);
@@ -660,6 +736,79 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             _composition.ExecuteSemanticCommand(node.Identity, new(SemanticCommandKind.Invoke))
         );
 
+    internal int Expand() =>
+        Run(node =>
+            _composition.ExecuteSemanticCommand(node.Identity, new(SemanticCommandKind.Expand))
+        );
+
+    internal int Collapse() =>
+        Run(node =>
+            _composition.ExecuteSemanticCommand(node.Identity, new(SemanticCommandKind.Collapse))
+        );
+
+    internal int ExpandCollapseState(out int value)
+    {
+        var node = CurrentNode();
+        value = ExpandCollapseStateValue(node?.Expanded);
+        return node is null ? NotAvailable : Ok;
+    }
+
+    internal int SetRangeValue(double value) =>
+        !double.IsFinite(value)
+            ? InvalidArgument
+            : Run(node =>
+                node.Range is not { IsReadOnly: false } range
+                || value < range.Minimum
+                || value > range.Maximum
+                    ? SemanticCommandResult.Rejected
+                    : _composition.ExecuteSemanticCommand(
+                        node.Identity,
+                        new(SemanticCommandKind.SetRangeValue, NumericValue: value)
+                    )
+            );
+
+    internal int RangeValue(out double value)
+    {
+        var node = CurrentNode();
+        value = node?.Range?.Value ?? 0;
+        return node?.Range is null ? NotAvailable : Ok;
+    }
+
+    internal int RangeReadOnly(out int value)
+    {
+        var node = CurrentNode();
+        value = node?.Range?.IsReadOnly == true ? 1 : 0;
+        return node?.Range is null ? NotAvailable : Ok;
+    }
+
+    internal int RangeMaximum(out double value)
+    {
+        var node = CurrentNode();
+        value = node?.Range?.Maximum ?? 0;
+        return node?.Range is null ? NotAvailable : Ok;
+    }
+
+    internal int RangeMinimum(out double value)
+    {
+        var node = CurrentNode();
+        value = node?.Range?.Minimum ?? 0;
+        return node?.Range is null ? NotAvailable : Ok;
+    }
+
+    internal int RangeLargeChange(out double value)
+    {
+        var node = CurrentNode();
+        value = node?.Range?.LargeChange ?? 0;
+        return node?.Range is null ? NotAvailable : Ok;
+    }
+
+    internal int RangeSmallChange(out double value)
+    {
+        var node = CurrentNode();
+        value = node?.Range?.SmallChange ?? 0;
+        return node?.Range is null ? NotAvailable : Ok;
+    }
+
     internal int SetValue(nint text) =>
         Run(node =>
             _composition.ExecuteSemanticCommand(
@@ -893,6 +1042,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             SemanticRole.MenuItem => 50011,
             SemanticRole.Text => 50020,
             SemanticRole.Status => 50017,
+            SemanticRole.Splitter => 50015,
             SemanticRole.Group when node.Actions.HasFlag(SemanticAction.Scroll) => 50033,
             _ => 50026,
         };
@@ -905,11 +1055,21 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             ? 100
             : state.Viewport.Height * 100d / (state.Viewport.Height + state.Maximum.Y);
 
+    internal static int ExpandCollapseStateValue(bool? expanded) =>
+        expanded switch
+        {
+            false => 0, // ExpandCollapseState.Collapsed
+            true => 1, // ExpandCollapseState.Expanded
+            null => 3, // ExpandCollapseState.LeafNode
+        };
+
     private static RawVariant Variant(object value)
     {
         var variant = new RawVariant();
         if (value is bool boolean)
             Bool(&variant, boolean);
+        else if (value is int integer)
+            I4(&variant, integer);
         else if (value is double number)
             R8(&variant, number);
         else
@@ -980,7 +1140,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         LayoutRect Bounds,
         LayoutRect PointBounds,
         SemanticScrollState? Scroll,
-        TextSnapshot? Text
+        TextSnapshot? Text,
+        bool? Expanded,
+        SemanticRangeSnapshot? Range
     );
 
     private sealed class Snapshot(FrozenDictionary<NodeKey, Node> nodes)

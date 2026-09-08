@@ -71,6 +71,8 @@ public sealed class ApplicationSession
         Composition = composition ?? throw new ArgumentNullException(nameof(composition));
         Theme = theme ?? throw new ArgumentNullException(nameof(theme));
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
+        if (!Composition.Root.HasPresentation)
+            Composition.Root.Present(Theme, author: PresentationStyles.Surface);
         _context = new SessionSynchronizationContext(_ownerThread, NotifyWorkAvailable);
         _status = composition.Graph.Signal(
             new ApplicationStatus(ApplicationPhase.Starting, null),

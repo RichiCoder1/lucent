@@ -4,6 +4,8 @@
 [Aa]rtifacts/
 .dotnet/
 .dotnet-install.ps1
+.localappdata/
+.nuget-appdata/
 
 # IDE and editor state
 .vs/

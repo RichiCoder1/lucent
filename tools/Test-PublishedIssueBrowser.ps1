@@ -18,6 +18,40 @@ public static class PublishedWindow {
   [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hdc);
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT point);
   [DllImport("gdi32.dll")] public static extern uint GetPixel(IntPtr hdc, int x, int y);
+  [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+  [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int width, int height);
+  [DllImport("gdi32.dll")] private static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+  [DllImport("gdi32.dll")] private static extern bool DeleteObject(IntPtr obj);
+  [DllImport("gdi32.dll")] private static extern bool DeleteDC(IntPtr hdc);
+  [DllImport("gdi32.dll")] private static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int sourceX, int sourceY, uint operation);
+  [StructLayout(LayoutKind.Sequential)] private struct BITMAPINFO {
+    public uint Size; public int Width, Height; public ushort Planes, BitCount;
+    public uint Compression, SizeImage; public int XPelsPerMeter, YPelsPerMeter; public uint ColorsUsed, ColorsImportant;
+  }
+  [DllImport("gdi32.dll")] private static extern int GetDIBits(IntPtr hdc, IntPtr bitmap, uint start, uint lines, [Out] uint[] pixels, ref BITMAPINFO info, uint usage);
+  public static bool ContainsScreenColor(IntPtr hwnd, int width, int height, uint color) {
+    var origin = new POINT();
+    if (!ClientToScreen(hwnd, ref origin)) throw new InvalidOperationException("Could not locate focus capture.");
+    var screen = GetDC(IntPtr.Zero); var memory = IntPtr.Zero; var bitmap = IntPtr.Zero; var prior = IntPtr.Zero;
+    try {
+      memory = CreateCompatibleDC(screen); bitmap = CreateCompatibleBitmap(screen, width, height);
+      if (screen == IntPtr.Zero || memory == IntPtr.Zero || bitmap == IntPtr.Zero) throw new InvalidOperationException("Could not allocate focus capture.");
+      prior = SelectObject(memory, bitmap);
+      if (!BitBlt(memory, 0, 0, width, height, screen, origin.X, origin.Y, 0x00CC0020)) throw new InvalidOperationException("Could not copy focus capture.");
+      SelectObject(memory, prior); prior = IntPtr.Zero;
+      var info = new BITMAPINFO { Size = 40, Width = width, Height = -height, Planes = 1, BitCount = 32 };
+      var pixels = new uint[checked(width * height)];
+      if (GetDIBits(memory, bitmap, 0, (uint)height, pixels, ref info, 0) != height) throw new InvalidOperationException("Could not read focus capture.");
+      var dibColor = ((color & 255) << 16) | (color & 0xff00) | ((color >> 16) & 255);
+      foreach (var pixel in pixels) if ((pixel & 0xffffff) == dibColor) return true;
+      return false;
+    } finally {
+      if (prior != IntPtr.Zero) SelectObject(memory, prior);
+      if (bitmap != IntPtr.Zero) DeleteObject(bitmap);
+      if (memory != IntPtr.Zero) DeleteDC(memory);
+      if (screen != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screen);
+    }
+  }
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
   [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct HIGHCONTRAST { public uint Size; public uint Flags; public IntPtr Scheme; }
   [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool SystemParametersInfo(uint action, uint parameter, ref HIGHCONTRAST value, uint flags);
@@ -26,6 +60,15 @@ public static class PublishedWindow {
 
 $source = (Resolve-Path $PublishDirectory).Path
 $assets = @('SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'vcruntime140.dll')
+function Remove-OwnedTemporaryDirectory([string] $Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
+    if ([IO.Path]::GetDirectoryName($full) -ne $temporaryRoot -or
+        [IO.Path]::GetFileName($full) -notmatch '^lucent-publish(ed-app|-missing)-[0-9a-f-]{36}$') {
+        throw "Refusing cleanup outside this test's temporary directories: $full"
+    }
+    Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+}
 function Assert-NativePreflight([string] $Asset) {
     $copy = Join-Path ([IO.Path]::GetTempPath()) ("lucent-publish-missing-" + [Guid]::NewGuid())
     $process = $null
@@ -42,7 +85,7 @@ function Assert-NativePreflight([string] $Asset) {
     }
     finally {
         Stop-LaunchedProcess $process
-        Remove-Item $copy -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-OwnedTemporaryDirectory $copy
     }
 }
 
@@ -77,17 +120,17 @@ function Get-EffectiveAppearance {
     if (($contrast.Flags -band 1) -ne 0) { return [pscustomobject]@{ Name = 'high-contrast'; Header = 0x000000; Page = 0x000000; Focus = 0x00FFFF } }
     try { $light = [int](Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop) }
     catch { throw "Could not read Windows app color preference: $($_.Exception.Message)" }
-    if ($light -eq 1) { return [pscustomobject]@{ Name = 'light'; Header = 0xF0E8E2; Page = 0xFCFAF8; Focus = 0x00FFFF } }
-    if ($light -eq 0) { return [pscustomobject]@{ Name = 'dark'; Header = 0x3B291E; Page = 0x2A170F; Focus = 0x15CCFA } }
+    if ($light -eq 1) { return [pscustomobject]@{ Name = 'light'; Header = 0xFFFFFF; Page = 0xFFFFFF; Focus = 0x00FFFF } }
+    if ($light -eq 0) { return [pscustomobject]@{ Name = 'dark'; Header = 0x271811; Page = 0x271811; Focus = 0x15CCFA } }
     throw "Windows AppsUseLightTheme was not finite: $light"
 }
 
 function Assert-ScenePixels([IntPtr] $Hwnd, [uint32] $Dpi, [PublishedWindow+RECT] $Client, $Appearance, [int] $Iteration) {
     $scale = $Dpi / 96.0
-    $headerX = [Math]::Round(790 * $scale); $headerY = [Math]::Round(12 * $scale)
-    # The list now has a useful 200-DIP viewport; sample the empty page below
-    # the content rather than a hard-coded point that now lands inside a row.
-    $pageX = [Math]::Round(20 * $scale); $pageY = $Client.Bottom - [Math]::Round(8 * $scale)
+    $headerX = $Client.Right - [Math]::Round(8 * $scale); $headerY = [Math]::Round(12 * $scale)
+    # Sample the layout margin, independent of virtualized row contents.
+    # Both samples use the stock surface at this application boundary.
+    $pageX = [Math]::Round(4 * $scale); $pageY = $Client.Bottom - [Math]::Round(8 * $scale)
     if ($headerX -ge $Client.Right -or $pageX -ge $Client.Right -or $headerY -ge $Client.Bottom -or $pageY -ge $Client.Bottom) { throw "Iteration $Iteration did not expose enough client backing pixels for the scale proof." }
     $deadline = [Environment]::TickCount64 + 5000
     do {
@@ -154,14 +197,12 @@ function Assert-KeyboardFocusPixels([IntPtr] $Hwnd, [uint32] $Dpi, [PublishedWin
         $origin = [PublishedWindow+POINT]::new()
         if (-not [PublishedWindow]::ClientToScreen($Hwnd, [ref]$origin)) { Start-Sleep -Milliseconds 100; continue }
         $located = $true
-        $desktop = [PublishedWindow]::GetDC([IntPtr]::Zero)
-        if ($desktop -eq [IntPtr]::Zero) { throw "Iteration $Iteration could not observe keyboard focus pixels." }
-        try {
-            $scale = $Dpi / 96.0
-            $x = [Math]::Round(20 * $scale); $y = [Math]::Round(35 * $scale)
-            if ($x -lt $Client.Right -and $y -lt $Client.Bottom -and (([PublishedWindow]::GetPixel($desktop, $origin.X + $x, $origin.Y + $y) -band 0xffffff) -eq $Appearance.Focus)) { return "ordinary Tab input produced $($Appearance.Name) visible focus" }
+        $scale = $Dpi / 96.0
+        # Capture once; per-pixel desktop GetPixel calls can each stall on composition.
+        $height = [int][Math]::Min($Client.Bottom, [Math]::Ceiling(220 * $scale))
+        if ([PublishedWindow]::ContainsScreenColor($Hwnd, $Client.Right, $height, $Appearance.Focus)) {
+            return "ordinary Tab input produced $($Appearance.Name) visible focus"
         }
-        finally { [void][PublishedWindow]::ReleaseDC([IntPtr]::Zero, $desktop) }
         Start-Sleep -Milliseconds 100
     } until ([Environment]::TickCount64 -ge $deadline)
     if (-not $located) { throw "Iteration $Iteration could not locate the client for keyboard focus observation." }
@@ -210,4 +251,4 @@ try {
     }
     [ordered]@{ ok = $true; copiedPublish = $true; missingNativePreflight = $preflight; iterations = $observations } | ConvertTo-Json -Depth 5 -Compress
 }
-finally { Remove-Item $copy -Recurse -Force -ErrorAction SilentlyContinue }
+finally { Remove-OwnedTemporaryDirectory $copy }

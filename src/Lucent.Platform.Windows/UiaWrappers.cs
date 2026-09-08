@@ -15,6 +15,8 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         SelectionPattern = new("fb8b03af-3bdf-48d4-bd36-1a65793be168"),
         SelectionItem = new("2acad808-b2d4-452d-a407-91ff1ad167b2"),
         Scroll = new("b38b8077-1fc3-42a5-8cae-d40c2215055a"),
+        ExpandCollapse = new("d847d3a5-cab0-4a98-8c32-ecb45c59ad24"),
+        RangeValue = new("36dc7aef-33e6-4691-afe1-2be7274b3d33"),
         TextProvider = new("3589c92c-63f3-4367-99bb-ada653b77cf2"),
         TextProvider2 = new("0dc5e6ed-3e16-4bf1-8f9a-a979878bc195");
     private static readonly ComInterfaceEntry* RootEntries,
@@ -24,6 +26,10 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         ListEntries,
         ItemEntries,
         ScrollEntries,
+        ExpandEntries,
+        ExpandInvokeEntries,
+        RangeEntries,
+        RangeInvokeEntries,
         TextEntries;
 
     static UiaWrappers()
@@ -150,6 +156,46 @@ internal sealed unsafe class UiaWrappers : ComWrappers
                 (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
                     &VerticalScrollable
         );
+        // IExpandCollapseProvider's authoritative Windows SDK vtable order is
+        // Expand, Collapse, get_ExpandCollapseState (UIAutomationCore.h).
+        var expand = Entry(
+            ExpandCollapse,
+            query,
+            addRef,
+            release,
+            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int>)&Expand,
+            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int>)&Collapse,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &ExpandCollapseState
+        );
+        var range = Entry(
+            RangeValue,
+            query,
+            addRef,
+            release,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, double, int>)
+                    &RangeSetValue,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, double*, int>)
+                    &RangeValueGet,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &RangeReadOnly,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, double*, int>)
+                    &RangeMaximum,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, double*, int>)
+                    &RangeMinimum,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, double*, int>)
+                    &RangeLargeChange,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, double*, int>)
+                    &RangeSmallChange
+        );
         var text = Entry(
             TextProvider,
             query,
@@ -219,6 +265,10 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         ListEntries = Entries(simple, fragment, selection);
         ItemEntries = Entries(simple, fragment, item);
         ScrollEntries = Entries(simple, fragment, scroll);
+        ExpandEntries = Entries(simple, fragment, expand);
+        ExpandInvokeEntries = Entries(simple, fragment, invoke, expand);
+        RangeEntries = Entries(simple, fragment, range);
+        RangeInvokeEntries = Entries(simple, fragment, invoke, range);
         TextEntries = Entries(simple, fragment, value, scroll, text, text2);
     }
 
@@ -239,6 +289,16 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         {
             count = 6;
             return TextEntries;
+        }
+        if (actions.HasFlag(SemanticAction.ExpandCollapse))
+        {
+            count = actions.HasFlag(SemanticAction.Invoke) ? 4 : 3;
+            return actions.HasFlag(SemanticAction.Invoke) ? ExpandInvokeEntries : ExpandEntries;
+        }
+        if (provider.ProviderHasRange)
+        {
+            count = actions.HasFlag(SemanticAction.Invoke) ? 4 : 3;
+            return actions.HasFlag(SemanticAction.Invoke) ? RangeInvokeEntries : RangeEntries;
         }
         if (actions.HasFlag(SemanticAction.Invoke))
         {
@@ -388,6 +448,65 @@ internal sealed unsafe class UiaWrappers : ComWrappers
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
     private static int InvokeCall(ComInterfaceDispatch* d) => Guard(() => P(d).Invoke());
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int Expand(ComInterfaceDispatch* d) => Guard(() => P(d).Expand());
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int Collapse(ComInterfaceDispatch* d) => Guard(() => P(d).Collapse());
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int ExpandCollapseState(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).ExpandCollapseState(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeSetValue(ComInterfaceDispatch* d, double value) =>
+        Guard(() => P(d).SetRangeValue(value));
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeValueGet(ComInterfaceDispatch* d, double* value)
+    {
+        *value = 0;
+        return Guard(() => P(d).RangeValue(out *value));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeReadOnly(ComInterfaceDispatch* d, int* value)
+    {
+        *value = 0;
+        return Guard(() => P(d).RangeReadOnly(out *value));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeMaximum(ComInterfaceDispatch* d, double* value)
+    {
+        *value = 0;
+        return Guard(() => P(d).RangeMaximum(out *value));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeMinimum(ComInterfaceDispatch* d, double* value)
+    {
+        *value = 0;
+        return Guard(() => P(d).RangeMinimum(out *value));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeLargeChange(ComInterfaceDispatch* d, double* value)
+    {
+        *value = 0;
+        return Guard(() => P(d).RangeLargeChange(out *value));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int RangeSmallChange(ComInterfaceDispatch* d, double* value)
+    {
+        *value = 0;
+        return Guard(() => P(d).RangeSmallChange(out *value));
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
     private static int SetValue(ComInterfaceDispatch* d, nint x) => Guard(() => P(d).SetValue(x));

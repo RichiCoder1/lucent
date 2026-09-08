@@ -8,6 +8,66 @@ namespace Lucent.Core.Tests;
 public sealed class LayoutSceneContracts
 {
     [TestMethod]
+    [DataRow(LayoutAxis.Row)]
+    [DataRow(LayoutAxis.Column)]
+    public void ConditionalBranchPassesThroughAllocationAndPreservesExplicitContainer(
+        LayoutAxis axis
+    )
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "conditional-allocation");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        composition.Root.Present(theme, author: Style.Empty.Set(LayoutProperties.Axis, axis));
+        var active = graph.Signal(true, "active");
+        var region = composition.When(
+            composition.Root,
+            "branch",
+            () => active.Value,
+            context =>
+            {
+                var child = context.Element("content");
+                child.Present(theme, author: Style.Empty.MainGrow(1).Padding(Insets.Uniform(7)));
+                return child;
+            }
+        );
+        graph.Drain();
+        LayoutRect Bounds(Element element)
+        {
+            var scene = SceneLayout.Project(composition, new(300, 200, 1), new ProbeShaper());
+            return scene.Boxes.Single(box => box.Identity.ElementId == element.Id).Bounds;
+        }
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            new LayoutRect(0, 0, 300, 200),
+            Bounds(region.Active!)
+        );
+        var first = region.Active!.Id;
+        active.Value = false;
+        graph.Drain();
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsNull(region.Active);
+        active.Value = true;
+        graph.Drain();
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreNotEqual(first, region.Active!.Id);
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            new LayoutRect(0, 0, 300, 200),
+            Bounds(region.Active)
+        );
+
+        // An explicitly presented retained region is still an authored container.
+        region.Region.Present(
+            theme,
+            author: Style.Empty.Width(100).Height(80).Padding(Insets.Uniform(5))
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            new LayoutRect(0, 0, 100, 80),
+            Bounds(region.Region)
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            new LayoutRect(5, 5, 90, 70),
+            Bounds(region.Active)
+        );
+    }
+
+    [TestMethod]
     public void CornerRadiusAndFontWeightValidateAndFlowThroughProjection()
     {
         var graph = new ReactiveGraph();
@@ -1798,7 +1858,7 @@ public sealed class LayoutSceneContracts
     }
 
     [TestMethod]
-    public void ResponsiveConstraintPassRejectsNewNestedContainer()
+    public void ResponsiveConstraintPassDiscoversAndAssignsNewNestedContainer()
     {
         var graph = new ReactiveGraph();
         using var owner = graph.CreateScope("responsive-structural-owner");
@@ -1825,13 +1885,54 @@ public sealed class LayoutSceneContracts
         );
         graph.Drain();
 
-        Expect<InvalidOperationException>(() =>
-            SceneLayout.Project(composition, new(100, 40, 1), new ProbeShaper())
-        );
+        var scene = SceneLayout.Project(composition, new(100, 40, 1), new ProbeShaper());
+        var nested = composition.Elements().Single(element => element.Name == "nested");
+        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == nested.Id).Bounds;
         Assert(
-            nestedConstraints.Current == default,
-            "A newly mounted nested responsive container observed a silently stale constraint."
+            nestedConstraints.Current == new ContainerConstraints(bounds.Width, bounds.Height),
+            "A newly mounted nested responsive container did not receive its assigned constraints."
         );
+        _ = SceneLayout.Project(composition, new(40, 40, 1), new ProbeShaper());
+        Assert(
+            !composition.Elements().Any(element => element.Name == "nested"),
+            "Narrowing did not remove the nested container."
+        );
+    }
+
+    [TestMethod]
+    public void ResponsiveDiscoveryRejectsAnUnboundedRecursiveBranch()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "recursive-responsive");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("recursive-responsive"));
+        _ = composition.Mount(composition.Root, theme, Recursive());
+        var error =
+            Microsoft.VisualStudio.TestTools.UnitTesting.Assert.Throws<InvalidOperationException>(
+                () =>
+                    SceneLayout.Project(composition, new(100, 100, 1), new ProbeShaper(), 1000)
+            );
+        Assert(
+            error.Message.Contains("eight passes", StringComparison.Ordinal),
+            "Unbounded responsive discovery was not rejected by its depth budget."
+        );
+
+        ComponentRecipe Recursive() =>
+            ComponentRecipe.Create(
+                "recursive",
+                (context, element) =>
+                {
+                    var constraints = new ResponsiveConstraints(element.Scope);
+                    element.Present(theme, author: Style.Empty.MainGrow(1));
+                    constraints.AcquireMount(element.Scope);
+                    element.UpdateControl(ProjectionProperties.ResponsiveConstraints, constraints);
+                    _ = context.When(
+                        element,
+                        "deeper",
+                        () => constraints.Current.Width > 0,
+                        child => Recursive().Mount(child)
+                    );
+                }
+            );
     }
 
     [TestMethod]

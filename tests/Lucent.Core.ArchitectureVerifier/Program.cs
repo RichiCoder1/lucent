@@ -106,6 +106,8 @@ static void VerifyLuiMetadata(
         ["Column"] = 1,
         ["CommandScope"] = 1,
         ["ResponsiveContainer"] = 1,
+        ["SplitPane"] = 1,
+        ["Divider"] = 1,
         ["Text"] = 2,
         ["Button"] = 2,
         ["TextField"] = 1,
@@ -118,6 +120,7 @@ static void VerifyLuiMetadata(
         ["ContextMenu"] = 1,
         ["Menu"] = 1,
         ["MenuItem"] = 2,
+        ["MenuSubmenu"] = 1,
         ["MenuSeparator"] = 1,
     };
     if (

@@ -61,6 +61,7 @@ public sealed class Element : IDisposable
     internal Element? Parent => _parent;
     internal ElementPresentation? Presentation => _presentation;
     internal bool HasPresentation => _presentation is not null;
+    internal bool IsConditionalRegion { get; set; }
     internal bool HasSemantics => _semantics is not null;
     internal StandardMenuPart StandardMenuPart { get; set; }
 
@@ -360,7 +361,9 @@ public sealed class Element : IDisposable
             state.Selected,
             _semantics.Actions,
             children,
-            _semantics.Text
+            _semantics.Text,
+            _semantics.Expanded,
+            _semantics.Range
         );
     }
 
@@ -486,6 +489,11 @@ public sealed class Element : IDisposable
             ),
             SemanticCommandKind.ScrollTextIntoView => _semantics!.Actions.HasFlag(
                 SemanticAction.ScrollTextIntoView
+            ),
+            SemanticCommandKind.Expand or SemanticCommandKind.Collapse =>
+                _semantics!.Actions.HasFlag(SemanticAction.ExpandCollapse),
+            SemanticCommandKind.SetRangeValue => _semantics!.Actions.HasFlag(
+                SemanticAction.SetRangeValue
             ),
             _ => false,
         };

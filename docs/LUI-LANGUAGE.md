@@ -195,7 +195,9 @@ Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValu
 
 ## Structural regions
 
-Conditionals are C#-shaped compile-time constructs lowering to retained `Switch` regions:
+Conditionals are C#-shaped compile-time constructs lowering to retained `Switch` regions.
+
+The unstyled retained branch owner passes its active child's sizing and Grid placement through to the surrounding layout. A growing workspace inside `if` therefore receives the same parent allocation as a direct child; the region still owns that branch's state and lifetime.
 
 ```lui
 if (state.Error is { } error) {

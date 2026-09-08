@@ -212,6 +212,7 @@ public sealed class ThemeContext : IDisposable
     private readonly Signal<Theme> _theme;
     private readonly Signal<bool> _reducedMotion;
     private readonly Signal<ThemeAppearance> _appearance;
+    private readonly Signal<ControlPresentationMode> _presentationMode;
     private readonly Dictionary<object, ITokenSlot> _tokens = [];
     private bool _disposed;
     internal ReactiveGraph Graph { get; }
@@ -223,18 +224,21 @@ public sealed class ThemeContext : IDisposable
         ReactiveScope scope,
         Theme theme,
         bool reducedMotion = false,
-        ThemeAppearance? appearance = null
+        ThemeAppearance? appearance = null,
+        ControlPresentationMode presentationMode = ControlPresentationMode.Standard
     )
     {
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(theme);
         var initialAppearance = appearance ?? ThemeAppearance.Light;
         initialAppearance.Validate();
+        ValidatePresentationMode(presentationMode, nameof(presentationMode));
         _scope = scope;
         Graph = scope.Graph;
         _theme = scope.Signal(theme, "theme");
         _reducedMotion = scope.Signal(reducedMotion, "reduced-motion");
         _appearance = scope.Signal(initialAppearance, "theme-appearance");
+        _presentationMode = scope.Signal(presentationMode, "control-presentation-mode");
         scope.Own(this);
     }
 
@@ -274,6 +278,20 @@ public sealed class ThemeContext : IDisposable
             _appearance.Value = value;
         }
     }
+
+    /// <summary>Gets or changes the composition-scoped stock control presentation mode.</summary>
+    /// <remarks>Minimal mode changes decoration only; control behavior, semantics, geometry, and focus remain active.</remarks>
+    public ControlPresentationMode PresentationMode
+    {
+        get => _presentationMode.Value;
+        set
+        {
+            _scope.CheckMutationGuard();
+            ValidatePresentationMode(value, nameof(value));
+            _presentationMode.Value = value;
+        }
+    }
+
     internal Theme CurrentTheme => _theme.Value;
     internal bool IsReducedMotion => _reducedMotion.Value;
 
@@ -326,8 +344,18 @@ public sealed class ThemeContext : IDisposable
             slot.Dispose();
         _tokens.Clear();
         _appearance.Dispose();
+        _presentationMode.Dispose();
         _reducedMotion.Dispose();
         _theme.Dispose();
+    }
+
+    private static void ValidatePresentationMode(
+        ControlPresentationMode value,
+        string parameterName
+    )
+    {
+        if (!Enum.IsDefined(value))
+            throw new ArgumentOutOfRangeException(parameterName);
     }
 
     private interface ITokenSlot : IDisposable

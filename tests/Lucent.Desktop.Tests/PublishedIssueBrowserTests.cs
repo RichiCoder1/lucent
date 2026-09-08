@@ -12,7 +12,7 @@ using FlaUI.UIA3;
 namespace Lucent.Desktop.Tests;
 
 [TestClass]
-public sealed class PublishedIssueBrowserTests
+public sealed partial class PublishedIssueBrowserTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
 
@@ -302,7 +302,38 @@ public sealed class PublishedIssueBrowserTests
 
             if (invocation == "pointer")
             {
-                var edge = targetRow.BoundingRectangle;
+                // The adaptive desktop app opens with a detail pane. Narrow it so
+                // the list reaches the owner edge before checking external placement.
+                Assert.IsTrue(SetWindowPos(owner, 0, 0, 0, 600, 760, SwpNoMove));
+                FlaUI.Core.AutomationElements.AutomationElement? back = null;
+                WaitUntil(
+                    process,
+                    () =>
+                        (
+                            back = root.FindFirstDescendant(condition =>
+                                condition.ByName("Back to issues")
+                            )
+                        )
+                            is not null,
+                    "The narrow workspace did not retain the selected issue's detail view."
+                );
+                back!.Patterns.Invoke.Pattern.Invoke();
+                FlaUI.Core.AutomationElements.AutomationElement? narrowList = null;
+                WaitUntil(
+                    process,
+                    () =>
+                        (
+                            narrowList = root.FindFirstDescendant(condition =>
+                                condition
+                                    .ByControlType(FlaUI.Core.Definitions.ControlType.List)
+                                    .And(condition.ByName("Issues"))
+                            )
+                        )
+                            is not null
+                        && narrowList.BoundingRectangle.Width > 450,
+                    "The narrow list did not reach the owner edge."
+                );
+                var edge = FindIssueRow(narrowList!, 9_998)!.BoundingRectangle;
                 Mouse.RightClick(new Point(edge.Right - 8, edge.Top + edge.Height / 2));
                 nint edgePopup = 0;
                 FlaUI.Core.AutomationElements.AutomationElement? edgeMenu = null;

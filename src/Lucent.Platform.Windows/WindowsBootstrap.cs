@@ -85,7 +85,7 @@ public static class WindowsBootstrap
         PerformanceDiagnostics? performanceDiagnostics = null;
         WindowsInputAdapter? input = null;
         WindowsLiveResize? liveResize = null;
-        WindowsPopupHost? popup = null;
+        WindowsPopupChain? popup = null;
         var popupInputGate = new WindowsPopupInputGate();
         ContextMenuRequest? pendingPopup = null;
         InputRouter? contextMenuRouter = null;
@@ -206,6 +206,7 @@ public static class WindowsBootstrap
 
             void SynchronizePopup()
             {
+                popup?.ResolveFocus();
                 if (popup?.IsDismissed == true)
                 {
                     popup.Dispose();
@@ -232,7 +233,14 @@ public static class WindowsBootstrap
                     scheduler.Request(FrameOperation.Input);
                     return;
                 }
-                popup = new WindowsPopupHost(window, request, uiaDispatcher, clipboard, cursor);
+                popup = new WindowsPopupChain(
+                    window,
+                    hwnd,
+                    request,
+                    uiaDispatcher,
+                    clipboard,
+                    cursor
+                );
                 popupInputGate.Opened();
             }
 
@@ -296,6 +304,9 @@ public static class WindowsBootstrap
                     var timeout = scheduler.IsVisible
                         ? caretBlink.WaitMilliseconds(NowMilliseconds())
                         : -1;
+                    var safeIntentTimeout = popup?.SafeIntentWaitMilliseconds() ?? -1;
+                    if (safeIntentTimeout >= 0 && (timeout < 0 || safeIntentTimeout < timeout))
+                        timeout = safeIntentTimeout;
                     SDL.Event @event;
                     bool received;
                     liveResize.EnterPump();
@@ -329,6 +340,7 @@ public static class WindowsBootstrap
                 }
                 while (PollEvent(out var @event))
                     refreshSettings |= ObserveHostEvent(@event);
+                _ = popup?.Tick();
                 liveResize.ThrowIfFailed();
                 SynchronizePopup();
 

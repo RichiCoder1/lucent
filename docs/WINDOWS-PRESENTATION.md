@@ -9,9 +9,9 @@ LucentApplication.CreateBuilder()
     });
 ```
 
-An unstyled `.lui` `Menu` containing standard `MenuItem` and `MenuSeparator` elements can use this path. It shares the same application commands, target and availability predicates. The Windows adapter translates a Core-owned descriptor and invokes the retained semantic command after tracking ends. Right-click does not select the underlying application item.
+An unstyled `.lui` `Menu` containing standard `MenuItem`, `MenuSeparator` and `MenuSubmenu` elements can use this path. It shares the same application commands, target and availability predicates. The Windows adapter translates a Core-owned descriptor and invokes the retained semantic command after tracking ends. Right-click does not select the underlying application item.
 
-Explicit menu/item styles, custom layout/content and nested menus use Lucent's popup. Labels that need native shortcut/control-character interpretation also retain Lucent rendering. Native menus display the Windows system appearance and accessibility implementation; the application theme does not recolor them. Availability shown while the native tracker is open is a snapshot; invocation checks the retained command again. The host does not run an additional SDL application loop while Windows tracks the menu.
+Explicit menu/item styles and custom layout/content use Lucent's popup. An unsupported subtree keeps the entire menu on the Lucent path. Labels that need native shortcut/control-character interpretation also retain Lucent rendering. Native menus display the Windows system appearance and accessibility implementation; the application theme does not recolor them. Availability shown while the native tracker is open is a snapshot; invocation checks the retained command again. The host does not run an additional SDL application loop while Windows tracks the menu.
 
 Lucent-rendered menus remain separate popup windows that may extend outside their owner. Stock presentation includes a theme-aware surface, border, rounded corners, separators, hover and keyboard-focus states. A transparent outer margin carries a restrained shadow, with content, hit testing and UIA projected into the same coordinates. High-contrast mode omits the shadow. Transparent composition depends on SDL/Windows support; it should be checked on the target graphics environment.
 
@@ -29,4 +29,10 @@ Issue Browser demonstrates stock themes and real context-menu actions. Run `dotn
 
 For native-menu troubleshooting, set `LUCENT_MENU_DIAGNOSTICS=1` before launching and capture standard error. Each completed native menu reports the Windows selection ID (`0` for cancellation) and the retained command result, such as `Applied`, `Disabled`, or `Stale`. The diagnostic omits menu labels and application content. `Applied` establishes command acceptance; inspect the resulting application state to verify its effect and presentation.
 
-Nested submenu authoring and safe-triangle pointer travel are tracked in [#104](https://github.com/RichiCoder1/lucent/issues/104). Flat menu support does not establish submenu behavior.
+## Submenus
+
+Use `<MenuSubmenu menu={() => StatusMenu(model)}>Set status</MenuSubmenu>` inside a `Menu`; declare `StatusMenu` as another `.lui` component that returns a `Menu`. A submenu owns a lazy child factory and an optional `enabled` predicate. Standard native projection evaluates a bounded snapshot of eligible branches before entering the Windows tracker (at most eight levels and 512 entries).
+
+Lucent owns one popup window per open level, so child menus can extend outside the application. Placement flips at screen edges. Right opens a child and Left returns to its parent, independently of the physical flip direction. Escape dismisses one level; invoking a leaf dismisses the whole chain before running the application callback. Empty children become unavailable; a nonempty group of disabled commands remains inspectable. Expanded state is exposed through UI Automation.
+
+Pointer intent uses the actual placed child bounds to preserve diagonal travel toward a submenu. The grace period is bounded to 300 ms; reversal, leaving the safe area, entering the child, or expiry stops deferral. Windows-native menus delegate their navigation and pointer behavior to Windows. See [stock presentation](STOCK-PRESENTATION.md) for shared control roles and adaptive panes.

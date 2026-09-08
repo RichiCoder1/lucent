@@ -1,6 +1,10 @@
 namespace Lucent.IssueBrowser;
-public component IssueRow(IssueBrowserState browser, Func<BrowserIssue> issue) {
-    <ContextMenu menu={() => IssueRowMenu(browser, issue)} name="issue-browser.issue-row-menu">
-        <Selectable content={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => browser.Select(issue().Number)} style={Style.Empty with { Spacing: browser.Density == IssueDensity.Comfortable ? 8f : 4f; FontSize: browser.Density == IssueDensity.Comfortable ? 14f : 12f; Height: browser.Density == IssueDensity.Comfortable ? 30f : 22f; }} />
+
+public component IssueRow(IssueBrowserState browser, Func<BrowserIssue> issue, IssueBrowserViewState? view = null) {
+    <ContextMenu menu={() => IssueRowMenu(browser, issue, view)} name="issue-browser.issue-row-menu">
+        <Selectable label={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => OpenIssue(browser, issue().Number, view)} style={IssueRowLayout(view)}>
+            <Text style={IssueRowBodyStyle} content={() => issue().Title} />
+            <Text style={IssueRowCaptionStyle} content={() => "#" + issue().Number + " · " + issue().Status + " · " + issue().Assignee} />
+        </Selectable>
     </ContextMenu>
 }

@@ -53,17 +53,49 @@ public static class SceneLayout
                 box => box.Identity.ElementId,
                 box => box.Bounds
             );
-            foreach (var item in responsive)
+            // A responsive branch may introduce another responsive control (for
+            // example a SplitPane). Discover that finite tree before realizing rows.
+            // Stable containers still get one correction pass; geometry feedback is
+            // rejected below rather than iterated until an arbitrary layout settles.
+            for (var discovery = 0; ; discovery++)
             {
-                var inner = ContentBounds(
-                    assignedById[item.Element.Id],
-                    item.Element.Resolve(LayoutProperties.Padding).Value,
-                    viewport.Scale
+                foreach (var item in responsive)
+                {
+                    var inner = ContentBounds(
+                        assignedById[item.Element.Id],
+                        item.Element.Resolve(LayoutProperties.Padding).Value,
+                        viewport.Scale
+                    );
+                    item.State.Assign(new(inner.Width, inner.Height));
+                }
+                composition.Flush(maximumWorkItems);
+                var current = ResponsiveElements(composition);
+                if (current.SequenceEqual(responsive))
+                    break;
+                if (discovery >= 7)
+                    throw new InvalidOperationException(
+                        "Responsive container discovery did not stabilize within eight passes."
+                    );
+                responsive = current;
+                assignedBoxes.Clear();
+                _ = composition.WithoutProjectionTracking(() =>
+                    Layout(
+                        composition.Root,
+                        new LayoutRect(0, 0, viewport.Width, viewport.Height),
+                        viewport,
+                        shaper,
+                        assignedBoxes,
+                        new ProjectionCache(),
+                        null,
+                        false,
+                        false
+                    )
                 );
-                item.State!.Assign(new(inner.Width, inner.Height));
+                assignedById = assignedBoxes.ToDictionary(
+                    box => box.Identity.ElementId,
+                    box => box.Bounds
+                );
             }
-            composition.Flush(maximumWorkItems);
-            EnsureResponsiveElementsUnchanged(composition, responsive);
             if (responsive.Length != 0)
             {
                 assignedBoxes.Clear();
@@ -1177,6 +1209,12 @@ public static class SceneLayout
         var textMetrics = IntrinsicTextMetrics(style, text, scale, shaper, cache);
         var width = textMetrics?.Width ?? 0f;
         var height = textMetrics?.Height ?? 0f;
+        // A virtualized viewport is a measurement boundary. Its source extent
+        // belongs to the scrolling region, never to an ancestor's desired size;
+        // otherwise nested auto layout can realize the entire source as visible.
+        // Explicit dimensions and flex/grid assignments are applied by callers.
+        if (element.Composition.IsVirtualizedViewport(element.Id))
+            return Outer(style, (width, height));
         var participatingChildren = element
             .Children.Where(child => child.Participation != ElementParticipation.Collapsed)
             .ToArray();
@@ -1484,6 +1522,35 @@ public static class SceneLayout
             if (_styles.TryGetValue(element.Id, out var cached))
                 return cached;
             var resolved = ReadResolved(element);
+            if (
+                element.IsConditionalRegion
+                && !element.HasPresentation
+                && element.Children is [var child]
+                && child.Participation != ElementParticipation.Collapsed
+            )
+            {
+                // The retained branch owner is not an authored layout container.
+                // Carry its single child's parent-facing allocation through the
+                // boundary without copying paint, padding, or child arrangement.
+                var content = Read(child);
+                var parent = element.Parent;
+                while (parent is { IsConditionalRegion: true, HasPresentation: false })
+                    parent = parent.Parent;
+                resolved = resolved with
+                {
+                    Axis = parent?.Resolve(LayoutProperties.Axis).Value ?? LayoutAxis.Column,
+                    Width = content.Width,
+                    Height = content.Height,
+                    MinWidth = content.MinWidth,
+                    MinHeight = content.MinHeight,
+                    MaxWidth = content.MaxWidth,
+                    MaxHeight = content.MaxHeight,
+                    MainBasis = content.MainBasis,
+                    MainGrow = content.MainGrow,
+                    MainShrink = content.MainShrink,
+                    GridPlacement = content.GridPlacement,
+                };
+            }
             _styles.Add(element.Id, resolved);
             var decorations = new DecorationValues(
                 element.Resolve(VisualProperties.Border).Value,

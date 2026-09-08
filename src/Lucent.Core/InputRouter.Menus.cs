@@ -5,6 +5,7 @@ public sealed partial class InputRouter
     private readonly Dictionary<long, MenuRegistration> _menus = [];
     private (int Pointer, ElementIdentity Target)? _contextPointer;
     private ContextMenuRequest? _activeMenu;
+    private ElementIdentity? _pendingMenuFocusAfter;
 
     /// <summary>Raised during an invocation route; hosts defer popup construction until routing returns.</summary>
     public event Action<ContextMenuRequest>? ContextMenuRequested;
@@ -213,16 +214,11 @@ public sealed partial class InputRouter
         Throw(errors);
     }
 
-    internal void FocusMenuBoundary(bool first)
+    internal bool FocusMenuBoundary(bool first)
     {
-        var targets = _scene!
-            .Input.Where(item =>
-                _focusable.TryGetValue(item.Identity.ElementId, out var focusable)
-                && focusable.TabStop
-                && Eligible(item.Identity)
-            )
-            .OrderBy(item => item.Order)
-            .ToArray();
+        if (_scene is null || !ValidateScene(_scene))
+            return false;
+        var targets = MenuFocusTargets();
         if (targets.Length != 0)
         {
             var errors = new List<Exception>();
@@ -232,7 +228,65 @@ public sealed partial class InputRouter
                 errors
             );
             Throw(errors);
+            return true;
         }
+        return false;
+    }
+
+    /// <summary>Focuses the next eligible item after a trigger, or defers until its scene is installed.</summary>
+    internal bool FocusMenuAfter(ElementIdentity trigger)
+    {
+        if (_disposed)
+            return false;
+        if (_scene is null || !ValidateScene(_scene))
+        {
+            _pendingMenuFocusAfter = trigger;
+            return false;
+        }
+        _pendingMenuFocusAfter = null;
+        var errors = new List<Exception>();
+        var focused = FocusMenuAfterCurrentScene(trigger, errors);
+        Throw(errors);
+        return focused;
+    }
+
+    internal void ClearPendingMenuFocus() => _pendingMenuFocusAfter = null;
+
+    private RetainedInputElement[] MenuFocusTargets() =>
+        _scene!
+            .Input.Where(item =>
+                _focusable.TryGetValue(item.Identity.ElementId, out var focusable)
+                && focusable.TabStop
+                && Eligible(item.Identity)
+            )
+            .OrderBy(item => item.Order)
+            .ToArray();
+
+    private bool FocusPendingMenuTarget(List<Exception> errors)
+    {
+        if (_pendingMenuFocusAfter is not { } trigger)
+            return false;
+        if (_scene is null || !ValidateScene(_scene))
+            return false;
+        _pendingMenuFocusAfter = null;
+        return FocusMenuAfterCurrentScene(trigger, errors);
+    }
+
+    private bool FocusMenuAfterCurrentScene(ElementIdentity trigger, List<Exception> errors)
+    {
+        var targets = MenuFocusTargets();
+        if (targets.Length == 0)
+            return false;
+        var start = 0;
+        if (_input.TryGetValue(trigger.ElementId, out var prior))
+        {
+            var next = Array.FindIndex(targets, item => item.Order > prior.Order);
+            start = next >= 0 ? next : 0;
+        }
+        var target = targets[start].Identity;
+        SetModality(InputModality.Keyboard, errors);
+        RequestFocus(target, FocusChangeReason.Traversal, errors);
+        return _focused?.Identity == target;
     }
 
     private sealed record MenuRegistration(

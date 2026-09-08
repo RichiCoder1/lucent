@@ -488,17 +488,26 @@ public sealed class TextFieldContracts
 
                 scene = Project();
                 var focused = scene.Boxes.Single(box => box.Identity.ElementId == field.Id).Bounds;
+                var contentBounds = SceneLayout.ContentBounds(
+                    focused,
+                    field.Resolve(LayoutProperties.Padding).Value,
+                    scale
+                );
+                var hasCaret = router.TryGetCaretGeometry(out var caret);
+                var expectedCaretY = hasCaret
+                    ? contentBounds.Y + (contentBounds.Height - caret.Height) / 2
+                    : 0;
                 Assert(
                     focused == initial
                         && field.Resolve(ProjectionProperties.Text).Value == ""
                         && !Flatten(scene.Nodes)
                             .OfType<TextSceneNode>()
                             .Any(node => node.Identity.Element.ElementId == field.Id)
-                        && router.TryGetCaretGeometry(out var caret)
-                        && caret.X == focused.X
-                        && caret.Y == focused.Y
+                        && hasCaret
+                        && MathF.Abs(caret.X - contentBounds.X) < .001f
+                        && MathF.Abs(caret.Y - expectedCaretY) < .001f
                         && MathF.Abs(caret.Height - 14) < .001f,
-                    $"Focused empty {axis} text field changed size, painted its placeholder, or lost caret geometry at {scale}x."
+                    $"Focused empty {axis} text field changed size, painted its placeholder, or lost caret geometry at {scale}x. Bounds={focused}; content={contentBounds}; caret={caret}."
                 );
 
                 state.Insert("x");

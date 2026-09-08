@@ -8,6 +8,9 @@ public enum StandardMenuEntryKind
 
     /// <summary>A noninteractive separator between command groups.</summary>
     Separator,
+
+    /// <summary>A command that opens a nested standard menu.</summary>
+    Submenu,
 }
 
 /// <summary>One immutable command or separator in a standard context menu.</summary>
@@ -17,13 +20,15 @@ public sealed class StandardMenuEntry
         StandardMenuEntryKind kind,
         string? label,
         SemanticIdentity? identity,
-        bool enabled
+        bool enabled,
+        StandardMenuDescriptor? submenu = null
     )
     {
         Kind = kind;
         Label = label;
         Identity = identity;
         Enabled = enabled;
+        Submenu = submenu;
     }
 
     /// <summary>Gets whether this entry is a command or separator.</summary>
@@ -37,9 +42,12 @@ public sealed class StandardMenuEntry
 
     /// <summary>Gets whether the current semantic command is enabled.</summary>
     public bool Enabled { get; }
+
+    /// <summary>Gets the nested descriptor for a submenu entry.</summary>
+    public StandardMenuDescriptor? Submenu { get; }
 }
 
-/// <summary>An immutable flat standard-menu projection suitable for platform adapters.</summary>
+/// <summary>An immutable bounded standard-menu projection suitable for platform adapters.</summary>
 public sealed class StandardMenuDescriptor
 {
     internal StandardMenuDescriptor(IReadOnlyList<StandardMenuEntry> entries) =>
@@ -49,11 +57,41 @@ public sealed class StandardMenuDescriptor
     public IReadOnlyList<StandardMenuEntry> Entries { get; }
 }
 
+/// <summary>One currently hosted level in a rendered context-menu chain.</summary>
+public sealed class MenuLevelSnapshot
+{
+    internal MenuLevelSnapshot(
+        int depth,
+        Composition composition,
+        ElementIdentity? parentTrigger,
+        bool focusFirst
+    )
+    {
+        Depth = depth;
+        Composition = composition;
+        ParentTrigger = parentTrigger;
+        FocusFirst = focusFirst;
+    }
+
+    /// <summary>Gets the zero-based level depth.</summary>
+    public int Depth { get; }
+
+    /// <summary>Gets the composition the host projects in this popup level.</summary>
+    public Composition Composition { get; }
+
+    /// <summary>Gets the parent-level trigger used to place this level.</summary>
+    public ElementIdentity? ParentTrigger { get; }
+
+    /// <summary>Gets whether the host should focus the first item after installing this level's scene.</summary>
+    public bool FocusFirst { get; }
+}
+
 internal enum StandardMenuPart
 {
     None,
     Menu,
     Command,
+    Submenu,
     Separator,
     SeparatorLine,
 }
@@ -68,7 +106,12 @@ public sealed class ContextMenuRequest : IDisposable
     private readonly Action? _onClosed;
     private Composition? _popup;
     private Element? _menuRoot;
+    private readonly List<MenuLevel> _levels = [];
+    private readonly Dictionary<ElementIdentity, SubmenuRegistration> _submenus = [];
     private bool _dismissed;
+
+    private const int MaximumDescriptorDepth = 8;
+    private const int MaximumDescriptorEntries = 512;
 
     internal ContextMenuRequest(
         Composition owner,
@@ -109,8 +152,17 @@ public sealed class ContextMenuRequest : IDisposable
     /// <summary>Whether a command, dismissal, or target disposal has ended this menu.</summary>
     public bool IsDismissed => _dismissed || !IsValid;
 
-    /// <summary>Gets a flat platform-menu descriptor when the content uses only unstyled standard menu components.</summary>
-    /// <remarks>Custom content, layout, nesting, or explicit styles return <see langword="null"/> so the host can use the Lucent-rendered popup.</remarks>
+    /// <summary>Gets the root-to-leaf popup levels the rendered host currently owns.</summary>
+    public IReadOnlyList<MenuLevelSnapshot> ActiveLevels =>
+        Array.AsReadOnly(
+            _levels.Where(level => level.Active).Select(level => level.Snapshot).ToArray()
+        );
+
+    /// <summary>Raised after the active rendered popup chain changes.</summary>
+    public event Action? ActiveLevelsChanged;
+
+    /// <summary>Gets a bounded platform-menu tree when the content uses only unstyled standard menu components.</summary>
+    /// <remarks>Custom content, layout, explicit styles, or a tree beyond the fixed budgets return <see langword="null"/> so the host can use the Lucent-rendered popup.</remarks>
     public StandardMenuDescriptor? StandardMenu
     {
         get
@@ -118,62 +170,22 @@ public sealed class ContextMenuRequest : IDisposable
             if (IsDismissed)
                 return null;
             var popup = CreateComposition();
-            popup.Flush();
-            if (
-                _menuRoot is not { StandardMenuPart: StandardMenuPart.Menu } root
-                || root.Children.Count == 0
-                || root.Children.Any(child =>
-                    child.StandardMenuPart is StandardMenuPart.None or StandardMenuPart.Menu
-                    || child.StandardMenuPart == StandardMenuPart.Command
-                        && child.Children.Count != 0
-                    || child.StandardMenuPart == StandardMenuPart.Separator
-                        && (
-                            child.Children.Count != 1
-                            || child.Children[0].StandardMenuPart != StandardMenuPart.SeparatorLine
-                            || child.Children[0].Children.Count != 0
-                        )
-                )
-            )
-                return null;
-            var semantics = popup.SemanticSnapshot();
-            if (semantics is null)
-                return null;
-            var commands = SemanticNodes(semantics)
-                .Where(node => node.Role == SemanticRole.MenuItem)
-                .ToDictionary(node => node.Identity.ElementId);
-            var entries = new List<StandardMenuEntry>(root.Children.Count);
-            foreach (var child in root.Children)
-            {
-                if (child.StandardMenuPart == StandardMenuPart.Separator)
-                {
-                    entries.Add(new(StandardMenuEntryKind.Separator, null, null, enabled: false));
-                    continue;
-                }
-                if (
-                    child.StandardMenuPart != StandardMenuPart.Command
-                    || !commands.TryGetValue(child.Id, out var command)
-                    || (command.Actions & SemanticAction.Invoke) == 0
-                )
-                    return null;
-                entries.Add(
-                    new(
-                        StandardMenuEntryKind.Command,
-                        command.Name,
-                        command.Identity,
-                        command.Enabled
-                    )
-                );
-            }
-            return new(entries);
+            var remaining = MaximumDescriptorEntries;
+            return BuildStandardMenu(popup, _menuRoot!, 1, ref remaining);
         }
     }
 
     /// <summary>Invokes a descriptor command through the popup's current semantic command surface.</summary>
     public SemanticCommandResult InvokeStandardCommand(SemanticIdentity identity)
     {
-        if (IsDismissed || _popup is null)
+        if (IsDismissed)
             return SemanticCommandResult.Stale;
-        return _popup.ExecuteSemanticCommand(identity, new(SemanticCommandKind.Invoke));
+        var level = _levels.FirstOrDefault(item =>
+            item.Composition.Epoch == identity.CompositionEpoch
+        );
+        return level is null
+            ? SemanticCommandResult.Stale
+            : level.Composition.ExecuteSemanticCommand(identity, new(SemanticCommandKind.Invoke));
     }
 
     /// <summary>Mounts the popup once on the same reactive graph and UI owner as its caller.</summary>
@@ -190,7 +202,8 @@ public sealed class ContextMenuRequest : IDisposable
                 popup.Root.Scope,
                 _theme.Theme,
                 _theme.ReducedMotion,
-                _theme.Appearance
+                _theme.Appearance,
+                _theme.PresentationMode
             );
             _ = popup.Root.Scope.Effect(
                 () =>
@@ -198,11 +211,13 @@ public sealed class ContextMenuRequest : IDisposable
                     theme.Theme = _theme.Theme;
                     theme.ReducedMotion = _theme.ReducedMotion;
                     theme.Appearance = _theme.Appearance;
+                    theme.PresentationMode = _theme.PresentationMode;
                 },
                 "popup-theme"
             );
             _menuRoot = popup.Mount(popup.Root, theme, _content);
             _popup = popup;
+            _levels.Add(new MenuLevel(popup, _menuRoot, 0, null, active: true, focusFirst: false));
             return popup;
         }
         catch
@@ -226,12 +241,341 @@ public sealed class ContextMenuRequest : IDisposable
         );
     }
 
+    /// <summary>Measures one active popup level within its host-provided logical work area.</summary>
+    public LayoutRect Measure(MenuLevelSnapshot level, ITextShaper shaper, LayoutViewport available)
+    {
+        var retained = RequireLevel(level, active: true);
+        var scene = SceneLayout.Project(retained.Composition, available, shaper);
+        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == retained.Root.Id).Bounds;
+        return new(
+            0,
+            0,
+            Math.Clamp(bounds.Width, 1, available.Width),
+            Math.Clamp(bounds.Height, 1, available.Height)
+        );
+    }
+
+    /// <summary>Focuses the first eligible item after a host installs the level's projected scene.</summary>
+    public bool FocusFirst(MenuLevelSnapshot level)
+    {
+        var retained = RequireLevel(level, active: true);
+        return retained.Composition.MenuSession == this
+            && retained.Composition.Input.FocusMenuBoundary(first: true);
+    }
+
+    /// <summary>Closes this rendered level and descendants, restoring focus to its parent trigger.</summary>
+    public bool CloseLevel(MenuLevelSnapshot level)
+    {
+        var retained = RequireLevel(level, active: true);
+        return CloseLevel(retained, restoreFocus: true);
+    }
+
+    internal void RegisterSubmenu(
+        ElementIdentity trigger,
+        BehaviorContext context,
+        Func<ComponentRecipe> content,
+        ThemeContext theme,
+        Func<bool>? enabled
+    )
+    {
+        if (_submenus.ContainsKey(trigger))
+            throw new InvalidOperationException("A menu trigger may own only one submenu.");
+        _submenus.Add(trigger, new(trigger, context, content, theme, enabled));
+    }
+
+    internal bool OpenSubmenu(ElementIdentity trigger, bool focusFirst)
+    {
+        if (IsDismissed || !_submenus.TryGetValue(trigger, out var registration))
+            return false;
+        var parent = _levels.FirstOrDefault(level =>
+            level.Active && ReferenceEquals(level.Composition, registration.ContextComposition)
+        );
+        if (parent is null || parent.Depth + 1 >= MaximumDescriptorDepth)
+            return false;
+        if (registration.Level is { Active: true } open && registration.Available)
+        {
+            // Ordinary motion within a trigger must not close/reopen its branch,
+            // invalidate accessibility identities, or restart pointer-intent time.
+            if (focusFirst)
+                _ = open.Composition.Input.FocusMenuBoundary(first: true);
+            return true;
+        }
+        CloseDescendants(parent.Depth);
+        var child = GetOrCreateSubmenu(registration, parent.Depth + 1);
+        if (child is null || !registration.Available)
+            return false;
+        child.Active = true;
+        child.Snapshot = new(child.Depth, child.Composition, trigger, focusFirst);
+        registration.SetExpanded(true);
+        ActiveLevelsChanged?.Invoke();
+        return true;
+    }
+
+    internal bool CloseCurrentLevel(Composition composition)
+    {
+        var level = _levels.FirstOrDefault(item =>
+            item.Active && ReferenceEquals(item.Composition, composition)
+        );
+        if (level is null)
+            return false;
+        if (level.Depth == 0)
+            return false;
+        return CloseLevel(level, restoreFocus: true);
+    }
+
+    internal bool CollapseSubmenu(ElementIdentity trigger)
+    {
+        if (
+            !_submenus.TryGetValue(trigger, out var registration)
+            || registration.Level is not { Active: true } level
+        )
+            return false;
+        return CloseLevel(level, restoreFocus: true);
+    }
+
+    internal void RefreshSubmenuAvailability(ElementIdentity trigger, bool enabled)
+    {
+        if (!_submenus.TryGetValue(trigger, out var registration))
+            return;
+        registration.SetEnabled(enabled);
+        if (!registration.Available && registration.Level is { Active: true } level)
+            _ = CloseLevel(level, restoreFocus: true);
+    }
+
+    internal void SelectPointerTarget(Composition composition, ElementIdentity target)
+    {
+        var parent = _levels.FirstOrDefault(level =>
+            level.Active && ReferenceEquals(level.Composition, composition)
+        );
+        if (parent is null)
+            return;
+        var child = _levels.FirstOrDefault(level =>
+            level.Active && level.Depth == parent.Depth + 1
+        );
+        if (child is null || child.ParentTrigger == target)
+            return;
+        CloseDescendants(parent.Depth);
+        ActiveLevelsChanged?.Invoke();
+    }
+
+    private MenuLevel RequireLevel(MenuLevelSnapshot snapshot, bool active)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var level = _levels.FirstOrDefault(item => ReferenceEquals(item.Snapshot, snapshot));
+        if (level is null || active && !level.Active || IsDismissed)
+            throw new InvalidOperationException("The menu level is no longer active.");
+        return level;
+    }
+
+    private bool CloseLevel(MenuLevel level, bool restoreFocus)
+    {
+        if (!level.Active)
+            return false;
+        if (level.Depth == 0)
+        {
+            Dismiss();
+            return true;
+        }
+        var trigger = level.ParentTrigger;
+        if (restoreFocus && trigger is { } identity)
+        {
+            var parent = _levels.FirstOrDefault(item =>
+                item.Active && item.Composition.Epoch == identity.CompositionEpoch
+            );
+            if (parent is not null && !parent.Composition.Input.FocusSemantic(identity))
+                _ = parent.Composition.Input.FocusMenuAfter(identity);
+        }
+        CloseDescendants(level.Depth - 1);
+        ActiveLevelsChanged?.Invoke();
+        return true;
+    }
+
+    private void CloseDescendants(int parentDepth)
+    {
+        foreach (var level in _levels.Where(item => item.Active && item.Depth > parentDepth))
+        {
+            level.Active = false;
+            if (
+                level.ParentTrigger is { } trigger
+                && _submenus.TryGetValue(trigger, out var registration)
+            )
+                registration.SetExpanded(false);
+        }
+    }
+
+    private MenuLevel? GetOrCreateSubmenu(SubmenuRegistration registration, int depth)
+    {
+        if (!(registration.Enabled?.Invoke() ?? true))
+        {
+            registration.SetEnabled(false);
+            return null;
+        }
+        if (registration.Level is { } existing)
+        {
+            registration.SetContentAvailable(existing.Root.Children.Count != 0);
+            return existing;
+        }
+        var content =
+            registration.Content()
+            ?? throw new InvalidOperationException("A submenu factory returned no recipe.");
+        var popup = new Composition(Owner.Graph, "context-submenu");
+        try
+        {
+            popup.MenuSession = this;
+            var theme = new ThemeContext(
+                popup.Root.Scope,
+                registration.Theme.Theme,
+                registration.Theme.ReducedMotion,
+                registration.Theme.Appearance,
+                registration.Theme.PresentationMode
+            );
+            _ = popup.Root.Scope.Effect(
+                () =>
+                {
+                    theme.Theme = registration.Theme.Theme;
+                    theme.ReducedMotion = registration.Theme.ReducedMotion;
+                    theme.Appearance = registration.Theme.Appearance;
+                    theme.PresentationMode = registration.Theme.PresentationMode;
+                },
+                "submenu-theme"
+            );
+            var root = popup.Mount(popup.Root, theme, content);
+            popup.Flush();
+            if (root.StandardMenuPart != StandardMenuPart.Menu)
+                throw new InvalidOperationException(
+                    "A submenu factory must return Components.Menu."
+                );
+            var level = new MenuLevel(
+                popup,
+                root,
+                depth,
+                registration.Trigger,
+                active: false,
+                focusFirst: false
+            );
+            registration.Level = level;
+            _levels.Add(level);
+            registration.SetContentAvailable(root.Children.Count != 0);
+            return level;
+        }
+        catch
+        {
+            popup.Dispose();
+            throw;
+        }
+    }
+
+    private StandardMenuDescriptor? BuildStandardMenu(
+        Composition composition,
+        Element root,
+        int depth,
+        ref int remaining
+    )
+    {
+        composition.Flush();
+        if (
+            depth > MaximumDescriptorDepth
+            || root.StandardMenuPart != StandardMenuPart.Menu
+            || root.Children.Count == 0
+        )
+            return null;
+        var nested = new Dictionary<long, StandardMenuDescriptor?>();
+        foreach (var child in root.Children)
+        {
+            if (--remaining < 0)
+                return null;
+            switch (child.StandardMenuPart)
+            {
+                case StandardMenuPart.Command when child.Children.Count == 0:
+                    break;
+                case StandardMenuPart.Submenu when child.Children.Count == 0:
+                    var trigger = new ElementIdentity(composition.Epoch, child.Id);
+                    if (!_submenus.TryGetValue(trigger, out var registration))
+                        return null;
+                    var childLevel = GetOrCreateSubmenu(registration, depth);
+                    if (childLevel is null)
+                    {
+                        nested[child.Id] = new StandardMenuDescriptor([]);
+                        break;
+                    }
+                    nested[child.Id] =
+                        childLevel.Root.Children.Count == 0
+                            ? new StandardMenuDescriptor([])
+                            : BuildStandardMenu(
+                                childLevel.Composition,
+                                childLevel.Root,
+                                depth + 1,
+                                ref remaining
+                            );
+                    if (nested[child.Id] is null)
+                        return null;
+                    break;
+                case StandardMenuPart.Separator
+                    when child.Children.Count == 1
+                        && child.Children[0].StandardMenuPart == StandardMenuPart.SeparatorLine
+                        && child.Children[0].Children.Count == 0:
+                    break;
+                default:
+                    return null;
+            }
+        }
+        var semantics = composition.SemanticSnapshot();
+        if (semantics is null)
+            return null;
+        var commands = SemanticNodes(semantics)
+            .Where(node => node.Role == SemanticRole.MenuItem)
+            .ToDictionary(node => node.Identity.ElementId);
+        var entries = new List<StandardMenuEntry>(root.Children.Count);
+        foreach (var child in root.Children)
+        {
+            if (child.StandardMenuPart == StandardMenuPart.Separator)
+            {
+                entries.Add(new(StandardMenuEntryKind.Separator, null, null, enabled: false));
+                continue;
+            }
+            if (!commands.TryGetValue(child.Id, out var command))
+                return null;
+            if (
+                child.StandardMenuPart == StandardMenuPart.Command
+                && (command.Actions & SemanticAction.Invoke) != 0
+            )
+                entries.Add(
+                    new(
+                        StandardMenuEntryKind.Command,
+                        command.Name,
+                        command.Identity,
+                        command.Enabled
+                    )
+                );
+            else if (
+                child.StandardMenuPart == StandardMenuPart.Submenu
+                && (command.Actions & SemanticAction.ExpandCollapse) != 0
+            )
+                entries.Add(
+                    new(
+                        StandardMenuEntryKind.Submenu,
+                        command.Name,
+                        command.Identity,
+                        command.Enabled,
+                        nested[child.Id]
+                    )
+                );
+            else
+                return null;
+        }
+        return new(entries);
+    }
+
     /// <summary>Requests host dismissal without running a nested native loop.</summary>
     public void Dismiss()
     {
         if (_dismissed)
             return;
         _dismissed = true;
+        foreach (var level in _levels)
+            level.Composition.Input.ClearPendingMenuFocus();
+        CloseDescendants(-1);
+        ActiveLevelsChanged?.Invoke();
         if (!Owner.IsDisposed && Owner.Find(Target) is { IsDisposed: false })
             _onClosed?.Invoke();
     }
@@ -255,10 +599,13 @@ public sealed class ContextMenuRequest : IDisposable
         }
         finally
         {
-            var popup = _popup;
+            var levels = _levels.ToArray();
             _popup = null;
             _menuRoot = null;
-            popup?.Dispose();
+            _levels.Clear();
+            _submenus.Clear();
+            foreach (var level in levels.Reverse())
+                level.Composition.Dispose();
         }
     }
 
@@ -268,6 +615,76 @@ public sealed class ContextMenuRequest : IDisposable
         foreach (var child in node.Children)
         foreach (var descendant in SemanticNodes(child))
             yield return descendant;
+    }
+
+    private sealed class MenuLevel
+    {
+        internal MenuLevel(
+            Composition composition,
+            Element root,
+            int depth,
+            ElementIdentity? parentTrigger,
+            bool active,
+            bool focusFirst
+        )
+        {
+            Composition = composition;
+            Root = root;
+            Depth = depth;
+            ParentTrigger = parentTrigger;
+            Active = active;
+            Snapshot = new(depth, composition, parentTrigger, focusFirst);
+        }
+
+        internal Composition Composition { get; }
+        internal Element Root { get; }
+        internal int Depth { get; }
+        internal ElementIdentity? ParentTrigger { get; }
+        internal bool Active { get; set; }
+        internal MenuLevelSnapshot Snapshot { get; set; }
+    }
+
+    private sealed class SubmenuRegistration(
+        ElementIdentity trigger,
+        BehaviorContext context,
+        Func<ComponentRecipe> content,
+        ThemeContext theme,
+        Func<bool>? enabled
+    )
+    {
+        internal ElementIdentity Trigger { get; } = trigger;
+        internal BehaviorContext Context { get; } = context;
+        internal Composition ContextComposition => Context.Composition;
+        internal Func<ComponentRecipe> Content { get; } = content;
+        internal ThemeContext Theme { get; } = theme;
+        internal Func<bool>? Enabled { get; } = enabled;
+        internal MenuLevel? Level { get; set; }
+        internal bool Available { get; private set; } = enabled?.Invoke() ?? true;
+        private bool? ContentAvailable { get; set; }
+
+        internal void SetContentAvailable(bool available)
+        {
+            ContentAvailable = available;
+            SetEnabled(Enabled?.Invoke() ?? true);
+        }
+
+        internal void SetEnabled(bool enabled)
+        {
+            Available = enabled && ContentAvailable != false;
+            Context.UpdateControl(InputProperties.Enabled, Available);
+            SetExpanded(Level?.Active == true && Available);
+        }
+
+        internal void SetExpanded(bool expanded) =>
+            Context.UpdateSemantics(
+                new(
+                    SemanticRole.MenuItem,
+                    Context.SemanticName,
+                    enabled: Available,
+                    actions: SemanticAction.ExpandCollapse,
+                    expanded: expanded
+                )
+            );
     }
 }
 
@@ -404,6 +821,56 @@ public static partial class Components
         );
     }
 
+    /// <summary>Creates a menu item whose nested menu is constructed only when inspected or opened.</summary>
+    [LucentComponent]
+    public static ComponentRecipe MenuSubmenu(
+        [DefaultContent] string content,
+        Func<ComponentRecipe> menu,
+        Func<bool>? enabled = null,
+        Style? style = null
+    )
+    {
+        content = Required(content, nameof(content));
+        ArgumentNullException.ThrowIfNull(menu);
+        return ComponentRecipe.Create(
+            "menu-submenu",
+            (context, root) =>
+            {
+                if (style is null)
+                    root.StandardMenuPart = StandardMenuPart.Submenu;
+                root.Present(
+                    context.Theme,
+                    component: Style
+                        .Empty.Set(LayoutProperties.Height, 32f)
+                        .Set(LayoutProperties.MainShrink, 0f)
+                        .Set(LayoutProperties.Padding, Insets.Symmetric(12, 7))
+                        .Set(LayoutProperties.Clip, true)
+                        .Set(VisualProperties.CornerRadius, 4f)
+                        .Set(ProjectionProperties.Text, content + "  ›")
+                        .Set(TypographyProperties.FontSize, 14f)
+                        .Set(TypographyProperties.TextColor, ControlThemes.Foreground)
+                        .Set(VisualProperties.Background, ControlThemes.Surface)
+                        .When(
+                            VariantState.Hover,
+                            Style.Empty.Set(VisualProperties.Background, ControlThemes.Selected)
+                        )
+                        .When(
+                            VariantState.FocusVisible,
+                            Style.Empty.Set(VisualProperties.Background, ControlThemes.Selected)
+                        )
+                        .When(
+                            VariantState.Disabled,
+                            Style.Empty.Set(VisualProperties.Opacity, 0.55f)
+                        ),
+                    author: style
+                );
+                root.AttachBehaviors(
+                    new MenuSubmenuBehavior(content, menu, context.Theme, enabled)
+                );
+            }
+        );
+    }
+
     /// <summary>Creates an item backed by an application-owned asynchronous command.</summary>
     [LucentComponent]
     public static ComponentRecipe MenuItem(
@@ -472,7 +939,13 @@ internal sealed class MenuBehavior : Behavior
         context.OnPointer(route =>
         {
             if (route.Command.Kind == PointerCommandKind.Move)
+            {
+                context.Composition.MenuSession?.SelectPointerTarget(
+                    context.Composition,
+                    route.Target
+                );
                 route.FocusTarget();
+            }
         });
         context.OnKey(route =>
         {
@@ -482,8 +955,25 @@ internal sealed class MenuBehavior : Behavior
             switch (route.Command.Key)
             {
                 case Key.Escape:
+                    if (
+                        !(
+                            context.Composition.MenuSession?.CloseCurrentLevel(context.Composition)
+                            ?? false
+                        )
+                    )
+                        router.DismissMenu();
+                    break;
                 case Key.Tab:
                     router.DismissMenu();
+                    break;
+                case Key.Left:
+                    if (
+                        !(
+                            context.Composition.MenuSession?.CloseCurrentLevel(context.Composition)
+                            ?? false
+                        )
+                    )
+                        return;
                     break;
                 case Key.Down:
                     router.MoveMenuFocus(FocusTraversalDirection.Next);
@@ -502,5 +992,80 @@ internal sealed class MenuBehavior : Behavior
             }
             route.Handled = true;
         });
+    }
+}
+
+internal sealed class MenuSubmenuBehavior(
+    string label,
+    Func<ComponentRecipe> menu,
+    ThemeContext theme,
+    Func<bool>? enabled
+) : Behavior
+{
+    public override string Name => "menu-submenu";
+    public override BehaviorOwnership Ownership =>
+        BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
+
+    public override void Attach(BehaviorContext context)
+    {
+        var available = enabled?.Invoke() ?? true;
+        context.SetSemantics(
+            new(
+                SemanticRole.MenuItem,
+                label,
+                enabled: available,
+                actions: SemanticAction.ExpandCollapse,
+                expanded: false
+            )
+        );
+        context.MakeFocusable();
+        context.RegisterMenuSubmenu(menu, theme, enabled);
+        context.OnSemanticCommand(command =>
+            command.Kind switch
+            {
+                SemanticCommandKind.Focus => context
+                    .CompositionInput()
+                    .FocusSemantic(context.Identity),
+                SemanticCommandKind.Expand => context.Composition.MenuSession?.OpenSubmenu(
+                    context.Identity,
+                    focusFirst: true
+                ) == true,
+                SemanticCommandKind.Collapse => context.Composition.MenuSession?.CollapseSubmenu(
+                    context.Identity
+                ) == true,
+                _ => false,
+            }
+        );
+        context.OnPointer(route =>
+        {
+            if (route.Command.Kind != PointerCommandKind.Move)
+                return;
+            route.Focus();
+            _ = context.Composition.MenuSession?.OpenSubmenu(context.Identity, focusFirst: false);
+        });
+        context.OnKey(route =>
+        {
+            if (
+                route.Command
+                is not {
+                    Kind: KeyCommandKind.Down,
+                    IsRepeat: false,
+                    Key: Key.Right or Key.Enter or Key.Space
+                }
+            )
+                return;
+            route.Handled =
+                context.Composition.MenuSession?.OpenSubmenu(context.Identity, focusFirst: true)
+                == true;
+        });
+        if (enabled is not null)
+            _ = context.Effect(
+                () =>
+                    context.Composition.MenuSession?.RefreshSubmenuAvailability(
+                        context.Identity,
+                        enabled()
+                    ),
+                "menu-submenu-enabled"
+            );
     }
 }

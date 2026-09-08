@@ -1,15 +1,19 @@
 namespace Lucent.IssueBrowser;
 style ErrorStatusStyle {
     Axis: LayoutAxis.Column;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
 }
 
-style ErrorRetryStyle {
-    Height: 30;
+style ErrorPanelStyle {
+    Padding: Insets.Symmetric(16, 8);
+    Spacing: 8;
 }
 
 public component Error(IssueBrowserState browser) {
-    <Column>
-        <Status content={() => browser.Error ?? ""} style={ErrorStatusStyle} />
-        <Button onInvoke={browser.Retry} style={ErrorRetryStyle} name="issue-browser.retry">Retry</Button>
+    <Column style={ErrorPanelStyle}>
+        <Status content={() => browser.Error ?? ""} style={PresentationStyles.Secondary.With(ErrorStatusStyle)} />
+        <Row>
+            <Button onInvoke={browser.Retry} name="issue-browser.retry">Retry</Button>
+        </Row>
     </Column>
 }

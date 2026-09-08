@@ -153,6 +153,7 @@ public sealed partial class InputRouter
                 )
             )
                 RequestFocus(null, FocusChangeReason.Reordered, errors);
+            _ = FocusPendingMenuTarget(errors);
             if (RevealEditorCaret() || _composition.InteractionVisualGeneration != visualGeneration)
             {
                 _scene = null;

@@ -68,7 +68,7 @@ public static class IssueBrowserStructure
         var composition = new Composition(graph, "issue-browser");
         var themeContext = new ThemeContext(
             composition.Root.Scope,
-            AppTheme.Create(ThemeAppearance.Light)
+            StockTheme(ThemeAppearance.Light)
         );
         theme = themeContext;
         InstallAppearanceTheme(composition, themeContext);
@@ -101,7 +101,7 @@ public static class IssueBrowserStructure
             "issue-browser-application",
             (context, root) =>
             {
-                root.Present(context.Theme, author: Style.Empty.MainGrow(1));
+                root.Present(context.Theme, author: Style.Empty.MainGrow(1).MainBasis(0));
                 var configured = dependencies(root.Scope);
                 var browser = new IssueBrowserState(
                     root.Scope,
@@ -122,13 +122,18 @@ public static class IssueBrowserStructure
                 var appearance = theme.Appearance;
                 if (appearance == appliedAppearance)
                     return;
-                var next = AppTheme.Create(appearance);
+                var next = StockTheme(appearance);
                 appliedAppearance = appearance;
                 theme.Theme = next;
             },
             "issue-browser-appearance"
         );
     }
+
+    private static Theme StockTheme(ThemeAppearance appearance) =>
+        appearance.Contrast == ThemeContrast.High ? ControlThemes.HighContrast
+        : appearance.ColorScheme == ThemeColorScheme.Dark ? ControlThemes.Dark
+        : ControlThemes.Light;
 
     private readonly record struct BrowserDependencies(
         GitHubIssueSource Issues,

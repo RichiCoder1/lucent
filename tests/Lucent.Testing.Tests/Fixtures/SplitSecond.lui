@@ -1,0 +1,2 @@
+namespace HeadlessFixtures;
+component SplitSecond() { <Text>Second pane</Text> }

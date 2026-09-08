@@ -56,6 +56,10 @@ Desktop interaction checks require an interactive Windows session. They launch a
 
 ## Desktop and accessibility coverage
 
+`PublishedIssueBrowserTests.FlaUiSplitPaneResizesAndRestoresAcrossNarrowNavigation` exercises the stock workspace through UIA range changes, physical keyboard input, captured dragging, narrow list/detail navigation and restoration of the preferred pane extent. `FlaUiSubmenuInvokesLeafAndDismissesOneLevel` covers nested Lucent keyboard/UIA commands and Windows-native keyboard menus. Set `LUCENT_DESKTOP_APP` to the published executable and optionally `LUCENT_DESKTOP_CAPTURES` to an artifact directory. The navigation driver supplies extended physical scan codes so SDL distinguishes arrow keys from keypad keys.
+
+Issue Browser's managed real-Skia checks cover stock light, dark and high-contrast surfaces and constrained workspace geometry; set `LUCENT_HEADLESS_CAPTURES` to export their frames. Geometry assertions include the list and splitter's actual lower edges, not just the root scene size. These checks do not establish native focus or popup transport behavior.
+
 FlaUI UIA3 drives published application workflows through the public UI Automation surface. Direct UIA contract checks retain precise assertions for provider identity, lifetime, stale nodes, and error behavior. Axe.Windows supplies automated accessibility rule scans and inspection output; a scan does not perform the manual tab-stop portion of Accessibility Insights FastPass.
 
 These dependencies belong to the test driver. The application remains NativeAOT-compatible and has no test-framework dependency, private test IPC, or proof mode. Tests use deterministic local data and ordinary input, accessibility, and diagnostics interfaces. See [CREDITS.md](../CREDITS.md) for dependency identities and attribution.

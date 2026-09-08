@@ -195,19 +195,21 @@ internal sealed class WindowsCursor(
 
     internal WindowsCursor()
         : this(
-            (CursorIntent intent) =>
-                SDL.CreateSystemCursor(
-                    intent switch
-                    {
-                        CursorIntent.Text => SDL.SystemCursor.Text,
-                        CursorIntent.Pointer => SDL.SystemCursor.Pointer,
-                        _ => SDL.SystemCursor.Default,
-                    }
-                ),
+            intent => SDL.CreateSystemCursor(SystemCursorFor(intent)),
             SDL.SetCursor,
             SDL.DestroyCursor,
             SDL.GetError
         ) { }
+
+    internal static SDL.SystemCursor SystemCursorFor(CursorIntent intent) =>
+        intent switch
+        {
+            CursorIntent.Text => SDL.SystemCursor.Text,
+            CursorIntent.Pointer => SDL.SystemCursor.Pointer,
+            CursorIntent.ResizeHorizontal => SDL.SystemCursor.EWResize,
+            CursorIntent.ResizeVertical => SDL.SystemCursor.NSResize,
+            _ => SDL.SystemCursor.Default,
+        };
 
     internal bool Activate(bool text = false) =>
         Activate(text ? CursorIntent.Text : CursorIntent.Default);

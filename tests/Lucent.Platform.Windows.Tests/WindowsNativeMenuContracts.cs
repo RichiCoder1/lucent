@@ -42,4 +42,77 @@ public sealed class WindowsNativeMenuContracts
             WindowsNativeMenuHost.AnchorInClientPixels(new LayoutRect(0, 0, 1, 1), 0)
         );
     }
+
+    [TestMethod]
+    public void NativeDescriptorAcceptsBoundedRecursiveSubmenusAndMapsOnlyLeaves()
+    {
+        var leaf = new StandardMenuEntry(
+            StandardMenuEntryKind.Command,
+            "Open & inspect",
+            new SemanticIdentity(4, 10, 1),
+            enabled: true
+        );
+        var nested = new StandardMenuDescriptor([leaf]);
+        var root = new StandardMenuDescriptor([
+            new StandardMenuEntry(
+                StandardMenuEntryKind.Submenu,
+                "More actions",
+                new SemanticIdentity(4, 9, 1),
+                enabled: true,
+                submenu: nested
+            ),
+        ]);
+
+        Assert.IsTrue(
+            WindowsNativeMenuHost.TryValidateNativeDescriptor(root, out var leaves),
+            "A bounded standard submenu was incorrectly rejected from native hosting."
+        );
+        Assert.AreEqual(
+            1,
+            leaves,
+            "Native validation counted a submenu trigger as a leaf command."
+        );
+    }
+
+    [TestMethod]
+    public void NativeDescriptorRejectsEmptyOrOverdeepSubmenus()
+    {
+        var empty = new StandardMenuDescriptor([]);
+        var root = new StandardMenuDescriptor([
+            new StandardMenuEntry(
+                StandardMenuEntryKind.Submenu,
+                "Empty",
+                null,
+                true,
+                submenu: empty
+            ),
+        ]);
+        Assert.IsFalse(
+            WindowsNativeMenuHost.TryValidateNativeDescriptor(root, out _),
+            "An empty native submenu would produce an unusable popup branch."
+        );
+
+        StandardMenuDescriptor current = new([
+            new StandardMenuEntry(
+                StandardMenuEntryKind.Command,
+                "Leaf",
+                new SemanticIdentity(1, 1, 1),
+                true
+            ),
+        ]);
+        for (var depth = 1; depth <= 16; depth++)
+            current = new([
+                new StandardMenuEntry(
+                    StandardMenuEntryKind.Submenu,
+                    "Next",
+                    null,
+                    true,
+                    submenu: current
+                ),
+            ]);
+        Assert.IsFalse(
+            WindowsNativeMenuHost.TryValidateNativeDescriptor(current, out _),
+            "The native descriptor depth guard did not reject an overdeep submenu tree."
+        );
+    }
 }

@@ -71,6 +71,9 @@ public sealed class TextAreaContracts
         var scene = SceneLayout.Project(composition, new(100, 30, 1), new FixedShaper());
         Assert.IsTrue(composition.Input.SetScene(scene));
         var bounds = scene.Input.Single(item => item.Identity.ElementId == element.Id).Bounds;
+        var padding = element.Resolve(LayoutProperties.Padding).Value;
+        var textOriginX = bounds.X + padding.Left;
+        var textOriginY = bounds.Y + padding.Top;
 
         Assert.IsTrue(
             composition
@@ -78,8 +81,8 @@ public sealed class TextAreaContracts
                     new(
                         PointerCommandKind.Down,
                         7,
-                        bounds.X + 25,
-                        bounds.Y + 5,
+                        textOriginX + 25,
+                        textOriginY + 5,
                         PointerButton.Primary
                     )
                 )
@@ -90,28 +93,38 @@ public sealed class TextAreaContracts
 
         Assert.IsTrue(
             composition
-                .Input.DispatchPointer(new(PointerCommandKind.Move, 7, bounds.X + 45, bounds.Y + 5))
+                .Input.DispatchPointer(
+                    new(PointerCommandKind.Move, 7, textOriginX + 45, textOriginY + 5)
+                )
                 .Handled
         );
         Assert.IsTrue(
             composition
-                .Input.DispatchPointer(new(PointerCommandKind.Up, 7, bounds.X + 45, bounds.Y + 5))
+                .Input.DispatchPointer(
+                    new(PointerCommandKind.Up, 7, textOriginX + 45, textOriginY + 5)
+                )
                 .Handled
         );
         Assert.AreEqual(2, state.Anchor);
         Assert.AreEqual(4, state.Caret);
         composition.Input.DispatchPointer(
-            new(PointerCommandKind.Down, 7, bounds.X + 25, bounds.Y + 5, PointerButton.Primary)
+            new(
+                PointerCommandKind.Down,
+                7,
+                textOriginX + 25,
+                textOriginY + 5,
+                PointerButton.Primary
+            )
         );
         composition.Input.DispatchPointer(
-            new(PointerCommandKind.Move, 9, bounds.X + 45, bounds.Y + 5)
+            new(PointerCommandKind.Move, 9, textOriginX + 45, textOriginY + 5)
         );
         Assert.AreEqual(2, state.Caret, "Another pointer extended the active selection.");
         composition.Input.DispatchPointer(
-            new(PointerCommandKind.Cancel, 7, bounds.X + 25, bounds.Y + 5)
+            new(PointerCommandKind.Cancel, 7, textOriginX + 25, textOriginY + 5)
         );
         composition.Input.DispatchPointer(
-            new(PointerCommandKind.Move, 7, bounds.X + 45, bounds.Y + 5)
+            new(PointerCommandKind.Move, 7, textOriginX + 45, textOriginY + 5)
         );
         Assert.AreEqual(
             2,
@@ -138,14 +151,15 @@ public sealed class TextAreaContracts
         var scene = SceneLayout.Project(composition, new(100, 30, 1), new FixedShaper());
         Assert.IsTrue(composition.Input.SetScene(scene));
         var bounds = scene.Input.Single(item => item.Identity.ElementId == element.Id).Bounds;
+        var padding = element.Resolve(LayoutProperties.Padding).Value;
         Assert.IsTrue(
             composition
                 .Input.DispatchPointer(
                     new(
                         PointerCommandKind.Down,
                         8,
-                        bounds.X + 25,
-                        bounds.Y + 5,
+                        bounds.X + padding.Left + 25,
+                        bounds.Y + padding.Top + 5,
                         PointerButton.Primary
                     )
                 )

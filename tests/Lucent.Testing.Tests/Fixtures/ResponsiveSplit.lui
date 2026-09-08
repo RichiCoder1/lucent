@@ -1,0 +1,12 @@
+namespace HeadlessFixtures;
+using Lucent.Core;
+
+public component ResponsiveSplit(ResponsiveConstraints bounds, SplitPaneState panes) {
+    <ResponsiveContainer constraints={bounds}>
+        if (bounds.Current.Width >= 820) {
+            <SplitSurface state={panes} />
+        } else {
+            <Text>Narrow content</Text>
+        }
+    </ResponsiveContainer>
+}

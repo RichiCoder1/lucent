@@ -18,10 +18,17 @@ public sealed class IssueBrowserState
     private readonly Signal<IReadOnlyDictionary<int, string>> _statuses;
     private readonly Signal<IReadOnlyDictionary<int, string>> _messages;
     private readonly AsyncValue<IReadOnlyList<BrowserIssue>> _issues;
-    private readonly Derived<IReadOnlyList<BrowserIssue>> _visible;
     private readonly ReactiveScope _scope;
     private readonly IIssueStatusSource _statusSource;
     private readonly Dictionary<int, IssueStatusMutation> _mutations = [];
+    private IReadOnlyList<BrowserIssue>? _effectiveSource;
+    private IReadOnlyDictionary<int, string>? _effectiveStatuses;
+    private IReadOnlyList<BrowserIssue> _effectiveCache = [];
+    private IReadOnlyList<BrowserIssue>? _visibleSource;
+    private string? _visibleSearch;
+    private string? _visibleStatus;
+    private string? _visibleAssignee;
+    private IReadOnlyList<BrowserIssue> _visibleCache = [];
 
     public IssueBrowserState(
         ReactiveScope scope,
@@ -55,24 +62,59 @@ public sealed class IssueBrowserState
             },
             "issue-browser.issues"
         );
-        _visible = scope.Derived<IReadOnlyList<BrowserIssue>>(
-            () => Issues.Where(Matches).ToArray(),
-            "issue-browser.visible-issues"
-        );
     }
 
-    public IReadOnlyList<BrowserIssue> Issues =>
-        (_issues.Value ?? Array.Empty<BrowserIssue>())
-            .Select(issue =>
-                _statuses.Value.TryGetValue(issue.Number, out var status)
-                    ? issue with
-                    {
-                        Status = status,
-                    }
-                    : issue
+    public IReadOnlyList<BrowserIssue> Issues
+    {
+        get
+        {
+            var source = _issues.Value ?? Array.Empty<BrowserIssue>();
+            var statuses = _statuses.Value;
+            if (
+                !ReferenceEquals(source, _effectiveSource)
+                || !ReferenceEquals(statuses, _effectiveStatuses)
             )
-            .ToArray();
-    public IReadOnlyList<BrowserIssue> VisibleIssues => _visible.Value;
+            {
+                _effectiveSource = source;
+                _effectiveStatuses = statuses;
+                _effectiveCache = source
+                    .Select(issue =>
+                        statuses.TryGetValue(issue.Number, out var status)
+                            ? issue with
+                            {
+                                Status = status,
+                            }
+                            : issue
+                    )
+                    .ToArray();
+            }
+            return _effectiveCache;
+        }
+    }
+    public IReadOnlyList<BrowserIssue> VisibleIssues
+    {
+        get
+        {
+            var source = Issues;
+            var search = Search;
+            var status = Status;
+            var assignee = Assignee;
+            if (
+                !ReferenceEquals(source, _visibleSource)
+                || search != _visibleSearch
+                || status != _visibleStatus
+                || assignee != _visibleAssignee
+            )
+            {
+                _visibleSource = source;
+                _visibleSearch = search;
+                _visibleStatus = status;
+                _visibleAssignee = assignee;
+                _visibleCache = source.Where(Matches).ToArray();
+            }
+            return _visibleCache;
+        }
+    }
     public bool IsLoading => _issues.IsPending;
     public bool IsStale => _issues.HasValue && _issues.IsPending;
     public string? Error => _issues.Error?.Message;
@@ -139,6 +181,15 @@ public sealed class IssueBrowserState
     public void ToggleDensity() =>
         Density =
             Density == IssueDensity.Comfortable ? IssueDensity.Compact : IssueDensity.Comfortable;
+
+    public void SetIssueStatus(int number, string status)
+    {
+        if (status is not ("open" or "closed"))
+            throw new ArgumentException("Issue status must be open or closed.", nameof(status));
+        var issue = Issues.FirstOrDefault(candidate => candidate.Number == number);
+        if (issue is not null && issue.Status != status)
+            ToggleStatus(issue);
+    }
 
     public void ToggleSelectedStatus()
     {

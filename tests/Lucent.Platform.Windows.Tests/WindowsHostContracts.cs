@@ -895,7 +895,10 @@ public sealed class WindowsHostContracts
 
     private static Color Fill(RetainedScene scene, Element element) =>
         Paints(scene.Nodes)
-            .Single(node => node.Identity.Element.ElementId == element.Id)
+            .Single(node =>
+                node.Identity.Element.ElementId == element.Id
+                && node.Identity.Kind == SceneNodeKind.Paint
+            )
             .Brush.Color
         ?? throw new InvalidOperationException("Expected solid paint.");
 

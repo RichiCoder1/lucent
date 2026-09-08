@@ -1,0 +1,28 @@
+namespace Lucent.IssueBrowser;
+
+style DetailPaneStyle {
+    MainGrow: 1;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
+    Padding: Insets.Uniform(24);
+    Spacing: 16;
+}
+
+public component IssueDetailPane(IssueBrowserState browser, IssueBrowserViewState view) {
+    <Column style={DetailPaneStyle}>
+        foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number {
+            <Details browser={browser} issue={() => issue} view={view} name="issue-browser.details" />
+        }
+        if (browser.SelectedIssue is null) {
+            <Column style={Style.Empty with { Spacing: 12; }}>
+                <Text style={PresentationStyles.Title}>Select an issue</Text>
+                <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>Read the details, review its status, and explore the available actions.</Text>
+                <Text style={PresentationStyles.Secondary}>Local fixtures · no GitHub account required</Text>
+            </Column>
+        }
+        if (browser.SelectedIssue is not null && browser.CanRetrySelected) {
+            <Button onInvoke={browser.RetrySelected} name="issue-browser.details-retry">Retry status change</Button>
+        }
+    </Column>
+}

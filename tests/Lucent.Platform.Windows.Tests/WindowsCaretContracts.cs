@@ -1,5 +1,6 @@
 using Lucent.Core;
 using Lucent.Renderer.Skia;
+using SDL3;
 
 namespace Lucent.Platform.Windows.Tests;
 
@@ -216,5 +217,38 @@ public sealed class WindowsCaretContracts
         cursor.Activate(CursorIntent.Pointer);
         Assert.IsTrue(created.SequenceEqual([CursorIntent.Pointer]));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => cursor.Activate(CursorIntent.Auto));
+    }
+
+    [TestMethod]
+    public void CursorMapsPaneResizeIntentsToDistinctCachedSystemRequests()
+    {
+        var created = new List<CursorIntent>();
+        using var cursor = new WindowsCursor(
+            (CursorIntent intent) =>
+            {
+                created.Add(intent);
+                return (nint)created.Count;
+            },
+            _ => true,
+            _ => { },
+            () => "error"
+        );
+
+        cursor.Activate(CursorIntent.ResizeHorizontal);
+        cursor.Activate(CursorIntent.ResizeVertical);
+        cursor.Activate(CursorIntent.ResizeHorizontal);
+
+        Assert.IsTrue(
+            created.SequenceEqual([CursorIntent.ResizeHorizontal, CursorIntent.ResizeVertical]),
+            "Horizontal and vertical pane resize intents did not map to independent cached cursors."
+        );
+        Assert.AreEqual(
+            SDL.SystemCursor.EWResize,
+            WindowsCursor.SystemCursorFor(CursorIntent.ResizeHorizontal)
+        );
+        Assert.AreEqual(
+            SDL.SystemCursor.NSResize,
+            WindowsCursor.SystemCursorFor(CursorIntent.ResizeVertical)
+        );
     }
 }

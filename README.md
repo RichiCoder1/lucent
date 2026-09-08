@@ -6,7 +6,7 @@ The prior Avalonia implementation and the validation spike that informed this di
 
 Read the active [architecture](docs/ARCHITECTURE.md), [application/service guide](docs/APPLICATIONS.md), [editor sessions](docs/EDITOR-SESSIONS.md), [async resources](docs/ASYNC-RESOURCES.md), [reactive integrations](docs/REACTIVE-INTEGRATIONS.md), [roadmap](docs/ROADMAP.md), [testing guidance](docs/TESTING.md), and [domain glossary](CONTEXT.md). GitHub Issues and the [Lucent Native project](https://github.com/users/RichiCoder1/projects/4/views/1) are the execution source of truth.
 
-Use [headless component tests](docs/HEADLESS-TESTING.md) for `.lui` interaction checks without desktop focus. See [Windows presentation](docs/WINDOWS-PRESENTATION.md) for stock menus, native-menu opt-in and scrollbar style presets.
+Use [headless component tests](docs/HEADLESS-TESTING.md) for `.lui` interaction checks without desktop focus. See [stock presentation](docs/STOCK-PRESENTATION.md) for text roles, density, the minimal base and resizable panes, and [Windows presentation](docs/WINDOWS-PRESENTATION.md) for submenu trees, native-menu opt-in and scrollbar styles.
 
 ## Getting started
 

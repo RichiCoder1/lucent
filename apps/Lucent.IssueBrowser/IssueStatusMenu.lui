@@ -1,0 +1,8 @@
+namespace Lucent.IssueBrowser;
+
+public component IssueStatusMenu(IssueBrowserState browser, Func<BrowserIssue> issue) {
+    <Menu>
+        <MenuItem onInvoke={() => browser.SetIssueStatus(issue().Number, "open")} enabled={() => issue().Status != "open"}>Mark open</MenuItem>
+        <MenuItem onInvoke={() => browser.SetIssueStatus(issue().Number, "closed")} enabled={() => issue().Status != "closed"}>Mark closed</MenuItem>
+    </Menu>
+}

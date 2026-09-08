@@ -2409,7 +2409,7 @@ public component MenuButton() {
             );
             var buttonHelp = await issueBrowser.SignatureHelpAsync(
                 header,
-                headerText.IndexOf("Density: Comfortable/Compact", StringComparison.Ordinal),
+                headerText.IndexOf("Density: comfortable", StringComparison.Ordinal),
                 CancellationToken.None
             );
             Assert(
@@ -2557,16 +2557,30 @@ public component MenuButton() {
 
             var issueRow = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/IssueRow.lui"));
             var issueRowText = await File.ReadAllTextAsync(issueRow.LocalPath);
-            // Exercise authored variants as an editor buffer, without requiring the
-            // stock-theme example to carry decorative styles solely for this test.
+            // Exercise token completion and authored variants through editor overlays,
+            // without requiring the stock-theme example to carry decorative app fields.
+            var components = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/Components.cs"));
+            var componentsText = await File.ReadAllTextAsync(components.LocalPath);
+            issueBrowser.ReplaceText(
+                components,
+                componentsText
+                    + """
+
+                    public static partial class Components
+                    {
+                        public static readonly Token<Brush> EditorFixtureSurface = new("editor-fixture-surface", Color.Parse("#ffffff"));
+                        public static readonly Token<Brush> EditorFixtureHover = new("editor-fixture-hover", Color.Parse("#eeeeee"));
+                    }
+                    """
+            );
             issueRowText += """
 
                 style EditorFixtureStyle {
-                    Background: PageSurface;
-                    when Hover { Background: HeaderSurface; }
-                    when Pressed { Background: PageSurface; }
-                    when Hover | Pressed { Background: HeaderSurface; }
-                    when FocusVisible { Background: PageSurface; }
+                    Background: EditorFixtureSurface;
+                    when Hover { Background: EditorFixtureHover; }
+                    when Pressed { Background: EditorFixtureSurface; }
+                    when Hover | Pressed { Background: EditorFixtureHover; }
+                    when FocusVisible { Background: EditorFixtureSurface; }
                 }
                 """;
             issueBrowser.ReplaceText(issueRow, issueRowText);
@@ -2594,20 +2608,11 @@ public component MenuButton() {
                     ),
                     "variant document-symbol selection range did not select its condition."
                 );
-            Assert(
-                issueRowSymbols!
-                    .SelectMany(symbol => symbol.Children)
-                    .Single(symbol => symbol.Name == "ContextMenu")
-                    .Children.Single(symbol => symbol.Name == "Selectable")
-                    .Children.Single(symbol => symbol.Name == "style")
-                    .Children.Any(symbol => symbol.Name == "Height"),
-                "inline style document symbols omitted the IssueRow Height assignment."
-            );
             var error = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/Error.lui"));
             var errorText = await File.ReadAllTextAsync(error.LocalPath);
             var tokenCompletions = await issueBrowser.CompletionsAsync(
                 issueRow,
-                issueRowText.IndexOf("PageSurface", StringComparison.Ordinal),
+                issueRowText.IndexOf("EditorFixtureSurface", StringComparison.Ordinal),
                 CancellationToken.None
             );
             var variantCompletions = await issueBrowser.CompletionsAsync(
@@ -2616,12 +2621,9 @@ public component MenuButton() {
                 CancellationToken.None
             );
             Assert(
-                tokenCompletions.Any(item =>
-                    item.Label == "PageSurface"
-                    && item.Kind == 5
-                    && item.Detail.Contains("Token", StringComparison.Ordinal)
-                ) && !tokenCompletions.Any(item => item.Label == "AppTheme"),
-                "token RHS completion leaked non-Token root members: "
+                tokenCompletions.Any(item => item.Label == "EditorFixtureSurface" && item.Kind == 5)
+                    && !tokenCompletions.Any(item => item.Label == "AppTheme"),
+                "token RHS completion omitted the controlled editor token or retained the removed app theme: "
                     + String.Join(
                         ", ",
                         tokenCompletions.Select(item =>
@@ -2723,8 +2725,16 @@ public component MenuButton() {
             var rpcColumnChanges = browserColumnRename
                 .RootElement.GetProperty("result")
                 .GetProperty("changes");
+            var authoredColumnReferences = Directory
+                .GetFiles("apps/Lucent.IssueBrowser", "*.lui")
+                .Sum(path =>
+                    System.Text.RegularExpressions.Regex.Count(
+                        File.ReadAllText(path),
+                        @"</?Column\b"
+                    )
+                );
             Assert(
-                rpcColumnReferences.Length == 9
+                rpcColumnReferences.Length == authoredColumnReferences + 1
                     && rpcColumnReferences.Count(location =>
                         location
                             .GetProperty("uri")
@@ -2742,7 +2752,7 @@ public component MenuButton() {
                         .Where(change =>
                             change.Name.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
                         )
-                        .Sum(change => change.Value.GetArrayLength()) == 8,
+                        .Sum(change => change.Value.GetArrayLength()) == authoredColumnReferences,
                 "Issue Browser Column RPC references/rename did not preserve all paired tags and the Core declaration."
             );
             var columnSource = new Uri(Path.GetFullPath("src/Lucent.Core/Components.cs"));
@@ -2799,7 +2809,8 @@ public component MenuButton() {
                 }
             );
             Assert(
-                insertedLineReferences.RootElement.GetProperty("result").GetArrayLength() == 9
+                insertedLineReferences.RootElement.GetProperty("result").GetArrayLength()
+                    == authoredColumnReferences + 1
                     && sameLineRename
                         .RootElement.GetProperty("result")
                         .GetProperty("changes")
@@ -2872,16 +2883,12 @@ public component MenuButton() {
             var errorText = await File.ReadAllTextAsync(errorDocument.LocalPath);
             var errorTokens = await SemanticTokensAsync(browserLsp, errorDocument, errorText);
             var browserTokens = await SemanticTokensAsync(browserLsp, browserDocument, browserText);
-            var issueRowDocument = new Uri(
-                Path.GetFullPath("apps/Lucent.IssueBrowser/IssueRow.lui")
+            var detailsDocument = new Uri(
+                Path.GetFullPath("apps/Lucent.IssueBrowser/IssueDetailPane.lui")
             );
-            var issueRowText = await File.ReadAllTextAsync(issueRowDocument.LocalPath);
-            var issueRowTokens = await SemanticTokensAsync(
-                browserLsp,
-                issueRowDocument,
-                issueRowText
-            );
-            foreach (var literal in new[] { "Issues</Text>", "Density: Comfortable/Compact" })
+            var detailsText = await File.ReadAllTextAsync(detailsDocument.LocalPath);
+            var detailsTokens = await SemanticTokensAsync(browserLsp, detailsDocument, detailsText);
+            foreach (var literal in new[] { "Issues</Text>", "Density: comfortable" })
             {
                 var start = headerText.IndexOf(literal, StringComparison.Ordinal);
                 Assert(
@@ -2892,7 +2899,7 @@ public component MenuButton() {
                         + literal
                 );
             }
-            AssertSemanticToken(headerTokens, headerText, "Width", "property");
+            AssertSemanticToken(headerTokens, headerText, "MaxWidth", "property");
             AssertSemanticToken(headerTokens, headerText, "IssueBrowserState", "type");
             AssertSemanticToken(errorTokens, errorText, "LayoutAxis", "type");
             AssertSemanticToken(errorTokens, errorText, "Column", "enumMember");
@@ -2956,37 +2963,41 @@ public component MenuButton() {
                 new { textDocument = new { uri = VsCodeUri(errorDocument) } }
             );
 
-            AssertSemanticToken(browserTokens, browserText, "var", "keyword");
-            var inKeyword = browserText.IndexOf(" in ", StringComparison.Ordinal) + 1;
+            AssertSemanticToken(detailsTokens, detailsText, "var", "keyword");
+            var inKeyword = detailsText.IndexOf(" in ", StringComparison.Ordinal) + 1;
             Assert(
-                browserTokens.Any(token =>
+                detailsTokens.Any(token =>
                     token.Start == inKeyword && token.Length == 2 && token.Type == "keyword"
                 ),
                 "semantic tokens did not classify the foreach 'in' as keyword."
             );
-            AssertSemanticToken(issueRowTokens, issueRowText, "with", "keyword");
+            AssertSemanticToken(detailsTokens, detailsText, "with", "keyword");
             foreach (
-                var (offset, label) in new[]
+                var (document, text, offset, label) in new[]
                 {
                     (
+                        browserDocument,
+                        browserText,
                         browserText.IndexOf("browser.IsLoading", StringComparison.Ordinal)
                             + "browser.".Length,
                         "IsLoading"
                     ),
                     (
-                        browserText.IndexOf("issue.Number", StringComparison.Ordinal)
+                        detailsDocument,
+                        detailsText,
+                        detailsText.IndexOf("issue.Number", StringComparison.Ordinal)
                             + "issue.".Length,
                         "Number"
                     ),
                 }
             )
             {
-                var position = Position(browserText, offset);
+                var position = Position(text, offset);
                 using var completion = await browserLsp.RequestAsync(
                     "textDocument/completion",
                     new
                     {
-                        textDocument = new { uri = VsCodeUri(browserDocument) },
+                        textDocument = new { uri = VsCodeUri(document) },
                         position = new { line = position.Line, character = position.Character },
                     }
                 );

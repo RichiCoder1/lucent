@@ -1,32 +1,52 @@
 namespace Lucent.IssueBrowser;
+
 style IssueBrowserStyle {
     MainGrow: 1;
-    Background: PageSurface;
-    TextColor: PageForeground;
+    MainBasis: 0;
+    MinWidth: 0;
+    MinHeight: 0;
     Clip: true;
 }
 
-style VirtualizedListStyle {
-    Height: 200;
-    MinHeight: 120;
-    Visibility: ScrollBarVisibility.Auto;
+style WorkspaceStyle {
+    MainGrow: 1;
+    MainBasis: 0;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
 }
 
 public component IssueBrowser(IssueBrowserState browser) {
-    <Column style={IssueBrowserStyle}>
-        <Header browser={browser} name="issue-browser.header" />
-        if (browser.IsLoading) {
-            <Loading browser={browser} name="issue-browser.loading" />
-        }
-        if (browser.Error is not null) {
-            <Error browser={browser} name="issue-browser.error" />
-        }
-        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value).Named("issue-browser.issue-row")} rowHeight={() => browser.Density == IssueDensity.Comfortable ? 30 : 22} label="Issues" style={VirtualizedListStyle} name="issue-browser.scroll-viewport" />
-        foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number {
-            <Details browser={browser} issue={() => issue} name="issue-browser.details" />
-        }
-        if (browser.SelectedIssue is not null && browser.CanRetrySelected) {
-            <Button onInvoke={browser.RetrySelected} style={Style.Empty with { Height: browser.Density == IssueDensity.Comfortable ? 28f : 22f; }} name="issue-browser.details-retry">Retry</Button>
-        }
-    </Column>
+    [Once] IssueBrowserViewState view = null!;
+
+    Setup(owner) {
+        view = new IssueBrowserViewState(owner, browser);
+    }
+
+    <ResponsiveContainer constraints={view.Constraints} style={PresentationStyles.Surface.With(IssueBrowserStyle)}>
+        <Column style={IssueBrowserStyle}>
+            <Header browser={browser} view={view} name="issue-browser.header" />
+            if (browser.IsLoading) {
+                <Loading browser={browser} name="issue-browser.loading" />
+            }
+            if (browser.Error is not null) {
+                <Error browser={browser} name="issue-browser.error" />
+            }
+            <Divider />
+            if (view.IsWide) {
+                <SplitPane first={[IssueList(browser, view)]} second={[IssueDetailPane(browser, view)]} state={view.Split} label="Resize issue list" style={WorkspaceStyle} />
+            } else {
+                <Column style={WorkspaceStyle}>
+                    if (view.ShowDetails) {
+                        <Column style={IssueBrowserStyle}>
+                            <Button onInvoke={view.BackToList} name="issue-browser.back">Back to issues</Button>
+                            <IssueDetailPane browser={browser} view={view} />
+                        </Column>
+                    } else {
+                        <IssueList browser={browser} view={view} />
+                    }
+                </Column>
+            }
+        </Column>
+    </ResponsiveContainer>
 }

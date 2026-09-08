@@ -64,7 +64,7 @@ public sealed class FocusTargetContracts
             "Body",
             session: session,
             focusTarget: target,
-            style: Style.Empty.Set(LayoutProperties.Width, 180f).Set(LayoutProperties.Height, 40f)
+            style: Style.Empty.Set(LayoutProperties.Width, 220f).Set(LayoutProperties.Height, 40f)
         );
 
         target.Request(selectAll: true);

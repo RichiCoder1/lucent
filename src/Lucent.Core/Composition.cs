@@ -582,6 +582,14 @@ public sealed class Composition : IDisposable
 
     internal bool HasVirtualizedRegions => _virtualized.Count != 0;
 
+    internal bool IsVirtualizedViewport(long elementId)
+    {
+        foreach (var region in _virtualized)
+            if (region.ViewportId == elementId)
+                return true;
+        return false;
+    }
+
     internal long[] VirtualizedViewportIds =>
         _virtualized.Select(region => region.ViewportId).ToArray();
 

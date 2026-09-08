@@ -436,11 +436,12 @@ public static partial class Components
                     root.Name + ".row-height-read"
                 );
                 var height = rowHeightValue.Value;
+                var viewportStyle = VirtualizedListStyle(root, style);
                 var scroll = Controls.ScrollViewport(
                     root,
                     context.Theme,
                     label,
-                    style: style,
+                    style: viewportStyle,
                     viewport: viewport
                 );
                 var region = context.Virtualize(
@@ -569,6 +570,32 @@ public static partial class Components
         if (!float.IsFinite(value) || value <= 0)
             throw new ArgumentOutOfRangeException(nameof(read));
         return value;
+    }
+
+    private static Style VirtualizedListStyle(Element root, Style? author) =>
+        Style
+            .Empty.Bind(LayoutProperties.MainBasis, () => VirtualizedListMainBasis(root))
+            .Bind(LayoutProperties.MainGrow, () => VirtualizedListMainGrow(root))
+            .With(author);
+
+    private static float VirtualizedListMainBasis(Element root)
+    {
+        var geometry = VirtualizedListMainGeometry(root);
+        return geometry.Value is { } value ? value : 0;
+    }
+
+    private static float VirtualizedListMainGrow(Element root)
+    {
+        var geometry = VirtualizedListMainGeometry(root);
+        return geometry.Value is null ? 1 : 0;
+    }
+
+    private static ResolvedProperty<float?> VirtualizedListMainGeometry(Element root)
+    {
+        var parentAxis = root.Parent?.Resolve(LayoutProperties.Axis).Value ?? LayoutAxis.Column;
+        return root.Resolve(
+            parentAxis == LayoutAxis.Row ? LayoutProperties.Width : LayoutProperties.Height
+        );
     }
 
     private static float ProgressValue(Func<float> read)

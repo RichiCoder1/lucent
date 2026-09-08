@@ -35,7 +35,7 @@ public sealed class IssueBrowserTests
             .CreateBuilder()
             .UseHost(host)
             .SetTitle("Issue Browser Probe")
-            .SetTheme(AppTheme.Create)
+            .SetTheme(_ => ControlThemes.Light)
             .Build()
             .Run(IssueBrowserStructure.Create());
         Assert(
@@ -96,65 +96,58 @@ public sealed class IssueBrowserTests
     }
 
     [TestMethod]
-    public void DirectRootParity()
+    public void CompiledFilterBarUsesHoistedEditors()
     {
-        var issue = IssueFixture.Issues[0];
-        var generatedFilter = DirectRootEvidence(
-            browser => Lucent.IssueBrowser.Components.FilterBar(browser),
-            issue
-        );
-        var generatedFilterNullStyle = DirectRootEvidence(
-            browser => Lucent.IssueBrowser.Components.FilterBar(browser, null),
-            issue
-        );
-        var handwrittenFilter = DirectRootEvidence(
-            browser => HandwrittenParityFixture.Create(browser),
-            issue
-        );
-        var generatedRow = DirectRootEvidence(
-            browser => Lucent.IssueBrowser.Components.IssueRow(browser, () => issue),
-            issue
-        );
-        var handwrittenRow = DirectRootEvidence(
-            browser => HandwrittenParityFixture.CreateRow(browser, () => issue),
-            issue
+        using var composition = LoadedComposition(out var graph, out var browser);
+        using var renderer = new SkiaSceneRenderer();
+        Install(composition, renderer, new(700, 600, 1));
+        var before = Fields(composition);
+        SetValue(composition, before["Search issues"], "native");
+        graph.Drain();
+        Install(composition, renderer, new(1120, 760, 1));
+        var after = Fields(composition);
+        Assert(
+            browser.Search == "native",
+            "The hoisted search editor did not update browser state."
         );
         Assert(
-            generatedFilter == generatedFilterNullStyle
-                && generatedFilter == handwrittenFilter
-                && generatedRow == handwrittenRow,
-            "Generated .lui direct roots diverged from the retained handwritten C# parity fixtures or null root style changed the default."
+            after["Search issues"].Value == "native",
+            "Responsive remount cleared the hoisted search editor."
         );
+        SetValue(composition, after["Search issues"], "no fixture can match this query");
+        graph.Drain();
+        var narrow = new LayoutViewport(420, 360, 1);
+        var empty = Install(composition, renderer, narrow);
+        var emptySemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
         Assert(
-            FilterBarInputEvidence(browser => Lucent.IssueBrowser.Components.FilterBar(browser))
-                == FilterBarInputEvidence(browser => HandwrittenParityFixture.Create(browser)),
-            "Generated and handwritten Filter Bars diverged after ordinary retained text input."
+            emptySemantics.Any(node => node.Name == "No matching issues")
+                && emptySemantics.Any(node =>
+                    node.Role == SemanticRole.Button && node.Name == "Clear filters"
+                )
+                && empty.Boxes.All(box =>
+                    box.Bounds.X >= -.01f && box.Bounds.X + box.Bounds.Width <= narrow.Width + .01f
+                ),
+            "The compact empty result lost its explanation, recovery action, or horizontal bounds."
         );
-        var evidence =
-            generatedFilter.Dump
-            + generatedFilter.Semantics
-            + generatedRow.Dump
-            + generatedRow.Semantics;
-        Assert(
-            Hash(evidence) == "4834d8c5591334f7955708fcd080f2f3144f8868c45dc9a0b8c14e57d7aef6cc",
-            "Direct-root parity evidence changed: " + Hash(evidence)
-        );
+        CaptureIfRequested(renderer, empty, narrow, "issue-browser-empty-narrow.png");
     }
 
     [TestMethod]
-    public void VirtualizedIssueRowParity()
+    public void VirtualizedRowsRemainBoundedAndAccessible()
     {
-        var generated = CaptureVirtualizedIssueRowEvidence(Lucent.IssueBrowser.Components.IssueRow);
-        var handwritten = CaptureVirtualizedIssueRowEvidence(HandwrittenParityFixture.CreateRow);
+        using var composition = LoadedComposition(out _, out _);
+        using var renderer = new SkiaSceneRenderer();
+        var scene = Install(composition, renderer, new(1120, 760, 1));
+        var rows = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role == SemanticRole.ListItem)
+            .ToArray();
         Assert(
-            generated == handwritten,
-            $"Generated virtual Issue Rows diverged from the test-owned C# fixture: dump={generated.Dump == handwritten.Dump} semantics={generated.Semantics == handwritten.Semantics} scene={generated.Scene == handwritten.Scene} pixels={generated.Pixels == handwritten.Pixels} identity={generated.ReorderedElementId == handwritten.ReorderedElementId}."
-        );
-        Assert(
-            generated.InitialRows <= 6
-                && generated.RemainingRows <= 6
-                && generated.ReorderedElementId != 0,
-            "The 10,000-row generated Issue Row list exceeded its realization bound or lost keyed identity."
+            rows.Length <= RealizedRowBound(scene, composition, 58)
+                && rows.Length > 0
+                && rows.All(row =>
+                    row.Name.StartsWith('#') && row.Name.Contains(" — ") && row.Name.Contains(" · ")
+                ),
+            "The 10,000-row list exceeded its realization bound or lost the accessible row label."
         );
     }
 
@@ -180,7 +173,7 @@ public sealed class IssueBrowserTests
 
         RetainedScene Install()
         {
-            var next = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+            var next = SceneLayout.Project(composition, new(1120, 760, 1), renderer);
             Assert(
                 composition.Input.SetScene(next),
                 "Issue Browser context-menu scene was rejected."
@@ -203,6 +196,10 @@ public sealed class IssueBrowserTests
         );
         graph.Drain();
         scene = Install();
+        rows = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role == SemanticRole.ListItem)
+            .Take(3)
+            .ToArray();
 
         ContextMenuRequest? request = null;
         composition.Input.ContextMenuRequested += value => request = value;
@@ -237,7 +234,9 @@ public sealed class IssueBrowserTests
         Assert(
             descriptor!
                 .Entries.Select(entry => entry.Label)
-                .SequenceEqual(new string?[] { "Open issue", null, "Toggle status" }),
+                .SequenceEqual(new string?[] { "Open issue", null, "Toggle status", "Set status" })
+                && descriptor.Entries[^1].Kind == StandardMenuEntryKind.Submenu
+                && descriptor.Entries[^1].Submenu?.Entries.Count == 2,
             "The generated row menu did not project its standard commands in authored order."
         );
         var beforeSecondStatus = browser
@@ -448,27 +447,42 @@ public sealed class IssueBrowserTests
     }
 
     [TestMethod]
-    public void ReactiveFilterBarParity()
+    public void CompactSelectionOpensDetailsAndBackRestoresList()
     {
-        var generated = ReactiveFilterBarEvidence(
-            (browser, style) => Lucent.IssueBrowser.Components.FilterBar(browser, style)
-        );
-        var handwritten = ReactiveFilterBarEvidence(HandwrittenParityFixture.Create);
+        using var composition = LoadedComposition(out var graph, out var browser);
+        using var renderer = new SkiaSceneRenderer();
+        Install(composition, renderer, new(700, 600, 1));
+        var row = Flatten(composition.SemanticSnapshot()!)
+            .First(node => node.Role == SemanticRole.ListItem);
         Assert(
-            generated == handwritten,
-            $"Generated Filter Bar diverged from the test-owned handwritten fixture after an idle reactive style completion: beforeDump={generated.BeforeDump == handwritten.BeforeDump} afterDump={generated.AfterDump == handwritten.AfterDump} beforeSemantics={generated.BeforeSemantics == handwritten.BeforeSemantics} afterSemantics={generated.AfterSemantics == handwritten.AfterSemantics} beforeScene={generated.BeforeScene == handwritten.BeforeScene} afterScene={generated.AfterScene == handwritten.AfterScene} beforePixels={generated.BeforePixels == handwritten.BeforePixels} afterPixels={generated.AfterPixels == handwritten.AfterPixels}."
+            composition.ExecuteSemanticCommand(row.Identity, new(SemanticCommandKind.Select))
+                == SemanticCommandResult.Applied,
+            "The compact issue row rejected selection."
+        );
+        graph.Drain();
+        Install(composition, renderer, new(700, 600, 1));
+        var details = Flatten(composition.SemanticSnapshot()!).ToArray();
+        Assert(
+            browser.SelectedIssue is not null
+                && details.Any(node =>
+                    node.Role == SemanticRole.Button && node.Name == "Back to issues"
+                )
+                && details.Any(node => node.Name == "Close issue" || node.Name == "Reopen issue"),
+            "Compact selection did not replace the list with issue details."
+        );
+        var back = details.Single(node =>
+            node.Role == SemanticRole.Button && node.Name == "Back to issues"
         );
         Assert(
-            generated.BeforeDump == generated.AfterDump
-                && generated.BeforeSemantics == generated.AfterSemantics
-                && generated.RootId == generated.AfterRootId,
-            "Reactive Filter Bar completion changed retained structure, semantics, or identity."
+            composition.ExecuteSemanticCommand(back.Identity, new(SemanticCommandKind.Invoke))
+                == SemanticCommandResult.Applied,
+            "Back to issues was not invokable."
         );
+        graph.Drain();
+        Install(composition, renderer, new(700, 600, 1));
         Assert(
-            generated.AfterScene.Contains("brush=solid(#123456FF)", StringComparison.Ordinal)
-                && generated.AfterScene.Contains("opacity=0.5", StringComparison.Ordinal)
-                && generated.BeforePixels != generated.AfterPixels,
-            "Reactive Filter Bar did not publish the expected Background, Padding, Opacity, and pixels."
+            Flatten(composition.SemanticSnapshot()!).Any(node => node.Role == SemanticRole.List),
+            "Back navigation did not restore the issue list."
         );
     }
 
@@ -765,6 +779,53 @@ public sealed class IssueBrowserTests
         + string.Join(",", snapshot.Children.Select(SemanticEvidence))
         + "]";
 
+    static Composition LoadedComposition(out ReactiveGraph graph, out IssueBrowserState browser)
+    {
+        graph = new ReactiveGraph();
+        var handler = new DeferredGitHubHandler();
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.github.local/") };
+        var composition = IssueBrowserStructure.Create(
+            graph,
+            new GitHubIssueSource(client),
+            out browser,
+            out _
+        );
+        composition.Root.Scope.Own(client);
+        graph.Drain(100);
+        handler.ReplyJson(0);
+        graph.Drain(100);
+        return composition;
+    }
+
+    static RetainedScene Install(
+        Composition composition,
+        SkiaSceneRenderer renderer,
+        LayoutViewport viewport
+    )
+    {
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            var scene = SceneLayout.Project(composition, viewport, renderer, 10_000);
+            if (composition.Input.SetScene(scene))
+                return scene;
+        }
+        throw new InvalidOperationException("The Issue Browser scene did not settle.");
+    }
+
+    static Dictionary<string, SemanticSnapshot> Fields(Composition composition) =>
+        Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role == SemanticRole.TextField)
+            .ToDictionary(node => node.Name, StringComparer.Ordinal);
+
+    static void SetValue(Composition composition, SemanticSnapshot field, string value) =>
+        Assert(
+            composition.ExecuteSemanticCommand(
+                field.Identity,
+                new(SemanticCommandKind.SetValue, value)
+            ) == SemanticCommandResult.Applied,
+            "The field rejected a semantic value update."
+        );
+
     [TestMethod]
     public void AsyncBrowserStates()
     {
@@ -909,6 +970,14 @@ public sealed class IssueBrowserTests
                 && composition.Dump().Contains("issue-browser.error", StringComparison.Ordinal),
             "Failed retry did not retain stale data and expose error."
         );
+        var errorViewport = new LayoutViewport(420, 600, 1);
+        scene = Install(composition, renderer, errorViewport);
+        Assert(
+            Flatten(composition.SemanticSnapshot()!)
+                .Any(node => node.Role == SemanticRole.Button && node.Name == "Retry"),
+            "Compact error presentation lost its recovery command."
+        );
+        CaptureIfRequested(renderer, scene, errorViewport, "issue-browser-error-narrow.png");
 
         browser.Retry();
         graph.Drain();
@@ -994,43 +1063,29 @@ public sealed class IssueBrowserTests
         transport.ReplyJson(0);
         graph.Drain();
         using var renderer = new SkiaSceneRenderer();
-        var viewport = new LayoutViewport(800, 500, 1);
-        var scene = SceneLayout.Project(composition, viewport, renderer);
-        Assert(composition.Input.SetScene(scene), "Density baseline scene did not install.");
-        var scroll = Flatten(composition.SemanticSnapshot()!)
-            .Single(node => node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll));
-        Assert(
-            composition.Input.ScrollSemantic(
-                new(scroll.Identity.CompositionEpoch, scroll.Identity.ElementId),
-                new(SemanticCommandKind.Scroll, Vertical: 1507)
-            ),
-            "Density proof could not reach a mid-list offset."
-        );
-        graph.Drain();
-        scene = SceneLayout.Project(composition, viewport, renderer);
-        Assert(composition.Input.SetScene(scene), "Density mid-list scene did not install.");
-        var comfortable = TopRow(scene, composition, "density comfortable");
+        var viewport = new LayoutViewport(1120, 760, 1);
+        var scene = Install(composition, renderer, viewport);
+        var comfortable = Flatten(composition.SemanticSnapshot()!)
+            .First(node => node.Role == SemanticRole.ListItem);
         Assert(
             composition.ExecuteSemanticCommand(
-                comfortable.Semantic.Identity,
+                comfortable.Identity,
                 new(SemanticCommandKind.Select)
             ) == SemanticCommandResult.Applied
                 && composition.Input.FocusSemantic(
-                    new(
-                        comfortable.Semantic.Identity.CompositionEpoch,
-                        comfortable.Semantic.Identity.ElementId
-                    )
+                    new(comfortable.Identity.CompositionEpoch, comfortable.Identity.ElementId)
                 ),
-            "Density proof could not select and focus its top row."
+            "Density proof could not select and focus its first row."
         );
         graph.Drain();
-        scene = SceneLayout.Project(composition, viewport, renderer);
-        Assert(composition.Input.SetScene(scene), "Density focused scene did not install.");
-        comfortable = TopRow(scene, composition, "density focused comfortable");
+        scene = Install(composition, renderer, viewport);
+        var comfortableHeight = scene
+            .Boxes.Single(box => box.Identity.ElementId == comfortable.Identity.ElementId)
+            .Bounds.Height;
         var focused = composition.Input.FocusedElement;
         var density = Flatten(composition.SemanticSnapshot()!)
             .Single(node =>
-                node.Role == SemanticRole.Button && node.Name == "Density: Comfortable/Compact"
+                node.Role == SemanticRole.Button && node.Name == "Density: comfortable"
             );
         Assert(
             composition.ExecuteSemanticCommand(density.Identity, new(SemanticCommandKind.Invoke))
@@ -1038,62 +1093,60 @@ public sealed class IssueBrowserTests
             "Keyboard/UIA density button rejected Invoke."
         );
         graph.Drain();
-        scene = SceneLayout.Project(composition, viewport, renderer);
-        Assert(composition.Input.SetScene(scene), "Compact density scene did not install.");
-        var compact = TopRow(scene, composition, "density compact");
+        scene = Install(composition, renderer, viewport);
+        var compact = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == comfortable.Identity.ElementId);
+        var compactBox = scene.Boxes.Single(box =>
+            box.Identity.ElementId == compact.Identity.ElementId
+        );
         Assert(
-            compact.Number == comfortable.Number
-                && MathF.Abs(compact.Relative - comfortable.Relative) < .001f
-                && compact.Height == 22f
+            compactBox.Bounds.Height < comfortableHeight
                 && composition.Input.FocusedElement == focused
-                && compact.Semantic.Identity == comfortable.Semantic.Identity
-                && composition.IsCurrent(comfortable.Semantic.Identity),
-            "Compact density lost its scroll anchor, focus, UIA identity, or typed row restyle: comfortable="
-                + comfortable
+                && compact.Identity.ElementId == comfortable.Identity.ElementId
+                && composition.IsCurrent(compact.Identity),
+            "Compact density lost focus, UIA identity, or its typed row height: comfortable="
+                + comfortableHeight
                 + " compact="
-                + compact
-                + " focused="
+                + compactBox.Bounds.Height
+                + " identity="
+                + (compact.Identity.ElementId == comfortable.Identity.ElementId)
+                + " current="
+                + composition.IsCurrent(compact.Identity)
+                + " focus="
                 + focused
                 + "/"
                 + composition.Input.FocusedElement
-                + "."
         );
         var compactRows = Flatten(composition.SemanticSnapshot()!)
             .Count(node => node.Role == SemanticRole.ListItem);
-        var compactBound = RealizedRowBound(scene, composition, 22f, retainedTransitionRows: 4);
-        var compactFontSize = scene
-            .Boxes.Single(box => box.Identity.ElementId == compact.Semantic.Identity.ElementId)
-            .Text!.Runs.Single()
-            .FontSize;
+        var compactBound = RealizedRowBound(scene, composition, 49f, retainedTransitionRows: 4);
         Assert(
-            compactRows <= compactBound && compactFontSize == 12f,
-            "Compact density exceeded its bounded realization or retained comfortable typography: rows="
+            compactRows <= compactBound,
+            "Compact density exceeded its bounded realization: rows="
                 + compactRows
                 + " bound="
                 + compactBound
-                + " font="
-                + compactFontSize
                 + "."
         );
+        density = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.Button && node.Name == "Density: compact");
         Assert(
             composition.ExecuteSemanticCommand(density.Identity, new(SemanticCommandKind.Invoke))
                 == SemanticCommandResult.Applied,
             "Compact density button identity was stale."
         );
         graph.Drain();
-        scene = SceneLayout.Project(composition, viewport, renderer);
-        Assert(
-            composition.Input.SetScene(scene),
-            "Restored comfortable density scene did not install."
+        scene = Install(composition, renderer, viewport);
+        var restored = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == comfortable.Identity.ElementId);
+        var restoredBox = scene.Boxes.Single(box =>
+            box.Identity.ElementId == restored.Identity.ElementId
         );
-        var restored = TopRow(scene, composition, "density restored comfortable");
         Assert(
-            restored.Number == comfortable.Number
-                && MathF.Abs(restored.Relative - comfortable.Relative) < .001f
-                && restored.Height == 30f
-                && restored.Semantic.Identity == comfortable.Semantic.Identity
+            restoredBox.Bounds.Height == comfortableHeight
+                && restored.Identity.ElementId == comfortable.Identity.ElementId
                 && composition.Input.FocusedElement == focused,
-            "Comfortable restoration changed the retained row, offset, focus, or UIA identity."
+            "Comfortable restoration changed the retained row, focus, UIA identity, or height."
         );
         foreach (
             var appearance in new[]
@@ -1106,11 +1159,7 @@ public sealed class IssueBrowserTests
         {
             theme.Appearance = appearance;
             graph.Drain();
-            scene = SceneLayout.Project(composition, viewport, renderer);
-            Assert(
-                composition.Input.SetScene(scene),
-                "Density style did not remain installable for " + appearance + "."
-            );
+            _ = Install(composition, renderer, viewport);
         }
     }
 
@@ -1149,8 +1198,7 @@ public sealed class IssueBrowserTests
         Assert(
             browser.SelectedIssue?.Status == "closed"
                 && saves.Requests.Count == 1
-                && !browser.CanRetrySelected
-                && !HasRetry(composition),
+                && !browser.CanRetrySelected,
             "Status save was not optimistic or exposed Retry before a transient result."
         );
         browser.Search = "native";
@@ -1182,8 +1230,7 @@ public sealed class IssueBrowserTests
         Assert(
             browser.SelectedIssue?.Status == "closed"
                 && browser.SelectedMutationMessage == "Rejected: policy"
-                && !browser.CanRetrySelected
-                && !HasRetry(composition),
+                && !browser.CanRetrySelected,
             "Rejected save did not roll back with its reason or hid Retry."
         );
         browser.Select(9_999);
@@ -1194,22 +1241,19 @@ public sealed class IssueBrowserTests
                 && browser.SelectedIssue is { } optimistic
                 && optimistic.Status
                     != IssueFixture.Issues.First(issue => issue.Number == optimistic.Number).Status
-                && browser.CanRetrySelected
-                && HasRetry(composition),
+                && browser.CanRetrySelected,
             "Transient save did not retain the optimistic status and expose Retry."
         );
         browser.RetrySelected();
         graph.Drain();
         Assert(
-            saves.Requests.Count == 4 && !browser.CanRetrySelected && !HasRetry(composition),
+            saves.Requests.Count == 4 && !browser.CanRetrySelected,
             "Manual retry did not start exactly one save and hide Retry while pending."
         );
         saves.Reply(3, new IssueStatusSaveOutcome.Saved());
         graph.Drain();
         Assert(
-            browser.SelectedMutationMessage is null
-                && !browser.CanRetrySelected
-                && !HasRetry(composition),
+            browser.SelectedMutationMessage is null && !browser.CanRetrySelected,
             "Successful retry retained a transient failure message or Retry action."
         );
         browser.ToggleSelectedStatus();
@@ -1241,22 +1285,34 @@ public sealed class IssueBrowserTests
         graph.Drain();
         transport.ReplyJson(0);
         graph.Drain();
+        using var renderer = new SkiaSceneRenderer();
+        var viewport = new LayoutViewport(1120, 760, 1);
+        _ = Install(composition, renderer, viewport);
         browser.Select(10_000);
         graph.Drain();
+        _ = Install(composition, renderer, viewport);
         var action = Flatten(composition.SemanticSnapshot()!)
-            .Single(node => node.Role == SemanticRole.Button && node.Name == "Open/Close");
+            .Single(node => node.Role == SemanticRole.Button && node.Name == "Close issue");
         Assert(
             composition.ExecuteSemanticCommand(action.Identity, new(SemanticCommandKind.Invoke))
                 == SemanticCommandResult.Applied,
             "Generated Details rejected its ordinary semantic status action."
         );
         graph.Drain();
+        _ = Install(composition, renderer, viewport);
         var semantics = Flatten(composition.SemanticSnapshot()!);
         Assert(
             semantics.Any(node =>
                 node.Role == SemanticRole.Status
-                && node.Name == "closed · Not synced: Fixture source is temporarily unavailable."
-            ) && semantics.Any(node => node.Role == SemanticRole.Button && node.Name == "Retry"),
+                && node.Name.Contains("closed ·", StringComparison.Ordinal)
+                && node.Name.EndsWith(
+                    " · Not synced: Fixture source is temporarily unavailable.",
+                    StringComparison.Ordinal
+                )
+            )
+                && semantics.Any(node =>
+                    node.Role == SemanticRole.Button && node.Name == "Retry status change"
+                ),
             "Generated Details did not publish transient status and Retry semantics."
         );
     }
@@ -1339,7 +1395,8 @@ public sealed class IssueBrowserTests
         transport.ReplyJson(0);
         graph.Drain();
         using var renderer = new SkiaSceneRenderer();
-        var light = SceneLayout.Project(composition, new(800, 500, 1.25f), renderer);
+        var viewport = new LayoutViewport(1120, 760, 1.25f);
+        var light = Install(composition, renderer, viewport);
         var router = composition.Input;
         Assert(
             router.SetScene(light)
@@ -1347,35 +1404,54 @@ public sealed class IssueBrowserTests
                 && router.FocusedElement is not null,
             "First keyboard focus target was unavailable."
         );
-        var focused = router.FocusedElement!.Value;
-        var bounds = light.Boxes.Single(box => box.Identity == focused).Bounds;
         Assert(
-            bounds.X <= 20
-                && bounds.Y <= 35
-                && bounds.X + bounds.Width > 20
-                && bounds.Y + bounds.Height > 35,
-            "First keyboard focus target no longer covers the published smoke coordinate."
-        );
-        Assert(
-            SceneLayout
-                .Project(composition, new(800, 500, 1.25f), renderer)
+            Install(composition, renderer, viewport)
                 .Dump()
                 .Contains("brush=solid(#FFFF00FF)", StringComparison.Ordinal),
             "Keyboard focus did not produce a visible focus paint."
         );
+        var row = Flatten(composition.SemanticSnapshot()!)
+            .First(node => node.Role == SemanticRole.ListItem);
+        Assert(
+            composition.ExecuteSemanticCommand(row.Identity, new(SemanticCommandKind.Select))
+                == SemanticCommandResult.Applied,
+            "Appearance captures could not select a detail issue."
+        );
+        graph.Drain();
+        light = Install(composition, renderer, viewport);
+        CaptureIfRequested(renderer, light, viewport, "issue-browser-light-wide.png");
+        var narrowViewport = new LayoutViewport(420, 360, 1.25f);
+        CaptureIfRequested(
+            renderer,
+            Install(composition, renderer, narrowViewport),
+            narrowViewport,
+            "issue-browser-light-narrow.png"
+        );
         theme.Appearance = new(ThemeColorScheme.Dark, ThemeContrast.Normal);
         graph.Drain();
-        var dark = SceneLayout.Project(composition, new(800, 500, 1.25f), renderer);
+        var dark = Install(composition, renderer, viewport);
+        CaptureIfRequested(renderer, dark, viewport, "issue-browser-dark-wide.png");
+        CaptureIfRequested(
+            renderer,
+            Install(composition, renderer, narrowViewport),
+            narrowViewport,
+            "issue-browser-dark-narrow.png"
+        );
         theme.Appearance = new(ThemeColorScheme.Light, ThemeContrast.High);
         graph.Drain();
-        var high = SceneLayout.Project(composition, new(800, 500, 1.25f), renderer);
+        var high = Install(composition, renderer, viewport);
+        CaptureIfRequested(renderer, high, viewport, "issue-browser-high-contrast-wide.png");
+        CaptureIfRequested(
+            renderer,
+            Install(composition, renderer, narrowViewport),
+            narrowViewport,
+            "issue-browser-high-contrast-narrow.png"
+        );
         Assert(
-            light.Dump().Contains("brush=solid(#F8FAFCFF)", StringComparison.Ordinal)
-                && dark.Dump().Contains("brush=solid(#0F172AFF)", StringComparison.Ordinal)
-                && dark.Dump().Contains("brush=solid(#FACC15FF)", StringComparison.Ordinal)
-                && high.Dump().Contains("brush=solid(#000000FF)", StringComparison.Ordinal)
+            light.Dump() != dark.Dump()
+                && dark.Dump() != high.Dump()
                 && !light.Dump().Contains("Native IME", StringComparison.Ordinal),
-            "Issue Browser appearance or diagnostic-safe retained scene regressed."
+            "Stock light, dark, and high-contrast appearances did not produce distinct diagnostic-safe scenes."
         );
         using var bitmap = new SKBitmap(1000, 625, SKColorType.Rgba8888, SKAlphaType.Premul);
         using (var canvas = new SKCanvas(bitmap))
@@ -1392,22 +1468,6 @@ public sealed class IssueBrowserTests
     [TestMethod]
     public void ResponsiveVisualSurface()
     {
-        static IEnumerable<Element> Descendants(Element root)
-        {
-            foreach (var child in root.Children)
-            {
-                yield return child;
-                foreach (var descendant in Descendants(child))
-                    yield return descendant;
-            }
-        }
-
-        static int IssueNumber(SemanticSnapshot row) =>
-            int.Parse(
-                row.Name.Split(' ')[0].TrimStart('#'),
-                System.Globalization.CultureInfo.InvariantCulture
-            );
-
         using var transport = new DeferredGitHubHandler();
         using var client = new HttpClient(transport)
         {
@@ -1424,116 +1484,82 @@ public sealed class IssueBrowserTests
         transport.ReplyJson(0);
         graph.Drain();
         using var renderer = new SkiaSceneRenderer();
-        var router = composition.Input;
-        var originalViewport = new LayoutViewport(800, 500, 1.25f);
-        var original = SceneLayout.Project(composition, originalViewport, renderer);
-        Assert(router.SetScene(original), "Original resize-proof scene did not install.");
-        var row = Flatten(composition.SemanticSnapshot()!)
-            .First(node => node.Role == SemanticRole.ListItem);
+
+        var wideViewport = new LayoutViewport(1120, 760, 1.25f);
+        var wide = Install(composition, renderer, wideViewport);
+        var wideSemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
+        var splitter = wideSemantics.Single(node => node.Role == SemanticRole.Splitter);
+        var listViewport = wideSemantics.Single(node =>
+            node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll)
+        );
+        var splitterBounds = wide
+            .Boxes.Single(box => box.Identity.ElementId == splitter.Identity.ElementId)
+            .Bounds;
+        var listBounds = wide
+            .Boxes.Single(box => box.Identity.ElementId == listViewport.Identity.ElementId)
+            .Bounds;
+        var row = wideSemantics.First(node => node.Role == SemanticRole.ListItem);
         Assert(
-            composition.ExecuteSemanticCommand(row.Identity, new(SemanticCommandKind.Select))
-                == SemanticCommandResult.Applied
-                && router.FocusSemantic(new(row.Identity.CompositionEpoch, row.Identity.ElementId)),
-            "Resize proof could not select and focus its retained issue row."
+            splitterBounds.Y + splitterBounds.Height >= 740
+                && listBounds.Y + listBounds.Height >= 740
+                && composition.ExecuteSemanticCommand(row.Identity, new(SemanticCommandKind.Select))
+                    == SemanticCommandResult.Applied,
+            "Wide Issue Browser did not fill its workspace: splitter="
+                + splitterBounds
+                + " list="
+                + listBounds
         );
         graph.Drain();
-        original = SceneLayout.Project(composition, originalViewport, renderer);
-        Assert(router.SetScene(original), "Selected resize-proof scene did not install.");
-
-        var app = composition.Root.Children.Single();
-        var header = Descendants(app).Single(element => element.Name == "issue-browser.header");
-        var list = Descendants(app)
-            .Single(element => element.Name == "issue-browser.scroll-viewport");
-        var details = Descendants(app).Single(element => element.Name == "issue-browser.details");
-        var fields = Flatten(composition.SemanticSnapshot()!)
-            .Where(node => node.Role == SemanticRole.TextField)
-            .Select(node => new ElementIdentity(
-                node.Identity.CompositionEpoch,
-                node.Identity.ElementId
-            ))
-            .ToArray();
-        var retained = new[] { app.Id, header.Id, list.Id, details.Id, row.Identity.ElementId };
-        var focused = router.FocusedElement;
-
-        var expandedViewport = new LayoutViewport(1040, 680, 1.25f);
-        var expanded = SceneLayout.Project(composition, expandedViewport, renderer);
-        Assert(router.SetScene(expanded), "Expanded resize-proof scene did not install.");
-        var expandedBoxes = expanded.Boxes.ToDictionary(
-            box => box.Identity.ElementId,
-            box => box.Bounds
-        );
+        wide = Install(composition, renderer, wideViewport);
         Assert(
-            expandedBoxes[app.Id] is { Width: 1040, Height: 680 }
-                && expandedBoxes[header.Id].Width == 1040
-                && expandedBoxes[list.Id] is { Width: 1040, Height: 200 }
-                && expanded.ScrollBars.Single().Track.Width == 12
-                && expandedBoxes[row.Identity.ElementId].Width
-                    == 1040 - expanded.ScrollBars.Single().Track.Width
-                && expandedBoxes[details.Id].Width == 1040
-                && fields.All(identity =>
-                    MathF.Abs(expandedBoxes[identity.ElementId].Width - 250)
-                    <= 1 / expandedViewport.Scale
+            browser.SelectedIssue is { } selected
+                && Flatten(composition.SemanticSnapshot()!)
+                    .Any(node => node.Name == selected.Title),
+            "Wide issue selection did not retain and reveal the detail pane."
+        );
+
+        var narrowViewport = new LayoutViewport(420, 360, 1.5f);
+        var narrow = Install(composition, renderer, narrowViewport);
+        var narrowSemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
+        Assert(
+            narrowSemantics.Any(node =>
+                node.Role == SemanticRole.Button && node.Name == "Back to issues"
+            )
+                && narrowSemantics.All(node => node.Role != SemanticRole.Splitter)
+                && narrow.Boxes.All(box =>
+                    box.Bounds.X >= -.01f
+                    && box.Bounds.X + box.Bounds.Width <= narrowViewport.Width + .01f
                 ),
-            "Expanded Issue Browser root or retained child widths did not follow the viewport while fixed control sizes stayed stable: app="
-                + expandedBoxes[app.Id]
-                + " header="
-                + expandedBoxes[header.Id]
-                + " list="
-                + expandedBoxes[list.Id]
-                + " row="
-                + expandedBoxes[row.Identity.ElementId]
-                + " details="
-                + expandedBoxes[details.Id]
-                + " fields="
-                + string.Join(",", fields.Select(identity => expandedBoxes[identity.ElementId]))
+            "The 420-pixel detail layout lost Back navigation, retained a splitter, or overflowed horizontally."
+        );
+        var back = narrowSemantics.Single(node =>
+            node.Role == SemanticRole.Button && node.Name == "Back to issues"
         );
         Assert(
-            browser.SelectedIssue?.Number == IssueNumber(row)
-                && router.FocusedElement == focused
-                && retained.All(id => expandedBoxes.ContainsKey(id))
-                && Flatten(composition.SemanticSnapshot()!)
-                    .Count(node => node.Role == SemanticRole.ListItem)
-                    <= RealizedRowBound(expanded, composition, 30f),
-            "Expanded Issue Browser lost selection, focus, identity, or bounded realization."
+            composition.ExecuteSemanticCommand(back.Identity, new(SemanticCommandKind.Invoke))
+                == SemanticCommandResult.Applied,
+            "Compact Back command was not invokable."
         );
-        using (var bitmap = new SKBitmap(1300, 850, SKColorType.Rgba8888, SKAlphaType.Premul))
-        {
-            using var canvas = new SKCanvas(bitmap);
-            canvas.Clear(SKColors.Transparent);
-            renderer.Render(expanded, canvas);
-            Assert(
-                bitmap.GetPixel(1275, 12) == new SKColor(0xe2, 0xe8, 0xf0, 0xff)
-                    && bitmap.GetPixel(1275, 837) == new SKColor(0xf8, 0xfa, 0xfc, 0xff),
-                "Expanded right or bottom surface was not painted with the authored header/page colors."
-            );
-        }
+        graph.Drain();
+        narrow = Install(composition, renderer, narrowViewport);
+        Assert(
+            browser.SelectedIssue is not null
+                && Flatten(composition.SemanticSnapshot()!)
+                    .Any(node =>
+                        node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll)
+                    )
+                && !Flatten(composition.SemanticSnapshot()!)
+                    .Any(node => node.Role == SemanticRole.Button && node.Name == "Back to issues"),
+            "Compact Back navigation did not restore the list while preserving selection."
+        );
 
-        var restoredViewport = new LayoutViewport(800, 500, 1.5f);
-        var restored = SceneLayout.Project(composition, restoredViewport, renderer);
-        Assert(router.SetScene(restored), "Restored resize-proof scene did not install.");
-        var restoredBoxes = restored.Boxes.ToDictionary(
-            box => box.Identity.ElementId,
-            box => box.Bounds
-        );
+        wide = Install(composition, renderer, wideViewport);
         Assert(
-            restoredBoxes[app.Id] is { Width: 800, Height: 500 }
-                && restoredBoxes[header.Id].Width == 800
-                && restoredBoxes[list.Id] is { Width: 800, Height: 200 }
-                && restored.ScrollBars.Single().Track.Width == 12
-                && restoredBoxes[row.Identity.ElementId].Width
-                    == 800 - restored.ScrollBars.Single().Track.Width
-                && restoredBoxes[details.Id].Width == 800
-                && fields.All(identity =>
-                    MathF.Abs(restoredBoxes[identity.ElementId].Width - 250)
-                    <= 1 / restoredViewport.Scale
-                )
-                && browser.SelectedIssue?.Number == IssueNumber(row)
-                && router.FocusedElement == focused
-                && retained.All(id => restoredBoxes.ContainsKey(id))
-                && Flatten(composition.SemanticSnapshot()!)
-                    .Count(node => node.Role == SemanticRole.ListItem)
-                    <= RealizedRowBound(restored, composition, 30f),
-            "Restored Issue Browser lost viewport sizing, fixed control sizes, state, identity, focus, or bounded realization at a different DPI."
+            Flatten(composition.SemanticSnapshot()!).Any(node => node.Role == SemanticRole.Splitter)
+                && browser.SelectedIssue is not null
+                && wide.Boxes.Max(box => box.Bounds.Y + box.Bounds.Height)
+                    >= wideViewport.Height - .01f,
+            "Returning wide lost split/detail state or failed to fill the viewport."
         );
     }
 
@@ -1554,6 +1580,10 @@ public sealed class IssueBrowserTests
                 var structure = File.ReadAllText(Path.Combine(app, "IssueBrowserStructure.cs"));
                 var issueRow = File.ReadAllText(Path.Combine(app, "IssueRow.lui"));
                 var issueBrowser = File.ReadAllText(Path.Combine(app, "IssueBrowser.lui"));
+                var authoredLui = string.Join(
+                    '\n',
+                    Directory.EnumerateFiles(app, "*.lui").Select(File.ReadAllText)
+                );
                 Assert(
                     !source.Contains(".Drain(", StringComparison.Ordinal)
                         && program.Contains("[STAThread]", StringComparison.Ordinal)
@@ -1583,11 +1613,11 @@ public sealed class IssueBrowserTests
                             "public component IssueBrowser",
                             StringComparison.Ordinal
                         )
-                        && issueBrowser.Contains(
-                            "<VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value).Named(\"issue-browser.issue-row\")}",
+                        && authoredLui.Contains(
+                            "<VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value, view).Named(\"issue-browser.issue-row\")}",
                             StringComparison.Ordinal
                         )
-                        && issueBrowser.Contains(
+                        && authoredLui.Contains(
                             "foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number",
                             StringComparison.Ordinal
                         ),
@@ -1644,9 +1674,10 @@ public sealed class IssueBrowserTests
                 Box = scene.Boxes.Single(box => box.Identity.ElementId == node.Identity.ElementId),
             })
             .Where(candidate =>
-                candidate.Box.Bounds.Y <= viewport.Y
+                candidate.Box.Bounds.Y < viewport.Y + viewport.Height
                 && candidate.Box.Bounds.Y + candidate.Box.Bounds.Height > viewport.Y
             )
+            .OrderBy(candidate => candidate.Box.Bounds.Y)
             .ToArray();
         var number =
             candidates.Length == 1
@@ -1680,6 +1711,31 @@ public sealed class IssueBrowserTests
         renderer.Render(scene, canvas);
         using var pixels = bitmap.PeekPixels();
         return Convert.ToHexString(SHA256.HashData(pixels.GetPixelSpan()));
+    }
+
+    static void CaptureIfRequested(
+        SkiaSceneRenderer renderer,
+        RetainedScene scene,
+        LayoutViewport viewport,
+        string fileName
+    )
+    {
+        var directory = Environment.GetEnvironmentVariable("LUCENT_HEADLESS_CAPTURES");
+        if (string.IsNullOrWhiteSpace(directory))
+            return;
+        Directory.CreateDirectory(directory);
+        var width = checked((int)MathF.Round(viewport.Width * viewport.Scale));
+        var height = checked((int)MathF.Round(viewport.Height * viewport.Scale));
+        using var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.Transparent);
+            renderer.Render(scene, canvas);
+        }
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        using var stream = File.Create(Path.Combine(directory, fileName));
+        data.SaveTo(stream);
     }
 
     static string SceneEvidence(RetainedScene scene) =>
