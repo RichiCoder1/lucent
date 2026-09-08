@@ -18,6 +18,8 @@ Lucent applications start with a stock surface and readable foreground. Built-in
 
 Stock buttons, text fields and selectables provide padding and visible interaction states; buttons and selectables also provide minimum heights. Explicit geometry and style overrides remain supported. Earlier prereleases had different editor defaults; applications that require exact text insets should specify padding explicitly. Hit testing, selection and caret geometry share that content inset.
 
+Single-line fields center text vertically; multiline editors start text at the top content inset, including when a short note occupies a tall editor. Explicit text alignment still takes precedence.
+
 ## Optional minimal base
 
 ```csharp

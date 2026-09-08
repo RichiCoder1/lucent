@@ -219,6 +219,91 @@ public sealed class TextAreaContracts
     }
 
     [TestMethod]
+    public void MultilineStockTextStartsAtContentTopAndHonorsAuthorAlignment()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "text-area-stock-alignment");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Width, 500f)
+                .Set(LayoutProperties.Height, 444f)
+                .Set(LayoutProperties.Axis, LayoutAxis.Row)
+                .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)
+        );
+
+        var defaultArea = composition.Child(composition.Root, "default-area");
+        Controls.TextArea(
+            defaultArea,
+            theme,
+            "Default",
+            "line",
+            Style.Empty.Set(LayoutProperties.Width, 240f).Set(LayoutProperties.Height, 444f)
+        );
+        var centeredArea = composition.Child(composition.Root, "centered-area");
+        Controls.TextArea(
+            centeredArea,
+            theme,
+            "Centered",
+            "line",
+            Style
+                .Empty.Set(LayoutProperties.Width, 240f)
+                .Set(LayoutProperties.Height, 444f)
+                .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
+        );
+        graph.Drain();
+
+        Assert.AreEqual(
+            LayoutAlignment.Start,
+            defaultArea.Resolve(LayoutProperties.CrossAlignment).Value,
+            "The stock multiline editor should start at the content top."
+        );
+        Assert.AreEqual(
+            LayoutAlignment.Center,
+            centeredArea.Resolve(LayoutProperties.CrossAlignment).Value,
+            "An explicit author alignment must still override the stock multiline default."
+        );
+
+        var scene = SceneLayout.Project(composition, new(500, 444, 1), new FixedShaper());
+        var defaultBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == defaultArea.Id)
+            .Bounds;
+        var centeredBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == centeredArea.Id)
+            .Bounds;
+        var defaultText = Flatten(scene.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == defaultArea.Id);
+        var centeredText = Flatten(scene.Nodes)
+            .OfType<TextSceneNode>()
+            .Single(node => node.Identity.Element.ElementId == centeredArea.Id);
+        var defaultContent = SceneLayout.ContentBounds(
+            defaultBounds,
+            defaultArea.Resolve(LayoutProperties.Padding).Value,
+            1
+        );
+        var centeredContent = SceneLayout.ContentBounds(
+            centeredBounds,
+            centeredArea.Resolve(LayoutProperties.Padding).Value,
+            1
+        );
+
+        Assert.AreEqual(
+            defaultContent.Y,
+            defaultText.Bounds.Y,
+            0.001f,
+            "A tall multiline editor should paint its first line at the content top."
+        );
+        Assert.AreEqual(
+            centeredContent.Y + (centeredContent.Height - centeredText.Text.Height) / 2,
+            centeredText.Bounds.Y,
+            0.001f,
+            "An explicit centered multiline editor should retain its centered text origin."
+        );
+    }
+
+    [TestMethod]
     public void TextAreaRequiresMultilineSessionAndSingleLineStillRejectsBreaks()
     {
         var graph = new ReactiveGraph();
@@ -328,6 +413,20 @@ public sealed class TextAreaContracts
         snapshot.Role == SemanticRole.TextField
             ? snapshot
             : snapshot.Children.Select(FindTextArea).First();
+
+    private static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            if (node is ClipSceneNode clip)
+                foreach (var child in Flatten(clip.Children))
+                    yield return child;
+            else if (node is OpacitySceneNode opacity)
+                foreach (var child in Flatten(opacity.Children))
+                    yield return child;
+        }
+    }
 
     private static void Expect<T>(Action action)
         where T : Exception

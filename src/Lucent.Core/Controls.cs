@@ -691,6 +691,10 @@ internal static class Controls
             );
         var initialText = editor.Text;
         var component = TextFieldStyle(theme)
+            // A multiline editor may occupy a tall viewport. Keep its first
+            // line at the content origin while allowing an explicit author
+            // alignment to override this stock default below.
+            .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)
             .With(ScrollBarStyle)
             .Set(ProjectionProperties.Text, initialText)
             .Set(ProjectionProperties.TextMeasure, name)
