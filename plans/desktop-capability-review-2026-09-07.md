@@ -35,7 +35,7 @@ The product design round is settled: complete pointer editing and controlled sel
 
 ### CORRECTNESS-01 — Make application-controlled selection authoritative
 
-- **Evidence:** `Lucent/src/Lucent.Core/InputBehaviors.cs:101–103` selects the retained item before invoking the application callback. `Composition.cs:317–321` selects only the target when there is no semantic List ancestor. `Components.cs:319–327` copies the application predicate into mutable control state through an effect. `LightNotes/src/LightNotes/Navigation.lui:67–68` mounts Inbox and Archive Selectables beneath a Column, with mutually exclusive predicates.
+- **Evidence:** `Lucent/src/Lucent.Core/InputBehaviors.cs:101–103` selects the retained item before invoking the application callback. `Composition.cs:317–321` selects only the target when there is no semantic List ancestor. `Components/Buttons/Buttons.cs` copies the application predicate into mutable control state through an effect. `LightNotes/src/LightNotes/Navigation.lui:67–68` mounts Inbox and Archive Selectables beneath a Column, with mutually exclusive predicates.
 - **Impact:** Clicking Archive immediately selects its control. If navigation declines while busy or fails while saving, `ShowArchived` stays unchanged, so its effect has no changed dependency to restore Archive to false. Inbox remains selected. This explains a concrete path to the reported double highlight; it is an ownership defect rather than merely styling.
 - **Effort:** M, including mounted-shell regression tests.
 - **Risk:** MED; selection semantics, UIA and uncontrolled selection need clear separation.
@@ -53,7 +53,7 @@ The product design round is settled: complete pointer editing and controlled sel
 
 ### CAPABILITY-01 — Complete single-line pointer editing
 
-- **Evidence:** `Lucent/src/Lucent.Core/TextField.cs:535–562` focuses all fields but only hit-tests/captures when `state.IsMultiline`; `567–569` restricts drag extension similarly. `tests/Lucent.Core.Tests/TextFieldContracts.cs:49–62` explicitly expects focus without caret hit testing. `TextAreaContracts.cs:57` covers multiline placement and dragging.
+- **Evidence:** `Lucent/src/Lucent.Core/Components/TextField/TextField.cs:535–562` focuses all fields but only hit-tests/captures when `state.IsMultiline`; `567–569` restricts drag extension similarly. `tests/Lucent.Core.Tests/TextFieldContracts.cs:49–62` explicitly expects focus without caret hit testing. `TextAreaContracts.cs:57` covers multiline placement and dragging.
 - **Impact:** Capture, search, title and URL fields cannot position the caret or drag-select using the mouse.
 - **Effort:** M.
 - **Risk:** MED; grapheme boundaries, preedit cancellation, pointer capture and horizontal scrolling must agree.

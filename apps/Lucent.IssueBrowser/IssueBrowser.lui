@@ -70,7 +70,7 @@ public component IssueBrowser(IssueBrowserState browser) {
             <Loading browser={browser} name="issue-browser.loading" />
         }
         if (browser.Error is not null) {
-            <Error browser={browser} name="issue-browser.error" />
+            <ErrorNotice message={() => browser.Error ?? ""} retry={browser.Retry} name="issue-browser.error" />
         }
         <Divider />
         <SplitPane first={[IssueList(browser, view)]} second={[IssueDetailPane(browser, view)]} state={view.Split} label="Resize issue list" style={WorkspaceStyle} splitterStyle={IssueBrowserSplitterStyle(view.Breakpoints)} firstStyle={IssueBrowserFirstPaneStyle(view.Breakpoints, view)} secondStyle={IssueBrowserSecondPaneStyle(view.Breakpoints, view)} />

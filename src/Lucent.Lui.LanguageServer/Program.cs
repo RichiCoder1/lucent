@@ -296,17 +296,17 @@ internal static class Program
             case "workspace/didChangeWatchedFiles":
                 if (project is null || !parameters.TryGetProperty("changes", out var changes))
                     return new HandlerResult(null, null);
-                var reloaded = false;
-                foreach (var change in changes.EnumerateArray())
-                {
-                    if (
+                var watchedUris = changes
+                    .EnumerateArray()
+                    .Where(change =>
                         change.TryGetProperty("uri", out var changedUri)
-                        && changedUri.GetString() is { } value
+                        && changedUri.GetString() is not null
                     )
-                        reloaded |= await project
-                            .ReloadIfRelevantAsync(new Uri(value), CancellationToken.None)
-                            .ConfigureAwait(false);
-                }
+                    .Select(change => new Uri(change.GetProperty("uri").GetString()!))
+                    .ToArray();
+                var reloaded = await project
+                    .ReloadIfRelevantAsync(watchedUris, CancellationToken.None)
+                    .ConfigureAwait(false);
                 if (reloaded)
                 {
                     WriteNotification(

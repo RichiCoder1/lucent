@@ -35,7 +35,11 @@ internal sealed class LuiProjectContext : IDisposable
     private readonly ConditionalWeakTable<Project, Project> editorProjects = new();
     private readonly object gate = new();
     private readonly Dictionary<Uri, LuiCompilationResult> compiledDocuments = [];
+    private readonly Dictionary<ProjectId, ProjectEvaluation> evaluations = [];
+    private HashSet<string> resolvedReferencePaths = new(StringComparer.OrdinalIgnoreCase);
     private long compilationEpoch = -1;
+    private int evaluationBuildCount;
+    private int evaluationDocumentReadCount;
     private CachedHover? cachedHover;
     private MSBuildWorkspace workspace;
     private ProjectId projectId;
@@ -59,6 +63,7 @@ internal sealed class LuiProjectContext : IDisposable
         solution = project.Solution;
         projectDirectories = ProjectDirectories(project)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        resolvedReferencePaths = ResolvedReferencePaths(project);
     }
 
     internal long CompletionEpoch
@@ -67,6 +72,24 @@ internal sealed class LuiProjectContext : IDisposable
         {
             lock (gate)
                 return epoch;
+        }
+    }
+
+    internal int EvaluationBuildCount
+    {
+        get
+        {
+            lock (gate)
+                return evaluationBuildCount;
+        }
+    }
+
+    internal int EvaluationDocumentReadCount
+    {
+        get
+        {
+            lock (gate)
+                return evaluationDocumentReadCount;
         }
     }
 
@@ -163,7 +186,7 @@ internal sealed class LuiProjectContext : IDisposable
             return null;
         if (!snapshot.Index.TryGet(snapshot.Document.Path, out _))
             return null;
-        var result = CompileSnapshot(snapshot);
+        var result = CompileSnapshot(snapshot, cancellationToken);
         Track(result, snapshot);
         if (!result.Success)
             return null;
@@ -213,7 +236,7 @@ internal sealed class LuiProjectContext : IDisposable
                     : [metadata]
                 : null;
         }
-        var result = CompileSnapshot(snapshot);
+        var result = CompileSnapshot(snapshot, cancellationToken);
         var diagnostics = result
             .Diagnostics.Select(diagnostic => EditorDiagnostic(snapshot.Compilation, diagnostic))
             .Where(diagnostic => diagnostic is not null)
@@ -314,7 +337,7 @@ internal sealed class LuiProjectContext : IDisposable
         var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
         if (snapshot.MetadataDiagnostic is not null)
             return [];
-        var result = CompileSnapshot(snapshot);
+        var result = CompileSnapshot(snapshot, cancellationToken);
         Track(result, snapshot);
         if (result.ProjectionSource is null)
             return [];
@@ -1804,8 +1827,16 @@ internal sealed class LuiProjectContext : IDisposable
             .ConfigureAwait(false);
     }
 
-    private void Track(LuiCompilationResult result, Snapshot snapshot) =>
-        resultEpochs.GetValue(result, _ => new SnapshotEpoch(snapshot.Epoch, snapshot.Freshness));
+    private void Track(LuiCompilationResult result, Snapshot snapshot)
+    {
+        lock (gate)
+        {
+            if (disposed)
+                return;
+            resultEpochs.Remove(result);
+            resultEpochs.Add(result, new SnapshotEpoch(snapshot.Epoch, snapshot.Freshness));
+        }
+    }
 
     private async Task<bool> IsCurrentAsync(
         LuiFreshnessTarget freshness,
@@ -1897,9 +1928,17 @@ internal sealed class LuiProjectContext : IDisposable
 
     internal void ReplaceText(Uri uri, string text) => Update(uri, SourceText.From(text));
 
-    internal async Task<bool> ReloadIfRelevantAsync(Uri uri, CancellationToken cancellationToken)
+    internal Task<bool> ReloadIfRelevantAsync(Uri uri, CancellationToken cancellationToken) =>
+        ReloadIfRelevantAsync([uri], cancellationToken);
+
+    internal async Task<bool> ReloadIfRelevantAsync(
+        IEnumerable<Uri> uris,
+        CancellationToken cancellationToken
+    )
     {
-        if (!IsRelevantProjectInput(uri))
+        ArgumentNullException.ThrowIfNull(uris);
+        var relevant = uris.Where(IsRelevantProjectInput).Distinct().ToArray();
+        if (relevant.Length == 0)
             return false;
         var reloaded = MSBuildWorkspace.Create();
         try
@@ -1929,8 +1968,11 @@ internal sealed class LuiProjectContext : IDisposable
                 solution = project.Solution;
                 projectDirectories = ProjectDirectories(project)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                resolvedReferencePaths = ResolvedReferencePaths(project);
                 reloadFailed = false;
                 epoch++;
+                evaluations.Clear();
+                compiledDocuments.Clear();
                 generated.Clear();
                 previous.Dispose();
             }
@@ -1945,6 +1987,8 @@ internal sealed class LuiProjectContext : IDisposable
                 {
                     reloadFailed = true;
                     epoch++;
+                    evaluations.Clear();
+                    compiledDocuments.Clear();
                     generated.Clear();
                 }
             }
@@ -2004,6 +2048,7 @@ internal sealed class LuiProjectContext : IDisposable
             else
                 overlays.Remove(FilePath(uri));
             epoch++;
+            evaluations.Clear();
             // Reuse only tooltip text. Maps, diagnostics, and compiler results still
             // invalidate normally because authored offsets have changed.
             var changedText = text.ToString();
@@ -2031,37 +2076,66 @@ internal sealed class LuiProjectContext : IDisposable
         if (!uri.IsFile)
             return false;
         var path = Path.GetFullPath(FilePath(uri));
-        var name = Path.GetFileName(path);
-        if (
-            IsProjectAncestor(Path.GetDirectoryName(path)!)
-            && (
-                String.Equals(name, "global.json", StringComparison.OrdinalIgnoreCase)
-                || String.Equals(name, ".editorconfig", StringComparison.OrdinalIgnoreCase)
-                || String.Equals(name, "Directory.Build.props", StringComparison.OrdinalIgnoreCase)
-                || String.Equals(
-                    name,
-                    "Directory.Packages.props",
-                    StringComparison.OrdinalIgnoreCase
-                )
-                || String.Equals(
-                    name,
-                    "Directory.Build.targets",
-                    StringComparison.OrdinalIgnoreCase
+        lock (gate)
+        {
+            if (disposed || reloadFailed)
+                return false;
+            if (IsBuildOutputPath(path) && !resolvedReferencePaths.Contains(path))
+                return false;
+            var name = Path.GetFileName(path);
+            if (
+                IsProjectAncestor(Path.GetDirectoryName(path)!)
+                && (
+                    String.Equals(name, "global.json", StringComparison.OrdinalIgnoreCase)
+                    || String.Equals(name, ".editorconfig", StringComparison.OrdinalIgnoreCase)
+                    || String.Equals(
+                        name,
+                        "Directory.Build.props",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    || String.Equals(
+                        name,
+                        "Directory.Packages.props",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                    || String.Equals(
+                        name,
+                        "Directory.Build.targets",
+                        StringComparison.OrdinalIgnoreCase
+                    )
                 )
             )
-        )
-            return true;
-        if (!projectDirectories.Any(directory => IsWithin(path, directory)))
-            return false;
-        return String.Equals(name, ".editorconfig", StringComparison.OrdinalIgnoreCase)
-            || String.Equals(name, "global.json", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".props", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
-            || path.EndsWith(".winmd", StringComparison.OrdinalIgnoreCase);
+                return true;
+            if (!projectDirectories.Any(directory => IsWithin(path, directory)))
+                return false;
+            return String.Equals(name, ".editorconfig", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(name, "global.json", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".props", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".targets", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".winmd", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private static bool IsBuildOutputPath(string path)
+    {
+        for (var current = Path.GetDirectoryName(path); current is not null; )
+        {
+            var name = Path.GetFileName(current);
+            if (
+                String.Equals(name, "bin", StringComparison.OrdinalIgnoreCase)
+                || String.Equals(name, "obj", StringComparison.OrdinalIgnoreCase)
+            )
+                return true;
+            var parent = Path.GetDirectoryName(current);
+            if (String.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+                break;
+            current = parent;
+        }
+        return false;
     }
 
     private static bool IsWithin(string path, string directory) =>
@@ -2075,6 +2149,27 @@ internal sealed class LuiProjectContext : IDisposable
         ProjectGraph(project)
             .Where(project => project.FilePath is not null)
             .Select(project => Path.GetDirectoryName(Path.GetFullPath(project.FilePath!))!);
+
+    private static HashSet<string> ResolvedReferencePaths(Project project)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var current in ProjectGraph(project))
+        {
+            foreach (
+                var reference in current.MetadataReferences.OfType<PortableExecutableReference>()
+            )
+            {
+                if (reference.FilePath is not null)
+                    paths.Add(Path.GetFullPath(reference.FilePath));
+            }
+            foreach (var reference in current.AnalyzerReferences)
+            {
+                if (reference.FullPath is not null)
+                    paths.Add(Path.GetFullPath(reference.FullPath));
+            }
+        }
+        return paths;
+    }
 
     private static List<Project> ProjectGraph(Project project)
     {
@@ -2117,19 +2212,18 @@ internal sealed class LuiProjectContext : IDisposable
         return false;
     }
 
-    private LuiCompilationResult CompileSnapshot(Snapshot snapshot)
+    private LuiCompilationResult CompileSnapshot(
+        Snapshot snapshot,
+        CancellationToken cancellationToken
+    )
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {
             ThrowIfDisposed();
-            if (compilationEpoch != epoch)
-            {
-                compiledDocuments.Clear();
-                compilationEpoch = epoch;
-            }
+            compilationEpoch = epoch;
             if (
-                snapshot.Epoch == epoch
-                && compiledDocuments.TryGetValue(snapshot.Uri, out var cached)
+                compiledDocuments.TryGetValue(snapshot.Uri, out var cached)
                 && cached.Identity.Equals(snapshot.Identity)
             )
                 return cached;
@@ -2139,6 +2233,7 @@ internal sealed class LuiProjectContext : IDisposable
             snapshot.Compilation,
             snapshot.Identity
         );
+        cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {
             if (!disposed && snapshot.Epoch == epoch && compilationEpoch == epoch)
@@ -2180,51 +2275,108 @@ internal sealed class LuiProjectContext : IDisposable
             captured = epoch;
         }
         var current = FindDocument(project, uri);
-        var documents = new List<LuiProjectDocument>();
-        LuiProjectDocument? input = null;
-        LuiDiagnostic? metadataDiagnostic = null;
+        var evaluation = await EvaluateProjectAsync(project, captured, cancellationToken)
+            .ConfigureAwait(false);
+        var input = evaluation.Documents.SingleOrDefault(document =>
+            String.Equals(
+                Path.GetFullPath(document.Path),
+                Path.GetFullPath(current.FilePath!),
+                StringComparison.OrdinalIgnoreCase
+            )
+        );
+        if (input is null)
+            throw new InvalidOperationException("The evaluated project has no current document.");
+        var metadataDiagnostic = evaluation.MetadataDiagnostics.TryGetValue(
+            input.Path,
+            out var inputDiagnostic
+        )
+            ? inputDiagnostic
+            : null;
+        var compilation = evaluation.Index.Augment(evaluation.Compilation, current.FilePath!);
+        var globals = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
+        globals.TryGetValue("build_property.LucentLuiProjectEpoch", out var projectEpoch);
+        globals.TryGetValue("build_property.LucentLuiProjectIdentity", out var projectIdentity);
+        globals.TryGetValue("build_property.LucentLuiCompilerOptions", out var options);
+        globals.TryGetValue("build_property.LucentLuiDefines", out var defines);
+        var parse = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
+        var identity = LuiCompiler.Snapshot(
+            new LuiFreshnessIdentity(
+                projectEpoch ?? "",
+                projectIdentity ?? project.FilePath ?? project.Name,
+                new LuiDocumentIdentity(input.LogicalPath),
+                input.Version,
+                "",
+                evaluation.Index.Generation,
+                parse.LanguageVersion.ToString(),
+                "",
+                "",
+                "",
+                options ?? "",
+                defines ?? "",
+                project.DefaultNamespace ?? ""
+            ),
+            compilation
+        );
+        return new Snapshot(
+            captured,
+            compilation,
+            input,
+            identity,
+            SourceText.From(input.Source),
+            uri,
+            evaluation.Index,
+            metadataDiagnostic,
+            new LuiFreshnessTarget(project.Id, uri, identity)
+        );
+    }
+
+    private async Task<ProjectEvaluation> EvaluateProjectAsync(
+        Project project,
+        long captured,
+        CancellationToken cancellationToken
+    )
+    {
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (evaluations.TryGetValue(project.Id, out var cached) && cached.Epoch == captured)
+                return cached;
+        }
+
+        var allDocuments = new List<LuiProjectDocument>();
+        var validDocuments = new List<LuiProjectDocument>();
+        var metadataDiagnostics = new Dictionary<string, LuiDiagnostic>(
+            StringComparer.OrdinalIgnoreCase
+        );
         foreach (
             var document in project.AdditionalDocuments.Where(item =>
                 item.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
             )
         )
         {
-            var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-            var source = text.ToString();
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = (
+                await document.GetTextAsync(cancellationToken).ConfigureAwait(false)
+            ).ToString();
             var logicalPath = LogicalPath(project, document);
             var validLogicalPath = LuiDocumentIdentity.TryCreate(
                 logicalPath,
                 out var logicalIdentity
             );
-            if (
-                !validLogicalPath
-                && String.Equals(
-                    document.FilePath,
-                    current.FilePath,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-                metadataDiagnostic = LuiDiagnosticProjection.InvalidLogicalPath(
-                    document.FilePath!,
-                    logicalPath
-                );
             var projectDocument = new LuiProjectDocument(
                 document.FilePath!,
                 logicalIdentity?.LogicalPath ?? Path.GetFileName(document.FilePath!),
                 source,
                 DocumentVersion(project, document, source)
             );
+            allDocuments.Add(projectDocument);
             if (validLogicalPath)
-                documents.Add(projectDocument);
-            if (
-                String.Equals(
-                    document.FilePath,
-                    current.FilePath,
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-                input = projectDocument;
+                validDocuments.Add(projectDocument);
+            else
+                metadataDiagnostics[document.FilePath!] =
+                    LuiDiagnosticProjection.InvalidLogicalPath(document.FilePath!, logicalPath);
         }
+
         // The editor builds its own LUI projection below. Running the build-time LUI
         // generator first duplicates that work; keep all other project generators.
         var compilation =
@@ -2253,45 +2405,25 @@ internal sealed class LuiProjectContext : IDisposable
                 )
             )
         );
-        var index = LuiProjectComponentIndex.Build(compilation, documents, cancellationToken);
-        compilation = index.Augment(compilation, current.FilePath!);
-        if (input is null)
-            throw new InvalidOperationException("The evaluated project has no current document.");
-        var globals = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
-        globals.TryGetValue("build_property.LucentLuiProjectEpoch", out var projectEpoch);
-        globals.TryGetValue("build_property.LucentLuiProjectIdentity", out var projectIdentity);
-        globals.TryGetValue("build_property.LucentLuiCompilerOptions", out var options);
-        globals.TryGetValue("build_property.LucentLuiDefines", out var defines);
-        var parse = project.ParseOptions as CSharpParseOptions ?? CSharpParseOptions.Default;
-        var identity = LuiCompiler.Snapshot(
-            new LuiFreshnessIdentity(
-                projectEpoch ?? "",
-                projectIdentity ?? project.FilePath ?? project.Name,
-                new LuiDocumentIdentity(input.LogicalPath),
-                input.Version,
-                "",
-                index.Generation,
-                parse.LanguageVersion.ToString(),
-                "",
-                "",
-                "",
-                options ?? "",
-                defines ?? "",
-                project.DefaultNamespace ?? ""
-            ),
-            compilation
-        );
-        return new Snapshot(
+        var index = LuiProjectComponentIndex.Build(compilation, validDocuments, cancellationToken);
+        var evaluation = new ProjectEvaluation(
             captured,
             compilation,
-            input,
-            identity,
-            await current.GetTextAsync(cancellationToken).ConfigureAwait(false),
-            uri,
+            allDocuments,
             index,
-            metadataDiagnostic,
-            new LuiFreshnessTarget(project.Id, uri, identity)
+            metadataDiagnostics
         );
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            if (epoch == captured)
+            {
+                evaluations[project.Id] = evaluation;
+                evaluationBuildCount++;
+                evaluationDocumentReadCount += allDocuments.Count;
+            }
+        }
+        return evaluation;
     }
 
     private static string LogicalPath(Project project, TextDocument document)
@@ -2416,7 +2548,7 @@ internal sealed class LuiProjectContext : IDisposable
         var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
         if (snapshot.MetadataDiagnostic is not null)
             return null;
-        var result = CompileSnapshot(snapshot);
+        var result = CompileSnapshot(snapshot, cancellationToken);
         Track(result, snapshot);
         if (
             result.ProjectionSource is null
@@ -3323,11 +3455,28 @@ internal sealed class LuiProjectContext : IDisposable
                 return;
             disposed = true;
             epoch++;
+            evaluations.Clear();
             generated.Clear();
             compiledDocuments.Clear();
             cachedHover = null;
             workspace.Dispose();
         }
+    }
+
+    private sealed class ProjectEvaluation(
+        long epoch,
+        Compilation compilation,
+        IReadOnlyList<LuiProjectDocument> documents,
+        LuiProjectComponentIndex index,
+        IReadOnlyDictionary<string, LuiDiagnostic> metadataDiagnostics
+    )
+    {
+        internal long Epoch { get; } = epoch;
+        internal Compilation Compilation { get; } = compilation;
+        internal IReadOnlyList<LuiProjectDocument> Documents { get; } = documents;
+        internal LuiProjectComponentIndex Index { get; } = index;
+        internal IReadOnlyDictionary<string, LuiDiagnostic> MetadataDiagnostics { get; } =
+            metadataDiagnostics;
     }
 
     private sealed class Snapshot(

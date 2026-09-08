@@ -117,6 +117,7 @@ static void VerifyLuiMetadata(
         ["ScrollViewport"] = 1,
         ["VirtualizedList"] = 1,
         ["Status"] = 2,
+        ["ErrorNotice"] = 1,
         ["Progress"] = 2,
         ["ContextMenu"] = 1,
         ["Menu"] = 1,

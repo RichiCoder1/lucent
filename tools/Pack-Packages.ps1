@@ -32,6 +32,11 @@ foreach ($name in $names) {
         $reader = [IO.StreamReader]::new($entry.Open())
         try { [xml]$spec = $reader.ReadToEnd() } finally { $reader.Dispose() }
         if ($spec.package.metadata.version -ne $Version -or $spec.package.metadata.repository.commit -ne $commit) { throw "Incorrect package identity: $name" }
+        if ($name -eq 'Lucent.Core') {
+            $runtimeTooling = @($spec.package.metadata.dependencies.group.dependency.id) -match '^Lucent\.Lui\.(Compiler|Generator)$|^Microsoft\.CodeAnalysis'
+            $packedTooling = @($zip.Entries.FullName) -match '(^|/)(Lucent\.Lui\.(Compiler|Generator)|Microsoft\.CodeAnalysis).*\.dll$'
+            if ($runtimeTooling -or $packedTooling) { throw 'Core package included build-time compiler, generator or Roslyn tooling.' }
+        }
         if ($name -eq 'Lucent.Platform.Windows' -and (-not $zip.GetEntry('runtimes/win-x64/native/vcruntime140.dll') -or -not $zip.GetEntry('buildTransitive/notices/SDL3-CS/LICENSE'))) { throw 'Windows package omitted native runtime or notices.' }
         if ($name -eq 'Lucent.Lui.Sdk' -and (-not $zip.GetEntry('analyzers/dotnet/cs/Lucent.Lui.Generator.dll') -or -not $zip.GetEntry('tools/net10.0/Lucent.Lui.Tooling.dll'))) { throw 'SDK package omitted generator or formatter.' }
     } finally { $zip.Dispose() }

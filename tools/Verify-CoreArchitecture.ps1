@@ -5,6 +5,11 @@ $root = Split-Path $PSScriptRoot -Parent
 $dotnet = Join-Path $root '.dotnet/dotnet.exe'
 if (-not (Test-Path $dotnet)) { $dotnet = 'dotnet' }
 $forbidden = 'SDL3|SkiaSharp|Windows\.Win32|Microsoft\.Windows\.CsWin32|Lucent\.Platform\.Windows'
+$forbiddenRuntimeTooling = 'Lucent\.Lui\.(Compiler|Generator)|Microsoft\.CodeAnalysis'
+$allowedBuildTools = @(
+    (Join-Path $root 'src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj'),
+    (Join-Path $root 'src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj')
+) | ForEach-Object { [IO.Path]::GetFullPath($_) }
 
 function Get-Assets([string] $Project) {
     Get-Content (Join-Path (Split-Path $Project) 'obj/project.assets.json') -Raw | ConvertFrom-Json
@@ -12,9 +17,27 @@ function Get-Assets([string] $Project) {
 
 function Assert-ProjectHasNoForbiddenDependencies([string] $Project) {
     [xml]$xml = Get-Content $Project
-    $direct = @($xml.Project.ItemGroup.PackageReference) + @($xml.Project.ItemGroup.ProjectReference) | Where-Object { $_ }
-    if ($direct) { throw "Core has a direct dependency reference: $Project" }
+    $packages = @($xml.Project.ItemGroup.PackageReference) | Where-Object { $_ }
+    if ($packages) { throw "Core has a direct dependency reference: $Project" }
+    foreach ($reference in @($xml.Project.ItemGroup.ProjectReference) | Where-Object { $_ }) {
+        $path = [IO.Path]::GetFullPath((Join-Path (Split-Path $Project) ([string]$reference.Include)))
+        $buildOnly = $allowedBuildTools -contains $path -and
+            [string]$reference.OutputItemType -eq 'Analyzer' -and
+            [string]$reference.ReferenceOutputAssembly -eq 'false' -and
+            [string]$reference.PrivateAssets -eq 'all'
+        if (-not $buildOnly) { throw "Core has a direct dependency reference: $Project" }
+    }
     Assert-AssetsHaveNoForbiddenDependencies $Project
+}
+
+function Assert-RuntimeHasNoBuildTooling([string] $AssemblyPath) {
+    $dependencies = [IO.Path]::ChangeExtension($AssemblyPath, '.deps.json')
+    if (-not (Test-Path -LiteralPath $dependencies -PathType Leaf)) {
+        throw "Core runtime dependency manifest is missing: $dependencies"
+    }
+    if ((Get-Content -LiteralPath $dependencies -Raw) -match $forbiddenRuntimeTooling) {
+        throw 'Core runtime output includes compiler, generator or Roslyn tooling.'
+    }
 }
 
 function Assert-AssetsHaveNoForbiddenDependencies([string] $Project) {
@@ -56,7 +79,9 @@ function Assert-PublicApi([string] $AssemblyPath, [bool] $ExpectFailure) {
 
 $core = Join-Path $root 'src/Lucent.Core/Lucent.Core.csproj'
 Assert-ProjectHasNoForbiddenDependencies $core
-Assert-PublicApi (Join-Path $root "src/Lucent.Core/bin/$Configuration/net10.0/Lucent.Core.dll") $false
+$coreAssembly = Join-Path $root "src/Lucent.Core/bin/$Configuration/net10.0/Lucent.Core.dll"
+Assert-PublicApi $coreAssembly $false
+Assert-RuntimeHasNoBuildTooling $coreAssembly
 
 if ($Negative) {
     $fixtures = Join-Path $root 'tests/ArchitectureFixtures'

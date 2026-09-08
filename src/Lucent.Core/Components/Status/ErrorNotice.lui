@@ -1,0 +1,27 @@
+namespace Lucent.Core;
+
+style ErrorNoticeRootStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Symmetric(16, 8);
+    Spacing: 8;
+}
+
+style ErrorNoticeMessageStyle {
+    Axis: LayoutAxis.Column;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+style ErrorNoticeActionsStyle {
+    Axis: LayoutAxis.Row;
+}
+
+internal component ErrorNoticeContent(Func<string> message, Action? retry, Style? style) {
+    <Layout style={ErrorNoticeRootStyle.With(style)}>
+        <Status content={message} style={PresentationStyles.Secondary.With(ErrorNoticeMessageStyle)} name="error-notice.message" />
+        if (retry is not null) {
+            <Layout style={ErrorNoticeActionsStyle}>
+                <Button onInvoke={retry} name="error-notice.retry">Retry</Button>
+            </Layout>
+        }
+    </Layout>
+}

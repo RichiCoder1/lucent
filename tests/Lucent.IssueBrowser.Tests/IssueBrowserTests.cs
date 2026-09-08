@@ -1023,11 +1023,34 @@ public sealed class IssueBrowserTests
         );
         var errorViewport = new LayoutViewport(420, 600, 1);
         scene = Install(composition, renderer, errorViewport);
-        Assert(
-            Flatten(composition.SemanticSnapshot()!)
-                .Any(node => node.Role == SemanticRole.Button && node.Name == "Retry"),
-            "Compact error presentation lost its recovery command."
+        var errorSemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
+        var errorStatus = errorSemantics.Single(node =>
+            node.Role == SemanticRole.Status && node.Name == browser.Error
         );
+        var errorRetry = errorSemantics.Single(node =>
+            node.Role == SemanticRole.Button && node.Name == "Retry"
+        );
+        var errorStatusBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == errorStatus.Identity.ElementId)
+            .Bounds;
+        var errorRetryBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == errorRetry.Identity.ElementId)
+            .Bounds;
+        Assert(
+            errorStatus.Name == browser.Error
+                && errorStatusBounds.Height > 0
+                && errorRetryBounds.Height > 0
+                && errorStatusBounds.Y + errorStatusBounds.Height <= errorRetryBounds.Y
+                && errorRetryBounds.X + errorRetryBounds.Width <= errorViewport.Width,
+            "Compact ErrorNotice lost its live status, recovery command, or bounded vertical geometry."
+        );
+        using (var errorBitmap = Render(renderer, scene, errorViewport))
+        {
+            Assert(
+                DistinctColors(errorBitmap, errorRetryBounds) > 1,
+                "The integrated stock ErrorNotice retry action did not produce visible Skia output."
+            );
+        }
         CaptureIfRequested(renderer, scene, errorViewport, "issue-browser-error-narrow.png");
 
         browser.Retry();
@@ -1783,6 +1806,41 @@ public sealed class IssueBrowserTests
         renderer.Render(scene, canvas);
         using var pixels = bitmap.PeekPixels();
         return Convert.ToHexString(SHA256.HashData(pixels.GetPixelSpan()));
+    }
+
+    static SKBitmap Render(SkiaSceneRenderer renderer, RetainedScene scene, LayoutViewport viewport)
+    {
+        var bitmap = new SKBitmap(
+            checked((int)MathF.Round(viewport.Width * viewport.Scale)),
+            checked((int)MathF.Round(viewport.Height * viewport.Scale)),
+            SKColorType.Rgba8888,
+            SKAlphaType.Premul
+        );
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Transparent);
+        renderer.Render(scene, canvas);
+        return bitmap;
+    }
+
+    static int DistinctColors(SKBitmap bitmap, LayoutRect logicalBounds)
+    {
+        var left = Math.Clamp((int)MathF.Floor(logicalBounds.X), 0, bitmap.Width);
+        var top = Math.Clamp((int)MathF.Floor(logicalBounds.Y), 0, bitmap.Height);
+        var right = Math.Clamp(
+            (int)MathF.Ceiling(logicalBounds.X + logicalBounds.Width),
+            left,
+            bitmap.Width
+        );
+        var bottom = Math.Clamp(
+            (int)MathF.Ceiling(logicalBounds.Y + logicalBounds.Height),
+            top,
+            bitmap.Height
+        );
+        var colors = new HashSet<SKColor>();
+        for (var y = top; y < bottom && colors.Count <= 1; y++)
+        for (var x = left; x < right && colors.Count <= 1; x++)
+            colors.Add(bitmap.GetPixel(x, y));
+        return colors.Count;
     }
 
     static void CaptureIfRequested(

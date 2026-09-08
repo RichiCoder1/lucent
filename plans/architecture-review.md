@@ -36,7 +36,7 @@ Use syntactic context to separate C# islands from markup recovery. Cover compari
 
 ### C2. Give empty editors stable intrinsic geometry
 
-[`Controls.cs:430`](../src/Lucent.Core/Controls.cs#L430) removes the placeholder from projected text on focus. [`SceneLayout.cs:429`](../src/Lucent.Core/SceneLayout.cs#L429) skips shaping empty text; intrinsic measurement then has no text height. A probe of the default field in a column observed **200 × 14 before focus and 200 × 0 after focus**. Existing field tests commonly assign explicit dimensions, masking this path.
+[`Components/TextField/TextFieldControls.cs`](../src/Lucent.Core/Components/TextField/TextFieldControls.cs) removes the placeholder from projected text on focus. [`SceneLayout.cs:429`](../src/Lucent.Core/SceneLayout.cs#L429) skips shaping empty text; intrinsic measurement then has no text height. A probe of the default field in a column observed **200 × 14 before focus and 200 × 0 after focus**. Existing field tests commonly assign explicit dimensions, masking this path.
 
 Separate placeholder painting from editor measurement or supply stable intrinsic/minimum editor metrics. Test default sizing under both Row and Column, including caret geometry and the first edit.
 
@@ -58,7 +58,7 @@ An attributed static method returning `int` can therefore enter editor component
 
 ### C6. Preserve identity while updating retained payloads
 
-[`KeyedRegion.cs:97`](../src/Lucent.Core/KeyedRegion.cs#L97) calls the factory only for new keys; retained entries are reordered without receiving a replacement item. [`VirtualizedRegion.cs:163`](../src/Lucent.Core/VirtualizedRegion.cs#L163) has the same arrangement. A reactive row that captures the factory's item can therefore keep displaying its original record after the collection receives a new record with the same key.
+[`KeyedRegion.cs:97`](../src/Lucent.Core/KeyedRegion.cs#L97) calls the factory only for new keys; retained entries are reordered without receiving a replacement item. [`Components/Scrolling/VirtualizedRegion.cs:163`](../src/Lucent.Core/Components/Scrolling/VirtualizedRegion.cs#L163) has the same arrangement. A reactive row that captures the factory's item can therefore keep displaying its original record after the collection receives a new record with the same key.
 
 A probe replacing `{ Id: 1, Title: "before" }` with `{ Id: 1, Title: "after" }` produced `source=after; rendered=before; factories=1; retained=True`. The Issue Browser already works around this by looking up the current record by key in [`Components.cs:5`](../apps/Lucent.IssueBrowser/Components.cs#L5).
 
@@ -150,7 +150,7 @@ Define startup, close request, drain/stop, and final disposal with explicit UI-t
 
 ### A3. Preserve editing sessions through responsive changes
 
-[`ConditionalRegion.cs:139`](../src/Lucent.Core/ConditionalRegion.cs#L139) mounts a new branch and disposes the old one. [`TextField.cs:87`](../src/Lucent.Core/TextField.cs#L87) holds value, caret, selection, preedit, undo and redo in internal mounted state; [`Components.cs:94`](../src/Lucent.Core/Components.cs#L94) exposes only initial text and change notification. Scroll state is similarly mount-owned at [`Controls.cs:178`](../src/Lucent.Core/Controls.cs#L178).
+[`ConditionalRegion.cs:139`](../src/Lucent.Core/ConditionalRegion.cs#L139) mounts a new branch and disposes the old one. [`Components/TextField/TextField.cs:87`](../src/Lucent.Core/Components/TextField/TextField.cs#L87) holds value, caret, selection, preedit, undo and redo in internal mounted state; [`Components/TextField/TextFieldComponents.cs`](../src/Lucent.Core/Components/TextField/TextFieldComponents.cs) exposes only initial text and change notification. Scroll state is similarly mount-owned at [`Components/Shared/ControlState.cs`](../src/Lucent.Core/Components/Shared/ControlState.cs).
 
 Hoisting just the note string will preserve a draft but lose much of the editing session on a branch change. Establish a specific editor-session and viewport-state interface, with explicit ownership of platform resources and focus transfer. Preserve undo/selection/scroll where appropriate, and deliberately end or transfer IME composition according to the supported contract. Generic mounted-component handles or arbitrary reparenting are not prerequisites.
 
@@ -170,11 +170,11 @@ There are additional source-confirmed scaling risks worth addressing within this
 | Recursive scene copying at every clip/opacity boundary, then again at scene creation | [`LayoutScene.cs:717`](../src/Lucent.Core/LayoutScene.cs#L717), [`:759`](../src/Lucent.Core/LayoutScene.cs#L759), [`:789`](../src/Lucent.Core/LayoutScene.cs#L789) | Internal ownership/freeze path; preserve public mutation isolation | M / medium / high source confidence |
 | Font coverage shapes once per grapheme before final shaping | [`SkiaSceneRenderer.cs:338`](../src/Lucent.Renderer.Skia/SkiaSceneRenderer.cs#L338), [`:353`](../src/Lucent.Renderer.Skia/SkiaSceneRenderer.cs#L353) | Measure long content; prefer run/cluster-based fallback with correct missing-glyph behavior | M/L / medium / high source confidence |
 | Shape cache is limited by entry count, retaining whole strings and glyph arrays | [`SkiaSceneRenderer.cs:28`](../src/Lucent.Renderer.Skia/SkiaSceneRenderer.cs#L28), [`:440`](../src/Lucent.Renderer.Skia/SkiaSceneRenderer.cs#L440) | Weighted retention budget and oversized-entry policy; consider paragraph granularity | M / low-medium / high source confidence |
-| Every caret movement reparses whole-string grapheme boundaries; undo stores complete values | [`TextField.cs:359`](../src/Lucent.Core/TextField.cs#L359), [`:380`](../src/Lucent.Core/TextField.cs#L380) | Cache boundaries now; choose buffer/history representation against an explicit note-size target | M/L / medium-high / high source confidence |
+| Every caret movement reparses whole-string grapheme boundaries; undo stores complete values | [`Components/TextField/TextField.cs:359`](../src/Lucent.Core/Components/TextField/TextField.cs#L359), [`:380`](../src/Lucent.Core/Components/TextField/TextField.cs#L380) | Cache boundaries now; choose buffer/history representation against an explicit note-size target | M/L / medium-high / high source confidence |
 
 Do not require a sophisticated text buffer before demonstrating its need. Set realistic supported content sizes and measure them. The current managed performance cycle realizes at most six rows in its fixed viewport ([`Program.cs:246`](../tests/Lucent.Performance.Verifier/Program.cs#L246)); that particular scenario cannot establish behavior for deep layouts or long editable text. Other published performance scenarios were not rerun in this audit.
 
-One integration risk needs a focused probe: [`VirtualizedRegion.cs:135`](../src/Lucent.Core/VirtualizedRegion.cs#L135) uses explicit viewport dimensions or the supplied window viewport before parent arrangement. Nested Grid/container constraints may consequently realize more rows than the actual viewport needs. Confidence is medium for the user-visible consequence; no nested-container reproduction was run. Include viewport-dependent realization in the layout evaluation.
+One integration risk needs a focused probe: [`Components/Scrolling/VirtualizedRegion.cs:135`](../src/Lucent.Core/Components/Scrolling/VirtualizedRegion.cs#L135) uses explicit viewport dimensions or the supplied window viewport before parent arrangement. Nested Grid/container constraints may consequently realize more rows than the actual viewport needs. Confidence is medium for the user-visible consequence; no nested-container reproduction was run. Include viewport-dependent realization in the layout evaluation.
 
 ### A5. Complete ordinary desktop input paths
 

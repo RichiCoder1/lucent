@@ -2585,7 +2585,13 @@ style ScrollStyle {
                     && hoverValue?.Contains("ScrollBarVisibility", StringComparison.Ordinal) == true
                     && definitionPath is not null
                     && definitionPath.EndsWith(
-                        Path.Combine("src", "Lucent.Core", "ScrollBar.cs"),
+                        Path.Combine(
+                            "src",
+                            "Lucent.Core",
+                            "Components",
+                            "Scrolling",
+                            "ScrollBar.cs"
+                        ),
                         StringComparison.OrdinalIgnoreCase
                     ),
                 "ScrollBarProperties were not resolved consistently by compilation and editor tooling: "
@@ -2685,7 +2691,9 @@ style ScrollStyle {
                 layoutCompletions.Any(item => item.Label == "Layout" && item.Kind == 2),
                 "IssueBrowser.lui tag completion omitted the evaluated generic Layout component."
             );
-            var layoutDeclarationPath = Path.GetFullPath("src/Lucent.Core/Components.cs");
+            var layoutDeclarationPath = Path.GetFullPath(
+                "src/Lucent.Core/Components/Layout/Layout.cs"
+            );
             var coreComponentsText = await File.ReadAllTextAsync(layoutDeclarationPath);
             var layoutDeclaration = coreComponentsText.IndexOf(
                 "ComponentRecipe Layout(",
@@ -2693,7 +2701,7 @@ style ScrollStyle {
             );
             Assert(
                 layoutDeclaration >= 0,
-                "Core Components.cs no longer contains the public Layout component declaration."
+                "Core Layout.cs no longer contains the public Layout component declaration."
             );
             layoutDeclaration += "ComponentRecipe ".Length;
             var layoutReferences = await issueBrowser.ReferencesAsync(
@@ -2712,7 +2720,13 @@ style ScrollStyle {
             {
                 (new Uri(layoutDeclarationPath), new LuiSpan(layoutDeclaration, "Layout".Length)),
             };
-            foreach (var path in Directory.GetFiles("apps/Lucent.IssueBrowser", "*.lui"))
+            foreach (
+                var path in Directory
+                    .GetFiles("apps/Lucent.IssueBrowser", "*.lui")
+                    .Concat(
+                        Directory.GetFiles("src/Lucent.Core", "*.lui", SearchOption.AllDirectories)
+                    )
+            )
             {
                 var text = await File.ReadAllTextAsync(path);
                 var start = 0;
@@ -2871,7 +2885,9 @@ style ScrollStyle {
                     ),
                     "variant document-symbol selection range did not select its condition."
                 );
-            var error = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/Error.lui"));
+            var error = new Uri(
+                Path.GetFullPath("src/Lucent.Core/Components/Status/ErrorNotice.lui")
+            );
             var errorText = await File.ReadAllTextAsync(error.LocalPath);
             var tokenCompletions = await issueBrowser.CompletionsAsync(
                 issueRow,
@@ -2994,6 +3010,7 @@ style ScrollStyle {
                 .GetProperty("changes");
             var authoredLayoutReferences = Directory
                 .GetFiles("apps/Lucent.IssueBrowser", "*.lui")
+                .Concat(Directory.GetFiles("src/Lucent.Core", "*.lui", SearchOption.AllDirectories))
                 .Sum(path =>
                     System.Text.RegularExpressions.Regex.Count(
                         File.ReadAllText(path),
@@ -3006,12 +3023,12 @@ style ScrollStyle {
                         location
                             .GetProperty("uri")
                             .GetString()!
-                            .EndsWith("Components.cs", StringComparison.Ordinal)
+                            .EndsWith("Layout.cs", StringComparison.Ordinal)
                     ) == 1
                     && rpcLayoutChanges
                         .EnumerateObject()
                         .Single(change =>
-                            change.Name.EndsWith("Components.cs", StringComparison.Ordinal)
+                            change.Name.EndsWith("Layout.cs", StringComparison.Ordinal)
                         )
                         .Value.GetArrayLength() == 1
                     && rpcLayoutChanges
@@ -3022,7 +3039,9 @@ style ScrollStyle {
                         .Sum(change => change.Value.GetArrayLength()) == authoredLayoutReferences,
                 "Issue Browser Layout RPC references/rename did not preserve all paired tags and the Core declaration."
             );
-            var layoutSource = new Uri(Path.GetFullPath("src/Lucent.Core/Components.cs"));
+            var layoutSource = new Uri(
+                Path.GetFullPath("src/Lucent.Core/Components/Layout/Layout.cs")
+            );
             var layoutSourceText = await File.ReadAllTextAsync(layoutSource.LocalPath);
             var layoutSourceOffset =
                 layoutSourceText.IndexOf("ComponentRecipe Layout(", StringComparison.Ordinal)
@@ -3085,7 +3104,7 @@ style ScrollStyle {
                         .GetProperty("changes")
                         .EnumerateObject()
                         .Single(change =>
-                            change.Name.EndsWith("Components.cs", StringComparison.Ordinal)
+                            change.Name.EndsWith("Layout.cs", StringComparison.Ordinal)
                         )
                         .Value.GetArrayLength() == 1,
                 "dirty C# inserted-line or same-line offsets used stale source positions."
@@ -3148,7 +3167,9 @@ style ScrollStyle {
             );
             var browserText = await File.ReadAllTextAsync(browserDocument.LocalPath);
             var headerTokens = await SemanticTokensAsync(browserLsp, header, headerText);
-            var errorDocument = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/Error.lui"));
+            var errorDocument = new Uri(
+                Path.GetFullPath("src/Lucent.Core/Components/Status/ErrorNotice.lui")
+            );
             var errorText = await File.ReadAllTextAsync(errorDocument.LocalPath);
             var errorTokens = await SemanticTokensAsync(browserLsp, errorDocument, errorText);
             var browserTokens = await SemanticTokensAsync(browserLsp, browserDocument, browserText);

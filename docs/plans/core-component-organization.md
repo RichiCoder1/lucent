@@ -52,6 +52,8 @@ Retain the ordinary application authoring rules: generated code must use the sam
 
 If same-assembly generation exposes a blocker, reduce it to a focused compiler/build regression. Do not silently publish a new package to bypass it. A separate assembly is a possible later architectural decision, not a prerequisite or authorized outcome of this issue.
 
+Public component XML documentation authored in `.lui` is tracked separately in [#152](https://github.com/RichiCoder1/lucent/issues/152). Until that lowering gap is closed, a thin documented public C# adapter may expose an internal generated composition without changing its ordinary runtime or package boundary.
+
 ## 3. Ship one substantive `.lui` stock composite
 
 Default proving component: a small error notice with a message and an optional retry action, composed from stock layout, text and button primitives. Choose the final public name after checking existing names; the intended behavior is a presentation of recoverable errors, not an exception boundary. Prefer replacing a real repeated Issue Browser error/retry composition over adding an unused demonstration.

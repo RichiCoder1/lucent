@@ -85,6 +85,19 @@ if (narrow.RequireBox(narrow.Require(SemanticRole.Button, "Run")).Bounds.Height 
     || narrow.Require(SemanticRole.TextField, "Retained draft").Value != "keep this draft")
     throw new InvalidOperationException("Packaged conditional style did not restore its base value.");
 Console.WriteLine("Packaged parameterized styles, window breakpoints and retained layout: PASS");
+var noticeCalls = 0;
+await using (var notice = await HeadlessApplication.StartAsync(
+    Components.ErrorNotice(() => "Package failure", () => noticeCalls++)))
+{
+    var noticeSnapshot = await notice.SnapshotAsync();
+    var status = noticeSnapshot.Require(SemanticRole.Status, "Package failure");
+    var retry = noticeSnapshot.Require(SemanticRole.Button, "Retry");
+    var result = await notice.InvokeAsync(context => context.Composition.ExecuteSemanticCommand(
+        retry.Identity, new(SemanticCommandKind.Invoke)));
+    if (status.Name != "Package failure" || result != SemanticCommandResult.Applied || noticeCalls != 1)
+        throw new InvalidOperationException("Packaged ErrorNotice lost status or retry behavior.");
+}
+Console.WriteLine("Packaged ErrorNotice composition: PASS");
 await using var rendered = await SkiaHeadlessApplication.StartAsync(
     context => HeadlessPackageProbe.Components.Probe(() => { },
         new(context.Composition.Root.Scope, HeadlessPackageProbe.ProbeBreakpoints.Set)),
