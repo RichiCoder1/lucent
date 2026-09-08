@@ -152,6 +152,14 @@ public static class LuiCompiler
                 diagnostics
             )
             .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var constantStyleExpressions = ConstantStyleExpressions(
+            probeModel,
+            probeTree,
+            probeMap,
+            writer,
+            document,
+            document.Source
+        );
         var implicitComponentDiagnostics = new List<LuiDiagnostic>();
         foreach (
             var pair in ContentPlans(
@@ -195,6 +203,7 @@ public static class LuiCompiler
             contentContributions,
             styleValueExpressions,
             styleValueBranches,
+            constantStyleExpressions,
             NullChecks(probeModel, probeTree, document),
             statePlans,
             liveValues
@@ -1649,6 +1658,7 @@ public static class LuiCompiler
                 contentContributions,
                 new HashSet<int>(),
                 new Dictionary<int, IReadOnlyList<StyleValueBranchPlan>>(),
+                null,
                 new HashSet<int>()
             ),
             [parameter.ContainingSymbol.ContainingType.ToDisplayString()],
@@ -1867,6 +1877,75 @@ public static class LuiCompiler
             );
         }
         return plans;
+    }
+
+    private static HashSet<int> ConstantStyleExpressions(
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        Writer writer,
+        LuiDocumentSyntax document,
+        string documentSource
+    )
+    {
+        var constants = new HashSet<int>();
+        var parameterizedExpressions = new HashSet<int>(
+            document
+                .Styles.Where(style =>
+                    style.Parameters.Count != 0 || !style.OpenParameters.IsMissing
+                )
+                .SelectMany(style => StyleAssignments(style.Members))
+                .Select(assignment =>
+                    TrimStyleExpression(assignment.Expression.Span, documentSource).Start
+                )
+        );
+        foreach (var expression in tree.GetRoot().DescendantNodes().OfType<ExpressionSyntax>())
+        {
+            if (!IsStyleExpressionRoot(expression))
+                continue;
+            var translated = Translate(
+                map,
+                new LuiSpan(expression.SpanStart, expression.Span.Length)
+            );
+            if (translated is not { } generatedSource)
+                continue;
+            var styleSpan = writer
+                .StyleExpressionSpans.Where(span =>
+                    span.Start <= generatedSource.Start && span.End >= generatedSource.End
+                )
+                .OrderBy(span => span.Length)
+                .FirstOrDefault();
+            if (
+                styleSpan.Length == 0
+                && !writer.StyleExpressionSpans.Any(span =>
+                    span.Start <= generatedSource.Start && span.End >= generatedSource.End
+                )
+            )
+                continue;
+            var source = TrimStyleExpression(styleSpan, documentSource);
+            if (source.Start != generatedSource.Start || source.End != generatedSource.End)
+                continue;
+            if (
+                parameterizedExpressions.Contains(source.Start)
+                && model.GetConstantValue(expression).HasValue
+            )
+                constants.Add(source.Start);
+        }
+        return constants;
+    }
+
+    private static IEnumerable<LuiStyleAssignmentSyntax> StyleAssignments(
+        IReadOnlyList<LuiStyleMemberSyntax> members
+    )
+    {
+        foreach (var member in members)
+        {
+            if (member is LuiStyleAssignmentSyntax assignment)
+                yield return assignment;
+            else if (member is LuiVariantGroupSyntax group)
+                foreach (var nested in StyleAssignments(group.Members))
+                    yield return nested;
+        }
     }
 
     private static bool IsStyleExpressionRoot(ExpressionSyntax expression) =>
@@ -2158,6 +2237,7 @@ public static class LuiCompiler
             IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
             HashSet<int> styleValueExpressions,
             IReadOnlyDictionary<int, IReadOnlyList<StyleValueBranchPlan>> styleValueBranches,
+            HashSet<int>? constantStyleExpressions,
             HashSet<int> nullChecks,
             IReadOnlyDictionary<string, StatePlan>? states = null,
             HashSet<int>? liveValues = null
@@ -2170,6 +2250,7 @@ public static class LuiCompiler
             ContentContributions = contentContributions;
             StyleValueExpressions = styleValueExpressions;
             StyleValueBranches = styleValueBranches;
+            ConstantStyleExpressions = constantStyleExpressions ?? [];
             NullChecks = nullChecks;
             States = states ?? new Dictionary<string, StatePlan>();
             LiveValues = liveValues ?? [];
@@ -2185,6 +2266,7 @@ public static class LuiCompiler
             int,
             IReadOnlyList<StyleValueBranchPlan>
         > StyleValueBranches { get; }
+        internal HashSet<int> ConstantStyleExpressions { get; }
         internal HashSet<int> NullChecks { get; }
         internal IReadOnlyDictionary<string, StatePlan> States { get; }
         internal HashSet<int> LiveValues { get; }
@@ -3765,7 +3847,7 @@ public static class LuiCompiler
                 assignment.Expression.Text.Trim().Length
             );
             var styleValue = plans?.StyleValueExpressions.Contains(expression.Start) == true;
-            var bind = live;
+            var bind = live && plans?.ConstantStyleExpressions.Contains(expression.Start) != true;
             var property =
                 plans is not null
                 && plans.Properties.TryGetValue(assignment.Property.Span.Start, out var resolved)

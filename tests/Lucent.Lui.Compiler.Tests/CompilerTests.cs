@@ -766,6 +766,61 @@ style Workspace(float width) {
     }
 
     [TestMethod]
+    public void ParameterizedStyleLiteralsDoNotBecomeLiveBindings()
+    {
+        const string source = """
+namespace Sample;
+using System;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Example(float width) { <Row style={Workspace(width)} /> }
+style Workspace(float width) {
+    Axis: LayoutAxis.Column;
+    Height: Math.Max(1f, 2f);
+    Width: width;
+    when Hover { Opacity: .5f; }
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("parameterized-style-literals", references: References()),
+            new LuiFreshnessIdentity(
+                "parameterized-style-literals",
+                "parameterized-style-literals",
+                new LuiDocumentIdentity("ParameterizedStyleLiterals.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "parameterized literal style did not compile: "
+                + String.Join(" | ", result.Diagnostics.Select(item => item.Message))
+        );
+        Assert(
+            result.Source!.Contains(
+                ".Set(global::Lucent.Core.LayoutProperties.Axis",
+                StringComparison.Ordinal
+            )
+                && result.Source.Contains(
+                    ".Bind<float?>(global::Lucent.Core.LayoutProperties.Width",
+                    StringComparison.Ordinal
+                )
+                && result.Source.Contains(
+                    ".Bind<float?>(global::Lucent.Core.LayoutProperties.Height",
+                    StringComparison.Ordinal
+                )
+                && result.Source.Contains("LayoutAxis.Column", StringComparison.Ordinal)
+                && result.Source.Contains(
+                    ".Set(global::Lucent.Core.VisualProperties.Opacity",
+                    StringComparison.Ordinal
+                )
+                && result.Source.Contains(".5f", StringComparison.Ordinal),
+            "literal parameterized assignments were lowered as live bindings.\n" + result.Source
+        );
+    }
+
+    [TestMethod]
     public void GrammarRecoveryAndFormatterContracts()
     {
         const string members = """

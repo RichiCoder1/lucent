@@ -317,7 +317,9 @@ internal sealed class ElementPresentation
                     return (Func<bool>)(() => value.Published.Value);
                 })
                 .ToArray();
-            bool Active() => IsActive(item.Condition) && conditions.All(read => read());
+            bool Active() =>
+                (item.Condition == VariantState.None || IsActive(item.Condition))
+                && conditions.All(read => read());
             yield return item with
             {
                 Assignment = item.Assignment is IBindingAssignment binding

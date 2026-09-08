@@ -152,6 +152,39 @@ public sealed class StyleConditionContracts
     }
 
     [TestMethod]
+    public void UnconditionalBindingDoesNotSubscribeToVariantSignals()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "unconditional-binding");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var reads = 0;
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Bind(
+                LayoutProperties.Width,
+                () =>
+                {
+                    reads++;
+                    return 42f;
+                }
+            )
+        );
+        graph.Drain();
+        Assert.AreEqual(1, reads);
+
+        composition.Root.SetVariants(VariantState.Hover);
+        graph.Drain();
+        composition.Root.SetVariants(VariantState.None);
+        graph.Drain();
+
+        Assert.AreEqual(
+            1,
+            reads,
+            "An unconditional binding must not rerun when interaction variants change."
+        );
+    }
+
+    [TestMethod]
     public void NestedConditionsAndVariantsComposeByAnd()
     {
         var graph = new ReactiveGraph();
