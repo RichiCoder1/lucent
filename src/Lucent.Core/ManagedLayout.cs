@@ -189,13 +189,13 @@ internal static class ManagedLayout
                 rowSizes.Skip(placement.Row).Take(placement.RowSpan).Sum()
                 + rowGap * (placement.RowSpan - 1);
             var childWidth =
-                alignment == LayoutAlignment.Stretch && item.MaxWidth >= cellWidth
-                    ? cellWidth
-                    : Math.Min(item.Width, cellWidth);
+                !item.AutoWidth ? item.Width
+                : alignment == LayoutAlignment.Stretch && item.MaxWidth >= cellWidth ? cellWidth
+                : Math.Min(item.Width, cellWidth);
             var childHeight =
-                alignment == LayoutAlignment.Stretch && item.MaxHeight >= cellHeight
-                    ? cellHeight
-                    : Math.Min(item.Height, cellHeight);
+                !item.AutoHeight ? item.Height
+                : alignment == LayoutAlignment.Stretch && item.MaxHeight >= cellHeight ? cellHeight
+                : Math.Min(item.Height, cellHeight);
             var xOffset = alignment switch
             {
                 LayoutAlignment.Center => (cellWidth - childWidth) / 2,

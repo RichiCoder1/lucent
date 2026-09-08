@@ -48,7 +48,7 @@ public sealed class Style
     {
         ArgumentNullException.ThrowIfNull(condition);
         ArgumentNullException.ThrowIfNull(style);
-        return new([.. _nodes, new ConditionNode(new(condition), style)]);
+        return new([.. _nodes, new ConditionNode(condition, style)]);
     }
 
     /// <summary>Combines styles in order; settings in later styles override earlier settings.</summary>
@@ -97,7 +97,7 @@ public sealed class Style
                 foreach (
                     var assignment in conditional.Style.Flatten(
                         condition,
-                        [.. conditions, conditional.Condition]
+                        [.. conditions, new StyleCondition(conditional.Condition, condition)]
                     )
                 )
                     yield return assignment;
@@ -111,12 +111,13 @@ public sealed class Style
 
     private sealed record VariantNode(VariantState Condition, Style Style) : Node;
 
-    private sealed record ConditionNode(StyleCondition Condition, Style Style) : Node;
+    private sealed record ConditionNode(Func<bool> Condition, Style Style) : Node;
 }
 
-internal sealed class StyleCondition(Func<bool> read)
+internal sealed class StyleCondition(Func<bool> read, VariantState variants)
 {
     internal Func<bool> Read { get; } = read;
+    internal VariantState Variants { get; } = variants;
 }
 
 /// <summary>Specifies how long an eligible property takes to change between values.</summary>

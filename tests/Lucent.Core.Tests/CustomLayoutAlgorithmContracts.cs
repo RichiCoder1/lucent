@@ -59,6 +59,7 @@ public sealed class CustomLayoutAlgorithmContracts
 
         _ = SceneLayout.Project(composition, new(100, 40, 1), new EmptyShaper());
 
+        Assert.AreEqual(new LayoutSize(15, 10), algorithm.FirstMeasured);
         Assert.AreEqual(algorithm.FirstMeasured, algorithm.SecondMeasured);
         Expect<InvalidOperationException>(() => _ = algorithm.Captured!.Children);
         Expect<InvalidOperationException>(() => _ = algorithm.CapturedChild!.DesiredSize);

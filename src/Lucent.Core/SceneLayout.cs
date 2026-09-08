@@ -7,6 +7,8 @@ namespace Lucent.Core;
 /// <summary>Projects a retained composition into immutable layout, scene, and input data.</summary>
 public static class SceneLayout
 {
+    private const int MaxStructuralDiscoveryRounds = 8;
+
     /// <summary>Lays out the current composition and returns a fresh retained scene; callers install it in the input router.</summary>
     public static RetainedScene Project(
         Composition composition,
@@ -31,24 +33,14 @@ public static class SceneLayout
             );
         viewport.Validate();
         composition.Flush(maximumWorkItems);
-        var windowBreakpoints = WindowBreakpointElements(composition);
-        if (windowBreakpoints.Length != 0)
-        {
-            for (var discovery = 0; ; discovery++)
-            {
-                foreach (var state in windowBreakpoints)
-                    state.Assign(composition, viewport.Width);
-                composition.Flush(maximumWorkItems);
-                var current = WindowBreakpointElements(composition);
-                if (current.SequenceEqual(windowBreakpoints))
-                    break;
-                if (discovery >= 7)
-                    throw new InvalidOperationException(
-                        "Window breakpoint registration did not stabilize within eight passes."
-                    );
-                windowBreakpoints = current;
-            }
-        }
+        var structuralDiscoveryRounds = 0;
+        var windowBreakpointDiscovery = DiscoverWindowBreakpoints(
+            composition,
+            viewport.Width,
+            maximumWorkItems,
+            ref structuralDiscoveryRounds
+        );
+        var windowBreakpoints = windowBreakpointDiscovery.Elements;
         var responsive = ResponsiveElements(composition);
         Dictionary<long, LayoutRect>? realizedViewportBounds = null;
         if (composition.HasVirtualizedRegions || responsive.Length != 0)
@@ -62,7 +54,6 @@ public static class SceneLayout
                     shaper,
                     assignedBoxes,
                     new ProjectionCache(),
-                    null,
                     false,
                     false
                 )
@@ -75,7 +66,7 @@ public static class SceneLayout
             // example a SplitPane). Discover that finite tree before realizing rows.
             // Stable containers still get one correction pass; geometry feedback is
             // rejected below rather than iterated until an arbitrary layout settles.
-            for (var discovery = 0; ; discovery++)
+            for (; ; )
             {
                 foreach (var item in responsive)
                 {
@@ -87,10 +78,34 @@ public static class SceneLayout
                     item.State.Assign(new(inner.Width, inner.Height));
                 }
                 composition.Flush(maximumWorkItems);
+                var previousWindowBreakpoints = windowBreakpoints;
+                var discoveredWindows = DiscoverWindowBreakpoints(
+                    composition,
+                    viewport.Width,
+                    maximumWorkItems,
+                    ref structuralDiscoveryRounds
+                );
+                windowBreakpoints = discoveredWindows.Elements;
+                var windowRegistrationChanged =
+                    discoveredWindows.RegistrationChanged
+                    || !windowBreakpoints.SequenceEqual(previousWindowBreakpoints);
+                if (
+                    windowRegistrationChanged
+                    && !discoveredWindows.RegistrationChanged
+                    && !TryConsumeStructuralDiscoveryRound(ref structuralDiscoveryRounds)
+                )
+                    throw new InvalidOperationException(
+                        "Window breakpoint registration did not stabilize within eight passes."
+                    );
                 var current = ResponsiveElements(composition);
-                if (current.SequenceEqual(responsive))
+                var responsiveRegistrationChanged = !current.SequenceEqual(responsive);
+                if (!responsiveRegistrationChanged && !windowRegistrationChanged)
                     break;
-                if (discovery >= 7)
+                if (
+                    responsiveRegistrationChanged
+                    && !windowRegistrationChanged
+                    && !TryConsumeStructuralDiscoveryRound(ref structuralDiscoveryRounds)
+                )
                     throw new InvalidOperationException(
                         "Responsive container discovery did not stabilize within eight passes."
                     );
@@ -104,7 +119,6 @@ public static class SceneLayout
                         shaper,
                         assignedBoxes,
                         new ProjectionCache(),
-                        null,
                         false,
                         false
                     )
@@ -125,7 +139,6 @@ public static class SceneLayout
                         shaper,
                         assignedBoxes,
                         new ProjectionCache(),
-                        null,
                         false,
                         false
                     )
@@ -169,7 +182,6 @@ public static class SceneLayout
                     shaper,
                     boxes,
                     cache,
-                    null,
                     false,
                     false
                 )
@@ -508,6 +520,46 @@ public static class SceneLayout
             .Select(state => state!)
             .ToArray();
 
+    private static (
+        WindowBreakpoints[] Elements,
+        bool RegistrationChanged
+    ) DiscoverWindowBreakpoints(
+        Composition composition,
+        float width,
+        int maximumWorkItems,
+        ref int structuralDiscoveryRounds
+    )
+    {
+        var elements = WindowBreakpointElements(composition);
+        var registrationChanged = false;
+        if (elements.Length == 0)
+            return (elements, registrationChanged);
+
+        while (true)
+        {
+            foreach (var state in elements)
+                state.Assign(composition, width);
+            composition.Flush(maximumWorkItems);
+            var current = WindowBreakpointElements(composition);
+            if (current.SequenceEqual(elements))
+                return (current, registrationChanged);
+            registrationChanged = true;
+            if (!TryConsumeStructuralDiscoveryRound(ref structuralDiscoveryRounds))
+                throw new InvalidOperationException(
+                    "Window breakpoint registration did not stabilize within eight passes."
+                );
+            elements = current;
+        }
+    }
+
+    private static bool TryConsumeStructuralDiscoveryRound(ref int rounds)
+    {
+        if (rounds >= MaxStructuralDiscoveryRounds)
+            return false;
+        rounds++;
+        return true;
+    }
+
     private static void EnsureWindowBreakpointElementsUnchanged(
         Composition composition,
         IReadOnlyList<WindowBreakpoints> expected
@@ -537,9 +589,8 @@ public static class SceneLayout
         ITextShaper shaper,
         List<LayoutBox> boxes,
         ProjectionCache cache,
-        LayoutAxis? parentAxis,
-        bool crossAllotted,
-        bool mainAllotted
+        bool widthAllotted,
+        bool heightAllotted
     )
     {
         if (element.Participation == ElementParticipation.Collapsed)
@@ -593,13 +644,9 @@ public static class SceneLayout
             style.MinHeight,
             style.MaxHeight
         );
-        if (crossAllotted && parentAxis == LayoutAxis.Row && style.Height is null)
-            height = Constrain(allotted.Height, style.MinHeight, style.MaxHeight);
-        if (crossAllotted && parentAxis == LayoutAxis.Column && style.Width is null)
+        if (widthAllotted)
             width = Constrain(allotted.Width, style.MinWidth, style.MaxWidth);
-        if (mainAllotted && parentAxis == LayoutAxis.Row)
-            width = Constrain(allotted.Width, style.MinWidth, style.MaxWidth);
-        if (mainAllotted && parentAxis == LayoutAxis.Column)
+        if (heightAllotted)
             height = Constrain(allotted.Height, style.MinHeight, style.MaxHeight);
         if (element.Parent is null)
         {
@@ -659,7 +706,18 @@ public static class SceneLayout
                 .ToArray();
 
             LayoutAssignment[] assignments;
-            if (style.VirtualRowHeight is { } virtualRowHeight)
+            if (
+                element.IsConditionalRegion
+                && !element.HasPresentation
+                && participating is [var active]
+            )
+            {
+                assignments =
+                [
+                    new(active.Index, new LayoutRect(0, 0, inner.Width, inner.Height), true, true),
+                ];
+            }
+            else if (style.VirtualRowHeight is { } virtualRowHeight)
             {
                 assignments = participating
                     .Select(
@@ -801,6 +859,7 @@ public static class SceneLayout
             }
 
             var byIndex = assignments.ToDictionary(value => value.Index);
+            var specsByIndex = specs.ToDictionary(value => value.Index);
             for (var index = 0; index < element.Children.Count; index++)
             {
                 var child = element.Children[index];
@@ -811,11 +870,12 @@ public static class SceneLayout
                 }
                 var assignment = byIndex[index];
                 var relative = assignment.Bounds;
+                var desired = specsByIndex[index];
                 var childBounds = new LayoutRect(
                     Finite(inner.X + relative.X - style.Scroll.X),
                     Finite(inner.Y + relative.Y - style.Scroll.Y),
-                    relative.Width,
-                    relative.Height
+                    assignment.WidthAssigned ? relative.Width : desired.Width,
+                    assignment.HeightAssigned ? relative.Height : desired.Height
                 );
                 childNodes.AddRange(
                     Layout(
@@ -825,13 +885,8 @@ public static class SceneLayout
                         shaper,
                         boxes,
                         cache,
-                        style.Axis,
-                        style.Axis == LayoutAxis.Row
-                            ? assignment.HeightAssigned
-                            : assignment.WidthAssigned,
-                        style.Axis == LayoutAxis.Row
-                            ? assignment.WidthAssigned
-                            : assignment.HeightAssigned
+                        assignment.WidthAssigned,
+                        assignment.HeightAssigned
                     )
                 );
             }
@@ -1436,6 +1491,68 @@ public static class SceneLayout
                     );
                 width = Math.Min(width, wrapWidth);
             }
+            else if (constrainedContentWidth is { } rowWidth)
+            {
+                var specs = children
+                    .Select(
+                        (child, index) =>
+                        {
+                            var childStyle = cache.Read(child.Element);
+                            return new LayoutItemSpec(
+                                index,
+                                child.Main,
+                                child.Cross,
+                                child.MinMain,
+                                childStyle.MinHeight,
+                                child.MaxMain,
+                                childStyle.MaxHeight,
+                                false,
+                                child.AutoCross,
+                                childStyle.MainBasis,
+                                child.MainGrow,
+                                child.MainShrink,
+                                childStyle.GridPlacement
+                            );
+                        }
+                    )
+                    .ToArray();
+                var arranged = ManagedLayout.ArrangeFlex(
+                    specs,
+                    LayoutAxis.Row,
+                    rowWidth,
+                    0,
+                    style.Spacing,
+                    style.RowGap,
+                    false,
+                    style.MainAlignment,
+                    style.CrossAlignment
+                );
+                var byIndex = arranged.ToDictionary(assignment => assignment.Index);
+                for (var index = 0; index < children.Length; index++)
+                {
+                    var child = children[index];
+                    if (!child.AutoCross)
+                    {
+                        height = Math.Max(height, child.Cross);
+                        continue;
+                    }
+                    var elementChild = participatingChildren[index];
+                    var childStyle = cache.Read(elementChild);
+                    var constrained = Intrinsic(
+                        elementChild,
+                        childStyle,
+                        Shape(elementChild, childStyle, scale, shaper, cache),
+                        scale,
+                        shaper,
+                        cache,
+                        byIndex[index].Bounds.Width
+                    );
+                    height = Math.Max(
+                        height,
+                        Constrain(constrained.Height, childStyle.MinHeight, childStyle.MaxHeight)
+                    );
+                }
+            }
             else
                 foreach (var child in children)
                     height = Math.Max(height, child.Cross);
@@ -1541,11 +1658,19 @@ public static class SceneLayout
             return new(
                 Math.Min(
                     childConstraints.Width.Or(float.PositiveInfinity),
-                    Constrain(intrinsic.Width, childStyle.MinWidth, childStyle.MaxWidth)
+                    Constrain(
+                        childStyle.Width ?? intrinsic.Width,
+                        childStyle.MinWidth,
+                        childStyle.MaxWidth
+                    )
                 ),
                 Math.Min(
                     childConstraints.Height.Or(float.PositiveInfinity),
-                    Constrain(intrinsic.Height, childStyle.MinHeight, childStyle.MaxHeight)
+                    Constrain(
+                        childStyle.Height ?? intrinsic.Height,
+                        childStyle.MinHeight,
+                        childStyle.MaxHeight
+                    )
                 )
             );
         }

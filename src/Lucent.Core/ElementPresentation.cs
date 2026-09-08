@@ -277,26 +277,35 @@ internal sealed class ElementPresentation
         string group
     )
     {
-        var mounted = new Dictionary<StyleCondition, Signal<bool>>(
+        var mounted = new Dictionary<StyleCondition, MountedCondition>(
             ReferenceEqualityComparer.Instance
         );
         foreach (var item in assignments)
         {
+            Derived<bool>? parent = null;
             var conditions = item
                 .Conditions.Select(condition =>
                 {
                     if (!mounted.TryGetValue(condition, out var value))
                     {
-                        value = _element.Scope.Signal(
-                            false,
-                            _element.Name + ".style-when." + group + "." + mounted.Count
+                        var name = _element.Name + ".style-when." + group + "." + mounted.Count;
+                        var enclosing = parent;
+                        // Read a lazy parent gate, rather than its published signal: a parent
+                        // invalidated in the same batch must be refreshed before its child runs.
+                        var gate = _element.Scope.Derived(
+                            () =>
+                                (enclosing?.Value ?? true)
+                                && (
+                                    condition.Variants == VariantState.None
+                                    || IsActive(condition.Variants)
+                                )
+                                && _element.Composition.RunStyleCondition(condition.Read),
+                            name + ".gate"
                         );
+                        value = new(gate, _element.Scope.Signal(false, name));
                         mounted.Add(condition, value);
                         _ = _element.Scope.Effect(
-                            () =>
-                                value.Value = _element.Composition.RunStyleCondition(
-                                    condition.Read
-                                ),
+                            () => value.Published.Value = gate.Value,
                             _element.Name
                                 + ".style-when-effect."
                                 + group
@@ -304,7 +313,8 @@ internal sealed class ElementPresentation
                                 + (mounted.Count - 1)
                         );
                     }
-                    return (Func<bool>)(() => value.Value);
+                    parent = value.Gate;
+                    return (Func<bool>)(() => value.Published.Value);
                 })
                 .ToArray();
             bool Active() => IsActive(item.Condition) && conditions.All(read => read());
@@ -317,6 +327,8 @@ internal sealed class ElementPresentation
             };
         }
     }
+
+    private sealed record MountedCondition(Derived<bool> Gate, Signal<bool> Published);
 
     private interface IControlValue
     {

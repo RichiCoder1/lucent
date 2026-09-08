@@ -53,6 +53,8 @@ Core owns immutable engine inputs and results. The exact names may change during
 - Cache keys use stable element identity plus content, computed typography, writing direction, wrap policy, constraints, and scale generations. Dirty propagation stops when an ancestor's intrinsic and final geometry are unchanged.
 - The retained composition remains the owner. Engine nodes, cached paragraphs, and native resources if an engine is reconsidered later are released with the composition on its owner.
 
+Implementation status, September 8, 2026: retained paragraph caching and per-projection intrinsic measurement reuse are implemented. The cache-generation and ancestor dirty-propagation behavior above remains an optimization target; scene projection currently traverses and lays out the participating tree again. Do not read that target as an implemented cross-projection layout cache or a verified latency budget.
+
 The first Grid subset is explicit tracks (`fixed`, `auto`, `fr`, and `minmax`), row/column gaps, explicit placement, and contiguous spans. The first Flex subset is row/column direction, basis, grow, shrink, gaps, alignment, and wrapping. Unsupported combinations fail during authored-style validation rather than silently approximating CSS. Responsive choice reads the shell's assigned content box once per projection; a child contribution cannot select its own breakpoint.
 
 ## Constrained paragraph contract
