@@ -106,6 +106,7 @@ public sealed class AsyncValue<T> : ReactiveNode
 
     private void EnsureStarted()
     {
+        ValidatePotentialDependencies();
         if (!_dirty)
             return;
         CheckScopeEvaluationGuard();
@@ -230,6 +231,8 @@ public sealed class AsyncValue<T> : ReactiveNode
         }
         ReactiveGraph.ThrowCombined(error, changedError, "Async invalidation failed.");
     }
+
+    internal override void EnsureCurrent() => EnsureStarted();
 
     /// <summary>Cancels the active generation and releases graph ownership; late producer completion is ignored.</summary>
     public override void Dispose()

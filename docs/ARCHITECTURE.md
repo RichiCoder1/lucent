@@ -60,7 +60,7 @@ The Issue Browser uses this pipeline directly. Application code cannot draw on a
 
 ### Reactivity
 
-The UI-thread graph uses push invalidation and pull validation, lazy memoized derived values, dynamic dependency replacement, explicit batching, named-cycle diagnostics, and hierarchical scopes. A disposed scope jointly owns reactive subscriptions, structural regions, async cancellation, input capture, focus, semantics, and scene resources.
+The UI-thread graph uses push invalidation and pull validation, lazy memoized derived values, dynamic dependency replacement, explicit batching, named-cycle diagnostics, and hierarchical scopes. Derived values compare successful replacements with `EqualityComparer<T>.Default`; an equal output keeps its observable revision and suppresses every downstream transition, including effect callbacks, async generation replacement, and input-scene invalidation. Comparer failures follow derived evaluation failure and recovery rules. Mutating an object in place is not observable: publish a distinct value or a separate signal when consumers must react. Dependency collection and graph/scope detachment use reference-indexed structures while retaining first-read dependency order, stable-ID notification order, and reverse ownership cleanup. A disposed scope jointly owns reactive subscriptions, structural regions, async cancellation, input capture, focus, semantics, and scene resources.
 
 Async cancellation is resource cleanup, not the correctness mechanism. Generation identity, scope ownership, and UI-thread commit checks prevent stale or disposed work from committing. Runtime-tracked dependencies are the only `0.1` path. A compiler may use a narrow explicit registration seam only after `.lui` work demonstrates a measured need.
 

@@ -9,7 +9,10 @@ namespace Lucent.Core;
 public sealed partial class ReactiveScope : IDisposable
 {
     private readonly ReactiveGraph _graph;
-    private readonly List<IDisposable> _owned = [];
+    private readonly List<IDisposable?> _owned = [];
+    private readonly Dictionary<IDisposable, OwnedPositions> _ownedIndex = new(
+        ReferenceEqualityComparer.Instance
+    );
     private ReactiveScope? _parent;
     private Action? _mutationGuard;
     private Action? _factoryGuard;
@@ -24,7 +27,7 @@ public sealed partial class ReactiveScope : IDisposable
         _factoryRollback = parent?._factoryRollback;
         Name = name;
         Id = graph.Register(this);
-        parent?._owned.Add(this);
+        parent?.AddOwned(this);
     }
 
     /// <summary>Gets the stable identifier assigned at creation.</summary>
@@ -176,7 +179,7 @@ public sealed partial class ReactiveScope : IDisposable
     {
         CheckActive();
         ArgumentNullException.ThrowIfNull(value);
-        _owned.Add(value);
+        AddOwned(value);
         return value;
     }
 
@@ -205,12 +208,13 @@ public sealed partial class ReactiveScope : IDisposable
         CancelPosted();
         var owned = _owned.ToArray();
         _owned.Clear();
+        _ownedIndex.Clear();
         List<Exception>? errors = null;
         for (var index = owned.Length - 1; index >= 0; index--)
         {
             try
             {
-                owned[index].Dispose();
+                owned[index]?.Dispose();
             }
             catch (Exception exception)
             {
@@ -224,7 +228,17 @@ public sealed partial class ReactiveScope : IDisposable
             throw new AggregateException("Reactive scope cleanup failed.", errors);
     }
 
-    internal void Detach(IDisposable value) => _owned.Remove(value);
+    internal void Detach(IDisposable value)
+    {
+        if (!_ownedIndex.Remove(value, out var positions))
+            return;
+        _owned[positions.First] = null;
+        if (positions.More is { Count: > 0 })
+        {
+            positions.First = positions.More.Dequeue();
+            _ownedIndex.Add(value, positions);
+        }
+    }
 
     internal void SetMutationGuard(Action guard) =>
         _mutationGuard = guard ?? throw new ArgumentNullException(nameof(guard));
@@ -269,8 +283,27 @@ public sealed partial class ReactiveScope : IDisposable
         where T : IDisposable
     {
         CheckActive(skipFactoryGuard: true);
-        _owned.Add(value);
+        AddOwned(value);
         return value;
+    }
+
+    private void AddOwned(IDisposable value)
+    {
+        var index = _owned.Count;
+        _owned.Add(value);
+        if (!_ownedIndex.TryGetValue(value, out var positions))
+        {
+            _ownedIndex.Add(value, new(index));
+            return;
+        }
+        (positions.More ??= []).Enqueue(index);
+        _ownedIndex[value] = positions;
+    }
+
+    private struct OwnedPositions(int first)
+    {
+        public int First { get; set; } = first;
+        public Queue<int>? More { get; set; }
     }
 
     private sealed class Cleanup(Action callback) : IDisposable

@@ -12,8 +12,8 @@ public sealed class ReactiveGraph
     internal const int DefaultMaximumWorkItems = 10_000;
     private const int MaximumRetainedDrainFailures = 64;
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
-    private readonly List<ReactiveNode> _nodes = [];
-    private readonly List<ReactiveScope> _scopes = [];
+    private readonly Dictionary<int, ReactiveNode> _nodes = [];
+    private readonly Dictionary<int, ReactiveScope> _scopes = [];
     private readonly LinkedList<ReactiveEffect> _effects = [];
     private readonly ConcurrentQueue<IPosted> _posted = new();
     private readonly object _postedGate = new();
@@ -293,7 +293,7 @@ public sealed class ReactiveGraph
     {
         CheckThread();
         var dump = new StringBuilder("reactive-graph\n");
-        foreach (var scope in _scopes.OrderBy(scope => scope.Id))
+        foreach (var scope in _scopes.Values.OrderBy(scope => scope.Id))
             dump.Append("scope ")
                 .Append(scope.Id.ToString(CultureInfo.InvariantCulture))
                 .Append(" name=")
@@ -301,7 +301,7 @@ public sealed class ReactiveGraph
                 .Append(" parent=")
                 .Append(scope.Parent?.Id.ToString(CultureInfo.InvariantCulture) ?? "-")
                 .Append('\n');
-        foreach (var node in _nodes.OrderBy(node => node.Id))
+        foreach (var node in _nodes.Values.OrderBy(node => node.Id))
         {
             dump.Append("node ")
                 .Append(node.Id.ToString(CultureInfo.InvariantCulture))
@@ -329,24 +329,38 @@ public sealed class ReactiveGraph
 
     internal int Register(ReactiveNode node)
     {
-        _nodes.Add(node);
-        return ++_nextNodeId;
+        var id = ++_nextNodeId;
+        _nodes.Add(id, node);
+        return id;
     }
 
     internal int Register(ReactiveScope scope)
     {
-        _scopes.Add(scope);
-        return ++_nextScopeId;
+        var id = ++_nextScopeId;
+        _scopes.Add(id, scope);
+        return id;
     }
 
-    internal void Unregister(ReactiveNode node) => _nodes.Remove(node);
+    internal void Unregister(ReactiveNode node) => _nodes.Remove(node.Id);
 
-    internal void Unregister(ReactiveScope scope) => _scopes.Remove(scope);
+    internal void Unregister(ReactiveScope scope) => _scopes.Remove(scope.Id);
 
     internal void Track(ReactiveNode node)
     {
         CheckThread();
         _collecting?.Add(node);
+    }
+
+    internal void RefreshTrackedVersion(ReactiveNode node)
+    {
+        CheckThread();
+        _collecting?.Refresh(node);
+    }
+
+    internal void MarkCollectionChanged()
+    {
+        CheckThread();
+        _collecting?.MarkChanged();
     }
 
     internal T Untracked<T>(Func<T> callback)

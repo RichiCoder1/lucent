@@ -936,7 +936,15 @@ public sealed class Composition : IDisposable
     ) : ReactiveNode(graph, name, scope)
     {
         internal override string Kind => "input-projection";
-        internal long Revision { get; private set; }
+        private long _revision;
+        internal long Revision
+        {
+            get
+            {
+                EnsureCurrent();
+                return _revision;
+            }
+        }
 
         internal T Capture<T>(Func<T> project)
         {
@@ -954,7 +962,9 @@ public sealed class Composition : IDisposable
             return result;
         }
 
-        internal void Invalidate() => Revision = checked(Revision + 1);
+        internal void Invalidate() => _revision = checked(_revision + 1);
+
+        internal override void EnsureCurrent() => ValidatePotentialDependencies();
 
         internal override void DependencyChanged()
         {

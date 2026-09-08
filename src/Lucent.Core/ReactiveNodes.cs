@@ -12,18 +12,35 @@ internal interface IPosted
 
 internal readonly record struct Evaluation<T>(T Value, bool ChangedDuringRun);
 
+internal readonly record struct ReactiveRead(ReactiveNode Node, long Version);
+
 internal sealed class ReactiveCollector
 {
-    private readonly List<(ReactiveNode Node, long Version)> _reads = [];
-    internal IEnumerable<ReactiveNode> Nodes => _reads.Select(read => read.Node);
+    private readonly List<ReactiveRead> _reads = [];
+    private readonly Dictionary<ReactiveNode, int> _indices = new(
+        ReferenceEqualityComparer.Instance
+    );
+    private bool _changedDuringRun;
+    internal IReadOnlyList<ReactiveRead> Reads => _reads;
 
     internal void Add(ReactiveNode node)
     {
-        if (_reads.All(read => !ReferenceEquals(read.Node, node)))
-            _reads.Add((node, node.Version));
+        if (_indices.ContainsKey(node))
+            return;
+        _indices.Add(node, _reads.Count);
+        _reads.Add(new(node, node.Version));
     }
 
-    internal bool Changed() => _reads.Any(read => read.Node.Version != read.Version);
+    internal void Refresh(ReactiveNode node)
+    {
+        if (_indices.TryGetValue(node, out var index))
+            _reads[index] = new(node, node.Version);
+    }
+
+    internal void MarkChanged() => _changedDuringRun = true;
+
+    internal bool Changed() =>
+        _changedDuringRun || _reads.Any(read => read.Node.Version != read.Version);
 }
 
 /// <summary>Reports a reactive evaluation cycle using author-provided node names.</summary>
@@ -36,9 +53,15 @@ public sealed class ReactiveCycleException : InvalidOperationException
 /// <summary>Base type for graph-owned state; disposal removes all dependency links and graph registration.</summary>
 public abstract class ReactiveNode : IDisposable
 {
-    private readonly List<ReactiveNode> _dependencies = [];
-    private readonly List<ReactiveNode> _dependents = [];
+    private readonly List<ReactiveRead?> _dependencies = [];
+    private readonly Dictionary<ReactiveNode, int> _dependencyIndex = new(
+        ReferenceEqualityComparer.Instance
+    );
+    private readonly DependentSet _dependents = new();
     private ReactiveScope? _scope;
+    private bool _dependenciesPotentiallyChanged;
+    private bool _validatingPotentialDependencies;
+    private long _dependencyChangeRevision;
 
     internal ReactiveNode(ReactiveGraph graph, string name, ReactiveScope? scope)
     {
@@ -60,7 +83,8 @@ public abstract class ReactiveNode : IDisposable
     internal long Version { get; private set; }
     internal ReactiveGraph Graph { get; }
     internal ReactiveScope? Scope => _scope;
-    internal IReadOnlyList<ReactiveNode> Dependencies => _dependencies;
+    internal IEnumerable<ReactiveNode> Dependencies =>
+        _dependencies.Where(read => read.HasValue).Select(read => read!.Value.Node);
     internal abstract string Kind { get; }
 
     /// <summary>Records a dependency when a reactive value is read.</summary>
@@ -74,38 +98,64 @@ public abstract class ReactiveNode : IDisposable
     {
         if (IsDisposed)
             return;
-        var next = succeeded ? collector.Nodes : _dependencies.Concat(collector.Nodes);
-        ReplaceDependencies(next.Distinct().ToArray());
+        if (succeeded)
+        {
+            ReplaceDependencies(collector.Reads);
+            return;
+        }
+        var combined = new List<ReactiveRead>(_dependencyIndex.Count + collector.Reads.Count);
+        var seen = new HashSet<ReactiveNode>(ReferenceEqualityComparer.Instance);
+        foreach (var read in _dependencies)
+            if (read.HasValue && seen.Add(read.Value.Node))
+                combined.Add(read.Value);
+        foreach (var read in collector.Reads)
+            if (seen.Add(read.Node))
+                combined.Add(read);
+        ReplaceDependencies(combined);
     }
 
-    private void ReplaceDependencies(ReactiveNode[] next)
+    private void ReplaceDependencies(IReadOnlyList<ReactiveRead> next)
     {
-        foreach (
-            var dependency in _dependencies
-                .Where(dependency => !next.Contains(dependency))
-                .ToArray()
-        )
-            dependency._dependents.Remove(this);
-        foreach (
-            var dependency in next.Where(dependency =>
-                !ReferenceEquals(dependency, this) && !_dependencies.Contains(dependency)
-            )
-        )
-            dependency._dependents.Add(this);
+        var nextNodes = new HashSet<ReactiveNode>(
+            next.Select(read => read.Node),
+            ReferenceEqualityComparer.Instance
+        );
+        foreach (var read in _dependencies)
+            if (read.HasValue && !nextNodes.Contains(read.Value.Node))
+                read.Value.Node._dependents.Remove(this);
+        foreach (var read in next)
+            if (!ReferenceEquals(read.Node, this) && !_dependencyIndex.ContainsKey(read.Node))
+                read.Node._dependents.Add(this);
         _dependencies.Clear();
-        _dependencies.AddRange(next);
+        _dependencyIndex.Clear();
+        for (var index = 0; index < next.Count; index++)
+        {
+            _dependencies.Add(next[index]);
+            _dependencyIndex.Add(next[index].Node, index);
+        }
     }
 
     /// <summary>Invalidates dependents after this node changes.</summary>
     protected void Changed()
     {
         Version++;
+        NotifyDependents(definite: true);
+    }
+
+    /// <summary>Propagates possible invalidation without publishing a new observable value revision.</summary>
+    protected void PotentiallyChanged() => NotifyDependents(definite: false);
+
+    private void NotifyDependents(bool definite)
+    {
         List<Exception>? errors = null;
-        foreach (var dependent in _dependents.OrderBy(dependent => dependent.Id).ToArray())
+        foreach (var dependent in _dependents.Snapshot())
         {
             try
             {
-                dependent.DependencyChanged();
+                if (definite)
+                    dependent.ReceiveDependencyChanged();
+                else
+                    dependent.ReceivePotentialDependencyChange();
             }
             catch (Exception exception)
             {
@@ -114,6 +164,67 @@ public abstract class ReactiveNode : IDisposable
         }
         if (errors is { Count: > 0 })
             throw new AggregateException("Reactive invalidation failed.", errors);
+    }
+
+    private void ReceiveDependencyChanged()
+    {
+        _dependencyChangeRevision++;
+        DependencyChanged();
+    }
+
+    private void ReceivePotentialDependencyChange()
+    {
+        if (IsDisposed || _dependenciesPotentiallyChanged)
+            return;
+        _dependenciesPotentiallyChanged = true;
+        PotentialDependencyChanged();
+    }
+
+    /// <summary>Ensures lazy dependencies have resolved any potential invalidation.</summary>
+    internal virtual void EnsureCurrent() => ValidatePotentialDependencies();
+
+    /// <summary>Handles a possible dependency change without assuming its observable value changed.</summary>
+    internal virtual void PotentialDependencyChanged() => PotentiallyChanged();
+
+    /// <summary>Resolves potential dependencies and reports whether an observable input revision changed.</summary>
+    protected bool ValidatePotentialDependencies()
+    {
+        if (!_dependenciesPotentiallyChanged)
+            return false;
+        if (_validatingPotentialDependencies)
+        {
+            ReceiveDependencyChanged();
+            return true;
+        }
+        var changeRevision = _dependencyChangeRevision;
+        var dependencies = _dependencies
+            .Where(read => read.HasValue)
+            .Select(read => read!.Value)
+            .ToArray();
+        _validatingPotentialDependencies = true;
+        try
+        {
+            foreach (var read in dependencies)
+                Graph.Untracked(() =>
+                {
+                    read.Node.EnsureCurrent();
+                    return true;
+                });
+        }
+        catch
+        {
+            _dependenciesPotentiallyChanged = false;
+            throw;
+        }
+        finally
+        {
+            _validatingPotentialDependencies = false;
+        }
+        var changed = dependencies.Any(read => read.Node.Version != read.Version);
+        _dependenciesPotentiallyChanged = false;
+        if (changed && _dependencyChangeRevision == changeRevision)
+            ReceiveDependencyChanged();
+        return changed;
     }
 
     internal virtual void DependencyChanged() { }
@@ -139,13 +250,13 @@ public abstract class ReactiveNode : IDisposable
         List<Exception>? errors = null;
         try
         {
-            ReplaceDependencies([]);
-            foreach (var dependent in _dependents.OrderBy(dependent => dependent.Id).ToArray())
+            ReplaceDependencies(Array.Empty<ReactiveRead>());
+            foreach (var dependent in _dependents.Snapshot())
             {
                 dependent.RemoveDependency(this);
                 try
                 {
-                    dependent.DependencyChanged();
+                    dependent.ReceiveDependencyChanged();
                 }
                 catch (Exception exception)
                 {
@@ -165,7 +276,12 @@ public abstract class ReactiveNode : IDisposable
             throw new AggregateException("Reactive node disposal failed.", errors);
     }
 
-    private void RemoveDependency(ReactiveNode dependency) => _dependencies.Remove(dependency);
+    private void RemoveDependency(ReactiveNode dependency)
+    {
+        if (!_dependencyIndex.Remove(dependency, out var index))
+            return;
+        _dependencies[index] = null;
+    }
 
     /// <summary>Rejects mutation during a protected scope operation.</summary>
     protected void CheckScopeMutationGuard()
@@ -176,6 +292,56 @@ public abstract class ReactiveNode : IDisposable
 
     /// <summary>Checks owner constraints while allowing lazy evaluation to read across provisional subtrees.</summary>
     protected void CheckScopeEvaluationGuard() => Graph.CheckThread();
+
+    private sealed class DependentSet
+    {
+        private ReactiveNode? _single;
+        private HashSet<ReactiveNode>? _many;
+
+        internal void Add(ReactiveNode node)
+        {
+            if (_many is not null)
+            {
+                _many.Add(node);
+                return;
+            }
+            if (_single is null)
+            {
+                _single = node;
+                return;
+            }
+            if (ReferenceEquals(_single, node))
+                return;
+            _many = new HashSet<ReactiveNode>(ReferenceEqualityComparer.Instance) { _single, node };
+            _single = null;
+        }
+
+        internal void Remove(ReactiveNode node)
+        {
+            if (_many is null)
+            {
+                if (ReferenceEquals(_single, node))
+                    _single = null;
+                return;
+            }
+            if (!_many.Remove(node) || _many.Count != 1)
+                return;
+            _single = _many.Single();
+            _many = null;
+        }
+
+        internal ReactiveNode[] Snapshot() =>
+            _many is not null ? _many.OrderBy(node => node.Id).ToArray()
+            : _single is not null ? [_single]
+            : [];
+
+        internal void Clear()
+        {
+            _single = null;
+            _many?.Clear();
+            _many = null;
+        }
+    }
 }
 
 /// <summary>Writable graph state.</summary>
@@ -229,6 +395,7 @@ public sealed class Derived<T> : ReactiveNode
     private T? _value;
     private bool _dirty = true;
     private bool _failed;
+    private bool _hasValue;
 
     internal Derived(ReactiveGraph graph, Func<T> compute, string name, ReactiveScope? scope)
         : base(graph, name, scope)
@@ -245,15 +412,35 @@ public sealed class Derived<T> : ReactiveNode
         {
             Graph.CheckThread();
             Read();
+            ValidatePotentialDependencies();
             if (_dirty)
             {
                 CheckScopeEvaluationGuard();
-                var evaluation = Graph.Evaluate(this, _compute!);
-                _value = evaluation.Value;
+                var evaluation = Graph.Evaluate(
+                    this,
+                    () =>
+                    {
+                        var value = _compute!();
+                        return (
+                            Value: value,
+                            Changed: _hasValue
+                                && !EqualityComparer<T>.Default.Equals(_value!, value)
+                        );
+                    }
+                );
+                _value = evaluation.Value.Value;
                 _dirty = false;
                 _failed = false;
+                _hasValue = true;
+                if (evaluation.Value.Changed)
+                    Changed();
                 if (evaluation.ChangedDuringRun)
+                {
                     DependencyChanged();
+                    Graph.MarkCollectionChanged();
+                }
+                else
+                    Graph.RefreshTrackedVersion(this);
             }
             return _value!;
         }
@@ -267,8 +454,10 @@ public sealed class Derived<T> : ReactiveNode
         _dirty = true;
         _failed = false;
         if (notify)
-            Changed();
+            PotentiallyChanged();
     }
+
+    internal override void EnsureCurrent() => _ = Value;
 
     internal override void EvaluationFailed() => _failed = true;
 
@@ -282,6 +471,7 @@ public sealed class Derived<T> : ReactiveNode
         CheckScopeMutationGuard();
         _compute = null;
         _value = default;
+        _hasValue = false;
         base.Dispose();
     }
 }
@@ -290,6 +480,8 @@ public sealed class Derived<T> : ReactiveNode
 public sealed class ReactiveEffect : ReactiveNode
 {
     private Action? _callback;
+    private bool _failed;
+    private bool _mustRun = true;
 
     internal ReactiveEffect(ReactiveGraph graph, Action callback, string name, ReactiveScope? scope)
         : base(graph, name, scope)
@@ -301,14 +493,54 @@ public sealed class ReactiveEffect : ReactiveNode
     internal LinkedListNode<ReactiveEffect>? QueueNode { get; set; }
     internal override string Kind => "effect";
 
-    internal override void DependencyChanged() => Graph.Schedule(this);
+    internal override void DependencyChanged()
+    {
+        _mustRun = true;
+        Graph.Schedule(this);
+    }
+
+    internal override void PotentialDependencyChanged() => Graph.Schedule(this);
 
     internal void Run()
     {
         CheckScopeMutationGuard();
-        var changed = Graph.Collect(this, _callback!);
+        try
+        {
+            ValidatePotentialDependencies();
+        }
+        catch
+        {
+            _failed = true;
+            throw;
+        }
+        if (!_mustRun && !_failed)
+            return;
+        Graph.Unschedule(this);
+        _mustRun = false;
+        bool changed;
+        try
+        {
+            changed = Graph.Collect(this, _callback!);
+            _failed = false;
+        }
+        catch
+        {
+            _failed = true;
+            throw;
+        }
         if (changed)
+        {
+            _mustRun = true;
             Graph.Schedule(this);
+        }
+        else
+        {
+            // Dependency notifications raised while the callback was collecting are already
+            // represented by the collector's final stamps. Keep a retry only when a value
+            // changed after its last read.
+            _mustRun = false;
+            Graph.Unschedule(this);
+        }
     }
 
     internal void Dequeue() => QueueNode = null;
