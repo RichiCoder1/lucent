@@ -1,0 +1,8 @@
+{
+  "name": "lucent-vsix-build-tools",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@vscode/vsce": "3.9.2"
+  }
+}

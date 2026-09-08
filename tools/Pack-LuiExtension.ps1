@@ -9,7 +9,7 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $extensionRoot = Join-Path $repoRoot 'extensions/lucent-lui-vscode'
 $manifestPath = Join-Path $extensionRoot 'package.json'
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-$vsceVersion = '3.9.2'
+$toolRoot = Join-Path $PSScriptRoot 'vsce'
 
 if (!$OutputPath) {
     $OutputPath = Join-Path $repoRoot "artifacts/lucent-lui-vscode/$($manifest.name)-$($manifest.version).vsix"
@@ -35,13 +35,16 @@ try {
     Copy-Item (Join-Path $extensionRoot 'syntaxes') (Join-Path $stageRoot 'syntaxes') -Recurse
     Copy-Item (Join-Path $repoRoot 'LICENSE') (Join-Path $stageRoot 'LICENSE')
 
-    $npmCache = Join-Path $repoRoot "artifacts/npm-cache-vsce-$vsceVersion"
+    $npmCache = Join-Path $repoRoot 'artifacts/npm-cache-vsce'
     $previousNpmCache = $env:NPM_CONFIG_CACHE
     $env:NPM_CONFIG_CACHE = $npmCache
     try {
+        & npm ci --prefix $toolRoot --ignore-scripts --no-audit --no-fund
+        if ($LASTEXITCODE) { throw 'Locked VSCE tool restore failed.' }
+        $vsce = Join-Path $toolRoot 'node_modules/@vscode/vsce/vsce'
         Push-Location $stageRoot
         try {
-            $vsceOutput = & npx --yes "@vscode/vsce@$vsceVersion" package `
+            $vsceOutput = & node $vsce package `
                 --no-dependencies `
                 --out $OutputPath 2>&1
             $vsceExitCode = $LASTEXITCODE

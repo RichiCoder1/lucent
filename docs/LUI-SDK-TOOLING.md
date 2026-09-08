@@ -91,7 +91,7 @@ The VS Code host accepts an absolute `lucentLui.projectPath` or a path relative 
 
 ## Local editor packaging
 
-Build the language server with the repository's pinned SDK and install its publish directory separately. Package the thin VS Code client with `./tools/Pack-LuiExtension.ps1`; it uses a pinned official VSCE tool and includes the repository license. The [extension setup guide](../extensions/lucent-lui-vscode/README.md) describes the settings and packaging command. Parameterized styles and reactive condition groups require the matching compiler/server revision and extension 0.3.1 or later. Reload the VS Code window after updating the server path or extension.
+Build the language server with the repository's pinned SDK and install its publish directory separately. Package the thin VS Code client with `./tools/Pack-LuiExtension.ps1`; it restores the official VSCE tool with `npm ci` from the committed `tools/vsce/package-lock.json`, disables dependency lifecycle scripts, and includes the repository license. The [extension setup guide](../extensions/lucent-lui-vscode/README.md) describes the settings and packaging command. Parameterized styles and reactive condition groups require the matching compiler/server revision and extension 0.3.1 or later. Reload the VS Code window after updating the server path or extension.
 
 ```powershell
 dotnet publish src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj -c Release -o artifacts/lui-server
