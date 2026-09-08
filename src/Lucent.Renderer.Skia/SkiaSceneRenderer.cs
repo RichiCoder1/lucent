@@ -25,6 +25,8 @@ namespace Lucent.Renderer.Skia;
 /// </remarks>
 public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 {
+    private const string ReplacementCharacter = "\ufffd";
+
     // Pinned SKShaper encodes HarfBuzz positions against this source constant.
     private const float FontSizeScale = 512f;
     private const int ShapeCacheCapacity = 256;
@@ -629,7 +631,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             index += length - 1;
             start = index + 1;
         }
-        if (start < text.Length || text.Length == 0)
+        if (start <= text.Length)
             yield return (start, text.Length - start, false);
     }
 
@@ -843,6 +845,17 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         out int collectionIndex
     )
     {
+        var resolved = TryResolveFace(request, text, out collectionIndex);
+        return resolved
+            ?? throw new InvalidOperationException("No font fallback covers the text element.");
+    }
+
+    private static SKTypeface? TryResolveFace(
+        TextMeasureRequest request,
+        string text,
+        out int collectionIndex
+    )
+    {
         var requested = SKTypeface.FromFamilyName(
             request.FontFamily,
             (int)request.FontWeight,
@@ -874,7 +887,8 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             }
             fallback.Dispose();
         }
-        throw new InvalidOperationException("No font fallback covers the text element.");
+        collectionIndex = 0;
+        return null;
     }
 
     private static bool Covers(SKTypeface face, TextMeasureRequest request, string text)
@@ -960,15 +974,32 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         var faceRuns = new List<Piece>();
         foreach (var item in elements)
         {
-            using var resolved = ResolveFace(request, item.Text, out var collectionIndex);
-            var descriptor =
-                FaceFingerprint(resolved, collectionIndex)
-                + ":"
-                + collectionIndex.ToString(CultureInfo.InvariantCulture);
-            if (faceRuns.LastOrDefault() is { } priorRun && priorRun.Face == descriptor)
-                faceRuns[^1] = priorRun with { Text = priorRun.Text + item.Text };
-            else
-                faceRuns.Add(new Piece(item.Text, item.Offset, direction, descriptor));
+            var shapedText = item.Text;
+            uint? clusterOverride = null;
+            var resolved = TryResolveFace(request, shapedText, out var collectionIndex);
+            if (resolved is null)
+            {
+                shapedText = ReplacementCharacter;
+                clusterOverride = (uint)item.Offset;
+                resolved = ResolveFace(request, shapedText, out collectionIndex);
+            }
+            using (resolved)
+            {
+                var descriptor =
+                    FaceFingerprint(resolved, collectionIndex)
+                    + ":"
+                    + collectionIndex.ToString(CultureInfo.InvariantCulture);
+                if (
+                    clusterOverride is null
+                    && faceRuns.LastOrDefault() is { ClusterOverride: null } priorRun
+                    && priorRun.Face == descriptor
+                )
+                    faceRuns[^1] = priorRun with { Text = priorRun.Text + shapedText };
+                else
+                    faceRuns.Add(
+                        new Piece(shapedText, item.Offset, direction, descriptor, clusterOverride)
+                    );
+            }
         }
         result.AddRange(faceRuns);
     }

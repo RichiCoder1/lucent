@@ -6,6 +6,96 @@ namespace Lucent.Core.Tests;
 public sealed class VirtualizedListContracts
 {
     [TestMethod]
+    public void FilteringAtEndClampsBeforeRealizationAndRetainsSurvivingRows()
+    {
+        var graph = new ReactiveGraph();
+        var rows = graph.Signal(Enumerable.Range(0, 10_000).ToArray(), "rows");
+        using var composition = new Composition(graph, "virtualized-filter-clamp");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Column(composition.Root, theme, "root");
+        var field = composition.Child(composition.Root, "search");
+        var editor = Controls.TextField(field, theme, "Search", style: Style.Empty.Height(30));
+        var list = composition.Mount(
+            composition.Root,
+            theme,
+            Components.VirtualizedList(
+                () => rows.Value,
+                value => value,
+                value => Components.Text("Row " + value.Value),
+                () => 24f,
+                label: "Rows"
+            )
+        );
+        RetainedScene Install(float height = 200)
+        {
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                graph.Drain();
+                var candidate = SceneLayout.Project(
+                    composition,
+                    new(320, height, 1),
+                    new EmptyShaper()
+                );
+                if (composition.Input.SetScene(candidate))
+                    return candidate;
+            }
+            throw new InvalidOperationException("Filtered list did not settle.");
+        }
+        var scene = Install();
+        var identity = scene.Input.Single(item => item.Identity.ElementId == list.Id).Identity;
+        Assert.IsTrue(
+            composition.Input.ScrollSemantic(
+                identity,
+                new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)
+            )
+        );
+        scene = Install();
+        var last = scene
+            .Boxes.Single(box =>
+                composition.Find(box.Identity)?.Resolve(ProjectionProperties.Text).Value
+                == "Row 9999"
+            )
+            .Identity;
+        Assert.IsTrue(composition.Input.FocusSemantic(new(composition.Epoch, field.Id)));
+        editor.SetPreedit("候", 0, 1);
+        Install();
+        rows.Value = Enumerable.Range(9990, 10).ToArray();
+        scene = Install();
+        Assert.IsTrue(
+            scene.Boxes.Any(box => box.Identity == last),
+            "Surviving keyed row was remounted."
+        );
+        Assert.IsTrue(
+            list.Resolve(LayoutProperties.Scroll).Value.Y < 240,
+            "Small list retained its old offset."
+        );
+        Assert.IsTrue(
+            composition.Input.FocusedElement?.ElementId == field.Id && editor.PreeditText == "候",
+            "A scroll clamp interrupted the focused editor's IME session."
+        );
+        Assert.IsTrue(composition.Input.DispatchText(new(TextInputKind.Commit, "候")).Handled);
+        Assert.AreEqual("候", editor.Value);
+        scene = Install(500);
+        Assert.AreEqual(
+            0f,
+            list.Resolve(LayoutProperties.Scroll).Value.Y,
+            "Growing viewport did not clamp to zero."
+        );
+        rows.Value = [];
+        Install();
+        rows.Value = Enumerable.Range(0, 10_000).ToArray();
+        scene = Install();
+        Assert.IsTrue(scene.Boxes.Count < 100, "Refill realized an unbounded list.");
+        field.Dispose();
+        rows.Value = [];
+        Install();
+        Assert.IsNull(
+            composition.Input.FocusedElement,
+            "Removed focus owner survived the clamp retry."
+        );
+    }
+
+    [TestMethod]
     public void LargeUnstyledListRealizesFromAssignedViewport()
     {
         var graph = new ReactiveGraph();

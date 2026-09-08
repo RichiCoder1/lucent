@@ -173,12 +173,18 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         var outer =
             assignedBounds ?? LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale);
         var viewportHeight = SceneLayout.ContentBounds(_viewport, outer, viewport.Scale).Height;
-        var offset = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
-        var first = Math.Max(0, (int)MathF.Floor(offset / RowHeight) - Overscan);
-        var last = Math.Min(
-            _items.Length,
-            (int)MathF.Ceiling((offset + viewportHeight) / RowHeight) + Overscan
-        );
+        // Source or viewport changes can precede the input router's scroll clamp.
+        // Realize against the new extent now, before slicing the accepted keys.
+        var maximum = Math.Max(0, (double)_items.Length * RowHeight - viewportHeight);
+        var requested = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
+        var offset = float.IsNaN(requested) ? 0 : Math.Clamp((double)requested, 0, maximum);
+        var first = (int)Math.Clamp(Math.Floor(offset / RowHeight) - Overscan, 0, _items.Length);
+        var last = (int)
+            Math.Clamp(
+                Math.Ceiling((offset + viewportHeight) / RowHeight) + Overscan,
+                first,
+                _items.Length
+            );
         Realize(first, last);
     }
 

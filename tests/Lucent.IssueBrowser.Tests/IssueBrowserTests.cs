@@ -134,6 +134,59 @@ public sealed class IssueBrowserTests
     }
 
     [TestMethod]
+    public void FilteringAtEndPreservesSearchFocusAndTyping()
+    {
+        using var composition = LoadedComposition(out var graph, out var browser);
+        using var renderer = new SkiaSceneRenderer();
+        var viewport = new LayoutViewport(1120, 760, 1);
+        Install(composition, renderer, viewport);
+        var list = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll));
+        Assert(
+            composition.Input.ScrollSemantic(
+                new(list.Identity.CompositionEpoch, list.Identity.ElementId),
+                new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)
+            ),
+            "Could not scroll to End."
+        );
+        Install(composition, renderer, viewport);
+        var search = Fields(composition)["Search issues"];
+        var searchIdentity = new ElementIdentity(
+            search.Identity.CompositionEpoch,
+            search.Identity.ElementId
+        );
+        Assert(composition.Input.FocusSemantic(searchIdentity), "Could not focus Search at End.");
+        Install(composition, renderer, viewport);
+        SetValue(
+            composition,
+            Fields(composition)["Search issues"],
+            "no fixture can match this query"
+        );
+        graph.Drain();
+        Install(composition, renderer, viewport);
+        Assert(browser.VisibleIssues.Count == 0, "Search did not empty the list.");
+        Assert(
+            composition.Input.FocusedElement == searchIdentity,
+            "Filtering at End cleared Search focus."
+        );
+        Assert(
+            composition.Input.DispatchText(new(TextInputKind.Commit, "!")).Handled,
+            "Search stopped accepting typing after the scroll-clamp retry."
+        );
+        graph.Drain();
+        Install(composition, renderer, viewport);
+        Assert(browser.Search.EndsWith('!'), "The next typed character did not reach Search.");
+        SetValue(composition, Fields(composition)["Search issues"], "");
+        graph.Drain();
+        Install(composition, renderer, viewport);
+        Assert(
+            browser.VisibleIssues.Count == 10_000
+                && composition.Input.FocusedElement == searchIdentity,
+            "Refilling the list lost data or Search focus."
+        );
+    }
+
+    [TestMethod]
     public void VirtualizedRowsRemainBoundedAndAccessible()
     {
         using var composition = LoadedComposition(out _, out _);

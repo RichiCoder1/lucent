@@ -3666,6 +3666,62 @@ internal component Current(IEnumerable<Row> rows, IEnumerable<Style> styles, obj
     }
 
     [TestMethod]
+    public void RetainedStructuralLocalLiveAttributesUseTheAuthoredArgument()
+    {
+        const string api = """
+namespace Sample;
+using System;
+using Lucent.Core;
+public sealed record Row(int Id, string Title);
+public sealed record Pair(Row Left, Row Right);
+public static class TestComponents
+{
+    [LucentComponent]
+    public static ComponentRecipe Probe(string snapshot, Func<string> live) =>
+        ComponentRecipe.Create("probe", static (_, _) => { });
+}
+""";
+        const string source = """
+namespace Sample;
+using System.Collections.Generic;
+using Lucent.Core;
+using static Sample.TestComponents;
+internal component Current(IEnumerable<Row> rows, object? candidate) {
+    <Column>
+        foreach (var item in rows) keyed by item.Id {
+            <Probe snapshot={item.Title} live={item.Title} />
+        }
+        if (candidate is Pair { Left: Row left, Right: Row right }) {
+            <Probe snapshot={left.Title} live={left.Title} />
+        }
+    </Column>
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create(
+                "retained-live-attributes",
+                [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "126",
+                "retained-live-attributes",
+                new LuiDocumentIdentity("Current.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "retained local live attributes did not compile: "
+                + string.Join(" | ", result.Diagnostics.Select(item => item.Message))
+                + "\n"
+                + result.ProjectionSource
+        );
+    }
+
+    [TestMethod]
     public void TargetTypedStyleConstructionExplainsValueTokenAmbiguity()
     {
         var compilation = CSharpCompilation.Create("insets-diagnostic", references: References());

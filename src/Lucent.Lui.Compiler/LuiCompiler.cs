@@ -186,6 +186,7 @@ public static class LuiCompiler
         var liveValues = new HashSet<int>();
         var plans = new BindingPlans(
             ComponentPlans(
+                document,
                 componentModel,
                 componentTree,
                 componentMap,
@@ -1053,6 +1054,7 @@ public static class LuiCompiler
             : name;
 
     private static IReadOnlyDictionary<int, string> ComponentPlans(
+        LuiDocumentSyntax document,
         SemanticModel model,
         SyntaxTree tree,
         LuiSourceMap map,
@@ -1081,6 +1083,8 @@ public static class LuiCompiler
             {
                 plans[mapped.Source.Start] = names[0];
                 PlanLiveValues(
+                    document,
+                    mapped.Source.Start,
                     model,
                     map,
                     invocation,
@@ -1095,6 +1099,8 @@ public static class LuiCompiler
     }
 
     private static void PlanLiveValues(
+        LuiDocumentSyntax document,
+        int elementStart,
         SemanticModel model,
         LuiSourceMap map,
         InvocationExpressionSyntax invocation,
@@ -1104,6 +1110,7 @@ public static class LuiCompiler
         List<LuiDiagnostic> diagnostics
     )
     {
+        var authoredElement = ElementAt(document, elementStart);
         foreach (var argument in invocation.ArgumentList.Arguments)
         {
             var parameterName = argument.NameColon?.Name.Identifier.ValueText;
@@ -1116,6 +1123,14 @@ public static class LuiCompiler
                     is not { } source
             )
                 continue;
+            var authoredValue =
+                authoredElement
+                    ?.Attributes.FirstOrDefault(attribute =>
+                        attribute.Name.Text.TrimStart('@') == parameterName
+                    )
+                    ?.Value as LuiExpressionSyntax;
+            if (authoredValue is not null)
+                source = authoredValue.Span;
             var parameters = methods
                 .Select(method =>
                     method.Parameters.FirstOrDefault(parameter => parameter.Name == parameterName)
@@ -2437,7 +2452,7 @@ public static class LuiCompiler
                 Hidden("\n\n");
             }
             if (setup is not null)
-                SetupMethod(setup);
+                SetupMethod(setup, stateOwner);
 
             Hidden(
                 "        internal global::Lucent.Core.ComponentRecipe "
@@ -2604,12 +2619,14 @@ public static class LuiCompiler
             Hidden(";\n");
         }
 
-        private void SetupMethod(LuiMemberSyntax setup)
+        private void SetupMethod(LuiMemberSyntax setup, string stateOwner)
         {
             var declaration = (MethodDeclarationSyntax)setup.Declaration;
-            var owner = setup.SetupOwner!;
             Hidden("        private void Setup(global::Lucent.Core.ReactiveScope ");
-            Mapped(owner.Text, owner.Span, LuiMapKind.Symbol);
+            if (setup.SetupOwner is { } owner)
+                Mapped(owner.Text, owner.Span, LuiMapKind.Symbol);
+            else
+                Hidden(stateOwner);
             Hidden(") ");
             if (declaration.Body is { } body)
             {

@@ -856,6 +856,217 @@ public static class Harness
     }
 
     [TestMethod]
+    public void RetainedPayloadReadersCoverAttributesBodiesAndSnapshots()
+    {
+        const string runtimeApi = """
+namespace CurrentPayload;
+using System;
+using Lucent.Core;
+public sealed record Row(int Id, string Title);
+public static class Probes
+{
+    public static int LoopFactories;
+    public static string LoopSnapshot = "";
+    public static Func<string> LoopExplicit = null!;
+    public static Func<string> LoopImplicit = null!;
+    public static Func<string> LoopBody = null!;
+    public static string LoopQuoted = "";
+    public static Element LoopRoot = null!;
+    public static int PatternFactories;
+    public static string PatternSnapshot = "";
+    public static Func<string> PatternExplicit = null!;
+    public static Func<string> PatternImplicit = null!;
+    public static Func<string> PatternBody = null!;
+    public static string PatternQuoted = "";
+    public static Element PatternRoot = null!;
+
+    [LucentComponent]
+    public static ComponentRecipe LoopProbe(
+        string snapshot,
+        Func<string> explicitLive,
+        Func<string> implicitLive,
+        [DefaultContent] Func<string> body,
+        string quoted
+    ) => ComponentRecipe.Create("loop-probe", (_, root) =>
+    {
+        LoopFactories++;
+        LoopSnapshot = snapshot;
+        LoopExplicit = explicitLive;
+        LoopImplicit = implicitLive;
+        LoopBody = body;
+        LoopQuoted = quoted;
+        LoopRoot = root;
+    });
+
+    [LucentComponent]
+    public static ComponentRecipe PatternProbe(
+        string snapshot,
+        Func<string> explicitLive,
+        Func<string> implicitLive,
+        [DefaultContent] Func<string> body,
+        string quoted
+    ) => ComponentRecipe.Create("pattern-probe", (_, root) =>
+    {
+        PatternFactories++;
+        PatternSnapshot = snapshot;
+        PatternExplicit = explicitLive;
+        PatternImplicit = implicitLive;
+        PatternBody = body;
+        PatternQuoted = quoted;
+        PatternRoot = root;
+    });
+}
+""";
+        const string loopSource = """
+namespace CurrentPayload;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static CurrentPayload.Probes;
+internal component Loop(Signal<Row[]> rows) {
+    <Row>
+        foreach (var item in rows.Value) keyed by item.Id {
+            <LoopProbe
+                snapshot={item.Title}
+                explicitLive={() => item.Title}
+                implicitLive={item.Title}
+                quoted="quoted">{item.Title}</LoopProbe>
+        }
+    </Row>
+}
+""";
+        const string patternSource = """
+namespace CurrentPayload;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static CurrentPayload.Probes;
+internal component Pattern(Signal<object?> candidate) {
+    <Row>
+        if (candidate.Value is Row { } item) {
+            <PatternProbe
+                snapshot={item.Title}
+                explicitLive={() => item.Title}
+                implicitLive={item.Title}
+                quoted="quoted">{item.Title}</PatternProbe>
+        }
+    </Row>
+}
+""";
+        var generatedResult = RunWithSource(
+            runtimeApi,
+            new TextFile("C:/consumer/LoopPayload.lui", loopSource, "LoopPayload.lui"),
+            new TextFile("C:/consumer/PatternPayload.lui", patternSource, "PatternPayload.lui")
+        );
+        Assert(
+            generatedResult.Diagnostics.Length == 0
+                && generatedResult.Results.Single().GeneratedSources.Length == 2,
+            "retained payload documents did not generate: "
+                + string.Join(
+                    " | ",
+                    generatedResult.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        const string harness = """
+#nullable enable
+namespace CurrentPayload;
+using System.Linq;
+using Lucent.Core;
+public static class Harness
+{
+    public static string Loop()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "loop-payload");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("loop-payload"));
+        var rows = composition.Root.Scope.Signal(new[] { new Row(1, "before") }, "rows");
+        composition.Mount(composition.Root, theme, Components.Loop(rows));
+        graph.Drain();
+        var root = Probes.LoopRoot;
+        var before =
+            $"{Probes.LoopSnapshot}|{Probes.LoopExplicit()}|{Probes.LoopImplicit()}|{Probes.LoopBody()}|{Probes.LoopQuoted}|{Probes.LoopFactories}";
+        rows.Value = new[] { new Row(1, "after") };
+        graph.Drain();
+        var after =
+            $"{Probes.LoopSnapshot}|{Probes.LoopExplicit()}|{Probes.LoopImplicit()}|{Probes.LoopBody()}|{Probes.LoopQuoted}|{Probes.LoopFactories}|{ReferenceEquals(root, Probes.LoopRoot)}";
+        return before + ";" + after;
+    }
+
+    public static string Pattern()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "pattern-payload");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("pattern-payload"));
+        var candidate = composition.Root.Scope.Signal<object?>(new Row(1, "before"), "candidate");
+        composition.Mount(composition.Root, theme, Components.Pattern(candidate));
+        graph.Drain();
+        var root = Probes.PatternRoot;
+        var before =
+            $"{Probes.PatternSnapshot}|{Probes.PatternExplicit()}|{Probes.PatternImplicit()}|{Probes.PatternBody()}|{Probes.PatternQuoted}|{Probes.PatternFactories}";
+        candidate.Value = new Row(1, "after");
+        graph.Drain();
+        var after =
+            $"{Probes.PatternSnapshot}|{Probes.PatternExplicit()}|{Probes.PatternImplicit()}|{Probes.PatternBody()}|{Probes.PatternQuoted}|{Probes.PatternFactories}|{ReferenceEquals(root, Probes.PatternRoot)}";
+        return before + ";" + after;
+    }
+}
+""";
+        var trees = new List<SyntaxTree>
+        {
+            CSharpSyntaxTree.ParseText(runtimeApi, new CSharpParseOptions(LanguageVersion.Preview)),
+            CSharpSyntaxTree.ParseText(harness, new CSharpParseOptions(LanguageVersion.Preview)),
+        };
+        trees.AddRange(
+            generatedResult
+                .Results.Single()
+                .GeneratedSources.Select(source =>
+                    CSharpSyntaxTree.ParseText(
+                        source.SourceText.ToString(),
+                        new CSharpParseOptions(LanguageVersion.Preview),
+                        source.HintName
+                    )
+                )
+        );
+        var compilation = CSharpCompilation.Create(
+            "generated-current-payload",
+            trees,
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var stream = new MemoryStream();
+        var emit = compilation.Emit(stream);
+        Assert(
+            emit.Success
+                && !emit.Diagnostics.Any(diagnostic =>
+                    diagnostic.Severity == DiagnosticSeverity.Warning
+                ),
+            "generated current-payload runtime was not warning-clean: "
+                + string.Join(
+                    " | ",
+                    emit.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        var assembly = Assembly.Load(stream.ToArray());
+        var type = assembly.GetType("CurrentPayload.Harness")!;
+        var loopValue = (string)type.GetMethod("Loop")!.Invoke(null, null)!;
+        var patternValue = (string)type.GetMethod("Pattern")!.Invoke(null, null)!;
+        Assert(
+            loopValue
+                == "before|before|before|before|quoted|1;before|after|after|after|quoted|1|True",
+            "same-key foreach payload readers were stale, remounted, or captured a quoted value: "
+                + loopValue
+        );
+        Assert(
+            patternValue
+                == "before|before|before|before|quoted|1;before|after|after|after|quoted|1|True",
+            "same-branch pattern payload readers were stale, remounted, or captured a quoted value: "
+                + patternValue
+        );
+    }
+
+    [TestMethod]
     public void GeneratedCodeExecutes()
     {
         const string InlineProbe =

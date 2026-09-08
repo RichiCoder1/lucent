@@ -102,11 +102,16 @@ public sealed partial class InputRouter
                     ReleaseAll(PointerCaptureLossReason.SceneChanged, rejectedErrors);
                 ClearHover(rejectedErrors);
                 UpdateScrollBarHover(null);
+                // Geometry needs another projection, but a surviving focus owner does
+                // not lose its editing session just because a scroll offset changed.
+                _scene = scene;
+                _input = nextInput;
+                BuildInputCaches(scene);
                 if (
                     _focused is { } focused
                     && (
-                        !_textFields.TryGetValue(focused.Identity.ElementId, out var editor)
-                        || !editor.IsMultiline
+                        !Eligible(focused.Identity)
+                        || !Path(focused.Identity).SequenceEqual(focused.Path)
                     )
                 )
                     RequestFocus(null, FocusChangeReason.SceneChanged, rejectedErrors);

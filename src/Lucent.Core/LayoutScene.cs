@@ -1170,6 +1170,17 @@ public sealed class ShapedText
                 throw new InvalidOperationException(
                     "The paragraph runs do not match its line geometry."
                 );
+            var finalLine = Lines[^1];
+            if (
+                !DidOverflow
+                && (
+                    finalLine.HardBreak
+                    || finalLine.Utf16Start + finalLine.Utf16Length != request.Text.Length
+                )
+            )
+                throw new InvalidOperationException(
+                    "A complete paragraph must represent its terminal text position."
+                );
             if (InlineConstraint.Limit is { } inline && !DidOverflow && Width > inline + .001f)
                 throw new InvalidOperationException(
                     "The paragraph exceeded its inline constraint without overflow."

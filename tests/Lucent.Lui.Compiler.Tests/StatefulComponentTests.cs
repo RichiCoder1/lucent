@@ -162,6 +162,59 @@ public component Trial() {
     }
 
     [TestMethod]
+    public void OwnerlessSetupUsesAHiddenOwnerParameter()
+    {
+        const string source = """
+namespace OwnerlessSetup;
+using Lucent.Core;
+public component Probe() {
+    Setup() { Harness.Setups++; }
+    <Text>ready</Text>
+}
+""";
+        const string api = """
+namespace OwnerlessSetup;
+using Lucent.Core;
+public static class Harness
+{
+    public static int Setups;
+    public static string Run()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "ownerless-setup");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("ownerless-setup"));
+        composition.Mount(composition.Root, theme, Components.Probe());
+        return Setups.ToString();
+    }
+}
+""";
+        var (result, compilation) = Compile(source, api);
+        Assert.IsTrue(result.Success, Describe(result));
+        Assert.IsTrue(
+            result.Source!.Contains(
+                "private void Setup(global::Lucent.Core.ReactiveScope",
+                StringComparison.Ordinal
+            ),
+            Describe(result)
+        );
+        var emitted = compilation.AddSyntaxTrees(
+            CSharpSyntaxTree.ParseText(
+                result.Source!,
+                new CSharpParseOptions(LanguageVersion.Preview)
+            )
+        );
+        using var output = new MemoryStream();
+        var emission = emitted.Emit(output);
+        Assert.IsTrue(emission.Success, string.Join("\n", emission.Diagnostics));
+        var assembly = Assembly.Load(output.ToArray());
+        Assert.AreEqual(
+            "1",
+            (string)
+                assembly.GetType("OwnerlessSetup.Harness")!.GetMethod("Run")!.Invoke(null, null)!
+        );
+    }
+
+    [TestMethod]
     public void SnapshotInitializersAllowDeferredReadsAndNameof()
     {
         var source = Source.Replace(
