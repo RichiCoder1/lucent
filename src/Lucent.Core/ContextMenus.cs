@@ -231,6 +231,7 @@ public sealed class ContextMenuRequest : IDisposable
     public LayoutRect Measure(ITextShaper shaper, LayoutViewport available)
     {
         var popup = CreateComposition();
+        ConstrainMenuHeight(_menuRoot!, available.Height);
         var scene = SceneLayout.Project(popup, available, shaper);
         var bounds = scene.Boxes.Single(box => box.Identity.ElementId == _menuRoot!.Id).Bounds;
         return new(
@@ -245,6 +246,7 @@ public sealed class ContextMenuRequest : IDisposable
     public LayoutRect Measure(MenuLevelSnapshot level, ITextShaper shaper, LayoutViewport available)
     {
         var retained = RequireLevel(level, active: true);
+        ConstrainMenuHeight(retained.Root, available.Height);
         var scene = SceneLayout.Project(retained.Composition, available, shaper);
         var bounds = scene.Boxes.Single(box => box.Identity.ElementId == retained.Root.Id).Bounds;
         return new(
@@ -253,6 +255,12 @@ public sealed class ContextMenuRequest : IDisposable
             Math.Clamp(bounds.Width, 1, available.Width),
             Math.Clamp(bounds.Height, 1, available.Height)
         );
+    }
+
+    private static void ConstrainMenuHeight(Element root, float availableHeight)
+    {
+        if (float.IsFinite(availableHeight) && availableHeight > 0)
+            root.UpdateControl(LayoutProperties.MaxHeight, availableHeight);
     }
 
     /// <summary>Focuses the first eligible item after a host installs the level's projected scene.</summary>
@@ -739,6 +747,17 @@ public static partial class Components
                         .Set(LayoutProperties.MaxWidth, 260f)
                         .Set(LayoutProperties.Padding, Insets.Uniform(6))
                         .Set(LayoutProperties.Clip, true)
+                        .Set(ScrollBarProperties.Visibility, ScrollBarVisibility.Auto)
+                        .Set(ScrollBarProperties.Thickness, 12f)
+                        .Set(ScrollBarProperties.MinimumThumbLength, 24f)
+                        .Set(ScrollBarProperties.TrackBrush, ControlThemes.ScrollTrack)
+                        .Set(ScrollBarProperties.ThumbBrush, ControlThemes.ScrollThumb)
+                        .Set(ScrollBarProperties.HoverThumbBrush, ControlThemes.ScrollThumbHover)
+                        .Set(
+                            ScrollBarProperties.PressedThumbBrush,
+                            ControlThemes.ScrollThumbPressed
+                        )
+                        .Set(ScrollBarProperties.ThumbCornerRadius, 6f)
                         .Set(VisualProperties.Background, ControlThemes.Surface)
                         .Bind(
                             VisualProperties.Border,
@@ -748,7 +767,12 @@ public static partial class Components
                         .Set(TypographyProperties.TextColor, ControlThemes.Foreground),
                     author: style
                 );
-                root.AttachBehaviors(new MenuBehavior());
+                var scroll = new ScrollViewportState(root.Scope, root.Name + ".scroll", default);
+                _ = root.Scope.Effect(
+                    () => root.UpdateControl(LayoutProperties.Scroll, scroll.Offset),
+                    root.Name + ".scroll-state"
+                );
+                root.AttachBehaviors(new MenuBehavior(scroll));
                 context.Mount(root, content);
             }
         );
@@ -927,15 +951,25 @@ internal sealed class ContextMenuBehavior(
         context.RegisterContextMenu(menu, theme, onOpenChanged);
 }
 
-internal sealed class MenuBehavior : Behavior
+internal sealed class MenuBehavior(ScrollViewportState scroll) : Behavior
 {
     public override string Name => "menu";
     public override BehaviorOwnership Ownership =>
-        BehaviorOwnership.Action | BehaviorOwnership.Semantics;
+        BehaviorOwnership.Action | BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
 
     public override void Attach(BehaviorContext context)
     {
-        context.SetSemantics(new(SemanticRole.Menu, "Context menu"));
+        context.SetSemantics(
+            new(SemanticRole.Menu, "Context menu", actions: SemanticAction.Scroll)
+        );
+        context.MakeFocusable(tabStop: false);
+        context.RegisterScrollable(scroll);
+        context.OnSemanticCommand(command =>
+            command.Kind == SemanticCommandKind.Focus
+                ? context.CompositionInput().FocusSemantic(context.Identity)
+                : command.Kind == SemanticCommandKind.Scroll
+                    && context.CompositionInput().ScrollSemantic(context.Identity, command)
+        );
         context.OnPointer(route =>
         {
             if (route.Command.Kind == PointerCommandKind.Move)

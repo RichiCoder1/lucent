@@ -212,6 +212,29 @@ internal sealed partial class WindowsPopupChain : IDisposable
         SynchronizeLevels();
     }
 
+    /// <summary>
+    /// Repositions every retained popup in parent order after the owner or its display moved.
+    /// Each child reads its parent's post-placement trigger bounds, so safe-intent geometry and
+    /// subsequent pointer routing stay in actual screen coordinates.
+    /// </summary>
+    internal void Reposition()
+    {
+        CheckThread();
+        if (_disposed)
+            return;
+        SynchronizeLevels();
+        foreach (var level in _levels)
+        {
+            if (level.IsDisposed)
+                continue;
+            level.Reposition();
+        }
+        // Force the existing levels through the reconciliation path so safe-intent rectangles
+        // follow the new screen geometry without rebuilding retained compositions.
+        _levelsDirty = true;
+        SynchronizeLevels();
+    }
+
     /// <summary>Resolves a pending focus loss after the SDL event batch has exposed internal child focus.</summary>
     internal void ResolveFocus()
     {

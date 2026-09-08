@@ -209,6 +209,71 @@ public sealed class ContextMenuTests
         Assert.AreEqual(field.Id, owner.Input.FocusedElement!.Value.ElementId);
     }
 
+    [TestMethod]
+    public void OversizedMenuIsBoundedAndSemanticallyScrollable()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "long-menu-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Mount(
+            owner.Root,
+            theme,
+            Components.Button("Target", () => { }, Style.Empty.Height(40))
+        );
+        var items = Enumerable
+            .Range(0, 20)
+            .Select(index => (ContentRecipe)Components.MenuItem($"Action {index}", () => { }))
+            .ToArray();
+        using var request = new ContextMenuRequest(
+            owner,
+            new(owner.Epoch, target.Id),
+            new(12, 12, 1, 1),
+            Components.Menu(ComponentContent.Create(items)),
+            theme
+        );
+        var popup = request.CreateComposition();
+        var available = new LayoutViewport(240, 100, 1);
+        var measured = request.Measure(new EmptyShaper(), available);
+        Assert.IsTrue(
+            measured.Height <= available.Height,
+            $"Menu height {measured.Height} exceeded available height {available.Height}."
+        );
+
+        graph.Drain();
+        var scene = SceneLayout.Project(popup, available, new EmptyShaper());
+        Assert.IsTrue(popup.Input.SetScene(scene), "Long-menu scene was rejected.");
+        var menu = Nodes(popup.SemanticSnapshot()!).Single(node => node.Role == SemanticRole.Menu);
+        var menuElement = new ElementIdentity(
+            menu.Identity.CompositionEpoch,
+            menu.Identity.ElementId
+        );
+        Assert.IsTrue(
+            menu.Actions.HasFlag(SemanticAction.Scroll),
+            "The retained menu did not expose semantic scrolling."
+        );
+        var scrollbar = scene.ScrollBars.SingleOrDefault(bar =>
+            bar.Viewport.ElementId == menu.Identity.ElementId
+        );
+        Assert.IsTrue(
+            scrollbar.Maximum.Y > 0,
+            "An oversized menu did not project a scrollable retained viewport."
+        );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            popup.ExecuteSemanticCommand(
+                menu.Identity,
+                new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)
+            )
+        );
+        var scroll = popup.Input.GetSemanticScroll(menuElement);
+        Assert.IsTrue(
+            scroll.HasValue
+                && scroll.Value.Offset.Y > 0
+                && scroll.Value.Offset.Y <= scroll.Value.Maximum.Y,
+            "Semantic End did not move the bounded menu viewport."
+        );
+    }
+
     private static void Install(Composition composition)
     {
         for (var attempt = 0; attempt < 3; attempt++)

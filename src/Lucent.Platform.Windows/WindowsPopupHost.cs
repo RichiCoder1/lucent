@@ -30,6 +30,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private float _scale = 1;
     private float _cornerRadius;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
+    private readonly nint _popupParentWindow;
     private readonly uint _ownerWindowId;
     private readonly ContextMenuRequest _request;
     private readonly MenuLevelSnapshot? _level;
@@ -111,6 +112,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
         _level = level;
         _parent = parent;
         _ownsRequest = ownsRequest;
+        _popupParentWindow = popupParentWindow;
         _ownerWindowId = SDL.GetWindowID(rootOwnerWindow);
         if (_ownerWindowId == 0)
             throw new InvalidOperationException($"SDL_GetWindowID root owner: {SDL.GetError()}");
@@ -127,59 +129,16 @@ internal sealed partial class WindowsPopupHost : IDisposable
         WindowsUiaListener? listener = null;
         try
         {
-            var ownerScale = ScaleForWindow(popupParentWindow);
-            var density = SDL.GetWindowPixelDensity(popupParentWindow);
-            if (!float.IsFinite(density) || density <= 0)
-                throw new InvalidOperationException(
-                    "SDL_GetWindowPixelDensity returned no popup density."
-                );
-            var display = SDL.GetDisplayForWindow(popupParentWindow);
-            if (display == 0 || !SDL.GetDisplayUsableBounds(display, out var usable))
-                throw new InvalidOperationException(
-                    $"SDL_GetDisplayUsableBounds: {SDL.GetError()}"
-                );
-            // SDL display bounds and Windows popup positions are physical screen/window units;
-            // only the Core measurement viewport is logical, so content scale is the sole
-            // conversion at this boundary. Pixel density belongs to the backing render buffer.
-            var available = new LayoutViewport(
-                Math.Max(1, usable.W / ownerScale - 2 * ShadowMargin),
-                Math.Max(1, usable.H / ownerScale - 2 * ShadowMargin),
-                ownerScale
-            );
-            var desired = level is null
-                ? request.Measure(_sceneRenderer, available)
-                : request.Measure(level, _sceneRenderer, available);
-            var placement =
-                level is null || level.Depth == 0
-                    ? WindowsPopupPlacement.Root(request.Anchor, desired, ownerScale, density)
-                    : WindowsPopupPlacement.Submenu(
-                        parent?.TriggerScreenBounds(level.ParentTrigger)
-                            ?? throw new InvalidOperationException(
-                                "A submenu level did not provide a live parent trigger."
-                            ),
-                        desired,
-                        parent.ScreenBounds,
-                        usable,
-                        ownerScale,
-                        density
-                    );
-            var offsetX = placement.OffsetX;
-            var offsetY = placement.OffsetY;
+            var placement = CalculatePlacement();
             _opensLeft = placement.OpensLeft;
-            var width = Math.Max(
-                1,
-                ToWindowUnits(desired.Width + 2 * ShadowMargin, ownerScale, density)
-            );
-            var height = Math.Max(
-                1,
-                ToWindowUnits(desired.Height + 2 * ShadowMargin, ownerScale, density)
-            );
+            var width = Math.Max(1, placement.Width);
+            var height = Math.Max(1, placement.Height);
             // Host padding keeps rendering, hit testing and UIA in the same coordinate space.
             EnsureHostPadding(_composition);
             window = SDL.CreatePopupWindow(
                 popupParentWindow,
-                offsetX,
-                offsetY,
+                placement.OffsetX,
+                placement.OffsetY,
                 width,
                 height,
                 PopupFlags
@@ -296,6 +255,28 @@ internal sealed partial class WindowsPopupHost : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Reanchors this popup after its owner or display moved. SDL popup positions remain relative
+    /// to the parent; refresh the parent first in <see cref="WindowsPopupChain.Reposition"/>
+    /// so a child uses live geometry.
+    /// </summary>
+    internal void Reposition()
+    {
+        CheckThread();
+        if (_disposed || _request.IsDismissed || _composition.IsDisposed)
+            return;
+
+        var placement = CalculatePlacement();
+        _opensLeft = placement.OpensLeft;
+        if (!SDL.SetWindowPosition(_window, placement.OffsetX, placement.OffsetY))
+            throw new InvalidOperationException($"SDL_SetWindowPosition popup: {SDL.GetError()}");
+        if (!SDL.SetWindowSize(_window, placement.Width, placement.Height))
+            throw new InvalidOperationException($"SDL_SetWindowSize popup: {SDL.GetError()}");
+        if (!SDL.SyncWindow(_window))
+            throw new InvalidOperationException($"SDL_SyncWindow popup: {SDL.GetError()}");
+        Refresh();
+    }
+
     internal void Refresh()
     {
         CheckThread();
@@ -391,6 +372,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             or SDL.EventType.RenderDeviceReset
             or SDL.EventType.RenderDeviceLost => @event.Render.WindowID,
             SDL.EventType.WindowCloseRequested
+            or SDL.EventType.WindowMoved
             or SDL.EventType.WindowFocusLost
             or SDL.EventType.WindowFocusGained
             or SDL.EventType.WindowMouseEnter
@@ -404,6 +386,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
             or SDL.EventType.WindowRestored => @event.Window.WindowID,
             _ => 0,
         };
+
+    internal static bool RequiresOwnerReposition(SDL.EventType type) =>
+        type
+            is SDL.EventType.WindowMoved
+                or SDL.EventType.WindowExposed
+                or SDL.EventType.WindowDisplayChanged
+                or SDL.EventType.WindowDisplayScaleChanged
+                or SDL.EventType.WindowRestored;
 
     internal static bool TargetsPopup(SDL.Event @event, uint popupWindowId, uint ownerWindowId)
     {
@@ -436,6 +426,51 @@ internal sealed partial class WindowsPopupHost : IDisposable
         foreach (var item in scene.Input.OrderBy(item => item.Order))
             if (_composition.Input.FocusSemantic(item.Identity))
                 return;
+    }
+
+    private PopupHostPlacement CalculatePlacement()
+    {
+        var ownerScale = ScaleForWindow(_popupParentWindow);
+        var density = SDL.GetWindowPixelDensity(_popupParentWindow);
+        if (!float.IsFinite(density) || density <= 0)
+            throw new InvalidOperationException(
+                "SDL_GetWindowPixelDensity returned no popup density."
+            );
+        var display = SDL.GetDisplayForWindow(_popupParentWindow);
+        if (display == 0 || !SDL.GetDisplayUsableBounds(display, out var usable))
+            throw new InvalidOperationException($"SDL_GetDisplayUsableBounds: {SDL.GetError()}");
+        // SDL display bounds and Windows popup positions are physical screen/window units;
+        // only the Core measurement viewport is logical, so content scale is the sole
+        // conversion at this boundary. Pixel density belongs to the backing render buffer.
+        var available = new LayoutViewport(
+            Math.Max(1, usable.W / ownerScale - 2 * ShadowMargin),
+            Math.Max(1, usable.H / ownerScale - 2 * ShadowMargin),
+            ownerScale
+        );
+        var desired = _level is null
+            ? _request.Measure(_sceneRenderer, available)
+            : _request.Measure(_level, _sceneRenderer, available);
+        var placement =
+            _level is null || _level.Depth == 0
+                ? WindowsPopupPlacement.Root(_request.Anchor, desired, ownerScale, density)
+                : WindowsPopupPlacement.Submenu(
+                    _parent?.TriggerScreenBounds(_level.ParentTrigger)
+                        ?? throw new InvalidOperationException(
+                            "A submenu level did not provide a live parent trigger."
+                        ),
+                    desired,
+                    _parent.ScreenBounds,
+                    usable,
+                    ownerScale,
+                    density
+                );
+        return new(
+            placement.OffsetX,
+            placement.OffsetY,
+            Math.Max(1, ToWindowUnits(desired.Width + 2 * ShadowMargin, ownerScale, density)),
+            Math.Max(1, ToWindowUnits(desired.Height + 2 * ShadowMargin, ownerScale, density)),
+            placement.OpensLeft
+        );
     }
 
     private static WindowsViewport Viewport(nint window, nint renderer)
@@ -579,6 +614,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
             );
     }
 }
+
+internal readonly record struct PopupHostPlacement(
+    int OffsetX,
+    int OffsetY,
+    int Width,
+    int Height,
+    bool OpensLeft
+);
 
 internal sealed class WindowsPopupInputGate
 {

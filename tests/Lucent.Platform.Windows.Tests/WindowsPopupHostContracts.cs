@@ -56,6 +56,40 @@ public sealed class WindowsPopupHostContracts
     }
 
     [TestMethod]
+    public void OwnerMovementAndDisplayChangesReanchorWithoutDismissingForExposure()
+    {
+        foreach (
+            var type in new[]
+            {
+                SDL.EventType.WindowMoved,
+                SDL.EventType.WindowExposed,
+                SDL.EventType.WindowDisplayChanged,
+                SDL.EventType.WindowDisplayScaleChanged,
+                SDL.EventType.WindowRestored,
+            }
+        )
+        {
+            var @event = new SDL.Event { Type = (uint)type };
+            @event.Window.WindowID = 17;
+
+            Assert.AreEqual(17U, WindowsPopupHost.EventWindowId(@event));
+            Assert.IsTrue(WindowsPopupHost.RequiresOwnerReposition(type));
+            Assert.IsFalse(
+                WindowsBootstrap.IsForeignWindowEvent(@event, 17),
+                $"Owner event {type} was classified as foreign."
+            );
+        }
+
+        var foreignExposure = new SDL.Event { Type = (uint)SDL.EventType.WindowExposed };
+        foreignExposure.Window.WindowID = 29;
+        Assert.IsTrue(WindowsBootstrap.IsForeignWindowEvent(foreignExposure, 17));
+        Assert.IsFalse(
+            WindowsPopupHost.RequiresOwnerReposition(SDL.EventType.WindowResized),
+            "A normal owner resize still follows popup dismissal handling."
+        );
+    }
+
+    [TestMethod]
     public void StalePopupWindowEventsNeverFallThroughToOwnerInputOrClose()
     {
         foreach (

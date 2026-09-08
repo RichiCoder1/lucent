@@ -198,6 +198,16 @@ public static class WindowsBootstrap
                     )
                         return false;
                 }
+                if (
+                    popup is not null
+                    && !popup.IsDismissed
+                    && WindowsPopupHost.EventWindowId(@event) == SDL.GetWindowID(window)
+                    && WindowsPopupHost.RequiresOwnerReposition(type)
+                )
+                {
+                    popup.Reposition();
+                    scheduler.Request(FrameOperation.Other);
+                }
                 var refresh = Observe(
                     scheduler,
                     input,
@@ -564,6 +574,9 @@ public static class WindowsBootstrap
                 return false;
             case SDL.EventType.WindowRestored:
                 scheduler.Observe(WindowsFrameEvent.Restored);
+                return false;
+            case SDL.EventType.WindowMoved:
+                scheduler.Observe(WindowsFrameEvent.Moved, timestamp);
                 return false;
             case SDL.EventType.WindowExposed:
                 scheduler.Observe(WindowsFrameEvent.Exposed);

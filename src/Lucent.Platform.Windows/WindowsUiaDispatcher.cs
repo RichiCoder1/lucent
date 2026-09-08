@@ -8,6 +8,10 @@ internal sealed class WindowsUiaDispatcher : IDisposable
 {
     internal delegate bool PushEvent(ref SDL.Event @event);
     private const int Capacity = 128;
+
+    // A UIA callback can enqueue another callback while its action is running. Keep one
+    // owner-loop pass finite so a refillable producer cannot starve input and rendering.
+    private const int ProcessBudget = 32;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly uint _eventType;
     private readonly ConcurrentQueue<Request> _pending = [];
@@ -134,8 +138,10 @@ internal sealed class WindowsUiaDispatcher : IDisposable
         if (Environment.CurrentManagedThreadId != _ownerThread)
             throw new InvalidOperationException("UIA dispatcher must run on the SDL owner thread.");
         var count = 0;
-        while (_pending.TryDequeue(out var request))
+        var examined = 0;
+        while (examined < ProcessBudget && _pending.TryDequeue(out var request))
         {
+            examined++;
             if (!request.TryBegin())
             {
                 _requests.TryRemove(request.Id, out _);
@@ -158,6 +164,13 @@ internal sealed class WindowsUiaDispatcher : IDisposable
                 _diagnostics.Complete(request);
                 count++;
             }
+        }
+        if (!_pending.IsEmpty)
+        {
+            // The event that caused this pass has already been consumed. Re-wake the owner
+            // after yielding the bounded batch so a producer cannot leave accepted work parked.
+            var wake = new SDL.Event { Type = _eventType };
+            _ = _push(ref wake);
         }
         return count;
     }

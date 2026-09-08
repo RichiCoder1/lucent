@@ -399,10 +399,20 @@ public sealed class PlatformContracts
                         $"Repeated queued UIA timeouts exceeded the bounded capacity: round={round} pending={saturated.PendingCount} executed={executed}."
                     );
             }
-            if (saturated.Process() != 0 || saturated.PendingCount != 0)
+            var firstCanceledPass = saturated.Process();
+            if (
+                firstCanceledPass != 0
+                || saturated.PendingCount == 0
+                || saturated.PendingCount >= capacity
+            )
                 throw new InvalidOperationException(
-                    $"Physical UIA dispatch did not drain cancelled requests: pending={saturated.PendingCount}."
+                    $"Physical UIA dispatch did not make bounded progress through cancelled requests: pending={saturated.PendingCount}."
                 );
+            while (saturated.PendingCount > 0)
+                if (saturated.Process() != 0)
+                    throw new InvalidOperationException(
+                        "A canceled UIA request was reported as a completed owner action."
+                    );
             var recovered = Task.Run(() =>
                 saturated.TryInvoke("recovered", () => 9, out var value) ? value : -1
             );
@@ -442,12 +452,7 @@ public sealed class PlatformContracts
                 .Select(_ => Task.Run(() => failedPush.TryInvoke("push-failure", () => 1, out _)))
                 .ToArray();
             Task.WaitAll(rejectedPushes);
-            if (
-                rejectedPushes.Any(task => task.Result)
-                || failedPush.PendingCount != capacity
-                || failedPush.Process() != 0
-                || failedPush.PendingCount != 0
-            )
+            if (rejectedPushes.Any(task => task.Result) || failedPush.PendingCount != capacity)
                 throw new InvalidOperationException(
                     "Failed SDL event pushes escaped the dispatcher's physical queue bound or did not release on dequeue: accepted="
                         + rejectedPushes.Count(task => task.Result)
@@ -455,6 +460,20 @@ public sealed class PlatformContracts
                         + failedPush.PendingCount
                         + "."
                 );
+            var failedPushFirstPass = failedPush.Process();
+            if (
+                failedPushFirstPass != 0
+                || failedPush.PendingCount == 0
+                || failedPush.PendingCount >= capacity
+            )
+                throw new InvalidOperationException(
+                    "Failed SDL event pushes did not make bounded dequeue progress."
+                );
+            while (failedPush.PendingCount > 0)
+                if (failedPush.Process() != 0)
+                    throw new InvalidOperationException(
+                        "A failed SDL event push was reported as a completed owner action."
+                    );
         }
         finally
         {
