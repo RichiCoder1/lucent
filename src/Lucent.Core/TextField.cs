@@ -31,6 +31,24 @@ public readonly record struct TextInputCommand(
     public static bool TryNormalizeMultiline(string? text, out string normalized) =>
         EditorSession.TryNormalizeMultiline(text, out normalized);
 
+    /// <summary>
+    /// Gets whether an active IME composition owns an editing key before a
+    /// text editor or host can mutate committed selection or text.
+    /// </summary>
+    public static bool IsImeOwnedKey(KeyCommand command) =>
+        command.Kind == KeyCommandKind.Down
+        && command.Key
+            is Key.Left
+                or Key.Right
+                or Key.Up
+                or Key.Down
+                or Key.Home
+                or Key.End
+                or Key.Backspace
+                or Key.Delete
+                or Key.Enter
+                or Key.Escape;
+
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate(bool allowMultiline = false)
     {
@@ -194,6 +212,16 @@ internal class TextFieldState
     {
         Check();
         new TextInputCommand(TextInputKind.Preedit, text, start, length).Validate(IsMultiline);
+        // SDL sends an empty TextEditing update when the IME closes its
+        // composition window.  It is a lifecycle update, rather than an
+        // empty replacement that should remain visible as an active
+        // composition.  Keeping Active=true here would make the next key
+        // event cancel or replace an already-finished composition.
+        if (text.Length == 0)
+        {
+            _ = CancelComposition();
+            return;
+        }
         var prior = _preedit.Value;
         var replacementStart = prior.Active ? prior.ReplacementStart : Math.Min(Anchor, Caret);
         var replacementEnd = prior.Active ? prior.ReplacementEnd : Math.Max(Anchor, Caret);
@@ -223,11 +251,15 @@ internal class TextFieldState
         );
     }
 
-    public void CancelComposition()
+    public bool CancelComposition()
     {
         Check();
         if (_preedit.Value.Active)
+        {
             _preedit.Value = default;
+            return true;
+        }
+        return false;
     }
 
     public void RequestClipboard(TextClipboardOperation operation)
@@ -610,6 +642,17 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
         {
             if (route.Command.Kind != KeyCommandKind.Down)
                 return;
+            // The IME owns navigation, deletion, commit, and cancellation
+            // keys while a preedit is active.  Routing those keys into the
+            // committed session would invalidate DisplayText geometry and
+            // can cause the same text to be committed twice by the IME.
+            if (state.HasPreedit && TextInputCommand.IsImeOwnedKey(route.Command))
+            {
+                if (route.Command.Key == Key.Escape)
+                    _ = state.CancelComposition();
+                route.Handled = true;
+                return;
+            }
             var shift = route.Command.Modifiers.HasFlag(KeyModifiers.Shift);
             var control =
                 !route.Command.Modifiers.HasFlag(KeyModifiers.Alt)
@@ -691,9 +734,6 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                         break;
                     case Key.Delete:
                         state.DeleteForward();
-                        break;
-                    case Key.Escape:
-                        state.CancelComposition();
                         break;
                     default:
                         return;

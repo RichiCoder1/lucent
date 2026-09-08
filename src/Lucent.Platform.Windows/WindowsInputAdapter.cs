@@ -16,6 +16,9 @@ internal sealed class WindowsInputAdapter : IDisposable
     private bool _disposed;
     private bool _windowFocused = true;
     private bool _repaintRequested;
+    private bool _imeCompositionActive;
+    private ElementIdentity? _imeCompositionTarget;
+    private bool _rejectQueuedTextUntilRefresh;
 
     internal WindowsInputAdapter(
         Composition composition,
@@ -144,7 +147,11 @@ internal sealed class WindowsInputAdapter : IDisposable
     internal void RefreshTextInput()
     {
         if (!_disposed)
+        {
+            ReconcileImeComposition();
             SyncTextInput();
+            _rejectQueuedTextUntilRefresh = false;
+        }
     }
 
     public void Dispose()
@@ -194,6 +201,7 @@ internal sealed class WindowsInputAdapter : IDisposable
         try
         {
             _ = _router.DispatchPointer(new(kind, pointer, x, y, button));
+            ReconcileImeComposition();
         }
         finally
         {
@@ -241,14 +249,27 @@ internal sealed class WindowsInputAdapter : IDisposable
         var key = MapKey(@event.Key) ?? MapShortcut(@event.Key, modifiers);
         if (key is null)
             return false;
-        _ = _router.DispatchKey(
-            new(
-                @event.Down ? KeyCommandKind.Down : KeyCommandKind.Up,
-                key.Value,
-                modifiers,
-                @event.Down && @event.Repeat
-            )
+        var command = new KeyCommand(
+            @event.Down ? KeyCommandKind.Down : KeyCommandKind.Up,
+            key.Value,
+            modifiers,
+            @event.Down && @event.Repeat
         );
+        ReconcileImeComposition();
+        if (_imeCompositionActive && TextInputCommand.IsImeOwnedKey(command))
+        {
+            if (@event.Down && key == Core.Key.Escape)
+            {
+                _ = CancelText();
+            }
+            // The native IME gets first ownership of editing/navigation keys
+            // while a preedit is active.  Sending them to the editor would
+            // mutate committed selection against DisplayText and can cause a
+            // later commit to be applied twice.
+            return true;
+        }
+        _ = _router.DispatchKey(command);
+        ReconcileImeComposition();
         if (@event.Down)
             ProcessClipboardRequests();
         return true;
@@ -257,6 +278,9 @@ internal sealed class WindowsInputAdapter : IDisposable
     internal bool DispatchText(TextInputCommand command)
     {
         if (!_windowFocused)
+            return false;
+        ReconcileImeComposition();
+        if (_rejectQueuedTextUntilRefresh)
             return false;
         if (command.Kind is TextInputKind.Commit or TextInputKind.Preedit)
         {
@@ -268,6 +292,22 @@ internal sealed class WindowsInputAdapter : IDisposable
         {
             var result = _router.DispatchText(command);
             _repaintRequested |= result.Handled;
+            if (result.Handled)
+            {
+                if (command.Kind == TextInputKind.Preedit && command.Text.Length != 0)
+                {
+                    _imeCompositionActive = true;
+                    _imeCompositionTarget = result.Target ?? _router.FocusedElement;
+                }
+                else
+                {
+                    if (command.Kind == TextInputKind.Cancel)
+                        ClearNativeComposition();
+                    _imeCompositionActive = false;
+                    _imeCompositionTarget = null;
+                }
+            }
+            ReconcileImeComposition();
             return result.Handled;
         }
         catch (Exception error) when (error is ObjectDisposedException or ArgumentException)
@@ -282,12 +322,61 @@ internal sealed class WindowsInputAdapter : IDisposable
         {
             var result = _router.DispatchText(new(TextInputKind.Cancel, ""));
             _repaintRequested |= result.Handled;
+            if (result.Handled)
+            {
+                ClearNativeComposition();
+                _imeCompositionActive = false;
+                _imeCompositionTarget = null;
+            }
             return result.Handled;
         }
         catch (ObjectDisposedException)
         {
             return false;
         }
+    }
+
+    private void ReconcileImeComposition()
+    {
+        ElementIdentity? focused;
+        bool coreActive;
+        try
+        {
+            focused = _router.FocusedElement;
+            coreActive = _router.HasTextComposition;
+        }
+        catch (ObjectDisposedException)
+        {
+            focused = null;
+            coreActive = false;
+        }
+        if (!_imeCompositionActive)
+        {
+            if (coreActive)
+            {
+                _imeCompositionActive = true;
+                _imeCompositionTarget = focused;
+            }
+            return;
+        }
+
+        if (coreActive && focused == _imeCompositionTarget)
+            return;
+
+        ClearNativeComposition();
+        if (_imeCompositionActive && focused != _imeCompositionTarget)
+            _rejectQueuedTextUntilRefresh = true;
+        _imeCompositionActive = coreActive;
+        _imeCompositionTarget = coreActive ? focused : null;
+    }
+
+    private void ClearNativeComposition()
+    {
+        if (_window == 0 || !_imeCompositionActive)
+            return;
+        if (!_textInput.ClearComposition(_window))
+            throw new InvalidOperationException("SDL_ClearComposition: " + SDL.GetError());
+        _repaintRequested = true;
     }
 
     /// <summary>Completes clipboard work requested by portable commands, including popup menu actions.</summary>
@@ -350,6 +439,17 @@ internal sealed class WindowsInputAdapter : IDisposable
         var errors = new List<Exception>();
         try
         {
+            // A Core-only focus or semantic cancellation may have ended the
+            // preedit before the host began cleanup.  Reconcile once before
+            // routing the portable cancel so the native IME is still reset.
+            ReconcileImeComposition();
+        }
+        catch (Exception error)
+        {
+            errors.Add(error);
+        }
+        try
+        {
             CancelPointers();
         }
         catch (Exception error)
@@ -359,6 +459,16 @@ internal sealed class WindowsInputAdapter : IDisposable
         try
         {
             _ = CancelText();
+        }
+        catch (Exception error)
+        {
+            errors.Add(error);
+        }
+        try
+        {
+            ClearNativeComposition();
+            _imeCompositionActive = false;
+            _imeCompositionTarget = null;
         }
         catch (Exception error)
         {
@@ -507,15 +617,23 @@ internal sealed class TextInputTransport(
     Func<nint, bool> active,
     Func<nint, bool> start,
     Func<nint, bool> stop,
-    Func<nint, SDL.Rect, int, bool> setArea
+    Func<nint, SDL.Rect, int, bool> setArea,
+    Func<nint, bool>? clearComposition = null
 )
 {
     internal static TextInputTransport Sdl { get; } =
-        new(SDL.TextInputActive, SDL.StartTextInput, SDL.StopTextInput, SetTextInputArea);
+        new(
+            SDL.TextInputActive,
+            SDL.StartTextInput,
+            SDL.StopTextInput,
+            SetTextInputArea,
+            SDL.ClearComposition
+        );
     internal Func<nint, bool> Active { get; } = active;
     internal Func<nint, bool> Start { get; } = start;
     internal Func<nint, bool> Stop { get; } = stop;
     internal Func<nint, SDL.Rect, int, bool> SetArea { get; } = setArea;
+    internal Func<nint, bool> ClearComposition { get; } = clearComposition ?? (_ => true);
 
     private static bool SetTextInputArea(nint window, SDL.Rect area, int cursor) =>
         SDL.SetTextInputArea(window, in area, cursor);
