@@ -12,6 +12,8 @@ Use [headless component tests](docs/HEADLESS-TESTING.md) for `.lui` interaction 
 
 Use Windows 11 24H2 or later on x64 with the .NET SDK pinned in `global.json`. NativeAOT publishing also requires the Visual Studio C++ build tools and Windows SDK.
 
+SDK selection is exact because its compiler and linker packages participate in locked restore. Update the SDK and affected lock files together when taking a .NET servicing update.
+
 Run the reference application:
 
 ```powershell
