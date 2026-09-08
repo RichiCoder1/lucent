@@ -10,6 +10,14 @@ internal component Editor(EditorSession session) {
 
 Use `SwitchDocument` for an intentional document change or reset. `SynchronizeExternalText` applies an authoritative update to the current document: equal text is a no-op, changed text clamps selection and clears undo history. `SynchronizeExternalText` rejects a different document identifier, preventing a delayed result from switching the active document. Local changes through `Text` or editing commands remain undoable. Sessions default to single-line input. Create a multiline session with `new EditorSession(owner, documentId, initialText, multiline: true)` and bind it to `TextArea`; `TextField` retains its single-line contract.
 
+## Labels, placeholders and keyboard policy
+
+`label` is the accessible name exposed by the text-field semantic snapshot. `placeholder` is an optional visual hint for an empty, unfocused field and defaults to `label` for compatibility; pass an empty string to disable the hint. For example, `<TextField label="Search" placeholder="Find issues" />` exposes `Search` to accessibility clients while painting the muted `Find issues` hint. The hint is a projection only: it is absent from the committed value, text range, selection, caret and clipboard operations. Focusing an empty field removes the hint before editing begins, so it can never become editable text.
+
+`TextField` leaves the `Tab` key unhandled so the input router owns focus traversal. `TextArea` follows the same key policy; a tab character can still arrive through committed text input or an explicit `Insert` call, but a `Tab` key does not mutate the document or selection. `Escape` follows the normal route and is consumed by an active IME composition only when it cancels that composition.
+
+Control/Meta word movement and deletion use Unicode grapheme boundaries and group letters, numbers, combining marks and connector punctuation as words. Punctuation and symbols share their own navigable run class, while whitespace is skipped between word runs. Visual `Home`/`End` use the shaped wrapped line, while `PageUp`/`PageDown` move by the mounted viewport's line count and preserve the desired horizontal position. Caret movement, selection changes, clipboard operations, line breaks and IME boundaries break typing undo coalescing. Consecutive inserts or same-direction deletes coalesce until one of those boundaries, and a line-break edit always starts a new undo unit.
+
 ## Multiline editing
 
 ```lui

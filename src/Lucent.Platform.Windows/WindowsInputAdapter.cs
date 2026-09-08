@@ -60,7 +60,8 @@ internal sealed class WindowsInputAdapter : IDisposable
                     PointerCommandKind.Move,
                     @event.Motion.X,
                     @event.Motion.Y,
-                    PointerButton.None
+                    PointerButton.None,
+                    MapModifiers(SDL.GetModState())
                 );
             case SDL.EventType.MouseButtonDown:
                 return Button(@event.Button, PointerCommandKind.Down);
@@ -177,7 +178,8 @@ internal sealed class WindowsInputAdapter : IDisposable
             kind,
             @event.X,
             @event.Y,
-            kind == PointerCommandKind.Down ? button : PointerButton.None
+            kind == PointerCommandKind.Down ? button : PointerButton.None,
+            MapModifiers(SDL.GetModState())
         );
     }
 
@@ -186,7 +188,8 @@ internal sealed class WindowsInputAdapter : IDisposable
         PointerCommandKind kind,
         float x,
         float y,
-        PointerButton button
+        PointerButton button,
+        KeyModifiers modifiers
     )
     {
         if (source > int.MaxValue || !float.IsFinite(x) || !float.IsFinite(y))
@@ -200,7 +203,7 @@ internal sealed class WindowsInputAdapter : IDisposable
         PointerPosition = (x, y);
         try
         {
-            _ = _router.DispatchPointer(new(kind, pointer, x, y, button));
+            _ = _router.DispatchPointer(new(kind, pointer, x, y, button, modifiers));
             ReconcileImeComposition();
         }
         finally
@@ -502,6 +505,8 @@ internal sealed class WindowsInputAdapter : IDisposable
             SDL.Keycode.Right => Core.Key.Right,
             SDL.Keycode.Up => Core.Key.Up,
             SDL.Keycode.Down => Core.Key.Down,
+            SDL.Keycode.Pageup => Core.Key.PageUp,
+            SDL.Keycode.Pagedown => Core.Key.PageDown,
             SDL.Keycode.Home => Core.Key.Home,
             SDL.Keycode.End => Core.Key.End,
             SDL.Keycode.Backspace => Core.Key.Backspace,

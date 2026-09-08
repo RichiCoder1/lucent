@@ -20,7 +20,7 @@ public sealed class EditorSession : IDisposable
     private readonly List<Snapshot> _undo = [];
     private readonly List<Snapshot> _redo = [];
     private readonly HashSet<MountLease> _mounts = [];
-    private bool _lastWasInsert;
+    private EditKind _lastEditKind;
     private long _editGeneration;
     private int[] _boundaries;
     private int _graphemeIndexBuildCount;
@@ -169,7 +169,7 @@ public sealed class EditorSession : IDisposable
         _anchorAffinity.Value = _caretAffinity.Value = TextAffinity.Downstream;
         _undo.Clear();
         _redo.Clear();
-        _lastWasInsert = false;
+        BreakEditCoalescingState();
         BreakVerticalNavigation();
         Viewport.Offset = default;
         Changed();
@@ -195,7 +195,7 @@ public sealed class EditorSession : IDisposable
         _anchorAffinity.Value = _caretAffinity.Value = TextAffinity.Downstream;
         _undo.Clear();
         _redo.Clear();
-        _lastWasInsert = false;
+        BreakEditCoalescingState();
         BreakVerticalNavigation();
         Changed();
     }
@@ -212,6 +212,24 @@ public sealed class EditorSession : IDisposable
     public void MoveRight(bool extend = false) =>
         Move(
             !extend && Anchor != Caret ? Math.Max(Anchor, Caret) : NextBoundary(Caret),
+            extend,
+            TextAffinity.Downstream
+        );
+
+    /// <summary>Moves to the preceding desktop word boundary.</summary>
+    /// <remarks>Whitespace is skipped first; punctuation and symbols form their own runs.</remarks>
+    public void MoveWordLeft(bool extend = false) =>
+        Move(
+            !extend && Anchor != Caret ? Math.Min(Anchor, Caret) : PreviousWordBoundary(Caret),
+            extend,
+            TextAffinity.Upstream
+        );
+
+    /// <summary>Moves to the following desktop word boundary.</summary>
+    /// <remarks>Whitespace is skipped first; punctuation and symbols form their own runs.</remarks>
+    public void MoveWordRight(bool extend = false) =>
+        Move(
+            !extend && Anchor != Caret ? Math.Max(Anchor, Caret) : NextWordBoundary(Caret),
             extend,
             TextAffinity.Downstream
         );
@@ -238,6 +256,28 @@ public sealed class EditorSession : IDisposable
         Move(lineEnd < 0 ? Text.Length : lineEnd, extend, TextAffinity.Upstream);
     }
 
+    /// <summary>Moves to the beginning of the current shaped visual line.</summary>
+    public void MoveVisualHome(ShapedText paragraph, bool extend = false)
+    {
+        ArgumentNullException.ThrowIfNull(paragraph);
+        CheckMutation();
+        if (paragraph.Lines.Count == 0)
+            return;
+        var line = paragraph.Lines[VisualLineAtCaret(paragraph)];
+        Move(line.Utf16Start, extend, TextAffinity.Downstream);
+    }
+
+    /// <summary>Moves to the end of the current shaped visual line.</summary>
+    public void MoveVisualEnd(ShapedText paragraph, bool extend = false)
+    {
+        ArgumentNullException.ThrowIfNull(paragraph);
+        CheckMutation();
+        if (paragraph.Lines.Count == 0)
+            return;
+        var line = paragraph.Lines[VisualLineAtCaret(paragraph)];
+        Move(checked(line.Utf16Start + line.Utf16Length), extend, TextAffinity.Upstream);
+    }
+
     /// <summary>Moves one visual paragraph line up while retaining the initial logical x position.</summary>
     public void MoveUp(ShapedText paragraph, bool extend = false) =>
         MoveVertical(paragraph, -1, extend);
@@ -245,6 +285,14 @@ public sealed class EditorSession : IDisposable
     /// <summary>Moves one visual paragraph line down while retaining the initial logical x position.</summary>
     public void MoveDown(ShapedText paragraph, bool extend = false) =>
         MoveVertical(paragraph, 1, extend);
+
+    /// <summary>Moves by one viewport of shaped visual lines while retaining the caret x position.</summary>
+    public void MovePageUp(ShapedText paragraph, float viewportHeight, bool extend = false) =>
+        MovePage(paragraph, viewportHeight, -1, extend);
+
+    /// <summary>Moves by one viewport of shaped visual lines while retaining the caret x position.</summary>
+    public void MovePageDown(ShapedText paragraph, float viewportHeight, bool extend = false) =>
+        MovePage(paragraph, viewportHeight, 1, extend);
 
     /// <summary>Selects the entire draft.</summary>
     public void SelectAll() => SetSelection(0, Text.Length);
@@ -275,7 +323,7 @@ public sealed class EditorSession : IDisposable
         _caret.Value = caret;
         _anchorAffinity.Value = anchorAffinity;
         _caretAffinity.Value = caretAffinity;
-        _lastWasInsert = false;
+        BreakEditCoalescingState();
         BreakVerticalNavigation();
         Changed();
     }
@@ -290,7 +338,13 @@ public sealed class EditorSession : IDisposable
         if (Anchor != Caret)
             Replace("");
         else if (Caret > 0)
-            Replace("", replacementStart: PreviousBoundary(Caret), replacementEnd: Caret);
+            ReplaceCore(
+                "",
+                EditKind.DeleteBackward,
+                coalesce: true,
+                replacementStart: PreviousBoundary(Caret),
+                replacementEnd: Caret
+            );
     }
 
     /// <summary>Deletes the selection or following grapheme.</summary>
@@ -300,7 +354,45 @@ public sealed class EditorSession : IDisposable
         if (Anchor != Caret)
             Replace("");
         else if (Caret < Text.Length)
-            Replace("", replacementStart: Caret, replacementEnd: NextBoundary(Caret));
+            ReplaceCore(
+                "",
+                EditKind.DeleteForward,
+                coalesce: true,
+                replacementStart: Caret,
+                replacementEnd: NextBoundary(Caret)
+            );
+    }
+
+    /// <summary>Deletes the selection or the preceding desktop word.</summary>
+    public void DeleteWordBackward()
+    {
+        CheckMutation();
+        if (Anchor != Caret)
+            ReplaceCore("", EditKind.Replace, coalesce: false);
+        else if (Caret > 0)
+            ReplaceCore(
+                "",
+                EditKind.DeleteBackward,
+                coalesce: true,
+                replacementStart: PreviousWordBoundary(Caret),
+                replacementEnd: Caret
+            );
+    }
+
+    /// <summary>Deletes the selection or the following desktop word.</summary>
+    public void DeleteWordForward()
+    {
+        CheckMutation();
+        if (Anchor != Caret)
+            ReplaceCore("", EditKind.Replace, coalesce: false);
+        else if (Caret < Text.Length)
+            ReplaceCore(
+                "",
+                EditKind.DeleteForward,
+                coalesce: true,
+                replacementStart: Caret,
+                replacementEnd: NextWordBoundary(Caret)
+            );
     }
 
     /// <summary>Restores the previous local edit.</summary>
@@ -312,7 +404,7 @@ public sealed class EditorSession : IDisposable
         _redo.Add(Current());
         Restore(_undo[^1]);
         _undo.RemoveAt(_undo.Count - 1);
-        _lastWasInsert = false;
+        BreakEditCoalescingState();
         Changed();
     }
 
@@ -325,7 +417,7 @@ public sealed class EditorSession : IDisposable
         _undo.Add(Current());
         Restore(_redo[^1]);
         _redo.RemoveAt(_redo.Count - 1);
-        _lastWasInsert = false;
+        BreakEditCoalescingState();
         Changed();
     }
 
@@ -409,12 +501,29 @@ public sealed class EditorSession : IDisposable
     internal void BreakInsertCoalescing()
     {
         CheckMutation();
-        _lastWasInsert = false;
+        BreakEditCoalescingState();
     }
 
     internal void Replace(
         string text,
         bool coalesceInsert = false,
+        int? replacementStart = null,
+        int? replacementEnd = null
+    )
+    {
+        ReplaceCore(
+            text,
+            coalesceInsert ? EditKind.Insert : EditKind.Replace,
+            coalesceInsert,
+            replacementStart,
+            replacementEnd
+        );
+    }
+
+    private void ReplaceCore(
+        string text,
+        EditKind editKind,
+        bool coalesce,
         int? replacementStart = null,
         int? replacementEnd = null
     )
@@ -427,7 +536,16 @@ public sealed class EditorSession : IDisposable
             throw new ArgumentException("Replacement must use ordered grapheme boundaries.");
         if (start == end && text.Length == 0)
             return;
-        Save(coalesceInsert && start == end && text.Length != 0);
+        var canCoalesce =
+            coalesce
+            && start == end
+            && text.Length != 0
+            && editKind == EditKind.Insert
+            && !text.Contains('\n');
+        if (editKind is EditKind.DeleteBackward or EditKind.DeleteForward)
+            canCoalesce =
+                coalesce && Anchor == Caret && !Text.AsSpan(start, end - start).Contains('\n');
+        Save(editKind, canCoalesce);
         SetText(ReplaceRange(Text, start, end, text));
         _anchor.Value = _caret.Value = BoundaryAtOrAfter(start + text.Length);
         _anchorAffinity.Value = _caretAffinity.Value = TextAffinity.Downstream;
@@ -452,7 +570,7 @@ public sealed class EditorSession : IDisposable
         var normalized = Normalize(text, IsMultiline);
         if (normalized == Text)
             return;
-        Save(false);
+        Save(EditKind.Replace, coalesce: false);
         SetText(normalized);
         _anchor.Value = _caret.Value = normalized.Length;
         _anchorAffinity.Value = _caretAffinity.Value = TextAffinity.Downstream;
@@ -481,7 +599,7 @@ public sealed class EditorSession : IDisposable
             _anchor.Value = caret;
             _anchorAffinity.Value = affinity;
         }
-        _lastWasInsert = false;
+        BreakEditCoalescingState();
         if (!preserveVerticalNavigation)
             BreakVerticalNavigation();
         Changed();
@@ -511,16 +629,31 @@ public sealed class EditorSession : IDisposable
         Move(hit.Utf16Offset, extend, hit.Affinity, preserveVerticalNavigation: true);
     }
 
-    private void Save(bool coalesce)
+    private void MovePage(ShapedText paragraph, float viewportHeight, int direction, bool extend)
     {
-        if (!coalesce || !_lastWasInsert)
+        ArgumentNullException.ThrowIfNull(paragraph);
+        if (!float.IsFinite(viewportHeight) || viewportHeight < 0)
+            throw new ArgumentOutOfRangeException(nameof(viewportHeight));
+        if (direction is not (-1 or 1))
+            throw new ArgumentOutOfRangeException(nameof(direction));
+        if (paragraph.Lines.Count == 0)
+            return;
+        var line = paragraph.Lines[VisualLineAtCaret(paragraph)];
+        var lineHeight = Math.Max(1, line.Descent - line.Ascent + line.Leading);
+        var lineCount = Math.Max(1, (int)MathF.Floor(viewportHeight / lineHeight));
+        MoveVertical(paragraph, checked(direction * lineCount), extend);
+    }
+
+    private void Save(EditKind editKind, bool coalesce)
+    {
+        if (!coalesce || _lastEditKind != editKind)
         {
             _undo.Add(Current());
             if (_undo.Count > UndoLimit)
                 _undo.RemoveAt(0);
         }
         _redo.Clear();
-        _lastWasInsert = coalesce;
+        _lastEditKind = coalesce ? editKind : EditKind.None;
     }
 
     private Snapshot Current() =>
@@ -567,6 +700,106 @@ public sealed class EditorSession : IDisposable
 
     private bool IsBoundary(int position) =>
         position >= 0 && position <= Text.Length && Array.BinarySearch(_boundaries, position) >= 0;
+
+    private int PreviousWordBoundary(int position)
+    {
+        var index = BoundaryIndex(position);
+        while (index > 0 && WordClassAt(index - 1) == WordClass.Whitespace)
+            index--;
+        if (index == 0)
+            return 0;
+        var kind = WordClassAt(index - 1);
+        while (index > 0 && WordClassAt(index - 1) == kind && kind != WordClass.Whitespace)
+            index--;
+        return _boundaries[index];
+    }
+
+    private int NextWordBoundary(int position)
+    {
+        var index = BoundaryIndex(position);
+        while (index < _boundaries.Length - 1 && WordClassAt(index) == WordClass.Whitespace)
+            index++;
+        if (index == _boundaries.Length - 1)
+            return Text.Length;
+        var kind = WordClassAt(index);
+        while (index < _boundaries.Length - 1 && WordClassAt(index) == kind)
+            index++;
+        return _boundaries[index];
+    }
+
+    private int BoundaryIndex(int position)
+    {
+        var index = Array.BinarySearch(_boundaries, position);
+        if (index < 0)
+            throw new ArgumentException(
+                "Text position must be a grapheme boundary.",
+                nameof(position)
+            );
+        return index;
+    }
+
+    private WordClass WordClassAt(int boundaryIndex)
+    {
+        var start = _boundaries[boundaryIndex];
+        var length = _boundaries[boundaryIndex + 1] - start;
+        var status = Rune.DecodeFromUtf16(Text.AsSpan(start, length), out var rune, out _);
+        if (status != OperationStatus.Done)
+            return WordClass.Symbol;
+        if (Rune.IsWhiteSpace(rune))
+            return WordClass.Whitespace;
+        return Rune.GetUnicodeCategory(rune) switch
+        {
+            UnicodeCategory.UppercaseLetter
+            or UnicodeCategory.LowercaseLetter
+            or UnicodeCategory.TitlecaseLetter
+            or UnicodeCategory.ModifierLetter
+            or UnicodeCategory.OtherLetter
+            or UnicodeCategory.DecimalDigitNumber
+            or UnicodeCategory.LetterNumber
+            or UnicodeCategory.OtherNumber
+            or UnicodeCategory.NonSpacingMark
+            or UnicodeCategory.SpacingCombiningMark
+            or UnicodeCategory.EnclosingMark
+            or UnicodeCategory.ConnectorPunctuation => WordClass.Word,
+            _ => WordClass.Symbol,
+        };
+    }
+
+    private int VisualLineAtCaret(ShapedText paragraph)
+    {
+        var offset = Caret;
+        var affinity = CaretAffinity;
+        for (var index = 0; index < paragraph.Lines.Count; index++)
+        {
+            var line = paragraph.Lines[index];
+            var start = line.Utf16Start;
+            var end = checked(start + line.Utf16Length);
+            if (offset < start || offset > end)
+                continue;
+            if (
+                affinity == TextAffinity.Upstream
+                && index > 0
+                && start == offset
+                && paragraph.Lines[index - 1].Utf16Start + paragraph.Lines[index - 1].Utf16Length
+                    == offset
+            )
+                return index - 1;
+            if (
+                affinity == TextAffinity.Downstream
+                && index + 1 < paragraph.Lines.Count
+                && end == offset
+                && paragraph.Lines[index + 1].Utf16Start == offset
+            )
+                return index + 1;
+            return index;
+        }
+        return offset <= paragraph.Lines[0].Utf16Start ? 0 : paragraph.Lines.Count - 1;
+    }
+
+    private void BreakEditCoalescingState()
+    {
+        _lastEditKind = EditKind.None;
+    }
 
     private string Slice(int start, int end) => Text[start..end];
 
@@ -656,6 +889,22 @@ public sealed class EditorSession : IDisposable
         TextAffinity AnchorAffinity,
         TextAffinity CaretAffinity
     );
+
+    private enum EditKind
+    {
+        None,
+        Insert,
+        DeleteBackward,
+        DeleteForward,
+        Replace,
+    }
+
+    private enum WordClass
+    {
+        Whitespace,
+        Word,
+        Symbol,
+    }
 
     private sealed class MountLease(EditorSession owner) : IDisposable
     {

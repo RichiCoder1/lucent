@@ -353,7 +353,7 @@ internal static class Controls
                     )
             );
 
-    private static Style TextFieldStyle(ThemeContext theme) =>
+    private static Style TextFieldStyle(ThemeContext theme, Func<bool> isPlaceholder) =>
         RowStyle
             .Set(LayoutProperties.Clip, true)
             .Set(LayoutProperties.Padding, Insets.Symmetric(12, 8))
@@ -365,7 +365,13 @@ internal static class Controls
                 () =>
                     ResolveBrush(theme, ControlThemes.Surface, PresentationStyles.TransparentBrush)
             )
-            .Bind(TypographyProperties.TextColor, () => theme.Token(ControlThemes.Foreground))
+            .Bind(
+                TypographyProperties.TextColor,
+                () =>
+                    isPlaceholder()
+                        ? theme.Token(ControlThemes.SecondaryForeground)
+                        : theme.Token(ControlThemes.Foreground)
+            )
             .Bind(VisualProperties.Border, () => ResolveBorder(theme, ControlThemes.Border))
             .When(
                 VariantState.Hover,
@@ -628,7 +634,8 @@ internal static class Controls
         string value = "",
         Style? style = null,
         EditorSession? session = null,
-        FocusTarget? focusTarget = null
+        FocusTarget? focusTarget = null,
+        string? placeholder = null
     )
     {
         name = Required(name, nameof(name));
@@ -639,9 +646,14 @@ internal static class Controls
                 nameof(session)
             );
         var initialText = session?.Text ?? value;
-        var component = TextFieldStyle(theme)
+        var placeholderText = Placeholder(placeholder, name);
+        var placeholderActive = element.Scope.Signal(
+            initialText.Length == 0 && placeholderText.Length != 0,
+            element.Name + ".placeholder-active"
+        );
+        var component = TextFieldStyle(theme, () => placeholderActive.Value)
             .Set(ProjectionProperties.Text, initialText)
-            .Set(ProjectionProperties.TextMeasure, name);
+            .Set(ProjectionProperties.TextMeasure, placeholderText);
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
         var editor =
             session
@@ -658,9 +670,12 @@ internal static class Controls
         _ = element.Scope.Effect(
             () =>
             {
+                var isPlaceholder =
+                    placeholderText.Length != 0 && state.DisplayText.Length == 0 && !state.Focused;
+                placeholderActive.Value = isPlaceholder;
                 element.UpdateControl(
                     ProjectionProperties.Text,
-                    state.DisplayText.Length == 0 && !state.Focused ? name : state.DisplayText
+                    isPlaceholder ? placeholderText : state.DisplayText
                 );
                 element.UpdateControl(
                     ProjectionProperties.TextSelectionStart,
@@ -687,7 +702,8 @@ internal static class Controls
         string value = "",
         Style? style = null,
         EditorSession? session = null,
-        FocusTarget? focusTarget = null
+        FocusTarget? focusTarget = null,
+        string? placeholder = null
     )
     {
         name = Required(name, nameof(name));
@@ -707,14 +723,19 @@ internal static class Controls
                 multiline: true
             );
         var initialText = editor.Text;
-        var component = TextFieldStyle(theme)
+        var placeholderText = Placeholder(placeholder, name);
+        var placeholderActive = element.Scope.Signal(
+            initialText.Length == 0 && placeholderText.Length != 0,
+            element.Name + ".placeholder-active"
+        );
+        var component = TextFieldStyle(theme, () => placeholderActive.Value)
             // A multiline editor may occupy a tall viewport. Keep its first
             // line at the content origin while allowing an explicit author
             // alignment to override this stock default below.
             .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)
             .With(ScrollBarStyle)
             .Set(ProjectionProperties.Text, initialText)
-            .Set(ProjectionProperties.TextMeasure, name)
+            .Set(ProjectionProperties.TextMeasure, placeholderText)
             .Set(ProjectionProperties.TextMultiline, true)
             .Set(ProjectionProperties.TextCaretAffinity, editor.CaretAffinity)
             .Set(TypographyProperties.TextWrap, TextWrap.WordWithGraphemeFallback)
@@ -732,9 +753,12 @@ internal static class Controls
         _ = element.Scope.Effect(
             () =>
             {
+                var isPlaceholder =
+                    placeholderText.Length != 0 && state.DisplayText.Length == 0 && !state.Focused;
+                placeholderActive.Value = isPlaceholder;
                 element.UpdateControl(
                     ProjectionProperties.Text,
-                    state.DisplayText.Length == 0 && !state.Focused ? name : state.DisplayText
+                    isPlaceholder ? placeholderText : state.DisplayText
                 );
                 element.UpdateControl(
                     ProjectionProperties.TextSelectionStart,
@@ -997,6 +1021,8 @@ internal static class Controls
 
     private static string Required(string value, string parameter) =>
         ControlState.Required(value, parameter);
+
+    private static string Placeholder(string? placeholder, string label) => placeholder ?? label;
 
     private static string Percent(float value) =>
         MathF.Round(value * 100).ToString("0", CultureInfo.InvariantCulture) + "%";

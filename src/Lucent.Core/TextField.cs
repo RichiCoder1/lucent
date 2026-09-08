@@ -44,6 +44,8 @@ public readonly record struct TextInputCommand(
                 or Key.Down
                 or Key.Home
                 or Key.End
+                or Key.PageUp
+                or Key.PageDown
                 or Key.Backspace
                 or Key.Delete
                 or Key.Enter
@@ -163,6 +165,10 @@ internal class TextFieldState
 
     public void MoveRight(bool extend = false) => _session.MoveRight(extend);
 
+    public void MoveWordLeft(bool extend = false) => _session.MoveWordLeft(extend);
+
+    public void MoveWordRight(bool extend = false) => _session.MoveWordRight(extend);
+
     public void MoveHome(bool extend = false)
     {
         if (IsMultiline)
@@ -189,6 +195,18 @@ internal class TextFieldState
     internal void MoveDown(ShapedText paragraph, bool extend = false) =>
         _session.MoveDown(paragraph, extend);
 
+    internal void MoveVisualHome(ShapedText paragraph, bool extend = false) =>
+        _session.MoveVisualHome(paragraph, extend);
+
+    internal void MoveVisualEnd(ShapedText paragraph, bool extend = false) =>
+        _session.MoveVisualEnd(paragraph, extend);
+
+    internal void MovePageUp(ShapedText paragraph, float viewportHeight, bool extend = false) =>
+        _session.MovePageUp(paragraph, viewportHeight, extend);
+
+    internal void MovePageDown(ShapedText paragraph, float viewportHeight, bool extend = false) =>
+        _session.MovePageDown(paragraph, viewportHeight, extend);
+
     internal void SetSelection(
         int anchor,
         int caret,
@@ -203,6 +221,10 @@ internal class TextFieldState
     public void DeleteBackward() => _session.DeleteBackward();
 
     public void DeleteForward() => _session.DeleteForward();
+
+    public void DeleteWordBackward() => _session.DeleteWordBackward();
+
+    public void DeleteWordForward() => _session.DeleteWordForward();
 
     public void Undo() => _session.Undo();
 
@@ -453,6 +475,12 @@ internal class TextFieldState
 }
 
 /// <summary>Text behavior bridges portable key/text commands to scope-owned field state and pointer editing.</summary>
+/// <remarks>
+/// Tab is intentionally left unhandled here so the input router can perform focus traversal. A
+/// multiline editor can still receive a tab through committed text input or an explicit insert
+/// command; the key itself never inserts text or changes the editor selection. An empty, unfocused
+/// field projects its configured placeholder (the label by default) as visual content while its semantic value remains empty.
+/// </remarks>
 internal sealed class TextFieldBehavior(TextFieldState state, string name) : Behavior
 {
     private int? _dragPointer;
@@ -579,12 +607,15 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                 )
                 {
                     _dragPointer = route.Command.PointerId;
-                    _dragAnchor = hit.Utf16Offset;
-                    _dragAnchorAffinity = hit.Affinity;
+                    var extendSelection = route.Command.Modifiers.HasFlag(KeyModifiers.Shift);
+                    _dragAnchor = extendSelection ? state.Anchor : hit.Utf16Offset;
+                    _dragAnchorAffinity = extendSelection
+                        ? state.Session.AnchorAffinity
+                        : hit.Affinity;
                     state.SetSelection(
+                        _dragAnchor,
                         hit.Utf16Offset,
-                        hit.Utf16Offset,
-                        hit.Affinity,
+                        _dragAnchorAffinity,
                         hit.Affinity
                     );
                     route.Capture();
@@ -690,6 +721,18 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                     case Key.End:
                         state.MoveDocumentEnd(shift);
                         break;
+                    case Key.Left:
+                        state.MoveWordLeft(shift);
+                        break;
+                    case Key.Right:
+                        state.MoveWordRight(shift);
+                        break;
+                    case Key.Backspace:
+                        state.DeleteWordBackward();
+                        break;
+                    case Key.Delete:
+                        state.DeleteWordForward();
+                        break;
                     default:
                         return;
                 }
@@ -703,10 +746,24 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                         state.MoveRight(shift);
                         break;
                     case Key.Home:
-                        state.MoveHome(shift);
+                        if (
+                            state.IsMultiline
+                            && context.CompositionInput().TextParagraph(context.Identity)
+                                is { } homeParagraph
+                        )
+                            state.MoveVisualHome(homeParagraph, shift);
+                        else
+                            state.MoveHome(shift);
                         break;
                     case Key.End:
-                        state.MoveEnd(shift);
+                        if (
+                            state.IsMultiline
+                            && context.CompositionInput().TextParagraph(context.Identity)
+                                is { } endParagraph
+                        )
+                            state.MoveVisualEnd(endParagraph, shift);
+                        else
+                            state.MoveEnd(shift);
                         break;
                     case Key.Enter when state.IsMultiline:
                         state.Insert("\n");
@@ -726,6 +783,32 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                             { } downParagraph
                         )
                             state.MoveDown(downParagraph, shift);
+                        else
+                            return;
+                        break;
+                    case Key.PageUp when state.IsMultiline:
+                        if (
+                            context.CompositionInput().TextParagraph(context.Identity)
+                                is { } pageUpParagraph
+                            && context.CompositionInput().GetSemanticScroll(context.Identity)
+                                is { } pageUpScroll
+                        )
+                            state.MovePageUp(pageUpParagraph, pageUpScroll.Viewport.Height, shift);
+                        else
+                            return;
+                        break;
+                    case Key.PageDown when state.IsMultiline:
+                        if (
+                            context.CompositionInput().TextParagraph(context.Identity)
+                                is { } pageDownParagraph
+                            && context.CompositionInput().GetSemanticScroll(context.Identity)
+                                is { } pageDownScroll
+                        )
+                            state.MovePageDown(
+                                pageDownParagraph,
+                                pageDownScroll.Viewport.Height,
+                                shift
+                            );
                         else
                             return;
                         break;

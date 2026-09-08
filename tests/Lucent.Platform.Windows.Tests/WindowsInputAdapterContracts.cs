@@ -83,6 +83,32 @@ public sealed class WindowsInputAdapterContracts
     }
 
     [TestMethod]
+    public void PointerModifiersAndPagingKeysRemainPortableAtTheWindowsBoundary()
+    {
+        Assert.AreEqual(Key.PageUp, WindowsInputAdapter.MapKey(SDL.Keycode.Pageup));
+        Assert.AreEqual(Key.PageDown, WindowsInputAdapter.MapKey(SDL.Keycode.Pagedown));
+
+        var shiftPointer = new PointerCommand(
+            PointerCommandKind.Down,
+            7,
+            12,
+            18,
+            PointerButton.Primary,
+            KeyModifiers.Shift
+        );
+        shiftPointer.Validate();
+        Assert.AreEqual(KeyModifiers.Shift, shiftPointer.Modifiers);
+
+        var modifiers = WindowsInputAdapter.MapModifiers(
+            SDL.Keymod.LShift | SDL.Keymod.LCtrl | SDL.Keymod.RAlt | SDL.Keymod.RGUI
+        );
+        Assert.AreEqual(
+            KeyModifiers.Shift | KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta,
+            modifiers
+        );
+    }
+
+    [TestMethod]
     public void NativeTextTransportNormalizesMultilineInputAndKeepsTheCaretInItsViewport()
     {
         foreach (var multiline in new[] { false, true })

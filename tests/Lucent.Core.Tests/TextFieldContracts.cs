@@ -6,6 +6,112 @@ namespace Lucent.Core.Tests;
 public sealed class TextFieldContracts
 {
     [TestMethod]
+    public void PlaceholderHasIndependentAccessibleNameMutedPaintAndNoEditableValue()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "text-field-placeholder");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(
+            composition.Root,
+            theme,
+            "root",
+            Style.Empty.Width(200).Height(40).CrossAlignment(LayoutAlignment.Start)
+        );
+        var field = composition.Child(composition.Root, "field");
+        var state = Controls.TextField(
+            field,
+            theme,
+            "Search",
+            style: Style.Empty.Width(180).Height(30),
+            placeholder: "Find issues"
+        );
+        var router = composition.Input;
+        var scene = Install(composition, router);
+        var semantic = FindTextField(composition.SemanticSnapshot()!);
+        Assert(
+            semantic.Name == "Search"
+                && semantic.Value == ""
+                && field.Resolve(ProjectionProperties.Text).Value == "Find issues"
+                && field.Resolve(TypographyProperties.TextColor).Value
+                    == theme.Token(ControlThemes.SecondaryForeground),
+            "Placeholder did not keep its accessible label, muted paint, and empty semantic value."
+        );
+
+        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == field.Id).Bounds;
+        Assert(
+            router
+                .DispatchPointer(
+                    new(
+                        PointerCommandKind.Down,
+                        1,
+                        bounds.X + 2,
+                        bounds.Y + 2,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled,
+            "Placeholder field rejected focus."
+        );
+        scene = Install(composition, router);
+        Assert(
+            state.Value == ""
+                && field.Resolve(ProjectionProperties.Text).Value == ""
+                && field.Resolve(TypographyProperties.TextColor).Value
+                    == theme.Token(ControlThemes.Foreground)
+                && !Flatten(scene.Nodes)
+                    .OfType<TextSceneNode>()
+                    .Any(node => node.Identity.Element.ElementId == field.Id),
+            "Focusing an empty field left the placeholder editable or painted."
+        );
+
+        state.Insert("x");
+        scene = Install(composition, router);
+        Assert(
+            state.Value == "x"
+                && field.Resolve(ProjectionProperties.Text).Value == "x"
+                && field.Resolve(TypographyProperties.TextColor).Value
+                    == theme.Token(ControlThemes.Foreground),
+            "Committed text did not replace the placeholder with normal foreground paint."
+        );
+    }
+
+    [TestMethod]
+    public void EmptyPlaceholderDisablesHintWithoutChangingAccessibleName()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "text-field-empty-placeholder");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(
+            composition.Root,
+            theme,
+            "root",
+            Style.Empty.Width(200).Height(40).CrossAlignment(LayoutAlignment.Start)
+        );
+        var field = composition.Child(composition.Root, "field");
+        Controls.TextField(
+            field,
+            theme,
+            "Search",
+            style: Style.Empty.Width(180).Height(30),
+            placeholder: ""
+        );
+
+        var scene = Install(composition, composition.Input);
+        var semantic = FindTextField(composition.SemanticSnapshot()!);
+        Assert(
+            semantic.Name == "Search"
+                && semantic.Value == ""
+                && field.Resolve(ProjectionProperties.Text).Value == ""
+                && field.Resolve(TypographyProperties.TextColor).Value
+                    == theme.Token(ControlThemes.Foreground)
+                && !Flatten(scene.Nodes)
+                    .OfType<TextSceneNode>()
+                    .Any(node => node.Identity.Element.ElementId == field.Id),
+            "An empty placeholder did not disable visual hinting while preserving the accessible name."
+        );
+    }
+
+    [TestMethod]
     public void EditingSelectionImeClipboardAndStaleInput()
     {
         var graph = new ReactiveGraph();

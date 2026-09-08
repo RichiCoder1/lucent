@@ -163,6 +163,12 @@ public enum Key
     /// <summary>Moves to the end.</summary>
     End,
 
+    /// <summary>Moves one viewport toward the beginning of a multiline editor.</summary>
+    PageUp,
+
+    /// <summary>Moves one viewport toward the end of a multiline editor.</summary>
+    PageDown,
+
     /// <summary>Deletes the preceding grapheme.</summary>
     Backspace,
 
@@ -312,13 +318,14 @@ public enum InputRejection
     Reentrant,
 }
 
-/// <summary>A pointer phase with finite logical-pixel coordinates; only down commands carry a button.</summary>
+/// <summary>A pointer phase with finite logical-pixel coordinates and native modifier state.</summary>
 public readonly record struct PointerCommand(
     PointerCommandKind Kind,
     int PointerId,
     float X,
     float Y,
-    PointerButton Button = PointerButton.None
+    PointerButton Button = PointerButton.None,
+    KeyModifiers Modifiers = KeyModifiers.None
 )
 {
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
@@ -332,9 +339,15 @@ public readonly record struct PointerCommand(
             || !float.IsFinite(Y)
             || (Kind == PointerCommandKind.Down && Button == PointerButton.None)
             || (Kind != PointerCommandKind.Down && Button != PointerButton.None)
+            || (
+                (uint)Modifiers
+                & ~(uint)(
+                    KeyModifiers.Shift | KeyModifiers.Control | KeyModifiers.Alt | KeyModifiers.Meta
+                )
+            ) != 0
         )
             throw new ArgumentException(
-                "Pointer commands require finite logical coordinates and a button only on down."
+                "Pointer commands require finite logical coordinates, valid modifiers, and a button only on down."
             );
     }
 }

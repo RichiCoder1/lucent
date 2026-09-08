@@ -222,7 +222,7 @@ public static partial class Components
         );
     }
 
-    /// <summary>Creates a single-line text editor. Supply <paramref name="session"/> to retain its document state across mounts; otherwise <paramref name="initialValue"/> seeds mount-owned state.</summary>
+    /// <summary>Creates a single-line text editor. <paramref name="label"/> is the accessible name; <paramref name="placeholder"/> is the muted empty-field hint, defaults to that label, and may be empty to disable the hint. Supply <paramref name="session"/> to retain its document state across mounts; otherwise <paramref name="initialValue"/> seeds mount-owned state.</summary>
     [LucentComponent]
     public static ComponentRecipe TextField(
         string initialValue = "",
@@ -230,7 +230,8 @@ public static partial class Components
         Style? style = null,
         string label = "Text field",
         EditorSession? session = null,
-        FocusTarget? focusTarget = null
+        FocusTarget? focusTarget = null,
+        string? placeholder = null
     )
     {
         TextFieldState.ValidateText(initialValue);
@@ -251,7 +252,8 @@ public static partial class Components
                     initialValue,
                     style,
                     session,
-                    focusTarget
+                    focusTarget,
+                    placeholder
                 );
                 if (onChange is not null)
                 {
@@ -273,7 +275,7 @@ public static partial class Components
         );
     }
 
-    /// <summary>Creates a multiline text editor. Supply <paramref name="session"/> to retain its document state across mounts.</summary>
+    /// <summary>Creates a multiline text editor. <paramref name="label"/> is the accessible name; <paramref name="placeholder"/> is the muted empty-field hint, defaults to that label, and may be empty to disable the hint. Supply <paramref name="session"/> to retain its document state across mounts.</summary>
     [LucentComponent]
     public static ComponentRecipe TextArea(
         string initialValue = "",
@@ -281,7 +283,8 @@ public static partial class Components
         Style? style = null,
         string label = "Text area",
         EditorSession? session = null,
-        FocusTarget? focusTarget = null
+        FocusTarget? focusTarget = null,
+        string? placeholder = null
     )
     {
         TextFieldState.ValidateMultilineText(initialValue);
@@ -302,7 +305,8 @@ public static partial class Components
                     initialValue,
                     style,
                     session,
-                    focusTarget
+                    focusTarget,
+                    placeholder
                 );
                 if (onChange is not null)
                 {
