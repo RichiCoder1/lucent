@@ -60,6 +60,7 @@ function Invoke-Managed {
     $selected = @(Resolve-ManagedProjects)
     $runCoreArchitecture = $Project.Count -eq 0 -or $selected -contains 'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj'
     if ($Project.Count -eq 0) {
+        & (Join-Path $PSScriptRoot 'Test-PackageSet.ps1')
         & (Join-Path $PSScriptRoot 'Verify-Formatting.ps1')
         if ($LASTEXITCODE) { throw 'Formatting check failed.' }
         Invoke-Dotnet @('restore', 'Lucent.slnx', '--locked-mode')

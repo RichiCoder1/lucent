@@ -1,0 +1,10 @@
+[
+  "Lucent.Core",
+  "Lucent.Renderer.Skia",
+  "Lucent.Platform.Windows",
+  "Lucent.Hosting",
+  "Lucent.Lui.Sdk",
+  "Lucent.Reactive.R3",
+  "Lucent.Testing",
+  "Lucent.Testing.Skia"
+]

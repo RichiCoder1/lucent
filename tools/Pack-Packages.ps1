@@ -8,7 +8,7 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $root "artifacts/packa
 $null = New-Item -ItemType Directory -Force -Path $OutputDirectory
 $commit = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE) { throw 'Cannot resolve package source identity.' }
-$names = @('Lucent.Core', 'Lucent.Renderer.Skia', 'Lucent.Platform.Windows', 'Lucent.Hosting', 'Lucent.Lui.Sdk', 'Lucent.Reactive.R3', 'Lucent.Testing', 'Lucent.Testing.Skia')
+$names = Get-Content (Join-Path $PSScriptRoot 'package-set.json') -Raw | ConvertFrom-Json
 foreach ($name in $names) {
     $project = Join-Path $root "src/$name/$name.csproj"
     & dotnet restore $project --locked-mode
@@ -16,6 +16,7 @@ foreach ($name in $names) {
     & dotnet pack $project -c Release --no-restore -warnaserror "-p:LucentPackageVersion=$Version" "-p:RepositoryCommit=$commit" -o $OutputDirectory
     if ($LASTEXITCODE) { throw "Pack failed: $name" }
 }
+$null = & (Join-Path $PSScriptRoot 'Get-PackageSet.ps1') -Directory $OutputDirectory -Version $Version
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $notices = Get-Content (Join-Path $PSScriptRoot 'package-notices.json') -Raw | ConvertFrom-Json
 foreach ($name in $names) {

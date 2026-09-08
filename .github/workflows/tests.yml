@@ -79,7 +79,8 @@ jobs:
         run: |
           $version = "0.3.0-dev.${{ github.run_number }}.1"
           $source = 'https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json'
-          foreach ($package in Get-ChildItem "artifacts/packages/$version/*.nupkg") {
+          $packages = @(./tools/Get-PackageSet.ps1 -Directory "artifacts/packages/$version" -Version $version)
+          foreach ($package in $packages) {
             dotnet nuget push $package.FullName --api-key $env:GITHUB_TOKEN --source $source --skip-duplicate
             if ($LASTEXITCODE) { throw "Package publish failed: $($package.Name)" }
           }

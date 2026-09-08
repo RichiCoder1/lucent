@@ -6,6 +6,8 @@ After the main-branch managed tests pass, CI runs the existing Core, R3, rendere
 
 Managed checks cancel obsolete runs. Package jobs serialize independently and are not automatically canceled by newer pushes. A retry of the same workflow run uses the same version, skipping existing uploads and completing missing packages; package metadata records the source commit. Manual cancellation or runner failure can still leave a partial set, so consumers should use a version from a successful workflow. NuGet has no atomic multi-package transaction.
 
+The [package set](../tools/package-set.json) is an explicit allowlist shared by packing and publishing. Before returning any files to the publisher, the package-set check rejects missing or additional `.nupkg` files. A stale or unexpected artifact cannot extend the set uploaded by CI.
+
 ## Consumption
 
 Use `Microsoft.NET.Sdk;Lucent.Lui.Sdk/<exact-version>` as the project SDK and exact `PackageReference` versions for Windows and optional Hosting. Core and Skia arrive transitively. The SDK supplies the generator, .lui items and optional formatting tooling. Build-time compiler assets do not become application runtime references.
