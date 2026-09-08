@@ -14,7 +14,7 @@ public static class SceneLayout
         Composition composition,
         LayoutViewport viewport,
         ITextShaper shaper
-    ) => Project(composition, viewport, shaper, int.MaxValue);
+    ) => Project(composition, viewport, shaper, ReactiveGraph.DefaultMaximumWorkItems);
 
     /// <summary>Lays out the current composition while bounding reactive work performed by the projection.</summary>
     public static RetainedScene Project(
@@ -225,7 +225,8 @@ public static class SceneLayout
                             element.Resolve(InputProperties.Visible).Value
                                 && element.ParticipatesInInput(),
                             signature,
-                            childClipCornerRadius
+                            childClipCornerRadius,
+                            element.Resolve(InputProperties.PointerTransparent).Value
                         );
                     }
                 )
@@ -2277,6 +2278,7 @@ public static class SceneLayout
         var caretAffinity = element.Resolve(ProjectionProperties.TextCaretAffinity).Value;
         var enabled = element.Resolve(InputProperties.Enabled).Value;
         var visible = element.Resolve(InputProperties.Visible).Value;
+        var pointerTransparent = element.Resolve(InputProperties.PointerTransparent).Value;
         var participation = element.Participation;
         return Hash(writer =>
         {
@@ -2360,6 +2362,7 @@ public static class SceneLayout
                 writer.Write(resolvedCaret);
             writer.Write(enabled);
             writer.Write(visible);
+            writer.Write(pointerTransparent);
             writer.Write((int)participation);
         });
     }

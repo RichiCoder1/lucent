@@ -42,7 +42,10 @@ internal static class LifecycleFixture
                     session.Scope.OnDispose(() => recorder.RecordUi("ui-dispose"));
                     return LuiFixtures.Components.LifecycleFixtureView(model);
                 },
-                services => services.GetRequiredService<LifecycleFixtureModel>().PrepareCloseAsync()
+                (services, cancellationToken) =>
+                    services
+                        .GetRequiredService<LifecycleFixtureModel>()
+                        .PrepareCloseAsync(cancellationToken)
             );
 
             var result = LucentApplication
@@ -143,7 +146,8 @@ public sealed class LifecycleFixtureModel : IAsyncDisposable
             throw new InvalidOperationException("The lifecycle model was attached more than once.");
     }
 
-    internal ValueTask<bool> PrepareCloseAsync() => _service.PrepareCloseAsync();
+    internal ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken) =>
+        _service.PrepareCloseAsync(cancellationToken);
 
     public async ValueTask DisposeAsync()
     {
@@ -178,11 +182,11 @@ internal sealed class LifecycleHostedService(LifecycleRecorder recorder, Lifecyc
         _acceptedWrite = AcceptedWriteAsync();
     }
 
-    internal async ValueTask<bool> PrepareCloseAsync()
+    internal async ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken)
     {
         var attempt = Interlocked.Increment(ref _prepareCount);
         recorder.RecordUi("prepare-" + attempt + "-start");
-        await Task.Delay(300);
+        await Task.Delay(300, cancellationToken);
         recorder.RecordUi("prepare-" + attempt + "-continued");
         if (attempt == 1)
         {
@@ -191,7 +195,9 @@ internal sealed class LifecycleHostedService(LifecycleRecorder recorder, Lifecyc
         }
 
         _finishAcceptedWrite.TrySetResult();
-        await (_acceptedWrite ?? throw new InvalidOperationException("No write was accepted."));
+        await (
+            _acceptedWrite ?? throw new InvalidOperationException("No write was accepted.")
+        ).WaitAsync(cancellationToken);
         recorder.RecordUi("prepare-2-accepted");
         return true;
     }

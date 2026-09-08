@@ -222,6 +222,9 @@ public enum SemanticCommandResult
 
     /// <summary>The current target is disabled.</summary>
     Disabled,
+
+    /// <summary>A controlled selection request was delivered, but the application has not applied selection.</summary>
+    Requested,
 }
 
 /// <summary>Accessible state supplied by a behavior for one retained element.</summary>
@@ -485,6 +488,9 @@ public sealed class BehaviorContext
     internal ElementIdentity Identity => new(_composition.Epoch, ElementId);
 
     internal InputRouter CompositionInput() => _composition.Input;
+
+    internal void RegisterCommandScope() =>
+        _composition.Input.RegisterCommandScope(ElementId, _scope);
 
     internal Composition Composition => _composition;
     internal string SemanticName =>

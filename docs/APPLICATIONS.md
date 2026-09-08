@@ -25,7 +25,9 @@ static int Main()
         },
         (services, session) => Notes.Components.Inbox(
             services.GetRequiredService<InboxModel>(), session),
-        services => services.GetRequiredService<InboxModel>().PrepareCloseAsync());
+        (services, cancellationToken) => services
+            .GetRequiredService<InboxModel>()
+            .PrepareCloseAsync(cancellationToken));
 
     return LucentApplication.CreateBuilder()
         .UseWindows()
@@ -53,11 +55,15 @@ The example illustrates the authoring boundary, not the planned application's fi
 
 ## Closing without losing accepted work
 
-`PrepareCloseAsync` must prevent new accepted writes, await existing accepted saves and return true only when closing is safe. It may return false to decline, or throw an actionable error. In either case services and UI remain alive. The next `session.RequestClose()` retries preparation. `session.Status` is reactive and can drive progress, disabled editing and recovery UI. Requests during startup are remembered; repeated requests during preparation do not run duplicate saves.
+`PrepareCloseAsync` must prevent new accepted writes, await existing accepted saves and return true only when closing is safe. For an expected validation or save failure, publish recoverable application state and return false; services and UI remain alive, and the next `session.RequestClose()` retries preparation. An exception escaping preparation is unexpected and terminates the session. `session.Status` is reactive and can drive progress and disabled editing, while the application model owns recoverable error details. Requests during startup are remembered; repeated requests during preparation do not run duplicate saves.
+
+Fatal host failure requests cancellation through the preparation token and begins terminal cleanup without waiting for preparation. Cancellation is cooperative. Preparation must observe the token, but accepted saves retain application-service ownership and still finish or report failure from service shutdown. A late preparation result cannot reopen the session; a late task fault remains observed when the task can complete independently of the closed owner context.
 
 Keep an accepted save's lifetime in the application service. Do not link it to the cancellation token of an element, obsolete read or Generic Host stopping notification. A service can cancel stale reads freely while maintaining its independent accepted-write drain. The storage ticket defines actual persistence and retry behavior; Lucent does not silently replay writes.
 
 After preparation succeeds, service stop is terminal. Lucent attempts service stop, owner-thread composition disposal, asynchronous model-scope disposal, and host disposal; failures remain observable from `Run`. A partially stopped host is not reopened. Fallible work needing user recovery belongs in preparation. A fatal platform failure cannot offer that recovery UI; service stop must also account for accepted work on this emergency path and report any failure to finish it.
+
+Use `SetFailureReporter` on the application builder to send terminal and late-preparation failures to application logging or crash reporting. The callback runs independently after cleanup, cannot resume the session, and must not use disposed UI or services. It is best effort before process exit. If the callback or its dispatcher fails, Lucent writes both the original and reporting failures to its minimal standard-error fallback without replacing the exception returned by `Run`.
 
 ## Threading and ownership
 

@@ -993,9 +993,9 @@ public sealed class CompositionContracts
         );
         Assert(
             composition.ExecuteSemanticCommand(semantic.Identity, new(SemanticCommandKind.Select))
-                == SemanticCommandResult.Applied
+                == SemanticCommandResult.Requested
                 && activations == 1,
-            "Composed selectable did not preserve selection activation."
+            "Composed selectable did not distinguish activation from unapplied selection."
         );
 
         label.Value = "Updated note";

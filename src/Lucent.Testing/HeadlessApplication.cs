@@ -506,7 +506,8 @@ public sealed class HeadlessApplication : IAsyncDisposable
             );
         }
 
-        public ValueTask<bool> PrepareCloseAsync() => ValueTask.FromResult(true);
+        public ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(true);
 
         public ValueTask StopAsync() => ValueTask.CompletedTask;
 

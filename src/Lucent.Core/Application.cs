@@ -11,6 +11,36 @@ public interface IApplicationHost
     int Run(ApplicationSession session);
 }
 
+/// <summary>Classifies a failure reported outside the application cleanup path.</summary>
+public enum ApplicationFailureKind
+{
+    /// <summary>The session completed terminal cleanup with one or more failures.</summary>
+    Terminal,
+
+    /// <summary>A cancelled close-preparation operation faulted after terminal shutdown began.</summary>
+    LateClosePreparation,
+}
+
+/// <summary>An immutable application failure delivered independently from lifecycle cleanup.</summary>
+public sealed class ApplicationFailureReport
+{
+    internal ApplicationFailureReport(string title, ApplicationFailureKind kind, Exception error)
+    {
+        Title = title;
+        Kind = kind;
+        Error = error;
+    }
+
+    /// <summary>Gets the snapshotted application title.</summary>
+    public string Title { get; }
+
+    /// <summary>Gets whether the failure terminated the session or arrived from cancelled preparation.</summary>
+    public ApplicationFailureKind Kind { get; }
+
+    /// <summary>Gets the captured original or aggregated failure.</summary>
+    public Exception Error { get; }
+}
+
 /// <summary>Collects reusable configuration snapshots for <see cref="LucentApplication"/>.</summary>
 public sealed class LucentApplicationBuilder
 {
@@ -18,6 +48,7 @@ public sealed class LucentApplicationBuilder
     private Func<ThemeAppearance, Theme> _themeFactory = DefaultTheme;
     private ControlPresentationMode _presentationMode = ControlPresentationMode.Standard;
     private IApplicationHost? _host;
+    private Action<ApplicationFailureReport>? _failureReporter;
 
     internal LucentApplicationBuilder() { }
 
@@ -53,6 +84,15 @@ public sealed class LucentApplicationBuilder
         return this;
     }
 
+    /// <summary>Reports terminal and late close-preparation failures independently after cleanup.</summary>
+    /// <remarks>The callback is best effort before process exit and cannot rely on UI or application services remaining available.</remarks>
+    public LucentApplicationBuilder SetFailureReporter(Action<ApplicationFailureReport> reporter)
+    {
+        ArgumentNullException.ThrowIfNull(reporter);
+        _failureReporter = reporter;
+        return this;
+    }
+
     /// <summary>Snapshots the current configuration into a one-shot application.</summary>
     /// <exception cref="InvalidOperationException">No host has been selected.</exception>
     public LucentApplication Build() =>
@@ -60,7 +100,8 @@ public sealed class LucentApplicationBuilder
             _title,
             _themeFactory,
             _presentationMode,
-            _host ?? throw new InvalidOperationException("An application host must be selected.")
+            _host ?? throw new InvalidOperationException("An application host must be selected."),
+            _failureReporter
         );
 
     private static Theme DefaultTheme(ThemeAppearance appearance) =>
@@ -85,19 +126,22 @@ public sealed class LucentApplication
     private readonly Func<ThemeAppearance, Theme> _themeFactory;
     private readonly ControlPresentationMode _presentationMode;
     private readonly IApplicationHost _host;
+    private readonly Action<ApplicationFailureReport>? _failureReporter;
     private int _started;
 
     internal LucentApplication(
         string title,
         Func<ThemeAppearance, Theme> themeFactory,
         ControlPresentationMode presentationMode,
-        IApplicationHost host
+        IApplicationHost host,
+        Action<ApplicationFailureReport>? failureReporter
     )
     {
         _title = title;
         _themeFactory = themeFactory;
         _presentationMode = presentationMode;
         _host = host;
+        _failureReporter = failureReporter;
     }
 
     /// <summary>Creates a reusable application builder with the title "Lucent" and standard control themes.</summary>
@@ -142,13 +186,26 @@ public sealed class LucentApplication
                 },
                 "application-theme"
             );
-            session = new ApplicationSession(_title, composition, theme, lifecycle);
+            session = new ApplicationSession(
+                _title,
+                composition,
+                theme,
+                lifecycle,
+                _failureReporter
+            );
         }
         catch (Exception error)
         {
             var errors = new List<Exception> { error };
             CleanupWithoutSession(lifecycle, composition, errors);
-            ThrowAll(errors);
+            var startupFailure = CreateFailure(errors);
+            ApplicationSession.ReportFailure(
+                _title,
+                _failureReporter,
+                ApplicationFailureKind.Terminal,
+                startupFailure
+            );
+            ExceptionDispatchInfo.Capture(startupFailure).Throw();
         }
 
         var exitCode = 0;
@@ -265,14 +322,10 @@ public sealed class LucentApplication
         theme
         ?? throw new InvalidOperationException("The application theme factory returned null.");
 
-    private static void ThrowAll(List<Exception> errors)
-    {
-        if (errors.Count == 0)
-            return;
-        if (errors.Count == 1)
-            ExceptionDispatchInfo.Capture(errors[0]).Throw();
-        throw new AggregateException("Application run and cleanup failed.", errors);
-    }
+    private static Exception CreateFailure(List<Exception> errors) =>
+        errors.Count == 1
+            ? errors[0]
+            : new AggregateException("Application run and cleanup failed.", errors);
 
     private sealed class CleanupSynchronizationContext : SynchronizationContext, IDisposable
     {
@@ -304,7 +357,8 @@ public sealed class LucentApplication
         public ValueTask<ComponentRecipe> StartAsync(ApplicationSession session) =>
             ValueTask.FromResult(recipe);
 
-        public ValueTask<bool> PrepareCloseAsync() => ValueTask.FromResult(true);
+        public ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(true);
 
         public ValueTask StopAsync() => ValueTask.CompletedTask;
 

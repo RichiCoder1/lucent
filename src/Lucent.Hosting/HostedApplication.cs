@@ -9,12 +9,12 @@ namespace Lucent.Hosting;
 /// <remarks>Factories execute on the UI owner. Resolve models only in the root factory; pass typed
 /// models to .lui components. One async DI scope owns application models, independent of elements.
 /// Close preparation must stop accepting new writes and drain already accepted writes before returning true.
-/// A false result or exception leaves the session available for retry. Hosted-service stop is terminal.</remarks>
+/// A false result leaves the session available for retry; an escaping exception is terminal. Hosted-service stop is terminal.</remarks>
 public sealed class HostedApplication : IApplicationLifecycle
 {
     private readonly Func<ApplicationSession, IHost> _createHost;
     private readonly Func<IServiceProvider, ApplicationSession, ComponentRecipe> _createRoot;
-    private readonly Func<IServiceProvider, ValueTask<bool>>? _prepareClose;
+    private readonly Func<IServiceProvider, CancellationToken, ValueTask<bool>>? _prepareClose;
     private IHost? _host;
     private AsyncServiceScope? _scope;
     private CancellationTokenRegistration _stopping;
@@ -25,7 +25,7 @@ public sealed class HostedApplication : IApplicationLifecycle
     public HostedApplication(
         Func<ApplicationSession, IHost> createHost,
         Func<IServiceProvider, ApplicationSession, ComponentRecipe> createRoot,
-        Func<IServiceProvider, ValueTask<bool>>? prepareClose = null
+        Func<IServiceProvider, CancellationToken, ValueTask<bool>>? prepareClose = null
     )
     {
         _createHost = createHost ?? throw new ArgumentNullException(nameof(createHost));
@@ -70,14 +70,15 @@ public sealed class HostedApplication : IApplicationLifecycle
     }
 
     /// <inheritdoc />
-    public ValueTask<bool> PrepareCloseAsync() =>
+    public ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken) =>
         _prepareClose is null
             ? ValueTask.FromResult(true)
             : _prepareClose(
                 (
                     _scope
                     ?? throw new InvalidOperationException("Application services have not started.")
-                ).ServiceProvider
+                ).ServiceProvider,
+                cancellationToken
             );
 
     /// <inheritdoc />

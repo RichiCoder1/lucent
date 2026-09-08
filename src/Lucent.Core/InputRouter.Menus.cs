@@ -23,7 +23,7 @@ public sealed partial class InputRouter
             || Hit(x, y) is not { } hit
         )
             return CursorIntent.Default;
-        foreach (var identity in Path(hit))
+        foreach (var identity in Path(hit).Reverse())
         {
             var element = _composition.Find(identity);
             if (element is null)
@@ -106,11 +106,11 @@ public sealed partial class InputRouter
 
     private ElementIdentity? MenuTarget(ElementIdentity hit)
     {
-        foreach (var identity in Path(hit))
-            if (_menus.ContainsKey(identity.ElementId))
-                return identity;
-        foreach (var identity in Path(hit))
-            if (_textFields.ContainsKey(identity.ElementId))
+        foreach (var identity in Path(hit).Reverse())
+            if (
+                _menus.ContainsKey(identity.ElementId)
+                || _textFields.ContainsKey(identity.ElementId)
+            )
                 return identity;
         return null;
     }
@@ -222,6 +222,7 @@ public sealed partial class InputRouter
         if (targets.Length != 0)
         {
             var errors = new List<Exception>();
+            SetModality(InputModality.Keyboard, errors);
             RequestFocus(
                 (first ? targets[0] : targets[^1]).Identity,
                 FocusChangeReason.Traversal,

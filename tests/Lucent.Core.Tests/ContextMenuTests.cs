@@ -6,6 +6,101 @@ namespace Lucent.Core.Tests;
 public sealed class ContextMenuTests
 {
     [TestMethod]
+    public void NestedEditorOwnsCursorAndMenuBeforeItsSelectableAncestor()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "nested-editor");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        Element? editor = null;
+        var row = owner.Mount(
+            owner.Root,
+            theme,
+            Components.ContextMenu(
+                [
+                    Components.Selectable(
+                        [
+                            ComponentRecipe.Create(
+                                "editor",
+                                (_, root) =>
+                                {
+                                    editor = root;
+                                    Controls.TextField(
+                                        root,
+                                        theme,
+                                        "Editor",
+                                        style: Style.Empty.Height(40)
+                                    );
+                                }
+                            ),
+                        ],
+                        () => "Row",
+                        () => false
+                    ),
+                ],
+                () => Components.Menu([Components.MenuItem("Outer action", () => { })])
+            )
+        );
+        ContextMenuRequest? request = null;
+        owner.Input.ContextMenuRequested += value => request = value;
+        Install(owner);
+        var scene = SceneLayout.Project(owner, new(800, 600, 1), new EmptyShaper());
+        Assert.IsTrue(owner.Input.SetScene(scene));
+        Assert.IsNotNull(editor);
+        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == editor.Id).Bounds;
+        var x = bounds.X + 2;
+        var y = bounds.Y + 2;
+        Assert.AreEqual(CursorIntent.Text, owner.Input.CursorAt(x, y));
+        owner.Input.DispatchPointer(new(PointerCommandKind.Down, 1, x, y, PointerButton.Secondary));
+        owner.Input.DispatchPointer(new(PointerCommandKind.Up, 1, x, y));
+        Assert.IsNotNull(request);
+        using var popupRequest = request;
+        Assert.IsTrue(
+            Nodes(request.CreateComposition().SemanticSnapshot()!).Any(node => node.Name == "Copy")
+        );
+    }
+
+    [TestMethod]
+    [DataRow(false, 0)]
+    [DataRow(true, 1)]
+    public void DisabledChildBlocksParentActivationUnlessPointerTransparent(
+        bool transparent,
+        int expected
+    )
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "disabled-child");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var activations = 0;
+        owner.Mount(
+            owner.Root,
+            theme,
+            Components.Selectable(
+                [
+                    Components.Button(
+                        "Disabled",
+                        () => Assert.Fail("Disabled child invoked."),
+                        Style
+                            .Empty.Height(40)
+                            .Set(InputProperties.Enabled, false)
+                            .Set(InputProperties.PointerTransparent, transparent)
+                    ),
+                ],
+                () => "Row",
+                () => false,
+                () => activations++
+            )
+        );
+        Install(owner);
+        owner.Input.DispatchPointer(new(PointerCommandKind.Down, 1, 20, 20, PointerButton.Primary));
+        owner.Input.DispatchPointer(new(PointerCommandKind.Up, 1, 20, 20));
+        Assert.AreEqual(
+            expected,
+            activations,
+            "Disabled and pointer-transparent hit behavior disagreed."
+        );
+    }
+
+    [TestMethod]
     public void KeyboardInvocationDismissalAndTargetDisposalAreBounded()
     {
         var graph = new ReactiveGraph();

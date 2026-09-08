@@ -9,6 +9,8 @@ namespace Lucent.Core;
 /// <remarks>Read and mutation operations belong to the creating thread. Worker completion is queued and becomes observable only when the owner calls <see cref="Drain()"/>.</remarks>
 public sealed class ReactiveGraph
 {
+    internal const int DefaultMaximumWorkItems = 10_000;
+    private const int MaximumRetainedDrainFailures = 64;
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
     private readonly List<ReactiveNode> _nodes = [];
     private readonly List<ReactiveScope> _scopes = [];
@@ -114,6 +116,13 @@ public sealed class ReactiveGraph
             return;
         }
 
+        if (_drainState is not null)
+        {
+            if (bodyError is not null)
+                ExceptionDispatchInfo.Capture(bodyError).Throw();
+            return;
+        }
+
         Exception? drainError = null;
         try
         {
@@ -130,7 +139,7 @@ public sealed class ReactiveGraph
     public void Drain()
     {
         CheckMutationGuard();
-        DrainPosted();
+        DrainPosted(DefaultMaximumWorkItems);
     }
 
     /// <summary>Commits at most <paramref name="maximumWorkItems"/> posted completions and scheduled effects.</summary>
@@ -142,7 +151,7 @@ public sealed class ReactiveGraph
         DrainPosted(maximumWorkItems);
     }
 
-    internal bool DrainPosted() => DrainPosted(int.MaxValue);
+    internal bool DrainPosted() => DrainPosted(DefaultMaximumWorkItems);
 
     internal bool DrainPosted(int maximumWorkItems)
     {
@@ -154,15 +163,14 @@ public sealed class ReactiveGraph
         CheckThread();
         if (_batchDepth != 0)
             return false;
+        if (_drainState is not null)
+            return false;
 
-        var state = _drainState;
-        var ownsState = state is null;
-        if (ownsState)
-            _drainState = state = new DrainState(maximumWorkItems);
-        else if (maximumWorkItems < state!.Limit)
-            state.Limit = maximumWorkItems;
+        var state = new DrainState(maximumWorkItems);
+        _drainState = state;
 
         List<Exception>? errors = null;
+        var omittedErrors = 0;
         try
         {
             while (true)
@@ -172,7 +180,7 @@ public sealed class ReactiveGraph
                     if (state!.Processed >= state.Limit)
                     {
                         if (HasPendingWork())
-                            ThrowDrainFailures(errors, state.Limit);
+                            ThrowDrainFailures(errors, state.Limit, omittedErrors);
                         break;
                     }
                     if (!TakePosted(out var post))
@@ -184,17 +192,17 @@ public sealed class ReactiveGraph
                     }
                     catch (Exception exception)
                     {
-                        (errors ??= []).Add(exception);
+                        AddDrainFailure(ref errors, ref omittedErrors, exception);
                     }
                     if (state.Processed >= state.Limit && HasPendingWork())
-                        ThrowDrainFailures(errors, state.Limit);
+                        ThrowDrainFailures(errors, state.Limit, omittedErrors);
                 }
 
                 var effect = _effects.First;
                 if (effect is null)
                     break;
                 if (state.Processed >= state.Limit)
-                    ThrowDrainFailures(errors, state.Limit);
+                    ThrowDrainFailures(errors, state.Limit, omittedErrors);
                 _effects.RemoveFirst();
                 effect.Value.Dequeue();
                 state.Processed++;
@@ -206,20 +214,22 @@ public sealed class ReactiveGraph
                 }
                 catch (Exception exception)
                 {
-                    (errors ??= []).Add(exception);
+                    AddDrainFailure(ref errors, ref omittedErrors, exception);
                 }
                 if (state.Processed >= state.Limit && HasPendingWork())
-                    ThrowDrainFailures(errors, state.Limit);
+                    ThrowDrainFailures(errors, state.Limit, omittedErrors);
             }
 
             if (errors is { Count: > 0 })
+            {
+                AddOmittedFailureSummary(errors, omittedErrors);
                 throw new AggregateException("Reactive callbacks failed.", errors);
+            }
             return state.Posted;
         }
         finally
         {
-            if (ownsState)
-                _drainState = null;
+            _drainState = null;
         }
     }
 
@@ -229,7 +239,11 @@ public sealed class ReactiveGraph
             return !_posted.IsEmpty || _effects.First is not null;
     }
 
-    private static void ThrowDrainFailures(List<Exception>? errors, int maximumWorkItems)
+    private static void ThrowDrainFailures(
+        List<Exception>? errors,
+        int maximumWorkItems,
+        int omittedErrors = 0
+    )
     {
         var limit = new InvalidOperationException(
             "Reactive work did not settle within "
@@ -238,8 +252,33 @@ public sealed class ReactiveGraph
         );
         if (errors is null)
             throw limit;
+        AddOmittedFailureSummary(errors, omittedErrors);
         errors.Add(limit);
         throw new AggregateException("Reactive callbacks failed before the drain limit.", errors);
+    }
+
+    private static void AddDrainFailure(
+        ref List<Exception>? errors,
+        ref int omittedErrors,
+        Exception error
+    )
+    {
+        if ((errors?.Count ?? 0) < MaximumRetainedDrainFailures)
+            (errors ??= []).Add(error);
+        else
+            omittedErrors = checked(omittedErrors + 1);
+    }
+
+    private static void AddOmittedFailureSummary(List<Exception> errors, int omittedErrors)
+    {
+        if (omittedErrors == 0)
+            return;
+        errors.Add(
+            new InvalidOperationException(
+                omittedErrors.ToString(CultureInfo.InvariantCulture)
+                    + " additional reactive callback failures were omitted."
+            )
+        );
     }
 
     private sealed class DrainState(int limit)

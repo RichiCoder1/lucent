@@ -1122,13 +1122,18 @@ public sealed class IssueBrowserTests
             composition.ExecuteSemanticCommand(
                 comfortable.Identity,
                 new(SemanticCommandKind.Select)
-            ) == SemanticCommandResult.Applied
-                && composition.Input.FocusSemantic(
-                    new(comfortable.Identity.CompositionEpoch, comfortable.Identity.ElementId)
-                ),
-            "Density proof could not select and focus its first row."
+            ) == SemanticCommandResult.Applied,
+            "Density proof could not select its first row."
         );
-        graph.Drain();
+        // Selection settles synchronous state and invalidates the old input projection.
+        // Install the new scene before issuing a separate focus command.
+        scene = Install(composition, renderer, viewport);
+        Assert(
+            composition.Input.FocusSemantic(
+                new(comfortable.Identity.CompositionEpoch, comfortable.Identity.ElementId)
+            ),
+            "Density proof could not focus its selected row."
+        );
         scene = Install(composition, renderer, viewport);
         var comfortableHeight = scene
             .Boxes.Single(box => box.Identity.ElementId == comfortable.Identity.ElementId)

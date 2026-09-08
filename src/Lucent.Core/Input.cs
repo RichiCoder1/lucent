@@ -9,8 +9,14 @@ public static class InputProperties
     /// <summary>Optional pointer appearance; Auto derives intent from the eligible control.</summary>
     public static readonly Property<CursorIntent> Cursor = new("input-cursor", CursorIntent.Auto);
 
-    /// <summary>When false, the element ignores pointer, keyboard, and focus input.</summary>
+    /// <summary>When false, the subtree cannot receive input; its visible bounds still block pointer activation behind it.</summary>
     public static readonly Property<bool> Enabled = new("input-enabled", true);
+
+    /// <summary>When true, the subtree is skipped by pointer hit testing. Keyboard and semantic availability are unchanged.</summary>
+    public static readonly Property<bool> PointerTransparent = new(
+        "input-pointer-transparent",
+        false
+    );
 
     /// <summary>When false, the element is hidden from hit testing and input.</summary>
     public static readonly Property<bool> Visible = new("input-visible", true);

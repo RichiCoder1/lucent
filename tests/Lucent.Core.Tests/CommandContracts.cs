@@ -287,13 +287,22 @@ public sealed class CommandContracts
             "Mounted CommandScope did not fill its available main axis."
         );
         Assert.IsTrue(composition.Input.SetScene(scene));
+        Assert.IsNull(composition.Input.FocusedElement);
+        Assert.IsTrue(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.N, KeyModifiers.Control))
+                .Handled,
+            "The application scope did not own its shortcut before focus was established."
+        );
+        Assert.AreEqual(1, runs);
+        graph.Drain();
         Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
         Assert.IsTrue(
             composition
                 .Input.DispatchKey(new(KeyCommandKind.Down, Key.N, KeyModifiers.Control))
                 .Handled
         );
-        Assert.AreEqual(1, runs, "Mounted CommandScope did not route from its focused child.");
+        Assert.AreEqual(2, runs, "Mounted CommandScope did not route from its focused child.");
     }
 
     [TestMethod]

@@ -1280,7 +1280,8 @@ public readonly record struct RetainedInputElement(
     bool Enabled,
     bool Visible,
     string Signature,
-    float ChildClipCornerRadius = 0
+    float ChildClipCornerRadius = 0,
+    bool PointerTransparent = false
 );
 
 /// <summary>The finite renderer operation represented by a retained scene node.</summary>

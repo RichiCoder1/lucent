@@ -249,6 +249,7 @@ static void VerifyPropertySurface(
                 ["Cursor"] = "Lucent.Core.Property`1|Lucent.Core.CursorIntent",
                 ["Enabled"] = "Lucent.Core.Property`1|System.Boolean",
                 ["Visible"] = "Lucent.Core.Property`1|System.Boolean",
+                ["PointerTransparent"] = "Lucent.Core.Property`1|System.Boolean",
             },
         }
     )

@@ -31,8 +31,8 @@ public interface IApplicationLifecycle : IAsyncDisposable
     /// <summary>Starts application services and returns the root recipe to mount.</summary>
     ValueTask<ComponentRecipe> StartAsync(ApplicationSession session);
 
-    /// <summary>Returns whether the current close request may proceed.</summary>
-    ValueTask<bool> PrepareCloseAsync();
+    /// <summary>Returns whether the current close request may proceed, observing fatal cancellation cooperatively.</summary>
+    ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken);
 
     /// <summary>Stops application services after close has been accepted or startup has failed.</summary>
     ValueTask StopAsync();
@@ -41,6 +41,7 @@ public interface IApplicationLifecycle : IAsyncDisposable
 /// <summary>Portable owner-thread session shared with a platform application host.</summary>
 public sealed class ApplicationSession
 {
+    private const int DefaultMaximumCallbacks = 1_024;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly IApplicationLifecycle _lifecycle;
     private readonly SessionSynchronizationContext _context;
@@ -49,6 +50,8 @@ public sealed class ApplicationSession
     private readonly ConcurrentQueue<Exception> _observerErrors = [];
     private readonly object _workGate = new();
     private readonly object _errorGate = new();
+    private readonly Action<ApplicationFailureReport> _failureReporter;
+    private readonly Action<Action> _failureDispatcher;
     private Action? _workAvailable;
     private int _notificationsInFlight;
     private bool _completionPending;
@@ -58,12 +61,17 @@ public sealed class ApplicationSession
     private bool _abortRequested;
     private bool _finishing;
     private bool _completed;
+    private int _closePreparationGeneration;
+    private CancellationTokenSource? _closePreparationCancellation;
+    private Task<bool>? _closePreparationTask;
 
     internal ApplicationSession(
         string title,
         Composition composition,
         ThemeContext theme,
-        IApplicationLifecycle lifecycle
+        IApplicationLifecycle lifecycle,
+        Action<ApplicationFailureReport>? failureReporter = null,
+        Action<Action>? failureDispatcher = null
     )
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(title);
@@ -71,6 +79,8 @@ public sealed class ApplicationSession
         Composition = composition ?? throw new ArgumentNullException(nameof(composition));
         Theme = theme ?? throw new ArgumentNullException(nameof(theme));
         _lifecycle = lifecycle ?? throw new ArgumentNullException(nameof(lifecycle));
+        _failureReporter = failureReporter ?? ReportToStandardError;
+        _failureDispatcher = failureDispatcher ?? DispatchOnThreadPool;
         if (!Composition.Root.HasPresentation)
             Composition.Root.Present(Theme, author: PresentationStyles.Surface);
         _context = new SessionSynchronizationContext(_ownerThread, NotifyWorkAvailable);
@@ -140,7 +150,7 @@ public sealed class ApplicationSession
     }
 
     /// <summary>Runs queued asynchronous lifecycle continuations on the owner thread.</summary>
-    public bool ProcessEvents() => ProcessEventsCore(null);
+    public bool ProcessEvents() => ProcessEventsCore(DefaultMaximumCallbacks);
 
     /// <summary>Runs at most <paramref name="maximumCallbacks"/> queued lifecycle continuations.</summary>
     /// <exception cref="InvalidOperationException">Callbacks remain queued after the limit is reached.</exception>
@@ -154,7 +164,7 @@ public sealed class ApplicationSession
         return ProcessEventsCore(maximumCallbacks);
     }
 
-    private bool ProcessEventsCore(int? maximumCallbacks)
+    private bool ProcessEventsCore(int maximumCallbacks)
     {
         CheckOwner();
         Exception? failure = null;
@@ -218,7 +228,12 @@ public sealed class ApplicationSession
             PublishStatus(ApplicationPhase.Completed, Failure);
             return;
         }
-        if (Volatile.Read(ref _started) == 0 || Status.Phase == ApplicationPhase.Running)
+        if (Status.Phase == ApplicationPhase.PreparingClose)
+            CancelClosePreparation();
+        if (
+            Volatile.Read(ref _started) == 0
+            || Status.Phase is ApplicationPhase.Running or ApplicationPhase.PreparingClose
+        )
             RunUnderContext(() => _ = FinishCoreAsync());
     }
 
@@ -264,6 +279,9 @@ public sealed class ApplicationSession
 
     private async Task PrepareCloseCoreAsync()
     {
+        CancellationTokenSource? cancellation = null;
+        Task<bool>? preparation = null;
+        var generation = 0;
         try
         {
             if (_finishing || _completed)
@@ -274,26 +292,29 @@ public sealed class ApplicationSession
                 return;
             }
 
+            generation = checked(++_closePreparationGeneration);
+            cancellation = new CancellationTokenSource();
+            _closePreparationCancellation = cancellation;
             bool accepted;
             try
             {
-                accepted = await _lifecycle.PrepareCloseAsync();
+                preparation = _lifecycle.PrepareCloseAsync(cancellation.Token).AsTask();
+                _closePreparationTask = preparation;
+                accepted = await preparation;
             }
             catch (Exception error)
             {
-                if (_abortRequested)
-                {
-                    AddTerminalError(error);
-                    await FinishCoreAsync();
-                }
-                else
-                {
-                    Interlocked.Exchange(ref _closeRequested, 0);
-                    if (!PublishStatus(ApplicationPhase.Running, error))
-                        await FinishCoreAsync();
-                }
+                if (generation != _closePreparationGeneration || _finishing || _completed)
+                    return;
+                ClearClosePreparation(generation, cancellation);
+                AddTerminalError(error);
+                await FinishCoreAsync();
                 return;
             }
+
+            if (generation != _closePreparationGeneration || _finishing || _completed)
+                return;
+            ClearClosePreparation(generation, cancellation);
 
             if (_abortRequested || accepted)
             {
@@ -307,9 +328,47 @@ public sealed class ApplicationSession
         }
         catch (Exception error)
         {
+            if (generation != 0)
+                ClearClosePreparation(generation, cancellation);
             AddTerminalError(error);
             await FinishCoreAsync();
         }
+    }
+
+    private void CancelClosePreparation()
+    {
+        CheckOwner();
+        checked
+        {
+            _closePreparationGeneration++;
+        }
+        var cancellation = _closePreparationCancellation;
+        var preparation = _closePreparationTask;
+        _closePreparationCancellation = null;
+        _closePreparationTask = null;
+        if (cancellation is null)
+            return;
+
+        var observer = new LatePreparationObserver(
+            Title,
+            _failureReporter,
+            _failureDispatcher,
+            cancellation
+        );
+        if (preparation is not null)
+            observer.Observe(preparation);
+        else
+            observer.AbandonObservation();
+        observer.Cancel();
+    }
+
+    private void ClearClosePreparation(int generation, CancellationTokenSource? cancellation)
+    {
+        if (generation != _closePreparationGeneration)
+            return;
+        _closePreparationCancellation = null;
+        _closePreparationTask = null;
+        cancellation?.Dispose();
     }
 
     private async Task FinishCoreAsync()
@@ -484,6 +543,14 @@ public sealed class ApplicationSession
         PublishStatus(ApplicationPhase.Completed, Failure);
         Volatile.Write(ref _completed, true);
         _context.Complete();
+        if (Failure is { } failure)
+            DispatchFailure(
+                Title,
+                _failureReporter,
+                _failureDispatcher,
+                ApplicationFailureKind.Terminal,
+                failure
+            );
     }
 
     private Exception? DrainObserverErrors()
@@ -505,6 +572,187 @@ public sealed class ApplicationSession
             throw new InvalidOperationException(
                 "Application session work belongs to its creating thread."
             );
+    }
+
+    private static void DispatchOnThreadPool(Action action) =>
+        ThreadPool.QueueUserWorkItem(static state => ((Action)state!).Invoke(), action);
+
+    internal static void ReportFailure(
+        string title,
+        Action<ApplicationFailureReport>? reporter,
+        ApplicationFailureKind kind,
+        Exception error
+    ) =>
+        DispatchFailure(
+            title,
+            reporter ?? ReportToStandardError,
+            DispatchOnThreadPool,
+            kind,
+            error
+        );
+
+    private static void ReportToStandardError(ApplicationFailureReport report) =>
+        Console.Error.WriteLine(
+            "Lucent application failure (" + report.Kind + "): " + report.Error
+        );
+
+    private static void DispatchFailure(
+        string title,
+        Action<ApplicationFailureReport> reporter,
+        Action<Action> dispatcher,
+        ApplicationFailureKind kind,
+        Exception error
+    )
+    {
+        var report = new ApplicationFailureReport(title, kind, error);
+        try
+        {
+            dispatcher(() =>
+            {
+                try
+                {
+                    reporter(report);
+                }
+                catch (Exception reporterError)
+                {
+                    TryWriteFallback(error, reporterError);
+                }
+            });
+        }
+        catch (Exception dispatchError)
+        {
+            TryWriteFallback(error, dispatchError);
+        }
+    }
+
+    private static void TryWriteFallback(Exception originalError, Exception reportingError)
+    {
+        try
+        {
+            Console.Error.WriteLine(
+                "Lucent application failure: "
+                    + originalError
+                    + Environment.NewLine
+                    + "Lucent application failure reporter failed: "
+                    + reportingError
+            );
+        }
+        catch
+        {
+            // A fallback diagnostic must never replace the application failure.
+        }
+    }
+
+    private sealed class LatePreparationObserver
+    {
+        private readonly string _title;
+        private readonly Action<ApplicationFailureReport> _reporter;
+        private readonly Action<Action> _dispatcher;
+        private readonly CancellationTokenSource _cancellation;
+        private int _operations = 2;
+
+        internal LatePreparationObserver(
+            string title,
+            Action<ApplicationFailureReport> reporter,
+            Action<Action> dispatcher,
+            CancellationTokenSource cancellation
+        )
+        {
+            _title = title;
+            _reporter = reporter;
+            _dispatcher = dispatcher;
+            _cancellation = cancellation;
+        }
+
+        internal void Observe(Task<bool> preparation) =>
+            _ = preparation.ContinueWith(
+                static (completed, state) =>
+                {
+                    var observer = (LatePreparationObserver)state!;
+                    try
+                    {
+                        if (completed.Exception is { } failure)
+                            DispatchFailure(
+                                observer._title,
+                                observer._reporter,
+                                observer._dispatcher,
+                                ApplicationFailureKind.LateClosePreparation,
+                                failure.InnerExceptions.Count == 1
+                                    ? failure.InnerExceptions[0]
+                                    : failure
+                            );
+                    }
+                    finally
+                    {
+                        observer.Release();
+                    }
+                },
+                this,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default
+            );
+
+        internal void Cancel()
+        {
+            Task cancellation;
+            try
+            {
+                cancellation = _cancellation.CancelAsync();
+            }
+            catch (Exception error)
+            {
+                ReportCancellationFailure(error);
+                Release();
+                return;
+            }
+
+            if (cancellation.IsCompletedSuccessfully)
+            {
+                Release();
+                return;
+            }
+            _ = cancellation.ContinueWith(
+                static (completed, state) =>
+                {
+                    var observer = (LatePreparationObserver)state!;
+                    try
+                    {
+                        if (completed.Exception is { } failure)
+                            observer.ReportCancellationFailure(
+                                failure.InnerExceptions.Count == 1
+                                    ? failure.InnerExceptions[0]
+                                    : failure
+                            );
+                    }
+                    finally
+                    {
+                        observer.Release();
+                    }
+                },
+                this,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default
+            );
+        }
+
+        internal void AbandonObservation() => Release();
+
+        private void ReportCancellationFailure(Exception error) =>
+            DispatchFailure(
+                _title,
+                _reporter,
+                _dispatcher,
+                ApplicationFailureKind.LateClosePreparation,
+                error
+            );
+
+        private void Release()
+        {
+            if (Interlocked.Decrement(ref _operations) == 0)
+                _cancellation.Dispose();
+        }
     }
 
     private sealed class ContextLease(ApplicationSession owner, SynchronizationContext? prior)
@@ -560,17 +808,12 @@ public sealed class ApplicationSession
             d(state);
         }
 
-        internal bool Drain(int? maximumCallbacks)
+        internal bool Drain(int maximumCallbacks)
         {
             List<Exception>? errors = null;
-            int count;
-            lock (_gate)
-                count = _queue.Count;
-
-            var limit = maximumCallbacks ?? count;
             var processed = 0;
 
-            for (var index = 0; index < limit; index++)
+            while (processed < maximumCallbacks)
             {
                 (SendOrPostCallback Callback, object? State) work;
                 lock (_gate)
@@ -599,7 +842,7 @@ public sealed class ApplicationSession
                 else
                 {
                     notifyMore = _accepting;
-                    limitReached = maximumCallbacks is not null;
+                    limitReached = true;
                 }
             }
             if (notifyMore)
@@ -609,7 +852,7 @@ public sealed class ApplicationSession
                 (errors ??= []).Add(
                     new InvalidOperationException(
                         "Application events did not settle within "
-                            + maximumCallbacks!.Value
+                            + maximumCallbacks
                             + " callbacks. A continuation may be posting itself repeatedly."
                     )
                 );

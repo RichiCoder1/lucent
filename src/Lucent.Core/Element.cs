@@ -455,6 +455,8 @@ public sealed class Element : IDisposable
 
     internal bool SemanticEnabled() => _semantics is not null && ReconcileSemanticState().Enabled;
 
+    internal bool SemanticSelected() => _semantics is not null && ReconcileSemanticState().Selected;
+
     internal SemanticSnapshot CreateStructuralSemanticSnapshot(
         IReadOnlyList<SemanticSnapshot> children
     ) =>

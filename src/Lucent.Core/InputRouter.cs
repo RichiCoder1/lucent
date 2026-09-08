@@ -23,6 +23,8 @@ public sealed partial class InputRouter
     private RetainedScene? _scene;
     private Dictionary<long, RetainedInputElement> _input = [];
     private Dictionary<long, bool> _available = [];
+    private Dictionary<long, bool> _pointerVisible = [];
+    private readonly HashSet<long> _commandScopes = [];
     private Dictionary<long, ElementIdentity[]> _paths = [];
     private Dictionary<long, InputClip[]> _effectiveClips = [];
     private RetainedInputElement[] _hitOrder = [];
@@ -54,6 +56,47 @@ public sealed partial class InputRouter
             Check();
             return _focused?.Identity;
         }
+    }
+
+    /// <summary>Whether the focused editor owns an active text composition; hosts use this to reconcile native IME cancellation.</summary>
+    public bool HasTextComposition
+    {
+        get
+        {
+            Check();
+            return _focused is { } focus
+                && _textFields.TryGetValue(focus.Identity.ElementId, out var editor)
+                && editor.HasPreedit;
+        }
+    }
+
+    internal void RegisterCommandScope(long elementId, ReactiveScope scope)
+    {
+        _commandScopes.Add(elementId);
+        scope.OnDispose(() => _commandScopes.Remove(elementId));
+    }
+
+    private ElementIdentity UnfocusedCommandTarget()
+    {
+        // Only an unambiguous outer scope acts as the application shortcut owner.
+        // Sibling scopes need focus to choose their subtree; nested scopes never win by mount order.
+        ElementIdentity? target = null;
+        foreach (var id in _commandScopes)
+        {
+            var candidate = new ElementIdentity(_composition.Epoch, id);
+            if (
+                !Eligible(candidate)
+                || Path(candidate)
+                    .Any(ancestor =>
+                        ancestor.ElementId != id && _commandScopes.Contains(ancestor.ElementId)
+                    )
+            )
+                continue;
+            if (target is not null)
+                return new(_composition.Epoch, _composition.Root.Id);
+            target = candidate;
+        }
+        return target ?? new(_composition.Epoch, _composition.Root.Id);
     }
 
     /// <summary>Gets the modality that last established focus-visible state.</summary>
@@ -343,7 +386,7 @@ public sealed partial class InputRouter
             var target =
                 _focused is { } focus && Eligible(focus.Identity)
                     ? focus.Identity
-                    : new ElementIdentity(_composition.Epoch, _composition.Root.Id);
+                    : UnfocusedCommandTarget();
             if (!Eligible(target))
                 return Reject(InputRejection.Ineligible, "Key/" + command.Kind, errors);
             var result = HandleContextKey(command, target)
@@ -1471,11 +1514,12 @@ public sealed partial class InputRouter
     {
         foreach (var candidate in _hitOrder)
             if (
-                Available(candidate.Identity)
+                _pointerVisible.GetValueOrDefault(candidate.Identity.ElementId)
                 && Contains(candidate.Bounds, x, y)
                 && ClippedIn(candidate.Identity, x, y)
             )
-                return candidate.Identity;
+                // Disabled content blocks targets behind it rather than retargeting to an ancestor.
+                return Available(candidate.Identity) ? candidate.Identity : null;
         return null;
     }
 
@@ -1603,6 +1647,7 @@ public sealed partial class InputRouter
     private void BuildInputCaches(RetainedScene scene)
     {
         _available = new Dictionary<long, bool>(scene.Input.Count);
+        _pointerVisible = new Dictionary<long, bool>(scene.Input.Count);
         _paths = new Dictionary<long, ElementIdentity[]>(scene.Input.Count);
         _effectiveClips = new Dictionary<long, InputClip[]>(scene.Input.Count);
         _scrollBars.Clear();
@@ -1643,6 +1688,15 @@ public sealed partial class InputRouter
                 retained.Identity.ElementId,
                 parentAvailable && retained.Enabled && retained.Visible
             );
+            _pointerVisible.Add(
+                retained.Identity.ElementId,
+                retained.Visible
+                    && !retained.PointerTransparent
+                    && (
+                        retained.Parent is not { } pointerParent
+                        || _pointerVisible.GetValueOrDefault(pointerParent.ElementId)
+                    )
+            );
             _paths.Add(retained.Identity.ElementId, path);
             _effectiveClips.Add(retained.Identity.ElementId, effectiveClips);
         }
@@ -1652,6 +1706,7 @@ public sealed partial class InputRouter
     private void ClearInputCaches()
     {
         _available.Clear();
+        _pointerVisible.Clear();
         _paths.Clear();
         _effectiveClips.Clear();
         _hitOrder = [];

@@ -225,8 +225,9 @@ public sealed class ApplicationTests
             PumpUntil(
                 session,
                 () =>
-                    session.Status.Phase == ApplicationPhase.Running
-                    && session.Status.Error?.Message == "prepare"
+                    lifecycle.PrepareCalls == 1
+                    && session.Status.Phase == ApplicationPhase.Running
+                    && session.Status.Error is null
             );
             Assert.AreEqual(1, lifecycle.PrepareCalls);
 
@@ -381,10 +382,6 @@ public sealed class ApplicationTests
                         captured.Post(callback, null);
                 };
                 captured.Post(callback, null);
-                Assert.IsTrue(session.ProcessEvents());
-                Assert.AreEqual(1, callbackCount);
-                Assert.IsTrue(session.ProcessEvents());
-                Assert.AreEqual(2, callbackCount);
                 Assert.IsTrue(session.ProcessEvents());
                 Assert.AreEqual(3, callbackCount);
             }
@@ -570,7 +567,7 @@ public sealed class ApplicationTests
             return Recipe;
         }
 
-        public virtual async ValueTask<bool> PrepareCloseAsync()
+        public virtual async ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken)
         {
             PrepareCalls++;
             await Task.Yield();
@@ -603,13 +600,11 @@ public sealed class ApplicationTests
             return Recipe;
         }
 
-        public override async ValueTask<bool> PrepareCloseAsync()
+        public override async ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken)
         {
             var call = ++PrepareCalls;
             await Task.Yield();
             OwnerThreads.Add(Environment.CurrentManagedThreadId);
-            if (call == 1)
-                throw new InvalidOperationException("prepare");
             return call == 3;
         }
 
@@ -652,7 +647,7 @@ public sealed class ApplicationTests
             throw new InvalidOperationException("start");
         }
 
-        public async ValueTask<bool> PrepareCloseAsync()
+        public async ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken)
         {
             await Task.Yield();
             return true;

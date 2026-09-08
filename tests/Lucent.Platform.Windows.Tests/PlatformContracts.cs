@@ -791,7 +791,8 @@ public sealed class PlatformContracts
             return recipe;
         }
 
-        public ValueTask<bool> PrepareCloseAsync() => ValueTask.FromResult(true);
+        public ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(true);
 
         public ValueTask StopAsync() => ValueTask.CompletedTask;
 

@@ -24,7 +24,7 @@ public sealed class ControlledSelectionTests
         graph.Drain();
         var archive = Nodes(composition.SemanticSnapshot()!).Single(node => node.Name == "Archive");
         Assert.AreEqual(
-            SemanticCommandResult.Applied,
+            SemanticCommandResult.Requested,
             composition.ExecuteSemanticCommand(archive.Identity, new(SemanticCommandKind.Select))
         );
         graph.Drain();
@@ -42,6 +42,34 @@ public sealed class ControlledSelectionTests
         );
         Assert.IsFalse(
             Nodes(composition.SemanticSnapshot()!).Single(node => node.Name == "Inbox").Selected
+        );
+        archive = Nodes(composition.SemanticSnapshot()!).Single(node => node.Name == "Archive");
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(archive.Identity, new(SemanticCommandKind.Select))
+        );
+    }
+
+    [TestMethod]
+    public void SynchronouslyAcceptedSelectionReportsApplied()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "accepted-selection");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var selected = graph.Signal(false, "selected");
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Selectable(() => "Item", () => selected.Value, () => selected.Value = true)
+        );
+        graph.Drain();
+        var item = Nodes(composition.SemanticSnapshot()!).Single(node => node.Name == "Item");
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(item.Identity, new(SemanticCommandKind.Select))
+        );
+        Assert.IsTrue(
+            Nodes(composition.SemanticSnapshot()!).Single(node => node.Name == "Item").Selected
         );
     }
 

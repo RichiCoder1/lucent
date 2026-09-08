@@ -265,7 +265,7 @@ public sealed class HeadlessHarnessTests
             return ValueTask.FromResult(EmptyRecipe());
         }
 
-        public ValueTask<bool> PrepareCloseAsync()
+        public ValueTask<bool> PrepareCloseAsync(CancellationToken cancellationToken)
         {
             _preparing = true;
             _pulse!.Value++;

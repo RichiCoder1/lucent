@@ -106,6 +106,11 @@ public sealed class MenuSubmenuTests
             Assert.AreEqual(0, changes, "Moving within an open trigger rebuilt its branch.");
             Assert.AreEqual(generation, root.SemanticSnapshot()!.Identity);
             Assert.IsTrue(request.FocusFirst(child));
+            Assert.AreEqual(
+                InputModality.Keyboard,
+                child.Composition.Input.Modality,
+                "Keyboard-opened submenu focus must be visibly keyboard focus."
+            );
             Assert.IsTrue(Find(child.Composition.SemanticSnapshot(), "Leaf").Focused);
             Assert.IsTrue(
                 child.Composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Left)).Handled

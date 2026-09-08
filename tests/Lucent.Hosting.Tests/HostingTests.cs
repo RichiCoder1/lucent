@@ -46,9 +46,10 @@ public sealed class HostingTests
                     }
                 );
             },
-            services =>
+            (services, cancellationToken) =>
             {
                 Assert.AreEqual(owner, Environment.CurrentManagedThreadId);
+                Assert.IsTrue(cancellationToken.CanBeCanceled);
                 Assert.AreSame(
                     services.GetRequiredService<ScopedModel>(),
                     services.GetRequiredService<ScopedModel>()
@@ -90,17 +91,19 @@ public sealed class HostingTests
         var accepted = NewGate();
         var attempts = 0;
         var acceptedWork = 0;
+        string? closeError = null;
         var builder = HostedApplication.CreateBuilder();
         var lifecycle = new HostedApplication(
             _ => builder.Build(),
             (_, _) => EmptyRecipe(),
-            async _ =>
+            async (_, cancellationToken) =>
             {
                 attempts++;
                 if (attempts == 1)
                 {
                     await first.Task;
-                    throw new IOException("save failed");
+                    closeError = "save failed";
+                    return false;
                 }
 
                 Interlocked.Increment(ref acceptedWork);
@@ -120,9 +123,9 @@ public sealed class HostingTests
             PumpingHost.WaitFor(
                 session,
                 () =>
-                    session.Status.Phase == ApplicationPhase.Running
-                    && session.Status.Error?.Message == "save failed"
+                    session.Status.Phase == ApplicationPhase.Running && session.Status.Error is null
             );
+            Assert.AreEqual("save failed", closeError);
 
             session.RequestClose();
             PumpingHost.WaitFor(
@@ -164,7 +167,7 @@ public sealed class HostingTests
                 return host;
             },
             (_, _) => EmptyRecipe(),
-            async _ =>
+            async (_, cancellationToken) =>
             {
                 prepareThreads.Add(Environment.CurrentManagedThreadId);
                 attempts++;

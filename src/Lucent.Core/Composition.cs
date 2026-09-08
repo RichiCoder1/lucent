@@ -321,9 +321,17 @@ public sealed class Composition : IDisposable
             return SemanticCommandResult.Stale;
         if (!element.SemanticEnabled())
             return SemanticCommandResult.Disabled;
-        return element.ExecuteSemanticCommand(command)
-            ? SemanticCommandResult.Applied
-            : SemanticCommandResult.Rejected;
+        if (!element.ExecuteSemanticCommand(command))
+            return SemanticCommandResult.Rejected;
+        if (command.Kind == SemanticCommandKind.Select)
+        {
+            // A callback can reject or defer controlled selection. Settle synchronous
+            // application state before reporting whether selection actually took effect.
+            _graph.DrainPosted();
+            if (element.IsDisposed || !element.SemanticSelected())
+                return SemanticCommandResult.Requested;
+        }
+        return SemanticCommandResult.Applied;
     }
 
     /// <summary>Selects one retained list item and clears every selectable sibling in its nearest semantic list.</summary>

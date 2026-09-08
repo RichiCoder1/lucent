@@ -159,6 +159,7 @@ internal sealed class CommandScopeBehavior(CommandBindings bindings) : Behavior
     {
         ArgumentNullException.ThrowIfNull(bindings);
         context.SetSemantics(new(SemanticRole.Group, "Command scope"));
+        context.RegisterCommandScope();
         context.OnKey(route =>
         {
             foreach (var binding in bindings)
