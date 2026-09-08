@@ -167,6 +167,11 @@ public static class WindowsBootstrap
                 var type = (SDL.EventType)@event.Type;
                 if (IsForeignWindowEvent(@event, SDL.GetWindowID(window)))
                     return false;
+                if (presenter.HandleRendererEvent(type))
+                {
+                    scheduler.Request();
+                    return false;
+                }
                 if (
                     type == SDL.EventType.MouseButtonDown
                     && popup is null

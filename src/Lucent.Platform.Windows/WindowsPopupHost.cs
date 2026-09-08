@@ -258,6 +258,11 @@ internal sealed partial class WindowsPopupHost : IDisposable
         if (_disposed || !TargetsPopup(@event, WindowId, _ownerWindowId))
             return false;
         var type = (SDL.EventType)@event.Type;
+        if (_presenter.HandleRendererEvent(type))
+        {
+            Refresh();
+            return true;
+        }
         if (type == SDL.EventType.MouseButtonDown)
         {
             var scale = WindowsCoordinateScale.ForWindow(_window);
@@ -382,6 +387,9 @@ internal sealed partial class WindowsPopupHost : IDisposable
             SDL.EventType.MouseMotion => @event.Motion.WindowID,
             SDL.EventType.MouseButtonDown or SDL.EventType.MouseButtonUp => @event.Button.WindowID,
             SDL.EventType.MouseWheel => @event.Wheel.WindowID,
+            SDL.EventType.RenderTargetsReset
+            or SDL.EventType.RenderDeviceReset
+            or SDL.EventType.RenderDeviceLost => @event.Render.WindowID,
             SDL.EventType.WindowCloseRequested
             or SDL.EventType.WindowFocusLost
             or SDL.EventType.WindowFocusGained

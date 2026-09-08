@@ -23,6 +23,12 @@ Native menus follow the [Windows standard keyboard interface](https://learn.micr
 
 This is a Lucent-rendered style preset. It does not read arbitrary system metrics or create a native child scrollbar. Scroll position, paging, dragging and accessibility continue to use the existing shared viewport implementation. The framework default remains unchanged unless the application chooses the preset.
 
+## Renderer resets
+
+Owner and popup windows handle SDL renderer events independently. A render-target reset requests a redraw; a device reset releases the CPU surface and streaming texture and recreates them on the next presentation without remounting application components. If recreation fails, the original failure follows the application shutdown path. An unrecoverable device-loss event is terminal. Application shaping, layout and draw callbacks are never retried as device recovery.
+
+This follows SDL's [renderer event contract](https://wiki.libsdl.org/SDL3/SDL_EventType). The focused presenter tests inject reset notifications against a real hidden SDL software renderer, verify subsequent presentation and retained editor state, and inject an allocation failure to check cleanup and bounded attempts. They do not simulate a physical GPU failure.
+
 ## Maintained example and limits
 
 Issue Browser demonstrates stock themes and real context-menu actions. Run `dotnet run --project apps/Lucent.IssueBrowser -- --native-menus` to exercise the opt-in host without rewriting `.lui` commands; omit the switch for Lucent-rendered menus. Use the headless menu tests for eligibility, style and command contracts; use native desktop checks for actual focus, popup boundaries and Windows UIA.

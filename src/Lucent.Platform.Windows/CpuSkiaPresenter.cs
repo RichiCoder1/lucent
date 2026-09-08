@@ -11,19 +11,54 @@ internal sealed class CpuSkiaPresenter : IDisposable
 {
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly nint _renderer;
+    private readonly Func<CpuResourceDescriptor, nint> _createTexture;
     private readonly CpuResourceState _resources = new();
     private SKSurface? _surface;
     private nint _texture;
     private bool _disposed;
 
-    public CpuSkiaPresenter(nint renderer)
+    public CpuSkiaPresenter(nint renderer, Func<CpuResourceDescriptor, nint>? createTexture = null)
     {
         ArgumentOutOfRangeException.ThrowIfZero(renderer, nameof(renderer));
         _renderer = renderer;
+        _createTexture =
+            createTexture
+            ?? (
+                descriptor =>
+                    SDL.CreateTexture(
+                        _renderer,
+                        SDL.PixelFormat.ABGR8888,
+                        SDL.TextureAccess.Streaming,
+                        descriptor.Width,
+                        descriptor.Height
+                    )
+            );
     }
 
     internal int LiveSurfaceCount => _surface is null ? 0 : 1;
     internal int LiveTextureCount => _texture == 0 ? 0 : 1;
+    internal int ResourceCreationCount => _resources.CreationCount;
+
+    /// <summary>Invalidates environmental presentation resources; application/render callbacks are never retried.</summary>
+    internal bool HandleRendererEvent(SDL.EventType type)
+    {
+        CheckThread();
+        ThrowIfDisposed();
+        switch (type)
+        {
+            case SDL.EventType.RenderTargetsReset:
+                return true;
+            case SDL.EventType.RenderDeviceReset:
+                DestroyResources();
+                return true;
+            case SDL.EventType.RenderDeviceLost:
+                throw new InvalidOperationException(
+                    "SDL render device was lost and cannot be recovered."
+                );
+            default:
+                return false;
+        }
+    }
 
     public PresenterPhaseTimestamps Present(
         RetainedScene scene,
@@ -76,32 +111,36 @@ internal sealed class CpuSkiaPresenter : IDisposable
                 "The CPU presenter supports only premultiplied RGBA8888."
             );
         DestroyResources();
-        using var colorSpace = SKColorSpace.CreateSrgb();
-        _surface =
-            SKSurface.Create(
-                new SKImageInfo(
-                    descriptor.Width,
-                    descriptor.Height,
-                    SKColorType.Rgba8888,
-                    SKAlphaType.Premul,
-                    colorSpace
+        try
+        {
+            using var colorSpace = SKColorSpace.CreateSrgb();
+            _surface =
+                SKSurface.Create(
+                    new SKImageInfo(
+                        descriptor.Width,
+                        descriptor.Height,
+                        SKColorType.Rgba8888,
+                        SKAlphaType.Premul,
+                        colorSpace
+                    )
                 )
-            )
-            ?? throw new InvalidOperationException("Skia could not create the CPU raster surface.");
-        _texture = SDL.CreateTexture(
-            _renderer,
-            SDL.PixelFormat.ABGR8888,
-            SDL.TextureAccess.Streaming,
-            descriptor.Width,
-            descriptor.Height
-        );
-        if (_texture == 0)
-            throw new InvalidOperationException($"SDL_CreateTexture: {SDL.GetError()}");
-        // Copy the complete premultiplied frame, including transparent popup margins.
-        // Blending here would multiply alpha twice and accumulate old shadow pixels.
-        if (!SDL.SetTextureBlendMode(_texture, SDL.BlendMode.None))
-            throw new InvalidOperationException($"SDL_SetTextureBlendMode: {SDL.GetError()}");
-        _resources.Commit(descriptor);
+                ?? throw new InvalidOperationException(
+                    "Skia could not create the CPU raster surface."
+                );
+            _texture = _createTexture(descriptor);
+            if (_texture == 0)
+                throw new InvalidOperationException($"SDL_CreateTexture: {SDL.GetError()}");
+            // Copy the complete premultiplied frame, including transparent popup margins.
+            // Blending here would multiply alpha twice and accumulate old shadow pixels.
+            if (!SDL.SetTextureBlendMode(_texture, SDL.BlendMode.None))
+                throw new InvalidOperationException($"SDL_SetTextureBlendMode: {SDL.GetError()}");
+            _resources.Commit(descriptor);
+        }
+        catch
+        {
+            DestroyResources();
+            throw;
+        }
     }
 
     private void DestroyResources()
