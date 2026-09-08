@@ -20,6 +20,8 @@ The affected-file helper includes relevant downstream suites and falls back to a
 
 ## Additional suites
 
+For reusable component/application tests without visible windows, use [the headless harness](HEADLESS-TESTING.md). `Lucent.Testing.Tests` is part of the default managed suite; `Lucent.Testing.Skia` adds optional real shaping and frame capture. Windows transport checks remain separate.
+
 | Suite | Use it for |
 | --- | --- |
 | `Published` | NativeAOT packaging, startup/close, presentation, desktop interaction, and UI Automation behavior. |

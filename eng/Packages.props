@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <LucentIsDistributionPackage
-      Condition="'$(MSBuildProjectName)' == 'Lucent.Core' Or '$(MSBuildProjectName)' == 'Lucent.Renderer.Skia' Or '$(MSBuildProjectName)' == 'Lucent.Platform.Windows' Or '$(MSBuildProjectName)' == 'Lucent.Hosting' Or '$(MSBuildProjectName)' == 'Lucent.Lui.Sdk' Or '$(MSBuildProjectName)' == 'Lucent.Reactive.R3'"
+      Condition="'$(MSBuildProjectName)' == 'Lucent.Core' Or '$(MSBuildProjectName)' == 'Lucent.Renderer.Skia' Or '$(MSBuildProjectName)' == 'Lucent.Platform.Windows' Or '$(MSBuildProjectName)' == 'Lucent.Hosting' Or '$(MSBuildProjectName)' == 'Lucent.Lui.Sdk' Or '$(MSBuildProjectName)' == 'Lucent.Reactive.R3' Or '$(MSBuildProjectName)' == 'Lucent.Testing' Or '$(MSBuildProjectName)' == 'Lucent.Testing.Skia'"
       >true</LucentIsDistributionPackage>
   </PropertyGroup>
   <PropertyGroup Condition="'$(LucentIsDistributionPackage)' == 'true'">

@@ -35,15 +35,16 @@ try {
         }
         if ($relative -match '^(docs/|[^/]+\.md$)') { continue }
         $selected = switch -Regex ($relative) {
+            '^tests/Lucent\.Testing\.Tests/|^src/Lucent\.Testing(\.Skia)?/' { 'Lucent.Testing.Tests'; break }
             '^tests/(Lucent\.(Core|Reactive\.R3|Hosting|Renderer\.Skia|Platform\.Windows|IssueBrowser|Lui\.(Compiler|Generator|LanguageServer))\.Tests)/' { $Matches[1]; break }
             '^src/Lucent\.Reactive\.R3/' { 'Lucent.Reactive.R3.Tests'; break }
             '^src/Lucent\.Hosting/' { 'Lucent.Hosting.Tests'; break }
-            '^src/Lucent\.Renderer\.Skia/' { 'Lucent.Renderer.Skia.Tests'; 'Lucent.IssueBrowser.Tests'; break }
+            '^src/Lucent\.Renderer\.Skia/' { 'Lucent.Renderer.Skia.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.Testing.Tests'; break }
             '^src/Lucent\.Platform\.Windows/' { 'Lucent.Platform.Windows.Tests'; 'Lucent.IssueBrowser.Tests'; break }
             '^apps/Lucent\.IssueBrowser/' { 'Lucent.IssueBrowser.Tests'; 'Lucent.Lui.LanguageServer.Tests'; break }
             '^src/Lucent\.Lui\.LanguageServer/' { 'Lucent.Lui.LanguageServer.Tests'; break }
-            '^src/Lucent\.Lui\.Generator/' { 'Lucent.Lui.Generator.Tests'; 'Lucent.IssueBrowser.Tests'; break }
-            '^src/Lucent\.Lui\.Compiler/' { 'Lucent.Lui.Compiler.Tests'; 'Lucent.Lui.Generator.Tests'; 'Lucent.Lui.LanguageServer.Tests'; 'Lucent.IssueBrowser.Tests'; break }
+            '^src/Lucent\.Lui\.Generator/' { 'Lucent.Lui.Generator.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.Testing.Tests'; break }
+            '^src/Lucent\.Lui\.Compiler/' { 'Lucent.Lui.Compiler.Tests'; 'Lucent.Lui.Generator.Tests'; 'Lucent.Lui.LanguageServer.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.Testing.Tests'; break }
             default { $allManaged = $true }
         }
         foreach ($project in $selected) { [void] $projects.Add($project) }

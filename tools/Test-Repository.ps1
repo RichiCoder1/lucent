@@ -15,6 +15,7 @@ if (-not (Test-Path $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $configuration = 'Release'
 $managedProjects = @(
     'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj',
+    'tests/Lucent.Testing.Tests/Lucent.Testing.Tests.csproj',
     'tests/Lucent.Reactive.R3.Tests/Lucent.Reactive.R3.Tests.csproj',
     'tests/Lucent.Hosting.Tests/Lucent.Hosting.Tests.csproj',
     'tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj',

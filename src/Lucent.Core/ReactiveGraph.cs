@@ -6,7 +6,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>A UI-thread-owned reactive graph for all Lucent authoring surfaces.</summary>
-/// <remarks>Read and mutation operations belong to the creating thread. Worker completion is queued and becomes observable only when the owner calls <see cref="Drain"/>.</remarks>
+/// <remarks>Read and mutation operations belong to the creating thread. Worker completion is queued and becomes observable only when the owner calls <see cref="Drain()"/>.</remarks>
 public sealed class ReactiveGraph
 {
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
@@ -17,12 +17,13 @@ public sealed class ReactiveGraph
     private readonly object _postedGate = new();
     private readonly List<ReactiveNode> _evaluating = [];
     private ReactiveCollector? _collecting;
+    private DrainState? _drainState;
     private int _batchDepth;
     private int _nextNodeId;
     private int _nextScopeId;
 
     /// <summary>Raised when worker-posted work changes from empty to nonempty.</summary>
-    /// <remarks>Observers are notified independently. Their failures are posted for aggregation by <see cref="Drain"/>; a new edge for those failures re-notifies only still-subscribed observers that succeeded.</remarks>
+    /// <remarks>Observers are notified independently. Their failures are posted for aggregation by <see cref="Drain()"/>; a new edge for those failures re-notifies only still-subscribed observers that succeeded.</remarks>
     public event Action? WorkAvailable;
 
     /// <summary>Creates a root lifetime scope on the UI thread. Disposing it releases every owned node and child scope.</summary>
@@ -59,7 +60,7 @@ public sealed class ReactiveGraph
         return new ReactiveEffect(this, callback, name, null);
     }
 
-    /// <summary>Creates latest-generation asynchronous state; only the current generation may commit on <see cref="Drain"/>.</summary>
+    /// <summary>Creates latest-generation asynchronous state; only the current generation may commit on <see cref="Drain()"/>.</summary>
     public AsyncValue<T> Async<T>(Func<CancellationToken, Task<T>> load, string name)
     {
         CheckThread();
@@ -119,48 +120,116 @@ public sealed class ReactiveGraph
     /// <summary>Commits posted async completions and scheduled effects on the owning UI thread.</summary>
     public void Drain() => DrainPosted();
 
-    internal bool DrainPosted()
+    /// <summary>Commits at most <paramref name="maximumWorkItems"/> posted completions and scheduled effects.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumWorkItems"/> is not positive.</exception>
+    /// <exception cref="InvalidOperationException">The graph still has pending work after the limit is reached.</exception>
+    public void Drain(int maximumWorkItems) => DrainPosted(maximumWorkItems);
+
+    internal bool DrainPosted() => DrainPosted(int.MaxValue);
+
+    internal bool DrainPosted(int maximumWorkItems)
     {
+        if (maximumWorkItems <= 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumWorkItems),
+                "The reactive drain limit must be positive."
+            );
         CheckThread();
         if (_batchDepth != 0)
             return false;
 
+        var state = _drainState;
+        var ownsState = state is null;
+        if (ownsState)
+            _drainState = state = new DrainState(maximumWorkItems);
+        else if (maximumWorkItems < state!.Limit)
+            state.Limit = maximumWorkItems;
+
         List<Exception>? errors = null;
-        var posted = false;
-        while (true)
+        try
         {
-            while (TakePosted(out var post))
+            while (true)
             {
+                while (true)
+                {
+                    if (state!.Processed >= state.Limit)
+                    {
+                        if (HasPendingWork())
+                            ThrowDrainFailures(errors, state.Limit);
+                        break;
+                    }
+                    if (!TakePosted(out var post))
+                        break;
+                    state.Processed++;
+                    try
+                    {
+                        state.Posted |= post.Commit();
+                    }
+                    catch (Exception exception)
+                    {
+                        (errors ??= []).Add(exception);
+                    }
+                    if (state.Processed >= state.Limit && HasPendingWork())
+                        ThrowDrainFailures(errors, state.Limit);
+                }
+
+                var effect = _effects.First;
+                if (effect is null)
+                    break;
+                if (state.Processed >= state.Limit)
+                    ThrowDrainFailures(errors, state.Limit);
+                _effects.RemoveFirst();
+                effect.Value.Dequeue();
+                state.Processed++;
+                if (effect.Value.IsDisposed)
+                    continue;
                 try
                 {
-                    posted |= post.Commit();
+                    effect.Value.Run();
                 }
                 catch (Exception exception)
                 {
                     (errors ??= []).Add(exception);
                 }
+                if (state.Processed >= state.Limit && HasPendingWork())
+                    ThrowDrainFailures(errors, state.Limit);
             }
 
-            var effect = _effects.First;
-            if (effect is null)
-                break;
-            _effects.RemoveFirst();
-            effect.Value.Dequeue();
-            if (effect.Value.IsDisposed)
-                continue;
-            try
-            {
-                effect.Value.Run();
-            }
-            catch (Exception exception)
-            {
-                (errors ??= []).Add(exception);
-            }
+            if (errors is { Count: > 0 })
+                throw new AggregateException("Reactive callbacks failed.", errors);
+            return state.Posted;
         }
+        finally
+        {
+            if (ownsState)
+                _drainState = null;
+        }
+    }
 
-        if (errors is { Count: > 0 })
-            throw new AggregateException("Reactive callbacks failed.", errors);
-        return posted;
+    private bool HasPendingWork()
+    {
+        lock (_postedGate)
+            return !_posted.IsEmpty || _effects.First is not null;
+    }
+
+    private static void ThrowDrainFailures(List<Exception>? errors, int maximumWorkItems)
+    {
+        var limit = new InvalidOperationException(
+            "Reactive work did not settle within "
+                + maximumWorkItems.ToString(CultureInfo.InvariantCulture)
+                + " work items. A callback may be scheduling itself repeatedly."
+        );
+        if (errors is null)
+            throw limit;
+        errors.Add(limit);
+        throw new AggregateException("Reactive callbacks failed before the drain limit.", errors);
+    }
+
+    private sealed class DrainState(int limit)
+    {
+        public int Limit { get; set; } = limit;
+        public int Processed { get; set; }
+        public bool Posted { get; set; }
     }
 
     /// <summary>Returns a deterministic snapshot of active graph topology without values or exception messages.</summary>

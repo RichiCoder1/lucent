@@ -138,14 +138,28 @@ public sealed class ApplicationSession
     }
 
     /// <summary>Runs queued asynchronous lifecycle continuations on the owner thread.</summary>
-    public bool ProcessEvents()
+    public bool ProcessEvents() => ProcessEventsCore(null);
+
+    /// <summary>Runs at most <paramref name="maximumCallbacks"/> queued lifecycle continuations.</summary>
+    /// <exception cref="InvalidOperationException">Callbacks remain queued after the limit is reached.</exception>
+    public bool ProcessEvents(int maximumCallbacks)
+    {
+        if (maximumCallbacks <= 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumCallbacks),
+                "The application event limit must be positive."
+            );
+        return ProcessEventsCore(maximumCallbacks);
+    }
+
+    private bool ProcessEventsCore(int? maximumCallbacks)
     {
         CheckOwner();
         Exception? failure = null;
         var processed = false;
         try
         {
-            processed = RunUnderContext(_context.Drain);
+            processed = RunUnderContext(() => _context.Drain(maximumCallbacks));
         }
         catch (Exception error)
         {
@@ -544,14 +558,17 @@ public sealed class ApplicationSession
             d(state);
         }
 
-        internal bool Drain()
+        internal bool Drain(int? maximumCallbacks)
         {
             List<Exception>? errors = null;
             int count;
             lock (_gate)
                 count = _queue.Count;
 
-            for (var index = 0; index < count; index++)
+            var limit = maximumCallbacks ?? count;
+            var processed = 0;
+
+            for (var index = 0; index < limit; index++)
             {
                 (SendOrPostCallback Callback, object? State) work;
                 lock (_gate)
@@ -560,6 +577,7 @@ public sealed class ApplicationSession
                         break;
                     work = _queue.Dequeue();
                 }
+                processed++;
                 try
                 {
                     work.Callback(work.State);
@@ -571,18 +589,30 @@ public sealed class ApplicationSession
             }
 
             var notifyMore = false;
+            var limitReached = false;
             lock (_gate)
             {
                 if (_queue.Count == 0)
                     _signaled = false;
                 else
+                {
                     notifyMore = _accepting;
+                    limitReached = maximumCallbacks is not null;
+                }
             }
             if (notifyMore)
                 workAvailable();
 
+            if (limitReached)
+                (errors ??= []).Add(
+                    new InvalidOperationException(
+                        "Application events did not settle within "
+                            + maximumCallbacks!.Value
+                            + " callbacks. A continuation may be posting itself repeatedly."
+                    )
+                );
             if (errors is null)
-                return count != 0;
+                return processed != 0;
             if (errors.Count == 1)
                 ExceptionDispatchInfo.Capture(errors[0]).Throw();
             throw new AggregateException("Application event processing failed.", errors);

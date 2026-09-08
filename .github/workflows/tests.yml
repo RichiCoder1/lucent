@@ -67,6 +67,7 @@ jobs:
         run: |
           $version = "0.3.0-dev.${{ github.run_number }}.${{ github.run_attempt }}"
           ./tools/Pack-Packages.ps1 -Version $version
+          ./tools/Test-HeadlessPackages.ps1 -Version $version -Feed "artifacts/packages/$version"
           ./tools/Test-Packages.ps1 -Version $version -Feed "artifacts/packages/$version"
       - name: Publish immutable package set
         shell: pwsh

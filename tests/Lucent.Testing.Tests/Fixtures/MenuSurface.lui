@@ -1,0 +1,26 @@
+namespace HeadlessFixtures;
+
+using System;
+using Lucent.Core;
+
+style MenuTargetStyle {
+    Width: 180;
+    Height: 40;
+    Cursor: CursorIntent.Pointer;
+}
+
+public component MenuSurface(
+    Action onRun,
+    Action onOther,
+    Func<bool> enabled,
+    Func<bool> disabled,
+    Func<bool> selected,
+    Action onSelect,
+    Action<bool> onOpenChanged
+) {
+    <ContextMenu menu={() => MenuContent(onRun, onOther, enabled, disabled)} onOpenChanged={onOpenChanged}>
+        <Selectable selected={selected} onSelect={onSelect} style={MenuTargetStyle}>
+            Target
+        </Selectable>
+    </ContextMenu>
+}

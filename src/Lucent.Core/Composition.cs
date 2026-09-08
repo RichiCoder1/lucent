@@ -98,6 +98,16 @@ public sealed class Composition : IDisposable
         return _graph.DrainPosted();
     }
 
+    /// <summary>Commits a bounded number of pending reactive work items on the owning UI thread.</summary>
+    /// <exception cref="InvalidOperationException">The composition still has pending work after the limit is reached.</exception>
+    public bool Flush(int maximumWorkItems)
+    {
+        _graph.CheckThread();
+        ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        return _graph.DrainPosted(maximumWorkItems);
+    }
+
     /// <summary>Forwards worker-posted work notification without exposing a platform transport to Core.</summary>
     public event Action? WorkAvailable
     {

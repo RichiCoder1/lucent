@@ -1,0 +1,12 @@
+namespace HeadlessFixtures;
+
+using Lucent.Core;
+
+style EditorStyle {
+    Width: 320;
+    Height: 40;
+}
+
+public component Editor() {
+    <TextField initialValue="seed" label="Draft" style={EditorStyle} name="headless.editor" />
+}

@@ -12,12 +12,25 @@ public static class SceneLayout
         Composition composition,
         LayoutViewport viewport,
         ITextShaper shaper
+    ) => Project(composition, viewport, shaper, int.MaxValue);
+
+    /// <summary>Lays out the current composition while bounding reactive work performed by the projection.</summary>
+    public static RetainedScene Project(
+        Composition composition,
+        LayoutViewport viewport,
+        ITextShaper shaper,
+        int maximumWorkItems
     )
     {
         ArgumentNullException.ThrowIfNull(composition);
         ArgumentNullException.ThrowIfNull(shaper);
+        if (maximumWorkItems <= 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(maximumWorkItems),
+                "The projection drain limit must be positive."
+            );
         viewport.Validate();
-        composition.Flush();
+        composition.Flush(maximumWorkItems);
         var responsive = ResponsiveElements(composition);
         Dictionary<long, LayoutRect>? realizedViewportBounds = null;
         if (composition.HasVirtualizedRegions || responsive.Length != 0)
@@ -49,7 +62,7 @@ public static class SceneLayout
                 );
                 item.State!.Assign(new(inner.Width, inner.Height));
             }
-            composition.Flush();
+            composition.Flush(maximumWorkItems);
             EnsureResponsiveElementsUnchanged(composition, responsive);
             if (responsive.Length != 0)
             {
@@ -84,7 +97,7 @@ public static class SceneLayout
                             "A virtualized region has no assigned viewport after responsive layout."
                         )
             );
-            composition.Flush(); // Responsive branches and newly realized rows commit before the final projection.
+            composition.Flush(maximumWorkItems); // Responsive branches and newly realized rows commit before the final projection.
             EnsureResponsiveElementsUnchanged(composition, responsive);
             if (!composition.VirtualizedViewportIds.SequenceEqual(virtualizedViewportIds))
                 throw new InvalidOperationException(

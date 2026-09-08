@@ -1,0 +1,13 @@
+namespace HeadlessFixtures;
+
+using System;
+using Lucent.Core;
+
+public component MenuContent(Action onRun, Action onOther, Func<bool> enabled, Func<bool> disabled) {
+    <Menu>
+        <MenuItem onInvoke={onRun} enabled={disabled}>Disabled</MenuItem>
+        <MenuItem onInvoke={onRun} enabled={enabled}>Run</MenuItem>
+        <MenuSeparator />
+        <MenuItem onInvoke={onOther}>Other</MenuItem>
+    </Menu>
+}
