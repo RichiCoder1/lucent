@@ -129,6 +129,120 @@ public sealed class StockPresentationContracts
     }
 
     [TestMethod]
+    public void FocusAndDisabledPaletteStatesStayContrastingAcrossAppearanceChanges()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "stock-appearance-states");
+        var theme = new ThemeContext(
+            composition.Root.Scope,
+            ControlThemes.Light,
+            appearance: ThemeAppearance.Light
+        );
+        composition.Root.Present(theme, author: PresentationStyles.Surface);
+        var button = composition.Child(composition.Root, "button");
+        Controls.Button(button, theme, "Action");
+        var field = composition.Child(composition.Root, "field");
+        Controls.TextField(field, theme, "Search");
+        var selected = composition.Child(composition.Root, "selected");
+        Controls.Selectable(selected, theme, "Issue");
+        var disabled = composition.Child(composition.Root, "disabled");
+        Controls.Button(disabled, theme, "Disabled");
+        graph.Drain();
+
+        field.SetVariants(VariantState.FocusVisible);
+        button.SetVariants(VariantState.FocusVisible | VariantState.Pressed);
+        selected.SetVariants(VariantState.FocusVisible | VariantState.Selected);
+        disabled.SetVariants(VariantState.Disabled);
+        graph.Drain();
+        AssertFocusStateContrast(button, "light pressed button");
+        AssertFocusStateContrast(selected, "light selected row");
+        Assert.IsTrue(
+            Contrast(
+                field.Resolve(VisualProperties.FocusRing).Value.Brush!.Color!.Value,
+                Color.Parse("#ffffff")
+            ) >= 3,
+            "The light focus ring must remain visible against a light field surface."
+        );
+
+        theme.Appearance = new(ThemeColorScheme.Dark, ThemeContrast.Normal);
+        theme.Theme = ControlThemes.Dark;
+        graph.Drain();
+        AssertFocusStateContrast(button, "dark pressed button");
+        AssertFocusStateContrast(selected, "dark selected row");
+        Assert.IsTrue(
+            Contrast(
+                field.Resolve(VisualProperties.FocusRing).Value.Brush!.Color!.Value,
+                Color.Parse("#111827")
+            ) >= 3,
+            "The dark focus ring must remain visible against a dark field surface."
+        );
+
+        theme.Appearance = new(ThemeColorScheme.Light, ThemeContrast.High);
+        theme.Theme = ControlThemes.HighContrast;
+        graph.Drain();
+        AssertFocusStateContrast(button, "high-contrast pressed button");
+        AssertFocusStateContrast(selected, "high-contrast selected row");
+        Assert.AreEqual(
+            Color.Parse("#ffff00"),
+            field.Resolve(VisualProperties.Background).Value.Color,
+            "Mounted focus state did not switch to the high-contrast treatment."
+        );
+        Assert.AreEqual(
+            Color.Parse("#000000"),
+            field.Resolve(TypographyProperties.TextColor).Value,
+            "High-contrast focus text did not switch with its background."
+        );
+        Assert.AreEqual(
+            Color.Parse("#ffffff"),
+            disabled.Resolve(TypographyProperties.TextColor).Value,
+            "High-contrast disabled text must remain distinct from its grey surface."
+        );
+        Assert.IsTrue(
+            Contrast(
+                disabled.Resolve(TypographyProperties.TextColor).Value,
+                disabled.Resolve(VisualProperties.Background).Value.Color!.Value
+            ) >= 3,
+            "High-contrast disabled text must not collide with its surface."
+        );
+
+        theme.Appearance = ThemeAppearance.Light;
+        theme.Theme = ControlThemes.Light;
+        graph.Drain();
+        Assert.AreEqual(
+            Color.Parse("#ffffff"),
+            field.Resolve(VisualProperties.Background).Value.Color,
+            "Mounted focus state did not return to the light treatment."
+        );
+        Assert.AreEqual(
+            Color.Parse("#0f172a"),
+            field.Resolve(TypographyProperties.TextColor).Value,
+            "Light focus text did not restore the stock foreground."
+        );
+    }
+
+    [TestMethod]
+    public void DecorativeRowAndColumnComponentsDoNotPublishGenericGroups()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "decorative-layout-semantics");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        composition.Root.Present(theme, author: PresentationStyles.Surface);
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Column([Components.Row([Components.Text("content")])])
+        );
+        graph.Drain();
+
+        var snapshot = composition.SemanticSnapshot();
+        Assert.IsNotNull(snapshot);
+        var names = Flatten(snapshot!).Select(item => item.Name).ToArray();
+        CollectionAssert.DoesNotContain(names, "Row");
+        CollectionAssert.DoesNotContain(names, "Column");
+        CollectionAssert.Contains(names, "content");
+    }
+
+    [TestMethod]
     public void DividerIsDecorativeAndUsesStockThemeBrush()
     {
         var graph = new ReactiveGraph();
@@ -215,6 +329,26 @@ public sealed class StockPresentationContracts
             text.Resolve(TypographyProperties.TextColor).Value,
             "Default composed text must inherit the selectable's readable pressed-state color."
         );
+
+        selectable.SetVariants(VariantState.Disabled);
+        graph.Drain();
+        ownerTextColor = selectable.Resolve(TypographyProperties.TextColor).Value;
+        Assert.AreEqual(
+            ownerTextColor,
+            text.Resolve(TypographyProperties.TextColor).Value,
+            "Nested typography must inherit the selectable's readable disabled-state color."
+        );
+
+        theme.Theme = ControlThemes.HighContrast;
+        theme.Appearance = new(ThemeColorScheme.Light, ThemeContrast.High);
+        graph.Drain();
+        ownerTextColor = selectable.Resolve(TypographyProperties.TextColor).Value;
+        Assert.AreEqual(Color.Parse("#ffffff"), ownerTextColor);
+        Assert.AreEqual(
+            ownerTextColor,
+            text.Resolve(TypographyProperties.TextColor).Value,
+            "Nested typography must inherit high-contrast disabled text color."
+        );
     }
 
     [TestMethod]
@@ -270,5 +404,49 @@ public sealed class StockPresentationContracts
             session.Start();
             return 0;
         }
+    }
+
+    private static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot snapshot)
+    {
+        yield return snapshot;
+        foreach (var child in snapshot.Children)
+        foreach (var descendant in Flatten(child))
+            yield return descendant;
+    }
+
+    private static double Contrast(Color first, Color second)
+    {
+        static double Channel(byte value)
+        {
+            var normalized = value / 255d;
+            return normalized <= 0.03928
+                ? normalized / 12.92
+                : Math.Pow((normalized + 0.055) / 1.055, 2.4);
+        }
+
+        var firstLuminance =
+            0.2126 * Channel(first.R) + 0.7152 * Channel(first.G) + 0.0722 * Channel(first.B);
+        var secondLuminance =
+            0.2126 * Channel(second.R) + 0.7152 * Channel(second.G) + 0.0722 * Channel(second.B);
+        var lighter = Math.Max(firstLuminance, secondLuminance);
+        var darker = Math.Min(firstLuminance, secondLuminance);
+        return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    private static void AssertFocusStateContrast(Element element, string state)
+    {
+        var background = element.Resolve(VisualProperties.Background).Value.Color;
+        var foreground = element.Resolve(TypographyProperties.TextColor).Value;
+        var ring = element.Resolve(VisualProperties.FocusRing).Value.Brush?.Color;
+        Assert.IsTrue(
+            background is { } surface && Contrast(foreground, surface) >= 3,
+            $"The {state} foreground must remain readable against its resolved surface."
+        );
+        Assert.IsTrue(
+            background is { } ringSurface
+                && ring is { } ringColor
+                && Contrast(ringColor, ringSurface) >= 3,
+            $"The {state} focus ring must remain visible against its resolved surface."
+        );
     }
 }

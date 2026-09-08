@@ -31,10 +31,10 @@ public static class ControlThemes
         "control-selected",
         Color.Parse("#dbeafe")
     );
-    internal static readonly Token<Brush> Focus = new("control-focus", Color.Parse("#ffff00"));
+    internal static readonly Token<Brush> Focus = new("control-focus", Color.Parse("#1d4ed8"));
     internal static readonly Token<global::Lucent.Core.FocusRing> FocusRing = new(
         "control-focus-ring",
-        global::Lucent.Core.FocusRing.Inset(Color.Parse("#ffff00"), 2)
+        global::Lucent.Core.FocusRing.Inset(Color.Parse("#1d4ed8"), 2)
     );
     internal static readonly Token<Color> FocusForeground = new(
         "control-focus-foreground",
@@ -78,7 +78,7 @@ public static class ControlThemes
             Color.Parse("#2563eb"),
             Color.Parse("#1d4ed8"),
             Color.Parse("#dbeafe"),
-            Color.Parse("#ffff00"),
+            Color.Parse("#1d4ed8"),
             Color.Parse("#000000"),
             Color.Parse("#94a3b8"),
             Color.Parse("#cbd5e1"),
@@ -112,7 +112,7 @@ public static class ControlThemes
             Color.Parse("#000000"),
             Color.Parse("#ffffff"),
             Color.Parse("#ffffff"),
-            Color.Parse("#808080"),
+            Color.Parse("#ffffff"),
             Color.Parse("#ffffff"),
             Color.Parse("#ffff00"),
             Color.Parse("#0000ff"),
@@ -121,7 +121,8 @@ public static class ControlThemes
             Color.Parse("#808080"),
             Color.Parse("#ffffff"),
             Color.Parse("#ffff00"),
-            Color.Parse("#ffffff")
+            Color.Parse("#ffffff"),
+            focusRing: Color.Parse("#000000")
         );
 
     private static Theme Palette(
@@ -138,7 +139,8 @@ public static class ControlThemes
         Color disabled,
         Color border,
         Color borderHover,
-        Color divider
+        Color divider,
+        Color? focusRing = null
     ) =>
         new Theme(name)
             .Set(Surface, (Brush)surface)
@@ -150,7 +152,10 @@ public static class ControlThemes
             .Set(AccentPressed, (Brush)pressed)
             .Set(Selected, (Brush)selected)
             .Set(Focus, (Brush)focus)
-            .Set(FocusRing, global::Lucent.Core.FocusRing.Inset((Brush)focus, 2))
+            .Set(
+                FocusRing,
+                global::Lucent.Core.FocusRing.Inset((Brush)(focusRing ?? focus), 2)
+            )
             .Set(FocusForeground, focusForeground)
             .Set(Disabled, (Brush)disabled)
             .Set(Border, (Brush)border)
@@ -441,12 +446,27 @@ internal static class Controls
             : theme.Token(standard);
 
     private static Style FocusStyle(ThemeContext theme) =>
-        theme.PresentationMode != ControlPresentationMode.Minimal && IsHighContrast(theme)
-            ? Style
-                .Empty.Set(VisualProperties.Background, ControlThemes.Focus)
-                .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
-                .Set(VisualProperties.FocusRing, ControlThemes.FocusRing)
-            : Style.Empty.Set(VisualProperties.FocusRing, ControlThemes.FocusRing);
+        Style
+            .Empty.Set(VisualProperties.FocusRing, ControlThemes.FocusRing)
+            .When(
+                VariantState.Pressed,
+                Style.Empty.Bind(
+                    VisualProperties.FocusRing,
+                    () =>
+                        global::Lucent.Core.FocusRing.Inset(
+                            theme.Token(ControlThemes.SurfaceColor),
+                            2
+                        )
+                )
+            )
+            .When(
+                () =>
+                    theme.PresentationMode != ControlPresentationMode.Minimal
+                    && IsHighContrast(theme),
+                Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.Focus)
+                    .Set(TypographyProperties.TextColor, ControlThemes.FocusForeground)
+            );
 
     private static bool IsHighContrast(ThemeContext theme) =>
         theme.Appearance.Contrast == ThemeContrast.High

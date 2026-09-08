@@ -49,7 +49,11 @@ public static partial class Components
             "row",
             (context, root) =>
             {
-                Controls.Row(root, context.Theme, "Row", style);
+                root.Present(
+                    context.Theme,
+                    component: Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Row),
+                    author: style
+                );
                 context.Mount(root, content);
             }
         );
@@ -67,7 +71,11 @@ public static partial class Components
             "column",
             (context, root) =>
             {
-                Controls.Column(root, context.Theme, "Column", style);
+                root.Present(
+                    context.Theme,
+                    component: Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Column),
+                    author: style
+                );
                 context.Mount(root, content);
             }
         );

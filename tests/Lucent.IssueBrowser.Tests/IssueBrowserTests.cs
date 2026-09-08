@@ -1463,7 +1463,7 @@ public sealed class IssueBrowserTests
         Assert(
             Install(composition, renderer, viewport)
                 .Dump()
-                .Contains("brush=solid(#FFFF00FF)", StringComparison.Ordinal),
+                .Contains("brush=solid(#1D4ED8FF)", StringComparison.Ordinal),
             "Keyboard focus did not produce a visible focus paint."
         );
         var row = Flatten(composition.SemanticSnapshot()!)

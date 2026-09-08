@@ -370,6 +370,7 @@ public sealed class ControlsContracts
             "Armed primary gestures did not activate both controls exactly once."
         );
         row.SetVariants(VariantState.FocusVisible);
+        graph.Drain();
         Assert(
             row.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#ffff00")
                 && row.Resolve(TypographyProperties.TextColor).Value == Color.Parse("#000000"),
@@ -382,11 +383,13 @@ public sealed class ControlsContracts
             "Focus should remain distinct and visible over selection."
         );
         row.SetVariants(VariantState.None);
+        graph.Drain();
         Assert(
             row.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#0000ff"),
             "High-contrast selection is indistinguishable from its surface."
         );
         theme.Theme = ControlThemes.Dark;
+        graph.Drain();
         Assert(
             row.Resolve(VisualProperties.Background).Value.Color == Color.Parse("#1e3a5f"),
             "Dark selection token did not resolve deterministically."
