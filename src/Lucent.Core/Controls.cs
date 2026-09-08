@@ -152,10 +152,7 @@ public static class ControlThemes
             .Set(AccentPressed, (Brush)pressed)
             .Set(Selected, (Brush)selected)
             .Set(Focus, (Brush)focus)
-            .Set(
-                FocusRing,
-                global::Lucent.Core.FocusRing.Inset((Brush)(focusRing ?? focus), 2)
-            )
+            .Set(FocusRing, global::Lucent.Core.FocusRing.Inset((Brush)(focusRing ?? focus), 2))
             .Set(FocusForeground, focusForeground)
             .Set(Disabled, (Brush)disabled)
             .Set(Border, (Brush)border)
