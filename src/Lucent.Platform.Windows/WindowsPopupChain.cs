@@ -495,10 +495,10 @@ internal static class WindowsPopupPlacement
             density
         );
         var work = new PopupScreenRect(
-            checked((int)MathF.Round(usable.X * density)),
-            checked((int)MathF.Round(usable.Y * density)),
-            checked((int)MathF.Round((usable.X + usable.W) * density)),
-            checked((int)MathF.Round((usable.Y + usable.H) * density))
+            usable.X,
+            usable.Y,
+            checked(usable.X + usable.W),
+            checked(usable.Y + usable.H)
         );
         var right = trigger.Right;
         var left = trigger.Left - width;

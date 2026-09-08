@@ -127,7 +127,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
         WindowsUiaListener? listener = null;
         try
         {
-            var ownerScale = Scale(popupParentWindow);
+            var ownerScale = ScaleForWindow(popupParentWindow);
             var density = SDL.GetWindowPixelDensity(popupParentWindow);
             if (!float.IsFinite(density) || density <= 0)
                 throw new InvalidOperationException(
@@ -138,9 +138,12 @@ internal sealed partial class WindowsPopupHost : IDisposable
                 throw new InvalidOperationException(
                     $"SDL_GetDisplayUsableBounds: {SDL.GetError()}"
                 );
+            // SDL display bounds and Windows popup positions are physical screen/window units;
+            // only the Core measurement viewport is logical, so content scale is the sole
+            // conversion at this boundary. Pixel density belongs to the backing render buffer.
             var available = new LayoutViewport(
-                Math.Max(1, usable.W * density / ownerScale - 2 * ShadowMargin),
-                Math.Max(1, usable.H * density / ownerScale - 2 * ShadowMargin),
+                Math.Max(1, usable.W / ownerScale - 2 * ShadowMargin),
+                Math.Max(1, usable.H / ownerScale - 2 * ShadowMargin),
                 ownerScale
             );
             var desired = level is null
@@ -255,13 +258,16 @@ internal sealed partial class WindowsPopupHost : IDisposable
         if (_disposed || !TargetsPopup(@event, WindowId, _ownerWindowId))
             return false;
         var type = (SDL.EventType)@event.Type;
-        if (
-            type == SDL.EventType.MouseButtonDown
-            && !ContainsMenuPoint(_menuBounds, @event.Button.X, @event.Button.Y)
-        )
+        if (type == SDL.EventType.MouseButtonDown)
         {
-            _request.Dismiss();
-            return true;
+            var scale = WindowsCoordinateScale.ForWindow(_window);
+            var x = scale.WindowToLogical(@event.Button.X);
+            var y = scale.WindowToLogical(@event.Button.Y);
+            if (!ContainsMenuPoint(_menuBounds, x, y))
+            {
+                _request.Dismiss();
+                return true;
+            }
         }
         if (
             type == SDL.EventType.WindowCloseRequested
@@ -426,14 +432,15 @@ internal sealed partial class WindowsPopupHost : IDisposable
 
     private static WindowsViewport Viewport(nint window, nint renderer)
     {
-        var scale = Scale(window);
+        var scale = ScaleForWindow(window);
         if (!SDL.GetRenderOutputSize(renderer, out var width, out var height))
             throw new InvalidOperationException($"Windows popup viewport: {SDL.GetError()}");
         return new(width, height, scale);
     }
 
-    private static float Scale(nint window)
+    internal static float ScaleForWindow(nint window)
     {
+        ArgumentOutOfRangeException.ThrowIfZero(window);
         var dpi = PInvoke.GetDpiForWindow(new HWND(Hwnd(window)));
         if (dpi == 0)
             throw new InvalidOperationException("GetDpiForWindow returned zero for an SDL window.");
@@ -456,15 +463,12 @@ internal sealed partial class WindowsPopupHost : IDisposable
 
     internal PopupScreenPoint ToScreenPoint(float x, float y)
     {
+        if (!float.IsFinite(x) || !float.IsFinite(y))
+            throw new ArgumentOutOfRangeException(nameof(x));
         var origin = ClientOrigin(HwndHandle);
-        var density = SDL.GetWindowPixelDensity(_window);
-        if (!float.IsFinite(density) || density <= 0)
-            throw new InvalidOperationException(
-                "SDL_GetWindowPixelDensity returned no popup density."
-            );
         return new(
-            origin.X + ToWindowUnits(x, _viewport.Scale, density),
-            origin.Y + ToWindowUnits(y, _viewport.Scale, density)
+            origin.X + WindowsCoordinateScale.WindowToScreenPixels(x),
+            origin.Y + WindowsCoordinateScale.WindowToScreenPixels(y)
         );
     }
 
@@ -478,16 +482,12 @@ internal sealed partial class WindowsPopupHost : IDisposable
                 "The submenu trigger is not present in its parent scene."
             );
         var origin = ClientOrigin(HwndHandle);
-        var density = SDL.GetWindowPixelDensity(_window);
-        if (!float.IsFinite(density) || density <= 0)
-            throw new InvalidOperationException(
-                "SDL_GetWindowPixelDensity returned no popup density."
-            );
+        var scale = WindowsCoordinateScale.ForWindow(_window);
         return new(
-            origin.X + ToWindowUnits(box.Bounds.X, _viewport.Scale, density),
-            origin.Y + ToWindowUnits(box.Bounds.Y, _viewport.Scale, density),
-            origin.X + ToWindowUnits(box.Bounds.X + box.Bounds.Width, _viewport.Scale, density),
-            origin.Y + ToWindowUnits(box.Bounds.Y + box.Bounds.Height, _viewport.Scale, density)
+            origin.X + scale.LogicalToScreenPixels(box.Bounds.X),
+            origin.Y + scale.LogicalToScreenPixels(box.Bounds.Y),
+            origin.X + scale.LogicalToScreenPixels(box.Bounds.X + box.Bounds.Width),
+            origin.Y + scale.LogicalToScreenPixels(box.Bounds.Y + box.Bounds.Height)
         );
     }
 

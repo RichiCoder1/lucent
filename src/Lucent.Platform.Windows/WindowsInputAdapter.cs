@@ -11,6 +11,7 @@ internal sealed class WindowsInputAdapter : IDisposable
     private readonly nint _window;
     private readonly WindowsClipboard? _clipboard;
     private readonly TextInputTransport _textInput;
+    private readonly WindowsCoordinateScale? _coordinateScaleOverride;
     private readonly Dictionary<int, (float X, float Y)> _pointers = [];
     private bool _disposed;
     private bool _windowFocused = true;
@@ -20,13 +21,15 @@ internal sealed class WindowsInputAdapter : IDisposable
         Composition composition,
         nint window = 0,
         WindowsClipboard? clipboard = null,
-        TextInputTransport? textInput = null
+        TextInputTransport? textInput = null,
+        WindowsCoordinateScale? coordinateScale = null
     )
     {
         _router = (composition ?? throw new ArgumentNullException(nameof(composition))).Input;
         _window = window;
         _clipboard = clipboard;
         _textInput = textInput ?? TextInputTransport.Sdl;
+        _coordinateScaleOverride = coordinateScale;
     }
 
     internal bool WindowFocused => _windowFocused;
@@ -182,6 +185,11 @@ internal sealed class WindowsInputAdapter : IDisposable
         if (source > int.MaxValue || !float.IsFinite(x) || !float.IsFinite(y))
             return false;
         var pointer = (int)source;
+        var scale = CoordinateScale;
+        x = scale.WindowToLogical(x);
+        y = scale.WindowToLogical(y);
+        if (!float.IsFinite(x) || !float.IsFinite(y))
+            return false;
         PointerPosition = (x, y);
         try
         {
@@ -208,12 +216,17 @@ internal sealed class WindowsInputAdapter : IDisposable
             || !float.IsFinite(@event.Y)
         )
             return false;
+        var scale = CoordinateScale;
+        var mouseX = scale.WindowToLogical(@event.MouseX);
+        var mouseY = scale.WindowToLogical(@event.MouseY);
+        if (!float.IsFinite(mouseX) || !float.IsFinite(mouseY))
+            return false;
         var direction = @event.Direction == SDL.MouseWheelDirection.Flipped ? -1f : 1f;
         const float logicalPixelsPerWheelUnit = 40f;
         var result = _router.DispatchWheel(
             new(
-                @event.MouseX,
-                @event.MouseY,
+                mouseX,
+                mouseY,
                 @event.X * direction * logicalPixelsPerWheelUnit,
                 -@event.Y * direction * logicalPixelsPerWheelUnit
             )
@@ -309,12 +322,13 @@ internal sealed class WindowsInputAdapter : IDisposable
         }
         if (_router.TryGetCaretGeometry(out var caret))
         {
+            var scale = CoordinateScale;
             var area = new SDL.Rect
             {
-                X = (int)MathF.Round(caret.X),
-                Y = (int)MathF.Round(caret.Y),
-                W = Math.Max(1, (int)MathF.Ceiling(caret.Width)),
-                H = Math.Max(1, (int)MathF.Ceiling(caret.Height)),
+                X = scale.LogicalToWindowRound(caret.X),
+                Y = scale.LogicalToWindowRound(caret.Y),
+                W = Math.Max(1, scale.LogicalToWindowCeiling(caret.Width)),
+                H = Math.Max(1, scale.LogicalToWindowCeiling(caret.Height)),
             };
             if (!_textInput.Active(_window) && !_textInput.Start(_window))
                 throw new InvalidOperationException("SDL_StartTextInput: " + SDL.GetError());
@@ -361,6 +375,9 @@ internal sealed class WindowsInputAdapter : IDisposable
         if (errors.Count != 0)
             throw new AggregateException("Windows input cleanup failed.", errors);
     }
+
+    private WindowsCoordinateScale CoordinateScale =>
+        _coordinateScaleOverride ?? WindowsCoordinateScale.ForWindow(_window);
 
     internal static Key? MapKey(SDL.Keycode key) =>
         key switch
@@ -422,6 +439,67 @@ internal sealed class WindowsInputAdapter : IDisposable
         if ((flags & (ushort)SDL.Keymod.GUI) != 0)
             result |= KeyModifiers.Meta;
         return result;
+    }
+}
+
+/// <summary>Separates Windows' physical SDL coordinates, Core logical coordinates, and backing density.</summary>
+/// <remarks>
+/// SDL reports Windows pointer coordinates in the platform's native screen/window units. On Windows
+/// those units are physical device pixels, while Lucent layout is in device-independent logical
+/// pixels. The content scale converts between those spaces; pixel density only converts a logical
+/// render size to a window-coordinate size when the backing buffer has a density other than one.
+/// </remarks>
+internal readonly record struct WindowsCoordinateScale
+{
+    internal WindowsCoordinateScale(float contentScale, float pixelDensity)
+    {
+        if (
+            !float.IsFinite(contentScale)
+            || contentScale <= 0
+            || !float.IsFinite(pixelDensity)
+            || pixelDensity <= 0
+        )
+            throw new ArgumentOutOfRangeException(nameof(contentScale));
+        ContentScale = contentScale;
+        PixelDensity = pixelDensity;
+    }
+
+    internal float ContentScale { get; }
+    internal float PixelDensity { get; }
+
+    internal float WindowToLogical(float windowCoordinate) =>
+        windowCoordinate * PixelDensity / ContentScale;
+
+    internal float LogicalToWindow(float logicalCoordinate) =>
+        logicalCoordinate * ContentScale / PixelDensity;
+
+    internal int LogicalToWindowRound(float logicalCoordinate) =>
+        checked((int)MathF.Round(LogicalToWindow(logicalCoordinate)));
+
+    internal int LogicalToWindowCeiling(float logicalCoordinate) =>
+        checked((int)MathF.Ceiling(LogicalToWindow(logicalCoordinate)));
+
+    /// <summary>Converts an SDL Windows event coordinate to a physical screen coordinate.</summary>
+    /// <remarks>Windows SDL window/screen coordinates are already physical pixels; density is for the backing buffer.</remarks>
+    internal static int WindowToScreenPixels(float windowCoordinate) =>
+        checked((int)MathF.Round(windowCoordinate));
+
+    /// <summary>Converts a Core logical edge to a physical screen coordinate for Windows UIA/placement.</summary>
+    internal int LogicalToScreenPixels(float logicalCoordinate) =>
+        checked((int)MathF.Round(logicalCoordinate * ContentScale));
+
+    internal static WindowsCoordinateScale ForWindow(nint window)
+    {
+        if (window == 0)
+            return new(1, 1);
+        // Input cleanup can observe a late callback after SDL has released its native window.
+        // Preserve the adapter's identity fallback for that teardown edge; the production
+        // bootstrap creates and retains the SDL window before dispatch begins.
+        if (SDL.GetWindowProperties(window) == 0)
+            return new(1, 1);
+        var scale = WindowsPopupHost.ScaleForWindow(window);
+        var density = SDL.GetWindowPixelDensity(window);
+        return new(scale, density);
     }
 }
 

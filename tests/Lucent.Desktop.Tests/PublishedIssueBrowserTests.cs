@@ -101,6 +101,15 @@ public sealed partial class PublishedIssueBrowserTests
                 "Issue rows did not appear."
             );
 
+            ActivateOwnedWindow(process, root, window);
+            var scroll = root.FindAllDescendants(condition => condition.ByName("Issues"))
+                .Single(element => element.Patterns.Scroll.IsSupported);
+            scroll.Patterns.Scroll.Pattern.SetScrollPercent(-1, 100);
+            WaitUntil(
+                process,
+                () => scroll.Patterns.Scroll.Pattern.VerticalScrollPercent.Value > 99,
+                "The virtualized list did not reach End before filtering."
+            );
             search.Focus();
             WaitUntil(
                 process,
@@ -114,6 +123,29 @@ public sealed partial class PublishedIssueBrowserTests
                     list.FindAllChildren()
                         .Any(row => row.Name.Contains("10000", StringComparison.Ordinal)),
                 "Filtering did not expose issue 10000."
+            );
+            Assert.IsTrue(
+                search.Properties.HasKeyboardFocus.Value,
+                "Filtering at End cleared the Search editor's focus."
+            );
+            Keyboard.Type("x");
+            WaitUntil(
+                process,
+                () => search.Patterns.Value.Pattern.Value.Value == "10000x",
+                "Physical typing did not reach Search after the scroll clamp."
+            );
+            WaitUntil(
+                process,
+                () => list.FindAllChildren().Length == 0,
+                "Filtering the shortened list to zero did not settle."
+            );
+            search.Patterns.Value.Pattern.SetValue("10000");
+            WaitUntil(
+                process,
+                () =>
+                    list.FindAllChildren()
+                        .Any(item => item.Name.Contains("10000", StringComparison.Ordinal)),
+                "Refilling the empty list did not restore the matching row."
             );
             var row = list.FindAllChildren()
                 .First(item => item.Name.Contains("10000", StringComparison.Ordinal));
