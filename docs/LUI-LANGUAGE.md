@@ -273,6 +273,8 @@ style Pane(WindowBreakpoints breakpoints, ViewState view) {
 
 The grammar, formatter and source maps preserve parameter declarations, references and nested condition expressions. Ordinary C# diagnostics, hover and completion apply at the corresponding authored spans. Named styles remain document-local; public style exports are still deferred.
 
+When a style factory receives a changing scalar component value, the compiler reports `LUI2016` instead of silently freezing that value at construction time. Use a compatible `Func<T>` input for a live reader, or make the snapshot explicit with a `readonly` declaration or `[Once]` state when that is the intended lifetime. `readonly` is a per-mount initial snapshot and remains read-only; `[Once]` is a writable per-mount copy. Mutable collection initializers inferred as derived state produce warning `LUI2017`; choose `[Once]` when the mounted component owns the collection and its mutations must be observable through ordinary assignments.
+
 ### Authoring conventions
 
 - End every named, inline, and variant style assignment with `;`. A missing terminator is a recoverable parse error so later assignments remain available to diagnostics and editor features.
@@ -442,6 +444,8 @@ Stable diagnostic categories begin immediately: parse (`LUI1xxx`), symbol/type (
 
 The parser recovers at component, element, attribute, style, and structural-region boundaries. Missing tokens remain explicit syntax nodes so one error does not suppress diagnostics or completion for later independent constructs. An invalid component does not emit.
 
+Recovery diagnostics identify the authored construct that needs attention. For example, unsupported `else if` syntax reports `LUI1022` and keeps parsing the nested `if` body, while an expression island that is malformed or outside the supported C# expression subset reports `LUI1012`. A recovered region is never silently dropped: later independent elements, attributes, styles, and nested groups continue through parsing and editor services. Generated C# diagnostics are translated back through the compiler source map, so fixing a diagnostic means editing the `.lui` span shown by the diagnostic rather than an internal generated file.
+
 One deterministic formatter owns document and range formatting plus CLI/check surfaces. Initially it formats `.lui` structure while preserving C# expression-island token text verbatim, comments, line endings under the selected formatter policy, and runtime-significant text. The build never rewrites source automatically. Initial lints are objective only: unstable/missing keys, duplicate or impossible content, unused private styles, and unsupported constructs.
 
 ## Generated identity and source maps
@@ -451,6 +455,8 @@ Component identity is resolved namespace plus declared name. Stable generated hi
 Generated sources live under Roslyn/`obj`, are inspectable on demand, and are not checked in. Only the declared `[LucentComponent]` method on the namespace's partial static `Components` class is a callable contract. Helpers and maps are generated implementation details hidden from completion where practical.
 
 Enhanced `#line` directives map compiler/debugger diagnostics and C# expression spans. A compact deterministic compiler-owned map covers every syntax and generated construct bidirectionally for completion, hover, diagnostics, rename/references, formatting, semantic navigation, and generated-code navigation. There is no runtime mapping service.
+
+Generated document hints and named-style helpers use the normalized project-relative document identity. The document's deterministic stable identifier is combined with each style's declaration ordinal; a source collision is checked and receives a deterministic suffix. Consequently, two `.lui` documents can use the same authored style name without colliding in generated C#, while reordering or renaming unrelated source text does not make an absolute host path or syntax offset part of the identity. Authored names remain the names used in diagnostics and editor views.
 
 ## Discovering control-state style winners
 

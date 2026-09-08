@@ -14,14 +14,8 @@ namespace Lucent.Lui.Compiler;
 /// <remarks>Use from build or editor tooling only. The output source and map have no runtime dependency or runtime role.</remarks>
 public static class LuiCompiler
 {
-    private static readonly string[] ImplicitStylePropertyTypes =
-    [
-        "Lucent.Core.LayoutProperties",
-        "Lucent.Core.VisualProperties",
-        "Lucent.Core.TypographyProperties",
-        "Lucent.Core.InputProperties",
-        "Lucent.Core.ScrollBarProperties",
-    ];
+    private static readonly IReadOnlyList<string> ImplicitStylePropertyTypes =
+        LuiPropertyCatalog.ImplicitStylePropertyTypeNames;
     private static readonly SymbolDisplayFormat FullyQualifiedNullableFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
             SymbolDisplayFormat.FullyQualifiedFormat.MiscellaneousOptions
@@ -67,9 +61,9 @@ public static class LuiCompiler
         var probeModel = probeCompilation.GetSemanticModel(probeTree);
         var probeMap = new LuiSourceMap(identity, writer.Entries);
         var statePlans = StatePlans(probeModel, probeTree, writer, diagnostics);
-        UnusedStyleLints(document, probeModel, probeTree, diagnostics);
+        UnusedStyleLints(document, probeModel, probeTree, writer, diagnostics);
         ReactiveStyleConditionDiagnostics(document, probeModel, probeTree, probeMap, diagnostics);
-        if (HasErrors(diagnostics))
+        if (HasBlockingErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
                 null,
@@ -205,7 +199,7 @@ public static class LuiCompiler
             statePlans,
             liveValues
         );
-        if (HasErrors(diagnostics))
+        if (HasBlockingErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
                 null,
@@ -216,7 +210,7 @@ public static class LuiCompiler
         writer = new Writer(document, identity, plans, []);
         writer.Document(diagnostics);
         var map = new LuiSourceMap(identity, writer.Entries);
-        if (HasErrors(diagnostics))
+        if (HasBlockingErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
                 null,
@@ -228,6 +222,7 @@ public static class LuiCompiler
         var tree = CSharpSyntaxTree.ParseText(writer.Text, parseOptions, identity.HintName);
         var bound = compilation.AddSyntaxTrees(tree);
         var model = bound.GetSemanticModel(tree);
+        StyleSnapshotDiagnostics(document, model, tree, map, writer, statePlans, diagnostics);
         foreach (
             var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
         )
@@ -402,16 +397,14 @@ public static class LuiCompiler
         LuiDocumentSyntax document,
         SemanticModel model,
         SyntaxTree tree,
+        Writer writer,
         List<LuiDiagnostic> diagnostics
     )
     {
         if (document.Styles.Count == 0)
             return;
         var root = tree.GetRoot();
-        var names = new HashSet<string>(
-            document.Styles.Select(style => style.Name.Text),
-            StringComparer.Ordinal
-        );
+        var names = new HashSet<string>(writer.StyleMemberNames, StringComparer.Ordinal);
         var fields = new HashSet<ISymbol>(
             root.DescendantNodes()
                 .OfType<VariableDeclaratorSyntax>()
@@ -451,12 +444,16 @@ public static class LuiCompiler
                 .Select(symbol => symbol!.Name),
             StringComparer.Ordinal
         );
-        foreach (var style in document.Styles.Where(style => !used.Contains(style.Name.Text)))
+        foreach (
+            var style in document
+                .Styles.Select((style, index) => (Style: style, Index: index))
+                .Where(item => !used.Contains(writer.StyleMemberNames[item.Index]))
+        )
             diagnostics.Add(
                 new LuiDiagnostic(
                     "LUI5002",
-                    "Private style '" + style.Name.Text + "' is unused.",
-                    style.Name.Span,
+                    "Private style '" + style.Style.Name.Text + "' is unused.",
+                    style.Style.Name.Span,
                     DiagnosticSeverity.Warning
                 )
             );
@@ -491,6 +488,8 @@ public static class LuiCompiler
                     )
                     .Type;
             if (type?.SpecialType == SpecialType.System_Boolean)
+                continue;
+            if (generated is not null && type is IErrorTypeSymbol)
                 continue;
             diagnostics.Add(
                 new LuiDiagnostic(
@@ -545,6 +544,12 @@ public static class LuiCompiler
 
     private static bool HasErrors(IEnumerable<LuiDiagnostic> diagnostics) =>
         diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+
+    private static bool HasBlockingErrors(IEnumerable<LuiDiagnostic> diagnostics) =>
+        diagnostics.Any(diagnostic =>
+            diagnostic.Severity == DiagnosticSeverity.Error
+            && !diagnostic.Id.StartsWith("LUI1", StringComparison.Ordinal)
+        );
 
     private static IEnumerable<LuiElementSyntax> Elements(IEnumerable<LuiBodySyntax> body) =>
         body.SelectMany(node =>
@@ -844,16 +849,34 @@ public static class LuiCompiler
                 : expression is not null && model.GetConstantValue(expression).HasValue
                     ? StateKind.Writable
                 : StateKind.Derived;
-            if (
-                kind == StateKind.Derived
-                && expression is not null
-                && IsTaskLike(model.GetTypeInfo(expression).Type)
-            )
+            var initializerType = expression is null ? null : model.GetTypeInfo(expression).Type;
+            if (initializerType is null && expression is not null)
+            {
+                initializerType = root.DescendantNodes()
+                    .OfType<PropertyDeclarationSyntax>()
+                    .Where(property => property.Identifier.ValueText == declaration.Name)
+                    .Select(property => model.GetDeclaredSymbol(property)?.Type)
+                    .FirstOrDefault(type => type is not null);
+            }
+            if (kind == StateKind.Derived && expression is not null && IsTaskLike(initializerType))
                 diagnostics.Add(
                     new LuiDiagnostic(
                         "LUI2015",
                         "An unmarked Task or ValueTask initializer cannot be inferred as a derived component value. Create an explicit owner-owned AsyncValue, or use [Once]/readonly for an intentional task snapshot.",
                         declaration.Source
+                    )
+                );
+            if (
+                kind == StateKind.Derived
+                && expression is not null
+                && IsMutableCollection(initializerType)
+            )
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2017",
+                        "This mutable collection initializer is inferred as read-only derived state and mutations will not update the UI. Add [Once] for a writable per-mount copy or readonly for an intentional snapshot.",
+                        declaration.Source,
+                        DiagnosticSeverity.Warning
                     )
                 );
             if (expression is not null)
@@ -927,6 +950,30 @@ public static class LuiCompiler
         var definition = named.OriginalDefinition;
         return definition.ContainingNamespace.ToDisplayString() == "System.Threading.Tasks"
             && definition.Name is "Task" or "ValueTask";
+    }
+
+    private static bool IsMutableCollection(ITypeSymbol? type)
+    {
+        if (type is IArrayTypeSymbol)
+            return true;
+        if (type is not INamedTypeSymbol named)
+            return false;
+        if (
+            named.Name
+            is "List"
+                or "Collection"
+                or "ObservableCollection"
+                or "Dictionary"
+                or "HashSet"
+                or "SortedSet"
+                or "Queue"
+                or "Stack"
+        )
+            return true;
+        return named.AllInterfaces.Any(interfaceType =>
+            interfaceType.ContainingNamespace.ToDisplayString() == "System.Collections.Generic"
+            && interfaceType.Name is "ICollection" or "IList" or "IDictionary" or "ISet"
+        );
     }
 
     private static LuiDiagnostic? StateAssignmentDiagnostic(
@@ -1098,6 +1145,61 @@ public static class LuiCompiler
         return plans;
     }
 
+    private static void StyleSnapshotDiagnostics(
+        LuiDocumentSyntax document,
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        Writer writer,
+        IReadOnlyDictionary<string, StatePlan> statePlans,
+        List<LuiDiagnostic> diagnostics
+    )
+    {
+        var styleNames = new HashSet<string>(writer.StyleMemberNames, StringComparer.Ordinal);
+        if (styleNames.Count == 0)
+            return;
+        foreach (
+            var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
+        )
+        {
+            if (
+                invocation.Expression is not IdentifierNameSyntax identifier
+                || !styleNames.Contains(identifier.Identifier.ValueText)
+            )
+                continue;
+            foreach (var argument in invocation.ArgumentList.Arguments)
+            {
+                if (
+                    model.GetConstantValue(argument.Expression).HasValue
+                    || !ReferencesComponentState(model, argument.Expression, statePlans)
+                    || !IsSnapshotScalar(model.GetTypeInfo(argument.Expression).Type)
+                )
+                    continue;
+                var generated = new LuiSpan(
+                    argument.Expression.SpanStart,
+                    argument.Expression.Span.Length
+                );
+                var source =
+                    Translate(map, generated) ?? document.Component?.Span ?? new LuiSpan(0, 0);
+                if (
+                    diagnostics.Any(existing =>
+                        existing.Id == "LUI2016"
+                        && existing.Span.Start == source.Start
+                        && existing.Span.Length == source.Length
+                    )
+                )
+                    continue;
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2016",
+                        "This style factory argument captures changing component state when the style is constructed. Use a live style binding or an explicit [Once]/readonly snapshot value.",
+                        source
+                    )
+                );
+            }
+        }
+    }
+
     private static void PlanLiveValues(
         LuiDocumentSyntax document,
         int elementStart,
@@ -1205,8 +1307,8 @@ public static class LuiCompiler
                 );
     }
 
-    private static bool IsSnapshotScalar(ITypeSymbol type) =>
-        type.IsValueType || type.SpecialType == SpecialType.System_String;
+    private static bool IsSnapshotScalar(ITypeSymbol? type) =>
+        type?.IsValueType == true || type?.SpecialType == SpecialType.System_String;
 
     private static ITypeSymbol? FuncReturnType(ITypeSymbol type) =>
         type
@@ -2096,6 +2198,10 @@ public static class LuiCompiler
         private readonly BindingPlans? plans;
         private readonly IReadOnlyList<string> implicitStaticTypes;
         private readonly bool suppressDefaultContentAttribute;
+        private readonly IReadOnlyDictionary<string, string> styleNames;
+        private readonly IReadOnlyList<string> styleMemberNames;
+        private readonly HashSet<string> componentLocalNames;
+        private HashSet<string> styleParameterNames = new HashSet<string>(StringComparer.Ordinal);
         private readonly List<StructuralLocal> structuralLocals = [];
         private int regionOrdinal;
         private int currentOrdinal;
@@ -2179,9 +2285,56 @@ public static class LuiCompiler
             this.plans = plans;
             this.implicitStaticTypes = implicitStaticTypes;
             this.suppressDefaultContentAttribute = suppressDefaultContentAttribute;
+            componentLocalNames = new HashSet<string>(
+                document.Component?.Parameters.Select(parameter => parameter.Name.Text)
+                    ?? Enumerable.Empty<string>(),
+                StringComparer.Ordinal
+            );
+            foreach (var member in document.Component?.Body.OfType<LuiMemberSyntax>() ?? [])
+            {
+                switch (member.Declaration)
+                {
+                    case FieldDeclarationSyntax field:
+                        foreach (var variable in field.Declaration.Variables)
+                            componentLocalNames.Add(variable.Identifier.ValueText);
+                        break;
+                    case MethodDeclarationSyntax method:
+                        componentLocalNames.Add(method.Identifier.ValueText);
+                        break;
+                }
+            }
+            var names = new Dictionary<string, string>(StringComparer.Ordinal);
+            var members = new List<string>(document.Styles.Count);
+            for (var index = 0; index < document.Styles.Count; index++)
+            {
+                var candidate =
+                    "__luiStyle_"
+                    + identity.Document.StableId
+                    + "_"
+                    + index.ToString(CultureInfo.InvariantCulture);
+                var suffix = 0;
+                while (
+                    document.Source.Contains(candidate, StringComparison.Ordinal)
+                    || members.Contains(candidate, StringComparer.Ordinal)
+                )
+                    candidate =
+                        "__luiStyle_"
+                        + identity.Document.StableId
+                        + "_"
+                        + index.ToString(CultureInfo.InvariantCulture)
+                        + "_"
+                        + (++suffix).ToString(CultureInfo.InvariantCulture);
+                members.Add(candidate);
+                var authored = document.Styles[index].Name.Text;
+                if (!String.IsNullOrEmpty(authored) && !names.ContainsKey(authored))
+                    names.Add(authored, candidate);
+            }
+            styleNames = names;
+            styleMemberNames = members;
         }
 
         internal string Text => text.ToString();
+        internal IReadOnlyList<string> StyleMemberNames => styleMemberNames;
 
         // Every generated character is either related to a source span or explicitly hidden.
         private void Write(string value) => Hidden(value);
@@ -2241,8 +2394,8 @@ public static class LuiCompiler
             if (!namespaceWritten)
                 Hidden("namespace Lucent.Lui.Generated;\n");
             Hidden("\npublic static partial class Components\n{\n");
-            foreach (var style in document.Styles)
-                Style(style, diagnostics);
+            for (var index = 0; index < document.Styles.Count; index++)
+                Style(document.Styles[index], index, diagnostics);
             Component(document.Component!, diagnostics);
             Hidden("}\n");
         }
@@ -2447,8 +2600,10 @@ public static class LuiCompiler
 
             foreach (var member in members.Where(member => member.Kind == LuiMemberKind.Method))
             {
+                Hidden(LineDirective(member.Span));
                 Hidden("        ");
                 Mapped(member.Text, member.Span, LuiMapKind.Symbol);
+                Hidden("\n#line hidden");
                 Hidden("\n\n");
             }
             if (setup is not null)
@@ -2600,7 +2755,9 @@ public static class LuiCompiler
                 member.Span.Start + initializer.SpanStart,
                 initializer.Span.Length
             );
+            Hidden(LineDirective(source));
             var generated = Mapped(initializer.ToString(), source, LuiMapKind.Expression);
+            Hidden("\n#line hidden\n");
             StateInitializers.Add(
                 new StateInitializerMapping(
                     name,
@@ -2631,11 +2788,13 @@ public static class LuiCompiler
             if (declaration.Body is { } body)
             {
                 var source = new LuiSpan(setup.Span.Start + body.SpanStart, body.Span.Length);
+                Hidden(LineDirective(source));
                 Mapped(
                     setup.Text.Substring(body.SpanStart, body.Span.Length),
                     source,
                     LuiMapKind.Expression
                 );
+                Hidden("\n#line hidden");
             }
             Hidden("\n\n");
         }
@@ -3267,6 +3426,8 @@ public static class LuiCompiler
             switch (value)
             {
                 case LuiScalarSyntax scalar:
+                    if (plans?.LiveValues.Contains(scalar.Span.Start) == true)
+                        Hidden("() => ");
                     Mapped(Escape(scalar.Value), scalar.Span, LuiMapKind.Expression);
                     break;
                 case LuiExpressionSyntax expression:
@@ -3285,13 +3446,18 @@ public static class LuiCompiler
             }
         }
 
-        private void Style(LuiStyleSyntax style, List<LuiDiagnostic> diagnostics)
+        private void Style(LuiStyleSyntax style, int styleIndex, List<LuiDiagnostic> diagnostics)
         {
             var method = !style.OpenParameters.IsMissing || style.Parameters.Count != 0;
+            var previousStyleParameters = styleParameterNames;
+            styleParameterNames = new HashSet<string>(
+                style.Parameters.Select(parameter => parameter.Name.Text),
+                StringComparer.Ordinal
+            );
             if (method)
             {
                 Hidden("    private static global::Lucent.Core.Style ");
-                Mapped(style.Name.Text, style.Name.Span, LuiMapKind.Symbol);
+                Mapped(styleMemberNames[styleIndex], style.Name.Span, LuiMapKind.Symbol);
                 Write("(");
                 for (var index = 0; index < style.Parameters.Count; index++)
                 {
@@ -3307,11 +3473,12 @@ public static class LuiCompiler
             else
             {
                 Hidden("    private static readonly global::Lucent.Core.Style ");
-                Mapped(style.Name.Text, style.Name.Span, LuiMapKind.Symbol);
+                Mapped(styleMemberNames[styleIndex], style.Name.Span, LuiMapKind.Symbol);
                 Write(" = global::Lucent.Core.Style.Empty");
                 StyleMembers(style.Members, false, diagnostics);
                 Write(";");
             }
+            styleParameterNames = previousStyleParameters;
             Hidden("\n");
             Mark(style.StyleKeyword.Span, LuiMapKind.Structure);
             Mark(style.OpenParameters.Span, LuiMapKind.Structure);
@@ -3328,6 +3495,8 @@ public static class LuiCompiler
         {
             foreach (var member in members)
             {
+                if (member is LuiStyleCommentSyntax)
+                    continue;
                 if (member is LuiStyleAssignmentSyntax assignment)
                     Assignment(assignment, live);
                 else if (member is LuiVariantGroupSyntax group)
@@ -3384,13 +3553,158 @@ public static class LuiCompiler
         {
             var local = structuralLocals.LastOrDefault(candidate => candidate.Name == token.Text);
             if (local is null)
-                Mapped(token.Text, token.Span, LuiMapKind.Symbol);
+            {
+                var name =
+                    !IsStyleNameShadowed(token.Text)
+                    && styleNames.TryGetValue(token.Text, out var generated)
+                        ? generated
+                        : token.Text;
+                Mapped(name, token.Span, LuiMapKind.Symbol);
+            }
             else
             {
                 Mapped(local.Reader, token.Span, LuiMapKind.Local);
                 Hidden(local.Accessor);
             }
         }
+
+        private bool IsStyleNameShadowed(string name) =>
+            componentLocalNames.Contains(name) || styleParameterNames.Contains(name);
+
+        private bool IsStyleNameShadowed(
+            ExpressionSyntax expression,
+            IdentifierNameSyntax identifier,
+            string name
+        )
+        {
+            if (IsStyleNameShadowed(name))
+                return true;
+            if (
+                identifier
+                    .Ancestors()
+                    .OfType<LambdaExpressionSyntax>()
+                    .Any(lambda =>
+                        lambda switch
+                        {
+                            SimpleLambdaExpressionSyntax simple => simple
+                                .Parameter
+                                .Identifier
+                                .ValueText == name,
+                            ParenthesizedLambdaExpressionSyntax parenthesized =>
+                                parenthesized.ParameterList.Parameters.Any(parameter =>
+                                    parameter.Identifier.ValueText == name
+                                ),
+                            _ => false,
+                        }
+                    )
+            )
+                return true;
+            if (
+                identifier
+                    .Ancestors()
+                    .OfType<LocalFunctionStatementSyntax>()
+                    .Any(function =>
+                        function.Identifier.ValueText == name
+                        || function.ParameterList.Parameters.Any(parameter =>
+                            parameter.Identifier.ValueText == name
+                        )
+                    )
+            )
+                return true;
+            foreach (var block in identifier.Ancestors().OfType<BlockSyntax>())
+            {
+                if (
+                    block
+                        .Statements.OfType<LocalFunctionStatementSyntax>()
+                        .Any(function => function.Identifier.ValueText == name)
+                )
+                    return true;
+                foreach (
+                    var declaration in block
+                        .DescendantNodes()
+                        .OfType<VariableDeclaratorSyntax>()
+                        .Where(declaration =>
+                            declaration.Identifier.ValueText == name
+                            && declaration.Identifier.SpanStart < identifier.SpanStart
+                        )
+                )
+                {
+                    if (
+                        declaration.Ancestors().OfType<BlockSyntax>().FirstOrDefault()
+                            is { } declarationBlock
+                        && ReferenceEquals(declarationBlock, block)
+                    )
+                        return true;
+                }
+            }
+            foreach (
+                var designation in expression
+                    .DescendantNodesAndSelf()
+                    .OfType<SingleVariableDesignationSyntax>()
+            )
+            {
+                if (
+                    designation.Identifier.ValueText == name
+                    && designation.Identifier.SpanStart < identifier.SpanStart
+                    && IsPatternDeclarationInScope(designation, identifier)
+                )
+                    return true;
+            }
+            return false;
+        }
+
+        private static bool IsPatternDeclarationInScope(
+            SingleVariableDesignationSyntax designation,
+            IdentifierNameSyntax identifier
+        )
+        {
+            var designationScope = LexicalScope(designation);
+            var identifierScope = LexicalScope(identifier);
+            if (!ReferenceEquals(designationScope, identifierScope))
+                return false;
+            var patternExpression = designation
+                .Ancestors()
+                .OfType<IsPatternExpressionSyntax>()
+                .FirstOrDefault();
+            if (patternExpression is null)
+                return false;
+            SyntaxNode branch = patternExpression;
+            for (var parent = branch.Parent; parent is not null; parent = parent.Parent)
+            {
+                if (
+                    parent is ParenthesizedExpressionSyntax parenthesized
+                    && parenthesized.Expression == branch
+                )
+                {
+                    branch = parenthesized;
+                    continue;
+                }
+                if (
+                    parent is ConditionalExpressionSyntax conditional
+                    && conditional.Condition == branch
+                )
+                    return conditional.WhenTrue.Span.Contains(identifier.Span);
+                if (
+                    parent is BinaryExpressionSyntax binary
+                    && binary.IsKind(SyntaxKind.LogicalAndExpression)
+                    && binary.Left == branch
+                )
+                    return binary.Right.Span.Contains(identifier.Span);
+                if (parent is LambdaExpressionSyntax or LocalFunctionStatementSyntax or BlockSyntax)
+                    break;
+                branch = parent;
+            }
+            return false;
+        }
+
+        private static SyntaxNode? LexicalScope(SyntaxNode node) =>
+            node.AncestorsAndSelf()
+                .FirstOrDefault(candidate =>
+                    candidate
+                        is LambdaExpressionSyntax
+                            or LocalFunctionStatementSyntax
+                            or BlockSyntax
+                );
 
         private void Variant(LuiVariantGroupSyntax variant, List<LuiDiagnostic> diagnostics)
         {
@@ -3510,21 +3824,7 @@ public static class LuiCompiler
             var leading = expressionText.Length - expressionText.TrimStart().Length;
             var value = expressionText.Trim();
             var source = new LuiSpan(expressionSpan.Start + leading, value.Length);
-            var start = Position(source.Start);
-            var end = Position(source.End);
-            var directive =
-                "\n#line ("
-                + start.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                + ","
-                + start.Column.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                + ")-("
-                + end.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                + ","
-                + end.Column.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                + ") \""
-                + identity.Document.LogicalPath.Replace("\\", "\\\\").Replace("\"", "\\\"")
-                + "\"\n";
-            Hidden(directive);
+            Hidden(LineDirective(source));
             var generatedStart = text.Length;
 
             var replacements =
@@ -3603,6 +3903,38 @@ public static class LuiCompiler
                     )
                 );
             foreach (
+                var invocation in expressionSyntax
+                    .DescendantNodesAndSelf()
+                    .OfType<InvocationExpressionSyntax>()
+                    .Where(invocation =>
+                        invocation.Expression is IdentifierNameSyntax operation
+                        && operation.Identifier.ValueText == "nameof"
+                        && invocation.ArgumentList.Arguments.Count == 1
+                        && invocation.ArgumentList.Arguments[0].Expression
+                            is IdentifierNameSyntax identifier
+                        && styleNames.ContainsKey(identifier.Identifier.ValueText)
+                        && !IsStyleNameShadowed(
+                            expressionSyntax,
+                            identifier,
+                            identifier.Identifier.ValueText
+                        )
+                    )
+            )
+            {
+                var identifier = (IdentifierNameSyntax)
+                    invocation.ArgumentList.Arguments[0].Expression;
+                replacements.Add(
+                    (
+                        new LuiSpan(source.Start + invocation.SpanStart, invocation.Span.Length),
+                        Escape(identifier.Identifier.ValueText),
+                        LuiMapKind.Expression,
+                        "",
+                        0,
+                        false
+                    )
+                );
+            }
+            foreach (
                 var identifier in expressionSyntax
                     .DescendantNodesAndSelf()
                     .OfType<IdentifierNameSyntax>()
@@ -3613,26 +3945,47 @@ public static class LuiCompiler
                 if (name == excludedLocal)
                     continue;
                 var local = structuralLocals.LastOrDefault(candidate => candidate.Name == name);
-                if (local is null)
-                    continue;
-                var inNameOf = identifier
-                    .Ancestors()
-                    .OfType<InvocationExpressionSyntax>()
-                    .Any(invocation =>
-                        invocation.Expression is IdentifierNameSyntax operation
-                        && operation.Identifier.ValueText == "nameof"
-                        && invocation.ArgumentList.Span.Contains(identifier.Span)
+                if (local is not null)
+                {
+                    var inNameOf = identifier
+                        .Ancestors()
+                        .OfType<InvocationExpressionSyntax>()
+                        .Any(invocation =>
+                            invocation.Expression is IdentifierNameSyntax operation
+                            && operation.Identifier.ValueText == "nameof"
+                            && invocation.ArgumentList.Span.Contains(identifier.Span)
+                        );
+                    replacements.Add(
+                        (
+                            new LuiSpan(
+                                source.Start + identifier.SpanStart,
+                                identifier.Span.Length
+                            ),
+                            inNameOf ? local.NameOfReader : local.Reader,
+                            LuiMapKind.Local,
+                            inNameOf ? local.NameOfAccessor : local.Accessor,
+                            0,
+                            false
+                        )
                     );
-                replacements.Add(
-                    (
-                        new LuiSpan(source.Start + identifier.SpanStart, identifier.Span.Length),
-                        inNameOf ? local.NameOfReader : local.Reader,
-                        LuiMapKind.Local,
-                        inNameOf ? local.NameOfAccessor : local.Accessor,
-                        0,
-                        false
-                    )
-                );
+                }
+                else if (
+                    !IsStyleNameShadowed(expressionSyntax, identifier, name)
+                    && styleNames.TryGetValue(name, out var generatedStyle)
+                )
+                    replacements.Add(
+                        (
+                            new LuiSpan(
+                                source.Start + identifier.SpanStart,
+                                identifier.Span.Length
+                            ),
+                            generatedStyle,
+                            LuiMapKind.Symbol,
+                            "",
+                            0,
+                            false
+                        )
+                    );
             }
 
             var offset = source.Start;
@@ -3778,6 +4131,23 @@ public static class LuiCompiler
                     column++;
             }
             return (line, column);
+        }
+
+        private string LineDirective(LuiSpan source)
+        {
+            var start = Position(source.Start);
+            var end = Position(source.End);
+            return "\n#line ("
+                + start.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ","
+                + start.Column.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ")-("
+                + end.Line.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ","
+                + end.Column.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ") \""
+                + identity.Document.LogicalPath.Replace("\\", "\\\\").Replace("\"", "\\\"")
+                + "\"\n";
         }
     }
 }

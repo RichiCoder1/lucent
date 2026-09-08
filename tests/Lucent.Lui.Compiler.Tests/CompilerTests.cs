@@ -744,7 +744,7 @@ style Workspace(float width) {
         );
         Assert(
             result.Source!.Contains(
-                "private static global::Lucent.Core.Style Workspace(float width)",
+                "private static global::Lucent.Core.Style __luiStyle_",
                 StringComparison.Ordinal
             )
                 && result.Source.Contains(".Bind<float?>(", StringComparison.Ordinal)
@@ -762,6 +762,169 @@ style Workspace(float width) {
                 .Map.FromSource(reactive.ConditionExpression!.Span)
                 .Any(entry => entry.Generated.Length != 0),
             "reactive condition did not receive a generated source-map entry."
+        );
+    }
+
+    [TestMethod]
+    public void GrammarRecoveryAndFormatterContracts()
+    {
+        const string members = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Members() {
+    // a member comment
+    public void Toggle() { }
+    /* another member comment */
+    internal int count = 0;
+    // the retained root follows the members
+    <Text>{count}</Text>
+}
+style Commented {
+    // a style comment
+    Width: 1f;
+    /* a block style comment */
+    when Hover {
+        Height: 2f;
+    }
+}
+""";
+        var memberDocument = LuiParser.Parse(members);
+        Assert(
+            memberDocument.Diagnostics.Count == 0
+                && memberDocument.Component!.Body.OfType<LuiCommentSyntax>().Count() == 3
+                && memberDocument.Styles.Single().Members.OfType<LuiStyleCommentSyntax>().Count()
+                    == 2,
+            "comments or member modifiers were not recovered locally: "
+                + Diagnostics(memberDocument)
+        );
+        var memberFormatted = LuiFormatter.Format(members, LuiLineEnding.Lf);
+        Assert(
+            memberFormatted.Contains("// a member comment", StringComparison.Ordinal)
+                && memberFormatted.Contains("/* a block style comment */", StringComparison.Ordinal)
+                && memberFormatted == LuiFormatter.Format(memberFormatted, LuiLineEnding.Lf),
+            "member/style comments were lost or formatter output was not idempotent."
+        );
+
+        const string text =
+            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; "
+            + "internal component TextBody() { <Text>Motif (x); Retry if (needed); foreach (item)</Text> }";
+        var textDocument = LuiParser.Parse(text);
+        Assert(
+            textDocument.Diagnostics.Count == 0
+                && ((LuiElementSyntax)textDocument.Component!.Body.Single())
+                    .Children.OfType<LuiTextSyntax>()
+                    .Single()
+                    .Text == "Motif (x); Retry if (needed); foreach (item)",
+            "control-keyword text was split into structural regions: " + Diagnostics(textDocument)
+        );
+
+        const string islands = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Islands(object? value) {
+    <Text content={value?.ToString() ?? global::System.String.Empty} />
+}
+""";
+        var islandDocument = LuiParser.Parse(islands);
+        Assert(
+            !islandDocument.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1012"),
+            "conditional/global-qualified expression islands were rejected: "
+                + Diagnostics(islandDocument)
+        );
+        const string spread =
+            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; "
+            + "internal component Spread(System.Collections.Generic.IEnumerable<int> values) "
+            + "{ <Text content={[..values].Length.ToString()} /> }";
+        var spreadDocument = LuiParser.Parse(spread);
+        Assert(
+            !spreadDocument.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1012"),
+            "collection spread expression islands were rejected: " + Diagnostics(spreadDocument)
+        );
+
+        const string elseIf = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Chain(bool first, bool second) {
+    if (first) { <Text>one</Text> } else if (second) { <Text>two</Text> } else { <Text>three</Text> }
+}
+""";
+        var elseIfDocument = LuiParser.Parse(elseIf);
+        Assert(
+            elseIfDocument.Diagnostics.Count(diagnostic => diagnostic.Id == "LUI1022") == 1
+                && elseIfDocument.Diagnostics.Count == 1
+                && elseIfDocument.Diagnostics[0].Span.Start
+                    == elseIf.IndexOf("if (second)", StringComparison.Ordinal),
+            "unsupported else-if did not produce one local actionable diagnostic: "
+                + Diagnostics(elseIfDocument)
+        );
+
+        const string rangeInput = "internal component X() { <Column><Row><Text /></Row></Column> }";
+        var rangeSource = LuiFormatter.Format(rangeInput, LuiLineEnding.Lf);
+        var nestedChild = LuiParser
+            .Parse(rangeSource)
+            .Component!.Body.OfType<LuiElementSyntax>()
+            .Single()
+            .Children.OfType<LuiElementSyntax>()
+            .Single();
+        var ranged = LuiFormatter.FormatRange(rangeSource, nestedChild.Span, LuiLineEnding.Lf);
+        Assert(
+            ranged.Contains("\n        </Row>", StringComparison.Ordinal),
+            "range formatting reset the selected node's authored indentation:\n" + ranged
+        );
+    }
+
+    [TestMethod]
+    public void QuotedScalarInputsCanUseLiveReaderOverloads()
+    {
+        const string source = """
+namespace ScalarLive;
+using System;
+using Lucent.Core;
+using static ScalarLive.TestComponents;
+internal component Host() { <Caption label="Hi" /> }
+""";
+        const string api = """
+namespace ScalarLive;
+using System;
+using Lucent.Core;
+public static class TestComponents
+{
+    [LucentComponent]
+    public static ComponentRecipe Caption(Func<string> label) =>
+        ComponentRecipe.Create("caption", (_, _) => { });
+}
+""";
+        var compilation = CSharpCompilation.Create(
+            "quoted-live",
+            [CSharpSyntaxTree.ParseText(api, new CSharpParseOptions(LanguageVersion.Preview))],
+            References()
+        );
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            compilation,
+            new LuiFreshnessIdentity(
+                "quoted-live",
+                "quoted-live",
+                new LuiDocumentIdentity("QuotedLive.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success
+                && result.Source!.Contains("label: () => \"Hi\"", StringComparison.Ordinal),
+            "quoted scalar live-reader inference was not lowered: "
+                + String.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.Message
+                    )
+                )
+                + "\n"
+                + result.Source
         );
     }
 
@@ -820,6 +983,82 @@ style Workspace(float width) {
             !inlineResult.Success
                 && inlineResult.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2021"),
             "an inline non-bool style condition was not rejected."
+        );
+    }
+
+    [TestMethod]
+    public void RecoveredSyntaxRetainsIndependentBindingDiagnostics()
+    {
+        var source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Example() { <Text content={MissingValue} /> }
+style Broken { Width: 1f
+""";
+        var document = LuiParser.Parse(source);
+        var result = LuiCompiler.Compile(
+            document,
+            CSharpCompilation.Create("recovered-bindings", references: References()),
+            new LuiFreshnessIdentity(
+                "recovered-bindings",
+                "recovered-bindings",
+                new LuiDocumentIdentity("RecoveredBindings.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            document.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1015"),
+            "the malformed style assignment did not retain its parser diagnostic."
+        );
+        Assert(
+            result.Diagnostics.Any(diagnostic =>
+                diagnostic.Id == "LUI2000"
+                && diagnostic.Message.Contains("MissingValue", StringComparison.Ordinal)
+            ),
+            "an unrelated unresolved expression was masked by the recovered syntax diagnostic: "
+                + String.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.Message
+                    )
+                )
+        );
+    }
+
+    [TestMethod]
+    public void ErrorTypedReactiveConditionReportsUnderlyingBindingFailure()
+    {
+        var source =
+            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; "
+            + "internal component Example() { <Row style={Broken} /> } "
+            + "style Broken { when (MissingFlag) { Width: 1f; } }";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("error-typed-condition", references: References()),
+            new LuiFreshnessIdentity(
+                "error-typed-condition",
+                "error-typed-condition",
+                new LuiDocumentIdentity("ErrorTypedCondition.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            !result.Success
+                && !result.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2021")
+                && result.Diagnostics.Any(diagnostic =>
+                    diagnostic.Id == "LUI2000"
+                    && diagnostic.Message.Contains("MissingFlag", StringComparison.Ordinal)
+                ),
+            "an error-typed condition was reported as non-bool instead of preserving its binding failure: "
+                + String.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.Message
+                    )
+                )
         );
     }
 
@@ -926,7 +1165,8 @@ style EditorPaneStyle { Opacity: .5f; }
         Assert(
             result.Success
                 && !result.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI5002")
-                && result.Source!.Contains("EditorPaneStyle.Padding(")
+                && result.Source!.Contains("__luiStyle_", StringComparison.Ordinal)
+                && result.Source.Contains(".Padding(", StringComparison.Ordinal)
                 && result.Source.Contains(".Participation(")
                 && LuiFormatter.Format(source, LuiLineEnding.Lf)
                     == LuiFormatter.Format(
@@ -970,6 +1210,65 @@ style EditorPaneStyle { Opacity: .5f; }
                         == shadowedSource.LastIndexOf("EditorPaneStyle", StringComparison.Ordinal)
                 ),
             "a same-named parameter incorrectly counted as use of a private style."
+        );
+    }
+
+    [TestMethod]
+    public void StyleNameRewriteRespectsExpressionLocalAndPatternShadowing()
+    {
+        const string source = """
+namespace Sample;
+using System;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component PatternShadow(object? value) {
+    Setup(owner) { Style Foo() => Style.Empty; _ = nameof(Foo); }
+    <Column>
+        <Text content={value is int Foo ? Foo.ToString() : nameof(Foo)} />
+        <Text content={nameof(Foo)} />
+        <Text content="ready" style={true ? Foo : ((Func<Style, Style>)(Foo => Foo.With(Style.Empty)))(Style.Empty)} />
+        <Text content="ready" style={true ? Foo : ((Func<object?, Style>)(candidate => candidate is int Foo ? Style.Empty : Style.Empty))(value)} />
+    </Column>
+}
+style Foo { Opacity: .5f; }
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("pattern-style-shadowing", references: References()),
+            new LuiFreshnessIdentity(
+                "pattern-style-shadowing",
+                "pattern-style-shadowing",
+                new LuiDocumentIdentity("PatternStyleShadowing.lui"),
+                "v1",
+                "preview"
+            )
+        );
+
+        var generatedSource = result.Source ?? "";
+        Assert(
+            result.Success
+                && generatedSource.Contains("Foo.ToString()", StringComparison.Ordinal)
+                && generatedSource.Contains("nameof(Foo)", StringComparison.Ordinal)
+                && generatedSource.Contains(
+                    "#line (9,24)-(9,35) \"PatternStyleShadowing.lui\"",
+                    StringComparison.Ordinal
+                )
+                && generatedSource.Contains("\"Foo\"", StringComparison.Ordinal)
+                && generatedSource.Contains("true ? __luiStyle_", StringComparison.Ordinal)
+                && generatedSource.Contains(
+                    "(Foo => Foo.With(Style.Empty))",
+                    StringComparison.Ordinal
+                )
+                && generatedSource.Contains("Style Foo() => Style.Empty", StringComparison.Ordinal),
+            "pattern-local or nameof references were rewritten as the generated style member:\n"
+                + String.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.Message
+                    )
+                )
+                + "\n"
+                + result.Source
         );
     }
 
@@ -1167,7 +1466,10 @@ style MatrixStyle { Spacing: 2f; when Hover { Opacity: .5f; } }
         Assert(
             matrix.Success
                 && matrix.Source!.Contains(
-                    "MatrixStyle = global::Lucent.Core.Style.Empty.Set(global::Lucent.Core.LayoutProperties.Spacing,"
+                    "private static readonly global::Lucent.Core.Style __luiStyle_"
+                )
+                && matrix.Source.Contains(
+                    "global::Lucent.Core.Style.Empty.Set(global::Lucent.Core.LayoutProperties.Spacing,"
                 )
                 && matrix.Source.Contains("ContentRecipe.Switch")
                 && matrix.Source.Contains("ContentRecipe.ForEach")
@@ -2174,7 +2476,10 @@ public sealed class Eligibility
                 )
                     .Tail
                     ?.Text == "style"
-                && styleTail.Source!.Contains("Style.Empty.With(Base).With(style)")
+                && styleTail.Source!.Contains(
+                    "Style.Empty.With(__luiStyle_",
+                    StringComparison.Ordinal
+                )
                 && LuiFormatter
                     .Format(styleTailSource)
                     .Contains("style={Base with style}", StringComparison.Ordinal),

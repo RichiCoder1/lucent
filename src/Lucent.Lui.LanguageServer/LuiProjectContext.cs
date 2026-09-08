@@ -25,13 +25,6 @@ internal sealed class LuiProjectContext : IDisposable
         "enumMember",
     ];
 
-    private static readonly string[] stylePropertyTypes =
-    [
-        "Lucent.Core.LayoutProperties",
-        "Lucent.Core.VisualProperties",
-        "Lucent.Core.TypographyProperties",
-        "Lucent.Core.InputProperties",
-    ];
     private static readonly Lazy<MefHostServices> editorHost = new(() =>
         MefHostServices.Create(
             MefHostServices
@@ -2769,8 +2762,8 @@ internal sealed class LuiProjectContext : IDisposable
             .SelectMany(method => method.Parameters);
 
     private static IEnumerable<ISymbol> StyleProperties(SemanticDocument semantic) =>
-        stylePropertyTypes
-            .Select(semantic.Model.Compilation.GetTypeByMetadataName)
+        LuiPropertyCatalog
+            .ImplicitStylePropertyTypeNames.Select(semantic.Model.Compilation.GetTypeByMetadataName)
             .Where(type => type is not null)
             .SelectMany(type => type!.GetMembers())
             .Concat(semantic.Model.LookupSymbols(semantic.Position))
@@ -2911,38 +2904,17 @@ internal sealed class LuiProjectContext : IDisposable
     {
         if (!Contains(expression.Span, offset))
             return false;
-        var invocation = expression
+        var styleNames = styles.Select(style => style.Name.Text).ToHashSet(StringComparer.Ordinal);
+        return expression
             .Expression.DescendantNodesAndSelf()
-            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
-            .FirstOrDefault();
-        if (invocation is not null)
-        {
-            var target = invocation.Expression;
-            var name = target switch
-            {
-                Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax identifier => identifier
-                    .Identifier
-                    .ValueText,
-                Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax member => member
-                    .Name
-                    .Identifier
-                    .ValueText,
-                _ => "",
-            };
-            return styles.Any(style =>
-                style.Name.Text == name
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax>()
+            .Any(identifier =>
+                styleNames.Contains(identifier.Identifier.ValueText)
                 && Contains(
-                    new LuiSpan(expression.Span.Start + target.SpanStart, target.Span.Length),
-                    offset
-                )
-            );
-        }
-        return expression.Expression
-                is Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax bare
-            && styles.Any(style =>
-                style.Name.Text == bare.Identifier.ValueText
-                && Contains(
-                    new LuiSpan(expression.Span.Start + bare.SpanStart, bare.Span.Length),
+                    new LuiSpan(
+                        expression.Span.Start + identifier.SpanStart,
+                        identifier.Span.Length
+                    ),
                     offset
                 )
             );

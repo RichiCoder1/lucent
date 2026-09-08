@@ -146,6 +146,116 @@ public component Trial() {
     }
 
     [TestMethod]
+    public void MutableDerivedCollectionsReportTheirNonReactiveSemantics()
+    {
+        const string source = """
+namespace MutableDerived;
+using System.Collections.Generic;
+using Lucent.Core;
+public component Trial() {
+    List<int> items = [];
+    <Text>ready</Text>
+}
+""";
+        var (result, _) = Compile(source, "");
+        Assert.IsTrue(
+            result.Success
+                && result.Diagnostics.Any(diagnostic =>
+                    diagnostic.Id == "LUI2017"
+                    && source
+                        .Substring(diagnostic.Span.Start, diagnostic.Span.Length)
+                        .Contains("[]", StringComparison.Ordinal)
+                ),
+            Describe(result)
+        );
+        var snapshot = Compile(
+            source.Replace("List<int> items", "readonly List<int> items"),
+            ""
+        ).Result;
+        Assert.IsTrue(snapshot.Success, Describe(snapshot));
+    }
+
+    [TestMethod]
+    public void StyleFactoryArgumentsCannotSilentlyCaptureChangingState()
+    {
+        const string source = """
+namespace StyleSnapshot;
+using Lucent.Core;
+public component Trial() {
+    bool selected = false;
+    <Text style={RowStyle(selected)}>ready</Text>
+}
+style RowStyle(bool active) {
+    when (active) { Opacity: .5f; }
+}
+""";
+        var (result, _) = Compile(source, "");
+        Assert.IsTrue(
+            !result.Success
+                && result.Diagnostics.Any(diagnostic =>
+                    diagnostic.Id == "LUI2016"
+                    && source
+                        .Substring(diagnostic.Span.Start, diagnostic.Span.Length)
+                        .Contains("selected", StringComparison.Ordinal)
+                ),
+            Describe(result)
+        );
+
+        const string capabilitySource = """
+namespace StyleCapability;
+using Lucent.Core;
+public component Trial() {
+    [Once] Capability capability = null!;
+    Setup(owner) { capability = new Capability(); }
+    <Text style={RowStyle(capability)}>ready</Text>
+}
+style RowStyle(Capability capability) {
+    when (capability.Active) { Opacity: .5f; }
+}
+""";
+        const string capabilityApi = """
+namespace StyleCapability;
+public sealed class Capability { public bool Active => true; }
+""";
+        var (capabilityResult, _) = Compile(capabilitySource, capabilityApi);
+        Assert.IsTrue(
+            capabilityResult.Success,
+            "A live capability object should remain valid as a style factory argument:\n"
+                + Describe(capabilityResult)
+        );
+    }
+
+    [TestMethod]
+    public void MemberAndSetupSourceSpansRemainVisibleToDebuggingAndDiagnostics()
+    {
+        const string source = """
+namespace DebugSpans;
+using Lucent.Core;
+public component Trial() {
+    int count = 0;
+    void Toggle() { count += 1; }
+    Setup(owner) { }
+    <Button onInvoke={Toggle}>ready</Button>
+}
+""";
+        var (result, _) = Compile(source, "");
+        Assert.IsTrue(result.Success, Describe(result));
+        var methodStart = source.IndexOf("void Toggle", StringComparison.Ordinal);
+        var setupStart = source.IndexOf("Setup(owner)", StringComparison.Ordinal);
+        Assert.IsTrue(
+            result
+                .Map.FromSource(new LuiSpan(methodStart, "void Toggle".Length))
+                .Any(entry => !entry.Hidden)
+                && result
+                    .Map.FromSource(new LuiSpan(setupStart, "Setup(owner)".Length))
+                    .Any(entry => !entry.Hidden)
+                && result.Source!.Contains("#line (", StringComparison.Ordinal)
+                && result.Source.Contains("Trial.lui", StringComparison.Ordinal),
+            "member or Setup source maps/debug directives were hidden:\n" + result.Source
+        );
+    }
+
+    [TestMethod]
     public void SetupLocalsDoNotEscapeToMarkup()
     {
         var source = Source

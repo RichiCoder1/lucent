@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using Lucent.Lui.Compiler;
 
@@ -8,6 +6,7 @@ namespace Lucent.Lui.LanguageServer;
 internal static class Program
 {
     private static readonly object outputGate = new();
+    private static readonly Stream protocolOutput = Console.OpenStandardOutput();
     private static readonly string[] signatureTriggers = ["(", ",", " "];
     private static readonly string[] completionTriggers = ["<", " ", ".", ":", "{"];
 
@@ -839,41 +838,8 @@ internal static class Program
         return (line, character);
     }
 
-    private static async Task<JsonDocument?> ReadMessageAsync()
-    {
-        var input = Console.OpenStandardInput();
-        var header = new StringBuilder();
-        while (true)
-        {
-            var value = input.ReadByte();
-            if (value < 0)
-                return null;
-            header.Append((char)value);
-            if (header.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal))
-                break;
-        }
-        var length = header
-            .ToString()
-            .Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.Split(':', 2))
-            .Where(parts =>
-                parts.Length == 2
-                && parts[0].Equals("Content-Length", StringComparison.OrdinalIgnoreCase)
-            )
-            .Select(parts => Int32.Parse(parts[1], CultureInfo.InvariantCulture))
-            .SingleOrDefault();
-        if (length <= 0)
-            throw new InvalidOperationException("LSP message has no Content-Length.");
-        var body = new byte[length];
-        for (var read = 0; read < body.Length; )
-        {
-            var count = await input.ReadAsync(body.AsMemory(read)).ConfigureAwait(false);
-            if (count == 0)
-                throw new EndOfStreamException("LSP message ended before its content.");
-            read += count;
-        }
-        return JsonDocument.Parse(body);
-    }
+    private static Task<JsonDocument?> ReadMessageAsync() =>
+        LspProtocol.ReadMessageAsync(Console.OpenStandardInput());
 
     private static void WriteResponse(string id, object? result) =>
         Write(
@@ -904,17 +870,8 @@ internal static class Program
 
     private static void Write(string message)
     {
-        var bytes = Encoding.UTF8.GetBytes(message);
         lock (outputGate)
-        {
-            Console.Out.Write(
-                "Content-Length: "
-                    + bytes.Length.ToString(CultureInfo.InvariantCulture)
-                    + "\r\n\r\n"
-            );
-            Console.Out.Write(message);
-            Console.Out.Flush();
-        }
+            LspProtocol.WriteMessage(protocolOutput, message);
     }
 
     private sealed class HandlerResult(

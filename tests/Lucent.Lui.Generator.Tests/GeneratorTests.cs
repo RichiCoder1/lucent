@@ -2045,6 +2045,87 @@ public static class Harness {
         );
     }
 
+    [TestMethod]
+    public void SameNamedStylesRemainDocumentLocalAcrossGeneratedDocuments()
+    {
+        const string first = """
+namespace StyleCollision;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component First(float width) { <Row style={Card(width)} /> }
+style Card(float width) { Width: width; }
+""";
+        const string second = """
+namespace StyleCollision;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Second(float height) { <Row style={Card(height)} /> }
+style Card(float height) { Height: height; }
+""";
+        var result = RunWithSource(
+            "",
+            new TextFile("C:/consumer/First.lui", first, "First.lui"),
+            new TextFile("C:/consumer/Second.lui", second, "Second.lui")
+        );
+        Assert(
+            result.Diagnostics.All(diagnostic => diagnostic.Severity < DiagnosticSeverity.Error)
+                && result.Results.Single().GeneratedSources.Length == 2,
+            "same-named styles produced a generator diagnostic: "
+                + String.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        var generated = result.Results.Single().GeneratedSources.ToArray();
+        var compilation = CSharpCompilation.Create(
+            "style-collision",
+            generated.Select(source =>
+                CSharpSyntaxTree.ParseText(
+                    source.SourceText,
+                    new CSharpParseOptions(LanguageVersion.Preview)
+                )
+            ),
+            References(),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+        );
+        using var output = new MemoryStream();
+        var emitted = compilation.Emit(output);
+        Assert(
+            emitted.Success,
+            "same-named document-local styles did not compile together: "
+                + String.Join(
+                    " | ",
+                    emitted.Diagnostics.Select(diagnostic =>
+                        diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                    )
+                )
+        );
+        Assert(
+            generated.Any(source =>
+                source.SourceText.ToString().Contains("__luiStyle_", StringComparison.Ordinal)
+            )
+                && generated.Count(source =>
+                    source
+                        .SourceText.ToString()
+                        .Contains(
+                            "global::Lucent.Core.LayoutProperties.Width",
+                            StringComparison.Ordinal
+                        )
+                ) == 1
+                && generated.Count(source =>
+                    source
+                        .SourceText.ToString()
+                        .Contains(
+                            "global::Lucent.Core.LayoutProperties.Height",
+                            StringComparison.Ordinal
+                        )
+                ) == 1,
+            "document-local style references did not retain their own generated style members."
+        );
+    }
+
     static GeneratorDriverRunResult RunWithSource(string source, params AdditionalText[] texts)
     {
         var compilation = CSharpCompilation.Create(

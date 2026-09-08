@@ -96,7 +96,16 @@ public static class LuiFormatter
         else if (selected is LuiStyleSyntax style)
             Style(output, style, 0, newline);
         else
-            Body(output, new[] { (LuiBodySyntax)selected }, 0, newline);
+        {
+            var indent = SourceIndent(source, selected.Span.Start);
+            Body(output, new[] { (LuiBodySyntax)selected }, indent, newline);
+            var prefixLength = Math.Min(indent * 4, output.Length);
+            if (
+                prefixLength != 0
+                && output.ToString(0, prefixLength).All(character => character == ' ')
+            )
+                output.Remove(0, prefixLength);
+        }
         if (
             output.Length >= newline.Length
             && output.ToString(output.Length - newline.Length, newline.Length) == newline
@@ -251,6 +260,12 @@ public static class LuiFormatter
     {
         foreach (var member in members)
         {
+            if (member is LuiStyleCommentSyntax comment)
+            {
+                Pad(output, indent);
+                output.Append(comment.Text).Append(nl);
+                continue;
+            }
             if (member is LuiStyleAssignmentSyntax assignment)
             {
                 Assignment(output, assignment, indent, nl);
@@ -324,6 +339,11 @@ public static class LuiFormatter
                     .Append(';');
                 continue;
             }
+            if (members[index] is LuiStyleCommentSyntax comment)
+            {
+                output.Append(comment.Text);
+                continue;
+            }
             var group = (LuiVariantGroupSyntax)members[index];
             output.Append("when ");
             if (group.ConditionExpression is not null)
@@ -339,6 +359,23 @@ public static class LuiFormatter
     private static void Pad(StringBuilder output, int count)
     {
         output.Append(' ', count * 4);
+    }
+
+    private static int SourceIndent(string source, int offset)
+    {
+        var lineStart = source.LastIndexOf('\n', Math.Max(0, offset - 1));
+        lineStart = lineStart < 0 ? 0 : lineStart + 1;
+        var count = 0;
+        for (var index = lineStart; index < offset; index++)
+        {
+            if (source[index] == ' ')
+                count++;
+            else if (source[index] == '\t')
+                count += 4;
+            else
+                return 0;
+        }
+        return count / 4;
     }
 
     private static IEnumerable<LuiSyntaxNode> Nodes(LuiDocumentSyntax document)

@@ -357,6 +357,18 @@ public static class LuiParser
                 if (Current == end || End || TopLevelStart())
                     break;
                 var start = position;
+                if (Starts("//") || Starts("/*"))
+                {
+                    var commentStart = position;
+                    var commentLength = SourceCommentEnd();
+                    result.Add(
+                        new LuiStyleCommentSyntax(
+                            new LuiSpan(commentStart, commentLength),
+                            text.Substring(commentStart, commentLength)
+                        )
+                    );
+                    continue;
+                }
                 if (Word("when"))
                 {
                     var when = Token("when", start, 4);
@@ -481,6 +493,11 @@ public static class LuiParser
                     || (end == '\0' && Starts("</"))
                 )
                     break;
+                if (Starts("//") || Starts("/*"))
+                {
+                    result.Add(SourceComment());
+                    continue;
+                }
                 if (
                     !memberPrefix
                     && !(
@@ -532,8 +549,7 @@ public static class LuiParser
                         && Current != '<'
                         && Current != '{'
                         && !Starts("{/*")
-                        && !PeekRegion("if")
-                        && !PeekRegion("foreach")
+                        && !IsSourceCommentStart()
                         && !(stopTopLevel && TopLevelStart())
                         && !(end == '\0' && Starts("</"))
                     )
@@ -757,6 +773,39 @@ public static class LuiParser
             );
         }
 
+        private LuiCommentSyntax SourceComment()
+        {
+            var start = position;
+            SourceCommentEnd();
+            return new LuiCommentSyntax(
+                LuiSpan.From(start, position),
+                text.Substring(start, position - start)
+            );
+        }
+
+        private int SourceCommentEnd()
+        {
+            var start = position;
+            if (Starts("//"))
+            {
+                position += 2;
+                while (!End && Current != '\r' && Current != '\n')
+                    position++;
+                return position - start;
+            }
+
+            position += 2;
+            var close = text.IndexOf("*/", position, StringComparison.Ordinal);
+            if (close < 0)
+            {
+                Error("LUI1006", "Unterminated comment.", new LuiSpan(start, text.Length - start));
+                position = text.Length;
+            }
+            else
+                position = close + 2;
+            return position - start;
+        }
+
         private LuiTopLevelCommentSyntax TopLevelComment()
         {
             var start = position;
@@ -812,6 +861,31 @@ public static class LuiParser
             if (Word("else"))
             {
                 elseKeyword = Token("else", position - 4, 4);
+                White();
+                if (PeekRegion("if"))
+                {
+                    var nestedStart = position;
+                    Error(
+                        "LUI1022",
+                        "'else if' chains are not supported; wrap the next if in an else block.",
+                        new LuiSpan(nestedStart, 2)
+                    );
+                    elseBody.Add(If());
+                    return new LuiIfSyntax(
+                        LuiSpan.From(start, position),
+                        ifKeyword,
+                        openCondition,
+                        condition,
+                        closeCondition,
+                        open,
+                        thenBody,
+                        close,
+                        elseKeyword,
+                        elseOpen,
+                        elseBody,
+                        elseClose
+                    );
+                }
                 elseOpen = Expect('{');
                 if (!elseOpen.IsMissing && EnterNesting())
                 {
@@ -1401,10 +1475,20 @@ public static class LuiParser
                     return true;
                 case ParenthesizedExpressionSyntax value:
                     return Allowed(value.Expression);
+                case ConditionalAccessExpressionSyntax value:
+                    return Allowed(value.Expression) && Allowed(value.WhenNotNull);
                 case MemberAccessExpressionSyntax value:
                     return Allowed(value.Expression);
                 case MemberBindingExpressionSyntax _:
                     return true;
+                case ElementBindingExpressionSyntax value:
+                    return value.ArgumentList.Arguments.All(argument =>
+                        Allowed(argument.Expression)
+                    );
+                case AliasQualifiedNameSyntax value:
+                    return Allowed(value.Alias) && Allowed(value.Name);
+                case QualifiedNameSyntax value:
+                    return Allowed(value.Left) && Allowed(value.Right);
                 case ElementAccessExpressionSyntax value:
                     return Allowed(value.Expression)
                         && value.ArgumentList.Arguments.All(argument =>
@@ -1456,8 +1540,14 @@ public static class LuiParser
                     return AllowedInitializer(value.Initializer);
                 case CollectionExpressionSyntax value:
                     return value.Elements.All(element =>
-                        element is ExpressionElementSyntax expressionElement
-                        && Allowed(expressionElement.Expression)
+                        element switch
+                        {
+                            ExpressionElementSyntax expressionElement => Allowed(
+                                expressionElement.Expression
+                            ),
+                            SpreadElementSyntax spread => Allowed(spread.Expression),
+                            _ => false,
+                        }
                     );
                 case SimpleLambdaExpressionSyntax value:
                     return value.Body is ExpressionSyntax simpleBody && Allowed(simpleBody);
@@ -1607,6 +1697,10 @@ public static class LuiParser
             return position + value.Length <= text.Length
                 && string.CompareOrdinal(text, position, value, 0, value.Length) == 0;
         }
+
+        private bool IsSourceCommentStart() =>
+            (Starts("//") || Starts("/*"))
+            && (position == 0 || char.IsWhiteSpace(text[position - 1]));
 
         private bool PeekWord(string word)
         {
@@ -1827,9 +1921,17 @@ public static class LuiParser
 
         private bool TopLevelStart() =>
             PeekWord("style")
-            || PeekWord("public")
-            || PeekWord("internal")
-            || PeekWord("component");
+            || PeekWord("component")
+            || PeekWords("public", "component")
+            || PeekWords("internal", "component");
+
+        private bool PeekWords(string first, string second)
+        {
+            var save = position;
+            var result = Word(first) && PeekWord(second);
+            position = save;
+            return result;
+        }
     }
 
     private static class IslandScanner

@@ -612,9 +612,12 @@ public sealed class LuiStyleWithSyntax : LuiValueSyntax
         Members = members;
         Assignments = members
             .SelectMany(member =>
-                member is LuiStyleAssignmentSyntax assignment
-                    ? new[] { assignment }
-                    : ((LuiVariantGroupSyntax)member).Assignments
+                member switch
+                {
+                    LuiStyleAssignmentSyntax assignment => [assignment],
+                    LuiVariantGroupSyntax group => group.Assignments,
+                    _ => [],
+                }
             )
             .ToArray();
         CloseBrace = closeBrace;
@@ -802,6 +805,20 @@ public abstract class LuiStyleMemberSyntax : LuiSyntaxNode
         : base(span) { }
 }
 
+/// <summary>Source comment retained between style members.</summary>
+public sealed class LuiStyleCommentSyntax : LuiStyleMemberSyntax
+{
+    /// <summary>Creates a style comment from its exact authored range.</summary>
+    public LuiStyleCommentSyntax(LuiSpan span, string text)
+        : base(span)
+    {
+        Text = text;
+    }
+
+    /// <summary>Exact line or block comment text.</summary>
+    public string Text { get; }
+}
+
 /// <summary>Named top-level style declaration.</summary>
 public sealed class LuiStyleSyntax : LuiSyntaxNode
 {
@@ -828,9 +845,12 @@ public sealed class LuiStyleSyntax : LuiSyntaxNode
         Members = members;
         Assignments = members
             .SelectMany(member =>
-                member is LuiStyleAssignmentSyntax assignment
-                    ? new[] { assignment }
-                    : ((LuiVariantGroupSyntax)member).Assignments
+                member switch
+                {
+                    LuiStyleAssignmentSyntax assignment => [assignment],
+                    LuiVariantGroupSyntax group => group.Assignments,
+                    _ => [],
+                }
             )
             .ToArray();
         CloseBrace = closeBrace;

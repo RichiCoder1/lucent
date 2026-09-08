@@ -31,6 +31,101 @@ public sealed class LanguageServerTests
     }
 
     [TestMethod]
+    public async Task ProtocolFramingUsesUtf8BytesForSequentialMessages()
+    {
+        var originalOutputEncoding = Console.OutputEncoding;
+        try
+        {
+            Console.OutputEncoding = Encoding.Latin1;
+            const string first =
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"hover\":\"café 日本語\"}}";
+            const string second =
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"diagnostic\":\"naïve\"}}";
+            using var wire = new MemoryStream();
+            LspProtocol.WriteMessage(wire, first);
+            LspProtocol.WriteMessage(wire, second);
+
+            var bytes = wire.ToArray();
+            var firstBody = Encoding.UTF8.GetBytes(first);
+            var firstHeader = Encoding.ASCII.GetBytes(
+                $"Content-Length: {firstBody.Length}\r\n\r\n"
+            );
+            Assert(
+                bytes.AsSpan(0, firstHeader.Length).SequenceEqual(firstHeader)
+                    && bytes.AsSpan(firstHeader.Length, firstBody.Length).SequenceEqual(firstBody),
+                "the first UTF-8 payload was not written byte-for-byte with its UTF-8 length."
+            );
+
+            wire.Position = 0;
+            using var firstMessage = await LspProtocol.ReadMessageAsync(wire);
+            using var secondMessage = await LspProtocol.ReadMessageAsync(wire);
+            Assert(
+                firstMessage?.RootElement.GetProperty("result").GetProperty("hover").GetString()
+                    == "café 日本語"
+                    && secondMessage
+                        ?.RootElement.GetProperty("result")
+                        .GetProperty("diagnostic")
+                        .GetString() == "naïve"
+                    && wire.Position == wire.Length,
+                "sequential non-ASCII protocol messages did not round-trip without framing residue."
+            );
+        }
+        finally
+        {
+            Console.OutputEncoding = originalOutputEncoding;
+        }
+    }
+
+    [TestMethod]
+    public async Task ProtocolFramingRejectsAmbiguousOversizedAndTruncatedMessages()
+    {
+        async Task ReadAndDisposeAsync(Stream stream, CancellationToken cancellationToken = default)
+        {
+            using var message = await LspProtocol.ReadMessageAsync(stream, cancellationToken);
+        }
+
+        await ExpectExceptionAsync<InvalidOperationException>(() =>
+            ReadAndDisposeAsync(
+                new MemoryStream(
+                    Encoding.ASCII.GetBytes(new string('x', LspProtocol.MaxHeaderBytes))
+                )
+            )
+        );
+        await ExpectExceptionAsync<InvalidOperationException>(() =>
+            ReadAndDisposeAsync(
+                new MemoryStream(
+                    Encoding.ASCII.GetBytes("Content-Length: 2\r\nContent-Length: 2\r\n\r\n{}")
+                )
+            )
+        );
+        await ExpectExceptionAsync<InvalidOperationException>(() =>
+            ReadAndDisposeAsync(
+                new MemoryStream(Encoding.ASCII.GetBytes("Content-Length: invalid\r\n\r\n"))
+            )
+        );
+        await ExpectExceptionAsync<InvalidOperationException>(() =>
+            ReadAndDisposeAsync(
+                new MemoryStream(
+                    Encoding.ASCII.GetBytes(
+                        $"Content-Length: {LspProtocol.MaxBodyBytes + 1}\r\n\r\n"
+                    )
+                )
+            )
+        );
+        await ExpectExceptionAsync<EndOfStreamException>(() =>
+            ReadAndDisposeAsync(new MemoryStream(Encoding.ASCII.GetBytes("Content-Length: 2\r\n")))
+        );
+        await ExpectExceptionAsync<EndOfStreamException>(() =>
+            ReadAndDisposeAsync(
+                new MemoryStream(Encoding.ASCII.GetBytes("Content-Length: 2\r\n\r\na"))
+            )
+        );
+        await ExpectExceptionAsync<OperationCanceledException>(() =>
+            ReadAndDisposeAsync(new MemoryStream(), new CancellationToken(canceled: true))
+        );
+    }
+
+    [TestMethod]
     public async Task StatefulDeclarationsExposeAuthoredEditorInformation()
     {
         var root = Path.Combine(
@@ -2435,6 +2530,82 @@ style Workspace(float width) {
     }
 
     [TestMethod]
+    public async Task ScrollBarPropertiesShareCompilerCompletionHoverAndDefinition()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-scrollbar-property-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            var projectPath = Path.Combine(root, "ScrollBarProperties.csproj");
+            var uri = new Uri(Path.Combine(root, "ScrollBarProperties.lui"));
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                    + core
+                    + "\" /><AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            var source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Example() { <Text style={ScrollStyle}>Scrollbar theme</Text> }
+style ScrollStyle {
+    Visibility: ScrollBarVisibility.Auto;
+    ThumbBrush: Brush.Solid(Color.Parse("#123456"));
+}
+""";
+            await File.WriteAllTextAsync(uri.LocalPath, source);
+            using var context = await LuiProjectContext.LoadAsync(
+                projectPath,
+                CancellationToken.None
+            );
+            var compiled = await context.CompileAsync(uri, CancellationToken.None);
+            var visibility = source.IndexOf("Visibility", StringComparison.Ordinal);
+            var completions = await context.CompletionsAsync(
+                uri,
+                visibility,
+                CancellationToken.None
+            );
+            var hover = await context.HoverAsync(uri, visibility, CancellationToken.None);
+            var definition = await context.DefinitionAsync(uri, visibility, CancellationToken.None);
+            var hoverValue = hover?.Value;
+            var definitionPath = definition?.Uri.LocalPath;
+            Assert(
+                compiled is not null
+                    && completions.Any(item =>
+                        item.Label == "Visibility"
+                        && item.Kind == 5
+                        && item.Detail.Contains("Property", StringComparison.Ordinal)
+                    )
+                    && completions.Any(item => item.Label == "ThumbBrush" && item.Kind == 5)
+                    && hoverValue?.Contains("ScrollBarVisibility", StringComparison.Ordinal) == true
+                    && definitionPath is not null
+                    && definitionPath.EndsWith(
+                        Path.Combine("src", "Lucent.Core", "ScrollBar.cs"),
+                        StringComparison.OrdinalIgnoreCase
+                    ),
+                "ScrollBarProperties were not resolved consistently by compilation and editor tooling: "
+                    + String.Join(
+                        ", ",
+                        completions.Select(item => item.Label + "/" + item.Kind + "/" + item.Detail)
+                    )
+                    + " hover="
+                    + (hover?.Value ?? "null")
+                    + " definition="
+                    + (definition?.Uri.ToString() ?? "null")
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task RealIssueBrowserProjectSupportsFormattingNavigationAndCompletion()
     {
         var projectPath = Path.GetFullPath("apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj");
@@ -4344,6 +4515,22 @@ style Workspace(float width) {
             throw new InvalidOperationException("disposed project accepted work.");
         }
         catch (ObjectDisposedException) { }
+    }
+
+    static async Task ExpectExceptionAsync<TException>(Func<Task> action)
+        where TException : Exception
+    {
+        try
+        {
+            await action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+        throw new InvalidOperationException(
+            "Expected " + typeof(TException).Name + " from the protocol operation."
+        );
     }
 
     static void Assert(bool condition, string message)
