@@ -1,25 +1,6 @@
 namespace Lucent.IssueBrowser;
-style IssueRowStyle {
-    Background: RowSurface;
-    TextColor: PageForeground;
-    when Hover {
-        Background: RowHoverSurface;
-        TextColor: PageForeground;
-    }
-    when Pressed {
-        Background: RowPressedSurface;
-        TextColor: PageForeground;
-    }
-    when Hover | Pressed {
-        Background: RowPressedSurface;
-        TextColor: PageForeground;
-    }
-    when FocusVisible {
-        Background: FocusSurface;
-        TextColor: FocusForeground;
-    }
-}
-
 public component IssueRow(IssueBrowserState browser, Func<BrowserIssue> issue) {
-    <Selectable content={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => browser.Select(issue().Number)} style={IssueRowStyle with { Spacing: browser.Density == IssueDensity.Comfortable ? 8f : 4f; FontSize: browser.Density == IssueDensity.Comfortable ? 14f : 12f; Height: browser.Density == IssueDensity.Comfortable ? 30f : 22f; }} />
+    <ContextMenu menu={() => IssueRowMenu(browser, issue)} name="issue-browser.issue-row-menu">
+        <Selectable content={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => browser.Select(issue().Number)} style={Style.Empty with { Spacing: browser.Density == IssueDensity.Comfortable ? 8f : 4f; FontSize: browser.Density == IssueDensity.Comfortable ? 14f : 12f; Height: browser.Density == IssueDensity.Comfortable ? 30f : 22f; }} />
+    </ContextMenu>
 }

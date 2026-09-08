@@ -1,9 +1,12 @@
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows.Automation;
 using Axe.Windows.Automation;
 using Axe.Windows.Automation.Data;
-using FlaUI.Core.Definitions;
+using FlaUI.Core.Input;
+using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
 
 namespace Lucent.Desktop.Tests;
@@ -133,7 +136,271 @@ public sealed class PublishedIssueBrowserTests
         }
     }
 
-    private static Process StartApplication()
+    [TestMethod]
+    [DataRow("keyboard")]
+    [DataRow("pointer")]
+    [DataRow("accessibility")]
+    public void FlaUiNativeMenuTargetsUnselectedIssueAndPreservesSelection(string invocation)
+    {
+        using var process = StartApplication("--native-menus");
+        nint owner = 0;
+        try
+        {
+            owner = WaitForWindow(process);
+            using var automation = new UIA3Automation();
+            var root = automation.FromHandle(owner);
+            var list =
+                root.FindFirstDescendant(condition =>
+                    condition
+                        .ByControlType(FlaUI.Core.Definitions.ControlType.List)
+                        .And(condition.ByName("Issues"))
+                ) ?? throw new InvalidOperationException("FlaUI could not find the Issues list.");
+
+            WaitUntil(
+                process,
+                () =>
+                    FindIssueRow(list, 10_000) is not null && FindIssueRow(list, 9_998) is not null,
+                "The native-menu fixture did not expose the target issue rows."
+            );
+
+            var selectedRow =
+                FindIssueRow(list, 10_000)
+                ?? throw new InvalidOperationException("Issue 10000 was not exposed.");
+            selectedRow.Patterns.SelectionItem.Pattern.Select();
+            WaitUntil(
+                process,
+                () =>
+                    FindIssueRow(list, 10_000)?.Patterns.SelectionItem.Pattern.IsSelected.Value
+                    == true,
+                "Issue 10000 did not become selected."
+            );
+
+            var targetRow =
+                FindIssueRow(list, 9_998)
+                ?? throw new InvalidOperationException("Issue 9998 was not exposed.");
+            Assert.IsTrue(
+                targetRow.Name.Contains("— open ·", StringComparison.Ordinal),
+                "The fixture target did not begin in the expected open state."
+            );
+            var targetPoint = Center(targetRow.BoundingRectangle);
+            root.SetForeground();
+            if (GetForegroundWindow() != owner)
+            {
+                // Windows may deny programmatic foreground activation. Raise only our
+                // window, then activate its verified title bar through ordinary input.
+                Assert.IsTrue(
+                    SetWindowPos(owner, 0, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate)
+                );
+                var titleBar =
+                    root.FindFirstChild(condition =>
+                        condition.ByControlType(FlaUI.Core.Definitions.ControlType.TitleBar)
+                    )
+                    ?? throw new InvalidOperationException(
+                        "The test window title bar was not exposed."
+                    );
+                var titleBounds = titleBar.BoundingRectangle;
+                var titlePoint = new Point(
+                    titleBounds.Left + Math.Min(100, titleBounds.Width / 2),
+                    titleBounds.Top + titleBounds.Height / 2
+                );
+                Assert.AreEqual(
+                    owner,
+                    WindowFromPoint(titlePoint),
+                    "The test title bar is occluded."
+                );
+                Mouse.LeftClick(titlePoint);
+            }
+            WaitUntil(
+                process,
+                () => GetForegroundWindow() == owner,
+                "Test owner did not gain foreground focus."
+            );
+            Mouse.RightClick(targetPoint);
+
+            nint popup = 0;
+            FlaUI.Core.AutomationElements.AutomationElement? menu = null;
+            WaitUntil(
+                process,
+                () => (menu = FindNativeMenu(automation, process, owner, out popup)) is not null,
+                "The native #32768 menu did not become discoverable through UI Automation."
+            );
+            Assert.AreEqual("#32768", WindowClass(popup));
+            Assert.AreEqual(FlaUI.Core.Definitions.ControlType.Menu, menu!.ControlType);
+
+            var open =
+                menu.FindFirstDescendant(condition =>
+                    condition
+                        .ByControlType(FlaUI.Core.Definitions.ControlType.MenuItem)
+                        .And(condition.ByName("Open issue"))
+                ) ?? throw new InvalidOperationException("Native menu omitted Open issue.");
+            var toggle =
+                menu.FindFirstDescendant(condition =>
+                    condition
+                        .ByControlType(FlaUI.Core.Definitions.ControlType.MenuItem)
+                        .And(condition.ByName("Toggle status"))
+                ) ?? throw new InvalidOperationException("Native menu omitted Toggle status.");
+            Assert.AreEqual("Open issue", open.Name);
+            Assert.AreEqual("Toggle status", toggle.Name);
+
+            Assert.AreEqual(
+                owner,
+                GetForegroundWindow(),
+                "Native menu lost foreground focus before invocation."
+            );
+            if (invocation == "pointer")
+                Mouse.LeftClick(Center(toggle.BoundingRectangle));
+            else if (invocation == "accessibility")
+                toggle.Patterns.Invoke.Pattern.Invoke();
+            else
+            {
+                // Native menu navigation belongs to Windows; do not assume Lucent's
+                // Home/End policy applies to an initially unselected system menu.
+                Keyboard.Type(VirtualKeyShort.DOWN, VirtualKeyShort.DOWN);
+                Wait.UntilInputIsProcessed();
+                Keyboard.Press(VirtualKeyShort.RETURN);
+                Keyboard.Release(VirtualKeyShort.RETURN);
+            }
+            Wait.UntilInputIsProcessed();
+            WaitUntil(
+                process,
+                () => !IsWindow(popup),
+                "Invoking the native Toggle status item did not dismiss the menu."
+            );
+            WaitUntil(
+                process,
+                () =>
+                    FindIssueRow(list, 9_998)?.Name.Contains("— closed ·", StringComparison.Ordinal)
+                    == true,
+                "Native Toggle status did not update the nonselected issue."
+            );
+            WaitUntil(
+                process,
+                () =>
+                    FindIssueRow(list, 10_000)?.Patterns.SelectionItem.Pattern.IsSelected.Value
+                    == true,
+                "Invoking the native menu changed the selected issue."
+            );
+            Assert.IsFalse(
+                FindIssueRow(list, 9_998)?.Patterns.SelectionItem.Pattern.IsSelected.Value == true,
+                "The right-clicked issue became selected while its native menu was invoked."
+            );
+
+            Mouse.RightClick(targetPoint);
+            nint escapePopup = 0;
+            WaitUntil(
+                process,
+                () => FindNativeMenu(automation, process, owner, out escapePopup) is not null,
+                "The native menu did not reopen for dismissal validation."
+            );
+            Keyboard.Press(VirtualKeyShort.ESCAPE);
+            Keyboard.Release(VirtualKeyShort.ESCAPE);
+            WaitUntil(
+                process,
+                () => !IsWindow(escapePopup),
+                "Escape did not dismiss the native menu."
+            );
+
+            if (invocation == "pointer")
+            {
+                var edge = targetRow.BoundingRectangle;
+                Mouse.RightClick(new Point(edge.Right - 8, edge.Top + edge.Height / 2));
+                nint edgePopup = 0;
+                FlaUI.Core.AutomationElements.AutomationElement? edgeMenu = null;
+                WaitUntil(
+                    process,
+                    () =>
+                        (edgeMenu = FindNativeMenu(automation, process, owner, out edgePopup))
+                            is not null,
+                    "The edge menu did not open."
+                );
+                Assert.IsTrue(
+                    edgeMenu!.BoundingRectangle.Right > root.BoundingRectangle.Right,
+                    "The native popup was clipped to its owner."
+                );
+                Assert.IsTrue(
+                    process.CloseMainWindow(),
+                    "The test owner rejected its close request."
+                );
+                WaitUntil(
+                    process,
+                    () => process.HasExited,
+                    "Closing an owner with a native menu open did not exit."
+                );
+                Assert.AreEqual(0, process.ExitCode);
+                Assert.IsFalse(IsWindow(edgePopup), "The native popup survived its owner.");
+            }
+        }
+        finally
+        {
+            StopApplication(process);
+        }
+    }
+
+    private static FlaUI.Core.AutomationElements.AutomationElement? FindIssueRow(
+        FlaUI.Core.AutomationElements.AutomationElement list,
+        int number
+    )
+    {
+        var prefix = "#" + number + " ";
+        return list.FindAllChildren()
+            .FirstOrDefault(row => row.Name.StartsWith(prefix, StringComparison.Ordinal));
+    }
+
+    private static FlaUI.Core.AutomationElements.AutomationElement? FindNativeMenu(
+        UIA3Automation automation,
+        Process process,
+        nint owner,
+        out nint handle
+    )
+    {
+        handle = 0;
+        foreach (var candidate in ProcessTopLevelWindows(process.Id))
+        {
+            if (candidate == owner || !IsWindowVisible(candidate))
+                continue;
+            if (!string.Equals(WindowClass(candidate), "#32768", StringComparison.Ordinal))
+                continue;
+            var nativeWindow = automation.FromHandle(candidate);
+            var menu =
+                nativeWindow.ControlType == FlaUI.Core.Definitions.ControlType.Menu
+                    ? nativeWindow
+                    : nativeWindow.FindFirstDescendant(condition =>
+                        condition.ByControlType(FlaUI.Core.Definitions.ControlType.Menu)
+                    );
+            if (menu is null)
+                continue;
+            handle = candidate;
+            return menu;
+        }
+        return null;
+    }
+
+    private static IEnumerable<nint> ProcessTopLevelWindows(int processId)
+    {
+        var desktop = GetDesktopWindow();
+        for (
+            var candidate = GetWindow(desktop, GetWindowChild);
+            candidate != 0;
+            candidate = GetWindow(candidate, GetWindowNext)
+        )
+        {
+            _ = GetWindowThreadProcessId(candidate, out var candidateProcessId);
+            if (candidateProcessId == processId)
+                yield return candidate;
+        }
+    }
+
+    private static string WindowClass(nint window)
+    {
+        var value = new char[256];
+        var length = GetClassName(window, value, value.Length);
+        return length == 0 ? string.Empty : new string(value, 0, length);
+    }
+
+    private static Point Center(System.Drawing.Rectangle rectangle) =>
+        new(rectangle.Left + rectangle.Width / 2, rectangle.Top + rectangle.Height / 2);
+
+    private static Process StartApplication(string? argument = null)
     {
         var path = Environment.GetEnvironmentVariable("LUCENT_DESKTOP_APP");
         if (string.IsNullOrWhiteSpace(path))
@@ -146,13 +413,14 @@ public sealed class PublishedIssueBrowserTests
                 "The published Issue Browser executable does not exist.",
                 fullPath
             );
-        return Process.Start(
-                new ProcessStartInfo(fullPath)
-                {
-                    UseShellExecute = false,
-                    WorkingDirectory = Path.GetDirectoryName(fullPath)!,
-                }
-            )
+        var start = new ProcessStartInfo(fullPath)
+        {
+            UseShellExecute = false,
+            WorkingDirectory = Path.GetDirectoryName(fullPath)!,
+        };
+        if (argument is not null)
+            start.ArgumentList.Add(argument);
+        return Process.Start(start)
             ?? throw new InvalidOperationException("Could not launch the published Issue Browser.");
     }
 
@@ -199,4 +467,48 @@ public sealed class PublishedIssueBrowserTests
                 throw new TimeoutException("The published app did not exit after termination.");
         }
     }
+
+    private const uint GetWindowNext = 2;
+    private const uint GetWindowChild = 5;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoActivate = 0x0010;
+
+    [DllImport("user32.dll", EntryPoint = "GetClassNameW", CharSet = CharSet.Unicode)]
+    private static extern int GetClassName(nint window, [Out] char[] className, int maximum);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetDesktopWindow();
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(Point point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        nint window,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags
+    );
+
+    [DllImport("user32.dll")]
+    private static extern nint GetWindow(nint window, uint command);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out int processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(nint window);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindow(nint window);
 }

@@ -52,6 +52,8 @@ The published Windows TestHost includes two focused fixtures for the new framewo
 
 Desktop interaction checks require an interactive Windows session. They launch and close their own application processes. Keep desktop checks separate from unrelated work that changes focus or input.
 
+`PublishedIssueBrowserTests.FlaUiNativeMenuTargetsUnselectedIssueAndPreservesSelection` covers the opt-in `--native-menus` path with keyboard, pointer and UIA invocation cases. It verifies foreground activation, discovers the actual Windows menu and its accessibility roles, invokes a command against an unselected issue, and checks selection preservation and Escape dismissal. The pointer case also checks placement outside the owner and shutdown with a menu open. Native keyboard checks use Windows arrow-key navigation. Run it as part of `Published`, or target it with `dotnet test --project tests/Lucent.Desktop.Tests -c Release --filter 'FullyQualifiedName~FlaUiNativeMenu'` after setting `LUCENT_DESKTOP_APP` to the published executable. This is a desktop test and must stay paused whenever focus testing is paused. Set `LUCENT_MENU_DIAGNOSTICS=1` to include native command outcomes in application standard error.
+
 ## Desktop and accessibility coverage
 
 FlaUI UIA3 drives published application workflows through the public UI Automation surface. Direct UIA contract checks retain precise assertions for provider identity, lifetime, stale nodes, and error behavior. Axe.Windows supplies automated accessibility rule scans and inspection output; a scan does not perform the manual tab-stop portion of Accessibility Insights FastPass.

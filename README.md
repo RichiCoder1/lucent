@@ -6,6 +6,8 @@ The prior Avalonia implementation and the validation spike that informed this di
 
 Read the active [architecture](docs/ARCHITECTURE.md), [application/service guide](docs/APPLICATIONS.md), [editor sessions](docs/EDITOR-SESSIONS.md), [async resources](docs/ASYNC-RESOURCES.md), [reactive integrations](docs/REACTIVE-INTEGRATIONS.md), [roadmap](docs/ROADMAP.md), [testing guidance](docs/TESTING.md), and [domain glossary](CONTEXT.md). GitHub Issues and the [Lucent Native project](https://github.com/users/RichiCoder1/projects/4/views/1) are the execution source of truth.
 
+Use [headless component tests](docs/HEADLESS-TESTING.md) for `.lui` interaction checks without desktop focus. See [Windows presentation](docs/WINDOWS-PRESENTATION.md) for stock menus, native-menu opt-in and scrollbar style presets.
+
 ## Getting started
 
 Use Windows 11 24H2 or later on x64 with the .NET SDK pinned in `global.json`. NativeAOT publishing also requires the Visual Studio C++ build tools and Windows SDK.
@@ -26,4 +28,4 @@ See [testing guidance](docs/TESTING.md) for focused tests, NativeAOT publication
 
 Prerelease distribution and independent application setup: [NuGet packages](docs/PACKAGES.md). Lucent is [MIT licensed](LICENSE).
 
-[Light Notes](https://github.com/RichiCoder1/light-notes) is the first independent package consumer. Its initial `.lui` startup is available; persistence and the complete inbox/editor remain planned application work.
+[Light Notes](https://github.com/RichiCoder1/light-notes) is the first independent package consumer, with a `.lui` inbox/editor, local persistence, autosave, recoverable drafts and collection continuity. Issue Browser remains the maintained stock-theme example and deterministic framework exercise.

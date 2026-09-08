@@ -29,7 +29,8 @@ internal sealed class CpuSkiaPresenter : IDisposable
         RetainedScene scene,
         WindowsViewport viewport,
         SkiaSceneRenderer renderer,
-        bool showCaret = true
+        bool showCaret = true,
+        Action<SKCanvas>? drawUnderlay = null
     )
     {
         CheckThread();
@@ -42,6 +43,7 @@ internal sealed class CpuSkiaPresenter : IDisposable
         var rasterStarted = Stopwatch.GetTimestamp();
         var canvas = _surface!.Canvas;
         canvas.Clear(SKColors.Transparent);
+        drawUnderlay?.Invoke(canvas);
         renderer.Render(scene, canvas, showCaret);
         var rasterized = Stopwatch.GetTimestamp();
         using var pixels =
@@ -95,6 +97,10 @@ internal sealed class CpuSkiaPresenter : IDisposable
         );
         if (_texture == 0)
             throw new InvalidOperationException($"SDL_CreateTexture: {SDL.GetError()}");
+        // Copy the complete premultiplied frame, including transparent popup margins.
+        // Blending here would multiply alpha twice and accumulate old shadow pixels.
+        if (!SDL.SetTextureBlendMode(_texture, SDL.BlendMode.None))
+            throw new InvalidOperationException($"SDL_SetTextureBlendMode: {SDL.GetError()}");
         _resources.Commit(descriptor);
     }
 

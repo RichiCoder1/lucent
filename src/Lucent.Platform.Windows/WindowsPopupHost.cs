@@ -11,7 +11,15 @@ namespace Lucent.Platform.Windows;
 internal sealed class WindowsPopupHost : IDisposable
 {
     internal const SDL.WindowFlags PopupFlags =
-        SDL.WindowFlags.PopupMenu | SDL.WindowFlags.HighPixelDensity | SDL.WindowFlags.Hidden;
+        SDL.WindowFlags.PopupMenu
+        | SDL.WindowFlags.HighPixelDensity
+        | SDL.WindowFlags.Hidden
+        | SDL.WindowFlags.Transparent;
+    internal const float ShadowMargin = 16;
+    private LayoutRect _menuBounds;
+    private readonly Action<SkiaSharp.SKCanvas> _drawShadow;
+    private float _scale = 1;
+    private float _cornerRadius;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly uint _ownerWindowId;
     private readonly ContextMenuRequest _request;
@@ -46,6 +54,7 @@ internal sealed class WindowsPopupHost : IDisposable
         _cursor = cursor;
         _composition = request.CreateComposition();
         _sceneRenderer = new SkiaSceneRenderer();
+        _drawShadow = canvas => WindowsPopupShadow.Draw(canvas, _menuBounds, _cornerRadius, _scale);
 
         nint window = 0;
         nint renderer = 0;
@@ -67,19 +76,30 @@ internal sealed class WindowsPopupHost : IDisposable
                     $"SDL_GetDisplayUsableBounds: {SDL.GetError()}"
                 );
             var available = new LayoutViewport(
-                Math.Max(1, usable.W * density / ownerScale),
-                Math.Max(1, usable.H * density / ownerScale),
+                Math.Max(1, usable.W * density / ownerScale - 2 * ShadowMargin),
+                Math.Max(1, usable.H * density / ownerScale - 2 * ShadowMargin),
                 ownerScale
             );
             var desired = request.Measure(_sceneRenderer, available);
-            var offsetX = ToWindowUnits(request.Anchor.X, ownerScale, density);
+            var offsetX = ToWindowUnits(request.Anchor.X - ShadowMargin, ownerScale, density);
             var offsetY = ToWindowUnits(
-                request.Anchor.Y + request.Anchor.Height,
+                request.Anchor.Y + request.Anchor.Height - ShadowMargin,
                 ownerScale,
                 density
             );
-            var width = Math.Max(1, ToWindowUnits(desired.Width, ownerScale, density));
-            var height = Math.Max(1, ToWindowUnits(desired.Height, ownerScale, density));
+            var width = Math.Max(
+                1,
+                ToWindowUnits(desired.Width + 2 * ShadowMargin, ownerScale, density)
+            );
+            var height = Math.Max(
+                1,
+                ToWindowUnits(desired.Height + 2 * ShadowMargin, ownerScale, density)
+            );
+            // Host padding keeps rendering, hit testing and UIA in the same coordinate space.
+            _composition.Root.Present(
+                new ThemeContext(_composition.Root.Scope, new Theme("popup-host")),
+                Style.Empty.Padding(Insets.Uniform(ShadowMargin))
+            );
             window = SDL.CreatePopupWindow(
                 ownerWindow,
                 offsetX,
@@ -139,6 +159,14 @@ internal sealed class WindowsPopupHost : IDisposable
         if (_disposed || !TargetsPopup(@event, WindowId, _ownerWindowId))
             return false;
         var type = (SDL.EventType)@event.Type;
+        if (
+            type == SDL.EventType.MouseButtonDown
+            && !ContainsMenuPoint(_menuBounds, @event.Button.X, @event.Button.Y)
+        )
+        {
+            _request.Dismiss();
+            return true;
+        }
         if (type is SDL.EventType.WindowCloseRequested or SDL.EventType.WindowFocusLost)
         {
             _request.Dismiss();
@@ -173,7 +201,17 @@ internal sealed class WindowsPopupHost : IDisposable
         );
         _uiaProvider.Refresh(scene);
         _input.RefreshTextInput();
-        _ = _presenter.Present(scene, viewport, _sceneRenderer, showCaret: false);
+        var menuRoot = _composition.Root.Children.Single();
+        _menuBounds = scene.Boxes.Single(box => box.Identity.ElementId == menuRoot.Id).Bounds;
+        _cornerRadius = menuRoot.Resolve(VisualProperties.CornerRadius).Value;
+        _scale = viewport.Scale;
+        _ = _presenter.Present(
+            scene,
+            viewport,
+            _sceneRenderer,
+            showCaret: false,
+            drawUnderlay: _request.Appearance.Contrast == ThemeContrast.High ? null : _drawShadow
+        );
         _ = _cursor.Activate(
             _input.PointerPosition is { } point
                 ? _composition.Input.CursorAt(point.X, point.Y)
@@ -182,6 +220,12 @@ internal sealed class WindowsPopupHost : IDisposable
     }
 
     internal void Dismiss() => _request.Dismiss();
+
+    internal static bool ContainsMenuPoint(LayoutRect bounds, float x, float y) =>
+        x >= bounds.X
+        && y >= bounds.Y
+        && x < bounds.X + bounds.Width
+        && y < bounds.Y + bounds.Height;
 
     public void Dispose()
     {
@@ -301,7 +345,13 @@ internal sealed class WindowsPopupHost : IDisposable
 
     internal static int ToWindowUnits(float logical, float dpiScale, float density)
     {
-        if (!float.IsFinite(logical) || logical < 0)
+        if (
+            !float.IsFinite(logical)
+            || !float.IsFinite(dpiScale)
+            || dpiScale <= 0
+            || !float.IsFinite(density)
+            || density <= 0
+        )
             throw new ArgumentOutOfRangeException(nameof(logical));
         return checked((int)MathF.Ceiling(logical * dpiScale / density));
     }

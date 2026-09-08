@@ -127,14 +127,27 @@ public sealed class IssueBrowserState
     public void Select(int number) =>
         _selectedNumber.Value = Issues.Any(issue => issue.Number == number) ? number : null;
 
+    public void OpenIssue(int number) => Select(number);
+
+    public void ToggleIssueStatus(int number)
+    {
+        var issue = Issues.FirstOrDefault(candidate => candidate.Number == number);
+        if (issue is not null)
+            ToggleStatus(issue);
+    }
+
     public void ToggleDensity() =>
         Density =
             Density == IssueDensity.Comfortable ? IssueDensity.Compact : IssueDensity.Comfortable;
 
     public void ToggleSelectedStatus()
     {
-        if (SelectedIssue is not { } issue)
-            return;
+        if (SelectedIssue is { } issue)
+            ToggleStatus(issue);
+    }
+
+    private void ToggleStatus(BrowserIssue issue)
+    {
         var next = issue.Status == "open" ? "closed" : "open";
         Set(_statuses, issue.Number, next);
         Set(_messages, issue.Number, null);

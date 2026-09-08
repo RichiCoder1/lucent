@@ -73,7 +73,8 @@ public sealed class IssueBrowserTests
                         node.Role == SemanticRole.TextField && node.Name == "Search issues"
                     )
                 && Flatten(composition.SemanticSnapshot()!)
-                    .Count(node => node.Role == SemanticRole.ListItem) <= 9,
+                    .Count(node => node.Role == SemanticRole.ListItem)
+                    <= RealizedRowBound(scene, composition, 30f),
             "C# Filter Bar or virtual Issue Row recipe structure regressed."
         );
         var nodes = Flatten(composition.SemanticSnapshot()!).ToArray();
@@ -86,7 +87,9 @@ public sealed class IssueBrowserTests
                     "Status: all, open, closed",
                     "Assignee: all, marta, devin, joel",
                 ])
-                && nodes.Count(node => node.Role == SemanticRole.ListItem) is > 0 and <= 9
+                && nodes.Any(node => node.Role == SemanticRole.ListItem)
+                && nodes.Count(node => node.Role == SemanticRole.ListItem)
+                    <= RealizedRowBound(scene, composition, 30f)
                 && scene.ScrollBars is [{ Maximum.Y: > 0 }],
             "Issue Browser filters, bounded list semantics or default scroll affordance changed."
         );
@@ -133,7 +136,7 @@ public sealed class IssueBrowserTests
             + generatedRow.Dump
             + generatedRow.Semantics;
         Assert(
-            Hash(evidence) == "85374dc3430fea48250fb2c65179ddc503580a593a98826f914d100da0d3a021",
+            Hash(evidence) == "4834d8c5591334f7955708fcd080f2f3144f8868c45dc9a0b8c14e57d7aef6cc",
             "Direct-root parity evidence changed: " + Hash(evidence)
         );
     }
@@ -152,6 +155,132 @@ public sealed class IssueBrowserTests
                 && generated.RemainingRows <= 6
                 && generated.ReorderedElementId != 0,
             "The 10,000-row generated Issue Row list exceeded its realization bound or lost keyed identity."
+        );
+    }
+
+    [TestMethod]
+    public void CompiledIssueRowContextMenuTargetsRightClickedIssue()
+    {
+        using var transport = new DeferredGitHubHandler();
+        using var client = new HttpClient(transport)
+        {
+            BaseAddress = new Uri("https://api.github.local/"),
+        };
+        var graph = new ReactiveGraph();
+        using var composition = IssueBrowserStructure.Create(
+            graph,
+            new GitHubIssueSource(client),
+            out var browser,
+            out _
+        );
+        graph.Drain();
+        transport.ReplyJson(0);
+        graph.Drain();
+        using var renderer = new SkiaSceneRenderer();
+
+        RetainedScene Install()
+        {
+            var next = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+            Assert(
+                composition.Input.SetScene(next),
+                "Issue Browser context-menu scene was rejected."
+            );
+            return next;
+        }
+
+        var scene = Install();
+        var rows = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role == SemanticRole.ListItem)
+            .Take(3)
+            .ToArray();
+        Assert(rows.Length == 3, "The Issue Browser did not realize three context-menu rows.");
+        var firstNumber = IssueNumber(rows[0]);
+        var secondNumber = IssueNumber(rows[2]);
+        Assert(
+            composition.ExecuteSemanticCommand(rows[0].Identity, new(SemanticCommandKind.Select))
+                == SemanticCommandResult.Applied,
+            "The first Issue Browser row could not be selected before opening its sibling menu."
+        );
+        graph.Drain();
+        scene = Install();
+
+        ContextMenuRequest? request = null;
+        composition.Input.ContextMenuRequested += value => request = value;
+        var bounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == rows[2].Identity.ElementId)
+            .Bounds;
+        var x = bounds.X + MathF.Max(1, bounds.Width / 2);
+        var y = bounds.Y + MathF.Max(1, bounds.Height / 2);
+        Assert(
+            composition
+                .Input.DispatchPointer(
+                    new(PointerCommandKind.Down, 91, x, y, PointerButton.Secondary)
+                )
+                .Handled
+                && composition.Input.DispatchPointer(new(PointerCommandKind.Up, 91, x, y)).Handled,
+            "The Issue Browser did not route a secondary click to the generated row menu target."
+        );
+        Assert(request is not null, "The generated row menu did not publish a request.");
+        using var menuRequest = request!;
+        Assert(
+            scene.Boxes.Any(box => box.Identity == request!.Target),
+            "The context-menu request did not retain the right-clicked row target."
+        );
+        Assert(
+            browser.SelectedIssue?.Number == firstNumber,
+            "Opening a row context menu changed the existing selection before invocation."
+        );
+        using var popup = request!.CreateComposition();
+        popup.Flush();
+        var descriptor = request.StandardMenu;
+        Assert(descriptor is not null, "The row menu did not qualify for standard presentation.");
+        Assert(
+            descriptor!
+                .Entries.Select(entry => entry.Label)
+                .SequenceEqual(new string?[] { "Open issue", null, "Toggle status" }),
+            "The generated row menu did not project its standard commands in authored order."
+        );
+        var beforeSecondStatus = browser
+            .Issues.Single(issue => issue.Number == secondNumber)
+            .Status;
+        var toggle = descriptor.Entries.Single(entry => entry.Label == "Toggle status");
+        Assert(
+            request.InvokeStandardCommand(toggle.Identity!.Value) == SemanticCommandResult.Applied,
+            "The native standard Toggle status command was rejected before popup projection."
+        );
+        graph.Drain();
+        var afterSecondStatus = browser.Issues.Single(issue => issue.Number == secondNumber).Status;
+        Assert(
+            browser.SelectedIssue?.Number == firstNumber && afterSecondStatus != beforeSecondStatus,
+            "Toggling a right-clicked issue changed its status but also stole the existing selection: selected="
+                + browser.SelectedIssue?.Number
+                + " target="
+                + secondNumber
+                + " before="
+                + beforeSecondStatus
+                + " after="
+                + afterSecondStatus
+                + "."
+        );
+
+        scene = Install();
+        var refreshedRow = Flatten(composition.SemanticSnapshot()!)
+            .Single(node =>
+                node.Role == SemanticRole.ListItem && IssueNumber(node) == secondNumber
+            );
+        Assert(
+            scene.Boxes.Any(box => box.Identity.ElementId == refreshedRow.Identity.ElementId)
+                && refreshedRow.Name.Contains(
+                    "— " + afterSecondStatus + " ·",
+                    StringComparison.Ordinal
+                ),
+            "The refreshed Issue Browser scene did not reflect the native status mutation for the right-clicked issue: status="
+                + afterSecondStatus
+                + " row="
+                + refreshedRow.Name
+                + " selected="
+                + browser.SelectedIssue?.Number
+                + "."
         );
     }
 
@@ -551,8 +680,11 @@ public sealed class IssueBrowserTests
         graph.Drain();
         var dump = composition.Dump();
         var start = dump.LastIndexOf("element " + root.Id + " ", StringComparison.Ordinal);
-        var semantic = Flatten(composition.SemanticSnapshot()!)
-            .Single(snapshot => snapshot.Identity.ElementId == root.Id);
+        var semantic =
+            Flatten(composition.SemanticSnapshot()!)
+                .SingleOrDefault(snapshot => snapshot.Identity.ElementId == root.Id)
+            ?? Flatten(composition.SemanticSnapshot()!)
+                .Single(snapshot => snapshot.Role == SemanticRole.ListItem);
         return (dump.Substring(start), SemanticEvidence(semantic));
     }
 
@@ -689,7 +821,8 @@ public sealed class IssueBrowserTests
                 && browser.Issues.Count == 10_000
                 && browser.VisibleIssues.Count == 10_000
                 && Flatten(composition.SemanticSnapshot()!)
-                    .Count(node => node.Role == SemanticRole.ListItem) <= 7,
+                    .Count(node => node.Role == SemanticRole.ListItem)
+                    <= RealizedRowBound(scene, composition, 30f),
             "Successful response did not build a bounded virtual issue browser list."
         );
 
@@ -925,16 +1058,22 @@ public sealed class IssueBrowserTests
                 + composition.Input.FocusedElement
                 + "."
         );
+        var compactRows = Flatten(composition.SemanticSnapshot()!)
+            .Count(node => node.Role == SemanticRole.ListItem);
+        var compactBound = RealizedRowBound(scene, composition, 22f, retainedTransitionRows: 4);
+        var compactFontSize = scene
+            .Boxes.Single(box => box.Identity.ElementId == compact.Semantic.Identity.ElementId)
+            .Text!.Runs.Single()
+            .FontSize;
         Assert(
-            Flatten(composition.SemanticSnapshot()!)
-                .Count(node => node.Role == SemanticRole.ListItem) <= 9
-                && scene
-                    .Boxes.Single(box =>
-                        box.Identity.ElementId == compact.Semantic.Identity.ElementId
-                    )
-                    .Text!.Runs.Single()
-                    .FontSize == 12f,
-            "Compact density exceeded its bounded realization or retained comfortable typography."
+            compactRows <= compactBound && compactFontSize == 12f,
+            "Compact density exceeded its bounded realization or retained comfortable typography: rows="
+                + compactRows
+                + " bound="
+                + compactBound
+                + " font="
+                + compactFontSize
+                + "."
         );
         Assert(
             composition.ExecuteSemanticCommand(density.Identity, new(SemanticCommandKind.Invoke))
@@ -1326,7 +1465,7 @@ public sealed class IssueBrowserTests
         Assert(
             expandedBoxes[app.Id] is { Width: 1040, Height: 680 }
                 && expandedBoxes[header.Id].Width == 1040
-                && expandedBoxes[list.Id] is { Width: 1040, Height: 60 }
+                && expandedBoxes[list.Id] is { Width: 1040, Height: 200 }
                 && expanded.ScrollBars.Single().Track.Width == 12
                 && expandedBoxes[row.Identity.ElementId].Width
                     == 1040 - expanded.ScrollBars.Single().Track.Width
@@ -1353,7 +1492,8 @@ public sealed class IssueBrowserTests
                 && router.FocusedElement == focused
                 && retained.All(id => expandedBoxes.ContainsKey(id))
                 && Flatten(composition.SemanticSnapshot()!)
-                    .Count(node => node.Role == SemanticRole.ListItem) <= 9,
+                    .Count(node => node.Role == SemanticRole.ListItem)
+                    <= RealizedRowBound(expanded, composition, 30f),
             "Expanded Issue Browser lost selection, focus, identity, or bounded realization."
         );
         using (var bitmap = new SKBitmap(1300, 850, SKColorType.Rgba8888, SKAlphaType.Premul))
@@ -1378,7 +1518,7 @@ public sealed class IssueBrowserTests
         Assert(
             restoredBoxes[app.Id] is { Width: 800, Height: 500 }
                 && restoredBoxes[header.Id].Width == 800
-                && restoredBoxes[list.Id] is { Width: 800, Height: 60 }
+                && restoredBoxes[list.Id] is { Width: 800, Height: 200 }
                 && restored.ScrollBars.Single().Track.Width == 12
                 && restoredBoxes[row.Identity.ElementId].Width
                     == 800 - restored.ScrollBars.Single().Track.Width
@@ -1391,7 +1531,8 @@ public sealed class IssueBrowserTests
                 && router.FocusedElement == focused
                 && retained.All(id => restoredBoxes.ContainsKey(id))
                 && Flatten(composition.SemanticSnapshot()!)
-                    .Count(node => node.Role == SemanticRole.ListItem) <= 9,
+                    .Count(node => node.Role == SemanticRole.ListItem)
+                    <= RealizedRowBound(restored, composition, 30f),
             "Restored Issue Browser lost viewport sizing, fixed control sizes, state, identity, focus, or bounded realization at a different DPI."
         );
     }
@@ -1416,7 +1557,12 @@ public sealed class IssueBrowserTests
                 Assert(
                     !source.Contains(".Drain(", StringComparison.Ordinal)
                         && program.Contains("[STAThread]", StringComparison.Ordinal)
-                        && program.Contains(".UseWindows()", StringComparison.Ordinal)
+                        && program.Contains(".UseWindows(", StringComparison.Ordinal)
+                        && program.Contains("--native-menus", StringComparison.Ordinal)
+                        && program.Contains(
+                            "WindowsMenuPresentation.PreferNative",
+                            StringComparison.Ordinal
+                        )
                         && program.Contains(
                             ".Run(IssueBrowserStructure.Create())",
                             StringComparison.Ordinal
@@ -1460,6 +1606,27 @@ public sealed class IssueBrowserTests
         foreach (var child in snapshot.Children)
         foreach (var node in Flatten(child))
             yield return node;
+    }
+
+    static int IssueNumber(SemanticSnapshot row) =>
+        int.Parse(
+            row.Name.Split(' ')[0].TrimStart('#'),
+            System.Globalization.CultureInfo.InvariantCulture
+        );
+
+    static int RealizedRowBound(
+        RetainedScene scene,
+        Composition composition,
+        float rowHeight,
+        int retainedTransitionRows = 0
+    )
+    {
+        var scroll = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll));
+        var viewportHeight = scene
+            .Boxes.Single(box => box.Identity.ElementId == scroll.Identity.ElementId)
+            .Bounds.Height;
+        return (int)MathF.Ceiling(viewportHeight / rowHeight) + 2 + retainedTransitionRows;
     }
 
     static TopVisibleRow TopRow(RetainedScene scene, Composition composition, string phase)
@@ -1716,40 +1883,33 @@ public sealed class IssueBrowserTests
             ArgumentNullException.ThrowIfNull(browser);
             ArgumentNullException.ThrowIfNull(issue);
             var style = Style
-                .Empty.Background(Tokens.RowSurface)
-                .TextColor(Tokens.PageForeground)
-                .When(
-                    VariantState.Hover,
-                    Style.Empty.Background(Tokens.RowHoverSurface).TextColor(Tokens.PageForeground)
+                .Empty.Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f)
+                .FontSize(() => browser.Density == IssueDensity.Comfortable ? 14f : 12f)
+                .Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f);
+            return Lucent
+                .Core.Components.ContextMenu(
+                    [
+                        Lucent.Core.Components.Selectable(
+                            () => Label(issue()),
+                            () => browser.IsSelected(issue().Number),
+                            () => browser.Select(issue().Number),
+                            style
+                        ),
+                    ],
+                    () =>
+                        Lucent.Core.Components.Menu([
+                            Lucent.Core.Components.MenuItem(
+                                "Open issue",
+                                () => browser.OpenIssue(issue().Number)
+                            ),
+                            Lucent.Core.Components.MenuSeparator(),
+                            Lucent.Core.Components.MenuItem(
+                                "Toggle status",
+                                () => browser.ToggleIssueStatus(issue().Number)
+                            ),
+                        ])
                 )
-                .When(
-                    VariantState.Pressed,
-                    Style
-                        .Empty.Background(Tokens.RowPressedSurface)
-                        .TextColor(Tokens.PageForeground)
-                )
-                .When(
-                    VariantState.Hover | VariantState.Pressed,
-                    Style
-                        .Empty.Background(Tokens.RowPressedSurface)
-                        .TextColor(Tokens.PageForeground)
-                )
-                .When(
-                    VariantState.FocusVisible,
-                    Style.Empty.Background(Tokens.FocusSurface).TextColor(Tokens.FocusForeground)
-                )
-                .With(
-                    Style
-                        .Empty.Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f)
-                        .FontSize(() => browser.Density == IssueDensity.Comfortable ? 14f : 12f)
-                        .Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f)
-                );
-            return Lucent.Core.Components.Selectable(
-                () => Label(issue()),
-                () => browser.IsSelected(issue().Number),
-                () => browser.Select(issue().Number),
-                style
-            );
+                .Named("issue-browser.issue-row-menu");
         }
 
         private static string Label(BrowserIssue issue) =>

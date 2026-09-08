@@ -1,0 +1,9 @@
+namespace Lucent.IssueBrowser;
+
+public component IssueRowMenu(IssueBrowserState browser, Func<BrowserIssue> issue) {
+    <Menu>
+        <MenuItem onInvoke={() => browser.OpenIssue(issue().Number)}>Open issue</MenuItem>
+        <MenuSeparator />
+        <MenuItem onInvoke={() => browser.ToggleIssueStatus(issue().Number)}>Toggle status</MenuItem>
+    </Menu>
+}

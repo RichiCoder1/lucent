@@ -17,6 +17,11 @@ public sealed class WindowsWindowOptionsContracts
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             LucentApplication.CreateBuilder().UseWindows(new() { MinimumWidth = -1 })
         );
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            LucentApplication
+                .CreateBuilder()
+                .UseWindows(new() { MenuPresentation = (WindowsMenuPresentation)99 })
+        );
         Assert.IsNotNull(
             LucentApplication
                 .CreateBuilder()
@@ -29,6 +34,10 @@ public sealed class WindowsWindowOptionsContracts
                         MinimumHeight = 520,
                     }
                 )
+        );
+        Assert.AreEqual(
+            WindowsMenuPresentation.Lucent,
+            new WindowsWindowOptions().MenuPresentation
         );
     }
 

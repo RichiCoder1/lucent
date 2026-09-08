@@ -1,5 +1,15 @@
 namespace Lucent.Platform.Windows;
 
+/// <summary>Chooses how standard context menus are presented by the Windows host.</summary>
+public enum WindowsMenuPresentation
+{
+    /// <summary>Use Lucent's retained, themed popup renderer.</summary>
+    Lucent,
+
+    /// <summary>Use a standard Windows menu when the Core menu descriptor is eligible.</summary>
+    PreferNative,
+}
+
 /// <summary>Initial and minimum client-area dimensions in device-independent logical pixels.</summary>
 public sealed record WindowsWindowOptions
 {
@@ -15,6 +25,9 @@ public sealed record WindowsWindowOptions
     /// <summary>Gets the minimum client height; zero leaves it unrestricted.</summary>
     public int MinimumHeight { get; init; }
 
+    /// <summary>Gets the requested context-menu presentation.</summary>
+    public WindowsMenuPresentation MenuPresentation { get; init; } = WindowsMenuPresentation.Lucent;
+
     internal void Validate()
     {
         if (
@@ -24,10 +37,11 @@ public sealed record WindowsWindowOptions
             || MinimumHeight < 0
             || MinimumWidth > Width
             || MinimumHeight > Height
+            || !Enum.IsDefined(MenuPresentation)
         )
             throw new ArgumentOutOfRangeException(
                 nameof(WindowsWindowOptions),
-                "Window dimensions must be positive and at least their nonnegative minimums."
+                "Window dimensions must be positive and at least their nonnegative minimums, and menu presentation must be defined."
             );
     }
 

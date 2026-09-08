@@ -76,7 +76,7 @@ Applications use `LucentApplication.CreateBuilder()` to snapshot a title, appear
 
 The session keeps asynchronous startup, close preparation, service stop and cleanup on the desktop event loop. A declined or failed preparation leaves the window and composition alive for recovery; repeated requests coalesce. Once preparation accepts close, stop and cleanup are terminal. Core disposes the composition before lifecycle resources, and failures remain observable across independently attempted cleanup stages. Accepted saves must be drained by the application service before acceptance; they are separate from cancellation of obsolete scope-owned reads.
 
-Core defines the portable host boundary without discovering a platform. The Windows adapter is selected explicitly with `UseWindows()` (optionally passing `WindowsWindowOptions` for initial and minimum logical client dimensions) and pumps session continuations through the same wake transport as reactive work, even while minimized. Platform settings update `ThemeContext.Appearance` and `ReducedMotion`; the application lifecycle maps appearance to the effective theme.
+Core defines the portable host boundary without discovering a platform. The Windows adapter is selected explicitly with `UseWindows()` (optionally passing `WindowsWindowOptions` for initial/minimum logical client dimensions and opt-in native menu presentation) and pumps session continuations through the same wake transport as reactive work, even while minimized. Platform settings update `ThemeContext.Appearance` and `ReducedMotion`; the application lifecycle maps appearance to the effective theme.
 
 Optional `Lucent.Hosting` references Core and Microsoft's Generic Host, independently of Windows. It owns one application DI scope, starts/stops hosted services, and resolves typed models at the application composition root. `.lui` components receive those models as parameters; there are no per-element DI scopes. [ADR 0003](adr/0003-application-services-and-shutdown.md) records recovery, service ownership and Microsoft container disposal boundaries.
 
@@ -221,3 +221,5 @@ style NotesScroll {
 ```
 
 The default implementation is rendered by Lucent. Platform-specific styling is a theme choice, not a claim that an operating-system scrollbar widget is embedded. The viewport continues to expose the existing UI Automation Scroll pattern.
+
+Opt-in Windows presentation and custom-menu fallback are described in [WINDOWS-PRESENTATION.md](WINDOWS-PRESENTATION.md). Standard menu descriptors remain portable Core values; native tracking stays in the Windows host.

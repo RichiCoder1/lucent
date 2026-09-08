@@ -483,6 +483,13 @@ public sealed class PointerRoute
         _router.RequestFocus(CurrentTarget, FocusChangeReason.Pointer, _errors);
     }
 
+    /// <summary>Requests pointer-established focus for the hit target while an ancestor callback is running.</summary>
+    public void FocusTarget()
+    {
+        Check();
+        _router.RequestFocus(Target, FocusChangeReason.Pointer, _errors);
+    }
+
     internal bool Finish()
     {
         _active = false;

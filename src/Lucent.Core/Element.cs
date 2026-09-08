@@ -62,6 +62,7 @@ public sealed class Element : IDisposable
     internal ElementPresentation? Presentation => _presentation;
     internal bool HasPresentation => _presentation is not null;
     internal bool HasSemantics => _semantics is not null;
+    internal StandardMenuPart StandardMenuPart { get; set; }
 
     internal IEnumerable<IProperty> AncestorProperties()
     {

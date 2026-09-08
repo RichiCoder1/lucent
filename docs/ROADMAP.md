@@ -38,7 +38,7 @@ Develop design quality alongside complete application slices. Deliver required `
 
 ## Current execution
 
-The accepted [desktop capabilities plan](plans/desktop-capabilities.md) applies the fresh review through #96–#100: controlled selection, single-line editing, durable drafts and collection continuity, live sizing/cursor intent, and Lucent-rendered menus that extend beyond the owner window. #95 covers observed authoring friction and documentation consistency. #102 adds reactive token selection inside already-live individual style assignments while retaining construction-time token choice for snapshots and standalone styles; whole-`Style` replacement remains deferred. Package identities and focused verification are recorded in the tickets. Draft persistence uses one ordered writer per note; popup commands retain their application owner after dismissal. Opt-in native platform presentation remains #101.
+The accepted [desktop capabilities plan](plans/desktop-capabilities.md) applies the fresh review through #96–#100: controlled selection, single-line editing, durable drafts and collection continuity, live sizing/cursor intent, and Lucent-rendered menus that extend beyond the owner window. #95 covers observed authoring friction and documentation consistency. #102 adds reactive token selection inside already-live individual style assignments while retaining construction-time token choice for snapshots and standalone styles; whole-`Style` replacement remains deferred. Package identities and focused verification are recorded in the tickets. Draft persistence uses one ordered writer per note; popup commands retain their application owner after dismissal. Opt-in native platform presentation is delivered in #101.
 
 Owner interaction review exposed a new refinement batch: [#91 long-note freeze and Archive exit](https://github.com/RichiCoder1/lucent/issues/91), [#92 hover/pressed and app presentation](https://github.com/RichiCoder1/lucent/issues/92), [#93 Windows caret/cursor](https://github.com/RichiCoder1/lucent/issues/93), and [#94 default themeable scrollbars](https://github.com/RichiCoder1/lucent/issues/94). The interaction changes and Issue Browser theme adoption are implemented; the local NativeAOT app passed its four maintained desktop checks. Final package/app delivery is recorded in those issues. The owner accepted closure of #91 after no further crashes; the original intermittent Archive exit still has no confirmed root cause. Bounded diagnostics remain available if it recurs. The previous closeout covered its recorded automated paths; it did not validate every interaction state. See [interaction refinement](plans/desktop-interaction-refinement.md).
 
@@ -61,7 +61,7 @@ Track execution in [#63](https://github.com/RichiCoder1/lucent/issues/63), its 2
 
 ## Deferred directions
 
-- Opt-in platform styles, defaults and native presentation for menus, scrollbars and related behaviors ([#101](https://github.com/RichiCoder1/lucent/issues/101)); the selected first menu slice uses Lucent-rendered popup windows.
+- Nested menus with safe-triangle pointer intent ([#104](https://github.com/RichiCoder1/lucent/issues/104)). Opt-in standard Windows menus and retained scrollbar presets are delivered in [#101](https://github.com/RichiCoder1/lucent/issues/101); broader platform styles and native controls remain future work.
 
 - Additional substantial samples and maintained ports after the first useful links-and-notes application.
 - Stable API and package compatibility, a 1.0 contract, and a broader control catalog.
@@ -81,8 +81,10 @@ The accepted .lui language and SDK/tooling boundaries live in [LUI-LANGUAGE.md](
 
 Use [TESTING.md](TESTING.md) for repository test scope and [pre-release verification](agents/verification.md) for risk-based check selection. Keep issue-specific evidence compact and source-bound; retain large captures, binaries, and traces as external artifacts.
 
-## Headless testing follow-up
+## Headless testing and platform presentation
 
 The selected execution order is #103 followed by #101, described in [Headless tests and Windows presentation](plans/testing-and-platform-presentation.md). #101 now includes the owner-requested menu contrast and depth refinement alongside opt-in Windows presentation. #91 was closed at the owner's request after no further crashes; no root cause is claimed for the historical intermittent Archive exit.
+
+#103 and #101 are delivered. Issue Browser demonstrates stock themes, refined Lucent popup presentation and opt-in native menus through the same `.lui` row commands. Focused published checks cover native keyboard, pointer and UIA invocation, preserved selection, outside-owner placement and owner shutdown. [Windows presentation](WINDOWS-PRESENTATION.md) describes the opt-in API and fallback behavior. The next menu slice is #104: nested menus and safe-triangle pointer intent.
 
 [#103](https://github.com/RichiCoder1/lucent/issues/103) delivers a small headless harness from existing composition, scene and application tests. It mounts real `.lui` components, routes simulated input through production code, controls time and queued work, and optionally renders frames with Skia. Avalonia.Headless is an architectural reference, not a Lucent dependency. The maintained suite includes representative test migrations; retain native desktop checks for Windows focus/capture, resizing, popup placement, clipboard and UIA. Headless semantics do not validate the Windows accessibility bridge. Nested menus and safe-triangle pointer intent are tracked in [#104](https://github.com/RichiCoder1/lucent/issues/104).

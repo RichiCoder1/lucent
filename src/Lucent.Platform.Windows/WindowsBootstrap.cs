@@ -221,6 +221,17 @@ public static class WindowsBootstrap
                     request.Dispose();
                     return;
                 }
+                if (
+                    windowOptions?.MenuPresentation == WindowsMenuPresentation.PreferNative
+                    && WindowsNativeMenuHost.TryShow(window, hwnd, request)
+                )
+                {
+                    // Native tracking returns outside SDL input dispatch. Complete owner
+                    // clipboard commands and refresh command/focus changes on this path too.
+                    input.ProcessClipboardRequests();
+                    scheduler.Request(FrameOperation.Input);
+                    return;
+                }
                 popup = new WindowsPopupHost(window, request, uiaDispatcher, clipboard, cursor);
                 popupInputGate.Opened();
             }
