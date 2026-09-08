@@ -215,33 +215,7 @@ public sealed partial class PublishedIssueBrowserTests
                 "The fixture target did not begin in the expected open state."
             );
             var targetPoint = Center(targetRow.BoundingRectangle);
-            root.SetForeground();
-            if (GetForegroundWindow() != owner)
-            {
-                // Windows may deny programmatic foreground activation. Raise only our
-                // window, then activate its verified title bar through ordinary input.
-                Assert.IsTrue(
-                    SetWindowPos(owner, 0, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate)
-                );
-                var titleBar =
-                    root.FindFirstChild(condition =>
-                        condition.ByControlType(FlaUI.Core.Definitions.ControlType.TitleBar)
-                    )
-                    ?? throw new InvalidOperationException(
-                        "The test window title bar was not exposed."
-                    );
-                var titleBounds = titleBar.BoundingRectangle;
-                var titlePoint = new Point(
-                    titleBounds.Left + Math.Min(100, titleBounds.Width / 2),
-                    titleBounds.Top + titleBounds.Height / 2
-                );
-                Assert.AreEqual(
-                    owner,
-                    WindowFromPoint(titlePoint),
-                    "The test title bar is occluded."
-                );
-                Mouse.LeftClick(titlePoint);
-            }
+            ActivateOwnedWindow(process, root, owner);
             WaitUntil(
                 process,
                 () => GetForegroundWindow() == owner,

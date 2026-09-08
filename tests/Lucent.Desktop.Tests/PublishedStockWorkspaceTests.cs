@@ -260,13 +260,21 @@ public sealed partial class PublishedIssueBrowserTests
         {
             if (handle == owner || !IsWindowVisible(handle))
                 continue;
-            var item = automation
-                .FromHandle(handle)
-                .FindFirstDescendant(c =>
-                    c.ByControlType(ControlType.MenuItem).And(c.ByName(name))
-                );
-            if (item is not null)
-                return item;
+            try
+            {
+                var item = automation
+                    .FromHandle(handle)
+                    .FindFirstDescendant(c =>
+                        c.ByControlType(ControlType.MenuItem).And(c.ByName(name))
+                    );
+                if (item is not null)
+                    return item;
+            }
+            catch (TimeoutException) when (!IsWindowVisible(handle))
+            {
+                // USER32 can destroy a native menu between enumeration and ElementFromHandle.
+                // Only an actually disappeared window counts as dismissed; a live UIA stall fails.
+            }
         }
         return null;
     }
@@ -287,18 +295,51 @@ public sealed partial class PublishedIssueBrowserTests
         root.SetForeground();
         if (GetForegroundWindow() != owner)
         {
+            // Foreground activation may be denied while another application owns input.
+            // Raise only this test-owned HWND, verify its title bar, then remove the temporary
+            // topmost flag as soon as ordinary pointer activation has succeeded (or failed).
             Assert.IsTrue(
-                SetWindowPos(owner, 0, 0, 0, 0, 0, SwpNoSize | SwpNoMove | SwpNoActivate)
+                SetWindowPos(
+                    owner,
+                    new IntPtr(-1),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SwpNoSize | SwpNoMove | SwpNoActivate
+                )
             );
-            var title = root.FindFirstChild(c =>
-                c.ByControlType(ControlType.TitleBar)
-            )!.BoundingRectangle;
-            var point = new Point(
-                title.Left + Math.Min(100, title.Width / 2),
-                title.Top + title.Height / 2
-            );
-            Assert.AreEqual(owner, WindowFromPoint(point), "The test owner is occluded.");
-            Mouse.LeftClick(point);
+            try
+            {
+                var title = root.FindFirstChild(c =>
+                    c.ByControlType(ControlType.TitleBar)
+                )!.BoundingRectangle;
+                var point = new Point(
+                    title.Left + Math.Min(100, title.Width / 2),
+                    title.Top + title.Height / 2
+                );
+                Assert.AreEqual(owner, WindowFromPoint(point), "The test owner is occluded.");
+                Mouse.LeftClick(point);
+                WaitUntil(
+                    process,
+                    () => GetForegroundWindow() == owner,
+                    "The test owner did not gain focus."
+                );
+            }
+            finally
+            {
+                Assert.IsTrue(
+                    SetWindowPos(
+                        owner,
+                        new IntPtr(-2),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SwpNoSize | SwpNoMove | SwpNoActivate
+                    )
+                );
+            }
         }
         WaitUntil(
             process,
