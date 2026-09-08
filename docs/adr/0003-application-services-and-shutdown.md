@@ -10,7 +10,7 @@ Lucent keeps the synchronous desktop entry point on its STA owner while pumping 
 
 ## Close preparation is the recovery boundary
 
-A close request starts one `PrepareCloseAsync` operation. Repeated requests coalesce; requests during startup wait for startup. Preparation must stop accepting new writes and await the already accepted work. Return false to decline close, or throw to expose a retryable failure in reactive session status. The composition, window and services remain available; another close request retries preparation. Applications restore write acceptance when declining close if their workflow allows continued editing.
+A close request starts one `PrepareCloseAsync` operation. Repeated requests coalesce; requests during startup wait for startup. Preparation must stop accepting new writes and await the already accepted work. Return false after publishing recoverable application state to decline close. The composition, window and services remain available, and another close request retries preparation. An exception escaping preparation is unexpected and terminates the session. Applications restore write acceptance when declining close if their workflow allows continued editing.
 
 Accepted writes belong to the application service, not to an element's cancellable read scope. Scope disposal may cancel an obsolete read; closing a view must not cancel a save the application has accepted. The framework does not replay writes or provide a persistence queue in this issue. The persistence service will define its ordering, durability and retry semantics separately.
 

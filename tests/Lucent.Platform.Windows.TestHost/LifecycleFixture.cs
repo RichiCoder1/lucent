@@ -132,9 +132,8 @@ public sealed class LifecycleFixtureModel : IAsyncDisposable
             if (Interlocked.Exchange(ref _statusObserved, 1) == 0)
                 _recorder.RecordUi("ui-mounted");
             var status = RequireSession().Status;
-            return status.Error is null
-                ? status.Phase.ToString()
-                : status.Phase + ": " + status.Error.Message;
+            var error = status.Error?.Message ?? _service.CloseError;
+            return error is null ? status.Phase.ToString() : status.Phase + ": " + error;
         }
     }
 
@@ -172,6 +171,8 @@ internal sealed class LifecycleHostedService(LifecycleRecorder recorder, Lifecyc
     private Task? _acceptedWrite;
     private int _prepareCount;
 
+    internal string? CloseError { get; private set; }
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         recorder.RecordUi("service-start");
@@ -190,10 +191,12 @@ internal sealed class LifecycleHostedService(LifecycleRecorder recorder, Lifecyc
         recorder.RecordUi("prepare-" + attempt + "-continued");
         if (attempt == 1)
         {
+            CloseError = "save failed; retry close";
             recorder.RecordUi("prepare-1-rejected");
-            throw new InvalidOperationException("save failed; retry close");
+            return false;
         }
 
+        CloseError = null;
         _finishAcceptedWrite.TrySetResult();
         await (
             _acceptedWrite ?? throw new InvalidOperationException("No write was accepted.")
