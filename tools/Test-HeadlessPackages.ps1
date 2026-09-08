@@ -113,6 +113,11 @@ try {
     if ($LASTEXITCODE) { throw 'Headless package restore failed.' }
     & dotnet run --project Consumer.csproj -c Release --no-restore
     if ($LASTEXITCODE) { throw 'Headless package consumer failed.' }
+    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json | Where-Object package -eq 'Lucent.Renderer.Skia')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $proof "bin/Release/net10.0/$($notice.output)") -PathType Leaf)) {
+            throw "Standalone renderer package omitted notice: $($notice.output)"
+        }
+    }
 } finally {
     Pop-Location
     $env:NUGET_PACKAGES = $previousPackages

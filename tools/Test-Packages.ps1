@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)] [string] $Feed,
-    [Parameter(Mandatory)] [ValidatePattern('^0\.3\.0-dev\.[0-9A-Za-z.-]+$')] [string] $Version
+    [Parameter(Mandatory)] [ValidatePattern('^0\.3\.0-dev\.[0-9A-Za-z.-]+$')] [string] $Version,
+    [switch] $SkipDesktopSmoke
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -80,8 +81,17 @@ try {
     & dotnet publish Consumer.csproj -c Release --no-restore -o publish -warnaserror
     if ($LASTEXITCODE) { throw 'Package-only NativeAOT publish failed.' }
     $published = Join-Path $proof 'publish'
+    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json)) {
+        if ($notice.output -and -not (Test-Path -LiteralPath (Join-Path $published $notice.output) -PathType Leaf)) {
+            throw "Missing published dependency notice: $($notice.output)"
+        }
+    }
     foreach ($file in 'SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'vcruntime140.dll', 'notices/SDL3-CS.txt', 'notices/Microsoft.Extensions-LICENSE.txt', 'notices/R3-LICENSE.txt') {
         if (-not (Test-Path -LiteralPath (Join-Path $published $file))) { throw "Missing published asset: $file" }
+    }
+    if ($SkipDesktopSmoke) {
+        Write-Output "Package-only restore/NativeAOT/assets/notices: PASS ($Version); desktop startup/close was not run."
+        return
     }
     $stdout = Join-Path $proof 'stdout.log'; $stderr = Join-Path $proof 'stderr.log'
     $process = Start-Process (Join-Path $published 'Lucent.IssueBrowser.exe') -WorkingDirectory $published -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru

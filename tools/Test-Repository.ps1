@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Managed', 'Published', 'Sdk', 'Performance', 'Accessibility')]
+    [ValidateSet('Managed', 'Native', 'Published', 'Sdk', 'Performance', 'Accessibility')]
     [string] $Suite = 'Managed',
     [string[]] $Project = @(),
     [string] $Filter
@@ -132,6 +132,10 @@ function Invoke-Published {
     & (Join-Path $PSScriptRoot 'Test-WindowsSettingsListener.ps1') -Executable $published.HostExe
     if ($LASTEXITCODE) { throw 'Windows settings listener proof failed.' }
     Invoke-DesktopTests $published 'FullyQualifiedName~FlaUi'
+    Invoke-Native
+}
+
+function Invoke-Native {
     foreach ($testProject in @(
         'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj',
         'tests/Lucent.Reactive.R3.Tests/Lucent.Reactive.R3.Tests.csproj',
@@ -191,6 +195,7 @@ Push-Location $root
 try {
     switch ($Suite) {
         'Managed' { Invoke-Managed }
+        'Native' { Invoke-Native }
         'Published' { Invoke-Published }
         'Sdk' {
             & (Join-Path $PSScriptRoot 'Verify-LuiSdk.ps1')

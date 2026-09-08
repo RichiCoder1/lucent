@@ -1,21 +1,73 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework><LangVersion>latest</LangVersion><GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer>
-    <PackageId>Lucent.Lui.Sdk</PackageId><Version Condition="'$(LucentPackageVersion)' == ''">$(LucentLuiToolingVersion)</Version><Authors>Lucent</Authors>
-    <Description>Additive .lui compiler, generator, and formatting SDK for Lucent.</Description><IncludeBuildOutput>false</IncludeBuildOutput>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <PackageId>Lucent.Lui.Sdk</PackageId>
+    <Version Condition="'$(LucentPackageVersion)' == ''">$(LucentLuiToolingVersion)</Version>
+    <Authors>Lucent</Authors>
+    <Description>Additive .lui compiler, generator, and formatting SDK for Lucent.</Description>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
     <NoPackageAnalysis>true</NoPackageAnalysis>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" />
-    <ProjectReference Include="../Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+    <ProjectReference
+      Include="../Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all"
+      SkipGetTargetFrameworkProperties="true"
+    />
+    <ProjectReference
+      Include="../Lucent.Lui.Generator/Lucent.Lui.Generator.csproj"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all"
+    />
     <None Include="Sdk/Sdk.props" Pack="true" PackagePath="Sdk/Sdk.props" />
     <None Include="Sdk/Sdk.targets" Pack="true" PackagePath="Sdk/Sdk.targets" />
-    <None Include="../Lucent.Lui.Generator/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Generator.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-    <None Include="../Lucent.Lui.Compiler/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Compiler.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None
+      Include="notices/Roslyn-LICENSE.txt"
+      Pack="true"
+      PackagePath="notices/Roslyn-LICENSE.txt"
+    />
+    <None
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.common/4.14.0/ThirdPartyNotices.rtf"
+      Pack="true"
+      PackagePath="notices/Roslyn-Common-NOTICES.rtf"
+    />
+    <None
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp/4.14.0/ThirdPartyNotices.rtf"
+      Pack="true"
+      PackagePath="notices/Roslyn-CSharp-NOTICES.rtf"
+    />
+    <None
+      Include="../Lucent.Lui.Generator/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Generator.dll"
+      Pack="true"
+      PackagePath="analyzers/dotnet/cs"
+      Visible="false"
+    />
+    <None
+      Include="../Lucent.Lui.Compiler/bin/$(Configuration)/netstandard2.0/Lucent.Lui.Compiler.dll"
+      Pack="true"
+      PackagePath="analyzers/dotnet/cs"
+      Visible="false"
+    />
   </ItemGroup>
   <Target Name="BuildLucentLuiTooling" BeforeTargets="_GetPackageFiles">
-    <MSBuild Projects="../Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
-    <ItemGroup><None Include="../Lucent.Lui.Tooling/bin/$(Configuration)/net10.0/**" Pack="true" PackagePath="tools/net10.0" Visible="false" /></ItemGroup>
+    <MSBuild
+      Projects="../Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)"
+    />
+    <ItemGroup>
+      <None
+        Include="../Lucent.Lui.Tooling/bin/$(Configuration)/net10.0/**"
+        Pack="true"
+        PackagePath="tools/net10.0"
+        Visible="false"
+      />
+    </ItemGroup>
   </Target>
 </Project>

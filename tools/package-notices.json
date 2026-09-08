@@ -1,0 +1,17 @@
+[
+  { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/SkiaSharp-LICENSE.txt", "output": "notices/SkiaSharp-LICENSE.txt" },
+  { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/SkiaSharp-NOTICES.txt", "output": "notices/SkiaSharp-NOTICES.txt" },
+  { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/HarfBuzzSharp-LICENSE.txt", "output": "notices/HarfBuzzSharp-LICENSE.txt" },
+  { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/HarfBuzzSharp-NOTICES.txt", "output": "notices/HarfBuzzSharp-NOTICES.txt" },
+  { "package": "Lucent.Platform.Windows", "entry": "buildTransitive/notices/SDL3-CS/LICENSE", "output": "notices/SDL3-CS.txt" },
+  { "package": "Lucent.Platform.Windows", "entry": "buildTransitive/notices/SDL-LICENSE.txt", "output": "notices/SDL-LICENSE.txt" },
+  { "package": "Lucent.Platform.Windows", "entry": "buildTransitive/notices/Microsoft-VCRuntime.txt", "output": "notices/Microsoft-VCRuntime.txt" },
+  { "package": "Lucent.Platform.Windows", "entry": "buildTransitive/notices/dotnet-LICENSE.txt", "output": "notices/dotnet-LICENSE.txt" },
+  { "package": "Lucent.Platform.Windows", "entry": "buildTransitive/notices/dotnet-ThirdPartyNotices.txt", "output": "notices/dotnet-ThirdPartyNotices.txt" },
+  { "package": "Lucent.Hosting", "entry": "buildTransitive/notices/Microsoft.Extensions-LICENSE.txt", "output": "notices/Microsoft.Extensions-LICENSE.txt" },
+  { "package": "Lucent.Hosting", "entry": "buildTransitive/notices/Microsoft.Extensions.Hosting-NOTICES.txt", "output": "notices/Microsoft.Extensions.Hosting-NOTICES.txt" },
+  { "package": "Lucent.Reactive.R3", "entry": "buildTransitive/notices/R3-LICENSE.txt", "output": "notices/R3-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "notices/Roslyn-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "notices/Roslyn-Common-NOTICES.rtf" },
+  { "package": "Lucent.Lui.Sdk", "entry": "notices/Roslyn-CSharp-NOTICES.rtf" }
+]

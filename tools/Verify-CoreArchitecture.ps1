@@ -14,19 +14,28 @@ function Assert-ProjectHasNoForbiddenDependencies([string] $Project) {
     [xml]$xml = Get-Content $Project
     $direct = @($xml.Project.ItemGroup.PackageReference) + @($xml.Project.ItemGroup.ProjectReference) | Where-Object { $_ }
     if ($direct) { throw "Core has a direct dependency reference: $Project" }
+    Assert-AssetsHaveNoForbiddenDependencies $Project
+}
+
+function Assert-AssetsHaveNoForbiddenDependencies([string] $Project) {
     if (((Get-Assets $Project).libraries.psobject.Properties.Name -join "`n") -match $forbidden) {
         throw 'Core project.assets.json resolves a forbidden dependency.'
     }
 }
 
-function Assert-ProjectRejected([string] $Project) {
+function Assert-ProjectRejected([string] $Project, [string] $Expected, [switch] $AssetsOnly) {
     try {
-        Assert-ProjectHasNoForbiddenDependencies $Project
-        throw "Injected forbidden dependency was accepted: $Project"
+        if ($AssetsOnly) { Assert-AssetsHaveNoForbiddenDependencies $Project }
+        else { Assert-ProjectHasNoForbiddenDependencies $Project }
     }
     catch {
-        if ($_.Exception.Message -match '^Injected forbidden dependency was accepted:') { throw }
+        if ($_.Exception.Message -ne $Expected) {
+            throw "Wrong architecture rejection: expected='$Expected'; actual='$($_.Exception.Message)'"
+        }
+        Write-Output "Expected rejection: $Expected"
+        return
     }
+    throw "Injected forbidden dependency was accepted: $Project"
 }
 
 function Assert-PublicApi([string] $AssemblyPath, [bool] $ExpectFailure) {
@@ -56,8 +65,9 @@ if ($Negative) {
     foreach ($project in @($direct, $transitive)) {
         & $dotnet restore $project --locked-mode; if ($LASTEXITCODE) { throw "Fixture locked restore failed: $project" }
         & $dotnet build $project --no-restore -warnaserror; if ($LASTEXITCODE) { throw "Fixture build failed: $project" }
-        Assert-ProjectRejected $project
     }
+    Assert-ProjectRejected $direct "Core has a direct dependency reference: $direct"
+    Assert-ProjectRejected $transitive 'Core project.assets.json resolves a forbidden dependency.' -AssetsOnly
 
     $directAssets = Get-Assets $direct
     $directDependencies = $directAssets.project.frameworks.psobject.Properties.Value.dependencies.psobject.Properties.Name

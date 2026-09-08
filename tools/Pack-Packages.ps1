@@ -17,11 +17,15 @@ foreach ($name in $names) {
     if ($LASTEXITCODE) { throw "Pack failed: $name" }
 }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+$notices = Get-Content (Join-Path $PSScriptRoot 'package-notices.json') -Raw | ConvertFrom-Json
 foreach ($name in $names) {
     $path = Join-Path $OutputDirectory "$name.$Version.nupkg"
     $zip = [IO.Compression.ZipFile]::OpenRead($path)
     try {
         if (-not $zip.GetEntry('LICENSE') -or -not $zip.GetEntry('README.md')) { throw "Missing package attribution: $name" }
+        foreach ($notice in @($notices | Where-Object package -eq $name)) {
+            if (-not $zip.GetEntry($notice.entry)) { throw "Missing package notice: $name/$($notice.entry)" }
+        }
         if ($name -eq 'Lucent.Reactive.R3' -and -not $zip.GetEntry('buildTransitive/notices/R3-LICENSE.txt')) { throw 'R3 package omitted upstream license notice.' }
         $entry = $zip.GetEntry("$name.nuspec")
         $reader = [IO.StreamReader]::new($entry.Open())

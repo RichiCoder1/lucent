@@ -16,6 +16,7 @@
     { "path": "notices/HarfBuzzSharp-NOTICES.txt", "kind": "notice" },
     { "path": "notices/Microsoft-VCRuntime.txt", "kind": "notice" },
     { "path": "notices/SDL3-CS.txt", "kind": "notice" },
+    { "path": "notices/SDL-LICENSE.txt", "kind": "notice" },
     { "path": "notices/SkiaSharp-LICENSE.txt", "kind": "notice" },
     { "path": "notices/SkiaSharp-NOTICES.txt", "kind": "notice" },
     { "path": "notices/dotnet-LICENSE.txt", "kind": "notice" },

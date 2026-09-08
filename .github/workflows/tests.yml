@@ -9,12 +9,11 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   managed:
+    concurrency:
+      group: managed-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: windows-2025
     timeout-minutes: 25
     steps:
@@ -45,10 +44,13 @@ jobs:
             '- VS Code extension contract: node --test extensions/lucent-lui-vscode/extension.test.cjs'
           ) -join [Environment]::NewLine | Add-Content -Path $env:GITHUB_STEP_SUMMARY
   packages:
+    concurrency:
+      group: lucent-package-publication
+      cancel-in-progress: false
     needs: managed
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -65,7 +67,8 @@ jobs:
       - name: Pack and consume prerelease packages
         shell: pwsh
         run: |
-          $version = "0.3.0-dev.${{ github.run_number }}.${{ github.run_attempt }}"
+          $version = "0.3.0-dev.${{ github.run_number }}.1"
+          ./tools/Test-Repository.ps1 -Suite Native
           ./tools/Pack-Packages.ps1 -Version $version
           ./tools/Test-HeadlessPackages.ps1 -Version $version -Feed "artifacts/packages/$version"
           ./tools/Test-Packages.ps1 -Version $version -Feed "artifacts/packages/$version"
@@ -74,10 +77,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $version = "0.3.0-dev.${{ github.run_number }}.${{ github.run_attempt }}"
+          $version = "0.3.0-dev.${{ github.run_number }}.1"
           $source = 'https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json'
           foreach ($package in Get-ChildItem "artifacts/packages/$version/*.nupkg") {
-            dotnet nuget push $package.FullName --api-key $env:GITHUB_TOKEN --source $source
+            dotnet nuget push $package.FullName --api-key $env:GITHUB_TOKEN --source $source --skip-duplicate
             if ($LASTEXITCODE) { throw "Package publish failed: $($package.Name)" }
           }
           "Published Lucent $version from ${{ github.sha }}" >> $env:GITHUB_STEP_SUMMARY
