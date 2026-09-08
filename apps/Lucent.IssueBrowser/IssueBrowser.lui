@@ -1,6 +1,7 @@
 namespace Lucent.IssueBrowser;
 
 style IssueBrowserStyle {
+    Axis: LayoutAxis.Column;
     MainGrow: 1;
     MainBasis: 0;
     MinWidth: 0;
@@ -16,6 +17,46 @@ style WorkspaceStyle {
     Clip: true;
 }
 
+style IssueBrowserFirstPaneStyle(WindowBreakpoints breakpoints, IssueBrowserViewState view) {
+    MainGrow: 0;
+    MainShrink: 0;
+    Participation: ElementParticipation.Visible;
+
+    when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide) && !view.DetailsRoute) {
+        Width: null;
+        MainGrow: 1;
+        MainShrink: 1;
+    }
+
+    when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide) && view.DetailsRoute) {
+        Participation: ElementParticipation.Collapsed;
+    }
+}
+
+style IssueBrowserSecondPaneStyle(WindowBreakpoints breakpoints, IssueBrowserViewState view) {
+    MainGrow: 1;
+    MainShrink: 1;
+    Participation: ElementParticipation.Visible;
+
+    when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide) && view.DetailsRoute) {
+        Width: null;
+        MainGrow: 1;
+        MainShrink: 1;
+    }
+
+    when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide) && !view.DetailsRoute) {
+        Participation: ElementParticipation.Collapsed;
+    }
+}
+
+style IssueBrowserSplitterStyle(WindowBreakpoints breakpoints) {
+    Participation: ElementParticipation.Visible;
+
+    when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide)) {
+        Participation: ElementParticipation.Collapsed;
+    }
+}
+
 public component IssueBrowser(IssueBrowserState browser) {
     [Once] IssueBrowserViewState view = null!;
 
@@ -23,8 +64,8 @@ public component IssueBrowser(IssueBrowserState browser) {
         view = new IssueBrowserViewState(owner, browser);
     }
 
-    <ResponsiveContainer constraints={view.Constraints} style={PresentationStyles.Surface.With(IssueBrowserStyle)}>
-        <Column style={IssueBrowserStyle}>
+    <Layout breakpoints={view.Breakpoints} style={PresentationStyles.Surface.With(IssueBrowserStyle)}>
+        <Layout style={IssueBrowserStyle}>
             <Header browser={browser} view={view} name="issue-browser.header" />
             if (browser.IsLoading) {
                 <Loading browser={browser} name="issue-browser.loading" />
@@ -33,20 +74,7 @@ public component IssueBrowser(IssueBrowserState browser) {
                 <Error browser={browser} name="issue-browser.error" />
             }
             <Divider />
-            if (view.IsWide) {
-                <SplitPane first={[IssueList(browser, view)]} second={[IssueDetailPane(browser, view)]} state={view.Split} label="Resize issue list" style={WorkspaceStyle} />
-            } else {
-                <Column style={WorkspaceStyle}>
-                    if (view.ShowDetails) {
-                        <Column style={IssueBrowserStyle}>
-                            <Button onInvoke={view.BackToList} name="issue-browser.back">Back to issues</Button>
-                            <IssueDetailPane browser={browser} view={view} />
-                        </Column>
-                    } else {
-                        <IssueList browser={browser} view={view} />
-                    }
-                </Column>
-            }
-        </Column>
-    </ResponsiveContainer>
+            <SplitPane first={[IssueList(browser, view)]} second={[IssueDetailPane(browser, view)]} state={view.Split} label="Resize issue list" style={WorkspaceStyle} splitterStyle={IssueBrowserSplitterStyle(view.Breakpoints)} firstStyle={IssueBrowserFirstPaneStyle(view.Breakpoints, view)} secondStyle={IssueBrowserSecondPaneStyle(view.Breakpoints, view)} />
+        </Layout>
+    </Layout>
 }

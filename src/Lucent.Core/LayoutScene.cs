@@ -13,6 +13,9 @@ public static class LayoutProperties
     /// <summary>Selects flex flow or the bounded explicit Grid algorithm.</summary>
     public static readonly Property<LayoutMode> Mode = new("layout-mode", LayoutMode.Flex);
 
+    /// <summary>Selects an explicit built-in or custom container algorithm; null preserves <see cref="Mode"/> compatibility.</summary>
+    public static readonly Property<LayoutAlgorithm?> Algorithm = new("layout-algorithm", null);
+
     /// <summary>Declares explicit Grid columns. Grid containers require at least one row and column.</summary>
     public static readonly Property<GridTracks> Columns = new("layout-columns", GridTracks.Empty);
 
@@ -253,6 +256,10 @@ internal static class ProjectionProperties
     internal static readonly Property<string?> Text = new("projection-text", null);
     internal static readonly Property<ResponsiveConstraints?> ResponsiveConstraints = new(
         "projection-responsive-constraints",
+        null
+    );
+    internal static readonly Property<WindowBreakpoints?> WindowBreakpoints = new(
+        "projection-window-breakpoints",
         null
     );
     internal static readonly Property<string?> TextMeasure = new("projection-text-measure", null);

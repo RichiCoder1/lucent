@@ -5,15 +5,20 @@ style ErrorStatusStyle {
 }
 
 style ErrorPanelStyle {
+    Axis: LayoutAxis.Column;
     Padding: Insets.Symmetric(16, 8);
     Spacing: 8;
 }
 
+style ErrorActionsStyle {
+    Axis: LayoutAxis.Row;
+}
+
 public component Error(IssueBrowserState browser) {
-    <Column style={ErrorPanelStyle}>
+    <Layout style={ErrorPanelStyle}>
         <Status content={() => browser.Error ?? ""} style={PresentationStyles.Secondary.With(ErrorStatusStyle)} />
-        <Row>
+        <Layout style={ErrorActionsStyle}>
             <Button onInvoke={browser.Retry} name="issue-browser.retry">Retry</Button>
-        </Row>
-    </Column>
+        </Layout>
+    </Layout>
 }

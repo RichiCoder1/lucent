@@ -168,7 +168,14 @@ public abstract class ReactiveNode : IDisposable
     private void RemoveDependency(ReactiveNode dependency) => _dependencies.Remove(dependency);
 
     /// <summary>Rejects mutation during a protected scope operation.</summary>
-    protected void CheckScopeMutationGuard() => _scope?.CheckMutationGuard();
+    protected void CheckScopeMutationGuard()
+    {
+        Graph.CheckMutationGuard();
+        _scope?.CheckMutationGuard();
+    }
+
+    /// <summary>Checks owner and factory constraints while allowing guarded lazy evaluation.</summary>
+    protected void CheckScopeEvaluationGuard() => _scope?.CheckEvaluationGuard();
 }
 
 /// <summary>Writable graph state.</summary>
@@ -240,7 +247,7 @@ public sealed class Derived<T> : ReactiveNode
             Read();
             if (_dirty)
             {
-                CheckScopeMutationGuard();
+                CheckScopeEvaluationGuard();
                 var evaluation = Graph.Evaluate(this, _compute!);
                 _value = evaluation.Value;
                 _dirty = false;

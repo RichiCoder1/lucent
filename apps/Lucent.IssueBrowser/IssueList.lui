@@ -1,12 +1,19 @@
 namespace Lucent.IssueBrowser;
 
 style IssueListStyle {
+    Axis: LayoutAxis.Column;
     MainGrow: 1;
     MinWidth: 0;
     MinHeight: 0;
     Clip: true;
     Padding: Insets.Uniform(12);
     Spacing: 12;
+}
+
+style IssueListEmptyStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    Padding: Insets.Uniform(16);
 }
 
 style IssueListViewportStyle {
@@ -18,14 +25,14 @@ style IssueListViewportStyle {
 }
 
 public component IssueList(IssueBrowserState browser, IssueBrowserViewState view) {
-    <Column style={IssueListStyle}>
-        <Text style={PresentationStyles.Secondary} name="issue-browser.result-count">{view.ResultSummary}</Text>
+    <Layout style={IssueListStyle}>
+        <Text style={PresentationStyles.Secondary} name="issue-browser.result-count" content={() => view.ResultSummary} />
         if (!browser.IsLoading && browser.VisibleIssues.Count == 0) {
-            <Column style={Style.Empty with { Spacing: 12; Padding: Insets.Uniform(16); }}>
+            <Layout style={IssueListEmptyStyle}>
                 <Text style={PresentationStyles.Title}>No matching issues</Text>
                 <Text style={PresentationStyles.Body}>Try a different search or clear your filters.</Text>
-            </Column>
+            </Layout>
         }
-        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value, view).Named("issue-browser.issue-row")} rowHeight={() => view.RowHeight} viewport={view.ListViewport} label="Issues" style={IssueListViewportStyle} name="issue-browser.scroll-viewport" />
-    </Column>
+        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value, view).Named("issue-browser.issue-row")} rowHeight={() => DensityMetrics.For(view.Density).RowHeight + DensityMetrics.For(view.Density).FontSize + DensityMetrics.For(view.Density).Spacing} viewport={view.ListViewport} label="Issues" style={IssueListViewportStyle} name="issue-browser.scroll-viewport" />
+    </Layout>
 }

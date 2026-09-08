@@ -1,56 +1,74 @@
 namespace Lucent.IssueBrowser;
 
-style FilterColumnStyle {
+style FilterBarStyle(WindowBreakpoints breakpoints) {
+    Axis: LayoutAxis.Column;
+    Spacing: 8;
+    MainShrink: 0;
+
+    when (breakpoints.IsActive(IssueBrowserBreakpoints.Wide)) {
+        Axis: LayoutAxis.Row;
+        Spacing: 12;
+        CrossAlignment: LayoutAlignment.End;
+    }
+}
+
+style FilterSearchColumnStyle(WindowBreakpoints breakpoints) {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 0;
+    Spacing: 6;
+
+    when (breakpoints.IsActive(IssueBrowserBreakpoints.Wide)) {
+        Width: 240;
+    }
+}
+
+style FilterStatusColumnStyle(WindowBreakpoints breakpoints) {
+    Width: 120;
+    Spacing: 6;
+    MainShrink: 0;
+
+    when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide)) {
+        MainGrow: 1;
+    }
+}
+
+style FilterAssigneeColumnStyle(WindowBreakpoints breakpoints) {
     Width: 160;
     Spacing: 6;
     MainShrink: 0;
+
+    when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide)) {
+        MainGrow: 1;
+    }
 }
 
-style FilterBarWideStyle {
-    Spacing: 12;
-    CrossAlignment: LayoutAlignment.End;
-}
-
-style FilterBarNarrowStyle {
+style FilterSecondaryStyle(WindowBreakpoints breakpoints) {
+    Axis: LayoutAxis.Row;
     Spacing: 8;
+    MainShrink: 0;
+
+    when (breakpoints.IsActive(IssueBrowserBreakpoints.Wide)) {
+        Spacing: 12;
+    }
 }
 
 public component FilterBar(IssueBrowserState browser, IssueBrowserViewState view, Style? style = null) {
-    <Column style={Style.Empty.With(style)}>
-        if (view.IsWide) {
-        <Row style={FilterBarWideStyle}>
-            <Column style={FilterColumnStyle with { Width: 240; MainGrow: 1; }}>
-                <Text style={PresentationStyles.Caption}>Search issues</Text>
-                <TextField session={view.SearchEditor} name="issue-browser.search" onChange={browser.SetSearch} label="Search issues" />
-            </Column>
-            <Column style={FilterColumnStyle with { Width: 120; }}>
+    <Layout style={FilterBarStyle(view.Breakpoints).With(style)}>
+        <Layout style={FilterSearchColumnStyle(view.Breakpoints)}>
+            <Text style={PresentationStyles.Caption}>Search issues</Text>
+            <TextField session={view.SearchEditor} name="issue-browser.search" onChange={browser.SetSearch} label="Search issues" />
+        </Layout>
+        <Layout style={FilterSecondaryStyle(view.Breakpoints)}>
+            <Layout style={FilterStatusColumnStyle(view.Breakpoints)}>
                 <Text style={PresentationStyles.Caption}>Status</Text>
                 <TextField session={view.StatusEditor} name="issue-browser.status" onChange={browser.SetStatus} label="Status: all, open, closed" />
-            </Column>
-            <Column style={FilterColumnStyle}>
+            </Layout>
+            <Layout style={FilterAssigneeColumnStyle(view.Breakpoints)}>
                 <Text style={PresentationStyles.Caption}>Assignee</Text>
                 <TextField session={view.AssigneeEditor} name="issue-browser.assignee" onChange={browser.SetAssignee} label="Assignee: all, marta, devin, joel" />
-            </Column>
+            </Layout>
             <Button onInvoke={view.ClearFilters}>Clear filters</Button>
-        </Row>
-        } else {
-        <Column style={FilterBarNarrowStyle}>
-            <Column style={Style.Empty with { Spacing: 6; }}>
-                <Text style={PresentationStyles.Caption}>Search issues</Text>
-                <TextField session={view.SearchEditor} name="issue-browser.search" onChange={browser.SetSearch} label="Search issues" />
-            </Column>
-            <Row style={FilterBarWideStyle}>
-                <Column style={FilterColumnStyle with { Width: 120; MainGrow: 1; }}>
-                    <Text style={PresentationStyles.Caption}>Status</Text>
-                    <TextField session={view.StatusEditor} name="issue-browser.status" onChange={browser.SetStatus} label="Status: all, open, closed" />
-                </Column>
-                <Column style={FilterColumnStyle with { Width: 160; MainGrow: 1; }}>
-                    <Text style={PresentationStyles.Caption}>Assignee</Text>
-                    <TextField session={view.AssigneeEditor} name="issue-browser.assignee" onChange={browser.SetAssignee} label="Assignee: all, marta, devin, joel" />
-                </Column>
-                <Button onInvoke={view.ClearFilters}>Clear filters</Button>
-            </Row>
-        </Column>
-        }
-    </Column>
+        </Layout>
+    </Layout>
 }

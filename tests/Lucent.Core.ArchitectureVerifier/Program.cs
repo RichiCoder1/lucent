@@ -112,6 +112,7 @@ static void VerifyLuiMetadata(
         ["Button"] = 2,
         ["TextField"] = 1,
         ["TextArea"] = 1,
+        ["Layout"] = 1,
         ["Selectable"] = 3,
         ["ScrollViewport"] = 1,
         ["VirtualizedList"] = 1,
@@ -197,6 +198,7 @@ static void VerifyPropertySurface(
             ["Lucent.Core.LayoutProperties"] = new()
             {
                 ["Mode"] = "Lucent.Core.Property`1|Lucent.Core.LayoutMode",
+                ["Algorithm"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAlgorithm",
                 ["Axis"] = "Lucent.Core.Property`1|Lucent.Core.LayoutAxis",
                 ["Columns"] = "Lucent.Core.Property`1|Lucent.Core.GridTracks",
                 ["Rows"] = "Lucent.Core.Property`1|Lucent.Core.GridTracks",

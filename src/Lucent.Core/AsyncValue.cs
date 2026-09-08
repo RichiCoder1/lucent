@@ -108,7 +108,7 @@ public sealed class AsyncValue<T> : ReactiveNode
     {
         if (!_dirty)
             return;
-        CheckScopeMutationGuard();
+        CheckScopeEvaluationGuard();
         Exception? stopError = StopCurrent();
         var lease = _lease = new AsyncLease<T>(this, ++_generation);
         _dirty = false;

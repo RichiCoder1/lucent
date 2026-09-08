@@ -242,6 +242,37 @@ style PrimaryButton {
 }} onInvoke={save}>Save</Button>
 ```
 
+### Parameterized styles and conditional groups
+
+A named style can accept ordinary typed parameters. It is used as a style factory expression; reads from state objects remain live while the style is applied:
+
+```csharp
+style Pane(WindowBreakpoints breakpoints, ViewState view) {
+    MainGrow: 1;
+    MinWidth: 0;
+
+    when (!breakpoints.IsActive(AppBreakpoints.Wide) && !view.ShowDetails) {
+        Participation: ElementParticipation.Collapsed;
+    }
+
+    when (view.IsImportant) {
+        when Hover {
+            FontWeight: FontWeight.SemiBold;
+        }
+    }
+}
+
+<Layout style={Pane(view.Breakpoints, view)}>
+    <Text>Details</Text>
+</Layout>
+```
+
+`ViewState` and `AppBreakpoints` above are application types. `style Name { ... }` remains a static style value; a declaration with parentheses becomes a typed factory method. Parameters are construction-time captures, so pass a state object or live reader when its contents must change. Passing an already evaluated scalar does not turn that scalar into a live source. Each application of a factory-produced style owns its bindings and releases them with the element. Style factories themselves do not create subscriptions.
+
+`when (expression)` requires a Boolean C# expression and lowers to `Style.When(Func<bool>, Style)`. Bare `when Hover` and other interaction variants retain their existing meaning. Nested groups combine their conditions; inactive assignments stop observing their value expressions. Conditions filter eligibility without adding a new specificity tier: ordinary component/author, interaction variant and source-order precedence remains in effect. A false group reveals the previous eligible value instead of retaining its last active value. Conditions are memoized per applied group; unchanged Boolean results do not rebuild styles or remount content.
+
+The grammar, formatter and source maps preserve parameter declarations, references and nested condition expressions. Ordinary C# diagnostics, hover and completion apply at the corresponding authored spans. Named styles remain document-local; public style exports are still deferred.
+
 ### Authoring conventions
 
 - End every named, inline, and variant style assignment with `;`. A missing terminator is a recoverable parse error so later assignments remain available to diagnostics and editor features.
@@ -334,7 +365,7 @@ Wrapped text uses the final assigned inline width. `TextWrap.WordWithGraphemeFal
 
 A `ResponsiveConstraints` value is hoisted with application or component state and passed to `ResponsiveContainer`. Its `Current.Width` and `Current.Height` are logical content-box units. Retained styles can bind `Mode`, tracks, sizing and `VisualProperties.Participation` to these values; switching Grid/Flex or collapsing a child does not itself remount that child's component. A branch that changes the responsive container's own assigned constraints after the bounded correction pass fails with a feedback diagnostic. Finite nested responsive containers are supported through at most eight structural-discovery rounds; recursive discovery fails explicitly. Virtualized viewports inside their branches may mount or resize; a post-branch assignment pass supplies the actual cell bounds before rows are realized.
 
-Child styles supply `GridPlacement` to a Grid parent and Flex sizing contributions to a Flex parent. Grid placement remains inactive while a parent uses Flex, and is validated against the declared tracks when Grid is selected. The [style-driven layout discussion](plans/style-driven-layout-draft.md) distinguishes these current mechanisms from a proposed generic `Layout` recipe and future container-condition syntax.
+Child styles supply `GridPlacement` to a Grid parent and Flex sizing contributions to a Flex parent. Grid placement remains inactive while a parent uses Flex, and is validated against the declared tracks when Grid is selected. The accepted [style-driven layout design](plans/style-driven-layout.md) extends these mechanisms with a generic `Layout`, typed custom algorithms, parameterized styles and named window breakpoints. Container queries are deferred.
 
 ~~~csharp
 using var constraints = new ResponsiveConstraints(applicationScope);
@@ -354,6 +385,33 @@ var shell = Components.ResponsiveContainer(
 ~~~
 
 Brush equality/hash/dumps are canonical. Gradient stops are finite, ordered, and box-relative; nested opacity multiplies and one group covers background, text, and descendants, including visible overflow when clipping is disabled. Brush alpha affects only that paint. Dumps contain no renderer object/cache identity.
+
+### Named window breakpoints
+
+Declare responsive thresholds once in an application type:
+
+```csharp
+internal static class AppBreakpoints
+{
+    internal static readonly Breakpoint Medium = new("medium", 840);
+    internal static readonly Breakpoint Wide = new("wide", 1060);
+    internal static readonly BreakpointSet All = BreakpointSet.Create(Medium, Wide);
+}
+```
+
+Create `new WindowBreakpoints(owner, AppBreakpoints.All)` in the component/application owner, pass it to parameterized styles, and register it on one retained `<Layout breakpoints={view.Breakpoints}>`. `IsActive(AppBreakpoints.Medium)` means the logical window width is at least 840; Wide is at least 1060. Rules are cumulative, so a later Wide style group can refine Medium assignments. Below the first threshold the base style applies. A medium-only condition combines Medium with `!Wide`.
+
+Breakpoint sets validate ascending unique thresholds and unique names. A reader rejects descriptors outside its set and multiple established mounts. Separate windows own separate readers. `Width` exposes the current logical window width for diagnostics; `IsActive` is the intended style input. The framework assigns breakpoint state before arranging the scene, independently of DPI and the padding or size of the element carrying the registration.
+
+Window breakpoints are distinct from assigned-container constraints. Resizing a split pane without resizing the window does not change them. Container queries, new containment rules and nearest-container lookup are deferred. The existing `ResponsiveConstraints` contract remains compatible for explicit advanced uses.
+
+### Generic layout and custom algorithms
+
+`Layout` owns retained content with a default Flex/Column arrangement and no implicit growth. Configure its arrangement through styles. Row and Column remain convenient presets. `Algorithm: LayoutAlgorithms.Grid` or `LayoutAlgorithms.Flex` explicitly selects a built-in strategy; a null Algorithm uses the existing Mode property. Explicit Algorithm wins when both are authored. All existing track, gap, alignment, min/max, wrap and child placement properties continue to apply.
+
+A custom `LayoutAlgorithm` receives a restricted `LayoutAlgorithmContext`, reads typed child contributions, measures participating direct children, and returns desired size plus their placements. The framework validates measurement budgets, output geometry and context lifetime. Algorithm-specific state belongs to the container and is disposed on strategy change or unmount. Algorithms cannot mount children or access native windows. Virtualized realization remains a separate contract; a virtualized viewport is measured as one child, not expanded into its entire source.
+
+`SplitPane` exposes `firstStyle`, `secondStyle` and `splitterStyle` so responsive styles can collapse a pane and the handle without replacing either pane's content. For a visible compact first pane, clear its preferred Width with `Width: null` and set `MainGrow: 1`; the preferred extent remains in SplitPaneState for the return to a wider window. Focus, drag, keyboard and semantic range actions remain owned by the splitter behavior.
 
 ### Application commands and wheel scrolling
 

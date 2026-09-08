@@ -224,24 +224,50 @@ public static class LuiFormatter
     private static void Style(StringBuilder output, LuiStyleSyntax style, int indent, string nl)
     {
         Pad(output, indent);
-        output.Append("style ").Append(style.Name.Text).Append(" {").Append(nl);
-        foreach (var member in style.Members)
+        output.Append("style ").Append(style.Name.Text);
+        if (!style.OpenParameters.IsMissing)
         {
-            if (member is LuiStyleAssignmentSyntax styleAssignment)
-                Assignment(output, styleAssignment, indent + 1, nl);
-            else
+            output.Append('(');
+            for (var index = 0; index < style.Parameters.Count; index++)
             {
-                var group = (LuiVariantGroupSyntax)member;
-                Pad(output, indent + 1);
-                output.Append("when ").Append(group.Condition.Text).Append(" {").Append(nl);
-                foreach (var groupAssignment in group.Assignments)
-                    Assignment(output, groupAssignment, indent + 2, nl);
-                Pad(output, indent + 1);
-                output.Append('}').Append(nl);
+                if (index != 0)
+                    output.Append(", ");
+                output.Append(style.Parameters[index].DeclarationText);
             }
+            output.Append(')');
         }
+        output.Append(" {").Append(nl);
+        StyleMembers(output, style.Members, indent + 1, nl);
         Pad(output, indent);
         output.Append('}').Append(nl);
+    }
+
+    private static void StyleMembers(
+        StringBuilder output,
+        IReadOnlyList<LuiStyleMemberSyntax> members,
+        int indent,
+        string nl
+    )
+    {
+        foreach (var member in members)
+        {
+            if (member is LuiStyleAssignmentSyntax assignment)
+            {
+                Assignment(output, assignment, indent, nl);
+                continue;
+            }
+            var group = (LuiVariantGroupSyntax)member;
+            Pad(output, indent);
+            output.Append("when ");
+            if (group.ConditionExpression is not null)
+                output.Append('(').Append(group.Condition.Text).Append(')');
+            else
+                output.Append(group.Condition.Text);
+            output.Append(" {").Append(nl);
+            StyleMembers(output, group.Members, indent + 1, nl);
+            Pad(output, indent);
+            output.Append('}').Append(nl);
+        }
     }
 
     private static void Assignment(
@@ -275,34 +301,38 @@ public static class LuiFormatter
                 return;
             }
             output.Append("{ ");
-            for (var i = 0; i < style.Members.Count; i++)
-            {
-                if (i != 0)
-                    output.Append(' ');
-                if (style.Members[i] is LuiStyleAssignmentSyntax assignment)
-                    output
-                        .Append(assignment.Property.Text)
-                        .Append(": ")
-                        .Append(assignment.Expression.Text)
-                        .Append(';');
-                else
-                {
-                    var group = (LuiVariantGroupSyntax)style.Members[i];
-                    output.Append("when ").Append(group.Condition.Text).Append(" { ");
-                    for (var j = 0; j < group.Assignments.Count; j++)
-                    {
-                        if (j != 0)
-                            output.Append(' ');
-                        output
-                            .Append(group.Assignments[j].Property.Text)
-                            .Append(": ")
-                            .Append(group.Assignments[j].Expression.Text)
-                            .Append(';');
-                    }
-                    output.Append(" }");
-                }
-            }
+            InlineStyleMembers(output, style.Members);
             output.Append(" }}");
+        }
+    }
+
+    private static void InlineStyleMembers(
+        StringBuilder output,
+        IReadOnlyList<LuiStyleMemberSyntax> members
+    )
+    {
+        for (var index = 0; index < members.Count; index++)
+        {
+            if (index != 0)
+                output.Append(' ');
+            if (members[index] is LuiStyleAssignmentSyntax assignment)
+            {
+                output
+                    .Append(assignment.Property.Text)
+                    .Append(": ")
+                    .Append(assignment.Expression.Text)
+                    .Append(';');
+                continue;
+            }
+            var group = (LuiVariantGroupSyntax)members[index];
+            output.Append("when ");
+            if (group.ConditionExpression is not null)
+                output.Append('(').Append(group.Condition.Text).Append(')');
+            else
+                output.Append(group.Condition.Text);
+            output.Append(" { ");
+            InlineStyleMembers(output, group.Members);
+            output.Append(" }");
         }
     }
 

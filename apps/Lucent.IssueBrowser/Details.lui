@@ -1,17 +1,35 @@
 namespace Lucent.IssueBrowser;
 
+style DetailsContentStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 16;
+    MainGrow: 1;
+    MinHeight: 0;
+    Clip: true;
+}
+
+style DetailsViewportStyle {
+    MainGrow: 1;
+    MinHeight: 0;
+    Clip: true;
+}
+
+style DetailsActionsStyle {
+    Axis: LayoutAxis.Row;
+}
+
 public component Details(IssueBrowserState browser, Func<BrowserIssue> issue, IssueBrowserViewState view) {
-    <Column style={Style.Empty with { Spacing: 16; MainGrow: 1; MinHeight: 0; Clip: true; }}>
+    <Layout style={DetailsContentStyle}>
         <Text style={PresentationStyles.Caption} content={() => "ISSUE #" + issue().Number} />
         <Text style={PresentationStyles.Title with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => issue().Title} name="issue-browser.details-title" />
         <Status style={PresentationStyles.Secondary} content={() => issue().Status + " · " + issue().Assignee + " · updated " + FormatUpdated(issue()) + (browser.SelectedMutationMessage is { } message ? " · " + message : "")} name="issue-browser.details-status" />
         <Text style={PresentationStyles.Caption with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => issue().Labels} />
         <Divider />
-        <ScrollViewport viewport={view.DetailViewport} label="Issue details" style={Style.Empty with { MainGrow: 1; MinHeight: 0; Clip: true; }}>
+        <ScrollViewport viewport={view.DetailViewport} label="Issue details" style={DetailsViewportStyle}>
             <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => issue().Body} name="issue-browser.details-body" />
         </ScrollViewport>
-        <Row>
+        <Layout style={DetailsActionsStyle}>
             <Button onInvoke={browser.ToggleSelectedStatus} name="issue-browser.status-action">{issue().Status == "open" ? "Close issue" : "Reopen issue"}</Button>
-        </Row>
-    </Column>
+        </Layout>
+    </Layout>
 }

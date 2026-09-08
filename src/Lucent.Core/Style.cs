@@ -43,6 +43,14 @@ public sealed class Style
         return new([.. _nodes, new VariantNode(when, style)]);
     }
 
+    /// <summary>Returns a new style whose nested settings apply while the reactive condition is true.</summary>
+    public Style When(Func<bool> condition, Style style)
+    {
+        ArgumentNullException.ThrowIfNull(condition);
+        ArgumentNullException.ThrowIfNull(style);
+        return new([.. _nodes, new ConditionNode(new(condition), style)]);
+    }
+
     /// <summary>Combines styles in order; settings in later styles override earlier settings.</summary>
     public static Style Compose(params Style[] styles)
     {
@@ -59,20 +67,39 @@ public sealed class Style
     internal IEnumerable<FlatAssignment> Flatten()
     {
         var ordinal = 0;
-        foreach (var assignment in Flatten(VariantState.None))
+        foreach (var assignment in Flatten(VariantState.None, []))
             yield return assignment with
             {
                 Ordinal = ordinal++,
             };
     }
 
-    private IEnumerable<FlatAssignment> Flatten(VariantState condition)
+    private IEnumerable<FlatAssignment> Flatten(VariantState condition, StyleCondition[] conditions)
     {
         foreach (var node in _nodes)
             if (node is AssignmentNode assignmentNode)
-                yield return new FlatAssignment(assignmentNode.Assignment, condition, 0);
+                yield return new FlatAssignment(
+                    assignmentNode.Assignment,
+                    condition,
+                    conditions,
+                    [],
+                    0
+                );
             else if (node is VariantNode variant)
-                foreach (var assignment in variant.Style.Flatten(condition | variant.Condition))
+                foreach (
+                    var assignment in variant.Style.Flatten(
+                        condition | variant.Condition,
+                        conditions
+                    )
+                )
+                    yield return assignment;
+            else if (node is ConditionNode conditional)
+                foreach (
+                    var assignment in conditional.Style.Flatten(
+                        condition,
+                        [.. conditions, conditional.Condition]
+                    )
+                )
                     yield return assignment;
     }
 
@@ -83,6 +110,13 @@ public sealed class Style
     private sealed record AssignmentNode(IAssignment Assignment) : Node;
 
     private sealed record VariantNode(VariantState Condition, Style Style) : Node;
+
+    private sealed record ConditionNode(StyleCondition Condition, Style Style) : Node;
+}
+
+internal sealed class StyleCondition(Func<bool> read)
+{
+    internal Func<bool> Read { get; } = read;
 }
 
 /// <summary>Specifies how long an eligible property takes to change between values.</summary>
@@ -141,7 +175,7 @@ internal interface IAssignment
 
 internal interface IBindingAssignment
 {
-    IAssignment Materialize(ElementPresentation presentation, VariantState condition, int ordinal);
+    IAssignment Materialize(ElementPresentation presentation, Func<bool> active, int ordinal);
 }
 
 internal sealed class Assignment<T> : IAssignment
@@ -200,9 +234,9 @@ internal sealed class BindingAssignment<T> : IAssignment, IBindingAssignment
 
     public IAssignment Materialize(
         ElementPresentation presentation,
-        VariantState condition,
+        Func<bool> active,
         int ordinal
-    ) => new BoundAssignment<T>(presentation, _property, _read, condition, ordinal);
+    ) => new BoundAssignment<T>(presentation, _property, _read, active, ordinal);
 }
 
 internal sealed class BoundAssignment<T> : IAssignment
@@ -214,7 +248,7 @@ internal sealed class BoundAssignment<T> : IAssignment
         ElementPresentation presentation,
         Property<T> property,
         Func<T> read,
-        VariantState condition,
+        Func<bool> active,
         int ordinal
     )
     {
@@ -230,11 +264,13 @@ internal sealed class BoundAssignment<T> : IAssignment
         _ = presentation.Element.Scope.Effect(
             () =>
             {
-                if (presentation.IsActive(condition))
+                if (active())
                 {
                     _value.Value = read();
                     _available.Value = true;
                 }
+                else
+                    _available.Value = false;
             },
             presentation.Element.Name + ".bind-effect." + property.Name + "." + ordinal
         );
@@ -254,5 +290,7 @@ internal sealed class BoundAssignment<T> : IAssignment
 internal readonly record struct FlatAssignment(
     IAssignment Assignment,
     VariantState Condition,
+    StyleCondition[] Conditions,
+    Func<bool>[] MountedConditions,
     int Ordinal
 );

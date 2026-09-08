@@ -1,10 +1,29 @@
 namespace Lucent.IssueBrowser;
 
-public component IssueRow(IssueBrowserState browser, Func<BrowserIssue> issue, IssueBrowserViewState? view = null) {
+style IssueRowBodyStyle {
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+    MaxLines: 1;
+    Overflow: TextOverflow.Ellipsis;
+}
+
+style IssueRowCaptionStyle {
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+    MaxLines: 1;
+    Overflow: TextOverflow.Ellipsis;
+}
+
+style IssueRowLayoutStyle(IssueBrowserViewState view) {
+    Axis: LayoutAxis.Column;
+    Spacing: 4;
+    CrossAlignment: LayoutAlignment.Stretch;
+    Height: DensityMetrics.For(view.Density).RowHeight + DensityMetrics.For(view.Density).FontSize + DensityMetrics.For(view.Density).Spacing;
+}
+
+public component IssueRow(IssueBrowserState browser, Func<BrowserIssue> issue, IssueBrowserViewState view) {
     <ContextMenu menu={() => IssueRowMenu(browser, issue, view)} name="issue-browser.issue-row-menu">
-        <Selectable label={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => OpenIssue(browser, issue().Number, view)} style={IssueRowLayout(view)}>
-            <Text style={IssueRowBodyStyle} content={() => issue().Title} />
-            <Text style={IssueRowCaptionStyle} content={() => "#" + issue().Number + " · " + issue().Status + " · " + issue().Assignee} />
+        <Selectable label={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => OpenIssue(browser, issue().Number, view)} style={IssueRowLayoutStyle(view)}>
+            <Text style={PresentationStyles.Body.With(IssueRowBodyStyle)} content={() => issue().Title} />
+            <Text style={PresentationStyles.Caption.With(IssueRowCaptionStyle)} content={() => "#" + issue().Number + " · " + issue().Status + " · " + issue().Assignee} />
         </Selectable>
     </ContextMenu>
 }

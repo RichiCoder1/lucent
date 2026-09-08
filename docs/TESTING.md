@@ -22,6 +22,8 @@ The affected-file helper includes relevant downstream suites and falls back to a
 
 For reusable component/application tests without visible windows, use [the headless harness](HEADLESS-TESTING.md). `Lucent.Testing.Tests` is part of the default managed suite; `Lucent.Testing.Skia` adds optional real shaping and frame capture. Windows transport checks remain separate.
 
+The style-driven layout slice combines Core contracts for algorithms, conditional style ownership and named window breakpoints with compiled `.lui` and consumer tests. Keep thresholds in the application's named BreakpointSet and test just below, at and above each boundary, including logical-size-preserving DPI changes and wide/narrow/wide identity restoration. Resizing an internal pane must not change a window breakpoint. Custom algorithms need invalid-output, measurement-budget, expired-context and per-container state tests; their virtualized children remain realization boundaries. `Test-HeadlessPackages.ps1` compiles parameterized styles using the packaged SDK and checks breakpoint-selected Grid/Flex geometry plus retained editor values against packaged runtime/testing libraries.
+
 | Suite | Use it for |
 | --- | --- |
 | `Published` | NativeAOT packaging, startup/close, presentation, desktop interaction, and UI Automation behavior. |

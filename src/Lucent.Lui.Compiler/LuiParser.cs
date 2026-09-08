@@ -218,7 +218,12 @@ public static class LuiParser
             );
         }
 
-        private IReadOnlyList<LuiParameterSyntax> Parameters(int start, int end)
+        private IReadOnlyList<LuiParameterSyntax> Parameters(
+            int start,
+            int end,
+            string declarationKind = "Component",
+            bool allowDefaultContent = true
+        )
         {
             var raw = text.Substring(start, Math.Max(0, end - start));
             var list = SyntaxFactory.ParseParameterList("(" + raw + ")");
@@ -251,7 +256,10 @@ public static class LuiParser
                     && attributeName.Identifier.ValueText == "DefaultContent"
                     && parameter.AttributeLists[0].Attributes[0].ArgumentList == null;
                 if (
-                    (parameter.AttributeLists.Count != 0 && !defaultContent)
+                    (
+                        parameter.AttributeLists.Count != 0
+                        && (!defaultContent || !allowDefaultContent)
+                    )
                     || parameter.Modifiers.Any(modifier =>
                         modifier.IsKind(SyntaxKind.RefKeyword)
                         || modifier.IsKind(SyntaxKind.OutKeyword)
@@ -261,13 +269,18 @@ public static class LuiParser
                 )
                     Error(
                         "LUI3004",
-                        "Component parameters support only one [DefaultContent] marker and cannot have ref, out, in, or params modifiers.",
+                        allowDefaultContent
+                            ? "Component parameters support only one [DefaultContent] marker and cannot have ref, out, in, or params modifiers."
+                            : declarationKind
+                                + " parameters do not support attributes or ref, out, in, or params modifiers.",
                         new LuiSpan(parameterStart, parameter.Span.Length)
                     );
-                if (defaultContent && ++defaultContentCount > 1)
+                if (allowDefaultContent && defaultContent && ++defaultContentCount > 1)
                     Error(
                         "LUI3004",
-                        "A component may declare only one [DefaultContent] parameter.",
+                        "A "
+                            + declarationKind.ToLowerInvariant()
+                            + " may declare only one [DefaultContent] parameter.",
                         new LuiSpan(parameterStart, parameter.Span.Length)
                     );
                 var type = parameter.Type!;
@@ -306,6 +319,19 @@ public static class LuiParser
             var start = position;
             var styleKeyword = ExpectWord("style");
             var name = Name("style name");
+            White();
+            var openParameters = Missing("(");
+            var closeParameters = Missing(")");
+            IReadOnlyList<LuiParameterSyntax> parameters = [];
+            if (Current == '(')
+            {
+                openParameters = Expect('(');
+                var parameterStart = position;
+                var parameterEnd = IslandScanner.End(text, position, ')');
+                position = parameterEnd;
+                parameters = Parameters(parameterStart, parameterEnd, "Style", false);
+                closeParameters = Expect(')');
+            }
             var open = Expect('{');
             var members = open.IsMissing ? Array.Empty<LuiStyleMemberSyntax>() : StyleMembers('}');
             var close = open.IsMissing ? Missing("}") : Expect('}');
@@ -315,7 +341,10 @@ public static class LuiParser
                 name,
                 open,
                 members,
-                close
+                close,
+                parameters,
+                openParameters,
+                closeParameters
             );
         }
 
@@ -331,21 +360,47 @@ public static class LuiParser
                 if (Word("when"))
                 {
                     var when = Token("when", start, 4);
-                    var variant = VariantCondition();
+                    White();
+                    LuiToken condition;
+                    LuiExpressionSyntax? conditionExpression = null;
+                    LuiToken? openCondition = null;
+                    LuiToken? closeCondition = null;
+                    if (Current == '(')
+                    {
+                        openCondition = Expect('(');
+                        var conditionStart = position;
+                        var conditionEnd = IslandScanner.End(text, position, ')');
+                        position = conditionEnd;
+                        conditionExpression = Expression(
+                            new LuiSpan(conditionStart, conditionEnd - conditionStart),
+                            text.Substring(conditionStart, conditionEnd - conditionStart)
+                        );
+                        condition = new LuiToken(
+                            conditionExpression.Text,
+                            conditionExpression.Span,
+                            conditionExpression.Text.Length == 0
+                        );
+                        closeCondition = Expect(')');
+                    }
+                    else
+                        condition = VariantCondition();
                     var whenOpen = Expect('{');
                     if (!whenOpen.IsMissing && EnterNesting())
                     {
-                        var inner = StyleMembers('}').OfType<LuiStyleAssignmentSyntax>().ToArray();
+                        var inner = StyleMembers('}');
                         var whenClose = Expect('}');
                         ExitNesting();
                         result.Add(
                             new LuiVariantGroupSyntax(
                                 LuiSpan.From(start, position),
                                 when,
-                                variant,
+                                condition,
                                 whenOpen,
                                 inner,
-                                whenClose
+                                whenClose,
+                                conditionExpression,
+                                openCondition,
+                                closeCondition
                             )
                         );
                     }
@@ -1092,70 +1147,8 @@ public static class LuiParser
             var members = new List<LuiStyleMemberSyntax>();
             var p = tokens[with + 1].Span.End;
             var close = tokens[tokens.Length - 1].SpanStart;
-            while (p < close)
-            {
-                Skip(content, ref p);
-                if (p >= close)
-                    break;
-                if (content.AsSpan(p).StartsWith("when ".AsSpan(), StringComparison.Ordinal))
-                {
-                    var groupStart = p;
-                    p += 4;
-                    Skip(content, ref p);
-                    var variantStart = p;
-                    while (p < close && content[p] != '{')
-                        p++;
-                    var variantText = content.Substring(variantStart, p - variantStart).Trim();
-                    var variantLeading = content
-                        .Substring(variantStart, p - variantStart)
-                        .IndexOf(variantText, StringComparison.Ordinal);
-                    if (variantText.Length == 0 || p >= close || content[p++] != '{')
-                        return false;
-                    var variant = new LuiToken(
-                        variantText,
-                        new LuiSpan(
-                            contentStart + variantStart + variantLeading,
-                            variantText.Length
-                        ),
-                        false
-                    );
-                    var groupOpen = new LuiToken("{", new LuiSpan(contentStart + p - 1, 1), false);
-                    var assignments = new List<LuiStyleAssignmentSyntax>();
-                    while (p < close)
-                    {
-                        Skip(content, ref p);
-                        if (p < close && content[p] == '}')
-                            break;
-                        if (
-                            !InlineAssignment(
-                                content,
-                                contentStart,
-                                close,
-                                ref p,
-                                out var assignment
-                            )
-                        )
-                            return false;
-                        assignments.Add(assignment);
-                    }
-                    if (p >= close || content[p++] != '}')
-                        return false;
-                    members.Add(
-                        new LuiVariantGroupSyntax(
-                            new LuiSpan(contentStart + groupStart, p - groupStart),
-                            new LuiToken("when", new LuiSpan(contentStart + groupStart, 4), false),
-                            variant,
-                            groupOpen,
-                            assignments,
-                            new LuiToken("}", new LuiSpan(contentStart + p - 1, 1), false)
-                        )
-                    );
-                    continue;
-                }
-                if (!InlineAssignment(content, contentStart, close, ref p, out var normal))
-                    return false;
-                members.Add(normal);
-            }
+            if (!InlineStyleMembers(content, contentStart, close, ref p, members))
+                return false;
             if (members.Count == 0)
                 return false;
             var baseStart = content.IndexOf(baseText, StringComparison.Ordinal);
@@ -1182,6 +1175,124 @@ public static class LuiParser
                 outerClose
             );
             return true;
+        }
+
+        private bool InlineStyleMembers(
+            string content,
+            int contentStart,
+            int close,
+            ref int p,
+            List<LuiStyleMemberSyntax> members
+        )
+        {
+            while (p < close)
+            {
+                Skip(content, ref p);
+                if (p >= close || content[p] == '}')
+                    return true;
+                if (StartsWord(content, p, "when"))
+                {
+                    var groupStart = p;
+                    p += "when".Length;
+                    Skip(content, ref p);
+                    LuiToken condition;
+                    LuiExpressionSyntax? conditionExpression = null;
+                    LuiToken? openCondition = null;
+                    LuiToken? closeCondition = null;
+                    if (p < close && content[p] == '(')
+                    {
+                        openCondition = new LuiToken("(", new LuiSpan(contentStart + p, 1), false);
+                        p++;
+                        var conditionStart = p;
+                        var conditionEnd = IslandScanner.End(content, p, ')');
+                        if (conditionEnd >= close)
+                            return false;
+                        conditionExpression = Expression(
+                            new LuiSpan(
+                                contentStart + conditionStart,
+                                conditionEnd - conditionStart
+                            ),
+                            content.Substring(conditionStart, conditionEnd - conditionStart)
+                        );
+                        condition = new LuiToken(
+                            conditionExpression.Text,
+                            conditionExpression.Span,
+                            conditionExpression.Text.Length == 0
+                        );
+                        p = conditionEnd;
+                        closeCondition = new LuiToken(")", new LuiSpan(contentStart + p, 1), false);
+                        p++;
+                    }
+                    else
+                    {
+                        var conditionStart = p;
+                        while (p < close && content[p] != '{')
+                            p++;
+                        var conditionText = content
+                            .Substring(conditionStart, p - conditionStart)
+                            .Trim();
+                        var leading = content
+                            .Substring(conditionStart, p - conditionStart)
+                            .IndexOf(conditionText, StringComparison.Ordinal);
+                        if (conditionText.Length == 0)
+                            return false;
+                        condition = new LuiToken(
+                            conditionText,
+                            new LuiSpan(
+                                contentStart + conditionStart + leading,
+                                conditionText.Length
+                            ),
+                            false
+                        );
+                    }
+                    Skip(content, ref p);
+                    if (p >= close || content[p] != '{')
+                        return false;
+                    var groupOpen = new LuiToken("{", new LuiSpan(contentStart + p, 1), false);
+                    p++;
+                    var nested = new List<LuiStyleMemberSyntax>();
+                    if (!InlineStyleMembers(content, contentStart, close, ref p, nested))
+                        return false;
+                    if (p >= close || content[p] != '}')
+                        return false;
+                    var groupClose = new LuiToken("}", new LuiSpan(contentStart + p, 1), false);
+                    p++;
+                    members.Add(
+                        new LuiVariantGroupSyntax(
+                            new LuiSpan(contentStart + groupStart, p - groupStart),
+                            new LuiToken(
+                                "when",
+                                new LuiSpan(contentStart + groupStart, "when".Length),
+                                false
+                            ),
+                            condition,
+                            groupOpen,
+                            nested,
+                            groupClose,
+                            conditionExpression,
+                            openCondition,
+                            closeCondition
+                        )
+                    );
+                    continue;
+                }
+                if (!InlineAssignment(content, contentStart, close, ref p, out var normal))
+                    return false;
+                members.Add(normal);
+            }
+            return true;
+        }
+
+        private static bool StartsWord(string source, int start, string word)
+        {
+            if (
+                start < 0
+                || start + word.Length > source.Length
+                || !source.AsSpan(start, word.Length).SequenceEqual(word.AsSpan())
+            )
+                return false;
+            return start + word.Length == source.Length
+                || !WordCharacter(source[start + word.Length]);
         }
 
         private bool InlineAssignment(

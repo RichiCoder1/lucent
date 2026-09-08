@@ -24,6 +24,22 @@ _Avoid_: Trace, log bundle, telemetry export
 An immutable set of typed assignments that determines an element's arrangement and visual representation. It does not own interaction, semantics, lifecycle, or content structure.
 _Avoid_: CSS rule, property bag, modifier
 
+**Layout container**:
+A retained owner of child content whose arrangement is selected through style. Changing its arrangement does not change the ownership of those children.
+_Avoid_: Responsive branch, layout instance
+
+**Layout strategy**:
+A measurement and arrangement policy that consumes available constraints and child layout contributions. It does not own child content or interactive behavior.
+_Avoid_: Container, layout engine
+
+**Window breakpoint**:
+A named minimum logical window width used to select responsive style assignments. It is independent of device scale and of the space assigned to any nested container.
+_Avoid_: Container query, responsive route
+
+**Child layout contribution**:
+Typed style information that a parent's layout strategy uses to size or place a child, such as a grid position or a growth weight.
+_Avoid_: Parent mutation, attached-property bag
+
 **Behavior**:
 A reusable interaction contract that adds input, focus, semantics, and lifecycle ownership to an element without changing its content structure.
 _Avoid_: Control subclass, event bundle, style

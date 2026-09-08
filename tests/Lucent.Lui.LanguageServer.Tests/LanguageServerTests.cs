@@ -2374,6 +2374,67 @@ public component MenuButton() {
     }
 
     [TestMethod]
+    public async Task ParameterizedStylesExposeSymbolsCompletionAndHover()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-parameterized-style-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            var projectPath = Path.Combine(root, "ParameterizedStyle.csproj");
+            var uri = new Uri(Path.Combine(root, "ParameterizedStyle.lui"));
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                    + core
+                    + "\" /><AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            var source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static Lucent.Core.VisualProperties;
+using static Lucent.Core.LayoutProperties;
+internal component Example(float width) { <Row style={Workspace(width)} /> }
+style Workspace(float width) {
+    Width: width;
+    when (width >= 820) { Opacity: .5f; }
+}
+""";
+            await File.WriteAllTextAsync(uri.LocalPath, source);
+            using var context = await LuiProjectContext.LoadAsync(
+                projectPath,
+                CancellationToken.None
+            );
+            var published = await context.CompileAsync(uri, CancellationToken.None);
+            var symbols = await context.DocumentSymbolsAsync(uri, CancellationToken.None);
+            var styleOffset = source.IndexOf("Workspace(width)", StringComparison.Ordinal);
+            var completions = await context.CompletionsAsync(
+                uri,
+                styleOffset,
+                CancellationToken.None
+            );
+            var hover = await context.HoverAsync(uri, styleOffset, CancellationToken.None);
+            var style = symbols!.Single(symbol => symbol.Name == "Workspace");
+            Assert(
+                published is not null
+                    && style.Children.Any(child => child.Name == "width")
+                    && style.Children.Any(child => child.Name == "when (width >= 820)")
+                    && completions.Any(item => item.Label == "Workspace" && item.Kind == 2)
+                    && hover is not null,
+                "parameterized style tooling lost compilation, declaration symbols, method completion, or hover information."
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task RealIssueBrowserProjectSupportsFormattingNavigationAndCompletion()
     {
         var projectPath = Path.GetFullPath("apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj");
@@ -2390,7 +2451,7 @@ public component MenuButton() {
             var header = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/Header.lui"));
             var headerText = await File.ReadAllTextAsync(header.LocalPath);
             var filterBar = headerText.IndexOf("FilterBar", StringComparison.Ordinal);
-            var column = headerText.IndexOf("Column", StringComparison.Ordinal);
+            var layoutTag = headerText.IndexOf("<Layout", StringComparison.Ordinal);
             var buttonAttribute = headerText.IndexOf("onInvoke", StringComparison.Ordinal);
             var styleProperty = headerText.IndexOf("Width", StringComparison.Ordinal);
             var styleReference = headerText.LastIndexOf(
@@ -2423,77 +2484,108 @@ public component MenuButton() {
                         .Label.Contains("Button", StringComparison.Ordinal),
                 "signature help did not map named attributes and default content to bound parameter ordinals."
             );
+            Assert(layoutTag >= 0, "Header.lui no longer contains an authored generic Layout tag.");
             var tagCompletions = await issueBrowser.CompletionsAsync(
                 header,
-                column,
+                layoutTag + 1,
                 CancellationToken.None
             );
             Assert(
-                tagCompletions.Any(item => item.Label == "Column")
+                tagCompletions.Any(item => item.Label == "Layout")
                     && tagCompletions.Any(item => item.Label == "Row"),
-                "Header.lui tag completion omitted evaluated component methods."
+                "Header.lui tag completion omitted evaluated Layout or Row component methods."
             );
-            var columnDeclarationPath = Path.GetFullPath("src/Lucent.Core/Components.cs");
-            var columnDeclaration = (await File.ReadAllTextAsync(columnDeclarationPath)).IndexOf(
-                "Column",
+            var issueBrowserRoot = new Uri(
+                Path.GetFullPath("apps/Lucent.IssueBrowser/IssueBrowser.lui")
+            );
+            var issueBrowserRootText = await File.ReadAllTextAsync(issueBrowserRoot.LocalPath);
+            var layout = issueBrowserRootText.IndexOf("<Layout", StringComparison.Ordinal);
+            Assert(
+                layout >= 0,
+                "IssueBrowser.lui no longer contains the authored generic Layout root."
+            );
+            var layoutPosition = layout + 1;
+            var layoutCompletions = await issueBrowser.CompletionsAsync(
+                issueBrowserRoot,
+                layoutPosition,
+                CancellationToken.None
+            );
+            Assert(
+                layoutCompletions.Any(item => item.Label == "Layout" && item.Kind == 2),
+                "IssueBrowser.lui tag completion omitted the evaluated generic Layout component."
+            );
+            var layoutDeclarationPath = Path.GetFullPath("src/Lucent.Core/Components.cs");
+            var coreComponentsText = await File.ReadAllTextAsync(layoutDeclarationPath);
+            var layoutDeclaration = coreComponentsText.IndexOf(
+                "ComponentRecipe Layout(",
                 StringComparison.Ordinal
             );
-            var columnReferences = await issueBrowser.ReferencesAsync(
-                header,
-                column,
+            Assert(
+                layoutDeclaration >= 0,
+                "Core Components.cs no longer contains the public Layout component declaration."
+            );
+            layoutDeclaration += "ComponentRecipe ".Length;
+            var layoutReferences = await issueBrowser.ReferencesAsync(
+                issueBrowserRoot,
+                layoutPosition,
                 true,
                 CancellationToken.None
             );
-            var columnRename = await issueBrowser.RenameAsync(
-                header,
-                column,
-                "Vertical",
+            var layoutRename = await issueBrowser.RenameAsync(
+                issueBrowserRoot,
+                layoutPosition,
+                "LayoutReplacement",
                 CancellationToken.None
             );
-            var expectedColumnLocations = new HashSet<(Uri Uri, LuiSpan Span)>
+            var expectedLayoutLocations = new HashSet<(Uri Uri, LuiSpan Span)>
             {
-                (new Uri(columnDeclarationPath), new LuiSpan(columnDeclaration, "Column".Length)),
+                (new Uri(layoutDeclarationPath), new LuiSpan(layoutDeclaration, "Layout".Length)),
             };
             foreach (var path in Directory.GetFiles("apps/Lucent.IssueBrowser", "*.lui"))
             {
                 var text = await File.ReadAllTextAsync(path);
                 var start = 0;
-                while ((start = text.IndexOf("Column", start, StringComparison.Ordinal)) >= 0)
+                while ((start = text.IndexOf("Layout", start, StringComparison.Ordinal)) >= 0)
                 {
-                    if (
-                        text[start - 1] == '<'
-                        || (text[start - 2] == '<' && text[start - 1] == '/')
-                    )
-                        expectedColumnLocations.Add(
-                            (new Uri(Path.GetFullPath(path)), new LuiSpan(start, 6))
+                    var isOpeningTag = start > 0 && text[start - 1] == '<';
+                    var isClosingTag =
+                        start > 1 && text[start - 2] == '<' && text[start - 1] == '/';
+                    var end = start + "Layout".Length;
+                    var hasTagBoundary =
+                        end == text.Length
+                        || char.IsWhiteSpace(text[end])
+                        || text[end] is '/' or '>';
+                    if ((isOpeningTag || isClosingTag) && hasTagBoundary)
+                        expectedLayoutLocations.Add(
+                            (new Uri(Path.GetFullPath(path)), new LuiSpan(start, "Layout".Length))
                         );
-                    start += 6;
+                    start = end;
                 }
             }
-            var actualColumnLocations = columnReferences
+            var actualLayoutLocations = layoutReferences
                 ?.Locations.Select(location => (location.Uri, location.Span))
                 .ToHashSet();
-            var actualColumnEdits = columnRename
+            var actualLayoutEdits = layoutRename
                 ?.Edits.SelectMany(edit => edit.Spans.Select(span => (edit.Uri, span)))
                 .ToHashSet();
-            var missingColumnReferences = expectedColumnLocations
-                .Except(actualColumnLocations ?? [])
+            var missingLayoutReferences = expectedLayoutLocations
+                .Except(actualLayoutLocations ?? [])
                 .ToArray();
-            var unexpectedColumnReferences = (actualColumnLocations ?? [])
-                .Except(expectedColumnLocations)
+            var unexpectedLayoutReferences = (actualLayoutLocations ?? [])
+                .Except(expectedLayoutLocations)
                 .ToArray();
-            var missingColumnEdits = expectedColumnLocations
-                .Except(actualColumnEdits ?? [])
+            var missingLayoutEdits = expectedLayoutLocations
+                .Except(actualLayoutEdits ?? [])
                 .ToArray();
-            var unexpectedColumnEdits = (actualColumnEdits ?? [])
-                .Except(expectedColumnLocations)
+            var unexpectedLayoutEdits = (actualLayoutEdits ?? [])
+                .Except(expectedLayoutLocations)
                 .ToArray();
             Assert(
-                actualColumnLocations is not null
-                    && actualColumnLocations.SetEquals(expectedColumnLocations)
-                    && actualColumnEdits is not null
-                    && actualColumnEdits.SetEquals(expectedColumnLocations),
-                $"Issue Browser Column references/rename did not cover every paired tag and the Core project declaration exactly. Missing references: {String.Join(", ", missingColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected references: {String.Join(", ", unexpectedColumnReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; missing edits: {String.Join(", ", missingColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected edits: {String.Join(", ", unexpectedColumnEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}."
+                actualLayoutLocations is not null
+                    && actualLayoutLocations.SetEquals(expectedLayoutLocations)
+                    && actualLayoutEdits is not null
+                    && actualLayoutEdits.SetEquals(expectedLayoutLocations),
+                $"Issue Browser Layout references/rename did not cover every paired tag and the Core project declaration exactly. Missing references: {String.Join(", ", missingLayoutReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected references: {String.Join(", ", unexpectedLayoutReferences.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; missing edits: {String.Join(", ", missingLayoutEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}; unexpected edits: {String.Join(", ", unexpectedLayoutEdits.Select(item => $"{item.Item1}@{item.Item2.Start}+{item.Item2.Length}"))}."
             );
             Assert(
                 tagCompletions.Any(item =>
@@ -2590,7 +2682,7 @@ public component MenuButton() {
             );
             var variants = LuiParser
                 .Parse(issueRowText)
-                .Styles.Single()
+                .Styles.Single(style => style.Name.Text == "EditorFixtureStyle")
                 .Members.OfType<LuiVariantGroupSyntax>()
                 .ToArray();
             var variantSymbols = issueRowSymbols!
@@ -2658,6 +2750,10 @@ public component MenuButton() {
             );
             var header = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/Header.lui"));
             var headerText = await File.ReadAllTextAsync(header.LocalPath);
+            var issueBrowserRoot = new Uri(
+                Path.GetFullPath("apps/Lucent.IssueBrowser/IssueBrowser.lui")
+            );
+            var issueBrowserRootText = await File.ReadAllTextAsync(issueBrowserRoot.LocalPath);
             using var browserInitialized = await browserLsp.RequestAsync(
                 "initialize",
                 new { initializationOptions = new { projectUri = VsCodeUri(project) } }
@@ -2677,110 +2773,112 @@ public component MenuButton() {
                 "LSP did not advertise the standard semantic-token legend and full provider."
             );
             await browserLsp.NotifyAsync("initialized", new { });
-            var column = headerText.IndexOf("Column", StringComparison.Ordinal);
-            var columnPosition = Position(headerText, column);
-            using var browserColumnReferences = await browserLsp.RequestAsync(
+            var layout = issueBrowserRootText.IndexOf("<Layout", StringComparison.Ordinal);
+            var layoutPosition = Position(issueBrowserRootText, layout + 1);
+            using var browserLayoutReferences = await browserLsp.RequestAsync(
                 "textDocument/references",
                 new
                 {
-                    textDocument = new { uri = VsCodeUri(header) },
+                    textDocument = new { uri = VsCodeUri(issueBrowserRoot) },
                     position = new
                     {
-                        line = columnPosition.Line,
-                        character = columnPosition.Character,
+                        line = layoutPosition.Line,
+                        character = layoutPosition.Character,
                     },
                     context = new { includeDeclaration = true },
                 }
             );
-            using var browserColumnRename = await browserLsp.RequestAsync(
+            using var browserLayoutRename = await browserLsp.RequestAsync(
                 "textDocument/rename",
                 new
                 {
-                    textDocument = new { uri = VsCodeUri(header) },
+                    textDocument = new { uri = VsCodeUri(issueBrowserRoot) },
                     position = new
                     {
-                        line = columnPosition.Line,
-                        character = columnPosition.Character,
+                        line = layoutPosition.Line,
+                        character = layoutPosition.Character,
                     },
-                    newName = "Vertical",
+                    newName = "LayoutReplacement",
                 }
             );
             Assert(
-                browserColumnReferences.RootElement.TryGetProperty("result", out _)
-                    && browserColumnRename.RootElement.TryGetProperty(
+                browserLayoutReferences.RootElement.TryGetProperty("result", out _)
+                    && browserLayoutRename.RootElement.TryGetProperty(
                         "result",
                         out var renameResult
                     )
                     && renameResult.ValueKind != JsonValueKind.Null
                     && renameResult.TryGetProperty("changes", out _),
-                "Issue Browser Column RPC returned no result: "
-                    + browserColumnReferences.RootElement.GetRawText()
+                "Issue Browser Layout RPC returned no result: "
+                    + browserLayoutReferences.RootElement.GetRawText()
                     + " / "
-                    + browserColumnRename.RootElement.GetRawText()
+                    + browserLayoutRename.RootElement.GetRawText()
             );
-            var rpcColumnReferences = browserColumnReferences
+            var rpcLayoutReferences = browserLayoutReferences
                 .RootElement.GetProperty("result")
                 .EnumerateArray()
                 .ToArray();
-            var rpcColumnChanges = browserColumnRename
+            var rpcLayoutChanges = browserLayoutRename
                 .RootElement.GetProperty("result")
                 .GetProperty("changes");
-            var authoredColumnReferences = Directory
+            var authoredLayoutReferences = Directory
                 .GetFiles("apps/Lucent.IssueBrowser", "*.lui")
                 .Sum(path =>
                     System.Text.RegularExpressions.Regex.Count(
                         File.ReadAllText(path),
-                        @"</?Column\b"
+                        @"</?Layout\b"
                     )
                 );
             Assert(
-                rpcColumnReferences.Length == authoredColumnReferences + 1
-                    && rpcColumnReferences.Count(location =>
+                rpcLayoutReferences.Length == authoredLayoutReferences + 1
+                    && rpcLayoutReferences.Count(location =>
                         location
                             .GetProperty("uri")
                             .GetString()!
                             .EndsWith("Components.cs", StringComparison.Ordinal)
                     ) == 1
-                    && rpcColumnChanges
+                    && rpcLayoutChanges
                         .EnumerateObject()
                         .Single(change =>
                             change.Name.EndsWith("Components.cs", StringComparison.Ordinal)
                         )
                         .Value.GetArrayLength() == 1
-                    && rpcColumnChanges
+                    && rpcLayoutChanges
                         .EnumerateObject()
                         .Where(change =>
                             change.Name.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
                         )
-                        .Sum(change => change.Value.GetArrayLength()) == authoredColumnReferences,
-                "Issue Browser Column RPC references/rename did not preserve all paired tags and the Core declaration."
+                        .Sum(change => change.Value.GetArrayLength()) == authoredLayoutReferences,
+                "Issue Browser Layout RPC references/rename did not preserve all paired tags and the Core declaration."
             );
-            var columnSource = new Uri(Path.GetFullPath("src/Lucent.Core/Components.cs"));
-            var columnSourceText = await File.ReadAllTextAsync(columnSource.LocalPath);
-            var columnSourceOffset = columnSourceText.IndexOf("Column", StringComparison.Ordinal);
-            var insertedLine = "\n" + columnSourceText;
+            var layoutSource = new Uri(Path.GetFullPath("src/Lucent.Core/Components.cs"));
+            var layoutSourceText = await File.ReadAllTextAsync(layoutSource.LocalPath);
+            var layoutSourceOffset =
+                layoutSourceText.IndexOf("ComponentRecipe Layout(", StringComparison.Ordinal)
+                + "ComponentRecipe ".Length;
+            var insertedLine = "\n" + layoutSourceText;
             await browserLsp.NotifyAsync(
                 "textDocument/didOpen",
                 new
                 {
                     textDocument = new
                     {
-                        uri = VsCodeUri(columnSource),
+                        uri = VsCodeUri(layoutSource),
                         version = 1,
                         text = insertedLine,
                     },
                 }
             );
-            var shiftedColumn = Position(insertedLine, columnSourceOffset + 1);
+            var shiftedLayout = Position(insertedLine, layoutSourceOffset + 1);
             using var insertedLineReferences = await browserLsp.RequestAsync(
                 "textDocument/references",
                 new
                 {
-                    textDocument = new { uri = VsCodeUri(columnSource) },
+                    textDocument = new { uri = VsCodeUri(layoutSource) },
                     position = new
                     {
-                        line = shiftedColumn.Line,
-                        character = shiftedColumn.Character,
+                        line = shiftedLayout.Line,
+                        character = shiftedLayout.Character,
                     },
                     context = new { includeDeclaration = true },
                 }
@@ -2790,27 +2888,27 @@ public component MenuButton() {
                 "textDocument/didChange",
                 new
                 {
-                    textDocument = new { uri = VsCodeUri(columnSource), version = 2 },
+                    textDocument = new { uri = VsCodeUri(layoutSource), version = 2 },
                     contentChanges = new[] { new { text = sameLine } },
                 }
             );
-            var sameLineColumn = Position(sameLine, columnSourceOffset + 3);
+            var sameLineLayout = Position(sameLine, layoutSourceOffset + 3);
             using var sameLineRename = await browserLsp.RequestAsync(
                 "textDocument/rename",
                 new
                 {
-                    textDocument = new { uri = VsCodeUri(columnSource) },
+                    textDocument = new { uri = VsCodeUri(layoutSource) },
                     position = new
                     {
-                        line = sameLineColumn.Line,
-                        character = sameLineColumn.Character,
+                        line = sameLineLayout.Line,
+                        character = sameLineLayout.Character,
                     },
-                    newName = "Vertical",
+                    newName = "LayoutReplacement",
                 }
             );
             Assert(
                 insertedLineReferences.RootElement.GetProperty("result").GetArrayLength()
-                    == authoredColumnReferences + 1
+                    == authoredLayoutReferences + 1
                     && sameLineRename
                         .RootElement.GetProperty("result")
                         .GetProperty("changes")
@@ -2823,7 +2921,7 @@ public component MenuButton() {
             );
             await browserLsp.NotifyAsync(
                 "textDocument/didClose",
-                new { textDocument = new { uri = VsCodeUri(columnSource) } }
+                new { textDocument = new { uri = VsCodeUri(layoutSource) } }
             );
             var member = headerText.IndexOf("browser.ToggleDensity", StringComparison.Ordinal);
             var memberPosition = Position(headerText, member + "browser.".Length);

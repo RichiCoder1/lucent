@@ -42,8 +42,8 @@ internal sealed class ElementPresentation
             VariantState.None,
             element.Name + ".behavior-variants"
         );
-        _component = Materialize(component.Flatten()).ToArray();
-        _author = Materialize(author.Flatten()).ToArray();
+        _component = Materialize(component.Flatten(), "component").ToArray();
+        _author = Materialize(author.Flatten(), "author").ToArray();
         foreach (var assignment in _component.Concat(_author).Select(item => item.Assignment))
             assignment.Prime(theme);
     }
@@ -128,7 +128,7 @@ internal sealed class ElementPresentation
             .Concat(_author)
             .Any(item =>
                 ReferenceEquals(item.Assignment.Property, property)
-                && item.Condition != VariantState.None
+                && (item.Condition != VariantState.None || item.Conditions.Length != 0)
             );
         var active = conditional ? _variants.Value | _behaviorVariants.Value : VariantState.None;
         var resolved =
@@ -147,6 +147,7 @@ internal sealed class ElementPresentation
                     ReferenceEquals(entry.item.Assignment.Property, property)
                     && entry.item.Assignment.IsAvailable
                     && (active & entry.item.Condition) == entry.item.Condition
+                    && entry.item.MountedConditions.All(read => read())
                 )
         )
             resolved.Add(
@@ -154,6 +155,7 @@ internal sealed class ElementPresentation
                     (T)item.item.Assignment.Resolve(_theme)!,
                     new(
                         (item.author ? "author" : "component")
+                            + (item.item.Conditions.Length == 0 ? "" : ":when")
                             + (
                                 item.item.Assignment.TokenName is { } token
                                     ? ":token:"
@@ -270,15 +272,50 @@ internal sealed class ElementPresentation
         }
     }
 
-    private IEnumerable<FlatAssignment> Materialize(IEnumerable<FlatAssignment> assignments)
+    private IEnumerable<FlatAssignment> Materialize(
+        IEnumerable<FlatAssignment> assignments,
+        string group
+    )
     {
+        var mounted = new Dictionary<StyleCondition, Signal<bool>>(
+            ReferenceEqualityComparer.Instance
+        );
         foreach (var item in assignments)
+        {
+            var conditions = item
+                .Conditions.Select(condition =>
+                {
+                    if (!mounted.TryGetValue(condition, out var value))
+                    {
+                        value = _element.Scope.Signal(
+                            false,
+                            _element.Name + ".style-when." + group + "." + mounted.Count
+                        );
+                        mounted.Add(condition, value);
+                        _ = _element.Scope.Effect(
+                            () =>
+                                value.Value = _element.Composition.RunStyleCondition(
+                                    condition.Read
+                                ),
+                            _element.Name
+                                + ".style-when-effect."
+                                + group
+                                + "."
+                                + (mounted.Count - 1)
+                        );
+                    }
+                    return (Func<bool>)(() => value.Value);
+                })
+                .ToArray();
+            bool Active() => IsActive(item.Condition) && conditions.All(read => read());
             yield return item with
             {
                 Assignment = item.Assignment is IBindingAssignment binding
-                    ? binding.Materialize(this, item.Condition, item.Ordinal)
+                    ? binding.Materialize(this, Active, item.Ordinal)
                     : item.Assignment,
+                MountedConditions = conditions,
             };
+        }
     }
 
     private interface IControlValue

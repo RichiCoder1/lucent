@@ -115,7 +115,9 @@ public static partial class Components
         SplitPaneState state,
         string label = "Resize panes",
         Style? style = null,
-        Style? splitterStyle = null
+        Style? splitterStyle = null,
+        Style? firstStyle = null,
+        Style? secondStyle = null
     )
     {
         first = Content(first);
@@ -145,7 +147,8 @@ public static partial class Components
                         .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
                         .Set(LayoutProperties.MainShrink, 0f)
                         .Set(LayoutProperties.Clip, true)
-                        .Bind(extentProperty, () => state.EffectiveExtent)
+                        .Bind(extentProperty, () => state.EffectiveExtent),
+                    author: firstStyle
                 );
                 context.Mount(leading, first);
 
@@ -198,7 +201,8 @@ public static partial class Components
                     component: Style
                         .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
                         .Set(LayoutProperties.MainGrow, 1f)
-                        .Set(LayoutProperties.Clip, true)
+                        .Set(LayoutProperties.Clip, true),
+                    author: secondStyle
                 );
                 context.Mount(trailing, second);
             }

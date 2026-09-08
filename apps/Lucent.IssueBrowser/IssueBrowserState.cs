@@ -62,6 +62,10 @@ public sealed class IssueBrowserState
             },
             "issue-browser.issues"
         );
+
+        // Start the owner-scoped load before retained child recipes begin speculative mounts.
+        // Child bindings may then observe the pending value without mutating this parent scope.
+        _ = _issues.IsPending;
     }
 
     public IReadOnlyList<BrowserIssue> Issues

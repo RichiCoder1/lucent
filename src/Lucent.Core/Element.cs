@@ -22,6 +22,8 @@ public sealed class Element : IDisposable
     private bool _inputDisabled;
     private EffectiveSemanticState? _effectiveSemanticState;
     private long _nextRecipeOrdinal;
+    private Dictionary<LayoutAlgorithm, Dictionary<object, object>>? _layoutAlgorithmStates;
+    private LayoutAlgorithm? _activeLayoutAlgorithm;
 
     internal Element(
         Composition composition,
@@ -64,6 +66,62 @@ public sealed class Element : IDisposable
     internal bool IsConditionalRegion { get; set; }
     internal bool HasSemantics => _semantics is not null;
     internal StandardMenuPart StandardMenuPart { get; set; }
+
+    internal T GetOrCreateLayoutAlgorithmState<T>(LayoutAlgorithm algorithm, Func<T> create)
+        where T : class
+    {
+        Composition.CheckThread();
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        _layoutAlgorithmStates ??= new(ReferenceEqualityComparer.Instance);
+        if (!_layoutAlgorithmStates.TryGetValue(algorithm, out var byType))
+        {
+            byType = [];
+            _layoutAlgorithmStates.Add(algorithm, byType);
+        }
+        if (byType.TryGetValue(LayoutStateKey<T>.Value, out var existing))
+            return (T)existing;
+        var created =
+            Composition.RunLayoutCallback(create)
+            ?? throw new InvalidOperationException("A layout state factory returned null.");
+        byType.Add(LayoutStateKey<T>.Value, created);
+        return created;
+    }
+
+    internal void ActivateLayoutAlgorithm(LayoutAlgorithm? algorithm)
+    {
+        Composition.CheckThread();
+        if (ReferenceEquals(_activeLayoutAlgorithm, algorithm))
+            return;
+        var previous = _activeLayoutAlgorithm;
+        _activeLayoutAlgorithm = algorithm;
+        if (
+            previous is null
+            || _layoutAlgorithmStates is null
+            || !_layoutAlgorithmStates.Remove(previous, out var states)
+        )
+            return;
+        List<Exception>? errors = null;
+        foreach (var disposable in states.Values.OfType<IDisposable>())
+            try
+            {
+                Composition.RunLayoutCallback(() =>
+                {
+                    disposable.Dispose();
+                    return true;
+                });
+            }
+            catch (Exception exception)
+            {
+                (errors ??= []).Add(exception);
+            }
+        Composition.ThrowAll(errors, "Layout algorithm state cleanup failed.");
+    }
+
+    private static class LayoutStateKey<T>
+        where T : class
+    {
+        internal static object Value { get; } = new();
+    }
 
     internal IEnumerable<IProperty> AncestorProperties()
     {
@@ -673,6 +731,20 @@ public sealed class Element : IDisposable
             {
                 (errors ??= []).Add(exception);
             }
+        }
+        if (_layoutAlgorithmStates is { } algorithmStates)
+        {
+            _layoutAlgorithmStates = null;
+            foreach (var state in algorithmStates.Values.SelectMany(values => values.Values))
+                if (state is IDisposable disposable)
+                    try
+                    {
+                        disposable.Dispose();
+                    }
+                    catch (Exception exception)
+                    {
+                        (errors ??= []).Add(exception);
+                    }
         }
         try
         {

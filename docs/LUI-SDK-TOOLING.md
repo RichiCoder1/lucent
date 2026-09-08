@@ -88,3 +88,15 @@ Review occurs once at each meaningful authoring boundary: runtime primitives; sy
 The source SDK recognizes component fields, methods, and synchronous Setup blocks described in [the language reference](LUI-LANGUAGE.md#component-local-state). Generated implementation members map back to authored declarations. Hover distinguishes writable, derived, and once-initialized values; document symbols include fields, methods, and Setup. Published packages and an already installed language server must be updated together before using this syntax in a package consumer.
 
 The VS Code host accepts an absolute `lucentLui.projectPath` or a path relative to the first workspace folder. Prefer the relative form in shared workspace settings.
+
+## Local editor packaging
+
+Build the language server with the repository's pinned SDK and install its publish directory separately. Package the thin VS Code client with `./tools/Pack-LuiExtension.ps1`; it uses a pinned official VSCE tool and includes the repository license. The [extension setup guide](../extensions/lucent-lui-vscode/README.md) describes the settings and packaging command. Parameterized styles and reactive condition groups require the matching compiler/server revision and extension 0.3.1 or later. Reload the VS Code window after updating the server path or extension.
+
+```powershell
+dotnet publish src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj -c Release -o artifacts/lui-server
+./tools/Pack-LuiExtension.ps1
+code --install-extension artifacts/lucent-lui-vscode/lucent-lui-0.3.1.vsix --force
+```
+
+Set `lucentLui.serverPath` to the absolute path of `artifacts/lui-server/Lucent.Lui.LanguageServer.dll`, or copy the entire publish directory to a stable local tooling location and use that path. A package consumer's project path should identify its own `.csproj`.

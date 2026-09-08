@@ -2,6 +2,8 @@
 
 Lucent will extend its managed layout engine behind an internal, Core-owned seam. The first production slice adds the Grid, Flex, constrained paragraph, viewport, and rounding behavior required by the links-and-notes shell. Taffy 0.14.0 is accepted as an architectural reference, not as a production runtime or build dependency.
 
+September 8, 2026: [ADR 0006](0006-style-driven-layout.md) extends the internal-only strategy boundary with a bounded public nonvirtualizing layout interface and adds named window breakpoints. The engine choice and paragraph contracts below remain in effect; the evaluation records describe the earlier decision point.
+
 ## Decision drivers
 
 The designed shell gives the decision concrete bounds. Its wide form has a 48-pixel capture row spanning `184 / 320 / minmax(482, 1fr)` columns at 1,060 logical pixels. Its medium form uses `64 / 300 / minmax(426, 1fr)` at 840 pixels. Compact mode has one 432-pixel content pane inside a 480-pixel window. The collection and editor are separate nested vertical viewports; a fixed-height 68-pixel list row is virtualized from the assigned collection cell. Text wraps within its final track. Layout thresholds remain logical at 100%, 150%, and 200% scale, and device rounding must preserve shared edges.

@@ -68,6 +68,7 @@ public static class LuiCompiler
         var probeMap = new LuiSourceMap(identity, writer.Entries);
         var statePlans = StatePlans(probeModel, probeTree, writer, diagnostics);
         UnusedStyleLints(document, probeModel, probeTree, diagnostics);
+        ReactiveStyleConditionDiagnostics(document, probeModel, probeTree, probeMap, diagnostics);
         if (HasErrors(diagnostics))
             return new LuiCompilationResult(
                 identity,
@@ -423,11 +424,29 @@ public static class LuiCompiler
                 .Cast<ISymbol>(),
             SymbolEqualityComparer.Default
         );
+        var methods = new HashSet<ISymbol>(
+            root.DescendantNodes()
+                .OfType<MethodDeclarationSyntax>()
+                .Select(method => model.GetDeclaredSymbol(method) as IMethodSymbol)
+                .Where(method =>
+                    method is not null
+                    && method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                        == "global::Lucent.Core.Style"
+                )
+                .Cast<ISymbol>(),
+            SymbolEqualityComparer.Default
+        );
+        var declarations = new HashSet<ISymbol>(fields, SymbolEqualityComparer.Default);
+        declarations.UnionWith(methods);
         var used = new HashSet<string>(
             root.DescendantNodes()
                 .OfType<IdentifierNameSyntax>()
+                .Where(identifier =>
+                    identifier.Parent is not MethodDeclarationSyntax method
+                    || method.Identifier.Span != identifier.Span
+                )
                 .Select(identifier => model.GetSymbolInfo(identifier).Symbol)
-                .Where(symbol => symbol is not null && fields.Contains(symbol))
+                .Where(symbol => symbol is not null && declarations.Contains(symbol))
                 .Select(symbol => symbol!.Name),
             StringComparer.Ordinal
         );
@@ -440,6 +459,76 @@ public static class LuiCompiler
                     DiagnosticSeverity.Warning
                 )
             );
+    }
+
+    private static void ReactiveStyleConditionDiagnostics(
+        LuiDocumentSyntax document,
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        List<LuiDiagnostic> diagnostics
+    )
+    {
+        var root = tree.GetRoot();
+        foreach (
+            var group in StyleGroups(document).Where(group => group.ConditionExpression is not null)
+        )
+        {
+            var condition = group.ConditionExpression!;
+            var generated = map.FromSource(condition.Span)
+                .Where(entry => !entry.Hidden && entry.Kind == LuiMapKind.Expression)
+                .OrderByDescending(entry => entry.Generated.Length)
+                .FirstOrDefault();
+            var type = generated is null
+                ? null
+                : model
+                    .GetTypeInfo(
+                        root.FindNode(
+                            new TextSpan(generated.Generated.Start, generated.Generated.Length),
+                            getInnermostNodeForTie: true
+                        )
+                    )
+                    .Type;
+            if (type?.SpecialType == SpecialType.System_Boolean)
+                continue;
+            diagnostics.Add(
+                new LuiDiagnostic(
+                    "LUI2021",
+                    "Reactive style conditions must resolve to bool.",
+                    condition.Span
+                )
+            );
+        }
+    }
+
+    private static IEnumerable<LuiVariantGroupSyntax> StyleGroups(LuiDocumentSyntax document)
+    {
+        foreach (var style in document.Styles)
+        foreach (var group in StyleGroups(style.Members))
+            yield return group;
+
+        foreach (
+            var style in Elements(document.Component?.Body ?? Array.Empty<LuiBodySyntax>())
+                .SelectMany(element => element.Attributes)
+                .Select(attribute => attribute.Value)
+                .OfType<LuiStyleWithSyntax>()
+        )
+        foreach (var group in StyleGroups(style.Members))
+            yield return group;
+    }
+
+    private static IEnumerable<LuiVariantGroupSyntax> StyleGroups(
+        IReadOnlyList<LuiStyleMemberSyntax> members
+    )
+    {
+        foreach (var member in members)
+        {
+            if (member is not LuiVariantGroupSyntax group)
+                continue;
+            yield return group;
+            foreach (var nested in StyleGroups(group.Members))
+                yield return nested;
+        }
     }
 
     private static IEnumerable<LuiForEachSyntax> Loops(IEnumerable<LuiBodySyntax> body) =>
@@ -3053,8 +3142,8 @@ public static class LuiCompiler
                                 ),
                                 LuiStyleWithSyntax style => style.Name.Text == name
                                     || style.Tail?.Text == name
-                                    || style.Assignments.Any(assignment =>
-                                        References(assignment.Expression.Expression, name)
+                                    || style.Members.Any(member =>
+                                        StyleMemberUsesLocal(member, name)
                                     ),
                                 _ => false,
                             }
@@ -3078,6 +3167,20 @@ public static class LuiCompiler
                     return false;
             }
         }
+
+        private static bool StyleMemberUsesLocal(LuiStyleMemberSyntax member, string name) =>
+            member switch
+            {
+                LuiStyleAssignmentSyntax assignment => References(
+                    assignment.Expression.Expression,
+                    name
+                ),
+                LuiVariantGroupSyntax group => (
+                    group.ConditionExpression is { } condition
+                    && References(condition.Expression, name)
+                ) || group.Members.Any(child => StyleMemberUsesLocal(child, name)),
+                _ => false,
+            };
 
         private static IEnumerable<LuiExpressionSyntax> Expressions(LuiBodySyntax node)
         {
@@ -3167,30 +3270,80 @@ public static class LuiCompiler
 
         private void Style(LuiStyleSyntax style, List<LuiDiagnostic> diagnostics)
         {
-            Hidden("    private static readonly global::Lucent.Core.Style ");
-            Mapped(style.Name.Text, style.Name.Span, LuiMapKind.Symbol);
-            Write(" = global::Lucent.Core.Style.Empty");
-            foreach (var member in style.Members)
+            var method = !style.OpenParameters.IsMissing || style.Parameters.Count != 0;
+            if (method)
             {
-                if (member is LuiStyleAssignmentSyntax assignment)
-                    Assignment(assignment, false);
-                else if (member is LuiVariantGroupSyntax variant)
+                Hidden("    private static global::Lucent.Core.Style ");
+                Mapped(style.Name.Text, style.Name.Span, LuiMapKind.Symbol);
+                Write("(");
+                for (var index = 0; index < style.Parameters.Count; index++)
                 {
-                    Write(".When(");
-                    Variant(variant, diagnostics);
-                    Write(", global::Lucent.Core.Style.Empty");
-                    foreach (var variantAssignment in variant.Assignments)
-                        Assignment(variantAssignment, false);
-                    Write(")");
-                    Mark(variant.WhenKeyword.Span, LuiMapKind.Structure);
-                    Mark(variant.OpenBrace.Span, LuiMapKind.Structure);
-                    Mark(variant.CloseBrace.Span, LuiMapKind.Structure);
+                    if (index != 0)
+                        Write(", ");
+                    var parameter = style.Parameters[index];
+                    Mapped(parameter.DeclarationText, parameter.Span, LuiMapKind.Symbol);
                 }
+                Write(") => global::Lucent.Core.Style.Empty");
+                StyleMembers(style.Members, true, diagnostics);
+                Write(";");
             }
-            Hidden(";\n");
+            else
+            {
+                Hidden("    private static readonly global::Lucent.Core.Style ");
+                Mapped(style.Name.Text, style.Name.Span, LuiMapKind.Symbol);
+                Write(" = global::Lucent.Core.Style.Empty");
+                StyleMembers(style.Members, false, diagnostics);
+                Write(";");
+            }
+            Hidden("\n");
             Mark(style.StyleKeyword.Span, LuiMapKind.Structure);
+            Mark(style.OpenParameters.Span, LuiMapKind.Structure);
+            Mark(style.CloseParameters.Span, LuiMapKind.Structure);
             Mark(style.OpenBrace.Span, LuiMapKind.Structure);
             Mark(style.CloseBrace.Span, LuiMapKind.Structure);
+        }
+
+        private void StyleMembers(
+            IReadOnlyList<LuiStyleMemberSyntax> members,
+            bool live,
+            List<LuiDiagnostic> diagnostics
+        )
+        {
+            foreach (var member in members)
+            {
+                if (member is LuiStyleAssignmentSyntax assignment)
+                    Assignment(assignment, live);
+                else if (member is LuiVariantGroupSyntax group)
+                {
+                    Write(".When(");
+                    if (group.ConditionExpression is { } condition)
+                    {
+                        Write("() => ");
+                        var generatedCondition = Expression(condition);
+                        if (generatedCondition.Length != 0)
+                            Entries.Add(
+                                new LuiMapEntry(
+                                    condition.Span,
+                                    generatedCondition,
+                                    LuiMapKind.Expression,
+                                    false
+                                )
+                            );
+                    }
+                    else
+                        Variant(group, diagnostics);
+                    Write(", global::Lucent.Core.Style.Empty");
+                    StyleMembers(group.Members, live, diagnostics);
+                    Write(")");
+                    Mark(group.WhenKeyword.Span, LuiMapKind.Structure);
+                    if (group.OpenCondition is { } openCondition)
+                        Mark(openCondition.Span, LuiMapKind.Structure);
+                    if (group.CloseCondition is { } closeCondition)
+                        Mark(closeCondition.Span, LuiMapKind.Structure);
+                    Mark(group.OpenBrace.Span, LuiMapKind.Structure);
+                    Mark(group.CloseBrace.Span, LuiMapKind.Structure);
+                }
+            }
         }
 
         private void StyleWith(LuiStyleWithSyntax style, List<LuiDiagnostic> diagnostics)
@@ -3206,24 +3359,7 @@ public static class LuiCompiler
                 return;
             }
             Write(".With(global::Lucent.Core.Style.Empty");
-            foreach (var member in style.Members)
-            {
-                if (member is LuiStyleAssignmentSyntax normal)
-                    Assignment(normal, true);
-                else
-                {
-                    var variant = (LuiVariantGroupSyntax)member;
-                    Write(".When(");
-                    Variant(variant, diagnostics);
-                    Write(", global::Lucent.Core.Style.Empty");
-                    foreach (var variantAssignment in variant.Assignments)
-                        Assignment(variantAssignment, true);
-                    Write(")");
-                    Mark(variant.WhenKeyword.Span, LuiMapKind.Structure);
-                    Mark(variant.OpenBrace.Span, LuiMapKind.Structure);
-                    Mark(variant.CloseBrace.Span, LuiMapKind.Structure);
-                }
-            }
+            StyleMembers(style.Members, true, diagnostics);
             Write(")");
         }
 

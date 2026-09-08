@@ -343,6 +343,10 @@ public static class StyleFluency
     public static Style Mode(this Style style, LayoutMode value) =>
         style.Set(LayoutProperties.Mode, value);
 
+    /// <summary>Returns a style with the typed container algorithm assignment.</summary>
+    public static Style Algorithm(this Style style, LayoutAlgorithm? value) =>
+        style.Set(LayoutProperties.Algorithm, value);
+
     /// <summary>Returns a style with the typed Columns assignment.</summary>
     public static Style Columns(this Style style, GridTracks value) =>
         style.Set(LayoutProperties.Columns, value);

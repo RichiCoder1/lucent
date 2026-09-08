@@ -23,8 +23,32 @@ Copy-Item (Join-Path $root 'global.json') $proof
 "@ | Set-Content (Join-Path $proof 'Consumer.csproj')
 @'
 namespace HeadlessPackageProbe;
-internal component Probe(Action invoked) {
-    <Button onInvoke={invoked} style={Style.Empty.Height(40)}>Run</Button>
+style ProbeLayout(WindowBreakpoints points) {
+    MainGrow: 1;
+    Axis: LayoutAxis.Column;
+    CrossAlignment: LayoutAlignment.Stretch;
+    when (points.IsActive(ProbeBreakpoints.Wide)) {
+        Algorithm: LayoutAlgorithms.Grid;
+        Columns: GridTracks.Create(GridTrack.Fraction());
+        Rows: GridTracks.Create(GridTrack.Content(), GridTrack.Fraction());
+    }
+}
+style ProbeAction(WindowBreakpoints points) {
+    Height: 40;
+    GridPlacement: new GridPlacement(0, 0);
+    when (points.IsActive(ProbeBreakpoints.Wide)) {
+        Height: 64;
+    }
+}
+style ProbeEditor {
+    GridPlacement: new GridPlacement(1, 0);
+    MainGrow: 1;
+}
+internal component Probe(Action invoked, WindowBreakpoints points) {
+    <Layout breakpoints={points} style={ProbeLayout(points)}>
+        <Button onInvoke={invoked} style={ProbeAction(points)}>Run</Button>
+        <TextField label="Retained draft" initialValue="seed" style={ProbeEditor} />
+    </Layout>
 }
 '@ | Set-Content (Join-Path $proof 'Probe.lui')
 @'
@@ -34,19 +58,48 @@ using Lucent.Testing.Skia;
 
 var calls = 0;
 await using var app = await HeadlessApplication.StartAsync(
-    HeadlessPackageProbe.Components.Probe(() => Interlocked.Increment(ref calls)));
+    context => HeadlessPackageProbe.Components.Probe(
+        () => Interlocked.Increment(ref calls),
+        new(context.Composition.Root.Scope, HeadlessPackageProbe.ProbeBreakpoints.Set)),
+    new() { Viewport = new(320, 120, 1) });
 await app.KeyAsync(new(KeyCommandKind.Down, Key.Tab));
 await app.KeyAsync(new(KeyCommandKind.Down, Key.Enter));
 if (Volatile.Read(ref calls) != 1)
     throw new InvalidOperationException("Packaged .lui headless command did not invoke exactly once.");
 Console.WriteLine("Packaged .lui headless command: PASS");
+var initial = await app.SnapshotAsync();
+var editor = initial.Require(SemanticRole.TextField, "Retained draft");
+var edited = await app.InvokeAsync(context => context.Composition.ExecuteSemanticCommand(
+    editor.Identity, new(SemanticCommandKind.SetValue, "keep this draft")));
+if (edited != SemanticCommandResult.Applied)
+    throw new InvalidOperationException("Packaged editor refused its current semantic command.");
+var wide = await app.ResizeAsync(new(640, 120, 1.5f));
+var retained = wide.Require(SemanticRole.TextField, "Retained draft");
+if (wide.RequireBox(wide.Require(SemanticRole.Button, "Run")).Bounds.Height != 64
+    || retained.Identity.ElementId != editor.Identity.ElementId
+    || retained.Identity.CompositionEpoch != editor.Identity.CompositionEpoch
+    || retained.Value != "keep this draft")
+    throw new InvalidOperationException("Packaged breakpoint style lost geometry or editor ownership.");
+var narrow = await app.ResizeAsync(new(320, 120, 2));
+if (narrow.RequireBox(narrow.Require(SemanticRole.Button, "Run")).Bounds.Height != 40
+    || narrow.Require(SemanticRole.TextField, "Retained draft").Value != "keep this draft")
+    throw new InvalidOperationException("Packaged conditional style did not restore its base value.");
+Console.WriteLine("Packaged parameterized styles, window breakpoints and retained layout: PASS");
 await using var rendered = await SkiaHeadlessApplication.StartAsync(
-    HeadlessPackageProbe.Components.Probe(() => { }),
+    context => HeadlessPackageProbe.Components.Probe(() => { },
+        new(context.Composition.Root.Scope, HeadlessPackageProbe.ProbeBreakpoints.Set)),
     new HeadlessApplicationOptions { Viewport = new(320, 120, 1.5f) });
 var png = await rendered.CapturePngAsync();
 if (png.Length < 8 || !png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
     throw new InvalidOperationException("Packaged Skia capture did not produce PNG data.");
 Console.WriteLine("Packaged Skia capture: PASS");
+
+namespace HeadlessPackageProbe {
+    internal static class ProbeBreakpoints {
+        internal static readonly Breakpoint Wide = new("wide", 600);
+        internal static readonly BreakpointSet Set = BreakpointSet.Create(Wide);
+    }
+}
 '@ | Set-Content (Join-Path $proof 'Program.cs')
 $escapedFeed = [Security.SecurityElement]::Escape($feedPath)
 @"

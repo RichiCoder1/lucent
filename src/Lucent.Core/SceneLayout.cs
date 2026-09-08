@@ -31,6 +31,24 @@ public static class SceneLayout
             );
         viewport.Validate();
         composition.Flush(maximumWorkItems);
+        var windowBreakpoints = WindowBreakpointElements(composition);
+        if (windowBreakpoints.Length != 0)
+        {
+            for (var discovery = 0; ; discovery++)
+            {
+                foreach (var state in windowBreakpoints)
+                    state.Assign(composition, viewport.Width);
+                composition.Flush(maximumWorkItems);
+                var current = WindowBreakpointElements(composition);
+                if (current.SequenceEqual(windowBreakpoints))
+                    break;
+                if (discovery >= 7)
+                    throw new InvalidOperationException(
+                        "Window breakpoint registration did not stabilize within eight passes."
+                    );
+                windowBreakpoints = current;
+            }
+        }
         var responsive = ResponsiveElements(composition);
         Dictionary<long, LayoutRect>? realizedViewportBounds = null;
         if (composition.HasVirtualizedRegions || responsive.Length != 0)
@@ -136,6 +154,7 @@ public static class SceneLayout
                     "A virtualized region was mounted or removed during its realization flush."
                 );
         }
+        EnsureWindowBreakpointElementsUnchanged(composition, windowBreakpoints);
         var projected = composition.CaptureInputProjection(() =>
         {
             var elements = composition.Elements().ToArray();
@@ -481,6 +500,25 @@ public static class SceneLayout
             .Select(value => (value.Element, value.State!))
             .ToArray();
 
+    private static WindowBreakpoints[] WindowBreakpointElements(Composition composition) =>
+        composition
+            .Elements()
+            .Select(element => element.Resolve(ProjectionProperties.WindowBreakpoints).Value)
+            .Where(state => state is not null)
+            .Select(state => state!)
+            .ToArray();
+
+    private static void EnsureWindowBreakpointElementsUnchanged(
+        Composition composition,
+        IReadOnlyList<WindowBreakpoints> expected
+    )
+    {
+        if (!WindowBreakpointElements(composition).SequenceEqual(expected))
+            throw new InvalidOperationException(
+                "A window breakpoint registration changed after bounded pre-layout discovery."
+            );
+    }
+
     private static void EnsureResponsiveElementsUnchanged(
         Composition composition,
         IReadOnlyList<(Element Element, ResponsiveConstraints State)> expected
@@ -572,7 +610,7 @@ public static class SceneLayout
         var inner = ContentBounds(element, bounds, viewport.Scale);
         boxes.Add(new(new(element.Composition.Epoch, element.Id), bounds, text));
         var childNodes = new List<SceneNode>();
-        if (element.Children.Count != 0)
+        if (element.Children.Count != 0 || style.Algorithm is { BuiltInMode: null })
         {
             var participating = element
                 .Children.Select((child, index) => (Child: child, Index: index))
@@ -644,7 +682,20 @@ public static class SceneLayout
                     )
                     .ToArray();
             }
-            else if (style.Mode == LayoutMode.Grid)
+            else if (style.Algorithm is { BuiltInMode: null } algorithm)
+            {
+                assignments = ArrangeCustom(
+                    element,
+                    algorithm,
+                    participating,
+                    inner.Width,
+                    inner.Height,
+                    viewport.Scale,
+                    shaper,
+                    cache
+                );
+            }
+            else if ((style.Algorithm?.BuiltInMode ?? style.Mode) == LayoutMode.Grid)
             {
                 assignments = ManagedLayout.ArrangeGrid(
                     specs,
@@ -1226,6 +1277,57 @@ public static class SceneLayout
         var participatingChildren = element
             .Children.Where(child => child.Participation != ElementParticipation.Collapsed)
             .ToArray();
+        if (style.Algorithm is { BuiltInMode: null } algorithm)
+        {
+            var initial = participatingChildren
+                .Select(child =>
+                {
+                    var childStyle = cache.Read(child);
+                    var intrinsic = Intrinsic(
+                        child,
+                        childStyle,
+                        Shape(child, childStyle, scale, shaper, cache),
+                        scale,
+                        shaper,
+                        cache
+                    );
+                    return (
+                        Element: child,
+                        Desired: new LayoutSize(
+                            Constrain(
+                                childStyle.Width ?? intrinsic.Width,
+                                childStyle.MinWidth,
+                                childStyle.MaxWidth
+                            ),
+                            Constrain(
+                                childStyle.Height ?? intrinsic.Height,
+                                childStyle.MinHeight,
+                                childStyle.MaxHeight
+                            )
+                        )
+                    );
+                })
+                .ToArray();
+            var result = InvokeCustomAlgorithm(
+                element,
+                algorithm,
+                new(
+                    constrainedContentWidth is { } contentWidth
+                        ? new LayoutConstraint(contentWidth)
+                        : LayoutConstraint.Unbounded,
+                    LayoutConstraint.Unbounded
+                ),
+                initial,
+                scale,
+                shaper,
+                cache
+            );
+            return cache.WriteIntrinsic(
+                element.Id,
+                constrainedOuterWidth,
+                Outer(style, (result.DesiredSize.Width, result.DesiredSize.Height))
+            );
+        }
         if (participatingChildren.Length == 0)
             return cache.WriteIntrinsic(
                 element.Id,
@@ -1353,6 +1455,130 @@ public static class SceneLayout
             constrainedOuterWidth,
             Outer(style, (Finite(width), Finite(height)))
         );
+    }
+
+    private static LayoutAssignment[] ArrangeCustom(
+        Element container,
+        LayoutAlgorithm algorithm,
+        IReadOnlyList<(Element Child, int Index)> participating,
+        float width,
+        float height,
+        float scale,
+        ITextShaper shaper,
+        ProjectionCache cache
+    )
+    {
+        var initial = participating
+            .Select(child =>
+            {
+                var childStyle = cache.Read(child.Child);
+                var intrinsic = Intrinsic(
+                    child.Child,
+                    childStyle,
+                    Shape(child.Child, childStyle, scale, shaper, cache),
+                    scale,
+                    shaper,
+                    cache
+                );
+                return (
+                    child.Child,
+                    new LayoutSize(
+                        Constrain(
+                            childStyle.Width ?? intrinsic.Width,
+                            childStyle.MinWidth,
+                            childStyle.MaxWidth
+                        ),
+                        Constrain(
+                            childStyle.Height ?? intrinsic.Height,
+                            childStyle.MinHeight,
+                            childStyle.MaxHeight
+                        )
+                    )
+                );
+            })
+            .ToArray();
+        var result = InvokeCustomAlgorithm(
+            container,
+            algorithm,
+            new(new LayoutConstraint(width), new LayoutConstraint(height)),
+            initial,
+            scale,
+            shaper,
+            cache
+        );
+        return result
+            .Placements.Select(placement => new LayoutAssignment(
+                participating[placement.ChildIndex].Index,
+                placement.Bounds,
+                placement.WidthAssigned,
+                placement.HeightAssigned
+            ))
+            .ToArray();
+    }
+
+    private static LayoutAlgorithmResult InvokeCustomAlgorithm(
+        Element container,
+        LayoutAlgorithm algorithm,
+        LayoutConstraints constraints,
+        IReadOnlyList<(Element Element, LayoutSize Desired)> children,
+        float scale,
+        ITextShaper shaper,
+        ProjectionCache cache
+    )
+    {
+        LayoutSize MeasureChild(Element child, LayoutConstraints childConstraints)
+        {
+            var childStyle = cache.Read(child);
+            var intrinsic = Intrinsic(
+                child,
+                childStyle,
+                Shape(child, childStyle, scale, shaper, cache),
+                scale,
+                shaper,
+                cache,
+                childConstraints.Width.Limit
+            );
+            return new(
+                Math.Min(
+                    childConstraints.Width.Or(float.PositiveInfinity),
+                    Constrain(intrinsic.Width, childStyle.MinWidth, childStyle.MaxWidth)
+                ),
+                Math.Min(
+                    childConstraints.Height.Or(float.PositiveInfinity),
+                    Constrain(intrinsic.Height, childStyle.MinHeight, childStyle.MaxHeight)
+                )
+            );
+        }
+
+        var context = new LayoutAlgorithmContext(
+            container,
+            algorithm,
+            constraints,
+            children,
+            MeasureChild
+        );
+        LayoutAlgorithmResult result;
+        try
+        {
+            container.ActivateLayoutAlgorithm(algorithm);
+            result =
+                container.Composition.RunLayoutCallback(() => algorithm.Layout(context))
+                ?? throw new InvalidOperationException("A layout algorithm returned null.");
+        }
+        finally
+        {
+            context.Complete();
+        }
+        var placements = result.Placements;
+        if (
+            placements.Count != children.Count
+            || placements.Select(value => value.ChildIndex).Distinct().Count() != children.Count
+            || placements.Any(value => value.ChildIndex >= children.Count)
+        )
+            throw new InvalidOperationException(
+                "A layout algorithm must place every participating direct child exactly once."
+            );
+        return result;
     }
 
     private static (float Width, float Height) Outer(
@@ -1505,6 +1731,7 @@ public static class SceneLayout
     {
         var values = new Values(
             element.Resolve(LayoutProperties.Mode).Value,
+            element.Resolve(LayoutProperties.Algorithm).Value,
             element.Resolve(LayoutProperties.Axis).Value,
             element.Resolve(LayoutProperties.Columns).Value,
             element.Resolve(LayoutProperties.Rows).Value,
@@ -1572,8 +1799,11 @@ public static class SceneLayout
             || values.MaxLines is <= 0
             || values.Columns is null
             || values.Rows is null
-            || values.Mode == LayoutMode.Grid
-                && (values.Columns.Count == 0 || values.Rows.Count == 0)
+            || (
+                values.Algorithm is null
+                    ? values.Mode == LayoutMode.Grid
+                    : values.Algorithm.BuiltInMode == LayoutMode.Grid
+            ) && (values.Columns.Count == 0 || values.Rows.Count == 0)
             || !float.IsFinite(values.Opacity)
             || values.Opacity < 0
             || values.Opacity > 1
@@ -1641,6 +1871,9 @@ public static class SceneLayout
             if (_styles.TryGetValue(element.Id, out var cached))
                 return cached;
             var resolved = ReadResolved(element);
+            element.ActivateLayoutAlgorithm(
+                resolved.Algorithm is { BuiltInMode: null } ? resolved.Algorithm : null
+            );
             if (
                 element.IsConditionalRegion
                 && !element.HasPresentation
@@ -1698,6 +1931,7 @@ public static class SceneLayout
 
     private readonly record struct Values(
         LayoutMode Mode,
+        LayoutAlgorithm? Algorithm,
         LayoutAxis Axis,
         GridTracks Columns,
         GridTracks Rows,
@@ -1867,6 +2101,7 @@ public static class SceneLayout
     internal static string InputSignature(Element element)
     {
         var mode = element.Resolve(LayoutProperties.Mode).Value;
+        var algorithm = element.Resolve(LayoutProperties.Algorithm).Value;
         var axis = element.Resolve(LayoutProperties.Axis).Value;
         var columns = element.Resolve(LayoutProperties.Columns).Value;
         var rows = element.Resolve(LayoutProperties.Rows).Value;
@@ -1921,6 +2156,9 @@ public static class SceneLayout
         return Hash(writer =>
         {
             writer.Write((int)mode);
+            writer.Write(algorithm is not null);
+            if (algorithm is not null)
+                writer.Write(algorithm.Name);
             writer.Write((int)axis);
             WriteTracks(writer, columns);
             WriteTracks(writer, rows);

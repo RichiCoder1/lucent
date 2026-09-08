@@ -120,7 +120,8 @@ public sealed class IssueBrowserTests
         var empty = Install(composition, renderer, narrow);
         var emptySemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
         Assert(
-            emptySemantics.Any(node => node.Name == "No matching issues")
+            emptySemantics.Any(node => node.Name.StartsWith("0 issues ·", StringComparison.Ordinal))
+                && emptySemantics.Any(node => node.Name == "No matching issues")
                 && emptySemantics.Any(node =>
                     node.Role == SemanticRole.Button && node.Name == "Clear filters"
                 )
@@ -170,15 +171,17 @@ public sealed class IssueBrowserTests
         transport.ReplyJson(0);
         graph.Drain();
         using var renderer = new SkiaSceneRenderer();
+        var input = composition.Input;
 
         RetainedScene Install()
         {
-            var next = SceneLayout.Project(composition, new(1120, 760, 1), renderer);
-            Assert(
-                composition.Input.SetScene(next),
-                "Issue Browser context-menu scene was rejected."
-            );
-            return next;
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                var next = SceneLayout.Project(composition, new(1120, 760, 1), renderer);
+                if (input.SetScene(next))
+                    return next;
+            }
+            throw new InvalidOperationException("Issue Browser context-menu scene did not settle.");
         }
 
         var scene = Install();
@@ -202,19 +205,16 @@ public sealed class IssueBrowserTests
             .ToArray();
 
         ContextMenuRequest? request = null;
-        composition.Input.ContextMenuRequested += value => request = value;
+        input.ContextMenuRequested += value => request = value;
         var bounds = scene
             .Boxes.Single(box => box.Identity.ElementId == rows[2].Identity.ElementId)
             .Bounds;
         var x = bounds.X + MathF.Max(1, bounds.Width / 2);
         var y = bounds.Y + MathF.Max(1, bounds.Height / 2);
         Assert(
-            composition
-                .Input.DispatchPointer(
-                    new(PointerCommandKind.Down, 91, x, y, PointerButton.Secondary)
-                )
-                .Handled
-                && composition.Input.DispatchPointer(new(PointerCommandKind.Up, 91, x, y)).Handled,
+            input
+                .DispatchPointer(new(PointerCommandKind.Down, 91, x, y, PointerButton.Secondary))
+                .Handled && input.DispatchPointer(new(PointerCommandKind.Up, 91, x, y)).Handled,
             "The Issue Browser did not route a secondary click to the generated row menu target."
         );
         Assert(request is not null, "The generated row menu did not publish a request.");
@@ -791,9 +791,9 @@ public sealed class IssueBrowserTests
             out _
         );
         composition.Root.Scope.Own(client);
-        graph.Drain(100);
+        graph.Drain(10_000);
         handler.ReplyJson(0);
-        graph.Drain(100);
+        graph.Drain(10_000);
         return composition;
     }
 
@@ -859,14 +859,12 @@ public sealed class IssueBrowserTests
             "Initial loading state was not externally visible."
         );
         using var initialRenderer = new SkiaSceneRenderer();
-        var initial = SceneLayout.Project(composition, new(800, 500, 1), initialRenderer);
-        Assert(composition.Input.SetScene(initial), "Initial issue-browser scene did not install.");
+        var input = composition.Input;
+        _ = Install(composition, initialRenderer, new(800, 500, 1));
         var search = Flatten(composition.SemanticSnapshot()!)
             .Single(node => node.Role == SemanticRole.TextField && node.Name == "Search issues");
         Assert(
-            composition.Input.FocusSemantic(
-                new(search.Identity.CompositionEpoch, search.Identity.ElementId)
-            ),
+            input.FocusSemantic(new(search.Identity.CompositionEpoch, search.Identity.ElementId)),
             "Initial loading scene rejected Search focus."
         );
 
@@ -875,7 +873,7 @@ public sealed class IssueBrowserTests
         using var renderer = new SkiaSceneRenderer();
         var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
         Assert(
-            composition.Input.SetScene(scene)
+            input.SetScene(scene)
                 && !browser.IsLoading
                 && !browser.IsStale
                 && browser.Error is null
@@ -1499,6 +1497,7 @@ public sealed class IssueBrowserTests
             .Boxes.Single(box => box.Identity.ElementId == listViewport.Identity.ElementId)
             .Bounds;
         var row = wideSemantics.First(node => node.Role == SemanticRole.ListItem);
+        var firstRowId = row.Identity.ElementId;
         Assert(
             splitterBounds.Y + splitterBounds.Height >= 740
                 && listBounds.Y + listBounds.Height >= 740
@@ -1542,6 +1541,8 @@ public sealed class IssueBrowserTests
         );
         graph.Drain();
         narrow = Install(composition, renderer, narrowViewport);
+        var restoredList = Flatten(composition.SemanticSnapshot()!)
+            .FirstOrDefault(node => node.Role == SemanticRole.ListItem);
         Assert(
             browser.SelectedIssue is not null
                 && Flatten(composition.SemanticSnapshot()!)
@@ -1551,6 +1552,10 @@ public sealed class IssueBrowserTests
                 && !Flatten(composition.SemanticSnapshot()!)
                     .Any(node => node.Role == SemanticRole.Button && node.Name == "Back to issues"),
             "Compact Back navigation did not restore the list while preserving selection."
+        );
+        Assert(
+            restoredList is not null && restoredList.Identity.ElementId == firstRowId,
+            "Compact route navigation remounted the retained issue list row."
         );
 
         wide = Install(composition, renderer, wideViewport);
@@ -1611,6 +1616,15 @@ public sealed class IssueBrowserTests
                         && !issueRow.Contains("VirtualizedList", StringComparison.Ordinal)
                         && issueBrowser.Contains(
                             "public component IssueBrowser",
+                            StringComparison.Ordinal
+                        )
+                        && issueBrowser.Contains(
+                            "breakpoints={view.Breakpoints}",
+                            StringComparison.Ordinal
+                        )
+                        && !issueBrowser.Contains("<ResponsiveContainer", StringComparison.Ordinal)
+                        && issueBrowser.Contains(
+                            "IssueBrowserFirstPaneStyle",
                             StringComparison.Ordinal
                         )
                         && authoredLui.Contains(

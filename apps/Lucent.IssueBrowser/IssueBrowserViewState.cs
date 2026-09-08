@@ -10,7 +10,7 @@ public sealed class IssueBrowserViewState
     {
         _browser = browser;
         _showDetails = owner.Signal(false, "browser-view.details");
-        Constraints = new(owner, "browser-view.bounds");
+        Breakpoints = new(owner, IssueBrowserBreakpoints.Set, "browser-view.breakpoints");
         Split = new(owner, 380, 280, 320, name: "browser-view.split");
         ListViewport = new(owner, name: "browser-view.list");
         DetailViewport = new(owner, name: "browser-view.detail");
@@ -32,21 +32,21 @@ public sealed class IssueBrowserViewState
         );
     }
 
-    public ResponsiveConstraints Constraints { get; }
+    public WindowBreakpoints Breakpoints { get; }
     public SplitPaneState Split { get; }
     public ViewportState ListViewport { get; }
     public ViewportState DetailViewport { get; }
     public EditorSession SearchEditor { get; }
     public EditorSession StatusEditor { get; }
     public EditorSession AssigneeEditor { get; }
-    public bool IsWide => Constraints.Current.Width >= 820;
+
+    /// <summary>Gets the route signal used by responsive pane styles without starting issue loading.</summary>
+    public bool DetailsRoute => _showDetails.Value;
     public bool ShowDetails => _showDetails.Value && _browser.SelectedIssue is not null;
     public DensityPreset Density =>
         _browser.Density == IssueDensity.Comfortable
             ? DensityPreset.Comfortable
             : DensityPreset.Compact;
-    public DensityMetrics Metrics => DensityMetrics.For(Density);
-    public float RowHeight => Metrics.RowHeight + Metrics.FontSize + Metrics.Spacing;
     public string ResultSummary =>
         $"{_browser.VisibleIssues.Count:N0} issues · {(_browser.Status == "all" ? "all states" : _browser.Status)}";
 

@@ -84,6 +84,17 @@ public sealed class Composition : IDisposable
 
     internal T WithoutProjectionTracking<T>(Func<T> project) => _graph.Untracked(project);
 
+    internal T ResumeProjectionTracking<T>(Func<T> read) => _graph.ResumeTracking(read);
+
+    internal T RunLayoutCallback<T>(Func<T> callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        _graph.CheckThread();
+        return _graph.RunMutationGuard(callback);
+    }
+
+    internal T RunStyleCondition<T>(Func<T> callback) => _graph.RunMutationGuard(callback);
+
     internal void InvalidateInputProjection() => _inputProjection.Invalidate();
 
     internal void InvalidateInteractionVisuals() =>
@@ -510,6 +521,7 @@ public sealed class Composition : IDisposable
     internal void ValidateFactoryMutation(Element element)
     {
         _graph.CheckThread();
+        _graph.CheckMutationGuard();
         if (
             _factoryRollbackDepth == 0
             && _factory is not null
@@ -562,6 +574,7 @@ public sealed class Composition : IDisposable
 
     internal void ThrowIfBehaviorAttachment()
     {
+        _graph.CheckMutationGuard();
         if (_behaviorDepth != 0)
             throw new InvalidOperationException("Behaviors cannot configure styles.");
     }
@@ -662,6 +675,7 @@ public sealed class Composition : IDisposable
     private void ThrowIfFactoryCreation()
     {
         _graph.CheckThread();
+        _graph.CheckMutationGuard();
         if (_factory is not null)
             throw new InvalidOperationException(
                 "Structural creation must use the active composition context."

@@ -681,6 +681,149 @@ internal component Example() { <Text style={Scrolling}>Scrollbar theme</Text> }
     }
 
     [TestMethod]
+    public void ParameterizedStylesRetainReactiveNestingAndLiveBindings()
+    {
+        var source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+using static Lucent.Core.VisualProperties;
+using static Lucent.Core.LayoutProperties;
+internal component Example(float width) {
+    <Row style={Workspace(width)} />
+}
+style Workspace(float width) {
+    Width: width;
+    when (width >= 820) {
+        Opacity: .5f;
+        when Hover { Opacity: .75f; }
+    }
+}
+""";
+        var document = LuiParser.Parse(source);
+        Assert(
+            document.Diagnostics.Count == 0,
+            "parameterized style parse: " + Diagnostics(document)
+        );
+        var style = document.Styles.Single();
+        var reactive = style.Members.OfType<LuiVariantGroupSyntax>().Single();
+        var nested = reactive.Members.OfType<LuiVariantGroupSyntax>().Single();
+        Assert(
+            style.Parameters.Count == 1
+                && style.Parameters[0].Name.Text == "width"
+                && reactive.ConditionExpression?.Text == "width >= 820"
+                && nested.ConditionExpression is null
+                && style.Assignments.Count == 3,
+            "parameterized style parameters or nested members were not retained."
+        );
+
+        var formatted = LuiFormatter.Format(source, LuiLineEnding.Lf);
+        Assert(
+            formatted == LuiFormatter.Format(formatted, LuiLineEnding.Lf)
+                && formatted.Contains("style Workspace(float width)", StringComparison.Ordinal)
+                && formatted.Contains("when (width >= 820)", StringComparison.Ordinal)
+                && formatted.Contains("when Hover", StringComparison.Ordinal),
+            "parameterized and nested style syntax was not formatted idempotently."
+        );
+
+        var result = LuiCompiler.Compile(
+            document,
+            CSharpCompilation.Create("parameterized-style", references: References()),
+            new LuiFreshnessIdentity(
+                "parameterized-style",
+                "parameterized-style",
+                new LuiDocumentIdentity("ParameterizedStyle.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "parameterized style lowering failed: "
+                + String.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Message))
+        );
+        Assert(
+            result.Source!.Contains(
+                "private static global::Lucent.Core.Style Workspace(float width)",
+                StringComparison.Ordinal
+            )
+                && result.Source.Contains(".Bind<float?>(", StringComparison.Ordinal)
+                && result.Source.Contains(".When(() =>", StringComparison.Ordinal)
+                && result.Source.Contains("width >= 820", StringComparison.Ordinal)
+                && result.Source.Contains(
+                    ".When(global::Lucent.Core.VariantState.Hover",
+                    StringComparison.Ordinal
+                ),
+            "parameterized styles did not lower through live bindings and nested conditions.\n"
+                + result.Source
+        );
+        Assert(
+            result
+                .Map.FromSource(reactive.ConditionExpression!.Span)
+                .Any(entry => entry.Generated.Length != 0),
+            "reactive condition did not receive a generated source-map entry."
+        );
+    }
+
+    [TestMethod]
+    public void ReactiveStyleConditionsAndStyleParametersDiagnoseSafely()
+    {
+        var nonBoolean = LuiParser.Parse(
+            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Example() { <Row style={Broken} /> } style Broken { when (1) { Width: 1f; } }"
+        );
+        var result = LuiCompiler.Compile(
+            nonBoolean,
+            CSharpCompilation.Create("non-boolean-style", references: References()),
+            new LuiFreshnessIdentity(
+                "non-boolean-style",
+                "non-boolean-style",
+                new LuiDocumentIdentity("NonBooleanStyle.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            !result.Success && result.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2021"),
+            "a non-bool named style condition was not rejected: "
+                + String.Join(
+                    " | ",
+                    result.Diagnostics.Select(diagnostic =>
+                        diagnostic.Id + ":" + diagnostic.Message
+                    )
+                )
+        );
+
+        var invalidParameters = LuiParser.Parse(
+            "style Broken([DefaultContent] Style style, ref int value) { Width: 1f; }"
+        );
+        Assert(
+            invalidParameters.Diagnostics.Count(diagnostic => diagnostic.Id == "LUI3004") == 2,
+            "unsupported style parameter forms did not produce one diagnostic each: "
+                + Diagnostics(invalidParameters)
+        );
+
+        var inlineNonBoolean = LuiParser.Parse(
+            "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Example() { <Row style={Style.Empty with { when (1) { Width: 1f; } }} /> }"
+        );
+        var inlineResult = LuiCompiler.Compile(
+            inlineNonBoolean,
+            CSharpCompilation.Create("inline-non-boolean-style", references: References()),
+            new LuiFreshnessIdentity(
+                "inline-non-boolean-style",
+                "inline-non-boolean-style",
+                new LuiDocumentIdentity("InlineNonBooleanStyle.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            !inlineResult.Success
+                && inlineResult.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI2021"),
+            "an inline non-bool style condition was not rejected."
+        );
+    }
+
+    [TestMethod]
     public void CompilerDiagnostics()
     {
         var lintSource = """

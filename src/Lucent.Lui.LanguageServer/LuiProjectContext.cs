@@ -295,7 +295,16 @@ internal sealed class LuiProjectContext : IDisposable
                 5,
                 style.Span,
                 style.Name.Span,
-                style.Members.SelectMany(StyleSymbols).ToArray()
+                style
+                    .Parameters.Select(parameter => new LuiDocumentSymbol(
+                        parameter.Name.Text,
+                        13,
+                        parameter.Span,
+                        parameter.Name.Span,
+                        []
+                    ))
+                    .Concat(style.Members.SelectMany(StyleSymbols))
+                    .ToArray()
             ))
         );
         var published = symbols.OrderBy(symbol => symbol.Span.Start).ToArray();
@@ -515,14 +524,21 @@ internal sealed class LuiProjectContext : IDisposable
             if (Contains(assignment.Property.Span, offset))
                 return Symbols(StyleProperties(semantic));
         }
-        if (VariantAt(syntax, offset) is { } variant && Contains(variant.Condition.Span, offset))
+        if (
+            VariantAt(syntax, offset) is { ConditionExpression: null } variant
+            && Contains(variant.Condition.Span, offset)
+        )
             return Symbols(VariantStates(semantic.Model.Compilation));
         if (StyleReferenceAt(syntax, offset))
             return DistinctCompletions(
                 syntax.Styles.Select(style => new LuiCompletionItem(
                     style.Name.Text,
-                    5,
-                    "Style",
+                    style.Parameters.Count == 0 && style.OpenParameters.IsMissing ? 5 : 2,
+                    style.Parameters.Count == 0 && style.OpenParameters.IsMissing
+                        ? "Style"
+                        : "Style("
+                            + String.Join(", ", style.Parameters.Select(p => p.DeclarationText))
+                            + ")",
                     null
                 ))
             );
@@ -2654,11 +2670,16 @@ internal sealed class LuiProjectContext : IDisposable
             LuiVariantGroupSyntax variant =>
             [
                 new LuiDocumentSymbol(
-                    "when " + variant.Condition.Text,
+                    "when "
+                        + (
+                            variant.ConditionExpression is null
+                                ? variant.Condition.Text
+                                : "(" + variant.Condition.Text + ")"
+                        ),
                     6,
                     variant.Span,
                     variant.Condition.Span,
-                    variant.Assignments.SelectMany(StyleSymbols).ToArray()
+                    variant.Members.SelectMany(StyleSymbols).ToArray()
                 ),
             ],
             _ => [],
@@ -2857,25 +2878,99 @@ internal sealed class LuiProjectContext : IDisposable
     private static LuiVariantGroupSyntax? VariantAt(LuiDocumentSyntax syntax, int offset) =>
         StyleMembers(syntax)
             .OfType<LuiVariantGroupSyntax>()
-            .FirstOrDefault(variant => Contains(variant.Span, offset));
+            .Where(variant => Contains(variant.Span, offset))
+            .OrderBy(variant => variant.Span.Length)
+            .FirstOrDefault();
 
     private static bool StyleReferenceAt(LuiDocumentSyntax syntax, int offset) =>
         Elements(syntax)
             .SelectMany(element => element.Attributes)
-            .Any(attribute =>
-                (attribute.Value is LuiStyleWithSyntax style && Contains(style.Name.Span, offset))
+            .Any(attribute => StyleReferenceAt(attribute.Value, syntax.Styles, offset));
+
+    private static bool StyleReferenceAt(
+        LuiValueSyntax value,
+        IReadOnlyList<LuiStyleSyntax> styles,
+        int offset
+    ) =>
+        value switch
+        {
+            LuiStyleWithSyntax style => Contains(style.Name.Span, offset),
+            LuiExpressionSyntax expression => StyleExpressionReferenceAt(
+                expression,
+                styles,
+                offset
+            ),
+            _ => false,
+        };
+
+    private static bool StyleExpressionReferenceAt(
+        LuiExpressionSyntax expression,
+        IReadOnlyList<LuiStyleSyntax> styles,
+        int offset
+    )
+    {
+        if (!Contains(expression.Span, offset))
+            return false;
+        var invocation = expression
+            .Expression.DescendantNodesAndSelf()
+            .OfType<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax>()
+            .FirstOrDefault();
+        if (invocation is not null)
+        {
+            var target = invocation.Expression;
+            var name = target switch
+            {
+                Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax identifier => identifier
+                    .Identifier
+                    .ValueText,
+                Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax member => member
+                    .Name
+                    .Identifier
+                    .ValueText,
+                _ => "",
+            };
+            return styles.Any(style =>
+                style.Name.Text == name
+                && Contains(
+                    new LuiSpan(expression.Span.Start + target.SpanStart, target.Span.Length),
+                    offset
+                )
             );
+        }
+        return expression.Expression
+                is Microsoft.CodeAnalysis.CSharp.Syntax.IdentifierNameSyntax bare
+            && styles.Any(style =>
+                style.Name.Text == bare.Identifier.ValueText
+                && Contains(
+                    new LuiSpan(expression.Span.Start + bare.SpanStart, bare.Span.Length),
+                    offset
+                )
+            );
+    }
 
     private static IEnumerable<LuiStyleMemberSyntax> StyleMembers(LuiDocumentSyntax syntax) =>
         syntax
-            .Styles.SelectMany(style => style.Members)
+            .Styles.SelectMany(style => StyleMembers(style.Members))
             .Concat(
                 Elements(syntax)
                     .SelectMany(element => element.Attributes)
                     .Select(attribute => attribute.Value)
                     .OfType<LuiStyleWithSyntax>()
-                    .SelectMany(style => style.Members)
+                    .SelectMany(style => StyleMembers(style.Members))
             );
+
+    private static IEnumerable<LuiStyleMemberSyntax> StyleMembers(
+        IReadOnlyList<LuiStyleMemberSyntax> members
+    )
+    {
+        foreach (var member in members)
+        {
+            yield return member;
+            if (member is LuiVariantGroupSyntax group)
+                foreach (var nested in StyleMembers(group.Members))
+                    yield return nested;
+        }
+    }
 
     private static IEnumerable<LuiSemanticSpan> SyntaxSemanticSpans(LuiDocumentSyntax syntax) =>
         StyleAssignments(syntax)
@@ -2997,8 +3092,8 @@ internal sealed class LuiProjectContext : IDisposable
         StyleMembers(syntax)
             .SelectMany(member =>
                 member is LuiStyleAssignmentSyntax assignment
-                    ? [assignment]
-                    : ((LuiVariantGroupSyntax)member).Assignments
+                    ? new[] { assignment }
+                    : Array.Empty<LuiStyleAssignmentSyntax>()
             );
 
     private static bool IsComponent(IMethodSymbol method) =>

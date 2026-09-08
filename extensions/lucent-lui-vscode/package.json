@@ -1,10 +1,28 @@
 {
   "name": "lucent-lui",
   "displayName": "Lucent .lui",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "lucent",
+  "description": "Language support and cross-language tooling for Lucent .lui files.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RichiCoder1/lucent.git",
+    "directory": "extensions/lucent-lui-vscode"
+  },
+  "bugs": { "url": "https://github.com/RichiCoder1/lucent/issues" },
+  "homepage": "https://github.com/RichiCoder1/lucent/tree/main/extensions/lucent-lui-vscode",
+  "categories": ["Programming Languages"],
+  "keywords": ["lucent", "lui", "language server", "syntax highlighting"],
   "engines": { "vscode": "^1.95.0" },
   "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "language-configuration.json",
+    "syntaxes/**",
+    "README.md",
+    "LICENSE"
+  ],
   "activationEvents": ["onLanguage:lui", "workspaceContains:**/*.lui"],
   "contributes": {
     "languages": [{

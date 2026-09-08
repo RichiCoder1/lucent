@@ -812,12 +812,18 @@ public sealed class LuiStyleSyntax : LuiSyntaxNode
         LuiToken name,
         LuiToken openBrace,
         IReadOnlyList<LuiStyleMemberSyntax> members,
-        LuiToken closeBrace
+        LuiToken closeBrace,
+        IReadOnlyList<LuiParameterSyntax>? parameters = null,
+        LuiToken? openParameters = null,
+        LuiToken? closeParameters = null
     )
         : base(span)
     {
         StyleKeyword = styleKeyword;
         Name = name;
+        Parameters = parameters ?? [];
+        OpenParameters = openParameters ?? new LuiToken("(", new LuiSpan(name.Span.End, 0), true);
+        CloseParameters = closeParameters ?? new LuiToken(")", new LuiSpan(name.Span.End, 0), true);
         OpenBrace = openBrace;
         Members = members;
         Assignments = members
@@ -835,6 +841,15 @@ public sealed class LuiStyleSyntax : LuiSyntaxNode
 
     /// <summary>Declared style-name token.</summary>
     public LuiToken Name { get; }
+
+    /// <summary>Declared style parameters in source order, when the style has a parameter list.</summary>
+    public IReadOnlyList<LuiParameterSyntax> Parameters { get; }
+
+    /// <summary>Opening parameter-list token, or a missing token for the field-style form.</summary>
+    public LuiToken OpenParameters { get; }
+
+    /// <summary>Closing parameter-list token, possibly recovered.</summary>
+    public LuiToken CloseParameters { get; }
 
     /// <summary>Opening declaration brace.</summary>
     public LuiToken OpenBrace { get; }
@@ -893,13 +908,38 @@ public sealed class LuiVariantGroupSyntax : LuiStyleMemberSyntax
         IReadOnlyList<LuiStyleAssignmentSyntax> assignments,
         LuiToken closeBrace
     )
+        : this(
+            span,
+            whenKeyword,
+            condition,
+            openBrace,
+            assignments.Cast<LuiStyleMemberSyntax>().ToArray(),
+            closeBrace
+        ) { }
+
+    /// <summary>Creates a conditional style group retaining nested groups and an optional C# condition.</summary>
+    public LuiVariantGroupSyntax(
+        LuiSpan span,
+        LuiToken whenKeyword,
+        LuiToken condition,
+        LuiToken openBrace,
+        IReadOnlyList<LuiStyleMemberSyntax> members,
+        LuiToken closeBrace,
+        LuiExpressionSyntax? conditionExpression = null,
+        LuiToken? openCondition = null,
+        LuiToken? closeCondition = null
+    )
         : base(span)
     {
         WhenKeyword = whenKeyword;
         Condition = condition;
         OpenBrace = openBrace;
-        Assignments = assignments;
+        Members = members;
+        Assignments = members.SelectMany(AssignmentsOf).ToArray();
         CloseBrace = closeBrace;
+        ConditionExpression = conditionExpression;
+        OpenCondition = openCondition;
+        CloseCondition = closeCondition;
     }
 
     /// <summary><c>when</c> keyword token.</summary>
@@ -908,12 +948,37 @@ public sealed class LuiVariantGroupSyntax : LuiStyleMemberSyntax
     /// <summary>Condition text token evaluated by lowering.</summary>
     public LuiToken Condition { get; }
 
+    /// <summary>Parenthesized C# condition, or <see langword="null"/> for a VariantState condition.</summary>
+    public LuiExpressionSyntax? ConditionExpression { get; }
+
+    /// <summary>Opening parenthesis for a C# condition, when present.</summary>
+    public LuiToken? OpenCondition { get; }
+
+    /// <summary>Closing parenthesis for a C# condition, possibly recovered.</summary>
+    public LuiToken? CloseCondition { get; }
+
     /// <summary>Opening assignment-group brace.</summary>
     public LuiToken OpenBrace { get; }
 
-    /// <summary>Conditional assignments in source order.</summary>
+    /// <summary>Conditional assignments and nested groups in source order.</summary>
+    public IReadOnlyList<LuiStyleMemberSyntax> Members { get; }
+
+    /// <summary>Conditional assignments flattened recursively for existing consumers.</summary>
     public IReadOnlyList<LuiStyleAssignmentSyntax> Assignments { get; }
 
     /// <summary>Closing assignment-group brace, possibly recovered.</summary>
     public LuiToken CloseBrace { get; }
+
+    /// <summary>Whether the group is driven by a parenthesized reactive C# condition.</summary>
+    public bool IsReactive => ConditionExpression is not null;
+
+    private static IEnumerable<LuiStyleAssignmentSyntax> AssignmentsOf(
+        LuiStyleMemberSyntax member
+    ) =>
+        member switch
+        {
+            LuiStyleAssignmentSyntax assignment => [assignment],
+            LuiVariantGroupSyntax group => group.Assignments,
+            _ => [],
+        };
 }

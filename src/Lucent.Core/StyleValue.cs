@@ -58,9 +58,9 @@ internal sealed class ValueBindingAssignment<T> : IAssignment, IBindingAssignmen
 
     public IAssignment Materialize(
         ElementPresentation presentation,
-        VariantState condition,
+        Func<bool> active,
         int ordinal
-    ) => new BoundStyleValue<T>(presentation, _property, _read, condition, ordinal);
+    ) => new BoundStyleValue<T>(presentation, _property, _read, active, ordinal);
 }
 
 internal sealed class BoundStyleValue<T> : IAssignment
@@ -72,7 +72,7 @@ internal sealed class BoundStyleValue<T> : IAssignment
         ElementPresentation presentation,
         Property<T> property,
         Func<StyleValue<T>> read,
-        VariantState condition,
+        Func<bool> active,
         int ordinal
     )
     {
@@ -84,7 +84,7 @@ internal sealed class BoundStyleValue<T> : IAssignment
         _ = scope.Effect(
             () =>
             {
-                if (!presentation.IsActive(condition))
+                if (!active())
                 {
                     _available.Value = false;
                     return;

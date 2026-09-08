@@ -17,6 +17,8 @@ public sealed class ReactiveGraph
     private readonly object _postedGate = new();
     private readonly List<ReactiveNode> _evaluating = [];
     private ReactiveCollector? _collecting;
+    private ReactiveCollector? _suspendedCollector;
+    private int _mutationGuardDepth;
     private DrainState? _drainState;
     private int _batchDepth;
     private int _nextNodeId;
@@ -30,6 +32,7 @@ public sealed class ReactiveGraph
     public ReactiveScope CreateScope(string name)
     {
         CheckThread();
+        CheckMutationGuard();
         ValidateName(name, nameof(name));
         return new ReactiveScope(this, null, name);
     }
@@ -38,6 +41,7 @@ public sealed class ReactiveGraph
     public Signal<T> Signal<T>(T value, string name)
     {
         CheckThread();
+        CheckMutationGuard();
         ValidateName(name, nameof(name));
         return new Signal<T>(this, value, name, null);
     }
@@ -46,6 +50,7 @@ public sealed class ReactiveGraph
     public Derived<T> Derived<T>(Func<T> compute, string name)
     {
         CheckThread();
+        CheckMutationGuard();
         ArgumentNullException.ThrowIfNull(compute);
         ValidateName(name, nameof(name));
         return new Derived<T>(this, compute, name, null);
@@ -55,6 +60,7 @@ public sealed class ReactiveGraph
     public ReactiveEffect Effect(Action callback, string name)
     {
         CheckThread();
+        CheckMutationGuard();
         ArgumentNullException.ThrowIfNull(callback);
         ValidateName(name, nameof(name));
         return new ReactiveEffect(this, callback, name, null);
@@ -64,6 +70,7 @@ public sealed class ReactiveGraph
     public AsyncValue<T> Async<T>(Func<CancellationToken, Task<T>> load, string name)
     {
         CheckThread();
+        CheckMutationGuard();
         ArgumentNullException.ThrowIfNull(load);
         ValidateName(name, nameof(name));
         return new AsyncValue<T>(this, load, default!, false, name, null);
@@ -73,6 +80,7 @@ public sealed class ReactiveGraph
     public AsyncValue<T> Async<T>(Func<CancellationToken, Task<T>> load, T staleValue, string name)
     {
         CheckThread();
+        CheckMutationGuard();
         ArgumentNullException.ThrowIfNull(load);
         ValidateName(name, nameof(name));
         return new AsyncValue<T>(this, load, staleValue, true, name, null);
@@ -83,6 +91,7 @@ public sealed class ReactiveGraph
     {
         ArgumentNullException.ThrowIfNull(action);
         CheckThread();
+        CheckMutationGuard();
         _batchDepth++;
         Exception? bodyError = null;
         try
@@ -118,12 +127,20 @@ public sealed class ReactiveGraph
     }
 
     /// <summary>Commits posted async completions and scheduled effects on the owning UI thread.</summary>
-    public void Drain() => DrainPosted();
+    public void Drain()
+    {
+        CheckMutationGuard();
+        DrainPosted();
+    }
 
     /// <summary>Commits at most <paramref name="maximumWorkItems"/> posted completions and scheduled effects.</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maximumWorkItems"/> is not positive.</exception>
     /// <exception cref="InvalidOperationException">The graph still has pending work after the limit is reached.</exception>
-    public void Drain(int maximumWorkItems) => DrainPosted(maximumWorkItems);
+    public void Drain(int maximumWorkItems)
+    {
+        CheckMutationGuard();
+        DrainPosted(maximumWorkItems);
+    }
 
     internal bool DrainPosted() => DrainPosted(int.MaxValue);
 
@@ -298,6 +315,8 @@ public sealed class ReactiveGraph
         CheckThread();
         ArgumentNullException.ThrowIfNull(callback);
         var prior = _collecting;
+        var suspendedPrior = _suspendedCollector;
+        _suspendedCollector = prior;
         _collecting = null;
         try
         {
@@ -306,7 +325,50 @@ public sealed class ReactiveGraph
         finally
         {
             _collecting = prior;
+            _suspendedCollector = suspendedPrior;
         }
+    }
+
+    internal T ResumeTracking<T>(Func<T> callback)
+    {
+        CheckThread();
+        ArgumentNullException.ThrowIfNull(callback);
+        if (_collecting is not null || _suspendedCollector is null)
+            return callback();
+        var prior = _collecting;
+        _collecting = _suspendedCollector;
+        try
+        {
+            return callback();
+        }
+        finally
+        {
+            _collecting = prior;
+        }
+    }
+
+    internal T RunMutationGuard<T>(Func<T> callback)
+    {
+        CheckThread();
+        ArgumentNullException.ThrowIfNull(callback);
+        _mutationGuardDepth++;
+        try
+        {
+            return callback();
+        }
+        finally
+        {
+            _mutationGuardDepth--;
+        }
+    }
+
+    internal void CheckMutationGuard()
+    {
+        CheckThread();
+        if (_mutationGuardDepth != 0)
+            throw new InvalidOperationException(
+                "Protected reactive evaluation callbacks cannot mutate reactive state."
+            );
     }
 
     internal Evaluation<T> Evaluate<T>(ReactiveNode node, Func<T> callback)

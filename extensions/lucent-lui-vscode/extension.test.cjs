@@ -45,6 +45,17 @@ test("does not treat component tag delimiters as expression brackets", () => {
     assert.ok(!configuration.brackets.some(pair => pair[0] === "<"));
 });
 
+test("grammar retains parameterized component and style declaration headers", () => {
+    const grammar = JSON.parse(
+        fs.readFileSync(path.join(__dirname, "syntaxes", "lui.tmLanguage.json"), "utf8")
+    );
+    const declarations = grammar.repository.declarations.patterns;
+    assert.ok(declarations.some(pattern =>
+        pattern.begin === "\\b(component|style)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*)(\\()"
+        && pattern.end === "\\)"
+    ));
+});
+
 test("activates only Lucent workspaces and registers C# cross-language selectors", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
     assert.deepEqual(manifest.activationEvents, ["onLanguage:lui", "workspaceContains:**/*.lui"]);

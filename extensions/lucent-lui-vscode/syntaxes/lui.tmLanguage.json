@@ -55,6 +55,19 @@
           }
         },
         {
+          "begin": "\\b(component|style)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\s*)(\\()",
+          "beginCaptures": {
+            "1": { "name": "storage.type.lui" },
+            "2": { "name": "entity.name.type.lui" },
+            "4": { "name": "punctuation.definition.parameters.begin.lui" }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.parameters.end.lui" }
+          },
+          "patterns": [{ "include": "source.cs" }]
+        },
+        {
           "match": "\\b(component|style)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.lui" },
