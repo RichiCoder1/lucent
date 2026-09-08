@@ -4,7 +4,11 @@ using Microsoft.Extensions.Time.Testing;
 namespace Lucent.Testing;
 
 /// <summary>Owner-thread-only access to the production state hosted by a headless application.</summary>
-/// <remarks>Instances are valid only for the duration of an <c>InvokeAsync</c> callback or recipe factory.</remarks>
+/// <remarks>
+/// Advanced test access to real runtime objects. Use this surface through an <c>InvokeAsync</c>
+/// callback or recipe factory on the application owner thread. Capturing a reference does not
+/// marshal later calls or extend the lifetime of the application or its elements.
+/// </remarks>
 public sealed class HeadlessContext
 {
     private readonly int _ownerThread;

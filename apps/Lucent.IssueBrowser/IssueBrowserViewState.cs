@@ -47,6 +47,16 @@ public sealed class IssueBrowserViewState
         _browser.Density == IssueDensity.Comfortable
             ? DensityPreset.Comfortable
             : DensityPreset.Compact;
+
+    /// <summary>Gets the shared extent used by the two-line row and its fixed-row viewport.</summary>
+    public float IssueRowHeight
+    {
+        get
+        {
+            var metrics = DensityMetrics.For(Density);
+            return metrics.RowHeight + metrics.FontSize + metrics.Spacing;
+        }
+    }
     public string ResultSummary =>
         $"{_browser.VisibleIssues.Count:N0} issues · {(_browser.Status == "all" ? "all states" : _browser.Status)}";
 

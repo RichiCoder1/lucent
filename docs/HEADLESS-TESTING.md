@@ -20,6 +20,8 @@ Assert.AreEqual(1, Volatile.Read(ref saves));
 
 Use `Lucent.Core` and `Lucent.Testing` in the C# file. Each harness application runs on its own owner thread. Input and observation operations marshal to that thread and settle queued work before returning. Create reactive models on that owner and inspect their live state there; do not pass a caller-owned reactive graph into a component closure. Prefer snapshots or plain result values for assertions on the test-runner thread.
 
+`HeadlessContext`, including its session, composition and element access, is an advanced test surface. Those are real runtime objects with ordinary owner-thread and disposal rules, not isolated test doubles. Use them within `InvokeAsync` or the root recipe factory; capturing them does not marshal later access or extend their lifetime. The harness does not expose a callback-expiry lease and does not make raw runtime APIs safe to use from the test runner thread.
+
 ## Choose what to exercise
 
 The base harness supplies deterministic text metrics for structural tests. It does not claim real font shaping or pixel fidelity. Reference `Lucent.Testing.Skia` for real text geometry, caret hit testing, and optional PNG captures with the production renderer. Pixel baselines are not required for behavior assertions.

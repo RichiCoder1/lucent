@@ -33,6 +33,6 @@ public component IssueList(IssueBrowserState browser, IssueBrowserViewState view
                 <Text style={PresentationStyles.Body}>Try a different search or clear your filters.</Text>
             </Layout>
         }
-        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value, view).Named("issue-browser.issue-row")} rowHeight={() => DensityMetrics.For(view.Density).RowHeight + DensityMetrics.For(view.Density).FontSize + DensityMetrics.For(view.Density).Spacing} viewport={view.ListViewport} label="Issues" style={IssueListViewportStyle} name="issue-browser.scroll-viewport" />
+        <VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value, view).Named("issue-browser.issue-row")} rowHeight={() => view.IssueRowHeight} viewport={view.ListViewport} label="Issues" style={IssueListViewportStyle} name="issue-browser.scroll-viewport" />
     </Layout>
 }

@@ -8,6 +8,37 @@ public sealed class CustomLayoutAlgorithmContracts
     private static readonly Property<int> Order = new("test-layout-order", 0);
 
     [TestMethod]
+    public void ContainerPropertyReadsTrackProjectionInputsAndExpireWithInvocation()
+    {
+        var algorithm = new ContainerMetadataAlgorithm();
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "custom-container-metadata");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var inset = graph.Signal(3, "container-inset");
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Algorithm(algorithm).Bind(Order, () => inset.Value)
+        );
+        var child = composition.Child(composition.Root, "child");
+        child.Present(theme, author: Style.Empty.Width(10).Height(10));
+        var scene = SceneLayout.Project(composition, new(100, 40, 1), new EmptyShaper());
+        Assert.AreEqual(3f, scene.Boxes.Single(box => box.Identity.ElementId == child.Id).Bounds.X);
+        Assert.IsTrue(composition.Input.SetScene(scene));
+        Expect<InvalidOperationException>(() => algorithm.Captured!.Read(Order));
+        inset.Value = 7;
+        graph.Drain();
+        Assert.AreEqual(
+            InputRejection.StaleScene,
+            composition.Input.DispatchPointer(new(PointerCommandKind.Move, 1, 1, 1)).Rejection
+        );
+        var updated = SceneLayout.Project(composition, new(100, 40, 1), new EmptyShaper());
+        Assert.AreEqual(
+            7f,
+            updated.Boxes.Single(box => box.Identity.ElementId == child.Id).Bounds.X
+        );
+    }
+
+    [TestMethod]
     public void CustomAlgorithmReadsTypedMetadataAndPlacesStableChildren()
     {
         var algorithm = new MetadataAlgorithm();
@@ -186,6 +217,18 @@ public sealed class CustomLayoutAlgorithmContracts
                     ))
                     .ToArray()
             );
+    }
+
+    private sealed class ContainerMetadataAlgorithm() : LayoutAlgorithm("container-metadata")
+    {
+        public LayoutAlgorithmContext? Captured { get; private set; }
+
+        public override LayoutAlgorithmResult Layout(LayoutAlgorithmContext context)
+        {
+            Captured = context;
+            var inset = context.Read(Order);
+            return new(new(10 + inset, 10), new LayoutChildPlacement(0, new(inset, 0, 10, 10)));
+        }
     }
 
     private sealed class MeasurementAlgorithm() : LayoutAlgorithm("measurement")

@@ -192,6 +192,17 @@ public sealed class LayoutAlgorithmContext
         }
     }
 
+    /// <summary>Reads a resolved container property and tracks it as an input to this projection.</summary>
+    /// <remarks>The context expires when Layout returns; this does not expose the mutable container.</remarks>
+    public T Read<T>(Property<T> property)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        CheckActive();
+        return _container.Composition.ResumeProjectionTracking(() =>
+            _container.Resolve(property).Value
+        );
+    }
+
     /// <summary>Measures a child with at most one constraint distinct from its initial unconstrained size.</summary>
     public LayoutSize MeasureChild(LayoutChild child, LayoutConstraints constraints)
     {
