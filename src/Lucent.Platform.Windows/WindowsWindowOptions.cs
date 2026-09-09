@@ -1,3 +1,5 @@
+using Lucent.Core;
+
 namespace Lucent.Platform.Windows;
 
 /// <summary>Chooses how standard context menus are presented by the Windows host.</summary>
@@ -27,6 +29,13 @@ public sealed record WindowsWindowOptions
 
     /// <summary>Gets the requested context-menu presentation.</summary>
     public WindowsMenuPresentation MenuPresentation { get; init; } = WindowsMenuPresentation.Lucent;
+
+    /// <summary>
+    /// Gets the artwork used by this window's title bar and taskbar icon.
+    /// When omitted, the executable's generated <see cref="ApplicationIconDefaults.Current"/>
+    /// artwork is used when one was declared.
+    /// </summary>
+    public ImageSource? Icon { get; init; }
 
     internal void Validate()
     {

@@ -30,6 +30,7 @@ $projectAppRoot = Join-Path $ProofDirectory 'project-reference-app'
 $packageAppRoot = Join-Path $ProofDirectory 'package-reference-app'
 $metadataRoot = Join-Path $ProofDirectory 'metadata'
 $negativeRoot = Join-Path $ProofDirectory 'negative'
+$applicationIconRoot = Join-Path $ProofDirectory 'application-icon'
 $crossRoot = Join-Path $ProofDirectory 'cross-library'
 $zeroRoot = Join-Path $ProofDirectory 'zero-assets'
 $disabledRoot = Join-Path $ProofDirectory 'lui-disabled'
@@ -260,13 +261,15 @@ Console.WriteLine("consumer: PASS");
     return Join-Path $directory "$name.csproj"
 }
 
-function New-CaseProject([string]$directory, [string]$name, [string]$itemXml, [hashtable]$files) {
+function New-CaseProject([string]$directory, [string]$name, [string]$itemXml, [hashtable]$files, [bool]$application = $false) {
     New-Item -ItemType Directory -Force -Path $directory | Out-Null
     foreach ($entry in $files.GetEnumerator()) { Write-BytesFile (Join-Path $directory $entry.Key) $entry.Value }
+    $outputType = if ($application) { '<OutputType>Exe</OutputType>' } else { '' }
     $project = @"
 <Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/$Version">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    $outputType
     <AssemblyName>$name</AssemblyName>
     <RootNamespace>AssetCase</RootNamespace>
     <Nullable>enable</Nullable>
@@ -281,6 +284,7 @@ function New-CaseProject([string]$directory, [string]$name, [string]$itemXml, [h
 </Project>
 "@
     Write-TextFile (Join-Path $directory "$name.csproj") $project
+    if ($application) { Write-TextFile (Join-Path $directory 'Program.cs') 'Console.WriteLine("application-icon: PASS");' }
     return Join-Path $directory "$name.csproj"
 }
 
@@ -337,7 +341,7 @@ function New-CrossConsumerProject([string]$directory, [string]$name, [string]$fi
     return Join-Path $directory "$name.csproj"
 }
 
-$knownDirectories = @('feed','packages','library','workspace-probe-library','project-reference-app','package-reference-app','metadata','negative','cross-library','zero-assets','lui-disabled','removed-last-asset','fixed-path-rename','publish')
+$knownDirectories = @('feed','packages','library','workspace-probe-library','project-reference-app','package-reference-app','metadata','negative','cross-library','zero-assets','lui-disabled','removed-last-asset','fixed-path-rename','application-icon','publish')
 New-Item -ItemType Directory -Force -Path $ProofDirectory | Out-Null
 foreach ($name in $knownDirectories) {
     $path = Join-Path $ProofDirectory $name
@@ -520,6 +524,47 @@ try {
         Build-ProbeExpectedFailure $caseRoot $caseProject $case.Name 'LUIA0004' | Out-Null
     }
 
+    # Application artwork uses one current-executable default, a finite generated ICO and
+    # packaged PNG renditions that the Windows host can consume before first presentation.
+    $applicationSvg = [IO.File]::ReadAllBytes((Join-Path $libraryFixture 'Artwork/brand.svg'))
+    $generatedIconRoot = Join-Path $applicationIconRoot 'generated'
+    $generatedIconProject = New-CaseProject $generatedIconRoot 'GeneratedApplicationIcon' '<LucentAsset Include="brand.svg" Path="application/brand.svg" ApplicationIcon="true" />' @{ 'brand.svg' = $applicationSvg } $true
+    $generatedInventoryFile = Build-Probe $generatedIconRoot $generatedIconProject 'application-icon-generated'
+    $generatedInventory = Get-Inventory $generatedIconRoot
+    $generatedArtwork = $generatedInventory.applicationIconArtwork
+    Assert-That ($null -ne $generatedArtwork) 'Generated application inventory omitted artwork provenance.'
+    Assert-That ($generatedArtwork.svgPolicy -eq 'lucent-secure-static-v1/svg.skia-5.2.3/skia-4.151.1') 'Generated application inventory omitted the SVG policy identity.'
+    Assert-That ($generatedArtwork.svgFont -eq 'none') 'Generated application inventory omitted the default SVG font identity.'
+    Assert-That (@($generatedArtwork.renditions).Count -eq 7) 'Generated application artwork did not contain seven finite renditions.'
+    $generatedSource = Get-ChildItem -LiteralPath $generatedIconRoot -Recurse -Filter 'Lucent.Assets.g.cs' -File | Select-Object -First 1
+    $generatedText = Get-Content -LiteralPath $generatedSource.FullName -Raw
+    Assert-That ($generatedText.Contains('ApplicationIconDefault') -and $generatedText.Contains('ApplicationIconRendition')) 'Generated source omitted the static application-icon registration.'
+    $generatedIco = Get-ChildItem -LiteralPath $generatedIconRoot -Recurse -Filter 'application.ico' -File | Select-Object -First 1
+    Assert-That ($null -ne $generatedIco) 'Generated application.ico is missing.'
+    $generatedIcoBytes = [IO.File]::ReadAllBytes($generatedIco.FullName)
+    Assert-That ([BitConverter]::ToUInt16($generatedIcoBytes, 4) -eq 7) 'Generated application.ico did not contain seven entries.'
+    $generatedPayloads = @(Get-ChildItem -LiteralPath (Join-Path $generatedIco.DirectoryName 'payload') -File)
+    Assert-That ($generatedPayloads.Count -eq 8) 'Generated application icon did not package its source and seven PNG rendition payloads.'
+
+    $suppliedIconRoot = Join-Path $applicationIconRoot 'supplied'
+    $suppliedProject = New-CaseProject $suppliedIconRoot 'SuppliedApplicationIcon' '<LucentAsset Include="brand.svg" Path="application/brand.svg" ApplicationIcon="true" IconFile="supplied.ico" />' @{ 'brand.svg' = $applicationSvg; 'supplied.ico' = $generatedIcoBytes } $true
+    Build-Probe $suppliedIconRoot $suppliedProject 'application-icon-supplied' | Out-Null
+    $suppliedOutput = Get-ChildItem -LiteralPath $suppliedIconRoot -Recurse -Filter 'application.ico' -File | Select-Object -First 1
+    Assert-That ((Get-Hash ([IO.File]::ReadAllBytes($suppliedOutput.FullName))) -eq (Get-Hash $generatedIcoBytes)) 'Supplied ICO optical bytes were not preserved for the apphost.'
+    $suppliedBefore = Get-FileHashHex $suppliedOutput.FullName
+    Write-BytesFile (Join-Path $suppliedIconRoot 'supplied.ico') ([byte[]]($generatedIcoBytes + [byte]0))
+    Start-Sleep -Seconds 1
+    $suppliedChanged = Invoke-DotnetCapture 'application-icon-supplied-edited' @('build', $suppliedProject, '--no-restore', '--nologo')
+    Assert-That ($suppliedChanged.ExitCode -eq 0 -and $suppliedChanged.Output -match 'Lucent asset catalog:') "Edited IconFile did not regenerate the catalog.`n$($suppliedChanged.Output)"
+    Assert-That ((Get-FileHashHex $suppliedOutput.FullName) -ne $suppliedBefore) 'Edited IconFile did not change the generated application.ico bytes.'
+
+    $overlapBytes = [byte[]]$generatedIcoBytes.Clone()
+    $firstPayloadOffset = [BitConverter]::ToUInt32($overlapBytes, 6 + 12)
+    [Array]::Copy([BitConverter]::GetBytes([uint32]$firstPayloadOffset), 0, $overlapBytes, 6 + 16 + 12, 4)
+    $overlapRoot = Join-Path $applicationIconRoot 'overlap'
+    $overlapProject = New-CaseProject $overlapRoot 'OverlappingApplicationIcon' '<LucentAsset Include="brand.svg" Path="application/brand.svg" ApplicationIcon="true" IconFile="overlap.ico" />' @{ 'brand.svg' = $applicationSvg; 'overlap.ico' = $overlapBytes } $true
+    Build-ProbeExpectedFailure $overlapRoot $overlapProject 'application-icon-overlap' 'LUIA0008' | Out-Null
+
     # Empty catalogs and removal must erase stale generated payload/source directories.
     $zeroProject = New-CaseProject $zeroRoot 'ZeroAssets' '' @{}
     New-Item -ItemType Directory -Force -Path (Join-Path $zeroRoot 'obj/Debug/net10.0/lucent-assets') | Out-Null
@@ -575,11 +620,13 @@ try {
         @{ Name='case-collision'; Items='<LucentAsset Include="one.svg" Path="icons/Brand.svg" /><LucentAsset Include="two.svg" Path="icons/brand.svg" />'; Files=@{ 'one.svg' = $validSvg; 'two.svg' = $validSvg }; Code='LUIA0006' },
         @{ Name='path-collision'; Items='<LucentAsset Include="one.svg" Path="icons/brand.svg" /><LucentAsset Include="two.svg" Path="icons/brand.svg" />'; Files=@{ 'one.svg' = $validSvg; 'two.svg' = $validSvg }; Code='LUIA0006' },
         @{ Name='member-collision'; Items='<LucentAsset Include="one.svg" Path="one.svg" Accessor="Thing" /><LucentAsset Include="two.svg" Path="two.svg" Accessor="Thing" />'; Files=@{ 'one.svg' = $validSvg; 'two.svg' = $validSvg }; Code='LUIA0007' },
-        @{ Name='type-collision'; Items='<LucentAsset Include="one.svg" Path="one.svg" Accessor="Thing" /><LucentAsset Include="two.svg" Path="two.svg" Accessor="Thing.Child" />'; Files=@{ 'one.svg' = $validSvg; 'two.svg' = $validSvg }; Code='LUIA0007' }
+        @{ Name='type-collision'; Items='<LucentAsset Include="one.svg" Path="one.svg" Accessor="Thing" /><LucentAsset Include="two.svg" Path="two.svg" Accessor="Thing.Child" />'; Files=@{ 'one.svg' = $validSvg; 'two.svg' = $validSvg }; Code='LUIA0007' },
+        @{ Name='application-icon-library'; Items='<LucentAsset Include="brand.svg" Path="brand.svg" ApplicationIcon="true" />'; Files=@{ 'brand.svg' = $validSvg }; Code='LUIA0008' },
+        @{ Name='application-icon-multiple'; Items='<LucentAsset Include="one.svg" Path="one.svg" ApplicationIcon="true" /><LucentAsset Include="two.svg" Path="two.svg" ApplicationIcon="true" />'; Files=@{ 'one.svg' = $validSvg; 'two.svg' = $validSvg }; Code='LUIA0008'; Application=$true }
     )
     foreach ($case in $negativeCases) {
         $caseRoot = Join-Path $negativeRoot $case.Name
-        $caseProject = New-CaseProject $caseRoot $case.Name $case.Items $case.Files
+        $caseProject = New-CaseProject $caseRoot $case.Name $case.Items $case.Files ([bool]$case.Application)
         Build-ProbeExpectedFailure $caseRoot $caseProject $case.Name $case.Code | Out-Null
         Assert-That (!(Get-ChildItem -LiteralPath $caseRoot -Recurse -Filter 'Lucent.Assets.g.cs' -File -ErrorAction SilentlyContinue)) "Failed catalog '$($case.Name)' emitted generated source."
     }

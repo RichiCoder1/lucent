@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "pack": "Lucent.Icons.Lucide",
+  "upstream": "lucide-icons/lucide",
+  "version": "1.43.0",
+  "revision": "ba95e4c988b1e1b39cf5544e73b25a74b76816ee",
+  "importerRevision": "lucent-lucide-import-v1",
+  "icons": [
+    {
+      "name": "archive",
+      "accessor": "LucideIcons.Archive",
+      "path": "icons/archive.svg",
+      "sha256": "78c732e34e232db63af06a2330b4448045cfdf49b48b59f2d31922df54c7bb17",
+      "bytes": 340
+    },
+    {
+      "name": "arrow-left",
+      "accessor": "LucideIcons.ArrowLeft",
+      "path": "icons/arrow-left.svg",
+      "sha256": "c5f4b88076108eb1a0d95336e1aa7e7bb1419a3a92af96f6247d88cd3456f933",
+      "bytes": 262
+    },
+    {
+      "name": "arrow-right",
+      "accessor": "LucideIcons.ArrowRight",
+      "path": "icons/arrow-right.svg",
+      "sha256": "288397fdb73bb4f783cf9eabb726ff47357df1d4e3f1201dd748090579f108b9",
+      "bytes": 261
+    },
+    {
+      "name": "circle-check",
+      "accessor": "LucideIcons.CircleCheck",
+      "path": "icons/circle-check.svg",
+      "sha256": "9711e045a5999f8a3b0782eb88e09b04e0559bc7b379dcc0a4ae645223e10345",
+      "bytes": 278
+    },
+    {
+      "name": "circle-dot",
+      "accessor": "LucideIcons.CircleDot",
+      "path": "icons/circle-dot.svg",
+      "sha256": "c263f6a08a089c06ad40f408ad5da9100359ab52d379e6c571cd7c5bd74eaa87",
+      "bytes": 279
+    },
+    {
+      "name": "ellipsis",
+      "accessor": "LucideIcons.Ellipsis",
+      "path": "icons/ellipsis.svg",
+      "sha256": "4f495cc72013ffdfec677f03b33a150f7b4dd741979283fd6853a09024bca112",
+      "bytes": 312
+    },
+    {
+      "name": "file-text",
+      "accessor": "LucideIcons.FileText",
+      "path": "icons/file-text.svg",
+      "sha256": "52ca55846c202335fb870c8aa23e9345630ec10489303756d62e750f7109605c",
+      "bytes": 444
+    },
+    {
+      "name": "inbox",
+      "accessor": "LucideIcons.Inbox",
+      "path": "icons/inbox.svg",
+      "sha256": "1838482c53d0846badef9be96fdcf7a167064241bd4891efa995c77ebec5f187",
+      "bytes": 388
+    },
+    {
+      "name": "link",
+      "accessor": "LucideIcons.Link",
+      "path": "icons/link.svg",
+      "sha256": "4f3237183dcaabfac92f4e94c776a9a9e45c3c5e77a921061a6b34b61eb5413f",
+      "bytes": 359
+    },
+    {
+      "name": "list-filter",
+      "accessor": "LucideIcons.ListFilter",
+      "path": "icons/list-filter.svg",
+      "sha256": "36b94082bd7f161244c06a27cdeea647cb99ee5b805183cbeaf7ac3155a7103b",
+      "bytes": 278
+    },
+    {
+      "name": "notebook-pen",
+      "accessor": "LucideIcons.NotebookPen",
+      "path": "icons/notebook-pen.svg",
+      "sha256": "56705c35e839977bd6f133d7ca4e9c93a6eea563c89e4be125efd0a32e1fa041",
+      "bytes": 519
+    },
+    {
+      "name": "plus",
+      "accessor": "LucideIcons.Plus",
+      "path": "icons/plus.svg",
+      "sha256": "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17",
+      "bytes": 256
+    },
+    {
+      "name": "refresh-cw",
+      "accessor": "LucideIcons.RefreshCw",
+      "path": "icons/refresh-cw.svg",
+      "sha256": "2e10dd403c85a24f163d59fc6151aa21147fe9402e1305dfc8979208caee8944",
+      "bytes": 392
+    },
+    {
+      "name": "search",
+      "accessor": "LucideIcons.Search",
+      "path": "icons/search.svg",
+      "sha256": "283d371c2e433817bb9c0c8310caa6c77fa4177c0f4f1168d9c83b97af7389dc",
+      "bytes": 275
+    },
+    {
+      "name": "trash",
+      "accessor": "LucideIcons.Trash",
+      "path": "icons/trash.svg",
+      "sha256": "27299f69ad7c6272be64b1b8e2d48cbd6dcf0ef0d4f92827a1affa945c91700e",
+      "bytes": 389
+    }
+  ]
+}

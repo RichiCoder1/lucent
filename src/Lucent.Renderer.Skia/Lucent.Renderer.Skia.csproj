@@ -6,6 +6,8 @@
     <ProjectReference Include="../Lucent.Core/Lucent.Core.csproj" />
     <PackageReference Include="SkiaSharp" />
     <PackageReference Include="SkiaSharp.HarfBuzz" />
+    <PackageReference Include="Svg.Skia" />
+    <None Include="notices/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/" />
     <None
       Include="$(NuGetPackageRoot)/skiasharp.nativeassets.win32/4.151.1/LICENSE.txt"
       Link="notices/SkiaSharp-LICENSE.txt"

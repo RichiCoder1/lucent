@@ -5,7 +5,9 @@
     <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="Fixtures/Abel-Regular.ttf;Fixtures/Abel-OFL.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
+    <ProjectReference Include="../../src/Lucent.Icons.Lucide/Lucent.Icons.Lucide.csproj" />
     <ProjectReference Include="../../src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
     <None
       Include="Fixtures/pixel.png"

@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj" />
   <Project Path="src/Lucent.Core/Lucent.Core.csproj" />
+  <Project Path="src/Lucent.Icons.Lucide/Lucent.Icons.Lucide.csproj" />
   <Project Path="src/Lucent.Testing/Lucent.Testing.csproj" />
   <Project Path="src/Lucent.Testing.Skia/Lucent.Testing.Skia.csproj" />
   <Project Path="tests/Lucent.Testing.Tests/Lucent.Testing.Tests.csproj" />

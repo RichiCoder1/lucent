@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Optional pinned Lucide SVG ImageSource assets for Lucent applications.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lucent.Core/Lucent.Core.csproj" />
+    <EmbeddedResource Include="Assets/*.svg">
+      <LogicalName>Lucent.Icons.Lucide.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <None Include="lucide-icons.json" Pack="true" PackagePath="contentFiles/any/any/lucide-icons.json" />
+    <None Include="notices/Lucide-LICENSE.txt" Link="notices/Lucide-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/Lucide-LICENSE.txt" />
+    <None Include="notices/Feather-LICENSE.txt" Link="notices/Feather-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Pack="true" PackagePath="buildTransitive/notices/Feather-LICENSE.txt" />
+    <None Include="buildTransitive/Lucent.Icons.Lucide.targets" Pack="true" PackagePath="buildTransitive/Lucent.Icons.Lucide.targets" />
+  </ItemGroup>
+</Project>

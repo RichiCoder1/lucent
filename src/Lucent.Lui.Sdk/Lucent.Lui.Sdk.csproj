@@ -27,6 +27,7 @@
     />
     <None Include="Sdk/Sdk.props" Pack="true" PackagePath="Sdk/Sdk.props" />
     <None Include="Sdk/Sdk.targets" Pack="true" PackagePath="Sdk/Sdk.targets" />
+    <None Include="Sdk/Assets.targets" Pack="true" PackagePath="Sdk/Assets.targets" />
     <None
       Include="notices/Roslyn-LICENSE.txt"
       Pack="true"

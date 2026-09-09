@@ -20,6 +20,7 @@ Copy-Item (Join-Path $root 'tests/Lucent.Renderer.Skia.Tests/Fixtures/pixel.png'
   <ItemGroup>
     <PackageReference Include="Lucent.Testing" Version="[$Version]" />
     <PackageReference Include="Lucent.Testing.Skia" Version="[$Version]" />
+    <PackageReference Include="Lucent.Icons.Lucide" Version="[$Version]" />
     <LucentAsset Include="Pixel.png" Path="Pixel.png" />
   </ItemGroup>
 </Project>
@@ -33,7 +34,7 @@ style ProbeLayout(WindowBreakpoints points) {
     when (points.IsActive(ProbeBreakpoints.Wide)) {
         Algorithm: LayoutAlgorithms.Grid;
         Columns: GridTracks.Create(GridTrack.Fraction());
-        Rows: GridTracks.Create(GridTrack.Content(), GridTrack.Fraction());
+        Rows: GridTracks.Create(GridTrack.Content(), GridTrack.Content(), GridTrack.Fraction());
     }
 }
 style ProbeAction(WindowBreakpoints points) {
@@ -44,13 +45,14 @@ style ProbeAction(WindowBreakpoints points) {
     }
 }
 style ProbeEditor {
-    GridPlacement: new GridPlacement(1, 0);
+    GridPlacement: new GridPlacement(2, 0);
     MainGrow: 1;
 }
 internal component Probe(Action invoked, WindowBreakpoints points) {
     <Layout breakpoints={points} style={ProbeLayout(points)}>
-        <Button onInvoke={invoked} style={ProbeAction(points)}>Run</Button>
+        <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.RefreshCw} onInvoke={invoked} style={ProbeAction(points)}>Run</Button>
         <TextField label="Retained draft" initialValue="seed" style={ProbeEditor} />
+        <IconButton source={Lucent.Icons.Lucide.LucideIcons.Ellipsis} label="More actions" onInvoke={invoked} style={Style.Empty.GridPlacement(new GridPlacement(1, 0))} />
     </Layout>
 }
 '@ | Set-Content (Join-Path $proof 'Probe.lui')
@@ -60,6 +62,7 @@ internal component ImageProbe() {
     <Row>
         <Image source={Assets.Pixel} alternativeText="Packaged pixel" style={Style.Empty with { Width: 32; Height: 32; }} />
         <Icon source={Assets.Pixel} style={Style.Empty with { Width: 32; Height: 32; }} />
+        <Icon source={Lucent.Icons.Lucide.LucideIcons.Search} style={Style.Empty with { Width: 32; Height: 32; }} />
     </Row>
 }
 '@ | Set-Content (Join-Path $proof 'ImageProbe.lui')
@@ -69,7 +72,7 @@ using Lucent.Testing;
 using Lucent.Testing.Skia;
 
 var calls = 0;
-await using var app = await HeadlessApplication.StartAsync(
+await using var app = await SkiaHeadlessApplication.StartAsync(
     context => HeadlessPackageProbe.Components.Probe(
         () => Interlocked.Increment(ref calls),
         new(context.Composition.Root.Scope, HeadlessPackageProbe.ProbeBreakpoints.Set)),
@@ -80,6 +83,12 @@ if (Volatile.Read(ref calls) != 1)
     throw new InvalidOperationException("Packaged .lui headless command did not invoke exactly once.");
 Console.WriteLine("Packaged .lui headless command: PASS");
 using var initial = await app.SnapshotAsync();
+var more = initial.Require(SemanticRole.Button, "More actions");
+var moreResult = await app.InvokeAsync(context => context.Composition.ExecuteSemanticCommand(
+    more.Identity, new(SemanticCommandKind.Invoke)));
+if (moreResult != SemanticCommandResult.Applied || Volatile.Read(ref calls) != 2)
+    throw new InvalidOperationException("Packaged IconButton did not expose one labeled invocation.");
+Console.WriteLine("Packaged Lucide Button/IconButton semantics: PASS");
 var editor = initial.Require(SemanticRole.TextField, "Retained draft");
 var edited = await app.InvokeAsync(context => context.Composition.ExecuteSemanticCommand(
     editor.Identity, new(SemanticCommandKind.SetValue, "keep this draft")));
@@ -122,23 +131,27 @@ Console.WriteLine("Packaged Skia capture: PASS");
 await using (var artwork = await SkiaHeadlessApplication.StartAsync(
     HeadlessPackageProbe.Components.ImageProbe(), new() { Viewport = new(80, 40, 1.5f) }))
 {
-    var preparation = await artwork.InvokeAsync(context => context.Composition.Images!.PreloadAsync(
+    var svgPreparation = await artwork.InvokeAsync(context => context.Composition.Images!.PreloadAsync(
+        context.Composition.Root.Scope, Lucent.Icons.Lucide.LucideIcons.Search, new ImageRendition(64, 64)));
+    var pixelPreparation = await artwork.InvokeAsync(context => context.Composition.Images!.PreloadAsync(
         context.Composition.Root.Scope, HeadlessPackageProbe.Assets.Pixel, new ImageRendition(64, 64)));
-    var outcome = await preparation.WaitAsync(TimeSpan.FromSeconds(10));
-    if (outcome.Status != ImagePreloadStatus.Ready)
-        throw new InvalidOperationException("Packaged PNG did not prepare: " + outcome.Status + " " + outcome.Error?.Message);
+    var svgOutcome = await svgPreparation.WaitAsync(TimeSpan.FromSeconds(10));
+    var pixelOutcome = await pixelPreparation.WaitAsync(TimeSpan.FromSeconds(10));
+    if (svgOutcome.Status != ImagePreloadStatus.Ready || pixelOutcome.Status != ImagePreloadStatus.Ready)
+        throw new InvalidOperationException("Packaged artwork did not prepare: SVG=" + svgOutcome.Status + " PNG=" + pixelOutcome.Status);
     using var snapshot = await artwork.SnapshotAsync();
     var images = ImageNodes(snapshot.Scene.Nodes).ToArray();
-    if (images.Length != 2 || !ReferenceEquals(images[0].Image, images[1].Image)
+    if (images.Length != 3 || !ReferenceEquals(images[0].Image, images[1].Image)
         || images[0].ColorMode != ImageColorMode.Source
         || images[1].ColorMode != ImageColorMode.Monochrome
+        || images[2].ColorMode != ImageColorMode.Monochrome
         || snapshot.FindAll(SemanticRole.Image).Count != 1)
-        throw new InvalidOperationException("Packaged Image/Icon did not share preparation or preserve accessible intent.");
+        throw new InvalidOperationException("Packaged Image/Icon/Lucide SVG did not preserve loading or accessible intent.");
     var frame = await artwork.CapturePngAsync();
     using var decoded = SkiaSharp.SKBitmap.Decode(frame);
-    if (decoded is null || decoded.GetPixel(20, 20).Alpha == 0 || decoded.GetPixel(65, 20).Alpha == 0)
-        throw new InvalidOperationException("Packaged Image/Icon did not paint pixels at 150% scale.");
-    Console.WriteLine("Packaged typed PNG, Image/Icon shared loading, semantics and 150% paint: PASS");
+    if (decoded is null || decoded.Pixels.Count(pixel => pixel.Alpha != 0) < 32)
+        throw new InvalidOperationException("Packaged Image/Icon/Lucide SVG did not paint pixels at 150% scale.");
+    Console.WriteLine("Packaged typed PNG and Lucide SVG loading, semantics and 150% paint: PASS");
 }
 
 static IEnumerable<ImageSceneNode> ImageNodes(IEnumerable<SceneNode> nodes)
@@ -170,7 +183,7 @@ try {
     if ($LASTEXITCODE) { throw 'Headless package restore failed.' }
     & dotnet run --project Consumer.csproj -c Release --no-restore
     if ($LASTEXITCODE) { throw 'Headless package consumer failed.' }
-    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json | Where-Object package -eq 'Lucent.Renderer.Skia')) {
+    foreach ($notice in (Get-Content (Join-Path $root 'tools/package-notices.json') -Raw | ConvertFrom-Json | Where-Object package -in @('Lucent.Renderer.Skia', 'Lucent.Icons.Lucide'))) {
         if (-not (Test-Path -LiteralPath (Join-Path $proof "bin/Release/net10.0/$($notice.output)") -PathType Leaf)) {
             throw "Standalone renderer package omitted notice: $($notice.output)"
         }

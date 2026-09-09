@@ -1,4 +1,7 @@
 <Project Sdk="MSTest.Sdk">
   <PropertyGroup><RuntimeIdentifiers>win-x64</RuntimeIdentifiers><PublishAot>true</PublishAot><PublishTrimmed>true</PublishTrimmed></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
+    <ProjectReference Include="../../src/Lucent.Icons.Lucide/Lucent.Icons.Lucide.csproj" />
+  </ItemGroup>
 </Project>

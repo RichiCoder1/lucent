@@ -155,10 +155,10 @@ public sealed class ImagePreparationTests
     }
 
     [TestMethod]
-    public void RejectsUnsupportedSvgAndTemporaryBudgetExhaustion()
+    public void RejectsUnsupportedSvgFeaturesAndTemporaryBudgetExhaustion()
     {
         var svgBytes =
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\" />"u8.ToArray();
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"><script /></svg>"u8.ToArray();
         var svg = Source(svgBytes, AssetFormat.Svg, 1, 1);
         var source = Source(PngBytes, AssetFormat.Png, .5f, .5f, 2);
 

@@ -46,6 +46,16 @@ internal static partial class Controls
                     )
             );
 
+    private static Style ComposedButtonStyle(ThemeContext theme) =>
+        ButtonStyle(theme).Set(LayoutProperties.Spacing, 8f);
+
+    private static Style IconButtonStyle(ThemeContext theme) =>
+        ButtonStyle(theme)
+            .Set(LayoutProperties.Width, 36f)
+            .Set(LayoutProperties.Height, 36f)
+            .Set(LayoutProperties.Padding, Insets.Uniform(10f))
+            .Set(ImageProperties.ColorMode, ImageColorMode.Monochrome);
+
     private static Style SelectableStyle(ThemeContext theme) =>
         RowStyle
             .Set(LayoutProperties.Clip, true)
@@ -103,6 +113,52 @@ internal static partial class Controls
             style,
             new ButtonBehavior(
                 "button",
+                new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
+                activate
+            )
+        );
+    }
+
+    internal static void ComposedButton(
+        Element element,
+        ThemeContext theme,
+        string label,
+        Action? activate = null,
+        Style? style = null
+    )
+    {
+        label = Required(label, nameof(label));
+        Configure(
+            element,
+            theme,
+            ComposedButtonStyle(theme),
+            style,
+            new ButtonBehavior(
+                "button",
+                new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
+                activate
+            )
+        );
+    }
+
+    internal static void IconButton(
+        Element element,
+        ThemeContext theme,
+        ImageSource source,
+        string label,
+        Action? activate = null,
+        Style? style = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        label = Required(label, nameof(label));
+        Configure(
+            element,
+            theme,
+            IconButtonStyle(theme).Set(ImageProperties.Source, source),
+            style,
+            new ButtonBehavior(
+                "icon-button",
                 new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
                 activate
             )

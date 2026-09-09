@@ -18,16 +18,11 @@ style HeaderContentStyle {
     Wrap: true;
 }
 
-style DensityButtonStyle {
-    MaxWidth: 240;
-    MainShrink: 0;
-}
-
 public component Header(IssueBrowserState browser, IssueBrowserViewState view) {
     <Layout style={HeaderStyle}>
         <Layout style={HeaderContentStyle}>
             <Text style={PresentationStyles.Title.With(HeaderTitleStyle)} name="issue-browser.title">Issues</Text>
-            <Button onInvoke={browser.ToggleDensity} style={DensityButtonStyle} name="issue-browser.density">{browser.Density == IssueDensity.Comfortable ? "Density: comfortable" : "Density: compact"}</Button>
+            <Button leadingIcon={() => Lucent.Icons.Lucide.LucideIcons.ListFilter} onInvoke={browser.ToggleDensity} style={Style.Empty.MaxWidth(240).MainShrink(0)} name="issue-browser.density">{browser.Density == IssueDensity.Comfortable ? "Density: comfortable" : "Density: compact"}</Button>
         </Layout>
         <Text style={PresentationStyles.Secondary}>Lucent reference workspace · local fixtures</Text>
         <FilterBar browser={browser} view={view} name="issue-browser.filters" />

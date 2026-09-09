@@ -6,18 +6,47 @@ using SkiaSharp;
 namespace Lucent.Renderer.Skia;
 
 /// <summary>
-/// Decodes packaged PNG and JPEG sources into the portable Core raster contract.
+/// Prepares packaged PNG/JPEG rasters and Secure Static SVG vectors.
 /// </summary>
 /// <remarks>
 /// This type deliberately has no renderer reference. A preparation can therefore run on a
 /// worker thread, while renderer-native images are created later by <see cref="SkiaSceneRenderer"/>
-/// on its owner thread. SVG remains an adapter-owned vector format and is not silently rasterized
-/// by this preparer.
+/// on its owner thread. SVG retains an adapter-owned vector representation and is not permanently
+/// rasterized at its first display size.
 /// </remarks>
 public sealed class SkiaImagePreparer : IImagePreparer
 {
+    /// <summary>Identifies the finite static-SVG processing contract and pinned renderer versions.</summary>
+    public const string SvgPolicyIdentity = "lucent-secure-static-v1/svg.skia-5.2.3/skia-4.151.1";
+
+    private readonly byte[] _svgFont;
+    private static readonly ImageRendition VectorRendition = new(1, 1);
+
+    /// <summary>Creates a preparer for rasters and text-free static SVG.</summary>
+    public SkiaImagePreparer()
+        : this(ReadOnlyMemory<byte>.Empty) { }
+
+    /// <summary>Creates a preparer with one immutable, explicitly supplied SVG font. Text uses the family "Lucent SVG"; no system-font discovery occurs.</summary>
+    public SkiaImagePreparer(ReadOnlyMemory<byte> svgFont)
+    {
+        if (svgFont.Length > 8 * 1024 * 1024)
+            throw new ArgumentOutOfRangeException(
+                nameof(svgFont),
+                "SVG fonts are limited to 8 MiB."
+            );
+        _svgFont = svgFont.ToArray();
+        SvgFontIdentity =
+            _svgFont.Length == 0 ? "none" : Convert.ToHexString(SHA256.HashData(_svgFont));
+    }
+
+    /// <summary>Gets the fixed font-content identity used by this preparer's cache environment.</summary>
+    public string SvgFontIdentity { get; }
+
+    /// <summary>Shares one static vector preparation across output sizes; raster renditions remain size-specific.</summary>
+    public ImageRendition GetCacheRendition(ImageSource source, ImageRendition requested) =>
+        source.PackagedAsset?.Format == AssetFormat.Svg ? VectorRendition : requested;
+
     private const int BytesPerPixel = 4;
-    private const int JpegCodecScratchBytesPerPixel = 8;
     private const long MaximumRendererOutputBytes = 64L * 1024 * 1024;
 
     // The codec owns native scratch memory that is not exposed by SKCodec. Reserve one
@@ -40,17 +69,14 @@ public sealed class SkiaImagePreparer : IImagePreparer
                 ImageLoadFailureKind.SourceUnavailable,
                 "The Skia raster preparer requires a packaged asset reference."
             );
-        if (asset.Format is AssetFormat.Svg)
-            throw new ImageLoadException(
-                ImageLoadFailureKind.UnsupportedFormat,
-                "Static SVG preparation is owned by the vector adapter."
-            );
-        if (asset.Format is not (AssetFormat.Png or AssetFormat.Jpeg))
+        if (asset.Format is not (AssetFormat.Png or AssetFormat.Jpeg or AssetFormat.Svg))
             throw new ImageLoadException(
                 ImageLoadFailureKind.UnsupportedFormat,
                 $"The Skia raster preparer does not support {asset.Format}."
             );
 
+        if (asset.Format == AssetFormat.Svg && asset.ByteLength > SecureSvgDocument.MaximumBytes)
+            throw SecureSvgDocument.Budget("SVG encoded input exceeds 2 MiB.");
         using var encodedReservation = ReserveEncoded(request, asset.ByteLength);
         byte[] encoded;
         try
@@ -79,6 +105,10 @@ public sealed class SkiaImagePreparer : IImagePreparer
         }
         VerifyHash(asset, encoded);
         cancellationToken.ThrowIfCancellationRequested();
+        if (asset.Format == AssetFormat.Svg)
+            return ValueTask.FromResult(
+                SkiaSvgImage.Prepare(request, encoded, _svgFont, cancellationToken)
+            );
 
         try
         {
@@ -120,19 +150,15 @@ public sealed class SkiaImagePreparer : IImagePreparer
 
                 // RasterImage intentionally copies its input. Reserve the managed raw decode,
                 // the oriented intermediate, the final output, that immutable copy, a codec
-                // scratch allowance, and a small fixed allowance. JPEG codecs may retain
-                // full-source progressive coefficients with higher precision or channel count
-                // even when GetScaledDimensions selects a small decode target, so charge a
-                // conservative eight bytes per source pixel for JPEG and one full source RGBA
-                // surface for PNG.
+                // scratch allowance, and a small fixed allowance. Known 8-bit three-component
+                // baseline/progressive JPEG headers use the pinned libjpeg/Skia estimates;
+                // malformed, CMYK/YCCK, arithmetic and otherwise unknown JPEGs retain the
+                // conservative eight bytes per source pixel fallback. PNG keeps one full source
+                // RGBA surface because its codec can materialize the original-size image.
                 var sourceCodecScratchBytes = Math.Max(
                     intermediateRawBytes,
                     asset.Format == AssetFormat.Jpeg
-                        ? checked(
-                            (long)sourceInfo.Width
-                            * sourceInfo.Height
-                            * JpegCodecScratchBytesPerPixel
-                        )
+                        ? JpegMemoryAdmission.EstimateScratchBytes(encoded, sourceInfo)
                         : RequiredBytes(sourceInfo.Width, sourceInfo.Height)
                 );
                 var temporaryBytes = checked(

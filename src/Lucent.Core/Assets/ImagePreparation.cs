@@ -176,6 +176,10 @@ public sealed class ImagePreparationRequest
 /// <summary>Prepares portable image resources outside layout and rendering.</summary>
 public interface IImagePreparer
 {
+    /// <summary>Returns the preparation size used for cache identity. Vector adapters may share a size-independent representation.</summary>
+    /// <remarks>Called on the requester thread before taking the cache lock. This must be pure, fast and must not open the source. The preparer's immutable resource/font policy is scoped to its cache instance.</remarks>
+    ImageRendition GetCacheRendition(ImageSource source, ImageRendition requested) => requested;
+
     /// <summary>Prepares an image resource for the requested rendition.</summary>
     ValueTask<PreparedImage> PrepareAsync(
         ImagePreparationRequest request,

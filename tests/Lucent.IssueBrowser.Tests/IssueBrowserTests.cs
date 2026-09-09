@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Lucent.Core;
+using Lucent.Icons.Lucide;
 using Lucent.IssueBrowser;
 using Lucent.Renderer.Skia;
 using SkiaSharp;
@@ -92,6 +93,84 @@ public sealed class IssueBrowserTests
                     <= RealizedRowBound(scene, composition, 30f)
                 && scene.ScrollBars is [{ Maximum.Y: > 0 }],
             "Issue Browser filters, bounded list semantics or default scroll affordance changed."
+        );
+    }
+
+    [TestMethod]
+    public void StockIconsStayDecorativeAcrossAppearanceAndScale()
+    {
+        using var composition = LoadedComposition(out var graph, out _, out var theme);
+        var icons = new[]
+        {
+            LucideIcons.ListFilter,
+            LucideIcons.ArrowLeft,
+            LucideIcons.CircleCheck,
+            LucideIcons.CircleDot,
+            LucideIcons.RefreshCw,
+        };
+        var preparations = icons.Select(source =>
+            composition.Images!.PreloadAsync(
+                composition.Root.Scope,
+                source,
+                new ImageRendition(64, 64)
+            )
+        );
+        Assert(
+            Task.WhenAll(preparations).GetAwaiter().GetResult()
+                .All(outcome => outcome.Status == ImagePreloadStatus.Ready),
+            "Issue Browser Lucide artwork did not prepare."
+        );
+
+        using var renderer = new SkiaSceneRenderer();
+        var wide = new LayoutViewport(1120, 760, 1);
+        _ = Install(composition, renderer, wide);
+        var issue = Flatten(composition.SemanticSnapshot()!)
+            .First(node => node.Role == SemanticRole.ListItem);
+        Assert(
+            composition.ExecuteSemanticCommand(issue.Identity, new(SemanticCommandKind.Select))
+                == SemanticCommandResult.Applied,
+            "Icon matrix could not open issue details."
+        );
+        graph.Drain();
+
+        foreach (
+            var sample in new[]
+            {
+                (new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.Normal), 1f),
+                (new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal), 1.5f),
+                (new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.High), 2f),
+            }
+        )
+        {
+            theme.Appearance = sample.Item1;
+            graph.Drain();
+            var scene = Install(composition, renderer, wide with { Scale = sample.Item2 });
+            var semantics = Flatten(composition.SemanticSnapshot()!).ToArray();
+            var images = SceneNodes(scene.Nodes).OfType<ImageSceneNode>().ToArray();
+            Assert(
+                semantics.All(node => node.Role != SemanticRole.Image)
+                    && semantics.Count(node =>
+                        node.Role == SemanticRole.Button
+                        && node.Name.StartsWith("Density:", StringComparison.Ordinal)
+                    ) == 1
+                    && semantics.Count(node =>
+                        node.Role == SemanticRole.Button && node.Name == "Close issue"
+                    ) == 1
+                    && images.Length >= 2
+                    && images.All(image => image.ColorMode == ImageColorMode.Monochrome),
+                $"Stock icon semantics or paint changed for {sample.Item1} at {sample.Item2}x."
+            );
+        }
+
+        var narrow = Install(composition, renderer, new(420, 360, 2));
+        var narrowSemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
+        Assert(
+            narrowSemantics.Count(node =>
+                node.Role == SemanticRole.Button && node.Name == "Back to issues"
+            ) == 1
+                && narrowSemantics.All(node => node.Role != SemanticRole.Image)
+                && SceneNodes(narrow.Nodes).OfType<ImageSceneNode>().Count() >= 3,
+            "Compact Issue Browser lost its labeled Back action or decorative glyphs."
         );
     }
 
@@ -833,6 +912,13 @@ public sealed class IssueBrowserTests
         + "]";
 
     static Composition LoadedComposition(out ReactiveGraph graph, out IssueBrowserState browser)
+        => LoadedComposition(out graph, out browser, out _);
+
+    static Composition LoadedComposition(
+        out ReactiveGraph graph,
+        out IssueBrowserState browser,
+        out ThemeContext theme
+    )
     {
         graph = new ReactiveGraph();
         var handler = new DeferredGitHubHandler();
@@ -841,7 +927,7 @@ public sealed class IssueBrowserTests
             graph,
             new GitHubIssueSource(client),
             out browser,
-            out _
+            out theme
         );
         composition.Root.Scope.Own(client);
         graph.Drain(10_000);
@@ -863,6 +949,23 @@ public sealed class IssueBrowserTests
                 return scene;
         }
         throw new InvalidOperationException("The Issue Browser scene did not settle.");
+    }
+
+    static IEnumerable<SceneNode> SceneNodes(IEnumerable<SceneNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            var children = node switch
+            {
+                ClipSceneNode clip => clip.Children,
+                OpacitySceneNode opacity => opacity.Children,
+                _ => null,
+            };
+            if (children is not null)
+            foreach (var child in SceneNodes(children))
+                yield return child;
+        }
     }
 
     static Dictionary<string, SemanticSnapshot> Fields(Composition composition) =>
@@ -2010,6 +2113,7 @@ public sealed class IssueBrowserTests
 
         public int Run(ApplicationSession session)
         {
+            session.Composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
             session.Start();
             var composition = session.Composition;
             var theme = session.Theme;

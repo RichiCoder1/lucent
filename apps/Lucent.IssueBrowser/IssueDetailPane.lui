@@ -25,7 +25,7 @@ style DetailEmptyStyle {
 
 public component IssueDetailPane(IssueBrowserState browser, IssueBrowserViewState view) {
     <Layout style={DetailPaneStyle}>
-        <Button onInvoke={view.BackToList} style={DetailBackStyle(view.Breakpoints)} name="issue-browser.back">Back to issues</Button>
+        <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.ArrowLeft} onInvoke={view.BackToList} style={DetailBackStyle(view.Breakpoints)} name="issue-browser.back">Back to issues</Button>
         foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number {
             <Details browser={browser} issue={() => issue} view={view} name="issue-browser.details" />
         }
@@ -37,7 +37,7 @@ public component IssueDetailPane(IssueBrowserState browser, IssueBrowserViewStat
             </Layout>
         }
         if (browser.SelectedIssue is not null && browser.CanRetrySelected) {
-            <Button onInvoke={browser.RetrySelected} name="issue-browser.details-retry">Retry status change</Button>
+            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.RefreshCw} onInvoke={browser.RetrySelected} name="issue-browser.details-retry">Retry status change</Button>
         }
     </Layout>
 }

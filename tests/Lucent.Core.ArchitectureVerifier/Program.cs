@@ -111,7 +111,8 @@ static void VerifyLuiMetadata(
         ["Text"] = 2,
         ["Image"] = 2,
         ["Icon"] = 2,
-        ["Button"] = 2,
+        ["Button"] = 6,
+        ["IconButton"] = 4,
         ["TextField"] = 1,
         ["TextArea"] = 1,
         ["Layout"] = 1,
@@ -135,6 +136,19 @@ static void VerifyLuiMetadata(
             .SequenceEqual(expected.OrderBy(pair => pair.Key))
     )
         violations.Add("Components catalog metadata changed.");
+    var buttonSignatures = annotated
+        .Where(method => metadata.GetString(method.Name) == "Button")
+        .Select(method => string.Join(";", method.DecodeSignature(provider, null).ParameterTypes))
+        .ToHashSet(StringComparer.Ordinal);
+    foreach (
+        var preserved in new[]
+        {
+            "System.String;System.Action;Lucent.Core.Style",
+            "System.Func`1|System.String;System.Action;Lucent.Core.Style",
+        }
+    )
+        if (!buttonSignatures.Contains(preserved))
+            violations.Add("A pre-icon Button signature was removed: " + preserved);
     foreach (var recipe in annotated)
     {
         var signature = recipe.DecodeSignature(provider, null);

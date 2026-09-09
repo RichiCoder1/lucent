@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "upstream": "lucide-icons/lucide",
+  "version": "1.43.0",
+  "revision": "ba95e4c988b1e1b39cf5544e73b25a74b76816ee",
+  "importerRevision": "lucent-lucide-import-v1",
+  "icons": [
+    "archive",
+    "arrow-left",
+    "arrow-right",
+    "circle-check",
+    "circle-dot",
+    "ellipsis",
+    "file-text",
+    "inbox",
+    "link",
+    "list-filter",
+    "notebook-pen",
+    "plus",
+    "refresh-cw",
+    "search",
+    "trash"
+  ]
+}

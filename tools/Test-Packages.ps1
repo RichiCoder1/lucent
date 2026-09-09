@@ -10,6 +10,9 @@ $proof = Join-Path $root ("artifacts/package-consumer/" + [Guid]::NewGuid().ToSt
 $null = New-Item -ItemType Directory -Path $proof
 # Consume the maintained real app through packages in a fresh, isolated directory.
 Get-ChildItem (Join-Path $root 'apps/Lucent.IssueBrowser') -File | Where-Object { $_.Extension -in '.cs', '.lui' } | Copy-Item -Destination $proof
+$artwork = Join-Path $proof 'Artwork'
+$null = New-Item -ItemType Directory -Path $artwork
+Copy-Item (Join-Path $root 'apps/Lucent.IssueBrowser/Artwork/issue-browser.svg') $artwork
 @'
 using Lucent.Core;
 using Lucent.Reactive.R3;
@@ -60,7 +63,9 @@ if (-not (Get-Content -Raw $programPath).Contains('R3PackageProbe.Run();', [Stri
   <ItemGroup>
     <PackageReference Include="Lucent.Platform.Windows" Version="[$Version]" />
     <PackageReference Include="Lucent.Hosting" Version="[$Version]" />
+    <PackageReference Include="Lucent.Icons.Lucide" Version="[$Version]" />
     <PackageReference Include="Lucent.Reactive.R3" Version="[$Version]" />
+    <LucentAsset Include="Artwork/issue-browser.svg" Path="Artwork/issue-browser.svg" ApplicationIcon="true" />
   </ItemGroup>
 </Project>
 "@ | Set-Content (Join-Path $proof 'Consumer.csproj')
@@ -89,12 +94,26 @@ try {
     foreach ($file in 'SDL3.dll', 'libSkiaSharp.dll', 'libHarfBuzzSharp.dll', 'vcruntime140.dll', 'notices/SDL3-CS.txt', 'notices/Microsoft.Extensions-LICENSE.txt', 'notices/R3-LICENSE.txt') {
         if (-not (Test-Path -LiteralPath (Join-Path $published $file))) { throw "Missing published asset: $file" }
     }
+    $publishedExe = Join-Path $published 'Lucent.IssueBrowser.exe'
+    Add-Type -AssemblyName System.Drawing.Common
+    $associatedIcon = [Drawing.Icon]::ExtractAssociatedIcon($publishedExe)
+    if ($null -eq $associatedIcon) { throw 'Published NativeAOT executable omitted its generated ICO resource.' }
+    $associatedIcon.Dispose()
+    Remove-Item -LiteralPath $artwork -Recurse -Force
     if ($SkipDesktopSmoke) {
         Write-Output "Package-only restore/NativeAOT/assets/notices: PASS ($Version); desktop startup/close was not run."
         return
     }
     $stdout = Join-Path $proof 'stdout.log'; $stderr = Join-Path $proof 'stderr.log'
-    $process = Start-Process (Join-Path $published 'Lucent.IssueBrowser.exe') -WorkingDirectory $published -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class PackageWindowIconProbe {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+}
+'@
+    $process = Start-Process $publishedExe -WorkingDirectory $published -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(15)
     do {
         $process.Refresh()
@@ -103,6 +122,9 @@ try {
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
     if ($process.MainWindowTitle -ne 'Lucent Issue Browser') { throw 'Published app did not create its window.' }
+    if ([PackageWindowIconProbe]::SendMessage($process.MainWindowHandle, 0x007F, [IntPtr]1, [IntPtr]::Zero) -eq [IntPtr]::Zero) {
+        throw 'Published app did not install its embedded application icon after source artwork removal.'
+    }
     if (-not $process.CloseMainWindow()) { throw "Published app rejected the close request. $(Get-Content $stderr -Raw)" }
     if (-not $process.WaitForExit(10000)) { throw "Published app did not exit within 10 seconds. $(Get-Content $stderr -Raw)" }
     if ($process.ExitCode -ne 0) { throw "Published app shutdown exited with code $($process.ExitCode). $(Get-Content $stderr -Raw)" }

@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
+using Lucent.Core;
+using Lucent.Renderer.Skia;
 using Microsoft.CodeAnalysis.CSharp;
 
 namespace Lucent.Lui.Tooling.Assets;
@@ -54,13 +56,37 @@ internal static class AssetCatalogGenerator
         var assets = manifest.Assets.Select(asset => ReadAsset(manifest, asset)).ToArray();
         ValidateIdentityCollisions(assets);
         ValidateAccessorCollisions(manifest, assets);
+        var applicationIcon = ValidateApplicationIcon(manifest, assets);
+        var applicationArtwork = applicationIcon is null
+            ? null
+            : BuildApplicationArtwork(manifest, applicationIcon);
 
-        var source = EmitSource(manifest, assets);
+        var source = EmitSource(manifest, assets, applicationArtwork);
         var inventory = JsonSerializer.Serialize(
             new
             {
                 version = 1,
                 domain = manifest.Domain,
+                applicationIconArtwork = applicationArtwork is null
+                    ? null
+                    : new
+                    {
+                        source = applicationIcon!.Source,
+                        sourceHash = applicationIcon.Hash,
+                        iconFile = applicationIcon.IconFile,
+                        icoHash = Convert
+                            .ToHexString(SHA256.HashData(applicationArtwork.IcoBytes))
+                            .ToLowerInvariant(),
+                        icoSize = applicationArtwork.IcoBytes.LongLength,
+                        svgPolicy = SkiaImagePreparer.SvgPolicyIdentity,
+                        svgFont = "none",
+                        renditions = applicationArtwork.Renditions.Select(rendition => new
+                        {
+                            size = rendition.Size,
+                            hash = rendition.Hash,
+                            sizeBytes = rendition.Bytes.LongLength,
+                        }),
+                    },
                 assets = assets.Select(asset => new
                 {
                     path = asset.Path,
@@ -76,6 +102,8 @@ internal static class AssetCatalogGenerator
                     source = asset.Source,
                     accessorNamespace = asset.Namespace,
                     accessor = manifest.RootClass + "." + string.Join(".", asset.Accessor),
+                    applicationIcon = asset.ApplicationIcon,
+                    applicationIconFile = asset.IconFile,
                     resource = asset.ResourceName,
                 }),
             },
@@ -83,6 +111,8 @@ internal static class AssetCatalogGenerator
         );
 
         SynchronizePayloads(payloadDirectory, assets);
+        SynchronizeApplicationIconRenditions(payloadDirectory, assets, applicationArtwork);
+        SynchronizeApplicationIcon(payloadDirectory, applicationArtwork);
 
         WriteIfChanged(sourcePath, source);
         WriteIfChanged(inventoryPath, inventory + Environment.NewLine);
@@ -90,7 +120,13 @@ internal static class AssetCatalogGenerator
             stampPath,
             string.Join(
                 Environment.NewLine,
-                assets.Select(asset => asset.ResourceName).Order(StringComparer.Ordinal)
+                assets
+                    .Select(asset => asset.ResourceName)
+                    .Concat(
+                        applicationArtwork?.Renditions.Select(rendition => rendition.ResourceName)
+                            ?? Enumerable.Empty<string>()
+                    )
+                    .Order(StringComparer.Ordinal)
             ) + Environment.NewLine
         );
     }
@@ -124,6 +160,9 @@ internal static class AssetCatalogGenerator
             ? manifest.Namespace
             : input.AccessorNamespace;
         ValidateNamespace(accessorNamespace, input.Source);
+        var iconFile = string.IsNullOrWhiteSpace(input.IconFile)
+            ? null
+            : ResolveIconFile(manifest, input.IconFile, input.Source);
 
         return new GeneratedAsset(
             fullPath,
@@ -141,8 +180,270 @@ internal static class AssetCatalogGenerator
             dimensions.RelativeWidth,
             dimensions.RelativeHeight,
             bytes,
-            "Lucent.Assets." + HashText(manifest.Domain + "\0" + path + "\0" + hash)
+            "Lucent.Assets." + HashText(manifest.Domain + "\0" + path + "\0" + hash),
+            iconFile,
+            ParseApplicationIcon(input.ApplicationIcon, input.Source)
         );
+    }
+
+    private static bool ParseApplicationIcon(string value, string source)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+        if (bool.TryParse(value, out var result))
+            return result;
+        throw new AssetGenerationException(
+            8,
+            $"Asset '{source}' has invalid ApplicationIcon metadata '{value}'; use true or false."
+        );
+    }
+
+    private static GeneratedAsset? ValidateApplicationIcon(
+        AssetManifest manifest,
+        GeneratedAsset[] assets
+    )
+    {
+        var declared = assets.Where(asset => asset.ApplicationIcon).ToArray();
+        var iconFiles = assets.Where(asset => asset.IconFile is not null).ToArray();
+        if (iconFiles.Any(asset => !asset.ApplicationIcon))
+            throw new AssetGenerationException(
+                8,
+                "IconFile is only valid on the asset that declares ApplicationIcon=true."
+            );
+        if (declared.Length == 0)
+            return null;
+        if (!manifest.IsApplication)
+            throw new AssetGenerationException(
+                8,
+                "ApplicationIcon is only valid on the current executable project; referenced libraries must not declare an application default."
+            );
+        if (declared.Length > 1)
+            throw new AssetGenerationException(
+                8,
+                $"Only one ApplicationIcon asset may be declared for the current application; found {declared.Length}."
+            );
+        if (iconFiles.Length > 1)
+            throw new AssetGenerationException(
+                8,
+                "Only one IconFile may be paired with the current application's ApplicationIcon."
+            );
+        if (declared[0].Format == "Binary")
+            throw new AssetGenerationException(
+                8,
+                $"ApplicationIcon asset '{declared[0].Source}' must be a PNG, JPEG, or SVG image."
+            );
+        return declared[0];
+    }
+
+    private static ApplicationIconArtwork BuildApplicationArtwork(
+        AssetManifest manifest,
+        GeneratedAsset applicationIcon
+    )
+    {
+        byte[] ico;
+        IReadOnlyList<ArtworkRendition> renditions;
+        if (applicationIcon.IconFile is { } iconFile)
+        {
+            if (new FileInfo(iconFile).Length > 64L * 1024 * 1024)
+                throw new AssetGenerationException(
+                    8,
+                    $"IconFile '{iconFile}' exceeds the 64 MiB application-icon limit."
+                );
+            ico = File.ReadAllBytes(iconFile);
+            try
+            {
+                renditions = SkiaArtwork
+                    .DecodeIco(ico)
+                    .OrderBy(rendition => rendition.Width)
+                    .ToArray();
+            }
+            catch (Exception exception)
+                when (exception
+                        is InvalidDataException
+                            or ArgumentException
+                            or OverflowException
+                            or InvalidOperationException
+                )
+            {
+                throw new AssetGenerationException(
+                    8,
+                    $"IconFile '{iconFile}' could not be decoded: {exception.Message}"
+                );
+            }
+        }
+        else
+        {
+            var source = CreateGeneratedImageSource(applicationIcon, manifest.Domain);
+            try
+            {
+                renditions = SkiaArtwork.PrepareRenditions(
+                    source,
+                    SkiaArtwork.ApplicationIconSizes,
+                    new SkiaImagePreparer(),
+                    ImageLoadLimits.Default
+                );
+                ico = SkiaArtwork.CreateIco(renditions);
+            }
+            catch (Exception exception)
+                when (exception
+                        is ImageLoadException
+                            or InvalidDataException
+                            or ArgumentException
+                            or InvalidOperationException
+                )
+            {
+                throw new AssetGenerationException(
+                    8,
+                    $"ApplicationIcon asset '{applicationIcon.Source}' could not be prepared: {exception.Message}"
+                );
+            }
+        }
+
+        try
+        {
+            var generatedRenditions = renditions
+                .Select(rendition =>
+                {
+                    var bytes = SkiaArtwork.EncodePng(rendition);
+                    var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+                    var path = $"__application-icon/{rendition.Width}.png";
+                    var resource =
+                        "Lucent.Assets.ApplicationIcon."
+                        + HashText(
+                            manifest.Domain
+                                + "\0"
+                                + applicationIcon.Path
+                                + "\0"
+                                + applicationIcon.Hash
+                                + "\0"
+                                + rendition.Width.ToString(CultureInfo.InvariantCulture)
+                                + "\0"
+                                + hash
+                        );
+                    return new GeneratedIconRendition(rendition.Width, path, hash, bytes, resource);
+                })
+                .ToArray();
+            return new ApplicationIconArtwork(ico, generatedRenditions);
+        }
+        catch (Exception exception)
+            when (exception
+                    is InvalidDataException
+                        or ArgumentException
+                        or InvalidOperationException
+                        or OverflowException
+            )
+        {
+            throw new AssetGenerationException(
+                8,
+                $"ApplicationIcon asset '{applicationIcon.Source}' could not be encoded: {exception.Message}"
+            );
+        }
+    }
+
+    private static void SynchronizeApplicationIcon(
+        string payloadDirectory,
+        ApplicationIconArtwork? applicationArtwork
+    )
+    {
+        var output = Path.Combine(Path.GetDirectoryName(payloadDirectory)!, "application.ico");
+        if (applicationArtwork is null)
+        {
+            if (File.Exists(output))
+                File.Delete(output);
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        var temporary = output + ".tmp";
+        try
+        {
+            File.WriteAllBytes(temporary, applicationArtwork.IcoBytes);
+            File.Move(temporary, output, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+                File.Delete(temporary);
+        }
+    }
+
+    private static void SynchronizeApplicationIconRenditions(
+        string payloadDirectory,
+        GeneratedAsset[] assets,
+        ApplicationIconArtwork? applicationArtwork
+    )
+    {
+        var desired = new HashSet<string>(
+            assets.Select(asset => asset.ResourceName),
+            StringComparer.Ordinal
+        );
+        if (applicationArtwork is not null)
+            foreach (var rendition in applicationArtwork.Renditions)
+                desired.Add(rendition.ResourceName);
+        Directory.CreateDirectory(payloadDirectory);
+        foreach (var existing in Directory.EnumerateFiles(payloadDirectory))
+            if (!desired.Contains(Path.GetFileName(existing)))
+                File.Delete(existing);
+        foreach (
+            var rendition in applicationArtwork?.Renditions ?? Array.Empty<GeneratedIconRendition>()
+        )
+        {
+            var destination = Path.Combine(payloadDirectory, rendition.ResourceName);
+            if (
+                File.Exists(destination)
+                && FileMatches(rendition.Bytes, rendition.Hash, destination)
+            )
+                continue;
+            var temporary = destination + ".tmp";
+            File.WriteAllBytes(temporary, rendition.Bytes);
+            File.Move(temporary, destination, overwrite: true);
+        }
+    }
+
+    private static ImageSource CreateGeneratedImageSource(
+        GeneratedAsset applicationIcon,
+        string domain
+    )
+    {
+        var assetFormat = Enum.Parse<AssetFormat>(applicationIcon.Format, ignoreCase: false);
+        var reference = new AssetReference(
+            new AssetId(domain, applicationIcon.Path),
+            applicationIcon.Hash,
+            applicationIcon.Length,
+            assetFormat,
+            () => new MemoryStream(applicationIcon.Bytes, writable: false),
+            new AssetImageMetadata(
+                checked((float)applicationIcon.Width!.Value),
+                checked((float)applicationIcon.Height!.Value),
+                checked((float)applicationIcon.Density!.Value),
+                (float?)applicationIcon.RelativeWidth,
+                (float?)applicationIcon.RelativeHeight
+            )
+        );
+        return ImageSource.FromAsset(reference);
+    }
+
+    private static string ResolveIconFile(AssetManifest manifest, string value, string source)
+    {
+        var relative = NormalizePath(value, source);
+        var projectDirectory = Path.GetFullPath(manifest.ProjectDirectory);
+        var fullPath = Path.GetFullPath(
+            Path.Combine(projectDirectory, relative.Replace('/', Path.DirectorySeparatorChar))
+        );
+        var projectPrefix = projectDirectory.EndsWith(Path.DirectorySeparatorChar)
+            ? projectDirectory
+            : projectDirectory + Path.DirectorySeparatorChar;
+        if (!fullPath.StartsWith(projectPrefix, StringComparison.OrdinalIgnoreCase))
+            throw new AssetGenerationException(
+                2,
+                $"Asset '{source}' IconFile '{value}' must stay within the project directory."
+            );
+        if (!File.Exists(fullPath))
+            throw new AssetGenerationException(
+                1,
+                $"Asset '{source}' IconFile does not exist at '{fullPath}'."
+            );
+        return fullPath;
     }
 
     private static string NormalizePath(string value, string source)
@@ -443,7 +744,11 @@ internal static class AssetCatalogGenerator
             $"Assets '{left.Source}' and '{right.Source}' produce conflicting accessor members."
         );
 
-    private static string EmitSource(AssetManifest manifest, GeneratedAsset[] assets)
+    private static string EmitSource(
+        AssetManifest manifest,
+        GeneratedAsset[] assets,
+        ApplicationIconArtwork? applicationArtwork
+    )
     {
         var builder = new StringBuilder();
         builder.AppendLine("// <auto-generated/>");
@@ -482,6 +787,49 @@ internal static class AssetCatalogGenerator
                 "                ?? throw new global::System.IO.FileNotFoundException(\"Embedded Lucent asset is unavailable.\", resourceName);"
             );
             builder.AppendLine("    }");
+            if (assets.SingleOrDefault(asset => asset.ApplicationIcon) is { } applicationIcon)
+            {
+                builder.AppendLine("    internal static class __LucentApplicationIconRegistration");
+                builder.AppendLine("    {");
+                builder.AppendLine(
+                    "        [global::System.Runtime.CompilerServices.ModuleInitializer]"
+                );
+                builder.AppendLine("        internal static void Register()");
+                builder.AppendLine(
+                    "            => global::Lucent.Core.ApplicationIconDefaults.RegisterGenerated("
+                );
+                builder.AppendLine(
+                    "                new global::Lucent.Core.ApplicationIconDefault("
+                );
+                builder
+                    .Append("                    global::")
+                    .Append(applicationIcon.Namespace)
+                    .Append('.')
+                    .Append(manifest.RootClass)
+                    .Append('.')
+                    .Append(string.Join(".", applicationIcon.Accessor))
+                    .AppendLine(",");
+                builder.AppendLine(
+                    "                    new global::Lucent.Core.ApplicationIconRendition[]"
+                );
+                builder.AppendLine("                    {");
+                foreach (
+                    var rendition in applicationArtwork?.Renditions
+                        ?? Array.Empty<GeneratedIconRendition>()
+                )
+                {
+                    builder
+                        .Append(
+                            "                        new global::Lucent.Core.ApplicationIconRendition("
+                        )
+                        .Append(rendition.Size.ToString(CultureInfo.InvariantCulture))
+                        .AppendLine(",");
+                    AppendGeneratedRenditionSource(builder, manifest, rendition, 28);
+                    builder.AppendLine("                        ),");
+                }
+                builder.AppendLine("                    }));");
+                builder.AppendLine("    }");
+            }
             builder.AppendLine("}");
         }
 
@@ -501,6 +849,46 @@ internal static class AssetCatalogGenerator
             builder.AppendLine("}");
         }
         return builder.ToString();
+    }
+
+    private static void AppendGeneratedRenditionSource(
+        StringBuilder builder,
+        AssetManifest manifest,
+        GeneratedIconRendition rendition,
+        int indent
+    )
+    {
+        builder.Append(' ', indent).AppendLine("global::Lucent.Core.ImageSource.FromAsset(");
+        builder.Append(' ', indent + 4).AppendLine("new global::Lucent.Core.AssetReference(");
+        builder
+            .Append(' ', indent + 8)
+            .Append("new global::Lucent.Core.AssetId(")
+            .Append(Literal(manifest.Domain))
+            .Append(", ")
+            .Append(Literal(rendition.Path))
+            .AppendLine("),");
+        builder.Append(' ', indent + 8).Append(Literal(rendition.Hash)).AppendLine(",");
+        builder
+            .Append(' ', indent + 8)
+            .Append(rendition.Bytes.LongLength.ToString(CultureInfo.InvariantCulture))
+            .AppendLine("L,");
+        builder.Append(' ', indent + 8).AppendLine("global::Lucent.Core.AssetFormat.Png,");
+        builder
+            .Append(' ', indent + 8)
+            .Append(
+                "static () => global::Lucent.Lui.Generated.Assets.__LucentAssetProvider.OpenRead("
+            )
+            .Append(Literal(rendition.ResourceName))
+            .AppendLine("),");
+        builder
+            .Append(' ', indent + 8)
+            .Append("new global::Lucent.Core.AssetImageMetadata(")
+            .Append(rendition.Size.ToString(CultureInfo.InvariantCulture))
+            .Append("F, ")
+            .Append(rendition.Size.ToString(CultureInfo.InvariantCulture))
+            .AppendLine("F, 1F)");
+        builder.Append(' ', indent + 4).AppendLine(")");
+        builder.Append(' ', indent).AppendLine(")");
     }
 
     private static void EmitAccessorLevel(
@@ -624,13 +1012,18 @@ internal static class AssetCatalogGenerator
 
     private static bool FileMatches(GeneratedAsset asset, string path)
     {
+        return FileMatches(asset.Bytes, asset.Hash, path);
+    }
+
+    private static bool FileMatches(byte[] bytes, string hash, string path)
+    {
         var info = new FileInfo(path);
-        if (info.Length != asset.Length)
+        if (info.Length != bytes.LongLength)
             return false;
         using var stream = File.OpenRead(path);
         return string.Equals(
             Convert.ToHexString(SHA256.HashData(stream)),
-            asset.Hash,
+            hash,
             StringComparison.OrdinalIgnoreCase
         );
     }
@@ -674,6 +1067,19 @@ internal static class AssetCatalogGenerator
 
     private sealed record AssetFormatInfo(string Name, string MediaType);
 
+    private sealed record ApplicationIconArtwork(
+        byte[] IcoBytes,
+        IReadOnlyList<GeneratedIconRendition> Renditions
+    );
+
+    private sealed record GeneratedIconRendition(
+        int Size,
+        string Path,
+        string Hash,
+        byte[] Bytes,
+        string ResourceName
+    );
+
     private readonly record struct AssetDimensions(
         double? Width,
         double? Height,
@@ -698,7 +1104,9 @@ internal static class AssetCatalogGenerator
         double? RelativeWidth,
         double? RelativeHeight,
         byte[] Bytes,
-        string ResourceName
+        string ResourceName,
+        string? IconFile,
+        bool ApplicationIcon
     );
 
     private sealed class AssetGenerationException(int code, string message) : Exception(message)
@@ -713,7 +1121,9 @@ internal static class AssetCatalogGenerator
         string AccessorNamespace,
         string Source,
         string Kind,
-        string Density
+        string Density,
+        string ApplicationIcon,
+        string IconFile
     );
 
     private sealed record AssetManifest(
@@ -721,16 +1131,21 @@ internal static class AssetCatalogGenerator
         string Domain,
         string Namespace,
         string RootClass,
-        IReadOnlyList<AssetInput> Assets
+        IReadOnlyList<AssetInput> Assets,
+        string OutputType
     )
     {
+        public bool IsApplication =>
+            string.Equals(OutputType, "Exe", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(OutputType, "WinExe", StringComparison.OrdinalIgnoreCase);
+
         public static AssetManifest Read(string path)
         {
             var lines = File.ReadAllLines(path);
             if (lines.Length == 0)
                 throw new AssetGenerationException(1, $"Asset manifest '{path}' is empty.");
             var header = DecodeLine(lines[0]);
-            if (header.Length != 6 || header[0] != ManifestVersion)
+            if (header.Length is < 6 or > 7 || header[0] != ManifestVersion)
                 throw new AssetGenerationException(
                     1,
                     $"Asset manifest '{path}' has an unsupported header."
@@ -749,7 +1164,7 @@ internal static class AssetCatalogGenerator
                 .Select(line =>
                 {
                     var fields = DecodeLine(line);
-                    if (fields.Length is < 6 or > 8 || fields[0] != "asset")
+                    if (fields.Length is < 6 or > 10 || fields[0] != "asset")
                         throw new AssetGenerationException(
                             1,
                             $"Asset manifest '{path}' contains an invalid entry."
@@ -761,11 +1176,20 @@ internal static class AssetCatalogGenerator
                         fields[4],
                         fields[5],
                         fields.Length > 6 ? fields[6] : string.Empty,
-                        fields.Length > 7 ? fields[7] : string.Empty
+                        fields.Length > 7 ? fields[7] : string.Empty,
+                        fields.Length > 8 ? fields[8] : string.Empty,
+                        fields.Length > 9 ? fields[9] : string.Empty
                     );
                 })
                 .ToArray();
-            return new(Path.GetFullPath(header[1]), header[2], header[3], rootClass, assets);
+            return new(
+                Path.GetFullPath(header[1]),
+                header[2],
+                header[3],
+                rootClass,
+                assets,
+                header.Length > 6 ? header[6] : string.Empty
+            );
         }
 
         private static void ValidateDomain(string domain, string source)

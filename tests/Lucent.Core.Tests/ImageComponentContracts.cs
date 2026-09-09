@@ -1,11 +1,97 @@
 using System.Security.Cryptography;
+using System.Xml.Linq;
 using Lucent.Core;
+using Lucent.Icons.Lucide;
 
 namespace Lucent.Core.Tests;
 
 [TestClass]
 public sealed class ImageComponentContracts
 {
+    private static readonly string[] ExpectedButtonNames = ["Refresh", "More actions"];
+
+    [TestMethod]
+    public void StockIconButtonsOwnOneAccessibleActionAndDecorativeGlyphs()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "stock-icon-buttons");
+        composition.ConfigureImages(new ImageCache(new ImmediatePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var invocations = 0;
+        var leading = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Button("Refresh", Source(1), () => invocations++)
+        );
+        var iconOnly = composition.Mount(
+            composition.Root,
+            theme,
+            Components.IconButton(Source(2), "More actions", () => invocations++)
+        );
+        graph.Drain();
+
+        Assert.AreEqual(2, leading.Children.Count);
+        Assert.AreEqual(0, iconOnly.Children.Count);
+        Assert.AreEqual(ImageColorMode.Monochrome, leading.Children[0].Resolve(ImageProperties.ColorMode).Value);
+        Assert.AreEqual("Refresh", leading.Children[1].Resolve(ProjectionProperties.Text).Value);
+        Assert.AreEqual(ImageColorMode.Monochrome, iconOnly.Resolve(ImageProperties.ColorMode).Value);
+        var buttons = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role == SemanticRole.Button)
+            .ToArray();
+        CollectionAssert.AreEquivalent(ExpectedButtonNames, buttons.Select(node => node.Name).ToArray());
+        Assert.AreEqual(2, buttons.Length);
+        Assert.AreEqual(0, Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.Image));
+        foreach (var button in buttons)
+            Assert.AreEqual(
+                SemanticCommandResult.Applied,
+                composition.ExecuteSemanticCommand(button.Identity, new(SemanticCommandKind.Invoke))
+            );
+        Assert.AreEqual(2, invocations);
+        Assert.ThrowsExactly<ArgumentException>(() => Components.IconButton(Source(3), " "));
+    }
+
+    [TestMethod]
+    public void PinnedLucideAccessorsExposeExactCanonicalArtwork()
+    {
+        var sources = new Dictionary<string, ImageSource>(StringComparer.Ordinal)
+        {
+            ["archive"] = LucideIcons.Archive,
+            ["arrow-left"] = LucideIcons.ArrowLeft,
+            ["arrow-right"] = LucideIcons.ArrowRight,
+            ["circle-check"] = LucideIcons.CircleCheck,
+            ["circle-dot"] = LucideIcons.CircleDot,
+            ["ellipsis"] = LucideIcons.Ellipsis,
+            ["file-text"] = LucideIcons.FileText,
+            ["inbox"] = LucideIcons.Inbox,
+            ["link"] = LucideIcons.Link,
+            ["list-filter"] = LucideIcons.ListFilter,
+            ["notebook-pen"] = LucideIcons.NotebookPen,
+            ["plus"] = LucideIcons.Plus,
+            ["refresh-cw"] = LucideIcons.RefreshCw,
+            ["search"] = LucideIcons.Search,
+            ["trash"] = LucideIcons.Trash,
+        };
+        Assert.AreEqual(15, sources.Count);
+        foreach (var (name, source) in sources)
+        {
+            var asset = source.PackagedAsset!;
+            Assert.AreEqual(new AssetId("Lucent.Icons.Lucide", "icons/" + name + ".svg"), asset.Id);
+            Assert.AreEqual(AssetFormat.Svg, asset.Format);
+            Assert.AreEqual(24f, source.Metadata.Width);
+            Assert.AreEqual(24f, source.Metadata.Height);
+            using var stream = asset.OpenRead();
+            Assert.AreEqual(asset.ByteLength, stream.Length);
+            Assert.AreEqual(asset.ContentHash, Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant());
+            stream.Position = 0;
+            var svg = XDocument.Load(stream).Root!;
+            Assert.AreEqual("0 0 24 24", (string?)svg.Attribute("viewBox"));
+            Assert.AreEqual("currentColor", (string?)svg.Attribute("stroke"));
+            Assert.AreEqual("2", (string?)svg.Attribute("stroke-width"));
+            Assert.AreEqual("round", (string?)svg.Attribute("stroke-linecap"));
+            Assert.AreEqual("round", (string?)svg.Attribute("stroke-linejoin"));
+        }
+    }
+
     [TestMethod]
     public void SceneCleanupReleasesEveryResourceWhenOneAdapterThrows()
     {

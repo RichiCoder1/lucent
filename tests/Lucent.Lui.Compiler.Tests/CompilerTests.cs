@@ -13,6 +13,45 @@ namespace Lucent.Lui.Compiler.Tests;
 public sealed class CompilerTests
 {
     [TestMethod]
+    public void StockIconControlOverloadsCompileWithDefaultContentAndLiveReaders()
+    {
+        const string source = """
+namespace Sample;
+using System;
+using Lucent.Core;
+internal component Stock(ImageSource icon, Func<string> label, Action invoke) {
+    <Column>
+        <Button leadingIcon={icon} onInvoke={invoke}>Refresh</Button>
+        <Button leadingIcon={() => icon} onInvoke={invoke}>{label()}</Button>
+        <IconButton source={icon} label="More actions" onInvoke={invoke} />
+        <IconButton source={() => icon} label={label} onInvoke={invoke} />
+    </Column>
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("stock-icon-controls", references: References()),
+            new LuiFreshnessIdentity(
+                "stock-icon-controls",
+                "stock-icon-controls",
+                new LuiDocumentIdentity("StockIconControls.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success
+                && result.Source!.Contains("Components.Button(", StringComparison.Ordinal)
+                && result.Source.Contains("leadingIcon:", StringComparison.Ordinal)
+                && result.Source.Contains("Components.IconButton(", StringComparison.Ordinal),
+            "stock icon controls did not bind through .lui: "
+                + string.Join(" | ", result.Diagnostics.Select(item => item.Id + ": " + item.Message))
+                + "\n"
+                + result.Source
+        );
+    }
+
+    [TestMethod]
     public void ImageStylesBindAndStaticAccessibilityIntentIsDiagnosed()
     {
         foreach (

@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><Version>$(LucentLuiToolingVersion)</Version><IsAotCompatible>false</IsAotCompatible><IsTrimmable>false</IsTrimmable><EnableTrimAnalyzer>false</EnableTrimAnalyzer></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" /><PackageReference Include="Microsoft.CodeAnalysis.CSharp" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" />
+    <ProjectReference Include="../Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
 </Project>

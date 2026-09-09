@@ -188,6 +188,11 @@ public sealed class ImageCache : IDisposable
         owner.Graph.CheckThread();
         ObjectDisposedException.ThrowIf(owner.IsDisposed, owner);
 
+        rendition =
+            _preparer.GetCacheRendition(source, rendition)
+            ?? throw new InvalidOperationException(
+                "The image preparer returned no cache rendition."
+            );
         ImageLoadHandle handle;
         lock (_gate)
         {
@@ -233,6 +238,11 @@ public sealed class ImageCache : IDisposable
 
         if (cancellationToken.IsCancellationRequested)
             return Task.FromResult(new ImagePreloadOutcome(ImagePreloadStatus.Canceled));
+        rendition =
+            _preparer.GetCacheRendition(source, rendition)
+            ?? throw new InvalidOperationException(
+                "The image preparer returned no cache rendition."
+            );
         var demand = new PreloadDemand(this, cancellationToken);
         ImagePreloadOutcome? immediate = null;
         lock (_gate)

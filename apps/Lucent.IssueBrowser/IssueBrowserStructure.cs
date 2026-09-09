@@ -66,6 +66,9 @@ public static class IssueBrowserStructure
         IssueFixture.AssertIntegrity();
         IssueBrowserState? capturedState = null;
         var composition = new Composition(graph, "issue-browser");
+        composition.ConfigureImages(
+            new ImageCache(new Lucent.Renderer.Skia.SkiaImagePreparer())
+        );
         var themeContext = new ThemeContext(
             composition.Root.Scope,
             StockTheme(ThemeAppearance.Light)

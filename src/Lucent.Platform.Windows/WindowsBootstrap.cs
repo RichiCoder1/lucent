@@ -86,19 +86,28 @@ public static class WindowsBootstrap
         WindowsInputAdapter? input = null;
         WindowsLiveResize? liveResize = null;
         WindowsPopupChain? popup = null;
+        WindowsWindowIcon? windowIcon = null;
         var popupInputGate = new WindowsPopupInputGate();
         ContextMenuRequest? pendingPopup = null;
         InputRouter? contextMenuRouter = null;
         Action<ContextMenuRequest>? popupRequested = null;
         RetainedScene? lastScene = null;
         var errors = new List<Exception>();
+        var generatedApplicationIcon = ApplicationIconDefaults.Current;
+        var configuredIcon = windowOptions?.Icon ?? generatedApplicationIcon?.Source;
+        var configuredRenditions = windowOptions?.Icon is null
+            ? generatedApplicationIcon?.Renditions
+            : null;
         try
         {
+            var windowFlags = SDL.WindowFlags.Resizable | SDL.WindowFlags.HighPixelDensity;
+            if (configuredIcon is not null)
+                windowFlags |= SDL.WindowFlags.Hidden;
             window = SDL.CreateWindow(
                 title,
                 windowOptions?.Width ?? InitialLogicalWidth,
                 windowOptions?.Height ?? InitialLogicalHeight,
-                SDL.WindowFlags.Resizable | SDL.WindowFlags.HighPixelDensity
+                windowFlags
             );
             if (window == 0)
                 throw new InvalidOperationException($"SDL_CreateWindow: {SDL.GetError()}");
@@ -114,6 +123,51 @@ public static class WindowsBootstrap
             );
             if (hwnd == 0)
                 throw new InvalidOperationException("SDL window did not expose an HWND.");
+
+            if (configuredIcon is not null)
+            {
+                // Preparation and codec/native vector work run off the owner thread while this
+                // hidden window keeps SDL's main-thread requirement intact. No arbitrary decode
+                // is performed synchronously by the presentation loop.
+                var iconCancellation = new CancellationTokenSource();
+                var iconPreparation = configuredRenditions is { Count: > 0 }
+                    ? WindowsWindowIcon.PrepareAsync(configuredRenditions, iconCancellation.Token)
+                    : WindowsWindowIcon.PrepareAsync(configuredIcon, iconCancellation.Token);
+                try
+                {
+                    var ownerWindowId = SDL.GetWindowID(window);
+                    while (!iconPreparation.IsCompleted)
+                    {
+                        SDL.PumpEvents();
+                        while (SDL.PollEvent(out var startupEvent))
+                        {
+                            if (IsStartupCloseEvent(startupEvent, ownerWindowId))
+                            {
+                                iconCancellation.Cancel();
+                                throw new StartupWindowClosedException();
+                            }
+                        }
+                        Thread.Sleep(1);
+                    }
+                    try
+                    {
+                        windowIcon = WindowsWindowIcon.Install(
+                            window,
+                            iconPreparation.GetAwaiter().GetResult()
+                        );
+                    }
+                    catch (ImageLoadException exception)
+                    {
+                        Console.Error.WriteLine(
+                            $"Lucent Windows window icon unavailable ({exception.Kind}): {exception.Message}"
+                        );
+                    }
+                }
+                finally
+                {
+                    ObserveBackground(iconPreparation, iconCancellation);
+                }
+            }
 
             uiaDispatcher = new WindowsUiaDispatcher();
             uiaProvider = new WindowsUiaProvider(hwnd, composition, uiaDispatcher, title);
@@ -152,6 +206,8 @@ public static class WindowsBootstrap
                 configuredWindowScale = GetViewport(window, sdlRenderer).Scale;
                 ApplyWindowDimensions(window, windowOptions, configuredWindowScale, initial: true);
             }
+            if (configuredIcon is not null && !SDL.ShowWindow(window))
+                throw new InvalidOperationException($"SDL_ShowWindow: {SDL.GetError()}");
             var recordedPerformanceBaseline = false;
             session?.Start();
             bool ObserveHostEvent(SDL.Event @event)
@@ -483,6 +539,12 @@ public static class WindowsBootstrap
             }
             uiaDispatcher.SetOwnerPhase("shutdown");
         }
+        catch (StartupWindowClosedException)
+        {
+            // The hidden startup window received a close/quit request while icon preparation
+            // was pending. The preparation task is cancellation-aware and cannot touch SDL;
+            // its completion is observed by the continuation installed above.
+        }
         catch (Exception error)
         {
             errors.Add(error);
@@ -506,6 +568,7 @@ public static class WindowsBootstrap
             Capture(errors, () => cursor?.Dispose());
             Capture(errors, () => presenter?.Dispose());
             Capture(errors, () => sceneRenderer?.Dispose());
+            Capture(errors, () => windowIcon?.Dispose());
             if (sdlRenderer != 0)
                 Capture(errors, () => SDL.DestroyRenderer(sdlRenderer));
             if (window != 0)
@@ -538,6 +601,34 @@ public static class WindowsBootstrap
         var eventWindowId = WindowsPopupHost.EventWindowId(@event);
         return eventWindowId != 0 && eventWindowId != ownerWindowId;
     }
+
+    private static bool IsStartupCloseEvent(SDL.Event @event, uint ownerWindowId) =>
+        (SDL.EventType)@event.Type == SDL.EventType.Quit
+        || (
+            (SDL.EventType)@event.Type == SDL.EventType.WindowCloseRequested
+            && WindowsPopupHost.EventWindowId(@event) == ownerWindowId
+        );
+
+    internal static void ObserveIconPreparationCompletion(
+        Task preparation,
+        CancellationTokenSource cancellation
+    ) => ObserveBackground(preparation, cancellation);
+
+    private static void ObserveBackground(Task task, CancellationTokenSource completionResource)
+    {
+        _ = task.ContinueWith(
+            completed =>
+            {
+                _ = completed.Exception;
+                completionResource.Dispose();
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default
+        );
+    }
+
+    private sealed class StartupWindowClosedException : Exception;
 
     private static bool Observe(
         WindowsFrameScheduler scheduler,

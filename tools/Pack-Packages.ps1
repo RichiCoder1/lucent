@@ -28,6 +28,22 @@ foreach ($name in $names) {
             if (-not $zip.GetEntry($notice.entry)) { throw "Missing package notice: $name/$($notice.entry)" }
         }
         if ($name -eq 'Lucent.Reactive.R3' -and -not $zip.GetEntry('buildTransitive/notices/R3-LICENSE.txt')) { throw 'R3 package omitted upstream license notice.' }
+        if ($name -eq 'Lucent.Lui.Sdk' -and -not $zip.GetEntry('Sdk/Assets.targets')) { throw 'Lucent.Lui.Sdk omitted the shared asset-generation targets.' }
+        if ($name -eq 'Lucent.Icons.Lucide') {
+            foreach ($required in @('buildTransitive/notices/Lucide-LICENSE.txt', 'buildTransitive/notices/Feather-LICENSE.txt', 'contentFiles/any/any/lucide-icons.json')) {
+                if (-not $zip.GetEntry($required)) { throw "Lucide package omitted pinned artwork inventory or notice: $required" }
+            }
+            $inventoryEntry = $zip.GetEntry('contentFiles/any/any/lucide-icons.json')
+            $inventoryReader = [IO.StreamReader]::new($inventoryEntry.Open())
+            try { $inventory = $inventoryReader.ReadToEnd() | ConvertFrom-Json } finally { $inventoryReader.Dispose() }
+            $selectedBytes = ($inventory.icons | Measure-Object bytes -Sum).Sum
+            if ($inventory.revision -cne 'ba95e4c988b1e1b39cf5544e73b25a74b76816ee' -or $inventory.importerRevision -cne 'lucent-lucide-import-v1' -or @($inventory.icons).Count -ne 15 -or $selectedBytes -ne 5032) {
+                throw 'Lucide package inventory did not retain its pinned finite selection.'
+            }
+            if (@($zip.Entries.FullName) -match '(^|/)(node_modules|package\.json|.*\.m?js)$') {
+                throw 'Lucide package introduced a Node or JavaScript consumer dependency.'
+            }
+        }
         $entry = $zip.GetEntry("$name.nuspec")
         $reader = [IO.StreamReader]::new($entry.Open())
         try { [xml]$spec = $reader.ReadToEnd() } finally { $reader.Dispose() }

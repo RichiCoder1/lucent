@@ -1608,10 +1608,22 @@ public static class LuiCompiler
                         return (
                             Candidate: candidate,
                             Plan: ContentPlan.For(candidate, wrapLiveReader: !direct),
-                            Compatible: direct || returns
+                            Compatible: direct || returns,
+                            WrapLiveReader: !direct
                         );
                     })
-                    .Where(item => item.Compatible)
+                    .Where(item =>
+                        item.Compatible
+                        && BindsContentCandidate(
+                            model.Compilation,
+                            document,
+                            identity,
+                            mapped.Source.Start,
+                            item.Candidate,
+                            contentContributions,
+                            item.WrapLiveReader
+                        )
+                    )
                     .ToArray();
                 if (liveCandidates.Length == 1)
                 {
@@ -1760,6 +1772,11 @@ public static class LuiCompiler
             ? null
             : model.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
         return target is not null
+            && parameter.ContainingSymbol is IMethodSymbol declaringMethod
+            && StringComparer.Ordinal.Equals(
+                target.OriginalDefinition.GetDocumentationCommentId(),
+                declaringMethod.GetDocumentationCommentId()
+            )
             && target.Parameters.Any(item =>
                 item.Name == parameter.Name
                 && item.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)

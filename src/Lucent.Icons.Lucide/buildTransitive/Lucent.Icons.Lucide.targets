@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)notices/*" Link="notices/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+</Project>

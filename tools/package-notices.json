@@ -1,4 +1,9 @@
 [
+  { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/ExCSS-LICENSE.txt", "output": "notices/ExCSS-LICENSE.txt" },
+  { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/Svg.Skia-LICENSE.txt", "output": "notices/Svg.Skia-LICENSE.txt" },
+  { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/Svg.Custom-LICENSE.txt", "output": "notices/Svg.Custom-LICENSE.txt" },
+  { "package": "Lucent.Icons.Lucide", "entry": "buildTransitive/notices/Lucide-LICENSE.txt", "output": "notices/Lucide-LICENSE.txt" },
+  { "package": "Lucent.Icons.Lucide", "entry": "buildTransitive/notices/Feather-LICENSE.txt", "output": "notices/Feather-LICENSE.txt" },
   { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/SkiaSharp-LICENSE.txt", "output": "notices/SkiaSharp-LICENSE.txt" },
   { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/SkiaSharp-NOTICES.txt", "output": "notices/SkiaSharp-NOTICES.txt" },
   { "package": "Lucent.Renderer.Skia", "entry": "buildTransitive/notices/HarfBuzzSharp-LICENSE.txt", "output": "notices/HarfBuzzSharp-LICENSE.txt" },
@@ -13,5 +18,12 @@
   { "package": "Lucent.Reactive.R3", "entry": "buildTransitive/notices/R3-LICENSE.txt", "output": "notices/R3-LICENSE.txt" },
   { "package": "Lucent.Lui.Sdk", "entry": "notices/Roslyn-LICENSE.txt" },
   { "package": "Lucent.Lui.Sdk", "entry": "notices/Roslyn-Common-NOTICES.rtf" },
-  { "package": "Lucent.Lui.Sdk", "entry": "notices/Roslyn-CSharp-NOTICES.rtf" }
+  { "package": "Lucent.Lui.Sdk", "entry": "notices/Roslyn-CSharp-NOTICES.rtf" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/ExCSS-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/Svg.Skia-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/Svg.Custom-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/SkiaSharp-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/SkiaSharp-NOTICES.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/HarfBuzzSharp-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/HarfBuzzSharp-NOTICES.txt" }
 ]

@@ -15,9 +15,15 @@
   <ItemGroup>
     <Using Include="Lucent.Core" />
     <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
+    <ProjectReference Include="../../src/Lucent.Icons.Lucide/Lucent.Icons.Lucide.csproj" />
     <ProjectReference Include="../../src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
     <ProjectReference Include="../../src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
     <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
+    <ProjectReference Include="../../src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
+  </ItemGroup>
+  <ItemGroup>
+    <LucentAsset Include="Artwork/issue-browser.svg" Path="Artwork/issue-browser.svg" ApplicationIcon="true" />
+    <None Include="Artwork/Lucide-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <AdditionalFiles Include="*.lui" LucentLuiLogicalPath="%(Filename)%(Extension)" />
@@ -33,4 +39,10 @@
       <LucentLuiCompilerOptions>$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiCompilerOptions>
     </PropertyGroup>
   </Target>
+  <PropertyGroup>
+    <LucentAssetOutputDirectory>$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\lucent-assets\</LucentAssetOutputDirectory>
+    <LucentAssetToolPath>$(MSBuildProjectDirectory)\..\..\src\Lucent.Lui.Tooling\bin\$(Configuration)\net10.0\Lucent.Lui.Tooling.dll</LucentAssetToolPath>
+    <LucentAssetToolDirectory>$(MSBuildProjectDirectory)\..\..\src\Lucent.Lui.Tooling\bin\$(Configuration)\net10.0</LucentAssetToolDirectory>
+  </PropertyGroup>
+  <Import Project="../../src/Lucent.Lui.Sdk/Sdk/Assets.targets" />
 </Project>

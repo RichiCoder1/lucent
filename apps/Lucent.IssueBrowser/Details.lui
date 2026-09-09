@@ -29,7 +29,7 @@ public component Details(IssueBrowserState browser, Func<BrowserIssue> issue, Is
             <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => issue().Body} name="issue-browser.details-body" />
         </ScrollViewport>
         <Layout style={DetailsActionsStyle}>
-            <Button onInvoke={browser.ToggleSelectedStatus} name="issue-browser.status-action">{issue().Status == "open" ? "Close issue" : "Reopen issue"}</Button>
+            <Button leadingIcon={() => issue().Status == "open" ? Lucent.Icons.Lucide.LucideIcons.CircleCheck : Lucent.Icons.Lucide.LucideIcons.CircleDot} onInvoke={browser.ToggleSelectedStatus} name="issue-browser.status-action">{issue().Status == "open" ? "Close issue" : "Reopen issue"}</Button>
         </Layout>
     </Layout>
 }

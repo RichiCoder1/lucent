@@ -1,5 +1,6 @@
 [
   "Lucent.Core",
+  "Lucent.Icons.Lucide",
   "Lucent.Renderer.Skia",
   "Lucent.Platform.Windows",
   "Lucent.Hosting",
