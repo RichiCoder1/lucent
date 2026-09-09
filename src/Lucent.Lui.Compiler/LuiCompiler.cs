@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Lucent.Lui.Compiler;
@@ -14,6 +15,20 @@ namespace Lucent.Lui.Compiler;
 /// <remarks>Use from build or editor tooling only. The output source and map have no runtime dependency or runtime role.</remarks>
 public static class LuiCompiler
 {
+    private static Optional<object?> ImageLabelConstant(IOperation operation) =>
+        operation switch
+        {
+            IConversionOperation conversion => ImageLabelConstant(conversion.Operand),
+            IDelegateCreationOperation creation => ImageLabelConstant(creation.Target),
+            IAnonymousFunctionOperation function
+                when function.Body.Operations.Length == 1
+                    && function.Body.Operations[0]
+                        is IReturnOperation { ReturnedValue: { } value } => ImageLabelConstant(
+                value
+            ),
+            _ => operation.ConstantValue,
+        };
+
     private static readonly IReadOnlyList<string> ImplicitStylePropertyTypes =
         LuiPropertyCatalog.ImplicitStylePropertyTypeNames;
     private static readonly SymbolDisplayFormat FullyQualifiedNullableFormat =
@@ -247,6 +262,49 @@ public static class LuiCompiler
             );
             if (mapped is null)
                 continue;
+            if (
+                model.GetOperation(invocation) is IInvocationOperation imageCall
+                && imageCall.TargetMethod.ContainingType.ToDisplayString()
+                    == "Lucent.Core.Components"
+                && imageCall.TargetMethod.Name is "Image" or "Icon"
+            )
+            {
+                var label = imageCall.Arguments.FirstOrDefault(argument =>
+                    argument.Parameter?.Name is "alternativeText" or "label"
+                );
+                var decorative = imageCall.Arguments.FirstOrDefault(argument =>
+                    argument.Parameter?.Name == "decorative"
+                );
+                var labelConstant = label is null ? default : ImageLabelConstant(label.Value);
+                var decorativeConstant = decorative?.Value.ConstantValue ?? default;
+                var icon = imageCall.TargetMethod.Name == "Icon";
+                var missingLabel =
+                    labelConstant.HasValue
+                    && (
+                        labelConstant.Value is null
+                        || labelConstant.Value is string labelText
+                            && string.IsNullOrWhiteSpace(labelText)
+                    );
+                var invalid = icon
+                    ? labelConstant.HasValue
+                        && labelConstant.Value is string iconLabel
+                        && string.IsNullOrWhiteSpace(iconLabel)
+                    : decorativeConstant.HasValue
+                        && (
+                            decorativeConstant.Value is true
+                                ? label is not null
+                                    && (!labelConstant.HasValue || labelConstant.Value is not null)
+                                : missingLabel
+                        );
+                if (invalid)
+                    diagnostics.Add(
+                        new LuiDiagnostic(
+                            "LUI2022",
+                            "Image requires nonempty alternativeText or decorative={true}, but not both. Icon is decorative by default; an explicit label must be nonempty.",
+                            mapped.Source
+                        )
+                    );
+            }
             if (ComponentMethods(model, invocation).Length == 0)
                 diagnostics.Add(
                     new LuiDiagnostic(

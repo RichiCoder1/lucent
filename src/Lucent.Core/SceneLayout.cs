@@ -264,7 +264,21 @@ public static class SceneLayout
                 );
         }
         var scrollBars = BuildScrollBars(composition, projected.Boxes, viewport);
-        var nodes = InsertScrollBars(projected.Nodes, scrollBars);
+        // Only the final assigned boxes establish image demand. Discovery layouts
+        // create borrowed slots, never leases or IO, and may be discarded.
+        foreach (var box in projected.Boxes)
+        {
+            var element = composition.Find(box.Identity);
+            if (element?.Image is not { } image)
+                continue;
+            image.Request(
+                ContentBounds(element, box.Bounds, viewport.Scale),
+                viewport.Scale,
+                element.Resolve(ImageProperties.Fit).Value,
+                element.Resolve(ImageProperties.ImageZoom).Value
+            );
+        }
+        var nodes = ResolveImages(InsertScrollBars(projected.Nodes, scrollBars), viewport.Scale);
         return new RetainedScene(
             composition.NextSceneGeneration(),
             viewport,
@@ -275,6 +289,45 @@ public static class SceneLayout
             projected.Collapsed,
             scrollBars
         );
+    }
+
+    private static IReadOnlyList<SceneNode> ResolveImages(
+        IReadOnlyList<SceneNode> nodes,
+        float scale
+    )
+    {
+        List<SceneNode>? result = null;
+        for (var index = 0; index < nodes.Count; index++)
+        {
+            var node = nodes[index];
+            var resolved = node switch
+            {
+                ImageSlotSceneNode image => image.Resolve(scale),
+                ClipSceneNode clip => ResolveClipImages(clip, scale),
+                OpacitySceneNode opacity => ResolveOpacityImages(opacity, scale),
+                _ => node,
+            };
+            if (result is null && !ReferenceEquals(node, resolved))
+                result = [.. nodes.Take(index)];
+            result?.Add(resolved);
+        }
+        return result ?? nodes;
+    }
+
+    private static SceneNode ResolveClipImages(ClipSceneNode clip, float scale)
+    {
+        var children = ResolveImages(clip.Children, scale);
+        return ReferenceEquals(children, clip.Children)
+            ? clip
+            : new ClipSceneNode(clip.Identity, clip.Bounds, children, clip.CornerRadius);
+    }
+
+    private static SceneNode ResolveOpacityImages(OpacitySceneNode opacity, float scale)
+    {
+        var children = ResolveImages(opacity.Children, scale);
+        return ReferenceEquals(children, opacity.Children)
+            ? opacity
+            : new OpacitySceneNode(opacity.Identity, opacity.Bounds, opacity.Opacity, children);
     }
 
     private static IReadOnlyList<SceneNode> InsertScrollBars(
@@ -905,6 +958,18 @@ public static class SceneLayout
                     style.CornerRadius
                 )
             );
+        if (element.Image is { } image)
+            result.Add(
+                new ImageSlotSceneNode(
+                    new(identity, SceneNodeKind.Image),
+                    inner,
+                    image,
+                    element.Resolve(ImageProperties.Fit).Value,
+                    element.Resolve(ImageProperties.ColorMode).Value,
+                    element.Resolve(ImageProperties.ImageZoom).Value,
+                    element.Resolve(TypographyProperties.TextColor).Value
+                )
+            );
         if (text is not null)
         {
             var viewOffset = style.Caret is { } caretOffset
@@ -1320,6 +1385,35 @@ public static class SceneLayout
         var textMetrics = IntrinsicTextMetrics(style, text, scale, shaper, cache);
         var width = textMetrics?.Width ?? 0f;
         var height = textMetrics?.Height ?? 0f;
+        if (
+            element.Image is not null
+            && element.Resolve(ImageProperties.Source).Value is { } imageSource
+        )
+        {
+            width = imageSource.Metadata.Width;
+            height = imageSource.Metadata.Height;
+            if (style.Width is not null && style.Height is null)
+                height = (constrainedContentWidth ?? 0) / width * height;
+            else if (style.Height is { } imageHeight && style.Width is null)
+                width =
+                    Math.Max(
+                        0,
+                        Constrain(imageHeight, style.MinHeight, style.MaxHeight)
+                            - style.Padding.Vertical
+                    )
+                    / height
+                    * width;
+            else if (
+                style.Width is null
+                && style.Height is null
+                && constrainedContentWidth is { } imageLimit
+                && imageLimit < width
+            )
+            {
+                height = imageLimit / width * height;
+                width = imageLimit;
+            }
+        }
         // A virtualized viewport is a measurement boundary. Its source extent
         // belongs to the scrolling region, never to an ancestor's desired size;
         // otherwise nested auto layout can realize the entire source as visible.

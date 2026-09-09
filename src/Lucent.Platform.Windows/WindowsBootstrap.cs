@@ -90,6 +90,7 @@ public static class WindowsBootstrap
         ContextMenuRequest? pendingPopup = null;
         InputRouter? contextMenuRouter = null;
         Action<ContextMenuRequest>? popupRequested = null;
+        RetainedScene? lastScene = null;
         var errors = new List<Exception>();
         try
         {
@@ -126,10 +127,11 @@ public static class WindowsBootstrap
                 ? new WindowsWorkDispatcher(composition)
                 : new WindowsWorkDispatcher(session);
             using var sessionContext = session?.EnterContext();
+            if (composition.Images is null)
+                composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
             performanceDiagnostics = new PerformanceDiagnostics();
             var scheduler = new WindowsFrameScheduler();
             var caretBlink = new WindowsCaretBlink(WindowsCaretBlink.GetCaretBlinkTime());
-            RetainedScene? lastScene = null;
             static long NowMilliseconds() => (long)Stopwatch.GetElapsedTime(0).TotalMilliseconds;
             input = new WindowsInputAdapter(composition, window, clipboard);
             popupRequested = request =>
@@ -283,7 +285,7 @@ public static class WindowsBootstrap
                         ),
                         sceneRenderer
                     );
-                    lastScene = liveScene;
+                    ReplaceScene(ref lastScene, liveScene);
                     uiaProvider.Refresh(liveScene);
                     input.RefreshTextInput();
                     var hasLiveCaret = composition.Input.TryGetCaretGeometry(
@@ -432,7 +434,7 @@ public static class WindowsBootstrap
                     );
                 if (!caretOnly)
                 {
-                    lastScene = scene;
+                    ReplaceScene(ref lastScene, scene);
                     uiaProvider.Refresh(scene);
                     input.RefreshTextInput();
                     var hasCaret = composition.Input.TryGetCaretGeometry(out var caretBounds);
@@ -497,6 +499,7 @@ public static class WindowsBootstrap
             Capture(errors, () => pendingPopup?.Dispose());
             Capture(errors, () => popup?.Dispose());
             Capture(errors, () => input?.Dispose());
+            Capture(errors, () => lastScene?.Dispose());
             Capture(errors, () => workDispatcher?.Dispose());
             Capture(errors, () => settingsListener?.Dispose());
             Capture(errors, () => clipboard?.Dispose());
@@ -687,12 +690,33 @@ public static class WindowsBootstrap
         {
             composition.Flush();
             var scene = SceneLayout.Project(composition, viewport, shaper);
-            if (composition.Input.SetScene(scene))
+            bool accepted;
+            try
+            {
+                accepted = composition.Input.SetScene(scene);
+            }
+            catch
+            {
+                scene.Dispose();
+                throw;
+            }
+            if (accepted)
                 return scene;
+            scene.Dispose();
         }
         throw new InvalidOperationException(
             $"Core input rejected {InstallAttempts} consecutive projected scenes."
         );
+    }
+
+    private static void ReplaceScene(ref RetainedScene? current, RetainedScene next)
+    {
+        ArgumentNullException.ThrowIfNull(next);
+        if (ReferenceEquals(current, next))
+            return;
+        var previous = current;
+        current = next;
+        previous?.Dispose();
     }
 
     internal static WindowsSettingsDiagnostic ReportDiagnostics(

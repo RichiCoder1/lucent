@@ -9,15 +9,18 @@ $proof = Join-Path $root ('artifacts/headless-package-consumer/' + [Guid]::NewGu
 New-Item -ItemType Directory -Path $proof -Force | Out-Null
 '<Project />' | Set-Content (Join-Path $proof 'Directory.Build.props'), (Join-Path $proof 'Directory.Build.targets'), (Join-Path $proof 'Directory.Packages.props')
 Copy-Item (Join-Path $root 'global.json') $proof
+Copy-Item (Join-Path $root 'tests/Lucent.Renderer.Skia.Tests/Fixtures/pixel.png') (Join-Path $proof 'Pixel.png')
 @"
 <Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/$Version">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType>
     <Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RootNamespace>HeadlessPackageProbe</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Lucent.Testing" Version="[$Version]" />
     <PackageReference Include="Lucent.Testing.Skia" Version="[$Version]" />
+    <LucentAsset Include="Pixel.png" Path="Pixel.png" />
   </ItemGroup>
 </Project>
 "@ | Set-Content (Join-Path $proof 'Consumer.csproj')
@@ -52,6 +55,15 @@ internal component Probe(Action invoked, WindowBreakpoints points) {
 }
 '@ | Set-Content (Join-Path $proof 'Probe.lui')
 @'
+namespace HeadlessPackageProbe;
+internal component ImageProbe() {
+    <Row>
+        <Image source={Assets.Pixel} alternativeText="Packaged pixel" style={Style.Empty with { Width: 32; Height: 32; }} />
+        <Icon source={Assets.Pixel} style={Style.Empty with { Width: 32; Height: 32; }} />
+    </Row>
+}
+'@ | Set-Content (Join-Path $proof 'ImageProbe.lui')
+@'
 using Lucent.Core;
 using Lucent.Testing;
 using Lucent.Testing.Skia;
@@ -67,20 +79,20 @@ await app.KeyAsync(new(KeyCommandKind.Down, Key.Enter));
 if (Volatile.Read(ref calls) != 1)
     throw new InvalidOperationException("Packaged .lui headless command did not invoke exactly once.");
 Console.WriteLine("Packaged .lui headless command: PASS");
-var initial = await app.SnapshotAsync();
+using var initial = await app.SnapshotAsync();
 var editor = initial.Require(SemanticRole.TextField, "Retained draft");
 var edited = await app.InvokeAsync(context => context.Composition.ExecuteSemanticCommand(
     editor.Identity, new(SemanticCommandKind.SetValue, "keep this draft")));
 if (edited != SemanticCommandResult.Applied)
     throw new InvalidOperationException("Packaged editor refused its current semantic command.");
-var wide = await app.ResizeAsync(new(640, 120, 1.5f));
+using var wide = await app.ResizeAsync(new(640, 120, 1.5f));
 var retained = wide.Require(SemanticRole.TextField, "Retained draft");
 if (wide.RequireBox(wide.Require(SemanticRole.Button, "Run")).Bounds.Height != 64
     || retained.Identity.ElementId != editor.Identity.ElementId
     || retained.Identity.CompositionEpoch != editor.Identity.CompositionEpoch
     || retained.Value != "keep this draft")
     throw new InvalidOperationException("Packaged breakpoint style lost geometry or editor ownership.");
-var narrow = await app.ResizeAsync(new(320, 120, 2));
+using var narrow = await app.ResizeAsync(new(320, 120, 2));
 if (narrow.RequireBox(narrow.Require(SemanticRole.Button, "Run")).Bounds.Height != 40
     || narrow.Require(SemanticRole.TextField, "Retained draft").Value != "keep this draft")
     throw new InvalidOperationException("Packaged conditional style did not restore its base value.");
@@ -89,7 +101,7 @@ var noticeCalls = 0;
 await using (var notice = await HeadlessApplication.StartAsync(
     Components.ErrorNotice(() => "Package failure", () => noticeCalls++)))
 {
-    var noticeSnapshot = await notice.SnapshotAsync();
+    using var noticeSnapshot = await notice.SnapshotAsync();
     var status = noticeSnapshot.Require(SemanticRole.Status, "Package failure");
     var retry = noticeSnapshot.Require(SemanticRole.Button, "Retry");
     var result = await notice.InvokeAsync(context => context.Composition.ExecuteSemanticCommand(
@@ -106,6 +118,38 @@ var png = await rendered.CapturePngAsync();
 if (png.Length < 8 || !png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
     throw new InvalidOperationException("Packaged Skia capture did not produce PNG data.");
 Console.WriteLine("Packaged Skia capture: PASS");
+
+await using (var artwork = await SkiaHeadlessApplication.StartAsync(
+    HeadlessPackageProbe.Components.ImageProbe(), new() { Viewport = new(80, 40, 1.5f) }))
+{
+    var preparation = await artwork.InvokeAsync(context => context.Composition.Images!.PreloadAsync(
+        context.Composition.Root.Scope, HeadlessPackageProbe.Assets.Pixel, new ImageRendition(64, 64)));
+    var outcome = await preparation.WaitAsync(TimeSpan.FromSeconds(10));
+    if (outcome.Status != ImagePreloadStatus.Ready)
+        throw new InvalidOperationException("Packaged PNG did not prepare: " + outcome.Status + " " + outcome.Error?.Message);
+    using var snapshot = await artwork.SnapshotAsync();
+    var images = ImageNodes(snapshot.Scene.Nodes).ToArray();
+    if (images.Length != 2 || !ReferenceEquals(images[0].Image, images[1].Image)
+        || images[0].ColorMode != ImageColorMode.Source
+        || images[1].ColorMode != ImageColorMode.Monochrome
+        || snapshot.FindAll(SemanticRole.Image).Count != 1)
+        throw new InvalidOperationException("Packaged Image/Icon did not share preparation or preserve accessible intent.");
+    var frame = await artwork.CapturePngAsync();
+    using var decoded = SkiaSharp.SKBitmap.Decode(frame);
+    if (decoded is null || decoded.GetPixel(20, 20).Alpha == 0 || decoded.GetPixel(65, 20).Alpha == 0)
+        throw new InvalidOperationException("Packaged Image/Icon did not paint pixels at 150% scale.");
+    Console.WriteLine("Packaged typed PNG, Image/Icon shared loading, semantics and 150% paint: PASS");
+}
+
+static IEnumerable<ImageSceneNode> ImageNodes(IEnumerable<SceneNode> nodes)
+{
+    foreach (var node in nodes)
+    {
+        if (node is ImageSceneNode image) yield return image;
+        var children = node is ClipSceneNode clip ? clip.Children : node is OpacitySceneNode opacity ? opacity.Children : null;
+        if (children is not null) foreach (var child in ImageNodes(children)) yield return child;
+    }
+}
 
 namespace HeadlessPackageProbe {
     internal static class ProbeBreakpoints {

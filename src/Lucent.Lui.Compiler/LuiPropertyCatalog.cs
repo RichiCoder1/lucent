@@ -13,5 +13,6 @@ public static class LuiPropertyCatalog
             "Lucent.Core.TypographyProperties",
             "Lucent.Core.InputProperties",
             "Lucent.Core.ScrollBarProperties",
+            "Lucent.Core.ImageProperties",
         ]);
 }

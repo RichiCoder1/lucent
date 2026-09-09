@@ -158,6 +158,124 @@ public sealed class HeadlessHarnessTests
     }
 
     [TestMethod]
+    public async Task SnapshotRetainsSceneAfterTheApplicationReprojects()
+    {
+        await using var application = await HeadlessApplication.StartAsync(EmptyRecipe());
+        var initial = await application.SnapshotAsync();
+
+        using var resized = await application.ResizeAsync(new LayoutViewport(800, 600, 1));
+
+        Assert.IsFalse(initial.Scene.IsDisposed);
+        Assert.IsFalse(resized.Scene.IsDisposed);
+        Assert.AreNotEqual(initial.Scene, resized.Scene);
+
+        initial.Dispose();
+        Assert.IsTrue(initial.Scene.IsDisposed);
+    }
+
+    [TestMethod]
+    public async Task SnapshotRetainsPreparedImageAfterApplicationDisposal()
+    {
+        var source = TestImageSource();
+        var application = await HeadlessApplication.StartAsync(
+            Components.Image(source, "Preview"),
+            new HeadlessApplicationOptions { ImagePreparer = new ImmediateImagePreparer() }
+        );
+        HeadlessSnapshot? snapshot = null;
+        try
+        {
+            var preload = await application.InvokeAsync(context =>
+                context.Composition.Images!.PreloadAsync(
+                    context.Composition.Root.Scope,
+                    source,
+                    new ImageRendition(64, 64)
+                )
+            );
+            Assert.AreEqual(ImagePreloadStatus.Ready, (await preload).Status);
+            using (await application.DrainAsync()) { }
+            var cache = await application.InvokeAsync(context => context.Composition.Images!);
+            snapshot = await application.SnapshotAsync();
+            Assert.IsGreaterThan(0L, cache.Metrics.LeasedBytes);
+
+            await application.DisposeAsync();
+
+            Assert.IsFalse(snapshot.Scene.IsDisposed);
+            Assert.IsGreaterThan(0L, cache.Metrics.LeasedBytes);
+            snapshot.Dispose();
+            Assert.IsTrue(snapshot.Scene.IsDisposed);
+            Assert.AreEqual(0L, cache.Metrics.LeasedBytes);
+        }
+        finally
+        {
+            snapshot?.Dispose();
+            await application.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task ImagePreparerIsConfiguredBeforeRecipeMounts()
+    {
+        var preparer = new UnusedImagePreparer();
+        var sawCache = false;
+        await using var application = await HeadlessApplication.StartAsync(
+            context =>
+            {
+                sawCache = context.Composition.Images is not null;
+                return EmptyRecipe();
+            },
+            new HeadlessApplicationOptions { ImagePreparer = preparer }
+        );
+
+        Assert.IsTrue(sawCache);
+    }
+
+    [TestMethod]
+    public async Task ContextMenuPopupSharesOwnerImageCacheWithoutOwningItsDisposal()
+    {
+        ContextMenuRequest? request = null;
+        var source = TestImageSource();
+        await using var application = await HeadlessApplication.StartAsync(
+            Components.ContextMenu(
+                [Components.Button("Target", static () => { })],
+                () => Components.Menu([Components.MenuItem("Run", static () => { })])
+            ),
+            new HeadlessApplicationOptions { ImagePreparer = new ImmediateImagePreparer() }
+        );
+
+        await application.InvokeAsync(context =>
+        {
+            context.Input.ContextMenuRequested += value => request = value;
+            return context.Input.MoveFocus(FocusTraversalDirection.Next);
+        });
+        await application.KeyAsync(new(KeyCommandKind.Down, Key.ContextMenu));
+
+        var shared = await application.InvokeAsync(_ =>
+        {
+            var popup = request!.CreateComposition();
+            return (
+                SameCache: ReferenceEquals(request.Owner.Images, popup.Images),
+                OwnerMetrics: request.Owner.Images!.Metrics
+            );
+        });
+
+        Assert.IsTrue(shared.SameCache);
+        Assert.AreEqual(0, shared.OwnerMetrics.ReadyEntries);
+        await application.InvokeAsync(_ =>
+        {
+            request!.Dispose();
+            return 0;
+        });
+        var preload = await application.InvokeAsync(context =>
+            context.Composition.Images!.PreloadAsync(
+                context.Composition.Root.Scope,
+                source,
+                new ImageRendition(64, 64)
+            )
+        );
+        Assert.AreEqual(ImagePreloadStatus.Ready, (await preload).Status);
+    }
+
+    [TestMethod]
     public async Task SettleCrossesFromReactiveEffectToApplicationContext()
     {
         await using var application = await HeadlessApplication.StartAsync(EmptyRecipe());
@@ -222,6 +340,18 @@ public sealed class HeadlessHarnessTests
     private static ComponentRecipe EmptyRecipe() =>
         ComponentRecipe.Create("headless-empty", static (_, _) => { });
 
+    private static ImageSource TestImageSource() =>
+        ImageSource.FromAsset(
+            new AssetReference(
+                new AssetId("headless", "preview.png"),
+                new string('0', 64),
+                1,
+                AssetFormat.Png,
+                static () => new MemoryStream(new byte[] { 0 }),
+                new AssetImageMetadata(1, 1)
+            )
+        );
+
     private sealed class ThrowingDisposeShaper : ITextShaper, IDisposable
     {
         private readonly HeadlessTextShaper _inner = new();
@@ -229,6 +359,22 @@ public sealed class HeadlessHarnessTests
         public ShapedText Shape(TextMeasureRequest request) => _inner.Shape(request);
 
         public void Dispose() => throw new InvalidOperationException("shaper-cleanup");
+    }
+
+    private sealed class UnusedImagePreparer : IImagePreparer
+    {
+        public ValueTask<PreparedImage> PrepareAsync(
+            ImagePreparationRequest request,
+            CancellationToken cancellationToken
+        ) => throw new NotSupportedException("The lifecycle test does not mount an image.");
+    }
+
+    private sealed class ImmediateImagePreparer : IImagePreparer
+    {
+        public ValueTask<PreparedImage> PrepareAsync(
+            ImagePreparationRequest request,
+            CancellationToken cancellationToken
+        ) => ValueTask.FromResult<PreparedImage>(new RasterImage(1, 1, new byte[] { 0, 0, 0, 0 }));
     }
 
     private sealed class AlternatingCloseLifecycle : IApplicationLifecycle

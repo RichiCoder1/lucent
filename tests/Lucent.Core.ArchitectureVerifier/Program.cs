@@ -109,6 +109,8 @@ static void VerifyLuiMetadata(
         ["SplitPane"] = 1,
         ["Divider"] = 1,
         ["Text"] = 2,
+        ["Image"] = 2,
+        ["Icon"] = 2,
         ["Button"] = 2,
         ["TextField"] = 1,
         ["TextArea"] = 1,

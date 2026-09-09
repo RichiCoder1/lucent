@@ -220,6 +220,18 @@ public sealed partial class InputRouter
             Throw(errors);
             return true;
         }
+        catch
+        {
+            // Installation borrows the candidate. A host must be able to release it
+            // on failure without leaving the router pointing at a disposed frame.
+            if (ReferenceEquals(_scene, scene))
+            {
+                _scene = null;
+                _input.Clear();
+                ClearInputCaches();
+            }
+            throw;
+        }
         finally
         {
             Exit();
@@ -1487,7 +1499,8 @@ public sealed partial class InputRouter
     private bool ValidateScene(RetainedScene scene, bool installing = false)
     {
         if (
-            scene.Generation == 0
+            scene.IsDisposed
+            || scene.Generation == 0
             || scene.Generation != _composition.LatestSceneGeneration
             || scene.InputProjectionRevision != _composition.InputProjectionRevision
             || scene.Input.Count != scene.Boxes.Count

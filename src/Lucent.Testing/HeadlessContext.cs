@@ -84,7 +84,8 @@ public sealed class HeadlessContext
         }
     }
 
-    /// <summary>Gets the most recently projected scene.</summary>
+    /// <summary>Gets the most recently projected scene borrowed by the owner-thread context.</summary>
+    /// <remarks>The context replaces and disposes this scene on the next projection; use a headless snapshot to retain it independently.</remarks>
     public RetainedScene Scene
     {
         get
@@ -122,7 +123,19 @@ public sealed class HeadlessContext
     internal void SetScene(RetainedScene scene)
     {
         CheckOwner();
+        ArgumentNullException.ThrowIfNull(scene);
+        var previous = _scene;
         _scene = scene;
+        if (previous is not null && !ReferenceEquals(previous, scene))
+            previous.Dispose();
+    }
+
+    internal void DisposeScene()
+    {
+        CheckOwner();
+        var scene = _scene;
+        _scene = null;
+        scene?.Dispose();
     }
 
     internal void CheckOwner()

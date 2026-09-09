@@ -24,6 +24,8 @@ For reusable component/application tests without visible windows, use [the headl
 
 The style-driven layout slice combines Core contracts for algorithms, conditional style ownership and named window breakpoints with compiled `.lui` and consumer tests. Keep thresholds in the application's named BreakpointSet and test just below, at and above each boundary, including logical-size-preserving DPI changes and wide/narrow/wide identity restoration. Resizing an internal pane must not change a window breakpoint. Custom algorithms need invalid-output, measurement-budget, expired-context and per-container state tests; their virtualized children remain realization boundaries. `Test-HeadlessPackages.ps1` compiles parameterized styles using the packaged SDK and checks breakpoint-selected Grid/Flex geometry plus retained editor values against packaged runtime/testing libraries.
 
+Image loading contracts live in `Lucent.Core.Tests`, with real PNG/JPEG decoding and pixel assertions in `Lucent.Renderer.Skia.Tests`. `Lucent.Testing.Tests` checks host setup, popup cache sharing and retained snapshot ownership; the Windows contracts check noninteractive Image accessibility through a hidden window. `Test-HeadlessPackages.ps1` also exercises generated asset accessors and `.lui` Image/Icon rendering against packed libraries at 150% scale. Dispose retained scenes and headless snapshots when a test releases its frame; disposing the application alone must not invalidate an independently retained snapshot. These checks do not take desktop focus.
+
 | Suite | Use it for |
 | --- | --- |
 | `Native` | Existing Core, R3, renderer and Windows contract executables under NativeAOT, without visible desktop interaction. Also runs in package CI. |

@@ -1316,6 +1316,9 @@ public enum SceneNodeKind
 
     /// <summary>Composites a child group with opacity.</summary>
     Opacity,
+
+    /// <summary>Paints a prepared image rendition.</summary>
+    Image,
 }
 
 /// <summary>Identity of a renderer operation belonging to a retained element.</summary>
@@ -1446,6 +1449,8 @@ public sealed class ClipSceneNode : SceneNode
                 opacity.Opacity,
                 opacity.Children
             ),
+            ImageSceneNode image => image,
+            ImageSlotSceneNode slot => slot,
             _ => throw new ArgumentException("Unknown scene node."),
         };
 }
@@ -1482,9 +1487,117 @@ public sealed class OpacitySceneNode : SceneNode
     public IReadOnlyList<SceneNode> Children => _children;
 }
 
-/// <summary>A renderer-facing retained snapshot. It owns no platform or renderer resources.</summary>
-public sealed class RetainedScene
+/// <summary>A renderer-facing retained snapshot owning leases on its prepared image data.</summary>
+/// <remarks>Dispose when the frame is no longer retained. Use <see cref="Retain"/> for an independently owned snapshot.</remarks>
+public sealed class RetainedScene : IDisposable
 {
+    private readonly object _imageGate = new();
+    private ImageLease[]? _imageLeases;
+
+    /// <summary>Whether this snapshot has released its image leases.</summary>
+    public bool IsDisposed
+    {
+        get
+        {
+            lock (_imageGate)
+                return _imageLeases is null;
+        }
+    }
+
+    /// <summary>Retains the immutable frame independently of its current owner.</summary>
+    public RetainedScene Retain()
+    {
+        lock (_imageGate)
+        {
+            ObjectDisposedException.ThrowIf(_imageLeases is null, this);
+            return new RetainedScene(this, _imageLeases!);
+        }
+    }
+
+    /// <summary>Releases this snapshot's prepared resources without invalidating independent snapshots.</summary>
+    public void Dispose()
+    {
+        ImageLease[]? leases;
+        lock (_imageGate)
+        {
+            leases = _imageLeases;
+            _imageLeases = null;
+        }
+        if (leases is not null)
+            ReleaseLeases(leases);
+    }
+
+    private RetainedScene(RetainedScene scene, ImageLease[] leases)
+    {
+        Generation = scene.Generation;
+        Viewport = scene.Viewport;
+        Boxes = scene.Boxes;
+        Nodes = scene.Nodes;
+        Input = scene.Input;
+        ScrollBars = scene.ScrollBars;
+        InputProjectionRevision = scene.InputProjectionRevision;
+        _collapsedElementIds = scene._collapsedElementIds;
+        InputSignature = scene.InputSignature;
+        _imageLeases = RetainLeases(leases);
+    }
+
+    private static ImageLease[] RetainLeases(IEnumerable<ImageLease> leases)
+    {
+        var retained = new List<ImageLease>();
+        try
+        {
+            foreach (var lease in leases)
+                retained.Add(lease.Retain());
+            return retained.ToArray();
+        }
+        catch (Exception error)
+        {
+            try
+            {
+                ReleaseLeases(retained);
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(error, cleanupError);
+            }
+            throw;
+        }
+    }
+
+    private static void ReleaseLeases(IEnumerable<ImageLease> leases)
+    {
+        List<Exception>? errors = null;
+        foreach (var lease in leases)
+        {
+            try
+            {
+                lease.Dispose();
+            }
+            catch (Exception error)
+            {
+                (errors ??= []).Add(error);
+            }
+        }
+        if (errors is not null)
+            throw new AggregateException("Retained scene image cleanup failed.", errors);
+    }
+
+    private static IEnumerable<ImageLease> ImageLeases(IEnumerable<SceneNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node is ImageSceneNode image)
+                yield return image.SourceLease;
+            var children =
+                node is ClipSceneNode clip ? clip.Children
+                : node is OpacitySceneNode opacity ? opacity.Children
+                : null;
+            if (children is not null)
+                foreach (var lease in ImageLeases(children))
+                    yield return lease;
+        }
+    }
+
     internal RetainedScene(
         long generation,
         LayoutViewport viewport,
@@ -1505,6 +1618,7 @@ public sealed class RetainedScene
         InputProjectionRevision = inputProjectionRevision;
         _collapsedElementIds = collapsedElementIds is null ? [] : [.. collapsedElementIds];
         InputSignature = Signature(Input);
+        _imageLeases = RetainLeases(ImageLeases(Nodes));
     }
 
     /// <summary>Monotonic composition-local identity; routers reject older snapshots.</summary>
@@ -1675,6 +1789,18 @@ public sealed class RetainedScene
                     .Append(text.Color)
                     .Append(" shape=")
                     .Append(DiagnosticText.Quote(text.Text.Identity));
+            if (node is ImageSceneNode image)
+                output
+                    .Append(" image=")
+                    .Append(image.Image.Width)
+                    .Append('x')
+                    .Append(image.Image.Height)
+                    .Append(" crop=")
+                    .Append(Format(image.SourceBounds))
+                    .Append(" mode=")
+                    .Append(image.ColorMode)
+                    .Append(" tint=")
+                    .Append(image.Tint);
             if (node is OpacitySceneNode opacity)
                 output
                     .Append(" opacity=")

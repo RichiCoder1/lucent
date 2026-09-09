@@ -1020,6 +1020,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             SemanticRole.Menu => 50009,
             SemanticRole.MenuItem => 50011,
             SemanticRole.Text => 50020,
+            SemanticRole.Image => 50006,
             SemanticRole.Status => 50017,
             SemanticRole.Splitter => 50015,
             SemanticRole.Group when node.Actions.HasFlag(SemanticAction.Scroll) => 50033,

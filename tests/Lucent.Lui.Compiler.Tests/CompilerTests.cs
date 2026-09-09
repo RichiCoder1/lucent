@@ -12,6 +12,51 @@ namespace Lucent.Lui.Compiler.Tests;
 [TestClass]
 public sealed class CompilerTests
 {
+    [TestMethod]
+    public void ImageStylesBindAndStaticAccessibilityIntentIsDiagnosed()
+    {
+        foreach (
+            var (tag, success) in new[]
+            {
+                ("<Image source={source} alternativeText=\"Diagram\" style={Artwork} />", true),
+                ("<Image source={source} decorative={true} style={Artwork} />", true),
+                ("<Icon source={source} style={Artwork} />", true),
+                ("<Image source={source} />", false),
+                ("<Image source={source} alternativeText=\" \" />", false),
+                ("<Image source={source} alternativeText=\"Diagram\" decorative={true} />", false),
+                ("<Icon source={source} label=\" \" />", false),
+            }
+        )
+        {
+            var source =
+                "namespace Sample; using Lucent.Core; style Artwork { Fit: ImageFit.Cover; ColorMode: ImageColorMode.Monochrome; ImageZoom: 1.5f; } public component Example(ImageSource source) { "
+                + tag
+                + " }";
+            var result = LuiCompiler.Compile(
+                LuiParser.Parse(source),
+                CSharpCompilation.Create("image-intent", references: References()),
+                new LuiFreshnessIdentity(
+                    "1",
+                    "images",
+                    new LuiDocumentIdentity("Images.lui"),
+                    "v1",
+                    "preview"
+                )
+            );
+            Assert(
+                result.Success == success,
+                tag
+                    + ": "
+                    + string.Join(" | ", result.Diagnostics.Select(d => d.Id + " " + d.Message))
+            );
+            if (!success)
+                Assert(
+                    result.Diagnostics.Any(d => d.Id == "LUI2022"),
+                    "Expected an actionable image accessibility diagnostic."
+                );
+        }
+    }
+
     private static readonly string[] ExpectedComments =
     [
         "// header",

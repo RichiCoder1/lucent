@@ -9,6 +9,7 @@ symbols; the files are grouped by the component family that owns each recipe.
 | Layout | `src/Lucent.Core/Components/Layout` | `Layout`, `Row`, `Column`, and responsive containers |
 | Commands | `src/Lucent.Core/Components/Commands` | `CommandScope` and application key bindings |
 | Text | `src/Lucent.Core/Components/Text` | Static and live text content |
+| Images | `src/Lucent.Core/Components/Images` | `Image` and `Icon`, shared preparation, image placement and accessible intent |
 | Buttons | `src/Lucent.Core/Components/Buttons` | `Button` and `Selectable` recipes and their stateful presentation |
 | Text fields | `src/Lucent.Core/Components/TextField` | `TextField`, `TextArea`, editor state, pointer editing, IME and placeholder projection |
 | Scrolling | `src/Lucent.Core/Components/Scrolling` | Scroll viewports, virtualized lists and scrollbar presentation |

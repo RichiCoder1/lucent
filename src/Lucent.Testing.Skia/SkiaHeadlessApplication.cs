@@ -51,6 +51,8 @@ public static class SkiaHeadlessApplication
                 ),
             TextShaperFactory = static () => new SkiaSceneRenderer(),
             TimeProviderFactory = source?.TimeProviderFactory ?? (static () => new()),
+            ImagePreparer = source?.ImagePreparer ?? new SkiaImagePreparer(),
+            ImageLimits = source?.ImageLimits,
             MaximumWorkItems = source?.MaximumWorkItems ?? 10_000,
         };
 

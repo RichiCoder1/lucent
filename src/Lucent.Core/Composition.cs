@@ -43,6 +43,31 @@ public sealed class Composition : IDisposable
     /// <summary>The stable root element for this composition.</summary>
     public Element Root { get; }
 
+    /// <summary>The optional application-owned image preparation cache installed by the host.</summary>
+    public ImageCache? Images { get; private set; }
+
+    /// <summary>Installs one image cache and transfers its disposal to this composition.</summary>
+    /// <remarks>Configure before mounting image components. The cache is shared by all image mounts in this composition.</remarks>
+    public void ConfigureImages(ImageCache images)
+    {
+        _graph.CheckThread();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(images);
+        if (Images is not null)
+            throw new InvalidOperationException("Image preparation has already been configured.");
+        Images = Root.Scope.Own(images);
+    }
+
+    internal void ShareImagesFrom(Composition owner)
+    {
+        _graph.CheckThread();
+        if (Images is not null || !ReferenceEquals(owner.Graph, _graph))
+            throw new InvalidOperationException(
+                "Popup images must share their existing UI owner's cache."
+            );
+        Images = owner.Images;
+    }
+
     /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
 

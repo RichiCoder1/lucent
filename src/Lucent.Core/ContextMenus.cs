@@ -197,6 +197,7 @@ public sealed class ContextMenuRequest : IDisposable
         var popup = new Composition(Owner.Graph, "context-menu");
         try
         {
+            popup.ShareImagesFrom(Owner);
             popup.MenuSession = this;
             var theme = new ThemeContext(
                 popup.Root.Scope,
@@ -232,7 +233,7 @@ public sealed class ContextMenuRequest : IDisposable
     {
         var popup = CreateComposition();
         ConstrainMenuHeight(_menuRoot!, available.Height);
-        var scene = SceneLayout.Project(popup, available, shaper);
+        using var scene = SceneLayout.Project(popup, available, shaper);
         var bounds = scene.Boxes.Single(box => box.Identity.ElementId == _menuRoot!.Id).Bounds;
         return new(
             0,
@@ -247,7 +248,7 @@ public sealed class ContextMenuRequest : IDisposable
     {
         var retained = RequireLevel(level, active: true);
         ConstrainMenuHeight(retained.Root, available.Height);
-        var scene = SceneLayout.Project(retained.Composition, available, shaper);
+        using var scene = SceneLayout.Project(retained.Composition, available, shaper);
         var bounds = scene.Boxes.Single(box => box.Identity.ElementId == retained.Root.Id).Bounds;
         return new(
             0,
@@ -429,6 +430,7 @@ public sealed class ContextMenuRequest : IDisposable
         var popup = new Composition(Owner.Graph, "context-submenu");
         try
         {
+            popup.ShareImagesFrom(Owner);
             popup.MenuSession = this;
             var theme = new ThemeContext(
                 popup.Root.Scope,

@@ -13,8 +13,8 @@ public component SaveButton(Action save) {
 var saves = 0;
 await using var app = await HeadlessApplication.StartAsync(
     Example.Components.SaveButton(() => Interlocked.Increment(ref saves)));
-await app.KeyAsync(new(KeyCommandKind.Down, Key.Tab));
-await app.KeyAsync(new(KeyCommandKind.Down, Key.Enter));
+using var focused = await app.KeyAsync(new(KeyCommandKind.Down, Key.Tab));
+using var invoked = await app.KeyAsync(new(KeyCommandKind.Down, Key.Enter));
 Assert.AreEqual(1, Volatile.Read(ref saves));
 ```
 
@@ -34,6 +34,10 @@ byte[] png = await rendered.CapturePngAsync();
 ```
 
 The companion namespace is `Lucent.Testing.Skia`. Captures use physical pixel dimensions (480 by 180 in this example); viewport coordinates and injected input stay in logical units.
+
+`HeadlessSnapshot` owns an independent retained scene and implements `IDisposable`. Use `using` for snapshots returned by observation, input and resize calls, including snapshots you only keep for one assertion. A snapshot may outlive its application and still paint prepared images; disposing it releases those image leases. The harness releases its own replaced frames automatically. When retaining a raw `RetainedScene`, use `scene.Retain()` and dispose that independent copy when finished.
+
+The Skia harness configures shared PNG/JPEG preparation automatically. For portable loading/lifetime tests, set `HeadlessApplicationOptions.ImagePreparer` to a controlled preparer and optionally supply `ImageLimits`. Cache setup happens before the recipe factory runs. Explicitly complete or await preparation before asserting a ready image; settling the owner queue alone does not finish worker decoding.
 
 Configure viewport size, scale, appearance, and theme in `HeadlessApplicationOptions`. Use `AdvanceAsync` to advance the controlled clock; use `InvokeAsync` for owner-thread setup or queries that need direct production capabilities. Tests should explicitly complete asynchronous dependencies. Draining the queue does not complete arbitrary network or background operations.
 

@@ -66,6 +66,7 @@ public sealed class Element : IDisposable
     internal bool IsConditionalRegion { get; set; }
     internal bool HasSemantics => _semantics is not null;
     internal StandardMenuPart StandardMenuPart { get; set; }
+    internal ImageBinding? Image { get; set; }
 
     internal T GetOrCreateLayoutAlgorithmState<T>(LayoutAlgorithm algorithm, Func<T> create)
         where T : class

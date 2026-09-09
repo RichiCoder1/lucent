@@ -1,7 +1,16 @@
 <Project Sdk="MSTest.Sdk">
-  <PropertyGroup><RuntimeIdentifiers>win-x64</RuntimeIdentifiers><PublishAot>true</PublishAot><PublishTrimmed>true</PublishTrimmed></PropertyGroup>
+  <PropertyGroup>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PublishAot>true</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
+  </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
     <ProjectReference Include="../../src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
+    <None
+      Include="Fixtures/pixel.png"
+      CopyToOutputDirectory="PreserveNewest"
+      CopyToPublishDirectory="PreserveNewest"
+    />
   </ItemGroup>
 </Project>

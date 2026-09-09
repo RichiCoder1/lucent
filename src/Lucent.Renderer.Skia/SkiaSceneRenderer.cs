@@ -33,6 +33,13 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private const long ShapeCacheByteBudget = 12L * 1024 * 1024;
     private const long ParagraphCacheByteBudget = 4L * 1024 * 1024;
     private const long TextBlobCacheByteBudget = 16L * 1024 * 1024;
+    private const long NativeImageCacheByteBudget = 32L * 1024 * 1024;
+    private const int NativeImageCacheEntryBudget = 256;
+
+    // Prepared images normally obey ImageLoadLimits.MaximumOutputBytes (64 MiB by default).
+    // Keep the renderer's one-off native image path bounded as well; images larger than this
+    // are rejected rather than creating an unaccounted native allocation.
+    private const long NativeImageTransientByteBudget = 64L * 1024 * 1024;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly Dictionary<FaceKey, string> _faceFingerprints = [];
     private readonly Dictionary<TextMeasureRequest, ShapedText> _shapes = [];
@@ -56,6 +63,12 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
     private long _shapeBytes;
     private long _textBlobBytes;
     private long _textBlobCreationCount;
+    private readonly Dictionary<RasterImage, NativeImageCacheEntry> _nativeImages = new(
+        RasterImageReferenceComparer.Instance
+    );
+    private readonly LinkedList<NativeImageCacheEntry> _nativeImageLru = [];
+    private long _nativeImageBytes;
+    private long _nativeImageCreationCount;
     private bool _disposed;
     internal long ParagraphShapeCount { get; private set; }
     internal long ShaperCreationCount { get; private set; }
@@ -72,6 +85,15 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 
     /// <summary>Gets the number of native text blobs created during this renderer's lifetime.</summary>
     public long TextBlobCreationCount => _textBlobCreationCount;
+
+    /// <summary>Gets the number of cached native raster images owned by this renderer.</summary>
+    public int LiveImageCount => _nativeImages.Count;
+
+    /// <summary>Gets the estimated bytes retained by the bounded native image cache.</summary>
+    public long RetainedImageBytes => _nativeImageBytes;
+
+    /// <summary>Gets the number of native raster images created during this renderer's lifetime.</summary>
+    public long ImageCreationCount => _nativeImageCreationCount;
 
     /// <summary>Shapes a Core text request into immutable logical-pixel glyph runs.</summary>
     /// <param name="request">Font, language, direction, text, and scale values to shape.</param>
@@ -710,6 +732,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(scene);
         ArgumentNullException.ThrowIfNull(canvas);
+        ObjectDisposedException.ThrowIf(scene.IsDisposed, scene);
         canvas.Save();
         try
         {
@@ -788,7 +811,133 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                 foreach (var run in text.Text.Runs)
                     PaintRun(canvas, text.Bounds, run, brush);
             }
+            else if (node is ImageSceneNode image)
+            {
+                PaintImage(image, canvas);
+            }
         }
+    }
+
+    private void PaintImage(ImageSceneNode node, SKCanvas canvas)
+    {
+        var destination = Rect(node.Bounds);
+        if (destination.Width <= 0 || destination.Height <= 0 || canvas.QuickReject(destination))
+            return;
+
+        if (node.Image is ISkiaPreparedImage prepared)
+        {
+            prepared.Draw(canvas, node.SourceBounds, node.Bounds, node.ColorMode, node.Tint);
+            return;
+        }
+        if (node.Image is not RasterImage raster)
+            throw new InvalidOperationException(
+                $"The Skia renderer does not understand prepared image type {node.Image.GetType().FullName}."
+            );
+
+        var source = ClampSource(node.SourceBounds, raster.Width, raster.Height);
+        if (source.Width <= 0 || source.Height <= 0)
+            return;
+        using var native = GetNativeImage(raster);
+        var nativeImage = native.Image;
+        var sampling = new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear);
+        if (node.ColorMode == ImageColorMode.Source)
+        {
+            using var paint = new SKPaint { IsAntialias = true };
+            canvas.DrawImage(nativeImage, source, destination, sampling, paint);
+            return;
+        }
+
+        // SrcIn uses the source image alpha as coverage while replacing its RGB with the
+        // requested tint. Applying it as a color filter avoids a DPI-sized SaveLayer surface.
+        using var colorFilter = SKColorFilter.CreateBlendMode(Color(node.Tint), SKBlendMode.SrcIn);
+        using var imagePaint = new SKPaint { IsAntialias = true, ColorFilter = colorFilter };
+        canvas.DrawImage(nativeImage, source, destination, sampling, imagePaint);
+    }
+
+    private NativeImageLease GetNativeImage(RasterImage source)
+    {
+        if (_nativeImages.TryGetValue(source, out var cached))
+        {
+            TouchNativeImage(source);
+            return new NativeImageLease(cached.Image, dispose: false);
+        }
+
+        var bytes = source.ByteCount;
+        if (bytes <= 0 || bytes > NativeImageTransientByteBudget)
+            throw new InvalidOperationException(
+                $"The prepared raster image is {bytes} bytes, above the Skia renderer's "
+                    + $"{NativeImageTransientByteBudget} byte native-image limit."
+            );
+
+        // Evict before copying pixels into a native image. A one-off image larger than the
+        // cache is still bounded by NativeImageTransientByteBudget and is created only after
+        // all retained native images have been released.
+        while (
+            _nativeImageLru.First is not null
+            && (
+                bytes > NativeImageCacheByteBudget
+                    ? _nativeImageBytes > 0
+                    : _nativeImageBytes + bytes > NativeImageCacheByteBudget
+                        || _nativeImageLru.Count >= NativeImageCacheEntryBudget
+            )
+        )
+        {
+            var evicted = _nativeImageLru.First!;
+            _nativeImageLru.RemoveFirst();
+            _nativeImages.Remove(evicted.Value.Source);
+            _nativeImageBytes -= evicted.Value.Bytes;
+            evicted.Value.Image.Dispose();
+        }
+
+        var image = CreateNativeImage(source);
+        if (bytes > NativeImageCacheByteBudget)
+            return new NativeImageLease(image, dispose: true);
+
+        var entry = new NativeImageCacheEntry(source, image, bytes);
+        _nativeImages.Add(source, entry);
+        _nativeImageLru.AddLast(entry);
+        _nativeImageBytes = checked(_nativeImageBytes + bytes);
+        return new NativeImageLease(image, dispose: false);
+    }
+
+    private SKImage CreateNativeImage(RasterImage source)
+    {
+        var pixels = source.Pixels;
+        using var colorSpace = SKColorSpace.CreateSrgb();
+        var info = new SKImageInfo(
+            source.Width,
+            source.Height,
+            SKColorType.Rgba8888,
+            SKAlphaType.Premul,
+            colorSpace
+        );
+        var image = SKImage.FromPixelCopy(info, pixels.Span);
+        if (image is null)
+            throw new InvalidOperationException(
+                "Skia could not create a native image from prepared pixels."
+            );
+        _nativeImageCreationCount = checked(_nativeImageCreationCount + 1);
+        return image;
+    }
+
+    private void TouchNativeImage(RasterImage source)
+    {
+        if (!_nativeImages.TryGetValue(source, out var entry))
+            return;
+        var node = _nativeImageLru.Find(entry);
+        if (node is null)
+            return;
+        _nativeImageLru.Remove(node);
+        _nativeImageLru.AddLast(node);
+    }
+
+    private static SKRect ClampSource(LayoutRect source, int width, int height)
+    {
+        var left = Math.Clamp(source.X, 0, width);
+        var top = Math.Clamp(source.Y, 0, height);
+        var right = Math.Clamp(source.X + source.Width, 0, width);
+        var bottom = Math.Clamp(source.Y + source.Height, 0, height);
+        return new SKRect(left, top, Math.Max(left, right), Math.Max(top, bottom));
     }
 
     private void PaintRun(SKCanvas canvas, LayoutRect bounds, ShapedRun run, SKPaint brush)
@@ -1112,7 +1261,17 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         _paragraphLru.Clear();
         _paragraphBytes = 0;
         DisposeTextBlobs();
+        DisposeNativeImages();
         _faceFingerprints.Clear();
+    }
+
+    private void DisposeNativeImages()
+    {
+        foreach (var entry in _nativeImages.Values)
+            entry.Image.Dispose();
+        _nativeImages.Clear();
+        _nativeImageLru.Clear();
+        _nativeImageBytes = 0;
     }
 
     private void CheckThread()
@@ -1526,6 +1685,19 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
 
     private sealed record TextBlobCacheEntry(ShapedRun Run, SKTextBlob Blob, long Bytes);
 
+    private sealed record NativeImageCacheEntry(RasterImage Source, SKImage Image, long Bytes);
+
+    private readonly struct NativeImageLease(SKImage image, bool dispose) : IDisposable
+    {
+        public SKImage Image { get; } = image;
+
+        public void Dispose()
+        {
+            if (dispose)
+                Image.Dispose();
+        }
+    }
+
     private readonly struct TextBlobLease(SKTextBlob blob, bool dispose) : IDisposable
     {
         public SKTextBlob Blob { get; } = blob;
@@ -1544,6 +1716,15 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         public bool Equals(ShapedRun? x, ShapedRun? y) => ReferenceEquals(x, y);
 
         public int GetHashCode(ShapedRun obj) => RuntimeHelpers.GetHashCode(obj);
+    }
+
+    private sealed class RasterImageReferenceComparer : IEqualityComparer<RasterImage>
+    {
+        public static RasterImageReferenceComparer Instance { get; } = new();
+
+        public bool Equals(RasterImage? x, RasterImage? y) => ReferenceEquals(x, y);
+
+        public int GetHashCode(RasterImage obj) => RuntimeHelpers.GetHashCode(obj);
     }
 
     private readonly record struct FaceKey(

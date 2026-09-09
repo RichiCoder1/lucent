@@ -97,10 +97,12 @@ public sealed class HeadlessApplication : IAsyncDisposable
     }
 
     /// <summary>Settles currently queued lifecycle and reactive work and returns a fresh snapshot.</summary>
+    /// <remarks>The returned snapshot owns a retained scene and must be disposed by the caller.</remarks>
     public Task<HeadlessSnapshot> DrainAsync() =>
         EnqueueAfterSettle(static _ => { }, static context => Snapshot(context));
 
     /// <summary>Changes the logical viewport, settles responsive state, and returns a fresh snapshot.</summary>
+    /// <remarks>The returned snapshot owns a retained scene and must be disposed by the caller.</remarks>
     public Task<HeadlessSnapshot> ResizeAsync(LayoutViewport viewport)
     {
         viewport.Validate();
@@ -111,6 +113,7 @@ public sealed class HeadlessApplication : IAsyncDisposable
     }
 
     /// <summary>Advances the deterministic clock on the owner thread and settles resulting work.</summary>
+    /// <remarks>The returned snapshot owns a retained scene and must be disposed by the caller.</remarks>
     public Task<HeadlessSnapshot> AdvanceAsync(TimeSpan elapsed)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(elapsed, TimeSpan.Zero);
@@ -145,6 +148,7 @@ public sealed class HeadlessApplication : IAsyncDisposable
         Enqueue(context => context.Input.DispatchText(command), settle: true);
 
     /// <summary>Returns the current immutable scene and semantic state.</summary>
+    /// <remarks>The returned snapshot owns a retained scene and must be disposed by the caller.</remarks>
     public Task<HeadlessSnapshot> SnapshotAsync() =>
         InvokeAfterSettleAsync(static context => Snapshot(context));
 
@@ -279,6 +283,8 @@ public sealed class HeadlessApplication : IAsyncDisposable
         try
         {
             session.Theme.Appearance = _options.Appearance;
+            if (_options.ImagePreparer is { } preparer)
+                session.Composition.ConfigureImages(new ImageCache(preparer, _options.ImageLimits));
             session.Start();
             PumpToRunning(session);
             Project();
@@ -297,10 +303,12 @@ public sealed class HeadlessApplication : IAsyncDisposable
             var disposed = new ObjectDisposedException(nameof(HeadlessApplication));
             while (_work.TryDequeue(out var item))
                 item.Fail(disposed);
+            _context?.DisposeScene();
             Shutdown(session);
         }
         finally
         {
+            _context?.DisposeScene();
             session.WorkAvailable -= Wake;
         }
     }
@@ -404,11 +412,22 @@ public sealed class HeadlessApplication : IAsyncDisposable
                 _shaper!,
                 _options.MaximumWorkItems
             );
-            if (context.Input.SetScene(scene))
+            bool accepted;
+            try
+            {
+                accepted = context.Input.SetScene(scene);
+            }
+            catch
+            {
+                scene.Dispose();
+                throw;
+            }
+            if (accepted)
             {
                 context.SetScene(scene);
                 return;
             }
+            scene.Dispose();
         }
         throw new InvalidOperationException(
             $"The production input router rejected {InstallAttempts} consecutive projected scenes."

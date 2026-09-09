@@ -72,6 +72,9 @@ public enum SemanticRole
 
     /// <summary>Exposes an adjustable split boundary or other numeric range.</summary>
     Splitter,
+
+    /// <summary>Exposes meaningful, noninteractive image content.</summary>
+    Image,
 }
 
 /// <summary>Semantic commands a retained target declares that it handles.</summary>

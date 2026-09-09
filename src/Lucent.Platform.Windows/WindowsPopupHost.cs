@@ -170,20 +170,27 @@ internal sealed partial class WindowsPopupHost : IDisposable
             if (!SDL.SyncWindow(window))
                 throw new InvalidOperationException($"SDL_SyncWindow popup: {SDL.GetError()}");
         }
-        catch
+        catch (Exception error)
         {
-            input?.Dispose();
-            presenter?.Dispose();
-            _sceneRenderer.Dispose();
+            List<Exception> cleanup = [];
+            Capture(cleanup, () => input?.Dispose());
+            Capture(cleanup, () => _scene?.Dispose());
+            Capture(cleanup, () => presenter?.Dispose());
+            Capture(cleanup, _sceneRenderer.Dispose);
             if (renderer != 0)
-                SDL.DestroyRenderer(renderer);
+                Capture(cleanup, () => SDL.DestroyRenderer(renderer));
             if (window != 0)
-                SDL.DestroyWindow(window);
-            listener?.Dispose();
-            provider?.Dispose();
+                Capture(cleanup, () => SDL.DestroyWindow(window));
+            Capture(cleanup, () => listener?.Dispose());
+            Capture(cleanup, () => provider?.Dispose());
             if (_ownsRequest)
-                request.Dispose();
-            throw;
+                Capture(cleanup, request.Dispose);
+            if (cleanup.Count == 0)
+                throw;
+            throw new AggregateException(
+                "Windows popup construction and cleanup both failed.",
+                [error, .. cleanup]
+            );
         }
     }
 
@@ -290,26 +297,72 @@ internal sealed partial class WindowsPopupHost : IDisposable
             new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
             _sceneRenderer
         );
-        _viewport = viewport;
-        _scene = scene;
-        _uiaProvider.Refresh(scene);
-        _input.RefreshTextInput();
-        var menuRoot = _composition.Root.Children.Single();
-        _menuBounds = scene.Boxes.Single(box => box.Identity.ElementId == menuRoot.Id).Bounds;
-        _cornerRadius = menuRoot.Resolve(VisualProperties.CornerRadius).Value;
-        _scale = viewport.Scale;
-        _ = _presenter.Present(
-            scene,
-            viewport,
-            _sceneRenderer,
-            showCaret: false,
-            drawUnderlay: _request.Appearance.Contrast == ThemeContrast.High ? null : _drawShadow
-        );
-        _ = _cursor.Activate(
-            _input.PointerPosition is { } point
-                ? _composition.Input.CursorAt(point.X, point.Y)
-                : CursorIntent.Default
-        );
+        var previous = _scene;
+        try
+        {
+            _viewport = viewport;
+            _scene = scene;
+            _uiaProvider.Refresh(scene);
+            _input.RefreshTextInput();
+            var menuRoot = _composition.Root.Children.Single();
+            _menuBounds = scene.Boxes.Single(box => box.Identity.ElementId == menuRoot.Id).Bounds;
+            _cornerRadius = menuRoot.Resolve(VisualProperties.CornerRadius).Value;
+            _scale = viewport.Scale;
+            _ = _presenter.Present(
+                scene,
+                viewport,
+                _sceneRenderer,
+                showCaret: false,
+                drawUnderlay: _request.Appearance.Contrast == ThemeContrast.High
+                    ? null
+                    : _drawShadow
+            );
+            _ = _cursor.Activate(
+                _input.PointerPosition is { } point
+                    ? _composition.Input.CursorAt(point.X, point.Y)
+                    : CursorIntent.Default
+            );
+        }
+        catch (Exception error)
+        {
+            // ProjectAndInstall has already installed this candidate in the popup
+            // router. Keep the same scene when a later renderer/UIA step fails;
+            // disposing it here would leave InputRouter pointing at a released
+            // frame. The host cleanup path will release the candidate, while the
+            // superseded frame can be released independently.
+            if (ReferenceEquals(_scene, scene))
+            {
+                try
+                {
+                    previous?.Dispose();
+                }
+                catch (Exception cleanup)
+                {
+                    throw new AggregateException(
+                        "The previous popup scene failed to release after replacement.",
+                        error,
+                        cleanup
+                    );
+                }
+            }
+            else
+            {
+                try
+                {
+                    scene.Dispose();
+                }
+                catch (Exception cleanup)
+                {
+                    throw new AggregateException(
+                        "The popup candidate failed to release after refresh.",
+                        error,
+                        cleanup
+                    );
+                }
+            }
+            throw;
+        }
+        previous?.Dispose();
     }
 
     internal void Dismiss() => _request.Dismiss();
@@ -328,6 +381,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
         _disposed = true;
         var errors = new List<Exception>();
         Capture(errors, _input.Dispose);
+        Capture(
+            errors,
+            () =>
+            {
+                _scene?.Dispose();
+                _scene = null;
+            }
+        );
         Capture(errors, _presenter.Dispose);
         Capture(errors, _sceneRenderer.Dispose);
         if (_sdlRenderer != 0)
@@ -417,12 +478,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _ = _request.FocusFirst(level);
             return;
         }
-        var viewport = Viewport(_window, _sdlRenderer);
-        var scene = WindowsBootstrap.ProjectAndInstall(
-            _composition,
-            new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
-            _sceneRenderer
-        );
+        var scene =
+            _scene ?? throw new InvalidOperationException("The popup has no retained scene.");
         foreach (var item in scene.Input.OrderBy(item => item.Order))
             if (_composition.Input.FocusSemantic(item.Identity))
                 return;

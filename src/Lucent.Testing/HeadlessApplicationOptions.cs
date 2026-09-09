@@ -29,6 +29,13 @@ public sealed class HeadlessApplicationOptions
     /// <summary>Gets or sets the deterministic clock factory evaluated on the application owner thread.</summary>
     public Func<FakeTimeProvider> TimeProviderFactory { get; set; } = static () => new();
 
+    /// <summary>Gets or sets the image preparer installed before the application lifecycle starts.</summary>
+    /// <remarks>When set, the headless host creates one composition-owned image cache from this preparer.</remarks>
+    public IImagePreparer? ImagePreparer { get; set; }
+
+    /// <summary>Gets or sets the optional image loading and retention limits for the configured preparer.</summary>
+    public ImageLoadLimits? ImageLimits { get; set; }
+
     /// <summary>Gets or sets the maximum work items processed while settling one operation.</summary>
     public int MaximumWorkItems { get; set; } = 10_000;
 
@@ -52,6 +59,8 @@ public sealed class HeadlessApplicationOptions
             ThemeFactory = ThemeFactory,
             TextShaperFactory = TextShaperFactory,
             TimeProviderFactory = TimeProviderFactory,
+            ImagePreparer = ImagePreparer,
+            ImageLimits = ImageLimits,
             MaximumWorkItems = MaximumWorkItems,
         };
     }

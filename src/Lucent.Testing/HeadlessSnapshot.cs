@@ -3,19 +3,28 @@ using Lucent.Core;
 namespace Lucent.Testing;
 
 /// <summary>An immutable semantic and renderer-facing snapshot from one settled application state.</summary>
-public sealed class HeadlessSnapshot
+/// <remarks>
+/// Each snapshot owns an independent retained scene lease. Dispose the snapshot when inspection
+/// or rendering is complete; disposing the application does not invalidate an undisposed snapshot.
+/// </remarks>
+public sealed class HeadlessSnapshot : IDisposable
 {
     internal HeadlessSnapshot(RetainedScene scene, SemanticSnapshot? semantics)
     {
-        Scene = scene;
+        ArgumentNullException.ThrowIfNull(scene);
+        Scene = scene.Retain();
         Semantics = semantics;
     }
 
-    /// <summary>Gets the immutable retained scene.</summary>
+    /// <summary>Gets the immutable retained scene owned by this snapshot.</summary>
     public RetainedScene Scene { get; }
 
     /// <summary>Gets the immutable semantic tree, when the application emits one.</summary>
     public SemanticSnapshot? Semantics { get; }
+
+    /// <summary>Releases this snapshot's independent retained scene lease.</summary>
+    /// <remarks>The operation is idempotent; the scene reports <see cref="RetainedScene.IsDisposed"/> after release.</remarks>
+    public void Dispose() => Scene.Dispose();
 
     /// <summary>Returns semantic nodes in stable depth-first order.</summary>
     public IReadOnlyList<SemanticSnapshot> FindAll(Func<SemanticSnapshot, bool> predicate)
