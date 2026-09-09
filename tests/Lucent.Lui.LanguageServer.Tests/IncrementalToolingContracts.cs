@@ -175,6 +175,123 @@ public sealed class IncrementalToolingContracts
     }
 
     [TestMethod]
+    public async Task UnavailableLucentBuildToolsInReferencedProjectDoNotBreakRename()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-lsp-unresolved-analyzer-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var projectPath = Path.Combine(root, "Sample.csproj");
+            var documentPath = Path.Combine(root, "Widget.lui");
+            var referencedRoot = Path.Combine(root, "Referenced");
+            Directory.CreateDirectory(referencedRoot);
+            var referencedProject = Path.Combine(referencedRoot, "Referenced.csproj");
+            var helperPath = Path.Combine(referencedRoot, "Helpers.cs");
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            var missingAnalyzer = Path.Combine(
+                root,
+                "src",
+                "Lucent.Lui.Generator",
+                "bin",
+                "Debug",
+                "netstandard2.0",
+                "Lucent.Lui.Generator.dll"
+            );
+            await File.WriteAllTextAsync(
+                referencedProject,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><Analyzer Include=\"{missingAnalyzer}\" /><Analyzer Include=\"{Path.Combine(root, "Lucent.Lui.Compiler.dll")}\" /></ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(
+                projectPath,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><Compile Remove=\"Referenced/**/*.cs\" /><ProjectReference Include=\"{core}\" /><ProjectReference Include=\"{referencedProject}\" /><AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(
+                helperPath,
+                "namespace Sample; public static class Helpers { public static string Format(int value) => value.ToString(); }"
+            );
+            var source =
+                "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Widget(int count) { <Text content={Helpers.Format(count)} /> }";
+            await File.WriteAllTextAsync(documentPath, source);
+
+            using var context = await LuiProjectContext.LoadAsync(
+                projectPath,
+                CancellationToken.None
+            );
+            var documentUri = new Uri(documentPath);
+            var offset = source.IndexOf("Format", StringComparison.Ordinal);
+            var rename = await context.RenameAsync(
+                documentUri,
+                offset,
+                "Render",
+                CancellationToken.None
+            );
+            Assert.IsNotNull(rename, "An unresolved analyzer reference broke LUI rename.");
+            Assert.IsTrue(
+                rename.Edits.Any(edit =>
+                    edit.Uri == documentUri
+                    && edit.Spans.Any(span =>
+                        span.Start == offset && span.Length == "Format".Length
+                    )
+                ),
+                "Rename did not retain the authored LUI expression span."
+            );
+            Assert.IsTrue(
+                rename.Edits.Any(edit => edit.Uri == new Uri(helperPath)),
+                "Rename did not reach the declaration in the referenced project."
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task UnrelatedUnresolvedAnalyzerDoesNotSuppressLuiDiagnostics()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-lsp-unrelated-analyzer-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var projectPath = Path.Combine(root, "Sample.csproj");
+            var documentPath = Path.Combine(root, "Widget.lui");
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            var missingAnalyzer = Path.Combine(root, "vendor", "ExternalAnalyzer.dll");
+            await File.WriteAllTextAsync(
+                projectPath,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\"{core}\" /><Analyzer Include=\"{missingAnalyzer}\" /><AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>"
+            );
+            var source =
+                "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Widget() { <Missing /> }";
+            await File.WriteAllTextAsync(documentPath, source);
+
+            using var context = await LuiProjectContext.LoadAsync(
+                projectPath,
+                CancellationToken.None
+            );
+            var diagnostics = await context.DiagnosticsAsync(
+                new Uri(documentPath),
+                CancellationToken.None
+            );
+            Assert.IsNotNull(diagnostics);
+            Assert.IsTrue(
+                diagnostics.Any(diagnostic => diagnostic.Code == "LUI2001"),
+                "An unrelated unresolved analyzer changed the normal LUI diagnostic evaluation."
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task CanceledEvaluationDoesNotBuildOrPublishObsoleteWork()
     {
         var root = Path.Combine(

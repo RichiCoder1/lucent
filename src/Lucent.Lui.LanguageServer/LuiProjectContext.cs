@@ -8,6 +8,7 @@ using Microsoft.CodeAnalysis.Classification;
 using Microsoft.CodeAnalysis.Completion;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
@@ -1087,7 +1088,7 @@ internal sealed class LuiProjectContext : IDisposable
         }
         var sourceByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var generatedDocuments = new List<(DocumentId Id, RenameGeneratedDocument Document)>();
-        var renameSolution = project.Solution;
+        var renameSolution = EditorSolution(project);
         foreach (var graphProject in ProjectGraph(project))
         {
             var current = renameSolution.GetProject(graphProject.Id);
@@ -2380,20 +2381,7 @@ internal sealed class LuiProjectContext : IDisposable
         // The editor builds its own LUI projection below. Running the build-time LUI
         // generator first duplicates that work; keep all other project generators.
         var compilation =
-            await editorProjects
-                .GetValue(
-                    project,
-                    static original =>
-                        original.WithAnalyzerReferences(
-                            original.AnalyzerReferences.Where(reference =>
-                                !String.Equals(
-                                    Path.GetFileName(reference.FullPath),
-                                    "Lucent.Lui.Generator.dll",
-                                    StringComparison.OrdinalIgnoreCase
-                                )
-                            )
-                        )
-                )
+            await EditorProject(project)
                 .GetCompilationAsync(cancellationToken)
                 .ConfigureAwait(false)
             ?? throw new InvalidOperationException("The evaluated project has no compilation.");
@@ -2424,6 +2412,56 @@ internal sealed class LuiProjectContext : IDisposable
             }
         }
         return evaluation;
+    }
+
+    private Project EditorProject(Project project) =>
+        editorProjects.GetValue(
+            project,
+            static original => original.WithAnalyzerReferences(EditorAnalyzerReferences(original))
+        );
+
+    private static Solution EditorSolution(Project project)
+    {
+        // Rename serializes the whole project graph. Normalize referenced projects too;
+        // MSBuild can retain missing Debug build-tool paths in a Release-only checkout.
+        var solution = project.Solution;
+        foreach (var current in ProjectGraph(project))
+        {
+            solution = solution.WithProjectAnalyzerReferences(
+                current.Id,
+                EditorAnalyzerReferences(current)
+            );
+        }
+        return solution;
+    }
+
+    private static IEnumerable<AnalyzerReference> EditorAnalyzerReferences(Project project) =>
+        project.AnalyzerReferences.Where(reference =>
+            !String.Equals(
+                Path.GetFileName(reference.FullPath),
+                "Lucent.Lui.Generator.dll",
+                StringComparison.OrdinalIgnoreCase
+            ) && !IsUnavailableLucentBuildToolAnalyzer(reference)
+        );
+
+    private static bool IsUnavailableLucentBuildToolAnalyzer(AnalyzerReference reference)
+    {
+        if (reference is not UnresolvedAnalyzerReference)
+            return false;
+        var path = reference.FullPath;
+        if (String.IsNullOrWhiteSpace(path))
+            path = reference.Display;
+        var fileName = Path.GetFileName(path);
+        return String.Equals(
+                fileName,
+                "Lucent.Lui.Compiler.dll",
+                StringComparison.OrdinalIgnoreCase
+            )
+            || String.Equals(
+                fileName,
+                "Lucent.Lui.Generator.dll",
+                StringComparison.OrdinalIgnoreCase
+            );
     }
 
     private static string LogicalPath(Project project, TextDocument document)
