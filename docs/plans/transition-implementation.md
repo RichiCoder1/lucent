@@ -1,6 +1,6 @@
 # Transition implementation breakdown
 
-Status: implementation authorized September 9, 2026, following #194–196 and Light Notes #8. Read [the accepted design](transitions.md); its owner choices were settled September 8. Use CSS and Motion as comparative references without implicitly expanding first delivery. Keep #140's experimental API clarification separate from production delivery.
+Status: delivered September 9, 2026 in Lucent `bab7cc3` / `0.3.0-dev.55.1` and Light Notes `9c00f75`, following #194–196 and Light Notes #8. Read [the accepted design](transitions.md); its owner choices were settled September 8. Use CSS and Motion as comparative references without implicitly expanding first delivery. The [handoff](../agents/remaining-work-handoff.md) records final evidence and publication links.
 
 Execution tickets, in dependency order:
 
@@ -10,7 +10,7 @@ Execution tickets, in dependency order:
 | T3: retained paint reuse | [#199](https://github.com/RichiCoder1/lucent/issues/199) | Geometry, real-Skia and 1/100/1,000-track characterization passing |
 | T4: native/headless scheduling | [#200](https://github.com/RichiCoder1/lucent/issues/200) | Managed contracts and published physical checks 3/3 passing |
 | T5: `.lui` grammar and tooling | [#201](https://github.com/RichiCoder1/lucent/issues/201) | Compiler/editor and packaged NativeAOT proof passing |
-| T6/T7: stock consumers and delivery evidence | [#202](https://github.com/RichiCoder1/lucent/issues/202) | Issue Browser passing; independent Light Notes package adoption in progress |
+| T6/T7: stock consumers and delivery evidence | [#202](https://github.com/RichiCoder1/lucent/issues/202) | Delivered: Issue Browser and independent Light Notes on official 55.1 packages; published app focus/autosave checks 2/2 |
 
 ## Coordination and sequence
 

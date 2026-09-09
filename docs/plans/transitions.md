@@ -1,10 +1,10 @@
 # Production transitions and animation
 
-Status: design accepted September 8 and implementation authorized September 9, 2026, after the review follow-ups and Light Notes focus continuity. Tracked by [#142](https://github.com/RichiCoder1/lucent/issues/142), following [#119](https://github.com/RichiCoder1/lucent/issues/119) and coordinated with [#140](https://github.com/RichiCoder1/lucent/issues/140). The implementation breakdown records delivery progress; declarations below remain planned until their execution checks pass.
+Status: design accepted September 8 and delivered September 9, 2026, after the review follow-ups and Light Notes focus continuity. Tracked by [#142](https://github.com/RichiCoder1/lucent/issues/142), following [#119](https://github.com/RichiCoder1/lucent/issues/119) and coordinated with [#140](https://github.com/RichiCoder1/lucent/issues/140). The [implementation breakdown](transition-implementation.md) records delivery. The analysis below retains its original design baseline; the [public guide](../TRANSITIONS.md) documents final API names, supported behavior and measured limits.
 
 Deliver implicit, finite transitions of explicitly eligible visual properties when their resolved targets change. One composition-owned motion module handles sampling, interruption and lifetime; native and headless hosts supply frame opportunities through the same seam. Applications declare intent in styles rather than installing effects, timers or element references.
 
-## Current evidence and constraints
+## Original design evidence and constraints
 
 Inspected Lucent `2bd1c7f`, including the delivered nested-style and constrained-layout corrections, not the older review snapshot. Relevant implementation:
 

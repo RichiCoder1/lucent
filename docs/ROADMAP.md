@@ -10,7 +10,7 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 
 ## Supported boundary
 
-Review follow-ups #194–196 and the framework support for Light Notes #8 are implemented. The accepted [production transition plan](plans/transition-implementation.md) is implemented through #198–201, with stock and independent consumer delivery tracked in #202. See the [transition guide](TRANSITIONS.md) for the supported contract and measured limits. Component Gaps #155–171 and context/navigation #203–222 remain separate work.
+Review follow-ups #194–196, Light Notes #8 focus continuity, and the accepted [production transition plan](plans/transition-implementation.md) #198–202 are delivered. Lucent publishes the implementation as `0.3.0-dev.55.1`, and Light Notes independently consumes that immutable version. See the [handoff](agents/remaining-work-handoff.md) for source/CI records and the [transition guide](TRANSITIONS.md) for the supported contract and measured limits. Component Gaps #155–171 and context/navigation #203–222 remain separate planned work.
 
 - Windows 11 24H2+, win-x64, .NET 10 LTS, NativeAOT, and trimming.
 - Typed C# composition and preview `.lui` over the same framework contracts. `.lui` is the primary UI authoring direction; C# remains the underlying semantic/runtime API.
