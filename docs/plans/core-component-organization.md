@@ -1,12 +1,20 @@
 # Component organization and framework-authored `.lui`
 
-Status: approved direction, implementation pending in [#143](https://github.com/RichiCoder1/lucent/issues/143). Part of the correctness and quality work in [#119](https://github.com/RichiCoder1/lucent/issues/119). The implementation session owns delivery and coordination with active control/compiler changes.
+Status: implemented in [#143](https://github.com/RichiCoder1/lucent/issues/143); package publication and consumer integration are recorded there. Part of the correctness and quality work in [#119](https://github.com/RichiCoder1/lucent/issues/119).
+
+The stock families now live under `src/Lucent.Core/Components`, with shared themes under `Presentation`. The existing public type and component contracts are unchanged. A normalized Roslyn member comparison preserved all 256 existing members, including attributes, defaults and implementation bodies. The new `ErrorNotice` uses ordinary same-assembly `.lui` generation behind a documented C# adapter and replaces Issue Browser's error/retry composition. See [the contributor guide](../COMPONENTS.md).
+
+A clean isolated checkout passed Core's 255 contracts and architecture checks; the `.lui` edit/rebuild proof changed the generated output and restored it after reverting the edit. Issue Browser's 17 contracts and focused keyboard/disposal regression passed, including real Skia geometry and rendering. All eight packages passed inventory checks, and independent package-only headless and NativeAOT consumers exercised the new component without runtime compiler/Roslyn dependencies.
+
+Light Notes retains its existing error presentation: its branded heading/surface and command enabled/busy behavior do not fit the Action-only stock notice without losing semantics. It consumes the framework improvements through its package pin. The public `.lui` XML-documentation gap is tracked in [#152](https://github.com/RichiCoder1/lucent/issues/152); no framework-only compiler bypass was introduced.
+
+The remaining sections preserve the accepted design and its scope.
 
 ## Outcome
 
 Make a stock component's recipe, presentation and component-specific state easy to find together, then ship one useful stock composite authored in `.lui`. Keep the existing package and public `Lucent.Core.Components` type. A folder move is not a namespace or assembly migration.
 
-The current `Components.cs` aggregates public recipes; `Controls.cs` combines themes, styles, state and internal configuration. Other controls already have dedicated files. The compiler references Roslyn and the generator references the compiler; neither project references Core. This makes same-assembly `.lui` generation plausible, but it still requires a clean-build proof against Core's own source symbols and the generated `Components` partial class.
+Before this change, `Components.cs` aggregated public recipes and `Controls.cs` combined themes, styles, state and internal configuration. The compiler references Roslyn and the generator references the compiler; neither project references Core. Same-assembly `.lui` generation now builds against Core's own source symbols and the generated `Components` partial class through private analyzer-only references.
 
 ## 1. Organize without changing behavior
 

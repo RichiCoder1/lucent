@@ -23,9 +23,10 @@ Family implementation files use the internal partial `Controls` type for
 mounting and projection details; application code should use the public recipe
 or an ordinary `Style` instead of reaching into that helper.
 
-Use C# when a component owns state, editing, input, virtualization, resource
-lifetime or a low-level semantic contract. Use `.lui` when the composition is
-usefully expressed from existing stock recipes, styles and typed callbacks.
+Keep the underlying editing, input, virtualization, resource ownership and
+low-level semantic mechanisms in C#. Prefer `.lui` for composition and
+presentation built from those primitives, including component-local state and
+owned setup through the normal authoring surface.
 The `Components/Status/ErrorNotice.lui` composite is the reference shape: its
 C# adapter exposes the message reader and retry callback, while the markup owns
 the layout, status content and conditional retry button.

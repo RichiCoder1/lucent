@@ -1053,7 +1053,12 @@ public sealed class IssueBrowserTests
         }
         CaptureIfRequested(renderer, scene, errorViewport, "issue-browser-error-narrow.png");
 
-        browser.Retry();
+        Assert(
+            composition.Input.FocusSemantic(
+                new(errorRetry.Identity.CompositionEpoch, errorRetry.Identity.ElementId)
+            ) && composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled,
+            "The compiled stock ErrorNotice retry action was not keyboard reachable."
+        );
         graph.Drain();
         Assert(
             transport.Requests.Count == 3
@@ -1061,6 +1066,11 @@ public sealed class IssueBrowserTests
                 && browser.IsStale
                 && browser.Error is null,
             "Error retry did not return to stale loading state."
+        );
+        Assert(
+            composition.ExecuteSemanticCommand(errorRetry.Identity, new(SemanticCommandKind.Invoke))
+                == SemanticCommandResult.Stale,
+            "The dismissed error notice retained an actionable retry target."
         );
         browser.Retry();
         graph.Drain();
