@@ -1,0 +1,19 @@
+namespace Lucent.Core;
+
+style ToggleSelectionIndicatorStyle {
+    Width: 36;
+    MinHeight: 20;
+    Height: 20;
+}
+
+style ToggleSelectionLabelStyle {
+    MinHeight: 20;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+internal component ToggleSelectionContent(ToggleSelectionBinding binding, Style? style) {
+    <SelectionToggleHost binding={binding} style={style}>
+        <Icon source={binding.Artwork} style={ToggleSelectionIndicatorStyle} />
+        <SelectionDecoration content={() => binding.Name} style={ToggleSelectionLabelStyle} />
+    </SelectionToggleHost>
+}

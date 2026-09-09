@@ -36,8 +36,12 @@ public sealed partial class InputRouter
             if (
                 element.DeclaredSemanticRole
                 is SemanticRole.Button
+                    or SemanticRole.Hyperlink
                     or SemanticRole.ListItem
                     or SemanticRole.MenuItem
+                    or SemanticRole.CheckBox
+                    or SemanticRole.RadioButton
+                    or SemanticRole.Switch
             )
                 return CursorIntent.Pointer;
         }

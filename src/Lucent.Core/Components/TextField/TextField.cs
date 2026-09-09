@@ -447,21 +447,19 @@ internal class TextFieldState
             ? EditorSession.TryNormalizeMultiline(text, out normalized)
             : EditorSession.TryNormalizeSingleLine(text, out normalized);
 
-    internal SemanticTextSnapshot SemanticText
+    internal SemanticTextSnapshot SemanticText => SemanticTextFor();
+
+    internal SemanticTextSnapshot SemanticTextFor(bool isReadOnly = false)
     {
-        get
-        {
-            var display = Display();
-            return new SemanticTextSnapshot(
-                display.Text,
-                display.Caret == display.SelectionStart
-                    ? display.SelectionEnd
-                    : display.SelectionStart,
-                display.Caret,
-                _session.AnchorAffinity,
-                _session.CaretAffinity
-            );
-        }
+        var display = Display();
+        return new SemanticTextSnapshot(
+            display.Text,
+            display.Caret == display.SelectionStart ? display.SelectionEnd : display.SelectionStart,
+            display.Caret,
+            _session.AnchorAffinity,
+            _session.CaretAffinity,
+            isReadOnly
+        );
     }
 
     private readonly record struct Preedit(
@@ -481,7 +479,15 @@ internal class TextFieldState
 /// command; the key itself never inserts text or changes the editor selection. An empty, unfocused
 /// field projects its configured placeholder (the label by default) as visual content while its semantic value remains empty.
 /// </remarks>
-internal sealed class TextFieldBehavior(TextFieldState state, string name) : Behavior
+internal sealed class TextFieldBehavior(
+    TextFieldState state,
+    string name,
+    Func<SemanticRelationships>? relationships = null,
+    Action? blurred = null,
+    Func<bool>? readOnly = null,
+    Action? committed = null,
+    Action? cancelled = null
+) : Behavior
 {
     private int? _dragPointer;
     private int _dragAnchor;
@@ -494,19 +500,25 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
     public override void Attach(BehaviorContext context)
     {
         ArgumentNullException.ThrowIfNull(state);
-        var actions = SemanticAction.SetValue;
-        if (state.IsMultiline)
-            actions |=
-                SemanticAction.Scroll
-                | SemanticAction.SelectText
-                | SemanticAction.ScrollTextIntoView;
+        bool IsReadOnly() => readOnly?.Invoke() == true;
+        SemanticAction Actions()
+        {
+            var actions = IsReadOnly() ? SemanticAction.None : SemanticAction.SetValue;
+            if (state.IsMultiline)
+                actions |=
+                    SemanticAction.Scroll
+                    | SemanticAction.SelectText
+                    | SemanticAction.ScrollTextIntoView;
+            return actions;
+        }
         context.SetSemantics(
             new(
                 SemanticRole.TextField,
                 name,
-                actions: actions,
+                actions: Actions(),
                 value: state.Value,
-                text: state.SemanticText
+                text: state.SemanticTextFor(IsReadOnly()),
+                relationships: relationships?.Invoke()
             )
         );
         context.MakeFocusable();
@@ -517,7 +529,7 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
         {
             if (command.Kind == SemanticCommandKind.Focus)
                 return context.CompositionInput().FocusSemantic(context.Identity);
-            if (command.Kind == SemanticCommandKind.SetValue)
+            if (command.Kind == SemanticCommandKind.SetValue && !IsReadOnly())
             {
                 string value;
                 if (state.IsMultiline)
@@ -566,22 +578,35 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
         });
         context.Effect(
             () =>
+            {
+                var currentRelationships = relationships?.Invoke();
+                var isReadOnly = IsReadOnly();
+                if (isReadOnly && state.HasPreedit)
+                    state.CancelComposition();
+                context.SetState(BehaviorState.Invalid, currentRelationships?.IsInvalid == true);
                 context.UpdateSemantics(
                     new(
                         SemanticRole.TextField,
                         name,
-                        actions: actions,
+                        actions: Actions(),
                         value: state.Value,
-                        text: state.SemanticText
+                        text: state.SemanticTextFor(isReadOnly),
+                        relationships: currentRelationships
                     )
-                ),
+                );
+            },
             name + ".semantics"
         );
         context.OnFocus(route =>
         {
             state.SetFocused(route.Command.Kind == FocusCommandKind.Gained);
             if (route.Command.Kind == FocusCommandKind.Lost)
+            {
                 state.CancelComposition();
+                if (!IsReadOnly())
+                    committed?.Invoke();
+                blurred?.Invoke();
+            }
         });
         context.OnCaptureLost(loss =>
         {
@@ -652,6 +677,11 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
         });
         context.OnText(route =>
         {
+            if (IsReadOnly() && route.Command.Kind != TextInputKind.Cancel)
+            {
+                route.Handled = true;
+                return;
+            }
             if (
                 !state.IsMultiline
                 && route.Command.Kind is TextInputKind.Commit or TextInputKind.Preedit
@@ -704,18 +734,26 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                         state.RequestClipboard(TextClipboardOperation.Copy);
                         break;
                     case Key.X:
+                        if (IsReadOnly())
+                            break;
                         state.RequestClipboard(TextClipboardOperation.Cut);
                         break;
                     case Key.V:
+                        if (IsReadOnly())
+                            break;
                         state.RequestClipboard(TextClipboardOperation.Paste);
                         break;
                     case Key.Z:
+                        if (IsReadOnly())
+                            break;
                         if (shift)
                             state.Redo();
                         else
                             state.Undo();
                         break;
                     case Key.Y:
+                        if (IsReadOnly())
+                            break;
                         state.Redo();
                         break;
                     case Key.Home:
@@ -731,9 +769,13 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                         state.MoveWordRight(shift);
                         break;
                     case Key.Backspace:
+                        if (IsReadOnly())
+                            break;
                         state.DeleteWordBackward();
                         break;
                     case Key.Delete:
+                        if (IsReadOnly())
+                            break;
                         state.DeleteWordForward();
                         break;
                     default:
@@ -742,6 +784,16 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
             else
                 switch (route.Command.Key)
                 {
+                    case Key.Enter when !state.IsMultiline:
+                        if (IsReadOnly())
+                            break;
+                        committed?.Invoke();
+                        break;
+                    case Key.Escape when !state.IsMultiline && cancelled is not null:
+                        if (IsReadOnly())
+                            break;
+                        cancelled();
+                        break;
                     case Key.Left:
                         state.MoveLeft(shift);
                         break;
@@ -769,6 +821,8 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                             state.MoveEnd(shift);
                         break;
                     case Key.Enter when state.IsMultiline:
+                        if (IsReadOnly())
+                            break;
                         state.Insert("\n");
                         break;
                     case Key.Up when state.IsMultiline:
@@ -816,9 +870,13 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                             return;
                         break;
                     case Key.Backspace:
+                        if (IsReadOnly())
+                            break;
                         state.DeleteBackward();
                         break;
                     case Key.Delete:
+                        if (IsReadOnly())
+                            break;
                         state.DeleteForward();
                         break;
                     default:

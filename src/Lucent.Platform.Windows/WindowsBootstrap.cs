@@ -86,6 +86,7 @@ public static class WindowsBootstrap
         WindowsInputAdapter? input = null;
         WindowsLiveResize? liveResize = null;
         WindowsPopupChain? popup = null;
+        WindowsSurfaceManager? surfaces = null;
         WindowsWindowIcon? windowIcon = null;
         var popupInputGate = new WindowsPopupInputGate();
         ContextMenuRequest? pendingPopup = null;
@@ -196,6 +197,15 @@ public static class WindowsBootstrap
             };
             contextMenuRouter = composition.Input;
             contextMenuRouter.ContextMenuRequested += popupRequested;
+            surfaces = new(
+                composition,
+                window,
+                uiaDispatcher,
+                clipboard,
+                cursor,
+                workDispatcher.RequestWake,
+                () => scheduler.Request(FrameOperation.Other)
+            );
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
             _ = cursor.Activate();
@@ -213,6 +223,8 @@ public static class WindowsBootstrap
             session?.Start();
             bool ObserveHostEvent(SDL.Event @event)
             {
+                if (surfaces.Dispatch(@event))
+                    return false;
                 if (popup?.Dispatch(@event) == true)
                 {
                     if (
@@ -280,6 +292,7 @@ public static class WindowsBootstrap
 
             void SynchronizePopup()
             {
+                surfaces.Synchronize();
                 popup?.ResolveFocus();
                 if (popup?.IsDismissed == true)
                 {
@@ -324,6 +337,7 @@ public static class WindowsBootstrap
                 () =>
                 {
                     popup?.Dismiss();
+                    surfaces.OwnerResizing();
                     if (session?.IsCompleted == true || composition.IsDisposed)
                         return;
                     _ = workDispatcher.Process();
@@ -370,7 +384,8 @@ public static class WindowsBootstrap
                         liveScene,
                         liveViewport,
                         sceneRenderer,
-                        caretBlink.Visible
+                        caretBlink.Visible,
+                        drawOverlay: surfaces.OwnerOverlay
                     );
                     _ = composition.TryAcknowledgePresentation(liveScene.Generation);
                     caretBlink.Presented(NowMilliseconds());
@@ -388,6 +403,10 @@ public static class WindowsBootstrap
                         : -1;
                     var safeIntentTimeout = popup?.SafeIntentWaitMilliseconds() ?? -1;
                     timeout = WindowsPresentationTiming.Earlier(timeout, safeIntentTimeout);
+                    timeout = WindowsPresentationTiming.Earlier(
+                        timeout,
+                        surfaces.WaitMilliseconds(NowMonotonic())
+                    );
                     timeout = WindowsPresentationTiming.Earlier(
                         timeout,
                         scheduler.IsVisible
@@ -436,6 +455,7 @@ public static class WindowsBootstrap
                     refreshSettings |= ObserveHostEvent(@event);
                 _ = popup?.Tick();
                 _ = popup?.TickPresentation(NowMonotonic());
+                surfaces.Tick(NowMonotonic());
                 liveResize.ThrowIfFailed();
                 SynchronizePopup();
 
@@ -444,6 +464,7 @@ public static class WindowsBootstrap
                 {
                     scheduler.Request();
                     popup?.Refresh();
+                    surfaces.Refresh();
                 }
                 SynchronizePopup();
                 if (
@@ -463,6 +484,7 @@ public static class WindowsBootstrap
                     input.ProcessClipboardRequests();
                     scheduler.Request();
                     popup?.Refresh();
+                    surfaces.Refresh();
                     SynchronizePopup();
                 }
                 refreshSettings |= settingsListener.TakePending();
@@ -525,6 +547,7 @@ public static class WindowsBootstrap
                 {
                     ReplaceScene(ref lastScene, scene);
                     uiaProvider.Refresh(scene);
+                    surfaces.Synchronize();
                     input.RefreshTextInput();
                     var hasCaret = composition.Input.TryGetCaretGeometry(out var caretBounds);
                     caretBlink.SetTarget(
@@ -541,7 +564,13 @@ public static class WindowsBootstrap
                 }
                 var projected = Stopwatch.GetTimestamp();
                 caretBlink.BeforePresent(NowMilliseconds());
-                var phase = presenter.Present(scene, viewport, sceneRenderer, caretBlink.Visible);
+                var phase = presenter.Present(
+                    scene,
+                    viewport,
+                    sceneRenderer,
+                    caretBlink.Visible,
+                    drawOverlay: surfaces.OwnerOverlay
+                );
                 if (!caretOnly)
                     _ = composition.TryAcknowledgePresentation(scene.Generation);
                 caretBlink.Presented(NowMilliseconds());
@@ -596,6 +625,7 @@ public static class WindowsBootstrap
                 Capture(errors, () => router.ContextMenuRequested -= handler);
             }
             Capture(errors, () => pendingPopup?.Dispose());
+            Capture(errors, () => surfaces?.Dispose());
             ShutdownUia(uiaDispatcher, uiaListener, uiaProvider, errors);
             Capture(errors, () => popup?.Dispose());
             Capture(errors, () => input?.Dispose());

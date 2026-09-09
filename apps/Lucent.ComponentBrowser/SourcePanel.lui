@@ -1,0 +1,33 @@
+namespace Lucent.ComponentBrowser;
+
+style SourcePanelStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 10;
+    MinWidth: 0;
+}
+
+style SourceViewportStyle {
+    Height: 230;
+    MinHeight: 140;
+    MinWidth: 0;
+    Clip: true;
+    Visibility: ScrollBarVisibility.Auto;
+}
+
+style SourceCodeStyle {
+    FontFamily: "Cascadia Mono";
+    FontSize: 12;
+    TextWrap: TextWrap.ExplicitBreaks;
+}
+
+public component SourcePanel(ComponentBrowserState browser, ComponentBrowserViewState view) {
+    <Layout style={SourcePanelStyle}>
+        <Text style={PresentationStyles.Caption} content={() => "COMPILED SOURCE · " + browser.SelectedItem.SourceFile} />
+        if (browser.SelectedItem.DependencyNote is not null) {
+            <Text style={PresentationStyles.Secondary} content={() => browser.SelectedItem.DependencyNote!} />
+        }
+        <ScrollViewport viewport={view.SourceViewport} label="Compiled .lui source" style={SourceViewportStyle}>
+            <Text content={() => browser.SelectedSource} style={PresentationStyles.Body.With(SourceCodeStyle)} name="component-browser.source" />
+        </ScrollViewport>
+    </Layout>
+}

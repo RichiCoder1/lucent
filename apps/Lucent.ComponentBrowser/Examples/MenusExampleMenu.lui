@@ -1,0 +1,10 @@
+namespace Lucent.ComponentBrowser;
+
+public component MenusExampleMenu(ComponentBrowserState browser) {
+    <Menu>
+        <MenuItem onInvoke={() => browser.SetMenuMessage("Primary command invoked.")}>Run command</MenuItem>
+        <MenuSeparator />
+        <MenuItem onInvoke={() => browser.SetMenuMessage("The menu remains a normal stock command surface.")}>Inspect semantics</MenuItem>
+        <MenuSubmenu menu={() => MenusExampleSubmenu(browser)}>More actions</MenuSubmenu>
+    </Menu>
+}

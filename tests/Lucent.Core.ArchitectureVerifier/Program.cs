@@ -125,7 +125,25 @@ static void VerifyLuiMetadata(
         ["Icon"] = 2,
         ["Button"] = 6,
         ["IconButton"] = 4,
-        ["TextField"] = 1,
+        ["TextField"] = 3,
+        ["Field"] = 1,
+        ["FormErrorSummary"] = 1,
+        ["CheckBox"] = 1,
+        ["RadioGroup"] = 2,
+        ["Switch"] = 1,
+        ["Tooltip"] = 1,
+        ["Popover"] = 1,
+        ["Dialog"] = 1,
+        ["DialogCancel"] = 1,
+        ["ListBox"] = 2,
+        ["Select"] = 2,
+        ["NumberField"] = 1,
+        ["Slider"] = 1,
+        ["Tabs"] = 2,
+        ["Disclosure"] = 1,
+        ["ProgressBar"] = 1,
+        ["InlineNotice"] = 1,
+        ["Link"] = 1,
         ["TextArea"] = 1,
         ["Layout"] = 1,
         ["Selectable"] = 3,
@@ -140,14 +158,25 @@ static void VerifyLuiMetadata(
         ["MenuSubmenu"] = 1,
         ["MenuSeparator"] = 1,
     };
-    if (
-        !annotated
-            .GroupBy(method => metadata.GetString(method.Name))
-            .ToDictionary(group => group.Key, group => group.Count())
-            .OrderBy(pair => pair.Key)
-            .SequenceEqual(expected.OrderBy(pair => pair.Key))
-    )
-        violations.Add("Components catalog metadata changed.");
+    var actual = annotated
+        .GroupBy(method => metadata.GetString(method.Name))
+        .ToDictionary(group => group.Key, group => group.Count());
+    if (!actual.OrderBy(pair => pair.Key).SequenceEqual(expected.OrderBy(pair => pair.Key)))
+        violations.Add(
+            "Components catalog metadata changed: "
+                + string.Join(
+                    ", ",
+                    expected
+                        .Keys.Union(actual.Keys)
+                        .Order()
+                        .Where(name =>
+                            expected.GetValueOrDefault(name) != actual.GetValueOrDefault(name)
+                        )
+                        .Select(name =>
+                            $"{name} expected {expected.GetValueOrDefault(name)}, actual {actual.GetValueOrDefault(name)}"
+                        )
+                )
+        );
     var buttonSignatures = annotated
         .Where(method => metadata.GetString(method.Name) == "Button")
         .Select(method => string.Join(";", method.DecodeSignature(provider, null).ParameterTypes))

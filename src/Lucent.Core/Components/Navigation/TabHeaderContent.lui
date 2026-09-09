@@ -1,0 +1,12 @@
+namespace Lucent.Core;
+
+style TabHeaderLabelStyle {
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+internal component TabHeaderContent(TabHeaderBinding binding) {
+    <TabHeaderHost binding={binding}>
+        <SelectionDecoration content={binding.Label} style={TabHeaderLabelStyle} />
+        <TabSelectionUnderline selected={binding.Selected} />
+    </TabHeaderHost>
+}

@@ -1,0 +1,30 @@
+namespace Lucent.ComponentBrowser;
+
+style FieldsExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+style FieldsExampleFieldStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 220;
+}
+
+style FieldsExampleAreaStyle {
+    Height: 108;
+    MinHeight: 108;
+}
+
+public component FieldsExample(ComponentBrowserState browser) {
+    <Layout style={FieldsExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>The field controls retain their editor sessions while this gallery remounts examples. Type, select text, and use the native clipboard or IME path as usual.</Text>
+        <Field label="Workspace name" required={true} session={browser.Form} validation={() => browser.NameValidation} help={() => "The label, editor, help, and validation message share one field relationship."} editor={field => Lucent.Core.Components.TextField(field, session: browser.ExampleField, placeholder: "Name this workspace", style: FieldsExampleFieldStyle.With(Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)))} name="component-browser.fields.name" />
+        <TextArea session={browser.ExampleNotes} label="Notes" placeholder="Add a short implementation note" style={FieldsExampleAreaStyle.With(Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled))} name="component-browser.fields.notes" />
+        if (browser.CurrentExampleState == ExampleState.Error) {
+            <ErrorNotice message={() => "The example is showing a recoverable validation state."} retry={browser.RetryExample} name="component-browser.fields.error" />
+        }
+        <Status content={() => browser.FieldSummary + " " + browser.NotesSummary} style={PresentationStyles.Secondary} name="component-browser.fields.status" />
+    </Layout>
+}

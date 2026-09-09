@@ -1,0 +1,22 @@
+namespace Lucent.ComponentBrowser;
+
+style PopoverExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+public component PopoverExample(ComponentBrowserState browser) {
+    <Layout style={PopoverExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>The trigger owns an application-controlled open value. Open the popover, move focus into its content, and close it from the surface or the outside dismissal path.</Text>
+        <Popover
+            open={() => browser.PopoverOpen}
+            onOpenRequested={browser.SetPopoverOpen}
+            popup={PopoverExamplePopup(browser)}
+            name="component-browser.popover"
+        >
+            <Button onInvoke={() => browser.SetPopoverOpen(true)} name="component-browser.popover.open">Open details</Button>
+        </Popover>
+        <Status content={() => browser.PopoverOpen ? "Popover is open." : "Popover is closed."} style={PresentationStyles.Secondary} name="component-browser.popover.status" />
+    </Layout>
+}

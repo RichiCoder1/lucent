@@ -1,0 +1,33 @@
+namespace Lucent.Core;
+
+style InlineNoticeStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Symmetric(16, 8);
+    Spacing: 8;
+    CornerRadius: 6;
+}
+
+style InlineNoticeHeadingStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Center;
+}
+
+style InlineNoticeMessageStyle {
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+internal component InlineNoticeContent(Func<string> message, NoticeSeverity severity, Action? onAction, string? actionLabel, Style? style) {
+    <InlineNoticeFrame style={InlineNoticeStyle.With(style)}>
+        <Layout style={InlineNoticeHeadingStyle}>
+            <Icon source={Components.NoticeIcon(severity)} />
+            <Text>{Components.NoticeLabel(severity)}</Text>
+        </Layout>
+        <Status content={message} style={InlineNoticeMessageStyle} />
+        if (onAction is not null) {
+            <Layout style={InlineNoticeHeadingStyle}>
+                <Button onInvoke={onAction}>{actionLabel!}</Button>
+            </Layout>
+        }
+    </InlineNoticeFrame>
+}

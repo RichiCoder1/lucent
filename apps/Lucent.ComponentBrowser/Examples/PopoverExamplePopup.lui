@@ -1,0 +1,15 @@
+namespace Lucent.ComponentBrowser;
+
+style PopoverExamplePopupStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 10;
+    MinWidth: 240;
+}
+
+component PopoverExamplePopup(ComponentBrowserState browser) {
+    <Layout style={PopoverExamplePopupStyle}>
+        <Text>A focused surface can contain ordinary controls.</Text>
+        <Status content={() => "State is retained by the browser model."} />
+        <Button onInvoke={() => browser.SetPopoverOpen(false)}>Close popover</Button>
+    </Layout>
+}

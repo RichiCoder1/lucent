@@ -98,7 +98,7 @@ internal enum StandardMenuPart
 
 /// <summary>One owner-thread menu invocation, independent of native popup transport.</summary>
 /// <remarks>The host queues the request during input routing, then owns popup creation and disposal outside that route.</remarks>
-public sealed class ContextMenuRequest : IDisposable
+public sealed class ContextMenuRequest : PopupSurfaceRequest
 {
     private readonly ComponentRecipe _content;
     private readonly ThemeContext _theme;
@@ -132,25 +132,25 @@ public sealed class ContextMenuRequest : IDisposable
     }
 
     /// <summary>The composition whose command context opened the menu.</summary>
-    public Composition Owner { get; }
+    public override Composition Owner { get; }
 
     /// <summary>The retained invocation target; this need not be the selected document.</summary>
     public ElementIdentity Target { get; }
 
     /// <summary>Preferred anchor in owner-client logical coordinates.</summary>
-    public LayoutRect Anchor { get; }
+    public override LayoutRect Anchor { get; }
 
     /// <summary>The current portable appearance used by the popup theme.</summary>
-    public ThemeAppearance Appearance => _theme.Appearance;
+    public override ThemeAppearance Appearance => _theme.Appearance;
 
     /// <summary>Whether the target still exists and accepts interaction.</summary>
-    public bool IsValid =>
+    public override bool IsValid =>
         !Owner.IsDisposed
         && Owner.Find(Target) is { IsDisposed: false } element
         && element.InputAvailable();
 
     /// <summary>Whether a command, dismissal, or target disposal has ended this menu.</summary>
-    public bool IsDismissed => _dismissed || !IsValid;
+    public override bool IsDismissed => _dismissed || !IsValid;
 
     /// <summary>Gets the root-to-leaf popup levels the rendered host currently owns.</summary>
     public IReadOnlyList<MenuLevelSnapshot> ActiveLevels =>
@@ -189,7 +189,7 @@ public sealed class ContextMenuRequest : IDisposable
     }
 
     /// <summary>Mounts the popup once on the same reactive graph and UI owner as its caller.</summary>
-    public Composition CreateComposition()
+    public override Composition CreateComposition()
     {
         ObjectDisposedException.ThrowIf(IsDismissed, this);
         if (_popup is not null)
@@ -229,7 +229,7 @@ public sealed class ContextMenuRequest : IDisposable
     }
 
     /// <summary>Measures the authored menu within the host's available logical work area.</summary>
-    public LayoutRect Measure(ITextShaper shaper, LayoutViewport available)
+    public override LayoutRect Measure(ITextShaper shaper, LayoutViewport available)
     {
         var popup = CreateComposition();
         ConstrainMenuHeight(_menuRoot!, available.Height);
@@ -577,7 +577,7 @@ public sealed class ContextMenuRequest : IDisposable
     }
 
     /// <summary>Requests host dismissal without running a nested native loop.</summary>
-    public void Dismiss()
+    public override void Dismiss()
     {
         if (_dismissed)
             return;
@@ -591,7 +591,7 @@ public sealed class ContextMenuRequest : IDisposable
     }
 
     /// <summary>Restores the prior retained focus if its owner is still available.</summary>
-    public bool RestoreFocus()
+    public override bool RestoreFocus()
     {
         if (Owner.IsDisposed || _returnFocus is not { } focus)
             return false;
@@ -601,7 +601,7 @@ public sealed class ContextMenuRequest : IDisposable
     }
 
     /// <summary>Releases the temporary menu composition; accepted application commands keep their original owners.</summary>
-    public void Dispose()
+    public override void Dispose()
     {
         try
         {

@@ -39,12 +39,14 @@ try {
             '^tests/(Lucent\.(Core|Reactive\.R3|Hosting|Renderer\.Skia|Platform\.Windows|IssueBrowser|Lui\.(Compiler|Generator|LanguageServer))\.Tests)/' { $Matches[1]; break }
             '^src/Lucent\.Reactive\.R3/' { 'Lucent.Reactive.R3.Tests'; 'Lucent.Testing.Tests'; break }
             '^src/Lucent\.Hosting/' { 'Lucent.Hosting.Tests'; break }
-            '^src/Lucent\.Renderer\.Skia/' { 'Lucent.Renderer.Skia.Tests'; 'Lucent.Platform.Windows.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.Testing.Tests'; break }
-            '^src/Lucent\.Platform\.Windows/' { 'Lucent.Platform.Windows.Tests'; 'Lucent.IssueBrowser.Tests'; break }
+            '^src/Lucent\.Renderer\.Skia/' { 'Lucent.Renderer.Skia.Tests'; 'Lucent.Platform.Windows.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.ComponentBrowser.Tests'; 'Lucent.Testing.Tests'; break }
+            '^src/Lucent\.Platform\.Windows/' { 'Lucent.Platform.Windows.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.ComponentBrowser.Tests'; break }
             '^apps/Lucent\.IssueBrowser/' { 'Lucent.IssueBrowser.Tests'; 'Lucent.Lui.LanguageServer.Tests'; break }
+            '^apps/Lucent\.ComponentBrowser/' { 'Lucent.ComponentBrowser.Tests'; break }
+            '^tests/Lucent\.ComponentBrowser\.Tests/' { 'Lucent.ComponentBrowser.Tests'; break }
             '^src/Lucent\.Lui\.LanguageServer/' { 'Lucent.Lui.LanguageServer.Tests'; break }
-            '^src/Lucent\.Lui\.Generator/' { 'Lucent.Lui.Generator.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.Testing.Tests'; break }
-            '^src/Lucent\.Lui\.Compiler/' { 'Lucent.Lui.Compiler.Tests'; 'Lucent.Lui.Generator.Tests'; 'Lucent.Lui.LanguageServer.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.Testing.Tests'; break }
+            '^src/Lucent\.Lui\.Generator/' { 'Lucent.Lui.Generator.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.ComponentBrowser.Tests'; 'Lucent.Testing.Tests'; break }
+            '^src/Lucent\.Lui\.Compiler/' { 'Lucent.Lui.Compiler.Tests'; 'Lucent.Lui.Generator.Tests'; 'Lucent.Lui.LanguageServer.Tests'; 'Lucent.IssueBrowser.Tests'; 'Lucent.ComponentBrowser.Tests'; 'Lucent.Testing.Tests'; break }
             default { $allManaged = $true }
         }
         foreach ($project in $selected) { [void] $projects.Add($project) }

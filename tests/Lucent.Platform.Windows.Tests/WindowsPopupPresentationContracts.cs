@@ -8,6 +8,19 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed class WindowsPopupPresentationContracts
 {
     [TestMethod]
+    public void ModalScrimDimsOnlyTheOwnedSurfaceAndPreservesRoundedTransparentMargins()
+    {
+        using var bitmap = new SKBitmap(120, 100);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Transparent);
+        WindowsModalScrim.Draw(canvas, new(10, 10, 60, 40), 8, 1.5f);
+        Assert.AreEqual((byte)0, bitmap.GetPixel(0, 0).Alpha);
+        Assert.AreEqual((byte)0, bitmap.GetPixel(15, 15).Alpha);
+        Assert.AreEqual((byte)64, bitmap.GetPixel(45, 40).Alpha);
+        Assert.AreEqual((byte)0, bitmap.GetPixel(119, 99).Alpha);
+    }
+
+    [TestMethod]
     public void ShadowFadesWithinTransparentMarginAtFractionalScale()
     {
         using var bitmap = new SKBitmap(228, 168);

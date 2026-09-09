@@ -1,0 +1,7 @@
+namespace Lucent.Core;
+
+internal component LinkContent(string label, Action onInvoke, Style? style) {
+    <LinkFrame label={label} onInvoke={onInvoke} style={style}>
+        <LinkLabel label={label} />
+    </LinkFrame>
+}

@@ -1,0 +1,32 @@
+namespace Lucent.ComponentBrowser;
+
+style ButtonsExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+style ButtonsRowStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 10;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+public component ButtonsExample(ComponentBrowserState browser) {
+    <Layout style={ButtonsExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These are live stock recipes. Invoke an action, move focus with Tab, and switch the state above to inspect selected, disabled, busy, and error behavior.</Text>
+        <Layout style={ButtonsRowStyle}>
+            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.CircleCheck} onInvoke={browser.ActivateExample} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.primary">Apply change</Button>
+            <IconButton source={Lucent.Icons.Lucide.LucideIcons.RefreshCw} label="Refresh example" onInvoke={browser.ActivateExample} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.refresh" />
+            <Selectable content={() => browser.IsOptionSelected("native") ? "Native rendering · selected" : "Native rendering"} selected={() => browser.IsOptionSelected("native")} onSelect={() => browser.SelectOption("native")} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.selectable" />
+        </Layout>
+        if (browser.CurrentExampleState == ExampleState.Busy) {
+            <Progress label="Applying example change" value={() => 0.62f} name="component-browser.buttons.progress" />
+        }
+        if (browser.CurrentExampleState == ExampleState.Error) {
+            <ErrorNotice message={() => "The fixture rejected this action. Retry to return to the ordinary path."} retry={browser.RetryExample} name="component-browser.buttons.error" />
+        }
+        <Status content={() => browser.ActivationCount == 0 ? "No action invoked yet." : "Invoked " + browser.ActivationCount + " time" + (browser.ActivationCount == 1 ? "" : "s") + "."} style={PresentationStyles.Secondary} name="component-browser.buttons.status" />
+    </Layout>
+}

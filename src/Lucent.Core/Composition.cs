@@ -7,7 +7,7 @@ namespace Lucent.Core;
 
 /// <summary>Owns a retained structural tree and the scopes of its mounted elements.</summary>
 /// <remarks>Use one composition on its graph's UI thread. Mounts are transactional, and disposing the composition disposes the root, all regions, and their reactive ownership.</remarks>
-public sealed class Composition : IDisposable
+public sealed partial class Composition : IDisposable
 {
     private static long _nextEpoch;
     private readonly ReactiveGraph _graph;
@@ -555,6 +555,8 @@ public sealed class Composition : IDisposable
             snapshots.Count == 0 ? null
             : Root.HasSemantics ? snapshots.Single()
             : Root.CreateStructuralSemanticSnapshot(snapshots);
+        if (snapshot is not null && IsInteractionSuspended)
+            snapshot = DisableInteraction(snapshot);
         if (snapshot is not null)
             Register(snapshot);
         return snapshot;
@@ -596,8 +598,9 @@ public sealed class Composition : IDisposable
         command.Validate();
         if (!IsCurrent(identity) || Find(identity.ElementId) is not { } element)
             return SemanticCommandResult.Stale;
-        if (!element.SemanticEnabled())
+        if (IsInteractionSuspended || !element.SemanticEnabled())
             return SemanticCommandResult.Disabled;
+        var priorToggle = element.SemanticToggleState;
         if (!element.ExecuteSemanticCommand(command))
             return SemanticCommandResult.Rejected;
         if (command.Kind == SemanticCommandKind.Select)
@@ -606,6 +609,12 @@ public sealed class Composition : IDisposable
             // application state before reporting whether selection actually took effect.
             _graph.DrainPosted();
             if (element.IsDisposed || !element.SemanticSelected())
+                return SemanticCommandResult.Requested;
+        }
+        else if (command.Kind == SemanticCommandKind.Toggle)
+        {
+            _graph.DrainPosted();
+            if (element.IsDisposed || element.SemanticToggleState == priorToggle)
                 return SemanticCommandResult.Requested;
         }
         return SemanticCommandResult.Applied;
@@ -1029,10 +1038,69 @@ public sealed class Composition : IDisposable
         if (element.Participation != ElementParticipation.Visible)
             return [];
         var children = element.Children.SelectMany(BuildSemantic).ToArray();
-        return element.CreateSemanticSnapshot(children) is { } semantic
-            ? [semantic]
+        return element.CreateSemanticSnapshot(children) is { } semantic ? [semantic]
+            : element.SupplementalDescription is { } description
+                ? MergeSupplementalDescription(children, description)
             : [.. children];
     }
+
+    private static List<SemanticSnapshot> MergeSupplementalDescription(
+        IReadOnlyList<SemanticSnapshot> children,
+        string description
+    )
+    {
+        var target = FindDescriptionTarget(children);
+        if (target is null)
+            return [.. children];
+        return children
+            .Select(child => ApplySupplementalDescription(child, target.Identity, description))
+            .ToList();
+    }
+
+    private static SemanticSnapshot ApplySupplementalDescription(
+        SemanticSnapshot node,
+        SemanticIdentity target,
+        string description
+    )
+    {
+        if (node.Identity == target)
+            return node with { Description = MergeDescription(node.Description, description) };
+        if (node.Children.Count == 0)
+            return node;
+        var children = node
+            .Children.Select(child => ApplySupplementalDescription(child, target, description))
+            .ToArray();
+        return node with { Children = children };
+    }
+
+    private static SemanticSnapshot? FindDescriptionTarget(IEnumerable<SemanticSnapshot> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (IsDescriptionTarget(node))
+                return node;
+            if (FindDescriptionTarget(node.Children) is { } nested)
+                return nested;
+        }
+        return null;
+    }
+
+    private static bool IsDescriptionTarget(SemanticSnapshot node) =>
+        node.Role
+            is not (
+                SemanticRole.Menu
+                or SemanticRole.Group
+                or SemanticRole.Text
+                or SemanticRole.List
+                or SemanticRole.Status
+                or SemanticRole.RadioGroup
+                or SemanticRole.TabList
+            );
+
+    private static string MergeDescription(string? existing, string supplemental) =>
+        string.IsNullOrWhiteSpace(existing)
+            ? supplemental
+            : existing + Environment.NewLine + supplemental;
 
     private static void Append(SemanticSnapshot snapshot, StringBuilder output)
     {

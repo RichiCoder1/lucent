@@ -1,0 +1,55 @@
+namespace Lucent.Core;
+
+style DialogTitleStyle {
+    FontSize: 20;
+}
+
+style DialogBodyStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MaxHeight: 520;
+    MinHeight: 0;
+    Clip: true;
+}
+
+style DialogActionsStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    MainAlignment: LayoutAlignment.End;
+    CrossAlignment: LayoutAlignment.Center;
+    MainShrink: 0;
+}
+
+internal component DialogSurfaceContent(
+    DialogControllerBase controller,
+    string title,
+    ComponentContent body,
+    ComponentContent actions,
+    bool destructive,
+    Action? defaultAccept,
+    Func<ValueTask>? defaultAcceptAsync,
+    Style? style
+) {
+    <DialogFrame
+        controller={controller}
+        title={title}
+        destructive={destructive}
+        defaultAccept={defaultAccept}
+        defaultAcceptAsync={defaultAcceptAsync}
+        style={style}
+    >
+        <Text style={DialogTitleStyle}>{title}</Text>
+        <ScrollViewport label="Dialog content" style={DialogBodyStyle}>
+            {body}
+        </ScrollViewport>
+        if (controller.FailureMessage is not null) {
+            <InlineNotice
+                message={() => controller.FailureMessage!}
+                severity={NoticeSeverity.Error}
+            />
+        }
+        <Layout style={DialogActionsStyle}>
+            {actions}
+        </Layout>
+    </DialogFrame>
+}

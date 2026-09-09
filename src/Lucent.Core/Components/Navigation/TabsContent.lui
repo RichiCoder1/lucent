@@ -1,0 +1,10 @@
+namespace Lucent.Core;
+
+internal component TabsContent(TabListBinding binding, ComponentContent headers, ComponentContent panels, Style? style) {
+    <TabsFrame style={style}>
+        <TabListHost binding={binding}>
+            {headers}
+        </TabListHost>
+        {panels}
+    </TabsFrame>
+}

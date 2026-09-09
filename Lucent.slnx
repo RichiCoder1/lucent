@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj" />
+  <Project Path="apps/Lucent.ComponentBrowser/Lucent.ComponentBrowser.csproj" />
   <Project Path="src/Lucent.Core/Lucent.Core.csproj" />
   <Project Path="src/Lucent.Icons.Lucide/Lucent.Icons.Lucide.csproj" />
   <Project Path="src/Lucent.Testing/Lucent.Testing.csproj" />
@@ -24,6 +25,7 @@
   <Project Path="tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj" />
   <Project Path="tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj" />
   <Project Path="tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj" />
+  <Project Path="tests/Lucent.ComponentBrowser.Tests/Lucent.ComponentBrowser.Tests.csproj" />
   <Project Path="tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj" />
   <Project Path="tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj" />
   <Project Path="tests/Lucent.Platform.Windows.TestHost/Lucent.Platform.Windows.TestHost.csproj" />

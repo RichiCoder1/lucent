@@ -1,0 +1,13 @@
+namespace Lucent.Core;
+
+style TabPanelStyle {
+    Axis: LayoutAxis.Column;
+}
+
+internal component TabPanelContent(TabPanelBinding binding, ComponentRecipe content) {
+    <TabPanelHost binding={binding}>
+        <Layout style={TabPanelStyle}>
+            {content}
+        </Layout>
+    </TabPanelHost>
+}

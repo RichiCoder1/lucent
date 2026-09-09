@@ -28,12 +28,13 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private LayoutRect _menuBounds;
     private bool _opensLeft;
     private readonly Action<SkiaSharp.SKCanvas> _drawShadow;
+    private readonly Action<SkiaSharp.SKCanvas> _drawModalScrim;
     private float _scale = 1;
     private float _cornerRadius;
     private readonly int _ownerThread = Environment.CurrentManagedThreadId;
     private readonly nint _popupParentWindow;
     private readonly uint _ownerWindowId;
-    private readonly ContextMenuRequest _request;
+    private readonly PopupSurfaceRequest _request;
     private readonly MenuLevelSnapshot? _level;
     private readonly WindowsPopupHost? _parent;
     private readonly bool _ownsRequest;
@@ -50,13 +51,15 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private RetainedScene? _scene;
     private WindowsViewport _viewport;
     private bool _disposed;
+    private readonly WindowsCaretBlink _caretBlink = new(WindowsCaretBlink.GetCaretBlinkTime());
 
     internal WindowsPopupHost(
         nint ownerWindow,
-        ContextMenuRequest request,
+        PopupSurfaceRequest request,
         WindowsUiaDispatcher uiaDispatcher,
         WindowsClipboard clipboard,
-        WindowsCursor cursor
+        WindowsCursor cursor,
+        Action? wakePresentation = null
     )
         : this(
             ownerWindow,
@@ -68,7 +71,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             cursor,
             parent: null,
             ownsRequest: true,
-            wakePresentation: null
+            wakePresentation
         ) { }
 
     internal WindowsPopupHost(
@@ -98,7 +101,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private WindowsPopupHost(
         nint rootOwnerWindow,
         nint popupParentWindow,
-        ContextMenuRequest request,
+        PopupSurfaceRequest request,
         MenuLevelSnapshot? level,
         WindowsUiaDispatcher uiaDispatcher,
         WindowsClipboard clipboard,
@@ -127,6 +130,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
         _sceneRenderer = new SkiaSceneRenderer();
         _wakePresentation = wakePresentation ?? (static () => { });
         _drawShadow = canvas => WindowsPopupShadow.Draw(canvas, _menuBounds, _cornerRadius, _scale);
+        _drawModalScrim = canvas =>
+            WindowsModalScrim.Draw(canvas, _menuBounds, _cornerRadius, _scale);
 
         nint window = 0;
         nint renderer = 0;
@@ -142,23 +147,54 @@ internal sealed partial class WindowsPopupHost : IDisposable
             var height = Math.Max(1, placement.Height);
             // Host padding keeps rendering, hit testing and UIA in the same coordinate space.
             EnsureHostPadding(_composition);
-            window = SDL.CreatePopupWindow(
-                popupParentWindow,
-                placement.OffsetX,
-                placement.OffsetY,
-                width,
-                height,
-                PopupFlags
-            );
+            window = request.IsModal
+                ? SDL.CreateWindow(
+                    request.Title,
+                    width,
+                    height,
+                    SDL.WindowFlags.Borderless
+                        | SDL.WindowFlags.HighPixelDensity
+                        | SDL.WindowFlags.Hidden
+                        | SDL.WindowFlags.Transparent
+                )
+                : SDL.CreatePopupWindow(
+                    popupParentWindow,
+                    placement.OffsetX,
+                    placement.OffsetY,
+                    width,
+                    height,
+                    request.IsInteractive ? PopupFlags : PopupFlags | SDL.WindowFlags.NotFocusable
+                );
             if (window == 0)
                 throw new InvalidOperationException($"SDL_CreatePopupWindow: {SDL.GetError()}");
+            if (request.IsModal)
+            {
+                var origin = ClientOrigin(Hwnd(popupParentWindow));
+                if (
+                    !SDL.SetWindowParent(window, popupParentWindow)
+                    || !SDL.SetWindowModal(window, true)
+                    || !SDL.SetWindowPosition(
+                        window,
+                        origin.X + placement.OffsetX,
+                        origin.Y + placement.OffsetY
+                    )
+                )
+                    throw new InvalidOperationException(
+                        $"SDL modal window setup: {SDL.GetError()}"
+                    );
+            }
             renderer = SDL.CreateRenderer(window, null);
             if (renderer == 0)
                 throw new InvalidOperationException($"SDL_CreateRenderer popup: {SDL.GetError()}");
             if (!SDL.SetRenderVSync(renderer, WindowsPresentationContract.VsyncInterval))
                 throw new InvalidOperationException($"SDL_SetRenderVSync popup: {SDL.GetError()}");
             var hwnd = Hwnd(window);
-            provider = new WindowsUiaProvider(hwnd, _composition, uiaDispatcher, "Context menu");
+            provider = new WindowsUiaProvider(
+                hwnd,
+                _composition,
+                uiaDispatcher,
+                request is ContextMenuRequest ? "Context menu" : request.Title
+            );
             listener = new WindowsUiaListener(hwnd, provider);
             presenter = new CpuSkiaPresenter(renderer);
             input = new WindowsInputAdapter(_composition, window, clipboard);
@@ -170,11 +206,18 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _uiaListener = listener;
             _composition.PresentationDemandAvailable += _wakePresentation;
             Refresh();
-            if (level is null || level.Depth == 0 || level.FocusFirst)
+            if (
+                request.IsInteractive
+                && !request.FocusInitial()
+                && request.AllowInitialFocusFallback
+                && (level is null || level.Depth == 0 || level.FocusFirst)
+            )
                 FocusFirstItem();
             Refresh();
             if (!SDL.ShowWindow(window))
                 throw new InvalidOperationException($"SDL_ShowWindow popup: {SDL.GetError()}");
+            if (request.IsModal && !SDL.RaiseWindow(window))
+                throw new InvalidOperationException($"SDL_RaiseWindow dialog: {SDL.GetError()}");
             if (!SDL.SyncWindow(window))
                 throw new InvalidOperationException($"SDL_SyncWindow popup: {SDL.GetError()}");
         }
@@ -221,7 +264,10 @@ internal sealed partial class WindowsPopupHost : IDisposable
         CheckThread();
         return _disposed || _composition.IsDisposed
             ? -1
-            : WindowsPresentationTiming.WaitMilliseconds(_composition.PresentationDemand, now);
+            : WindowsPresentationTiming.Earlier(
+                WindowsPresentationTiming.WaitMilliseconds(_composition.PresentationDemand, now),
+                _caretBlink.WaitMilliseconds((long)now.TotalMilliseconds)
+            );
     }
 
     internal bool TickPresentation(TimeSpan now)
@@ -252,6 +298,15 @@ internal sealed partial class WindowsPopupHost : IDisposable
         if (_disposed || !TargetsPopup(@event, WindowId, _ownerWindowId))
             return false;
         var type = (SDL.EventType)@event.Type;
+        if (_request is OwnedSurfaceRequest surface && EventWindowId(@event) == WindowId)
+        {
+            if (type == SDL.EventType.WindowMouseEnter)
+                surface.SetPointerInside(true);
+            else if (type == SDL.EventType.WindowMouseLeave)
+                surface.SetPointerInside(false);
+        }
+        if (!_request.IsInteractive && EventWindowId(@event) != WindowId)
+            return false;
         if (type == SDL.EventType.WindowMinimized)
         {
             _composition.SetPresentationAvailable(false);
@@ -275,7 +330,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
             var y = scale.WindowToLogical(@event.Button.Y);
             if (!ContainsMenuPoint(_menuBounds, x, y))
             {
-                _request.Dismiss();
+                if (!_request.IsModal)
+                    _request.Dismiss();
                 return true;
             }
         }
@@ -314,7 +370,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
 
         var placement = CalculatePlacement();
         _opensLeft = placement.OpensLeft;
-        if (!SDL.SetWindowPosition(_window, placement.OffsetX, placement.OffsetY))
+        var origin = _request.IsModal ? ClientOrigin(Hwnd(_popupParentWindow)) : default;
+        if (
+            !SDL.SetWindowPosition(
+                _window,
+                origin.X + placement.OffsetX,
+                origin.Y + placement.OffsetY
+            )
+        )
             throw new InvalidOperationException($"SDL_SetWindowPosition popup: {SDL.GetError()}");
         if (!SDL.SetWindowSize(_window, placement.Width, placement.Height))
             throw new InvalidOperationException($"SDL_SetWindowSize popup: {SDL.GetError()}");
@@ -351,6 +414,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _scene = scene;
             _uiaProvider.Refresh(scene);
             _input.RefreshTextInput();
+            var hasCaret = _request.IsInteractive && _composition.Input.TryGetCaretGeometry(out _);
+            _composition.Input.TryGetCaretGeometry(out var caretBounds);
+            _caretBlink.SetTarget(
+                hasCaret ? _composition.Input.FocusedElement : null,
+                caretBounds,
+                (long)now.TotalMilliseconds
+            );
+            _caretBlink.BeforePresent((long)now.TotalMilliseconds);
             var menuRoot = _composition.Root.Children.Single();
             _menuBounds = scene.Boxes.Single(box => box.Identity.ElementId == menuRoot.Id).Bounds;
             _cornerRadius = menuRoot.Resolve(VisualProperties.CornerRadius).Value;
@@ -359,11 +430,16 @@ internal sealed partial class WindowsPopupHost : IDisposable
                 scene,
                 viewport,
                 _sceneRenderer,
-                showCaret: false,
+                showCaret: _caretBlink.Visible,
                 drawUnderlay: _request.Appearance.Contrast == ThemeContrast.High
                     ? null
-                    : _drawShadow
+                    : _drawShadow,
+                drawOverlay: _composition.IsInteractionSuspended
+                && _request.Appearance.Contrast != ThemeContrast.High
+                    ? _drawModalScrim
+                    : null
             );
+            _caretBlink.Presented((long)now.TotalMilliseconds);
             _ = _composition.TryAcknowledgePresentation(scene.Generation);
             _ = _cursor.Activate(
                 _input.PointerPosition is { } point
@@ -421,7 +497,9 @@ internal sealed partial class WindowsPopupHost : IDisposable
         && x < bounds.X + bounds.Width
         && y < bounds.Y + bounds.Height;
 
-    public void Dispose()
+    public void Dispose() => Dispose(restoreFocus: true);
+
+    internal void Dispose(bool restoreFocus)
     {
         CheckThread();
         if (_disposed)
@@ -458,13 +536,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
         }
         if (_ownsRequest)
         {
-            Capture(
-                errors,
-                () =>
-                {
-                    _ = _request.RestoreFocus();
-                }
-            );
+            if (restoreFocus)
+                Capture(errors, () => _ = _request.RestoreFocus());
             Capture(errors, _request.Dispose);
         }
         if (errors.Count == 1)
@@ -528,7 +601,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
     {
         if (_level is { } level)
         {
-            _ = _request.FocusFirst(level);
+            _ = ((ContextMenuRequest)_request).FocusFirst(level);
             return;
         }
         var scene =
@@ -559,10 +632,42 @@ internal sealed partial class WindowsPopupHost : IDisposable
         );
         var desired = _level is null
             ? _request.Measure(_sceneRenderer, available)
-            : _request.Measure(_level, _sceneRenderer, available);
+            : ((ContextMenuRequest)_request).Measure(_level, _sceneRenderer, available);
+        if (_request.IsModal)
+        {
+            var parentBounds = GetWindowBounds(Hwnd(_popupParentWindow));
+            var origin = ClientOrigin(Hwnd(_popupParentWindow));
+            var width = Math.Max(
+                1,
+                ToWindowUnits(desired.Width + 2 * ShadowMargin, ownerScale, density)
+            );
+            var height = Math.Max(
+                1,
+                ToWindowUnits(desired.Height + 2 * ShadowMargin, ownerScale, density)
+            );
+            var left = Math.Clamp(
+                (parentBounds.Left + parentBounds.Right - width) / 2,
+                usable.X,
+                Math.Max(usable.X, usable.X + usable.W - width)
+            );
+            var top = Math.Clamp(
+                (parentBounds.Top + parentBounds.Bottom - height) / 2,
+                usable.Y,
+                Math.Max(usable.Y, usable.Y + usable.H - height)
+            );
+            return new(left - origin.X, top - origin.Y, width, height, false);
+        }
         var placement =
             _level is null || _level.Depth == 0
-                ? WindowsPopupPlacement.Root(_request.Anchor, desired, ownerScale, density)
+                ? WindowsPopupPlacement.Root(
+                    _request.Anchor with
+                    {
+                        Y = _request.Anchor.Y + _request.AnchorGap,
+                    },
+                    desired,
+                    ownerScale,
+                    density
+                )
                 : WindowsPopupPlacement.Submenu(
                     _parent?.TriggerScreenBounds(_level.ParentTrigger)
                         ?? throw new InvalidOperationException(

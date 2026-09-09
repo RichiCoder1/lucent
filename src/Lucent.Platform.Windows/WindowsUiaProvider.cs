@@ -168,10 +168,41 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 continue;
             if (old.Name != node.Name)
                 RaiseProperty(node, 30005, old.Name, node.Name);
-            if (old.Value != node.Value)
+            if (!old.IsPassword && !node.IsPassword && old.Value != node.Value)
                 RaiseProperty(node, 30045, old.Value ?? "", node.Value ?? "");
+            if (old.IsPassword != node.IsPassword)
+                RaiseProperty(node, 30019, old.IsPassword, node.IsPassword);
             if (old.Selected != node.Selected)
                 RaiseProperty(node, 30079, old.Selected, node.Selected);
+            if (old.ToggleState != node.ToggleState)
+                RaiseProperty(
+                    node,
+                    30086,
+                    (int)(old.ToggleState ?? SemanticToggleState.Off),
+                    (int)(node.ToggleState ?? SemanticToggleState.Off)
+                );
+            if (old.Selection?.IsSelectionRequired != node.Selection?.IsSelectionRequired)
+                RaiseProperty(
+                    node,
+                    30061,
+                    old.Selection?.IsSelectionRequired ?? false,
+                    node.Selection?.IsSelectionRequired ?? false
+                );
+            if (HelpDescription(old) != HelpDescription(node))
+                RaiseProperty(node, 30013, HelpDescription(old), HelpDescription(node));
+            if (old.Relationships?.IsInvalid != node.Relationships?.IsInvalid)
+                RaiseProperty(
+                    node,
+                    30103,
+                    old.Relationships?.IsInvalid != true,
+                    node.Relationships?.IsInvalid != true
+                );
+            if (old.PositionInSet != node.PositionInSet)
+                RaiseProperty(node, 30152, old.PositionInSet ?? 0, node.PositionInSet ?? 0);
+            if (old.SizeOfSet != node.SizeOfSet)
+                RaiseProperty(node, 30153, old.SizeOfSet ?? 0, node.SizeOfSet ?? 0);
+            if (FullDescription(old) != FullDescription(node))
+                RaiseProperty(node, 30159, FullDescription(old), FullDescription(node));
             if (old.Enabled != node.Enabled)
                 RaiseProperty(node, 30010, old.Enabled, node.Enabled);
             if (old.Expanded != node.Expanded)
@@ -316,7 +347,14 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 scroll,
                 textSnapshot,
                 snapshot.Expanded,
-                snapshot.Range
+                snapshot.Range,
+                snapshot.ToggleState,
+                snapshot.Selection,
+                snapshot.Relationships,
+                snapshot.Description,
+                snapshot.PositionInSet,
+                snapshot.SizeOfSet,
+                snapshot.IsPassword
             );
             foreach (var child in snapshot.Children)
             foreach (var node in Flatten(child, key))
@@ -434,9 +472,16 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         var iid = id switch
         {
             10000 when node.Actions.HasFlag(SemanticAction.Invoke) => UiaWrappers.Invoke,
-            10001 when node.Role == SemanticRole.List => UiaWrappers.SelectionPattern,
-            10002 when node.Actions.HasFlag(SemanticAction.SetValue) || node.Text is not null =>
-                UiaWrappers.ValuePattern,
+            10001
+                when node.Role
+                    is SemanticRole.List
+                        or SemanticRole.RadioGroup
+                        or SemanticRole.TabList => UiaWrappers.SelectionPattern,
+            10015 when node.Actions.HasFlag(SemanticAction.Toggle) => UiaWrappers.TogglePattern,
+            10002
+                when node.Actions.HasFlag(SemanticAction.SetValue)
+                    || node.Text is not null
+                    || node.Role == SemanticRole.ComboBox => UiaWrappers.ValuePattern,
             10004 when node.Actions.HasFlag(SemanticAction.Scroll) => UiaWrappers.Scroll,
             10005 when node.Actions.HasFlag(SemanticAction.ExpandCollapse) =>
                 UiaWrappers.ExpandCollapse,
@@ -488,8 +533,54 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             case 30010:
                 Bool(value, node.Enabled);
                 break;
+            case 30013:
+                Bstr(value, HelpDescription(node));
+                break;
+            case 30019:
+                Bool(value, node.IsPassword);
+                break;
+            case 30152 when node.PositionInSet is { } position:
+                I4(value, position);
+                break;
+            case 30153 when node.SizeOfSet is { } size:
+                I4(value, size);
+                break;
+            case 30103:
+                Bool(value, node.Relationships?.IsInvalid != true);
+                break;
+            case 30159:
+                Bstr(value, FullDescription(node));
+                break;
+            case 30018 when node.Relationships?.Label is { } label:
+                var snapshot = CurrentSnapshot();
+                if (
+                    snapshot.Nodes.TryGetValue(
+                        new(label.CompositionEpoch, label.ElementId),
+                        out var labelNode
+                    )
+                )
+                {
+                    var labelProvider = Provider(labelNode);
+                    if (labelProvider is not null)
+                    {
+                        value->Type = VtUnknown;
+                        value->Value = Query(labelProvider._unknown, UiaWrappers.Simple);
+                    }
+                }
+                break;
+            case 30105 when node.Relationships is { } relationships:
+                return DescribedBy(relationships, value);
             case 30023:
                 I4(value, ExpandCollapseStateValue(node.Expanded));
+                break;
+            case 30086 when node.ToggleState is { } toggle:
+                I4(value, (int)toggle);
+                break;
+            case 30060:
+                Bool(value, node.Selection?.CanSelectMultiple ?? false);
+                break;
+            case 30061:
+                Bool(value, node.Selection?.IsSelectionRequired ?? false);
                 break;
             case 30047 when node.Range is { } range:
                 R8(value, range.Value);
@@ -544,7 +635,15 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 );
                 break;
             case 30045:
+                if (node.IsPassword)
+                    return InvalidOperation;
                 Bstr(value, node.Value ?? "");
+                break;
+            case 30046:
+                Bool(
+                    value,
+                    node.Text?.IsReadOnly == true || !node.Actions.HasFlag(SemanticAction.SetValue)
+                );
                 break;
             case 30053:
                 R8(value, -1);
@@ -821,6 +920,8 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         var node = CurrentNode();
         if (node is null)
             return NotAvailable;
+        if (node.IsPassword)
+            return InvalidOperation;
         value = SysAllocString(node.Value ?? "");
         return value == 0 ? OutOfMemory : Ok;
     }
@@ -828,8 +929,60 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     internal int ValueReadOnly(out int value)
     {
         var node = CurrentNode();
-        value = node?.Text?.IsReadOnly == true ? 1 : 0;
+        value =
+            node is not null
+            && (node.Text?.IsReadOnly == true || !node.Actions.HasFlag(SemanticAction.SetValue))
+                ? 1
+                : 0;
         return node is null ? NotAvailable : Ok;
+    }
+
+    private static string HelpDescription(Node node) =>
+        JoinDescription(node.Relationships?.HelpText, node.Description);
+
+    private static string FullDescription(Node node) =>
+        JoinDescription(
+            node.Relationships?.ErrorText ?? node.Relationships?.HelpText,
+            node.Description
+        );
+
+    private static string JoinDescription(string? first, string? second) =>
+        string.IsNullOrEmpty(first) ? second ?? ""
+        : string.IsNullOrEmpty(second) || first == second ? first
+        : first + " " + second;
+
+    private int DescribedBy(SemanticRelationships relationships, RawVariant* value)
+    {
+        var snapshot = CurrentSnapshot();
+        var identities = relationships.Help is { } help
+            ? relationships.Errors.Prepend(help)
+            : relationships.Errors;
+        var nodes = identities
+            .Distinct()
+            .Select(identity =>
+                snapshot.Nodes.GetValueOrDefault(new(identity.CompositionEpoch, identity.ElementId))
+            )
+            .Where(node => node is not null)
+            .ToArray();
+        var array = SafeArrayCreateVector(VtUnknown, 0, (uint)nodes.Length);
+        if (array == 0)
+            return OutOfMemory;
+        for (var i = 0; i < nodes.Length; i++)
+        {
+            var provider = Provider(nodes[i]);
+            var pointer = provider is null ? 0 : Query(provider._unknown, UiaWrappers.Simple);
+            var index = i;
+            var result = SafeArrayPutElement(array, &index, (void*)pointer);
+            Release(ref pointer);
+            if (result < 0)
+            {
+                _ = SafeArrayDestroy(array);
+                return result;
+            }
+        }
+        value->Type = 0x2000 | VtUnknown; // VT_ARRAY | VT_UNKNOWN; ownership passes to caller.
+        value->Value = array;
+        return Ok;
     }
 
     internal int Selection(out nint value)
@@ -861,6 +1014,34 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         return Ok;
     }
 
+    internal int Toggle() =>
+        Run(node =>
+            _composition.ExecuteSemanticCommand(node.Identity, new(SemanticCommandKind.Toggle))
+        );
+
+    internal int ToggleState(out int value)
+    {
+        var node = CurrentNode();
+        value = (int)(node?.ToggleState ?? SemanticToggleState.Off);
+        return node is null ? NotAvailable
+            : node.ToggleState is null ? InvalidOperation
+            : Ok;
+    }
+
+    internal int CanSelectMultiple(out int value)
+    {
+        var node = CurrentNode();
+        value = node?.Selection?.CanSelectMultiple == true ? 1 : 0;
+        return node is null ? NotAvailable : Ok;
+    }
+
+    internal int IsSelectionRequired(out int value)
+    {
+        var node = CurrentNode();
+        value = node?.Selection?.IsSelectionRequired == true ? 1 : 0;
+        return node is null ? NotAvailable : Ok;
+    }
+
     internal int Select() =>
         Run(node =>
             _composition.ExecuteSemanticCommand(node.Identity, new(SemanticCommandKind.Select))
@@ -890,7 +1071,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         if (node is null)
             return NotAvailable;
         while (node.Parent is { } parent && snapshot.Nodes.TryGetValue(parent, out node))
-            if (node.Role == SemanticRole.List)
+            if (node.Role is SemanticRole.List or SemanticRole.RadioGroup or SemanticRole.TabList)
             {
                 var provider = Provider(node);
                 value = provider is null ? 0 : Query(provider._unknown, UiaWrappers.Simple);
@@ -1033,6 +1214,16 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         node.Role switch
         {
             SemanticRole.Button => 50000,
+            SemanticRole.CheckBox or SemanticRole.Switch => 50002,
+            SemanticRole.RadioButton => 50013,
+            SemanticRole.TabList => 50018,
+            SemanticRole.Tab => 50019,
+            SemanticRole.Slider => 50015,
+            SemanticRole.Spinner => 50016,
+            SemanticRole.Hyperlink => 50005,
+            SemanticRole.ComboBox => 50003,
+            SemanticRole.RadioGroup => 50026,
+            SemanticRole.ProgressBar => 50012,
             SemanticRole.TextField => 50004,
             SemanticRole.List => 50008,
             SemanticRole.ListItem => 50007,
@@ -1141,7 +1332,14 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         SemanticScrollState? Scroll,
         TextSnapshot? Text,
         bool? Expanded,
-        SemanticRangeSnapshot? Range
+        SemanticRangeSnapshot? Range,
+        SemanticToggleState? ToggleState,
+        SemanticSelectionSnapshot? Selection,
+        SemanticRelationships? Relationships,
+        string? Description,
+        int? PositionInSet,
+        int? SizeOfSet,
+        bool IsPassword
     );
 
     // Immutable after construction: COM readers use one snapshot for every navigation step.

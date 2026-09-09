@@ -1,0 +1,15 @@
+namespace Lucent.Core;
+using System;
+
+/// <summary>Associates a delayed hover or immediate focus description with one trigger subtree.</summary>
+public component Tooltip(
+    string description,
+    [DefaultContent] ComponentContent content,
+    TimeSpan? delay = null,
+    TimeProvider? timeProvider = null,
+    Style? style = null
+) {
+    <TooltipFrame description={description} delay={delay} timeProvider={timeProvider} style={style}>
+        {content}
+    </TooltipFrame>
+}

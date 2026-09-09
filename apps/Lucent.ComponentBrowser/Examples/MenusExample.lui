@@ -1,0 +1,17 @@
+namespace Lucent.ComponentBrowser;
+
+style MenusExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+public component MenusExample(ComponentBrowserState browser) {
+    <Layout style={MenusExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>The button keeps its primary action. The context menu adds secondary commands and a nested branch without making the menu part of the ordinary tab sequence.</Text>
+        <ContextMenu menu={() => MenusExampleMenu(browser)} name="component-browser.menus.context">
+            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.Ellipsis} onInvoke={browser.ActivateExample} name="component-browser.menus.target">Open action menu</Button>
+        </ContextMenu>
+        <Status content={() => browser.MenuMessage} style={PresentationStyles.Secondary} name="component-browser.menus.status" />
+    </Layout>
+}

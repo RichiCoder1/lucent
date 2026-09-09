@@ -1,5 +1,9 @@
 # Credits and references
 
+Password automation follows Microsoft's [Edit control requirements](https://learn.microsoft.com/windows/win32/winauto/uiauto-supporteditcontroltype), consulted September 9, 2026: confidential editors identify themselves as passwords, accept explicit value replacement, and reject value reads. This is platform-contract guidance; no implementation source is copied.
+
+The native file-picker work consults Microsoft's [Common File Dialog](https://learn.microsoft.com/windows/win32/shell/common-file-dialog), [IFileDialog.Close](https://learn.microsoft.com/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifiledialog-close), and [CsWin32 AOT examples](https://github.com/microsoft/CsWin32/blob/main/docfx/docs/Examples.md), September 9, 2026. These inform STA ownership, cancellation, filesystem selection and generated unmanaged COM calls. CsWin32 is an existing MIT-licensed build dependency; selecting a save path does not write application data.
+
 Lucent is informed by open-source UI systems and platform documentation. Conceptual influence does not imply source reuse. Any copied or translated code must carry file-level attribution, upstream commit identity, and its required license notice.
 
 The Native validation spike's complete conceptual reference ledger remains available at the immutable [703d8e2 history tree](https://github.com/RichiCoder1/lucent/tree/703d8e267c6590603350db7819aa553822a30b87/docs/history/native-spike/). The active ledger below records current architectural references, adopted dependencies, and distribution attribution.
@@ -102,6 +106,10 @@ The headless testing surface introduced for #103 takes architectural inspiration
 [Lucide 1.43.0](https://github.com/lucide-icons/lucide/tree/ba95e4c988b1e1b39cf5544e73b25a74b76816ee) (Lucide Icons and Contributors, ISC; selected Feather-derived artwork by Cole Bemis, MIT) supplies the finite SVG artwork in the optional `Lucent.Icons.Lucide` package. Lucent vendors only the icons named in the package inventory at the pinned upstream revision. The importer runs only for maintainer updates; consumers receive typed embedded `ImageSource` values and require neither Node nor Lucide tooling. The package ships separate Lucide ISC and Feather MIT notices.
 
 ## Desktop interaction references
+
+Dialog hosting also follows SDL3's [SetWindowParent](https://wiki.libsdl.org/SDL3/SDL_SetWindowParent) and [SetWindowModal](https://wiki.libsdl.org/SDL3/SDL_SetWindowModal) contracts, consulted September 9, 2026. Dialogs use real owned top-level modal windows; SDL popup-menu windows remain reserved for nonmodal surfaces and menus. The existing zlib-licensed SDL dependency supplies window ownership and native input blocking, complemented by Core's explicit automation/input suspension.
+
+The component program consults Microsoft's [.NET shell execution contract](https://learn.microsoft.com/dotnet/api/system.diagnostics.processstartinfo.useshellexecute) and [Process.Start return and failure behavior](https://learn.microsoft.com/dotnet/api/system.diagnostics.process.start), September 9, 2026, for explicit application-authorized URI launching through registered Windows handlers. No shell command interpreter or new runtime dependency is introduced. Tooltip timing tests reuse the existing MIT-licensed Microsoft.Extensions.TimeProvider.Testing 10.9.0 pin; production timers use the .NET TimeProvider contract and scope-owned dispatch.
 
 Consulted September 8, 2026 for submenus and accessible panes: Costa Alexoglou's [Better Context Menus With Safe Triangles](https://www.smashingmagazine.com/2023/08/better-context-menus-safe-triangles/) (Smashing Magazine, August 21, 2023; copyrighted article, no source copied) informs directional pointer-intent geometry using actual child placement. Lucent uses a bounded portable decision helper and platform event replay, not the article's SVG/React implementation. Microsoft's [RangeValue control-pattern guidance](https://learn.microsoft.com/windows/win32/winauto/uiauto-implementingrangevalue) informs the splitter's finite numeric range and Windows UIA adapter. Neither reference introduces a dependency.
 

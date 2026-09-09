@@ -17,6 +17,7 @@ public sealed class Element : IDisposable
     private readonly List<BehaviorMount> _behaviors = [];
     private BehaviorOwnership _behaviorClaims;
     private SemanticDeclaration? _semantics;
+    private string? _supplementalDescription;
     private Func<SemanticCommand, bool>? _semanticCommand;
     private Action<bool>? _selectionChanged;
     private long _semanticGeneration;
@@ -66,6 +67,7 @@ public sealed class Element : IDisposable
     internal bool HasPresentation => _presentation is not null;
     internal bool IsConditionalRegion { get; set; }
     internal bool HasSemantics => _semantics is not null;
+    internal string? SupplementalDescription => _supplementalDescription;
     internal StandardMenuPart StandardMenuPart { get; set; }
     internal ImageBinding? Image { get; set; }
 
@@ -359,7 +361,7 @@ public sealed class Element : IDisposable
             {
                 var scope = Scope.CreateBehaviorChild(Name + ".behavior." + behavior.Name);
                 var context = new BehaviorContext(
-                    Id,
+                    this,
                     Composition,
                     scope,
                     behavior,
@@ -529,7 +531,14 @@ public sealed class Element : IDisposable
             children,
             _semantics.Text,
             _semantics.Expanded,
-            _semantics.Range
+            _semantics.Range,
+            _semantics.Relationships,
+            _semantics.ToggleState,
+            _semantics.Selection,
+            MergeDescription(_semantics.Description, _supplementalDescription),
+            _semantics.PositionInSet,
+            _semantics.SizeOfSet,
+            _semantics.IsPassword
         );
     }
 
@@ -565,6 +574,8 @@ public sealed class Element : IDisposable
 
     internal bool SemanticSelected() => _semantics is not null && ReconcileSemanticState().Selected;
 
+    internal SemanticToggleState? SemanticToggleState => _semantics?.ToggleState;
+
     internal SemanticSnapshot CreateStructuralSemanticSnapshot(
         IReadOnlyList<SemanticSnapshot> children
     ) =>
@@ -577,8 +588,33 @@ public sealed class Element : IDisposable
             false,
             false,
             SemanticAction.None,
-            children
+            children,
+            Description: _supplementalDescription
         );
+
+    internal void SetSupplementalDescription(string description)
+    {
+        Composition.CheckThread();
+        ThrowIfDisposed();
+        if (string.IsNullOrWhiteSpace(description))
+            throw new ArgumentException(
+                "A supplemental semantic description is required.",
+                nameof(description)
+            );
+        if (string.Equals(_supplementalDescription, description, StringComparison.Ordinal))
+            return;
+        _supplementalDescription = description;
+        Composition.InvalidateSemantics();
+    }
+
+    private static string? MergeDescription(string? primary, string? supplemental)
+    {
+        if (string.IsNullOrWhiteSpace(supplemental))
+            return primary;
+        if (string.IsNullOrWhiteSpace(primary))
+            return supplemental;
+        return primary + Environment.NewLine + supplemental;
+    }
 
     internal void AppendPresentationDump(StringBuilder dump)
     {
@@ -634,6 +670,7 @@ public sealed class Element : IDisposable
         {
             SemanticCommandKind.Focus => true,
             SemanticCommandKind.Invoke => _semantics!.Actions.HasFlag(SemanticAction.Invoke),
+            SemanticCommandKind.Toggle => _semantics!.Actions.HasFlag(SemanticAction.Toggle),
             SemanticCommandKind.SetValue => _semantics!.Actions.HasFlag(SemanticAction.SetValue),
             SemanticCommandKind.Select => _semantics!.Actions.HasFlag(SemanticAction.Select),
             SemanticCommandKind.Scroll => _semantics!.Actions.HasFlag(SemanticAction.Scroll),
@@ -691,6 +728,8 @@ public sealed class Element : IDisposable
                 variants |= VariantState.Selected;
             if (behavior.State.GetValueOrDefault(BehaviorState.FocusVisible))
                 variants |= VariantState.FocusVisible;
+            if (behavior.State.GetValueOrDefault(BehaviorState.Invalid))
+                variants |= VariantState.Invalid;
         }
         if (_inputDisabled)
             variants |= VariantState.Disabled;

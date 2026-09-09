@@ -1,0 +1,19 @@
+namespace Lucent.Core;
+
+style RadioOptionIndicatorStyle {
+    Width: 36;
+    MinHeight: 20;
+    Height: 20;
+}
+
+style RadioOptionLabelStyle {
+    MinHeight: 20;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+internal component RadioOptionContent(RadioOptionBinding binding) {
+    <RadioOptionHost binding={binding}>
+        <Icon source={() => binding.Selected() ? SelectionArtwork.RadioOn : SelectionArtwork.RadioOff} style={RadioOptionIndicatorStyle} />
+        <SelectionDecoration content={binding.Label} style={RadioOptionLabelStyle} />
+    </RadioOptionHost>
+}

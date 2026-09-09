@@ -1,0 +1,94 @@
+namespace Lucent.ComponentBrowser;
+
+style ComponentDetailStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
+}
+
+style ComponentDetailContentStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Symmetric(24, 24);
+    Spacing: 16;
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 0;
+}
+
+style ComponentDetailViewportStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
+    Visibility: ScrollBarVisibility.Auto;
+}
+
+style ComponentDetailHeadingStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 5;
+}
+
+style ComponentDetailActionStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 10;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+style ComponentStateRowStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+style ComponentStateLabelStyle {
+    MainShrink: 0;
+}
+
+style ComponentExampleStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Uniform(16);
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+public component ComponentDetail(ComponentBrowserState browser, ComponentBrowserViewState view) {
+    <Layout style={ComponentDetailStyle}>
+        <ScrollViewport viewport={view.DetailViewport} label="Component details" style={ComponentDetailViewportStyle}>
+            <Layout style={ComponentDetailContentStyle}>
+                <Layout style={ComponentDetailHeadingStyle}>
+                    <Text style={PresentationStyles.Caption} content={() => browser.SelectedItem.Family.ToUpperInvariant()} />
+                    <Text style={PresentationStyles.Title with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Title} name="component-browser.detail-title" />
+                    <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Summary} />
+                </Layout>
+                <Layout style={ComponentStateRowStyle}>
+                    <Text style={PresentationStyles.Caption.With(ComponentStateLabelStyle)}>EXAMPLE STATE</Text>
+                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Default)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Default)} name="component-browser.state-default">Default</Button>
+                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Disabled)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.state-disabled">Disabled</Button>
+                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Busy)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Busy)} name="component-browser.state-busy">Busy</Button>
+                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Error)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Error)} name="component-browser.state-error">Error</Button>
+                    <Status content={() => browser.ExampleStateLabel} style={PresentationStyles.Secondary} name="component-browser.state-status" />
+                </Layout>
+                <Layout style={ComponentDetailActionStyle}>
+                    <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.FileText} onInvoke={browser.CopySource} name="component-browser.copy-source">Copy compiled .lui</Button>
+                    <Status content={() => browser.CopyMessage} style={PresentationStyles.Secondary} name="component-browser.copy-status" />
+                </Layout>
+                <Divider />
+                <Text style={PresentationStyles.Caption}>INTERACTIVE EXAMPLE</Text>
+                <Layout style={ComponentExampleStyle}>
+                    <ComponentExample browser={browser} name="component-browser.example" />
+                </Layout>
+                <SourcePanel browser={browser} view={view} name="component-browser.source-panel" />
+                <Divider />
+                <Text style={PresentationStyles.Caption}>USAGE</Text>
+                <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Usage} name="component-browser.usage" />
+                <Text style={PresentationStyles.Caption}>ACCESSIBILITY</Text>
+                <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Accessibility} name="component-browser.accessibility" />
+            </Layout>
+        </ScrollViewport>
+    </Layout>
+}

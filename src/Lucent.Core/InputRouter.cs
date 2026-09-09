@@ -8,6 +8,7 @@ public sealed partial class InputRouter
 {
     private readonly Composition _composition;
     private readonly List<Registration<Action<PointerRoute>>> _pointer = [];
+    private readonly List<Registration<Action<WheelRoute>>> _wheel = [];
     private readonly List<Registration<Action<KeyRoute>>> _key = [];
     private readonly List<Registration<Action<FocusRoute>>> _focus = [];
     private readonly List<Registration<Action<TextRoute>>> _text = [];
@@ -362,7 +363,20 @@ public sealed partial class InputRouter
             var route = Path(target.Value).Reverse().ToArray();
             var remainingX = command.DeltaX;
             var remainingY = command.DeltaY;
-            var handled = false;
+            var handled = RouteWheel(command, target.Value, route, errors);
+            if (handled)
+            {
+                SetLast(
+                    "Wheel",
+                    InputDispatchStatus.Delivered,
+                    InputRejection.None,
+                    target,
+                    route,
+                    true
+                );
+                Throw(errors);
+                return new(InputDispatchStatus.Delivered, InputRejection.None, target, route, true);
+            }
             foreach (var identity in route)
             {
                 if (
@@ -422,14 +436,23 @@ public sealed partial class InputRouter
                     : UnfocusedCommandTarget();
             if (!Eligible(target))
                 return Reject(InputRejection.Ineligible, "Key/" + command.Kind, errors);
-            var result = HandleContextKey(command, target)
-                ? new InputDispatchResult(
-                    InputDispatchStatus.Delivered,
-                    InputRejection.None,
-                    target,
-                    Path(target),
-                    true
-                )
+            var result =
+                HandleTooltipKey(command, target, errors)
+                    ? new InputDispatchResult(
+                        InputDispatchStatus.Delivered,
+                        InputRejection.None,
+                        target,
+                        Path(target),
+                        true
+                    )
+                : HandleContextKey(command, target)
+                    ? new InputDispatchResult(
+                        InputDispatchStatus.Delivered,
+                        InputRejection.None,
+                        target,
+                        Path(target),
+                        true
+                    )
                 : RouteKey(command, target, errors);
             if (!result.Handled && command is { Kind: KeyCommandKind.Down, Key: Key.Tab })
             {
@@ -798,6 +821,7 @@ public sealed partial class InputRouter
             .Append(_focusable.Count.ToString(CultureInfo.InvariantCulture))
             .Append('\n');
         AppendRegistrations(output, "pointer", _pointer);
+        AppendRegistrations(output, "wheel", _wheel);
         AppendRegistrations(output, "key", _key);
         AppendRegistrations(output, "focus", _focus);
         AppendRegistrations(output, "capture-loss", _captureLoss);
@@ -840,6 +864,9 @@ public sealed partial class InputRouter
         Action<PointerRoute> callback
     ) => Register(_pointer, elementId, scope, callback);
 
+    internal void RegisterWheel(long elementId, ReactiveScope scope, Action<WheelRoute> callback) =>
+        Register(_wheel, elementId, scope, callback);
+
     internal void RegisterKey(long elementId, ReactiveScope scope, Action<KeyRoute> callback) =>
         Register(_key, elementId, scope, callback);
 
@@ -874,6 +901,19 @@ public sealed partial class InputRouter
             )
                 _focusable.Remove(elementId);
         });
+    }
+
+    internal void SetTabStop(long elementId, BehaviorContext owner, bool tabStop)
+    {
+        Check();
+        if (
+            !_focusable.TryGetValue(elementId, out var entry)
+            || !ReferenceEquals(entry.Context, owner)
+        )
+            throw new InvalidOperationException(
+                "A behavior can change only its own registered focus target."
+            );
+        entry.TabStop = tabStop;
     }
 
     internal void RegisterScrollable(long elementId, ReactiveScope scope, ScrollViewportState state)
@@ -1085,6 +1125,7 @@ public sealed partial class InputRouter
             return;
         var errors = new List<Exception>();
         ReleaseAll(PointerCaptureLossReason.Disposed, errors);
+        CleanupSurfaces(errors);
         ClearHover(errors);
         UpdateScrollBarHover(null);
         RequestFocus(null, FocusChangeReason.Disposed, errors);
@@ -1102,6 +1143,7 @@ public sealed partial class InputRouter
         }
         _disposed = true;
         _pointer.Clear();
+        _wheel.Clear();
         _key.Clear();
         _focus.Clear();
         _text.Clear();
@@ -1368,6 +1410,7 @@ public sealed partial class InputRouter
 
     private void UpdateHover(ElementIdentity? hit, List<Exception> errors)
     {
+        UpdateTooltipHover(hit, errors);
         ElementIdentity? next = null;
         if (hit is { } identity && Eligible(identity))
         {
@@ -1448,6 +1491,7 @@ public sealed partial class InputRouter
             {
                 errors.Add(error);
             }
+        UpdateTooltipFocus(target, command.Kind == FocusCommandKind.Gained, errors);
     }
 
     private void ReleaseAll(PointerCaptureLossReason reason, List<Exception> errors)
@@ -1530,6 +1574,8 @@ public sealed partial class InputRouter
 
     private InputRejection? EnsureScene(List<Exception> errors)
     {
+        if (_composition.IsInteractionSuspended)
+            return InputRejection.Ineligible;
         if (_scene is null)
             return InputRejection.NoScene;
         if (ValidateScene(_scene))
@@ -2200,7 +2246,7 @@ public sealed partial class InputRouter
 
     private sealed class Focusable(bool tabStop, BehaviorContext context)
     {
-        public bool TabStop { get; } = tabStop;
+        public bool TabStop { get; set; } = tabStop;
         public BehaviorContext Context { get; } = context;
     }
 

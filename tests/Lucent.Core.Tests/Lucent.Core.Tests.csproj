@@ -3,5 +3,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
     <ProjectReference Include="../../src/Lucent.Icons.Lucide/Lucent.Icons.Lucide.csproj" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 </Project>

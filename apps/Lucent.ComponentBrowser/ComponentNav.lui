@@ -1,0 +1,64 @@
+namespace Lucent.ComponentBrowser;
+
+style ComponentNavStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Symmetric(16, 16);
+    Spacing: 12;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
+}
+
+style ComponentNavHeadingStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Center;
+    MainShrink: 0;
+}
+
+style ComponentNavViewportStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
+    Visibility: ScrollBarVisibility.Auto;
+}
+
+style ComponentNavListStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 4;
+}
+
+style ComponentNavItemStyle(ComponentBrowserState browser) {
+    MainShrink: 0;
+    Height: browser.Density == BrowserDensity.Compact ? 36 : 44;
+}
+
+style ComponentNavEmptyStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 8;
+    Padding: Insets.Uniform(8);
+}
+
+public component ComponentNav(ComponentBrowserState browser, ComponentBrowserViewState view) {
+    <Layout style={ComponentNavStyle}>
+        <Layout style={ComponentNavHeadingStyle}>
+            <Text style={PresentationStyles.Caption}>COMPONENTS</Text>
+            <Text style={PresentationStyles.Secondary}>Browse the stock surface</Text>
+        </Layout>
+        <ScrollViewport viewport={view.NavigationViewport} label="Component navigation" style={ComponentNavViewportStyle}>
+            <Layout style={ComponentNavListStyle}>
+                if (browser.VisibleItems.Count == 0) {
+                    <Layout style={ComponentNavEmptyStyle}>
+                        <Text style={PresentationStyles.Body}>No components found</Text>
+                        <Text style={PresentationStyles.Secondary}>Try a family or control name.</Text>
+                    </Layout>
+                }
+                foreach (var item in browser.VisibleItems) keyed by item.Id {
+                    <Selectable content={() => item.Title + " · " + item.Family} selected={() => browser.IsSelected(item.Id)} onSelect={() => browser.Select(item.Id)} style={ComponentNavItemStyle(browser)} name={"component-browser.nav." + item.Id} />
+                }
+            </Layout>
+        </ScrollViewport>
+    </Layout>
+}

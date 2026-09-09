@@ -1,0 +1,27 @@
+namespace Lucent.Core;
+
+style ProgressBarTrackStyle(Func<double?> value) {
+    Mode: LayoutMode.Grid;
+    Columns: Components.ProgressBarColumns(value());
+    Rows: GridTracks.Create(GridTrack.Fixed(4));
+    Height: 4;
+    Clip: true;
+    CornerRadius: 2;
+    Background: ControlThemes.Border;
+}
+
+style ProgressBarFillStyle {
+    GridPlacement: new GridPlacement(0, 0);
+    Height: 4;
+    MinWidth: 0;
+    Background: ControlThemes.Accent;
+}
+
+internal component ProgressBarContent(string label, Func<double?> value, Style? style) {
+    <ProgressBarFrame label={label} value={value} style={style}>
+        <Text>{Components.ProgressBarLabel(label, value())}</Text>
+        <Layout style={ProgressBarTrackStyle(value)}>
+            <Layout style={ProgressBarFillStyle} />
+        </Layout>
+    </ProgressBarFrame>
+}

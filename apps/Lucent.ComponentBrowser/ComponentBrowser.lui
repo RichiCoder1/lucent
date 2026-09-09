@@ -1,0 +1,39 @@
+namespace Lucent.ComponentBrowser;
+
+style BrowserRootStyle {
+    Axis: LayoutAxis.Column;
+    MainGrow: 1;
+    MainBasis: 0;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
+}
+
+style BrowserBodyStyle {
+    Axis: LayoutAxis.Row;
+    MainGrow: 1;
+    MainBasis: 0;
+    MinWidth: 0;
+    MinHeight: 0;
+    Clip: true;
+}
+
+style BrowserSplitterStyle {
+    MainShrink: 0;
+}
+
+public component ComponentBrowser(ComponentBrowserState browser, ThemeContext theme) {
+    [Once] ComponentBrowserViewState view = null!;
+
+    Setup(owner) {
+        view = new ComponentBrowserViewState(owner);
+    }
+
+    <Layout style={PresentationStyles.Surface.With(BrowserRootStyle)}>
+        <BrowserHeader browser={browser} theme={theme} name="component-browser.header" />
+        <Divider />
+        <Layout style={BrowserBodyStyle}>
+            <SplitPane first={[ComponentNav(browser, view)]} second={[ComponentDetail(browser, view)]} state={view.Split} label="Resize component navigation" style={BrowserBodyStyle} splitterStyle={BrowserSplitterStyle} firstStyle={Style.Empty.MainShrink(0)} secondStyle={Style.Empty.MainGrow(1).MainShrink(1).MinWidth(0).MinHeight(0)} />
+        </Layout>
+    </Layout>
+}

@@ -38,6 +38,9 @@ public enum BehaviorState
 
     /// <summary>Marks the current pointer hit target.</summary>
     Hover,
+
+    /// <summary>Marks a control whose current application validation is invalid.</summary>
+    Invalid,
 }
 
 /// <summary>Portable accessibility roles emitted in retained semantic snapshots.</summary>
@@ -75,6 +78,39 @@ public enum SemanticRole
 
     /// <summary>Exposes meaningful, noninteractive image content.</summary>
     Image,
+
+    /// <summary>Exposes a binary or mixed-state checkbox.</summary>
+    CheckBox,
+
+    /// <summary>Exposes a mutually exclusive selection group.</summary>
+    RadioGroup,
+
+    /// <summary>Exposes one option in a radio group.</summary>
+    RadioButton,
+
+    /// <summary>Exposes a binary setting switch.</summary>
+    Switch,
+
+    /// <summary>Exposes determinate or indeterminate read-only progress.</summary>
+    ProgressBar,
+
+    /// <summary>Exposes a mutually exclusive set of tab headers.</summary>
+    TabList,
+
+    /// <summary>Exposes one selectable tab header.</summary>
+    Tab,
+
+    /// <summary>Exposes a value chosen along a bounded range.</summary>
+    Slider,
+
+    /// <summary>Exposes a numeric entry with explicit increment and decrement controls.</summary>
+    Spinner,
+
+    /// <summary>Exposes an explicitly invokable hyperlink.</summary>
+    Hyperlink,
+
+    /// <summary>Exposes an expandable selection editor.</summary>
+    ComboBox,
 }
 
 /// <summary>Semantic commands a retained target declares that it handles.</summary>
@@ -107,6 +143,9 @@ public enum SemanticAction
 
     /// <summary>Permits setting a finite numeric range value.</summary>
     SetRangeValue = 128,
+
+    /// <summary>Permits requesting the next toggle state.</summary>
+    Toggle = 256,
 }
 
 /// <summary>Finite portable requests accepted by retained semantic behaviors; platform adapters never receive control state.</summary>
@@ -141,6 +180,9 @@ public enum SemanticCommandKind
 
     /// <summary>Requests a finite numeric range value.</summary>
     SetRangeValue,
+
+    /// <summary>Requests the next toggle state; the application owns the applied value.</summary>
+    Toggle,
 }
 
 /// <summary>Named destinations for semantic scrolling.</summary>
@@ -226,8 +268,88 @@ public enum SemanticCommandResult
     /// <summary>The current target is disabled.</summary>
     Disabled,
 
-    /// <summary>A controlled selection request was delivered, but the application has not applied selection.</summary>
+    /// <summary>A controlled selection or toggle request was delivered, but the application has not applied the requested state change.</summary>
     Requested,
+}
+
+/// <summary>Finite applied state of a semantic toggle.</summary>
+public enum SemanticToggleState
+{
+    /// <summary>The toggle is off.</summary>
+    Off,
+
+    /// <summary>The toggle is on.</summary>
+    On,
+
+    /// <summary>The toggle represents a mixed aggregate.</summary>
+    Indeterminate,
+}
+
+/// <summary>Immutable selection requirements for a semantic container.</summary>
+public sealed record SemanticSelectionSnapshot(bool CanSelectMultiple, bool IsSelectionRequired);
+
+/// <summary>Stable accessible relationships and validation metadata for one retained element.</summary>
+public sealed class SemanticRelationships
+{
+    private readonly IReadOnlyList<ElementIdentity> _errors;
+
+    /// <summary>Initializes relationships to retained label, help, and error elements.</summary>
+    public SemanticRelationships(
+        ElementIdentity? label = null,
+        ElementIdentity? help = null,
+        IEnumerable<ElementIdentity>? errors = null,
+        string? helpText = null,
+        string? errorText = null,
+        bool isInvalid = false
+    )
+    {
+        var errorCopy = errors?.ToArray() ?? [];
+        if (
+            Invalid(label)
+            || Invalid(help)
+            || errorCopy.Any(static identity => Invalid(identity))
+            || errorCopy.Distinct().Count() != errorCopy.Length
+        )
+            throw new ArgumentException(
+                "Semantic relationships require distinct, nondefault retained identities."
+            );
+        if (helpText is not null && string.IsNullOrWhiteSpace(helpText))
+            throw new ArgumentException("Semantic help text must be nonempty.", nameof(helpText));
+        if (errorText is not null && string.IsNullOrWhiteSpace(errorText))
+            throw new ArgumentException("Semantic error text must be nonempty.", nameof(errorText));
+        if (!isInvalid && (errorCopy.Length != 0 || errorText is not null))
+            throw new ArgumentException(
+                "Semantic error relationships and text require invalid state."
+            );
+
+        Label = label;
+        Help = help;
+        _errors = Array.AsReadOnly(errorCopy);
+        HelpText = helpText;
+        ErrorText = errorText;
+        IsInvalid = isInvalid;
+    }
+
+    /// <summary>Gets the retained element that labels the control.</summary>
+    public ElementIdentity? Label { get; }
+
+    /// <summary>Gets the retained element that supplies supplemental help.</summary>
+    public ElementIdentity? Help { get; }
+
+    /// <summary>Gets the retained elements that describe current validation errors.</summary>
+    public IReadOnlyList<ElementIdentity> Errors => _errors;
+
+    /// <summary>Gets the current plain-text help exposed by native accessibility adapters.</summary>
+    public string? HelpText { get; }
+
+    /// <summary>Gets the current plain-text validation error exposed by native accessibility adapters.</summary>
+    public string? ErrorText { get; }
+
+    /// <summary>Gets whether the related control currently has invalid input.</summary>
+    public bool IsInvalid { get; }
+
+    private static bool Invalid(ElementIdentity? identity) =>
+        identity is { CompositionEpoch: <= 0 } or { ElementId: <= 0 };
 }
 
 /// <summary>Accessible state supplied by a behavior for one retained element.</summary>
@@ -244,7 +366,14 @@ public sealed class SemanticDeclaration
         string? value = null,
         SemanticTextSnapshot? text = null,
         bool? expanded = null,
-        SemanticRangeSnapshot? range = null
+        SemanticRangeSnapshot? range = null,
+        SemanticRelationships? relationships = null,
+        SemanticToggleState? toggleState = null,
+        SemanticSelectionSnapshot? selection = null,
+        string? description = null,
+        int? positionInSet = null,
+        int? sizeOfSet = null,
+        bool isPassword = false
     )
     {
         if (
@@ -260,15 +389,33 @@ public sealed class SemanticDeclaration
                     | SemanticAction.ScrollTextIntoView
                     | SemanticAction.ExpandCollapse
                     | SemanticAction.SetRangeValue
+                    | SemanticAction.Toggle
                 )
             ) != 0
             || actions.HasFlag(SemanticAction.ExpandCollapse) != expanded.HasValue
             || (range is { IsReadOnly: false }) != actions.HasFlag(SemanticAction.SetRangeValue)
             || role == SemanticRole.Splitter && range is null
+            || actions.HasFlag(SemanticAction.Toggle) != toggleState.HasValue
+            || toggleState is { } toggle && !Enum.IsDefined(toggle)
+            || role is SemanticRole.CheckBox or SemanticRole.Switch && toggleState is null
+            || role == SemanticRole.Switch && toggleState == SemanticToggleState.Indeterminate
+            || role is SemanticRole.RadioGroup or SemanticRole.TabList && selection is null
+            || positionInSet.HasValue != sizeOfSet.HasValue
+            || positionInSet is { } position && (position < 1 || sizeOfSet < position)
         )
             throw new ArgumentException("Semantic role/actions must be finite.");
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("A semantic name is required.", nameof(name));
+        if (isPassword && (role != SemanticRole.TextField || value is not null || text is not null))
+            throw new ArgumentException(
+                "A password semantic field must omit value and text contents.",
+                nameof(isPassword)
+            );
+        if (description is not null && string.IsNullOrWhiteSpace(description))
+            throw new ArgumentException(
+                "A semantic description must be nonempty when supplied.",
+                nameof(description)
+            );
         Role = role;
         Name = name;
         Enabled = enabled;
@@ -279,6 +426,13 @@ public sealed class SemanticDeclaration
         Text = text;
         Expanded = expanded;
         Range = range;
+        Relationships = relationships;
+        ToggleState = toggleState;
+        Selection = selection;
+        Description = description;
+        PositionInSet = positionInSet;
+        SizeOfSet = sizeOfSet;
+        IsPassword = isPassword;
     }
 
     /// <summary>Gets the accessible role.</summary>
@@ -310,6 +464,27 @@ public sealed class SemanticDeclaration
 
     /// <summary>Gets the optional immutable numeric range exposed to automation.</summary>
     public SemanticRangeSnapshot? Range { get; }
+
+    /// <summary>Gets stable label, help, and validation relationships for this element.</summary>
+    public SemanticRelationships? Relationships { get; }
+
+    /// <summary>Gets the applied toggle state, when supported.</summary>
+    public SemanticToggleState? ToggleState { get; }
+
+    /// <summary>Gets the selection policy for a containing control.</summary>
+    public SemanticSelectionSnapshot? Selection { get; }
+
+    /// <summary>Gets optional supplemental text associated with this semantic control.</summary>
+    public string? Description { get; }
+
+    /// <summary>One-based position in the complete logical set, including virtualized members.</summary>
+    public int? PositionInSet { get; }
+
+    /// <summary>Number of members in the complete logical set.</summary>
+    public int? SizeOfSet { get; }
+
+    /// <summary>Whether this editor contains confidential text excluded from accessible value and range reads.</summary>
+    public bool IsPassword { get; }
 }
 
 /// <summary>Immutable finite numeric range state exposed to platform automation.</summary>
@@ -443,7 +618,14 @@ public sealed record SemanticSnapshot(
     IReadOnlyList<SemanticSnapshot> Children,
     SemanticTextSnapshot? Text = null,
     bool? Expanded = null,
-    SemanticRangeSnapshot? Range = null
+    SemanticRangeSnapshot? Range = null,
+    SemanticRelationships? Relationships = null,
+    SemanticToggleState? ToggleState = null,
+    SemanticSelectionSnapshot? Selection = null,
+    string? Description = null,
+    int? PositionInSet = null,
+    int? SizeOfSet = null,
+    bool IsPassword = false
 );
 
 /// <summary>Reusable interaction capability that owns input, focus, semantics, and cleanup for one element.</summary>
@@ -462,6 +644,7 @@ public abstract class Behavior
 /// <summary>Behavior-only capability surface: identity, deterministic state, semantics, and scope-owned cleanup.</summary>
 public sealed class BehaviorContext
 {
+    private readonly Element _element;
     private readonly Composition _composition;
     private readonly ReactiveScope _scope;
     private readonly Dictionary<BehaviorState, bool> _state = [];
@@ -472,14 +655,15 @@ public sealed class BehaviorContext
     private readonly Action _stateChanged;
 
     internal BehaviorContext(
-        long elementId,
+        Element element,
         Composition composition,
         ReactiveScope scope,
         Behavior behavior,
         Action stateChanged
     )
     {
-        ElementId = elementId;
+        _element = element ?? throw new ArgumentNullException(nameof(element));
+        ElementId = element.Id;
         _composition = composition;
         _scope = scope;
         Behavior = behavior;
@@ -505,6 +689,34 @@ public sealed class BehaviorContext
         ThemeContext theme,
         Action<bool>? onOpenChanged
     ) => _composition.Input.RegisterContextMenu(ElementId, _scope, menu, theme, onOpenChanged);
+
+    internal void RegisterTooltip(
+        Action<bool> onHoverChanged,
+        Action<bool> onFocusChanged,
+        Action? onEscape = null
+    )
+    {
+        CheckAttachment();
+        _composition.Input.RegisterTooltip(
+            ElementId,
+            _scope,
+            onHoverChanged,
+            onFocusChanged,
+            onEscape
+        );
+    }
+
+    internal void SetSupplementalDescription(string description)
+    {
+        CheckAttachment();
+        _element.SetSupplementalDescription(description);
+    }
+
+    internal IDisposable Post(Action callback)
+    {
+        CheckLive();
+        return _scope.Post(callback);
+    }
 
     internal void RegisterMenuSubmenu(
         Func<ComponentRecipe> menu,
@@ -602,6 +814,13 @@ public sealed class BehaviorContext
         _composition.Input.RegisterPointer(ElementId, _scope, handler);
     }
 
+    /// <summary>Registers an opt-in wheel callback for this action-owning behavior.</summary>
+    public void OnWheel(Action<WheelRoute> handler)
+    {
+        CheckInputOwnership();
+        _composition.Input.RegisterWheel(ElementId, _scope, handler);
+    }
+
     /// <summary>Registers a key callback for this action-owning behavior.</summary>
     public void OnKey(Action<KeyRoute> handler)
     {
@@ -635,6 +854,19 @@ public sealed class BehaviorContext
     {
         CheckFocusOwnership();
         _composition.Input.RegisterFocusable(ElementId, _scope, tabStop, this);
+    }
+
+    /// <summary>Changes traversal participation for this behavior's already registered focus target.</summary>
+    /// <remarks>Grouped controls use this to retain one tab stop while preserving arrow-key focus on their other items.</remarks>
+    public void SetTabStop(bool tabStop)
+    {
+        _composition.CheckThread();
+        CheckLive();
+        if (!Behavior.Ownership.HasFlag(BehaviorOwnership.Focus))
+            throw new InvalidOperationException(
+                "Changing tab participation requires focus ownership."
+            );
+        _composition.Input.SetTabStop(ElementId, this, tabStop);
     }
 
     internal ReactiveEffect Effect(Action callback, string name)

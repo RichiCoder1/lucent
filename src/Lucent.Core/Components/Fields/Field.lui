@@ -1,0 +1,27 @@
+namespace Lucent.Core;
+using System;
+
+/// <summary>Composes a persistent label, optional help, one typed primary editor, and validation feedback.</summary>
+public component Field(
+    string label,
+    Func<FieldContext, ComponentRecipe> editor,
+    Func<ValidationState>? validation = null,
+    Func<string>? help = null,
+    FormSession? session = null,
+    string? fieldId = null,
+    FieldParticipation participation = FieldParticipation.WhenNotCollapsed,
+    bool required = false,
+    Style? style = null
+) {
+    readonly FieldContext field = new(owner, fieldId ?? label, label, validation, session);
+    <FieldRoot field={field} participation={participation} style={style}>
+        <FieldLabel field={field} label={label} required={required} />
+        if (help is not null) {
+            <FieldHelp field={field} content={help} />
+        }
+        {editor(field)}
+        if (field.ShowErrors) {
+            <FieldError field={field} content={field.ReadErrorText} />
+        }
+    </FieldRoot>
+}

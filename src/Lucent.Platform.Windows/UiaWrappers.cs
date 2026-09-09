@@ -17,20 +17,11 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         Scroll = new("b38b8077-1fc3-42a5-8cae-d40c2215055a"),
         ExpandCollapse = new("d847d3a5-cab0-4a98-8c32-ecb45c59ad24"),
         RangeValue = new("36dc7aef-33e6-4691-afe1-2be7274b3d33"),
+        TogglePattern = new("56d00bd0-c4f4-433c-a836-1a52a57e0892"),
         TextProvider = new("3589c92c-63f3-4367-99bb-ada653b77cf2"),
         TextProvider2 = new("0dc5e6ed-3e16-4bf1-8f9a-a979878bc195");
     private static readonly ComInterfaceEntry* RootEntries,
-        PlainEntries,
-        InvokeEntries,
-        ValueEntries,
-        ListEntries,
-        ItemEntries,
-        ScrollEntries,
-        ExpandEntries,
-        ExpandInvokeEntries,
-        RangeEntries,
-        RangeInvokeEntries,
-        TextEntries;
+        NodeEntries;
 
     static UiaWrappers()
     {
@@ -112,8 +103,12 @@ internal sealed unsafe class UiaWrappers : ComWrappers
             release,
             (nint)
                 (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)&Selection,
-            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&False,
-            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&False
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &CanSelectMultiple,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &IsSelectionRequired
         );
         var item = Entry(
             SelectionItem,
@@ -196,6 +191,16 @@ internal sealed unsafe class UiaWrappers : ComWrappers
                 (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, double*, int>)
                     &RangeSmallChange
         );
+        // UIAutomationCore.h: IToggleProvider is Toggle, then get_ToggleState.
+        var toggle = Entry(
+            TogglePattern,
+            query,
+            addRef,
+            release,
+            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int>)&Toggle,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&ToggleState
+        );
         var text = Entry(
             TextProvider,
             query,
@@ -259,17 +264,25 @@ internal sealed unsafe class UiaWrappers : ComWrappers
                     &CaretRange
         );
         RootEntries = Entries(simple, fragment, root);
-        PlainEntries = Entries(simple, fragment);
-        InvokeEntries = Entries(simple, fragment, invoke);
-        ValueEntries = Entries(simple, fragment, value);
-        ListEntries = Entries(simple, fragment, selection);
-        ItemEntries = Entries(simple, fragment, item);
-        ScrollEntries = Entries(simple, fragment, scroll);
-        ExpandEntries = Entries(simple, fragment, expand);
-        ExpandInvokeEntries = Entries(simple, fragment, invoke, expand);
-        RangeEntries = Entries(simple, fragment, range);
-        RangeInvokeEntries = Entries(simple, fragment, invoke, range);
-        TextEntries = Entries(simple, fragment, value, scroll, text, text2);
+        // A stable CCW implements the transport interfaces. Pattern() advertises only
+        // capabilities present in the current immutable semantic snapshot. Keeping the
+        // transport stable supports compound controls and later optional capabilities
+        // (for example progress changing from indeterminate to determinate) without
+        // invalidating an accessibility client's retained provider identity.
+        NodeEntries = Entries(
+            simple,
+            fragment,
+            invoke,
+            value,
+            selection,
+            item,
+            scroll,
+            expand,
+            range,
+            toggle,
+            text,
+            text2
+        );
     }
 
     protected override ComInterfaceEntry* ComputeVtables(
@@ -278,55 +291,13 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         out int count
     )
     {
-        var provider = (WindowsUiaProvider)obj;
-        if (provider.IsRoot)
+        if (((WindowsUiaProvider)obj).IsRoot)
         {
             count = 3;
             return RootEntries;
         }
-        var actions = provider.ProviderActions;
-        if (provider.ProviderHasText)
-        {
-            count = 6;
-            return TextEntries;
-        }
-        if (actions.HasFlag(SemanticAction.ExpandCollapse))
-        {
-            count = actions.HasFlag(SemanticAction.Invoke) ? 4 : 3;
-            return actions.HasFlag(SemanticAction.Invoke) ? ExpandInvokeEntries : ExpandEntries;
-        }
-        if (provider.ProviderHasRange)
-        {
-            count = actions.HasFlag(SemanticAction.Invoke) ? 4 : 3;
-            return actions.HasFlag(SemanticAction.Invoke) ? RangeInvokeEntries : RangeEntries;
-        }
-        if (actions.HasFlag(SemanticAction.Invoke))
-        {
-            count = 3;
-            return InvokeEntries;
-        }
-        if (actions.HasFlag(SemanticAction.SetValue))
-        {
-            count = 3;
-            return ValueEntries;
-        }
-        if (actions.HasFlag(SemanticAction.Select))
-        {
-            count = 3;
-            return ItemEntries;
-        }
-        if (actions.HasFlag(SemanticAction.Scroll))
-        {
-            count = 3;
-            return ScrollEntries;
-        }
-        if (provider.ProviderRole == SemanticRole.List)
-        {
-            count = 3;
-            return ListEntries;
-        }
-        count = 2;
-        return PlainEntries;
+        count = 12;
+        return NodeEntries;
     }
 
     protected override object CreateObject(nint externalComObject, CreateObjectFlags flags) =>
@@ -448,6 +419,30 @@ internal sealed unsafe class UiaWrappers : ComWrappers
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
     private static int InvokeCall(ComInterfaceDispatch* d) => Guard(() => P(d).Invoke());
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int Toggle(ComInterfaceDispatch* d) => Guard(() => P(d).Toggle());
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int ToggleState(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).ToggleState(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int CanSelectMultiple(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).CanSelectMultiple(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int IsSelectionRequired(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).IsSelectionRequired(out *x));
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
     private static int Expand(ComInterfaceDispatch* d) => Guard(() => P(d).Expand());

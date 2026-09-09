@@ -1,0 +1,18 @@
+namespace Lucent.Core;
+
+style SelectValueStyle {
+    MainGrow: 1;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+style SelectChevronStyle {
+    Width: 20;
+    Height: 20;
+}
+
+internal component SelectContent(SelectBinding binding, Style? style) {
+    <SelectHost binding={binding} style={style}>
+        <SelectionDecoration content={binding.Value} style={SelectValueStyle} />
+        <Icon source={() => NavigationArtwork.Expanded} style={SelectChevronStyle} />
+    </SelectHost>
+}

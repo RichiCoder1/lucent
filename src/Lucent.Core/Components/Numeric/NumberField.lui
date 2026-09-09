@@ -1,0 +1,31 @@
+namespace Lucent.Core;
+using System;
+
+/// <summary>Creates a culture-aware controlled decimal field with explicit draft commit and named step actions.</summary>
+public component NumberField(
+    string label,
+    Func<decimal?> value,
+    Action<decimal?> onValueRequested,
+    NumericEditOptions options,
+    Func<string>? help = null,
+    FormSession? form = null,
+    string? fieldId = null,
+    FieldParticipation participation = FieldParticipation.WhenNotCollapsed,
+    bool required = false,
+    Func<bool>? enabled = null,
+    Func<bool>? readOnly = null,
+    Style? style = null
+) {
+    readonly NumericEditSession numeric = new(owner, value, onValueRequested, options, fieldId ?? label);
+    <Field
+        label={label}
+        editor={field => NumberFieldEditor(field, numeric, enabled, readOnly)}
+        validation={() => numeric.Validation}
+        help={help}
+        session={form}
+        fieldId={fieldId}
+        participation={participation}
+        required={required}
+        style={style}
+    />
+}

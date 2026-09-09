@@ -1,0 +1,10 @@
+namespace Lucent.Core;
+
+style TooltipTextStyle {
+    MaxWidth: 360;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+internal component TooltipPopup(string description) {
+    <Text style={TooltipTextStyle}>{description}</Text>
+}

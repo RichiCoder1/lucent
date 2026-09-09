@@ -1,0 +1,67 @@
+namespace Lucent.ComponentBrowser;
+
+style BrowserHeaderStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Symmetric(24, 18);
+    Spacing: 14;
+    MainShrink: 0;
+}
+
+style HeaderTopStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 18;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+style HeaderTitleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 3;
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 260;
+}
+
+style HeaderActionsStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    Wrap: true;
+    MainShrink: 0;
+}
+
+style HeaderSearchStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 240;
+}
+
+style HeaderSearchRowStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 10;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+public component BrowserHeader(ComponentBrowserState browser, ThemeContext theme) {
+    <Layout style={BrowserHeaderStyle}>
+        <Layout style={HeaderTopStyle}>
+            <Layout style={HeaderTitleStyle}>
+                <Text style={PresentationStyles.Title} name="component-browser.title">Components</Text>
+                <Text style={PresentationStyles.Secondary}>Stock recipes, working examples, and source you can take with you.</Text>
+            </Layout>
+            <Layout style={HeaderActionsStyle}>
+                <Button onInvoke={() => ComponentBrowserTheme.SetAppearance(theme, ThemeAppearance.Light)} style={Style.Empty.Enabled(() => theme.Appearance != ThemeAppearance.Light)} name="component-browser.theme-light">Light</Button>
+                <Button onInvoke={() => ComponentBrowserTheme.SetAppearance(theme, new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal))} style={Style.Empty.Enabled(() => theme.Appearance != new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal))} name="component-browser.theme-dark">Dark</Button>
+                <Button onInvoke={() => ComponentBrowserTheme.SetAppearance(theme, new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.High))} style={Style.Empty.Enabled(() => theme.Appearance != new ThemeAppearance(ThemeColorScheme.Light, ThemeContrast.High))} name="component-browser.theme-high-contrast">High contrast</Button>
+                <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.ListFilter} onInvoke={browser.ToggleDensity} name="component-browser.density">{browser.Density == BrowserDensity.Comfortable ? "Density: comfortable" : "Density: compact"}</Button>
+            </Layout>
+        </Layout>
+        <Layout style={HeaderSearchRowStyle}>
+            <Layout style={HeaderSearchStyle}>
+                <Text style={PresentationStyles.Caption}>Find a component</Text>
+                <TextField session={browser.SearchEditor} onChange={browser.SetSearch} label="Search components" placeholder="Search by name, family, or purpose" name="component-browser.search" />
+            </Layout>
+            <Status content={() => browser.VisibleItems.Count + " of " + ComponentCatalog.Items.Count + " recipes"} style={PresentationStyles.Secondary} name="component-browser.result-count" />
+        </Layout>
+    </Layout>
+}

@@ -1,0 +1,31 @@
+namespace Lucent.ComponentBrowser;
+
+style FeedbackExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+style FeedbackActionsStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 10;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+public component FeedbackExample(ComponentBrowserState browser) {
+    <Layout style={FeedbackExampleStyle}>
+        <Status content={() => browser.CurrentExampleState == ExampleState.Busy ? "Loading the next fixture page…" : "Ready to load a deterministic fixture page."} name="component-browser.feedback.status" />
+        <ProgressBar label="Fixture page loaded" value={() => browser.ProgressFraction} name="component-browser.feedback.progress" />
+        <Layout style={FeedbackActionsStyle}>
+            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.RefreshCw} onInvoke={browser.AdvanceProgress} name="component-browser.feedback.advance">Advance progress</Button>
+            <Button onInvoke={browser.RetryExample} style={Style.Empty.Enabled(() => browser.CurrentExampleState == ExampleState.Error)} name="component-browser.feedback.retry">Retry</Button>
+        </Layout>
+        if (browser.CurrentExampleState == ExampleState.Error) {
+            <InlineNotice message={() => "The fixture page failed to load. Retry keeps the current gallery context."} severity={NoticeSeverity.Error} onAction={browser.RetryExample} actionLabel="Retry" name="component-browser.feedback.error" />
+        }
+        if (browser.CurrentExampleState != ExampleState.Error) {
+            <InlineNotice message={() => "The progress value is determinate and owned by application state."} severity={NoticeSeverity.Information} name="component-browser.feedback.notice" />
+        }
+    </Layout>
+}

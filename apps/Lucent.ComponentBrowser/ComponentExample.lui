@@ -1,0 +1,24 @@
+namespace Lucent.ComponentBrowser;
+
+public component ComponentExample(ComponentBrowserState browser) {
+    <Layout>
+        if (browser.SelectedId == "buttons") {
+            <ButtonsExample browser={browser} />
+        }
+        if (browser.SelectedId == "fields") {
+            <FieldsExample browser={browser} />
+        }
+        if (browser.SelectedId == "selection") {
+            <SelectionExample browser={browser} />
+        }
+        if (browser.SelectedId == "feedback") {
+            <FeedbackExample browser={browser} />
+        }
+        if (browser.SelectedId == "menus") {
+            <MenusExample browser={browser} />
+        }
+        if (browser.SelectedId == "surfaces") {
+            <PopoverExample browser={browser} />
+        }
+    </Layout>
+}

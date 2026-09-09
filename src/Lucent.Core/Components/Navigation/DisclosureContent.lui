@@ -1,0 +1,25 @@
+namespace Lucent.Core;
+
+style DisclosureIconStyle {
+    Width: 20;
+    Height: 20;
+}
+style DisclosureLabelStyle {
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+style DisclosureBodyStyle {
+    Axis: LayoutAxis.Column;
+    Padding: Insets.Symmetric(16, 0);
+}
+
+internal component DisclosureContent(DisclosureBinding binding, ComponentContent panel, Style? style) {
+    <DisclosureFrame style={style}>
+        <DisclosureHeaderHost binding={binding}>
+            <Icon source={() => binding.Expanded() ? NavigationArtwork.Expanded : NavigationArtwork.Collapsed} style={DisclosureIconStyle} />
+            <SelectionDecoration content={() => binding.Heading} style={DisclosureLabelStyle} />
+        </DisclosureHeaderHost>
+        <Layout style={DisclosureBodyStyle}>
+            {panel}
+        </Layout>
+    </DisclosureFrame>
+}

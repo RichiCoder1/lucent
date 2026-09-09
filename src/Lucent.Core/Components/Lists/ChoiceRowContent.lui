@@ -1,0 +1,20 @@
+namespace Lucent.Core;
+
+style ChoiceIndicatorStyle {
+    Width: 36;
+    Height: 20;
+}
+
+style ChoiceContentStyle {
+    MainGrow: 1;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+internal component ChoiceRowContent(ChoiceRowBinding binding, ComponentRecipe content) {
+    <ChoiceRowHost binding={binding}>
+        <Icon source={() => binding.Selected() ? SelectionArtwork.CheckOn : SelectionArtwork.CheckOff} style={ChoiceIndicatorStyle} />
+        <Layout style={ChoiceContentStyle}>
+            {content}
+        </Layout>
+    </ChoiceRowHost>
+}

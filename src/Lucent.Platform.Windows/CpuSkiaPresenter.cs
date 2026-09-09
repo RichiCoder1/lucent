@@ -65,7 +65,8 @@ internal sealed class CpuSkiaPresenter : IDisposable
         WindowsViewport viewport,
         SkiaSceneRenderer renderer,
         bool showCaret = true,
-        Action<SKCanvas>? drawUnderlay = null
+        Action<SKCanvas>? drawUnderlay = null,
+        Action<SKCanvas>? drawOverlay = null
     )
     {
         CheckThread();
@@ -80,6 +81,7 @@ internal sealed class CpuSkiaPresenter : IDisposable
         canvas.Clear(SKColors.Transparent);
         drawUnderlay?.Invoke(canvas);
         renderer.Render(scene, canvas, showCaret);
+        drawOverlay?.Invoke(canvas);
         var rasterized = Stopwatch.GetTimestamp();
         using var pixels =
             _surface.PeekPixels()

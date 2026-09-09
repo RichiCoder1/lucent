@@ -1,0 +1,8 @@
+namespace Lucent.ComponentBrowser;
+
+public component MenusExampleSubmenu(ComponentBrowserState browser) {
+    <Menu>
+        <MenuItem onInvoke={() => browser.SetMenuMessage("Nested action invoked.")}>Nested action</MenuItem>
+        <MenuItem onInvoke={() => browser.SetMenuMessage("The submenu was dismissed after invocation.")}>Dismiss branch</MenuItem>
+    </Menu>
+}
