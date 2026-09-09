@@ -173,9 +173,7 @@ public sealed class ImageLoadingContracts
         );
         handle.Dispose();
         call.Complete(new TrackingImage(1, 1, 4));
-        Assert.IsTrue(SpinWait.SpinUntil(() => cache.Metrics.Active == 0, 5000));
-
-        var failure = Assert.ThrowsExactly<AggregateException>(() => graph.Drain());
+        var failure = DrainFailure(graph);
         StringAssert.Contains(failure.ToString(), "bad cancellation callback");
     }
 
@@ -219,9 +217,7 @@ public sealed class ImageLoadingContracts
         using var cache = new ImageCache(preparer);
         using var handle = cache.Acquire(scope, Source('7'), new ImageRendition(1, 1));
         preparer.Next().Fail(new OperationCanceledException("unexpected cancellation"));
-        Assert.IsTrue(SpinWait.SpinUntil(() => cache.Metrics.Active == 0, 5000));
-
-        var failure = Assert.ThrowsExactly<AggregateException>(() => graph.Drain());
+        var failure = DrainFailure(graph);
         StringAssert.Contains(failure.ToString(), "unexpected cancellation");
     }
 
@@ -280,6 +276,32 @@ public sealed class ImageLoadingContracts
                 5000
             )
         );
+    }
+
+    private static AggregateException DrainFailure(ReactiveGraph graph)
+    {
+        // Active counts preparation, not delivery. Completion releases the cache lock
+        // before posting faults; observe the actual owner outcome across that boundary.
+        AggregateException? failure = null;
+        Assert.IsTrue(
+            SpinWait.SpinUntil(
+                () =>
+                {
+                    try
+                    {
+                        graph.Drain();
+                    }
+                    catch (AggregateException error)
+                    {
+                        failure = error;
+                    }
+                    return failure is not null;
+                },
+                5000
+            ),
+            "The image preparation failure did not reach the owner queue."
+        );
+        return failure!;
     }
 
     private sealed class ControlledPreparer : IImagePreparer
