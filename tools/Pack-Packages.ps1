@@ -38,7 +38,14 @@ foreach ($name in $names) {
             if ($runtimeTooling -or $packedTooling) { throw 'Core package included build-time compiler, generator or Roslyn tooling.' }
         }
         if ($name -eq 'Lucent.Platform.Windows' -and (-not $zip.GetEntry('runtimes/win-x64/native/vcruntime140.dll') -or -not $zip.GetEntry('buildTransitive/notices/SDL3-CS/LICENSE'))) { throw 'Windows package omitted native runtime or notices.' }
-        if ($name -eq 'Lucent.Lui.Sdk' -and (-not $zip.GetEntry('analyzers/dotnet/cs/Lucent.Lui.Generator.dll') -or -not $zip.GetEntry('tools/net10.0/Lucent.Lui.Tooling.dll'))) { throw 'SDK package omitted generator or formatter.' }
+        if ($name -eq 'Lucent.Lui.Sdk') {
+            foreach ($required in @('Sdk/Sdk.props', 'Sdk/Sdk.targets', 'analyzers/dotnet/cs/Lucent.Lui.Generator.dll', 'analyzers/dotnet/cs/Lucent.Lui.Compiler.dll', 'tools/net10.0/Lucent.Lui.Tooling.dll', 'tools/net10.0/Lucent.Lui.Tooling.runtimeconfig.json')) {
+                if (-not $zip.GetEntry($required)) { throw "SDK package omitted build-time asset/compiler tooling: $required" }
+            }
+            if ($spec.SelectNodes('//*[local-name()="dependencies"]//*[local-name()="dependency"]').Count -ne 0) {
+                throw 'SDK package introduced runtime package dependencies; build-time tooling must remain private.'
+            }
+        }
     } finally { $zip.Dispose() }
 }
 Write-Output "Lucent package set: PASS ($Version, $commit)"

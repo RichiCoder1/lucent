@@ -30,4 +30,6 @@ See [testing guidance](docs/TESTING.md) for focused tests, NativeAOT publication
 
 Prerelease distribution and independent application setup: [NuGet packages](docs/PACKAGES.md). Lucent is [MIT licensed](LICENSE).
 
+Typed artwork and binary resources: [packaged assets](docs/ASSETS.md).
+
 [Light Notes](https://github.com/RichiCoder1/light-notes) is the first independent package consumer, with a `.lui` inbox/editor, local persistence, autosave, recoverable drafts and collection continuity. Issue Browser remains the maintained stock-theme example and deterministic framework exercise.

@@ -1,0 +1,9 @@
+namespace Fixture.Library;
+
+internal component AssetView() {
+    <Column>
+        <Text content={Fixture.Resources.Catalog.Images.Brand.PackagedAsset!.Id.Path} />
+        <Text content={Fixture.Branding.Catalog.Photos.TinyJpeg.PackagedAsset!.Id.Path} />
+        <Text content={Fixture.Binary.Catalog.Payload.Binary.Id.Path} />
+    </Column>
+}

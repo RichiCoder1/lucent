@@ -1,10 +1,10 @@
 # Current work and follow-ups
 
-The September 8 restart checkpoint has been resumed. UI testing was reauthorized by the owner after the restart; later instructions take precedence.
+The assets/icons batch is active. The latest owner instruction requires asking before any desktop focus test. Headless builds, rendering and console NativeAOT checks may continue.
 
 ## Quality integration
 
-The implementation and local verification for #119 and #143 are complete. Final publication, CI results and the independently consumed Light Notes package version are recorded in those issues. Confirm their delivery status before starting the next batch.
+The #119/#143 batch is complete and published as `0.3.0-dev.45.1` from Lucent `3707b21`; Light Notes `eab529a` consumes it. Both CI runs passed, and final source-bound results are recorded in the delivery issues.
 
 - Component organization preserves the existing public type and 256 existing members, including defaults, attributes and bodies. The contributor guide is `docs/COMPONENTS.md`.
 - Core generates the stock ErrorNotice from ordinary `.lui`; Issue Browser consumes it. Light Notes retains its app-specific error presentation because the Action-only notice does not preserve its command enabled/busy behavior and branded layout.
@@ -16,7 +16,9 @@ The implementation and local verification for #119 and #143 are complete. Final 
 
 ## Next work
 
-The accepted images/icons/assets design is queued in #144, with #145–151 and Light Notes #4. Read #144 comment 5592602334 and `docs/ROADMAP.md` before beginning it. Full transitions #142 are a separate design.
+The accepted images/icons/assets design is active in #144. Packaged typed assets (#145) are implemented: explicit declarations, generated accessors and metadata, exact embedded-resource providers, incremental output repair, and cross-library identity diagnostics. See `docs/ASSETS.md`. Focus-free checks passed: Core asset contracts 4/4, generator tests 16/16, Core architecture checks, and the maintained Assets suite against local SDK candidate `0.3.0-dev.assets.13`. The suite proves cold editor binding, warm builds, metadata/diagnostic cases and real NativeAOT project/package consumers after source/feed/cache removal. These are local results; official publication follows repository CI.
+
+Next is owned asynchronous Image/Icon loading (#146). The isolated Svg.Skia feasibility proof passed actual NativeAOT rendering, but #147 must still implement bounded static-SVG preflight, required-reference validation and explicit unsupported-feature errors before adoption. The full scope is #145–151 and Light Notes #4; #144 comment 5592602334 is the accepted design. Full transitions #142 remain separate. No local desktop focus tests ran for #145; ask before running them.
 
 Existing focused follow-ups remain #114 (projection), #116 (Grid/overflow), #117 (fractional paragraphs), #118 (custom layout), #152 (public `.lui` XML documentation) and #153 (physical mixed-DPI input/popups). All attached monitors were at 100%; synthetic scale checks and 150% shaping/paint do not certify physical mixed-monitor transitions.
 

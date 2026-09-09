@@ -1,4 +1,8 @@
 using Lucent.Lui.Compiler;
+using Lucent.Lui.Tooling.Assets;
+
+if (args.FirstOrDefault() == "--generate-assets")
+    return AssetCatalogGenerator.Run(args.Skip(1).ToArray(), Console.Out, Console.Error);
 
 var check = args.FirstOrDefault() == "--check";
 var write = args.FirstOrDefault() == "--write";

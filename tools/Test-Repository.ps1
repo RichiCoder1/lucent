@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Managed', 'Native', 'Published', 'Sdk', 'Performance', 'Accessibility')]
+    [ValidateSet('Managed', 'Native', 'Published', 'Sdk', 'Assets', 'Performance', 'Accessibility')]
     [string] $Suite = 'Managed',
     [string[]] $Project = @(),
     [string] $Filter
@@ -201,6 +201,10 @@ try {
         'Sdk' {
             & (Join-Path $PSScriptRoot 'Verify-LuiSdk.ps1')
             if ($LASTEXITCODE) { throw 'LUI SDK integration proof failed.' }
+        }
+        'Assets' {
+            & (Join-Path $PSScriptRoot 'Verify-LuiAssets.ps1')
+            if ($LASTEXITCODE) { throw 'Packaged asset integration proof failed.' }
         }
         'Performance' { Invoke-Performance }
         'Accessibility' { Invoke-Accessibility }

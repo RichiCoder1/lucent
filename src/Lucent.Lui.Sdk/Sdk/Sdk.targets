@@ -3,7 +3,90 @@
     <LucentLuiProjectEpoch Condition="'$(LucentLuiProjectEpoch)' == ''">$(MSBuildProjectFullPath)|$(TargetFramework)|$(Configuration)</LucentLuiProjectEpoch>
     <LucentLuiCompilerOptions Condition="'$(LucentLuiCompilerOptions)' == ''">LangVersion=$(LangVersion)|Nullable=$(Nullable)|ImplicitUsings=$(ImplicitUsings)|Optimize=$(Optimize)|WarningLevel=$(WarningLevel)|TreatWarningsAsErrors=$(TreatWarningsAsErrors)</LucentLuiCompilerOptions>
     <LucentLuiDefines Condition="'$(LucentLuiDefines)' == ''">$(DefineConstants)</LucentLuiDefines>
+    <LucentAssetDomain Condition="'$(LucentAssetDomain)' == ''">$(AssemblyName)</LucentAssetDomain>
+    <LucentAssetAccessorNamespace Condition="'$(LucentAssetAccessorNamespace)' == ''">$(RootNamespace)</LucentAssetAccessorNamespace>
+    <LucentAssetAccessorClass Condition="'$(LucentAssetAccessorClass)' == ''">Assets</LucentAssetAccessorClass>
+    <_LucentAssetOutputDirectory>$(IntermediateOutputPath)lucent-assets\</_LucentAssetOutputDirectory>
+    <_LucentAssetManifest>$(_LucentAssetOutputDirectory)manifest.txt</_LucentAssetManifest>
+    <_LucentAssetManifestCandidate>$(_LucentAssetOutputDirectory)manifest.next</_LucentAssetManifestCandidate>
+    <_LucentAssetGeneratedSource>$(_LucentAssetOutputDirectory)Lucent.Assets.g.cs</_LucentAssetGeneratedSource>
+    <LucentAssetInventory Condition="'$(LucentAssetInventory)' == ''">$(_LucentAssetOutputDirectory)inventory.json</LucentAssetInventory>
+    <_LucentAssetPayloadDirectory>$(_LucentAssetOutputDirectory)payload</_LucentAssetPayloadDirectory>
+    <_LucentAssetPayloadStamp>$(_LucentAssetOutputDirectory)payload.stamp</_LucentAssetPayloadStamp>
+    <_LucentAssetTool>$(MSBuildThisFileDirectory)..\tools\net10.0\Lucent.Lui.Tooling.dll</_LucentAssetTool>
+    <_LucentAssetToolDependency>$(MSBuildThisFileDirectory)..\tools\net10.0\Lucent.Lui.Compiler.dll</_LucentAssetToolDependency>
+    <_LucentAssetTargets>$(MSBuildThisFileFullPath)</_LucentAssetTargets>
   </PropertyGroup>
+  <Target Name="PrepareLucentAssetManifest" BeforeTargets="GenerateLucentAssets" Condition="'@(LucentAsset)' != ''">
+    <ItemGroup>
+      <_LucentAssetManifestLines Remove="@(_LucentAssetManifestLines)" />
+      <_LucentAssetManifestCandidateWithHash Remove="@(_LucentAssetManifestCandidateWithHash)" />
+      <_LucentAssetManifestWithHash Remove="@(_LucentAssetManifestWithHash)" />
+      <_LucentAssetManifestLines Include="lucent-assets-v1&#x9;$([System.Uri]::EscapeDataString('$(MSBuildProjectDirectory)'))&#x9;$([System.Uri]::EscapeDataString('$(LucentAssetDomain)'))&#x9;$([System.Uri]::EscapeDataString('$(LucentAssetAccessorNamespace)'))&#x9;$([System.Uri]::EscapeDataString('$(LucentAssetAccessorClass)'))&#x9;$([System.Uri]::EscapeDataString('$(MSBuildProjectFullPath)'))" />
+      <_LucentAssetManifestLines Include="asset&#x9;$([System.Uri]::EscapeDataString('%(LucentAsset.FullPath)'))&#x9;$([System.Uri]::EscapeDataString('%(LucentAsset.Path)'))&#x9;$([System.Uri]::EscapeDataString('%(LucentAsset.Accessor)'))&#x9;$([System.Uri]::EscapeDataString('%(LucentAsset.AccessorNamespace)'))&#x9;$([System.Uri]::EscapeDataString('%(LucentAsset.Identity)'))&#x9;$([System.Uri]::EscapeDataString('%(LucentAsset.Kind)'))&#x9;$([System.Uri]::EscapeDataString('%(LucentAsset.Density)'))" />
+    </ItemGroup>
+    <MakeDir Directories="$(_LucentAssetOutputDirectory)" />
+    <WriteLinesToFile File="$(_LucentAssetManifestCandidate)" Lines="@(_LucentAssetManifestLines)" Overwrite="true" Encoding="UTF-8" />
+    <GetFileHash Files="$(_LucentAssetManifestCandidate)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_LucentAssetManifestCandidateWithHash" />
+    </GetFileHash>
+    <GetFileHash Files="$(_LucentAssetManifest)" Algorithm="SHA256" Condition="Exists('$(_LucentAssetManifest)')">
+      <Output TaskParameter="Items" ItemName="_LucentAssetManifestWithHash" />
+    </GetFileHash>
+    <PropertyGroup>
+      <_LucentAssetManifestCandidateHash>@(_LucentAssetManifestCandidateWithHash->'%(FileHash)')</_LucentAssetManifestCandidateHash>
+      <_LucentAssetManifestHash>@(_LucentAssetManifestWithHash->'%(FileHash)')</_LucentAssetManifestHash>
+    </PropertyGroup>
+    <Copy SourceFiles="$(_LucentAssetManifestCandidate)"
+          DestinationFiles="$(_LucentAssetManifest)"
+          Condition="'$(_LucentAssetManifestCandidateHash)' != '$(_LucentAssetManifestHash)'" />
+    <Delete Files="$(_LucentAssetManifestCandidate)" />
+  </Target>
+  <Target Name="ValidateLucentAssetOutputs"
+          DependsOnTargets="PrepareLucentAssetManifest"
+          BeforeTargets="GenerateLucentAssets"
+          Condition="'@(LucentAsset)' != ''">
+    <ItemGroup>
+      <_LucentExpectedPayload Remove="@(_LucentExpectedPayload)" />
+    </ItemGroup>
+    <Delete Files="$(_LucentAssetPayloadStamp)" Condition="!Exists('$(_LucentAssetGeneratedSource)') or !Exists('$(LucentAssetInventory)')" />
+    <ReadLinesFromFile File="$(_LucentAssetPayloadStamp)" Condition="Exists('$(_LucentAssetPayloadStamp)')">
+      <Output TaskParameter="Lines" ItemName="_LucentExpectedPayload" />
+    </ReadLinesFromFile>
+    <Delete Files="$(_LucentAssetPayloadStamp)"
+            Condition="'%(_LucentExpectedPayload.Identity)' != '' and !Exists('$(_LucentAssetPayloadDirectory)\%(_LucentExpectedPayload.Identity)')" />
+  </Target>
+  <Target Name="GenerateLucentAssets"
+          DependsOnTargets="PrepareLucentAssetManifest;ValidateLucentAssetOutputs"
+          BeforeTargets="AssignTargetPaths;CoreCompile"
+          Condition="'@(LucentAsset)' != ''"
+          Inputs="$(_LucentAssetManifest);@(LucentAsset);$(_LucentAssetTool);$(_LucentAssetToolDependency);$(_LucentAssetTargets)"
+          Outputs="$(_LucentAssetPayloadStamp)">
+    <Exec Command="dotnet &quot;$(_LucentAssetTool)&quot; --generate-assets &quot;$(_LucentAssetManifest)&quot; &quot;$(_LucentAssetGeneratedSource)&quot; &quot;$(LucentAssetInventory)&quot; &quot;$(_LucentAssetPayloadDirectory)&quot; &quot;$(_LucentAssetPayloadStamp)&quot;" />
+  </Target>
+  <Target Name="CollectLucentAssetOutputs"
+          DependsOnTargets="GenerateLucentAssets"
+          BeforeTargets="AssignTargetPaths;CoreCompile"
+          Condition="'@(LucentAsset)' != ''">
+    <ItemGroup>
+      <Compile Remove="$(_LucentAssetGeneratedSource)" />
+      <Compile Include="$(_LucentAssetGeneratedSource)" AutoGen="true" DesignTime="true" Visible="false" />
+      <EmbeddedResource Remove="$(_LucentAssetPayloadDirectory)\*" />
+      <EmbeddedResource Include="$(_LucentAssetPayloadDirectory)\*" />
+      <EmbeddedResource Update="$(_LucentAssetPayloadDirectory)\*">
+        <LogicalName>%(EmbeddedResource.Filename)%(EmbeddedResource.Extension)</LogicalName>
+        <ManifestResourceName>%(EmbeddedResource.Filename)%(EmbeddedResource.Extension)</ManifestResourceName>
+        <TargetPath>%(EmbeddedResource.Filename)%(EmbeddedResource.Extension)</TargetPath>
+        <WithCulture>false</WithCulture>
+      </EmbeddedResource>
+      <FileWrites Include="$(_LucentAssetGeneratedSource);$(LucentAssetInventory);$(_LucentAssetManifest);$(_LucentAssetPayloadStamp);$(_LucentAssetPayloadDirectory)\*" />
+    </ItemGroup>
+  </Target>
+  <Target Name="RemoveStaleLucentAssetOutputs"
+          BeforeTargets="AssignTargetPaths;CoreCompile"
+          Condition="'@(LucentAsset)' == '' and Exists('$(_LucentAssetOutputDirectory)')">
+    <RemoveDir Directories="$(_LucentAssetOutputDirectory)" />
+  </Target>
   <Target Name="ValidateLucentLuiLangVersion" BeforeTargets="CoreCompile" Condition="'$(LucentEnableLui)' != 'false'">
     <Error Condition="'$(LucentLuiLangVersion)' != 'preview'" Text="LucentLuiLangVersion must be 'preview' for this SDK proof." />
   </Target>
@@ -26,11 +109,18 @@
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Compiler.dll" />
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Generator.dll" />
   </ItemGroup>
+  <ItemGroup Condition="'$(LucentEnableLui)' == 'false'">
+    <AdditionalFiles Remove="@(AdditionalFiles->WithMetadataValue('Extension', '.lui'))" />
+    <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Generator.dll" />
+  </ItemGroup>
   <ItemGroup Condition="'$(LucentLuiImplicitUsings)' == 'true'">
     <Using Include="Lucent.Core" />
   </ItemGroup>
   <Target Name="CleanLucentLuiGeneratedFiles" AfterTargets="CoreClean" Condition="'$(EmitCompilerGeneratedFiles)' == 'true'">
     <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Lucent.Lui.Generator" />
+  </Target>
+  <Target Name="CleanLucentAssetGeneratedFiles" AfterTargets="CoreClean">
+    <RemoveDir Directories="$(_LucentAssetOutputDirectory)" />
   </Target>
   <Target Name="ResetLucentLuiGeneratedFiles" BeforeTargets="PrepareForBuild" Condition="'$(EmitCompilerGeneratedFiles)' == 'true'">
     <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Lucent.Lui.Generator" />

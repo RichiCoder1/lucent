@@ -29,6 +29,7 @@ The style-driven layout slice combines Core contracts for algorithms, conditiona
 | `Native` | Existing Core, R3, renderer and Windows contract executables under NativeAOT, without visible desktop interaction. Also runs in package CI. |
 | `Published` | NativeAOT packaging, startup/close, presentation, desktop interaction, and UI Automation behavior. |
 | `Sdk` | SDK package consumers, MSBuild integration, and generated NativeAOT applications. |
+| `Assets` | Focus-free packaged asset generation, cold editor symbols, invalidation, project/package references and console NativeAOT byte access. |
 | `Performance` | Runtime and tooling operation measurements when investigating performance. |
 | `Accessibility` | Automated Windows accessibility rule scans against the published application. |
 
@@ -36,6 +37,7 @@ The style-driven layout slice combines Core contracts for algorithms, conditiona
 ./tools/Test-Repository.ps1 -Suite Native
 ./tools/Test-Repository.ps1 -Suite Published
 ./tools/Test-Repository.ps1 -Suite Sdk
+./tools/Test-Repository.ps1 -Suite Assets
 ./tools/Test-Repository.ps1 -Suite Performance
 ./tools/Test-Repository.ps1 -Suite Accessibility
 ```

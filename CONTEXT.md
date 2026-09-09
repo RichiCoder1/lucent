@@ -92,6 +92,22 @@ _Avoid_: Captured item, mutable row model, replacement component
 An immutable box-local visual value. The initial closed set is solid color and bounded linear gradient. A brush does not imply image layers, borders, clipping, opacity, or layout.
 _Avoid_: CSS background, renderer paint object, `IBrush`
 
+**Asset identity**:
+The stable domain and logical path identifying declared content, independent of its physical source or installed location. A content revision is distinct from that identity.
+_Avoid_: File path, resource URL, cache key
+
+**Asset reference**:
+An immutable description of a declared content revision and the capability to obtain its bytes. Holding the reference does not load or prepare that content.
+_Avoid_: Loaded image, open stream, native resource
+
+**Image source**:
+A reusable description of image content shared by image and icon presentation. The description is distinct from a mounted view or a prepared rendition.
+_Avoid_: Icon source, image component, decoded bitmap
+
+**Image rendition**:
+A prepared representation of one content revision for particular rendering requirements. Different renditions may share the same asset identity and revision.
+_Avoid_: New image identity, resized component
+
 **Project context**:
 The authoritative evaluated C# project inputs used consistently by build and editor tooling: compilation, references, options, global usings, and `.lui` documents.
 _Avoid_: Workspace approximation, project manifest

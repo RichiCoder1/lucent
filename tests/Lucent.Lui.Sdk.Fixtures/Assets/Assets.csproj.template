@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/__LUCENT_SDK_VERSION__">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>AssetFixture.Library</AssemblyName>
+    <RootNamespace>Fixture.Library</RootNamespace>
+    <PackageId>AssetFixture.Library</PackageId>
+    <PackageVersion>1.0.0</PackageVersion>
+    <Authors>Lucent</Authors>
+    <Description>SDK asset fixture used by Verify-LuiAssets.ps1.</Description>
+    <IsPackable>true</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <LucentAssetDomain>Fixture.Library.Domain</LucentAssetDomain>
+    <LucentAssetAccessorNamespace>Fixture.Resources</LucentAssetAccessorNamespace>
+    <LucentAssetAccessorClass>Catalog</LucentAssetAccessorClass>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Lucent.Core" Version="__LUCENT_VERSION__" />
+    <LucentAsset Include="Artwork\brand.svg" Path="images/brand.svg" />
+    <LucentAsset Include="Artwork\tiny.png" Path="pixels/tiny.png" Density="2" />
+    <LucentAsset Include="Artwork\rotated.jpeg" Path="photos/tiny.jpeg" Density="2" Accessor="Photos.TinyJpeg" AccessorNamespace="Fixture.Branding" />
+    <LucentAsset Include="Data\payload.bin" Path="data/payload.bin" Kind="Binary" Accessor="Payload.Binary" AccessorNamespace="Fixture.Binary" />
+  </ItemGroup>
+</Project>

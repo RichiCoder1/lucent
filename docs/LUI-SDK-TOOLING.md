@@ -25,9 +25,12 @@ The compiler and generator target `netstandard2.0`, the documented analyzer-comp
 - `<LucentLuiLangVersion>` with SDK default `preview`;
 - evaluated C# `$(RootNamespace)` as style-token binding and freshness authority;
 - default-enabled, opt-out ordinary C# `Lucent.Core` namespace using only; built-in components, properties, and variants remain tag/LHS/`when` scoped;
+- explicit `LucentAsset` declarations, typed accessors and exact embedded payloads as described in [packaged assets](ASSETS.md);
 - validation, generated inspection, formatting check, and clean integration.
 
 Projects may disable the default glob and list files explicitly. `.lui` never enters `Compile`. Evaluated items/imports are tested with `dotnet msbuild -preprocess`; broad or duplicate globs fail tests. Build props/targets do not mutate restore-driving framework/package properties.
+
+Asset accessors are ordinary generated `Compile` inputs under `obj`, available before `.lui` semantic compilation and in cold design-time builds. They are separate from the `.lui` source generator's `AddSource` output: one generator cannot depend on another generator's newly emitted symbols in the same run. Exact embedded resources and their static providers belong to the declaring assembly. A build-time analyzer checks referenced provider identity metadata; no runtime catalog scan is introduced.
 
 ## Compiler and generator
 

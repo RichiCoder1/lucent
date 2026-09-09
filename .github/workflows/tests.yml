@@ -70,6 +70,7 @@ jobs:
           $version = "0.3.0-dev.${{ github.run_number }}.1"
           ./tools/Test-Repository.ps1 -Suite Native
           ./tools/Pack-Packages.ps1 -Version $version
+          ./tools/Verify-LuiAssets.ps1 -Version $version -Feed "artifacts/packages/$version"
           ./tools/Test-HeadlessPackages.ps1 -Version $version -Feed "artifacts/packages/$version"
           ./tools/Test-Packages.ps1 -Version $version -Feed "artifacts/packages/$version"
       - name: Publish immutable package set
