@@ -116,7 +116,9 @@ public sealed class IssueBrowserTests
             )
         );
         Assert(
-            Task.WhenAll(preparations).GetAwaiter().GetResult()
+            Task.WhenAll(preparations)
+                .GetAwaiter()
+                .GetResult()
                 .All(outcome => outcome.Status == ImagePreloadStatus.Ready),
             "Issue Browser Lucide artwork did not prepare."
         );
@@ -911,8 +913,8 @@ public sealed class IssueBrowserTests
         + string.Join(",", snapshot.Children.Select(SemanticEvidence))
         + "]";
 
-    static Composition LoadedComposition(out ReactiveGraph graph, out IssueBrowserState browser)
-        => LoadedComposition(out graph, out browser, out _);
+    static Composition LoadedComposition(out ReactiveGraph graph, out IssueBrowserState browser) =>
+        LoadedComposition(out graph, out browser, out _);
 
     static Composition LoadedComposition(
         out ReactiveGraph graph,
@@ -963,8 +965,8 @@ public sealed class IssueBrowserTests
                 _ => null,
             };
             if (children is not null)
-            foreach (var child in SceneNodes(children))
-                yield return child;
+                foreach (var child in SceneNodes(children))
+                    yield return child;
         }
     }
 

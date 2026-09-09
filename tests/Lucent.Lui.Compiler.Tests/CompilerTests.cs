@@ -45,7 +45,10 @@ internal component Stock(ImageSource icon, Func<string> label, Action invoke) {
                 && result.Source.Contains("leadingIcon:", StringComparison.Ordinal)
                 && result.Source.Contains("Components.IconButton(", StringComparison.Ordinal),
             "stock icon controls did not bind through .lui: "
-                + string.Join(" | ", result.Diagnostics.Select(item => item.Id + ": " + item.Message))
+                + string.Join(
+                    " | ",
+                    result.Diagnostics.Select(item => item.Id + ": " + item.Message)
+                )
                 + "\n"
                 + result.Source
         );

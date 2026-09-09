@@ -32,15 +32,27 @@ public sealed class ImageComponentContracts
 
         Assert.AreEqual(2, leading.Children.Count);
         Assert.AreEqual(0, iconOnly.Children.Count);
-        Assert.AreEqual(ImageColorMode.Monochrome, leading.Children[0].Resolve(ImageProperties.ColorMode).Value);
+        Assert.AreEqual(
+            ImageColorMode.Monochrome,
+            leading.Children[0].Resolve(ImageProperties.ColorMode).Value
+        );
         Assert.AreEqual("Refresh", leading.Children[1].Resolve(ProjectionProperties.Text).Value);
-        Assert.AreEqual(ImageColorMode.Monochrome, iconOnly.Resolve(ImageProperties.ColorMode).Value);
+        Assert.AreEqual(
+            ImageColorMode.Monochrome,
+            iconOnly.Resolve(ImageProperties.ColorMode).Value
+        );
         var buttons = Flatten(composition.SemanticSnapshot()!)
             .Where(node => node.Role == SemanticRole.Button)
             .ToArray();
-        CollectionAssert.AreEquivalent(ExpectedButtonNames, buttons.Select(node => node.Name).ToArray());
+        CollectionAssert.AreEquivalent(
+            ExpectedButtonNames,
+            buttons.Select(node => node.Name).ToArray()
+        );
         Assert.AreEqual(2, buttons.Length);
-        Assert.AreEqual(0, Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.Image));
+        Assert.AreEqual(
+            0,
+            Flatten(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.Image)
+        );
         foreach (var button in buttons)
             Assert.AreEqual(
                 SemanticCommandResult.Applied,
@@ -81,7 +93,10 @@ public sealed class ImageComponentContracts
             Assert.AreEqual(24f, source.Metadata.Height);
             using var stream = asset.OpenRead();
             Assert.AreEqual(asset.ByteLength, stream.Length);
-            Assert.AreEqual(asset.ContentHash, Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant());
+            Assert.AreEqual(
+                asset.ContentHash,
+                Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant()
+            );
             stream.Position = 0;
             var svg = XDocument.Load(stream).Root!;
             Assert.AreEqual("0 0 24 24", (string?)svg.Attribute("viewBox"));
