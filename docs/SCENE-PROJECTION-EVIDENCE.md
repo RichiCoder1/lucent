@@ -21,9 +21,24 @@ The first after run is retained at `artifacts/scene-projection-114/after.json`, 
 
 The implemented optimization retains resolved style values already captured for the input mutation guard and reuses them during the final layout in the same projection pass. Paint-only background, opacity, and text-color reads remain outside input tracking. A fresh post-layout signature still detects style, typography, scrolling, input, and participation changes made while producing the scene. The snapshot does not survive into another projection and does not implement dirty-subtree caching.
 
-The after worktree also contained the focused #116 Grid/Flex allocation correction and #117 paragraph-width correction, so elapsed-time changes cannot be attributed solely to #114. The allocation reduction is consistent with removing one repeated property-resolution pass, but it is still evidence from the combined source. Allocations remain substantial, especially for deep inherited-property resolution, and warrant later measurement before another narrow optimization. The probe currently includes Issue Browser and synthetic trees. Light Notes remains a separate package consumer and was not included in this measured corpus. These results do not establish a release threshold, a universal frame budget, cold-start behavior, renderer cost, or performance on other hardware.
+The after worktree also contained the focused #116 Grid/Flex allocation correction and #117 paragraph-width correction, so elapsed-time changes cannot be attributed solely to #114. The allocation reduction is consistent with removing one repeated property-resolution pass, but it is still evidence from the combined source. Allocations remain substantial, especially for deep inherited-property resolution, and warrant later measurement before another narrow optimization. These results do not establish a release threshold, a universal frame budget, cold-start behavior, renderer cost, or performance on other hardware.
 
-Commands used:
+## Independent Light Notes consumer
+
+Light Notes also characterizes its actual `.lui` shell against official Lucent `0.3.0-dev.51.1+a83761967f5f42d76179079c7b5129f897b5481e`. Its opt-in `OptInNotesProjectionProbe` uses a temporary seeded review database, waits for 18 ready image nodes, and runs five warmups followed by 20 samples per scenario. It uses the same machine, runtime and Release x64 configuration as the framework measurements above. The final viewport has 146 retained boxes and 12 realized list rows; the wide semantic tree has 55 nodes and the medium endpoint has 53. Counts describe the final endpoint, not every intermediate responsive branch.
+
+| Light Notes scenario | Run 3 p50 | Run 4 p50 | Run 4 p50 allocation | Ownership retries over 20 samples |
+| --- | ---: | ---: | ---: | ---: |
+| Unchanged, 1180 px | 73.86 ms | 69.01 ms | 77,499,952 B | 0 |
+| Same wide bucket, 1100/1180 px | 69.43 ms | 61.27 ms | 77,494,240 B | 0 |
+| Narrow/wide, 800/1120 px | 115.22 ms | 117.81 ms | 140,586,872 B | 19 |
+| Narrow/medium, 800/900 px | 125.19 ms | 120.37 ms | 140,570,224 B | 19 |
+
+These are after-only measurements, not an optimization comparison: the earlier package lacks the new icon consumer surface. Timed intervals contain `SceneLayout.Project`, including shaping and any projection retry; graph draining, input installation, scene disposal and painting remain outside them. Crossing a breakpoint needs at most two projection attempts, and the first measured sample already matches the last warmup viewport. The observed allocation churn and elapsed time justify further profiling; they do not establish a native-window frame rate or a new latency gate.
+
+The consumer reports are `artifacts/projection-run-3/notes-projection.json` and `artifacts/projection-run-4/notes-projection.json` in the Light Notes checkout. Both record parent commit `eab529a256c90f16d2ce24b70d6d869507ae5c3d` plus tracked dirty-diff SHA-256 `1bf1d3785a2ec1995c4a971e5a7eeaba3d6bde14ca205cec77e44712ed773bcd`, artwork SHA-256 `f9b502c32034c966566c995b196eb785de0da54e94ffa93946e6fb9b38407534`, and probe SHA-256 `48217ec8c161b54bd57306eb2f079b2ff78ef5b74bd9aa6d3de8840645871c71`. The [Light Notes README](https://github.com/RichiCoder1/light-notes#opt-in-notes-projection-characterization) documents reproduction without a foreground window or access to the live database.
+
+## Framework commands
 
 ```powershell
 dotnet build tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj -c Release --no-restore -p:BuildProjectReferences=false

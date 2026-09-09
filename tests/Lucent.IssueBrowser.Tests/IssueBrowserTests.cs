@@ -100,28 +100,7 @@ public sealed class IssueBrowserTests
     public void StockIconsStayDecorativeAcrossAppearanceAndScale()
     {
         using var composition = LoadedComposition(out var graph, out _, out var theme);
-        var icons = new[]
-        {
-            LucideIcons.ListFilter,
-            LucideIcons.ArrowLeft,
-            LucideIcons.CircleCheck,
-            LucideIcons.CircleDot,
-            LucideIcons.RefreshCw,
-        };
-        var preparations = icons.Select(source =>
-            composition.Images!.PreloadAsync(
-                composition.Root.Scope,
-                source,
-                new ImageRendition(64, 64)
-            )
-        );
-        Assert(
-            Task.WhenAll(preparations)
-                .GetAwaiter()
-                .GetResult()
-                .All(outcome => outcome.Status == ImagePreloadStatus.Ready),
-            "Issue Browser Lucide artwork did not prepare."
-        );
+        PreloadStockIcons(composition);
 
         using var renderer = new SkiaSceneRenderer();
         var wide = new LayoutViewport(1120, 760, 1);
@@ -938,6 +917,42 @@ public sealed class IssueBrowserTests
         return composition;
     }
 
+    static void PreloadStockIcons(Composition composition)
+    {
+        var icons = new[]
+        {
+            LucideIcons.ListFilter,
+            LucideIcons.ArrowLeft,
+            LucideIcons.CircleCheck,
+            LucideIcons.CircleDot,
+            LucideIcons.RefreshCw,
+        };
+        var preparations = icons.Select(source =>
+            composition.Images!.PreloadAsync(
+                composition.Root.Scope,
+                source,
+                new ImageRendition(64, 64)
+            )
+        );
+        Assert(
+            Task.WhenAll(preparations)
+                .GetAwaiter()
+                .GetResult()
+                .All(outcome => outcome.Status == ImagePreloadStatus.Ready),
+            "Issue Browser Lucide artwork did not prepare."
+        );
+    }
+
+    static void AssertReadyStockIcons(RetainedScene scene, int minimumCount, string phase)
+    {
+        var images = SceneNodes(scene.Nodes).OfType<ImageSceneNode>().ToArray();
+        Assert(
+            images.Length >= minimumCount
+                && images.All(image => image.ColorMode == ImageColorMode.Monochrome),
+            $"The {phase} capture did not contain every ready monochrome stock icon."
+        );
+    }
+
     static RetainedScene Install(
         Composition composition,
         SkiaSceneRenderer renderer,
@@ -1588,6 +1603,8 @@ public sealed class IssueBrowserTests
         graph.Drain();
         transport.ReplyJson(0);
         graph.Drain();
+        PreloadStockIcons(composition);
+        graph.Drain();
         using var renderer = new SkiaSceneRenderer();
         var viewport = new LayoutViewport(1120, 760, 1.25f);
         var light = Install(composition, renderer, viewport);
@@ -1613,31 +1630,30 @@ public sealed class IssueBrowserTests
         );
         graph.Drain();
         light = Install(composition, renderer, viewport);
+        AssertReadyStockIcons(light, 2, "light wide");
         CaptureIfRequested(renderer, light, viewport, "issue-browser-light-wide.png");
         var narrowViewport = new LayoutViewport(420, 360, 1.25f);
-        CaptureIfRequested(
-            renderer,
-            Install(composition, renderer, narrowViewport),
-            narrowViewport,
-            "issue-browser-light-narrow.png"
-        );
+        var lightNarrow = Install(composition, renderer, narrowViewport);
+        AssertReadyStockIcons(lightNarrow, 3, "light narrow");
+        CaptureIfRequested(renderer, lightNarrow, narrowViewport, "issue-browser-light-narrow.png");
         theme.Appearance = new(ThemeColorScheme.Dark, ThemeContrast.Normal);
         graph.Drain();
         var dark = Install(composition, renderer, viewport);
+        AssertReadyStockIcons(dark, 2, "dark wide");
         CaptureIfRequested(renderer, dark, viewport, "issue-browser-dark-wide.png");
-        CaptureIfRequested(
-            renderer,
-            Install(composition, renderer, narrowViewport),
-            narrowViewport,
-            "issue-browser-dark-narrow.png"
-        );
+        var darkNarrow = Install(composition, renderer, narrowViewport);
+        AssertReadyStockIcons(darkNarrow, 3, "dark narrow");
+        CaptureIfRequested(renderer, darkNarrow, narrowViewport, "issue-browser-dark-narrow.png");
         theme.Appearance = new(ThemeColorScheme.Light, ThemeContrast.High);
         graph.Drain();
         var high = Install(composition, renderer, viewport);
+        AssertReadyStockIcons(high, 2, "high-contrast wide");
         CaptureIfRequested(renderer, high, viewport, "issue-browser-high-contrast-wide.png");
+        var highNarrow = Install(composition, renderer, narrowViewport);
+        AssertReadyStockIcons(highNarrow, 3, "high-contrast narrow");
         CaptureIfRequested(
             renderer,
-            Install(composition, renderer, narrowViewport),
+            highNarrow,
             narrowViewport,
             "issue-browser-high-contrast-narrow.png"
         );
