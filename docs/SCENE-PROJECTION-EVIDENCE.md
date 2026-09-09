@@ -53,6 +53,21 @@ These are after-only measurements, not an optimization comparison: the earlier p
 
 The consumer reports are `artifacts/projection-run-3/notes-projection.json` and `artifacts/projection-run-4/notes-projection.json` in the Light Notes checkout. Both record parent commit `eab529a256c90f16d2ce24b70d6d869507ae5c3d` plus tracked dirty-diff SHA-256 `1bf1d3785a2ec1995c4a971e5a7eeaba3d6bde14ca205cec77e44712ed773bcd`, artwork SHA-256 `f9b502c32034c966566c995b196eb785de0da54e94ffa93946e6fb9b38407534`, and probe SHA-256 `48217ec8c161b54bd57306eb2f079b2ff78ef5b74bd9aa6d3de8840645871c71`. The [Light Notes README](https://github.com/RichiCoder1/light-notes#opt-in-notes-projection-characterization) documents reproduction without a foreground window or access to the live database.
 
+### Review-fix package integration
+
+The independent consumer repeated its maintained probe against official `0.3.0-dev.53.1+905bd1cc5354b7ef4e181ad4bc82dfc10c4345e1`, with its recovery and keyboard fixes applied. Both runs used five warmups and 20 samples per scenario, with 18 ready images. Every sample in all four scenarios accepted its first projection: zero ownership retries, maximum attempts one.
+
+| Light Notes scenario | Package 53.1 run 2 p50 | Run 2 p50 allocation |
+| --- | ---: | ---: |
+| Unchanged, 1180 px | 42.95 ms | 2,332,056 B |
+| Same wide bucket, 1100/1180 px | 13.22 ms | 2,306,944 B |
+| Narrow/wide, 800/1120 px | 11.68 ms | 2,066,728 B |
+| Narrow/medium, 800/900 px | 12.02 ms | 2,048,000 B |
+
+The final endpoint has 148 boxes, 12 realized rows and 56 wide/54 medium semantic nodes. This consumer also changed between package runs, so these observations do not isolate a single framework optimization. Unchanged-scene elapsed times varied between runs; allocation reduction and the absence of retries reproduced. Timing remains JIT projection-only evidence, excluding painting and native-window delivery.
+
+The reports are `artifacts/projection/run-1/notes-projection.json` and `artifacts/projection/run-2/notes-projection.json` in Light Notes; run 2 SHA-256 is `11abe40536431fccf6e161703494a926dd335dbd9df8b15c56ec583f20d42914`. Both identify parent commit `d2d351b3a41c76b3a76f3cd9c2dec539f054fb91` plus tracked dirty-diff SHA-256 `01eeb6e76ee8a53fde84d5c15591c23659582254bc92641fbd990e36dccb6939`. Artwork and probe hashes match the earlier consumer reports above. Runtime was .NET 10.0.11, Release x64 on the same host.
+
 ## Framework commands
 
 ```powershell
