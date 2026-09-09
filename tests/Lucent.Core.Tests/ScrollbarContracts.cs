@@ -6,6 +6,84 @@ namespace Lucent.Core.Tests;
 public sealed class ScrollbarContracts
 {
     [TestMethod]
+    public void CollapsedChildDoesNotLeavePhantomScrollExtent()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "collapsed-child-extent");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var participation = composition.Root.Scope.Signal(
+            ElementParticipation.Visible,
+            "participation"
+        );
+        using var viewportState = new ViewportState(composition.Root.Scope, new(0, 200));
+        Controls.Column(composition.Root, theme, "Root");
+        var viewport = composition.Child(composition.Root, "viewport");
+        Controls.ScrollViewport(
+            viewport,
+            theme,
+            "Viewport",
+            viewport: viewportState,
+            style: Style.Empty.Width(120).Height(40)
+        );
+        var child = composition.Child(viewport, "content");
+        Controls.Panel(
+            child,
+            theme,
+            "Content",
+            Style.Empty.Width(108).Height(400).Participation(() => participation.Value)
+        );
+        composition.Flush();
+        using (var initial = SceneLayout.Project(composition, new(120, 60, 1), new TestShaper()))
+            Assert.IsTrue(composition.Input.SetScene(initial));
+        Assert.AreEqual(200f, viewportState.Offset.Y);
+
+        participation.Value = ElementParticipation.Collapsed;
+        composition.Flush();
+        using var collapsed = SceneLayout.Project(composition, new(120, 60, 1), new TestShaper());
+        _ = composition.Input.SetScene(collapsed);
+        Assert.AreEqual(
+            0f,
+            viewportState.Offset.Y,
+            "Empty content must clamp to zero in one reconciliation."
+        );
+        Assert.AreEqual(
+            0,
+            collapsed.ScrollBars.Count,
+            "Collapsed content must not create an Auto scrollbar."
+        );
+    }
+
+    [TestMethod]
+    public void ResponsiveConstraintsExcludeReservedScrollbarGutter()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "responsive-gutter");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var constraints = new ResponsiveConstraints(composition.Root.Scope);
+        var viewport = composition.Child(composition.Root, "viewport");
+        Controls.ScrollViewport(
+            viewport,
+            theme,
+            "Viewport",
+            style: Style
+                .Empty.Width(120)
+                .Height(60)
+                .Padding(Insets.Uniform(4))
+                .Set(ScrollBarProperties.Visibility, ScrollBarVisibility.Always)
+        );
+        constraints.AcquireMount(viewport.Scope);
+        viewport.UpdateControl(ProjectionProperties.ResponsiveConstraints, constraints);
+        composition.Flush();
+        using var scene = SceneLayout.Project(composition, new(120, 60, 1), new TestShaper());
+        var content = scene
+            .Input.Single(item => item.Identity.ElementId == viewport.Id)
+            .ChildClipBounds!.Value;
+        Assert.AreEqual(100f, content.Width);
+        Assert.AreEqual(
+            new ContainerConstraints(content.Width, content.Height),
+            constraints.Current
+        );
+    }
+
+    [TestMethod]
     public void OverflowProjectsGutterAndInteractiveNodes()
     {
         var graph = new ReactiveGraph();

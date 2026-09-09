@@ -112,6 +112,125 @@ internal sealed class ElementPresentation
 
     internal ResolvedProperty<T> Resolve<T>(Property<T> property) => _element.Resolve(property);
 
+    internal T ResolveValueLocal<T>(Property<T> property, bool hasInherited, T inherited)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        var value = hasInherited && property.Inherits ? inherited : property.DefaultValue;
+        var hasAssignment = false;
+        var winnerKey = int.MinValue;
+        var winnerSource = int.MinValue;
+        var winnerOrdinal = int.MinValue;
+
+        var conditional = false;
+        foreach (var item in _component)
+            if (
+                ReferenceEquals(item.Assignment.Property, property)
+                && (item.Condition != VariantState.None || item.Conditions.Length != 0)
+            )
+            {
+                conditional = true;
+                break;
+            }
+        if (!conditional)
+            foreach (var item in _author)
+                if (
+                    ReferenceEquals(item.Assignment.Property, property)
+                    && (item.Condition != VariantState.None || item.Conditions.Length != 0)
+                )
+                {
+                    conditional = true;
+                    break;
+                }
+
+        var active = conditional ? _variants.Value | _behaviorVariants.Value : VariantState.None;
+        ResolveValueAssignments(
+            property,
+            _component,
+            source: 0,
+            active,
+            ref value,
+            ref hasAssignment,
+            ref winnerKey,
+            ref winnerSource,
+            ref winnerOrdinal
+        );
+        ResolveValueAssignments(
+            property,
+            _author,
+            source: 1,
+            active,
+            ref value,
+            ref hasAssignment,
+            ref winnerKey,
+            ref winnerSource,
+            ref winnerOrdinal
+        );
+
+        if (_control.TryGetValue(property, out var control))
+            value = (T)control.Value!;
+
+        if (_samples.TryGetValue(property, out var slot) && slot.Value is { } sample)
+            if (!_theme.IsReducedMotion)
+                value = (T)sample.Value!;
+
+        return value;
+    }
+
+    private void ResolveValueAssignments<T>(
+        Property<T> property,
+        FlatAssignment[] assignments,
+        int source,
+        VariantState active,
+        ref T value,
+        ref bool hasAssignment,
+        ref int winnerKey,
+        ref int winnerSource,
+        ref int winnerOrdinal
+    )
+    {
+        foreach (var item in assignments)
+        {
+            if (!ReferenceEquals(item.Assignment.Property, property))
+                continue;
+            if (!item.Assignment.IsAvailable)
+                continue;
+            if ((active & item.Condition) != item.Condition)
+                continue;
+
+            var mounted = true;
+            foreach (var read in item.MountedConditions)
+                if (!read())
+                {
+                    mounted = false;
+                    break;
+                }
+            if (!mounted)
+                continue;
+
+            // Read every available active assignment so losing bindings and theme tokens remain dependencies.
+            var candidate = (T)item.Assignment.Resolve(_theme)!;
+            var key = VariantOrder.Key(item.Condition);
+            if (
+                !hasAssignment
+                || key > winnerKey
+                || (
+                    key == winnerKey
+                    && (
+                        source > winnerSource
+                        || (source == winnerSource && item.Ordinal > winnerOrdinal)
+                    )
+                )
+            )
+            {
+                value = candidate;
+                winnerKey = key;
+                winnerSource = source;
+                winnerOrdinal = item.Ordinal;
+            }
+            hasAssignment = true;
+        }
+    }
+
     internal ResolvedProperty<T> ResolveLocal<T>(
         Property<T> property,
         ResolvedProperty<T>? inherited
@@ -455,11 +574,14 @@ internal static class VariantOrder
         VariantState.Hover,
     ];
 
-    internal static string Key(VariantState state) =>
-        BitOperations
-            .PopCount((uint)state)
-            .ToString("D2", System.Globalization.CultureInfo.InvariantCulture)
-        + string.Concat(Order.Select(flag => state.HasFlag(flag) ? '1' : '0'));
+    internal static int Key(VariantState state)
+    {
+        var key = BitOperations.PopCount((uint)state) * (1 << Order.Length);
+        for (var index = 0; index < Order.Length; index++)
+            if ((state & Order[index]) != VariantState.None)
+                key |= 1 << (Order.Length - index - 1);
+        return key;
+    }
 }
 
 internal static class DiagnosticText

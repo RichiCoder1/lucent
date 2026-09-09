@@ -171,7 +171,7 @@ public sealed class LuiGenerator : IIncrementalGenerator
             return new DocumentResult(input, null);
         var augmented = index.Augment(compilation, input.Path);
         var identity = CurrentIdentity(input, index, augmented, project);
-        var result = LuiCompiler.Compile(input.Document!, augmented, identity);
+        var result = LuiCompiler.Compile(input.Document!, augmented, identity, input.Path);
         cancellationToken.ThrowIfCancellationRequested();
         return new DocumentResult(input, result);
     }
@@ -230,9 +230,12 @@ public sealed class LuiGenerator : IIncrementalGenerator
         production.CancellationToken.ThrowIfCancellationRequested();
         if (lowered.Result is null || current.Identity is null)
             return;
+        var shouldPublish = ShouldPublish(lowered.Result, current.Identity);
         foreach (var diagnostic in lowered.Result.Diagnostics)
         {
             production.CancellationToken.ThrowIfCancellationRequested();
+            if (shouldPublish && diagnostic.Source != "Lucent.Lui")
+                continue;
             production.ReportDiagnostic(
                 Diagnostic.Create(
                     ParseDescriptor(diagnostic),
@@ -241,7 +244,7 @@ public sealed class LuiGenerator : IIncrementalGenerator
                 )
             );
         }
-        if (ShouldPublish(lowered.Result, current.Identity))
+        if (shouldPublish)
             production.AddSource(current.Identity.HintName, lowered.Result.Source!);
     }
 

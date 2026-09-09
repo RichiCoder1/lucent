@@ -1136,10 +1136,11 @@ public sealed class ControlsContracts
                             .Set(LayoutProperties.Height, 20f)
                     );
                 else
-                    Controls.Panel(
+                    Controls.Button(
                         row,
                         theme,
                         "Other",
+                        () => { },
                         Style
                             .Empty.Set(InputProperties.Enabled, otherEnabled)
                             .Set(LayoutProperties.Width, 100f)
@@ -1172,6 +1173,15 @@ public sealed class ControlsContracts
         _ = router.DispatchPointer(
             new(PointerCommandKind.Down, 70, point.X, point.Y, PointerButton.Primary)
         );
+        var otherBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == region.Items[1].Id)
+            .Bounds;
+        // A separate pointer hovers the soon-disabled control while the button keeps capture.
+        // Availability now settles before layout; hover cleanup during installation still
+        // changes interaction visuals and must reject the candidate without losing stable capture.
+        _ = router.DispatchPointer(
+            new(PointerCommandKind.Move, 90, otherBounds.X + 1, otherBounds.Y + 1)
+        );
         theme.Theme = theme.Theme.Set(otherEnabled, false);
         graph.Drain();
         Assert(
@@ -1191,6 +1201,12 @@ public sealed class ControlsContracts
         point = Point(scene);
         _ = router.DispatchPointer(
             new(PointerCommandKind.Down, 71, point.X, point.Y, PointerButton.Primary)
+        );
+        otherBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == region.Items[1].Id)
+            .Bounds;
+        _ = router.DispatchPointer(
+            new(PointerCommandKind.Move, 91, otherBounds.X + 1, otherBounds.Y + 1)
         );
         theme.Theme = theme.Theme.Set(otherEnabled, false);
         graph.Drain();

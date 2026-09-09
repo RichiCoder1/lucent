@@ -6,6 +6,58 @@ namespace Lucent.Core.Tests;
 public sealed class TextFieldContracts
 {
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void CandidateCaretStaysWithinClippingAncestors(bool multiline)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "candidate-ancestor-clip");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(
+            composition.Root,
+            theme,
+            "root",
+            Style.Empty.Width(200).Height(40).CrossAlignment(LayoutAlignment.Start)
+        );
+        var container = composition.Child(composition.Root, "clip");
+        Controls.Panel(
+            container,
+            theme,
+            "clip",
+            Style.Empty.Width(55).Height(40).Clip(true).CrossAlignment(LayoutAlignment.Start)
+        );
+        var field = composition.Child(container, "field");
+        var style = Style
+            .Empty.Width(150)
+            .MinWidth(150)
+            .Height(35)
+            .Set(ScrollBarProperties.Visibility, ScrollBarVisibility.Hidden);
+        var state = multiline
+            ? Controls.TextArea(field, theme, "Notes", style: style)
+            : Controls.TextField(field, theme, "Title", style: style);
+        state.Value = "abcdefghij";
+        state.MoveEnd();
+        using (Install(composition, composition.Input, new HitMetricShaper()))
+            Assert(
+                composition.Input.MoveFocus(FocusTraversalDirection.Next),
+                "Editor could not receive focus."
+            );
+        state.MoveEnd();
+        using var scene = Install(composition, composition.Input, new HitMetricShaper());
+        var clip = scene
+            .Input.Single(item => item.Identity.ElementId == container.Id)
+            .ChildClipBounds!.Value;
+        Assert(composition.Input.TryGetCaretGeometry(out var caret), "Candidate caret was absent.");
+        Assert(
+            caret.X >= clip.X
+                && caret.X + caret.Width <= clip.X + clip.Width
+                && caret.Y >= clip.Y
+                && caret.Y + caret.Height <= clip.Y + clip.Height,
+            $"Candidate caret {caret} escaped ancestor clip {clip}."
+        );
+    }
+
+    [TestMethod]
     public void PlaceholderHasIndependentAccessibleNameMutedPaintAndNoEditableValue()
     {
         var graph = new ReactiveGraph();
@@ -181,11 +233,13 @@ public sealed class TextFieldContracts
             );
         Assert(
             router.TryGetCaretGeometry(out var initialCaret)
-                && initialCaret == initialCaretNode.Bounds
+                && initialCaret.X == initialCaretNode.Bounds.X
+                && initialCaret.Y == initialCaretNode.Bounds.Y
                 && initialCaret.X == fieldBox.Bounds.X + 2
                 && initialCaret.Y == fieldBox.Bounds.Y + 3
-                && initialCaret.Height == 14,
-            "Focused padded text field did not expose its rendered inner caret geometry."
+                && initialCaretNode.Bounds.Height == 14
+                && initialCaret.Height == 12,
+            "Focused padded text field did not expose its visible clipped caret geometry."
         );
 
         state.Value = "a😀b";
@@ -201,14 +255,15 @@ public sealed class TextFieldContracts
         Assert(
             router.TryGetCaretGeometry(out var preeditCaret)
                 && preeditCaret.X == fieldBox.Bounds.X + 22
-                && preeditCaret
+                && preeditCaret.Y
                     == Flatten(scene.Nodes)
                         .Single(node =>
                             node.Identity.Element.ElementId == field.Id
                             && node.Identity.Kind == SceneNodeKind.Caret
                         )
-                        .Bounds,
-            "Candidate geometry did not use the rendered padded display caret."
+                        .Bounds.Y
+                && preeditCaret.Height == 12,
+            "Candidate geometry did not use the visible padded display caret."
         );
         Assert(
             Flatten(scene.Nodes)

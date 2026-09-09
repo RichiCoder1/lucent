@@ -160,6 +160,75 @@ public sealed class ImageLoadingContracts
     }
 
     [TestMethod]
+    public void ReleasingLastLeaseDeclinesSurvivingDemandWhenCacheCannotReAdmitIt()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("image-owner");
+        var preparer = new ControlledPreparer();
+        using var cache = new ImageCache(
+            preparer,
+            new ImageLoadLimits(maximumCachedBytes: 16, maximumLeasedBytes: 16)
+        );
+        using var first = cache.Acquire(scope, Source('a'), new ImageRendition(2, 2));
+        preparer.Next().Complete(new TrackingImage(2, 2, 16));
+        DrainCompletion(graph, cache, () => first.Status == ImageLoadStatus.Ready);
+        var lease = first.AcquireLease();
+        Assert.IsNotNull(lease);
+
+        var preload = cache.PreloadAsync(scope, Source('b'), new ImageRendition(2, 2));
+        preparer.Next().Complete(new TrackingImage(2, 2, 16));
+        Assert.AreEqual(ImagePreloadStatus.Ready, preload.GetAwaiter().GetResult().Status);
+        using var pinned = cache.Acquire(scope, Source('b'), new ImageRendition(2, 2));
+        Assert.AreEqual(ImageLoadStatus.BudgetDeclined, pinned.Status);
+
+        lease.Dispose();
+        DrainCompletion(graph, cache, () => first.Status != ImageLoadStatus.Ready);
+        Assert.AreEqual(ImageLoadStatus.BudgetDeclined, first.Status);
+        Assert.AreEqual(ImageLoadFailureKind.BudgetDeclined, first.Error?.Kind);
+        Assert.AreEqual(0L, cache.Metrics.LeasedBytes);
+
+        pinned.Dispose();
+        first.Retry();
+        preparer.Next().Complete(new TrackingImage(2, 2, 16));
+        DrainCompletion(graph, cache, () => first.Status == ImageLoadStatus.Ready);
+        using var retryLease = first.AcquireLease();
+        Assert.IsNotNull(retryLease);
+    }
+
+    [TestMethod]
+    public void RetryPublishesBudgetDeclineWhenAdmissionIsAlreadyFull()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("image-owner");
+        var preparer = new ControlledPreparer();
+        using var cache = new ImageCache(
+            preparer,
+            new ImageLoadLimits(maximumQueuedRequests: 1, maximumConcurrentPreparations: 1)
+        );
+        using var retried = cache.Acquire(scope, Source('c'), new ImageRendition(1, 1));
+        preparer.Next().Fail(new ImageLoadException(ImageLoadFailureKind.InvalidData, "bad image"));
+        DrainCompletion(graph, cache, () => retried.Status == ImageLoadStatus.Failed);
+
+        using var active = cache.Acquire(scope, Source('d'), new ImageRendition(1, 1));
+        var activeCall = preparer.Next();
+        using var queued = cache.Acquire(scope, Source('e'), new ImageRendition(1, 1));
+
+        retried.Retry();
+        Assert.AreEqual(ImageLoadStatus.BudgetDeclined, retried.Status);
+        Assert.AreEqual(ImageLoadFailureKind.BudgetDeclined, retried.Error?.Kind);
+
+        queued.Dispose();
+        active.Dispose();
+        Assert.IsTrue(
+            SpinWait.SpinUntil(() => activeCall.CancellationToken.IsCancellationRequested, 5000)
+        );
+        var late = new TrackingImage(1, 1, 4);
+        activeCall.Complete(late);
+        DrainCompletion(graph, cache, () => late.IsDisposed);
+        Assert.IsTrue(late.IsDisposed);
+    }
+
+    [TestMethod]
     public void CancellationCallbackBugsRemainObservableAfterDemandIsReleased()
     {
         var graph = new ReactiveGraph();

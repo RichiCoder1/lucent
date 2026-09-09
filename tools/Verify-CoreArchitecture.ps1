@@ -70,8 +70,8 @@ function Assert-PublicApi([string] $AssemblyPath, [bool] $ExpectFailure) {
     $ErrorActionPreference = $prior
     if ($ExpectFailure) {
         $text = $output -join "`n"
-        if ($exitCode -eq 0 -or $text -notmatch 'Forbidden Core public API type: .*SDL3.SDL\+WindowFlags' -or $text -notmatch 'Forbidden Core runtime discovery type: System.ComponentModel.TypeDescriptor') {
-            throw "Compiled metadata inspection did not report both platform and runtime-discovery fixture violations: $text"
+        if ($exitCode -eq 0 -or $text -notmatch 'Forbidden Core public API type: .*SDL3.SDL\+WindowFlags' -or $text -notmatch 'Forbidden Core runtime discovery type: System.ComponentModel.TypeDescriptor' -or $text -notmatch 'Core component factories use an unexpected namespace: Misplaced.Components') {
+            throw "Compiled metadata inspection did not report platform, runtime-discovery, and component-namespace fixture violations: $text"
         }
     }
     elseif ($exitCode -ne 0) { throw "Compiled Core public API inspection failed: $($output -join "`n")" }

@@ -1719,6 +1719,49 @@ style MatrixStyle { Spacing: 2f; when Hover { Opacity: .5f; } }
                 .Path == "Matrix.lui",
             "enhanced #line did not map a generated expression to its logical .lui path."
         );
+        const string physicalPath = "C:/consumer/views/Matrix.lui";
+        var physicallyMapped = LuiCompiler.Compile(
+            LuiParser.Parse(matrixSource),
+            CSharpCompilation.Create(
+                "physical-matrix",
+                [
+                    CSharpSyntaxTree.ParseText(
+                        "internal class C {}",
+                        new CSharpParseOptions(LanguageVersion.Preview)
+                    ),
+                ],
+                References()
+            ),
+            new LuiFreshnessIdentity(
+                "43",
+                "physical-matrix",
+                new LuiDocumentIdentity("Views/Matrix.lui"),
+                "v2",
+                "preview"
+            ),
+            physicalPath
+        );
+        var physicalTree = CSharpSyntaxTree.ParseText(
+            physicallyMapped.Source!,
+            new CSharpParseOptions(LanguageVersion.Preview),
+            "Matrix.physical.g.cs"
+        );
+        var physicalExpression = physicallyMapped
+            .Map.FromSource(condition)
+            .First(entry => entry.Kind == LuiMapKind.Expression && !entry.Hidden);
+        Assert(
+            physicallyMapped.Success
+                && physicalTree
+                    .GetMappedLineSpan(
+                        new Microsoft.CodeAnalysis.Text.TextSpan(
+                            physicalExpression.Generated.Start,
+                            physicalExpression.Generated.Length
+                        )
+                    )
+                    .Path == physicalPath
+                && physicallyMapped.Identity.Document.LogicalPath == "Views/Matrix.lui",
+            "physical #line mapping changed logical document identity or retained its logical path."
+        );
         Assert(
             matrix
                 .Map.FromSource(condition)

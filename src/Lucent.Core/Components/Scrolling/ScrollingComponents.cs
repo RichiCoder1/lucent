@@ -114,19 +114,19 @@ public static partial class Components
     private static float VirtualizedListMainBasis(Element root)
     {
         var geometry = VirtualizedListMainGeometry(root);
-        return geometry.Value is { } value ? value : 0;
+        return geometry is { } value ? value : 0;
     }
 
     private static float VirtualizedListMainGrow(Element root)
     {
         var geometry = VirtualizedListMainGeometry(root);
-        return geometry.Value is null ? 1 : 0;
+        return geometry is null ? 1 : 0;
     }
 
-    private static ResolvedProperty<float?> VirtualizedListMainGeometry(Element root)
+    private static float? VirtualizedListMainGeometry(Element root)
     {
-        var parentAxis = root.Parent?.Resolve(LayoutProperties.Axis).Value ?? LayoutAxis.Column;
-        return root.Resolve(
+        var parentAxis = root.Parent?.ResolveValue(LayoutProperties.Axis) ?? LayoutAxis.Column;
+        return root.ResolveValue(
             parentAxis == LayoutAxis.Row ? LayoutProperties.Width : LayoutProperties.Height
         );
     }

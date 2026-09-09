@@ -319,6 +319,80 @@ public sealed class GeneratorTests
     }
 
     [TestMethod]
+    public void PublishedRoslynWarningsKeepNativeIdentityAndPhysicalPath()
+    {
+        const string physicalPath = "C:/consumer/views/Warning.lui";
+        const string source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Warning(string? value) {
+    <Text content={() => value.ToString()} />
+}
+""";
+        var text = new TextFile(physicalPath, source, "Views/Warning.lui");
+        var compilation = CSharpCompilation.Create(
+            "warning-identity",
+            [
+                CSharpSyntaxTree.ParseText(
+                    "internal class C {}",
+                    new CSharpParseOptions(LanguageVersion.Preview)
+                ),
+            ],
+            References(),
+            new CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary,
+                nullableContextOptions: NullableContextOptions.Enable
+            )
+        );
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            [new LuiGenerator().AsSourceGenerator()],
+            [text],
+            optionsProvider: new OptionsProvider(
+                [text],
+                new Dictionary<string, string>
+                {
+                    ["build_property.LucentLuiCompilerOptions"] = "nullable:enable",
+                }
+            ),
+            parseOptions: new CSharpParseOptions(LanguageVersion.Preview)
+        );
+        driver = driver.RunGeneratorsAndUpdateCompilation(
+            compilation,
+            out var generatedCompilation,
+            out var generatorDiagnostics
+        );
+        var nativeWarnings = generatedCompilation
+            .GetDiagnostics()
+            .Where(diagnostic => diagnostic.Id == "CS8602")
+            .ToArray();
+        Assert(
+            !generatorDiagnostics.Any(diagnostic => diagnostic.Id == "LUI2000")
+                && nativeWarnings.Length == 1
+                && nativeWarnings[0].Location.GetMappedLineSpan().Path == physicalPath
+                && driver
+                    .GetRunResult()
+                    .Results.Single()
+                    .GeneratedSources.Single()
+                    .SourceText.ToString()
+                    .Contains(physicalPath, StringComparison.Ordinal),
+            "published source duplicated a translated warning or lost the physical .lui path: "
+                + String.Join(
+                    " | ",
+                    generatorDiagnostics
+                        .Concat(nativeWarnings)
+                        .Select(diagnostic =>
+                            diagnostic.Id
+                            + ":"
+                            + diagnostic.Location.GetMappedLineSpan().Path
+                            + ":"
+                            + diagnostic.GetMessage(CultureInfo.InvariantCulture)
+                        )
+                )
+        );
+    }
+
+    [TestMethod]
     public void SiblingSymbolsAndStableIdentity()
     {
         var siblings = Run(
@@ -354,6 +428,34 @@ public sealed class GeneratorTests
             aliasSibling.Diagnostics.Length == 0
                 && aliasSibling.Results.Single().GeneratedSources.Length == 2,
             "sibling declarations did not preserve aliases or bind alias-qualified components."
+        );
+        var csharpOverloadSibling = RunWithSource(
+            """
+namespace Sample;
+using Lucent.Core;
+public static partial class Components
+{
+    [LucentComponent]
+    public static ComponentRecipe A(int value) => null!;
+}
+""",
+            new TextFile(
+                "C:/consumer/A.lui",
+                "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; public component A(string value) { <Text content={value} /> }",
+                "A.lui"
+            ),
+            new TextFile(
+                "C:/consumer/B.lui",
+                "namespace Sample; using Lucent.Core; using static Sample.Components; internal component B() { <A value=\"sibling\" /> }",
+                "B.lui"
+            )
+        );
+        Assert(
+            csharpOverloadSibling.Diagnostics.Length == 0
+                && csharpOverloadSibling.Results.Single().GeneratedSources.Length == 2
+                && Source(csharpOverloadSibling, "B")
+                    .Contains("global::Sample.Components.A(value: \"sibling\")"),
+            "an existing same-name C# overload masked a distinct sibling LUI signature."
         );
         var orderedAliases = RunWithSource(
             "namespace Sample { public class Local {} }",

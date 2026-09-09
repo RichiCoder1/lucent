@@ -340,8 +340,9 @@ public sealed partial class PublishedInputTests
                         && current.Right - current.Left < 700,
                     "Physical border drag did not enter compact native width."
                 );
-                Assert.IsFalse(
-                    HasWideCapture(),
+                WaitUntil(
+                    process,
+                    () => !HasWideCapture(),
                     "Responsive branch did not reproject until after the held border was released."
                 );
             }

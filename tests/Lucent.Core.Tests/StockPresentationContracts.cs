@@ -1,4 +1,5 @@
 using Lucent.Core;
+using Lucent.Icons.Lucide;
 
 namespace Lucent.Core.Tests;
 
@@ -126,6 +127,86 @@ public sealed class StockPresentationContracts
         Assert.IsNotNull(button.Resolve(VisualProperties.FocusRing).Value.Brush);
         Assert.IsNotNull(field.Resolve(VisualProperties.FocusRing).Value.Brush);
         Assert.IsNotNull(row.Resolve(VisualProperties.FocusRing).Value.Brush);
+    }
+
+    [TestMethod]
+    public void FocusedAccentButtonsAndIconButtonsKeepThreeToOneRingContrast()
+    {
+        foreach (
+            var (palette, appearance, name) in new[]
+            {
+                (ControlThemes.Light, ThemeAppearance.Light, "light"),
+                (
+                    ControlThemes.Dark,
+                    new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal),
+                    "dark"
+                ),
+            }
+        )
+        {
+            var graph = new ReactiveGraph();
+            using var composition = new Composition(graph, name + "-accent-focus");
+            var theme = new ThemeContext(composition.Root.Scope, palette, appearance: appearance);
+            composition.Root.Present(
+                theme,
+                author: PresentationStyles.Surface.Width(160).Height(80)
+            );
+            var button = composition.Child(composition.Root, "button");
+            Controls.Button(button, theme, "Action");
+            var iconButton = composition.Child(composition.Root, "icon-button");
+            Controls.IconButton(
+                iconButton,
+                theme,
+                LucideIcons.Ellipsis,
+                "More actions",
+                style: Style.Empty.Set(
+                    VisualProperties.Participation,
+                    ElementParticipation.Collapsed
+                )
+            );
+            button.SetVariants(VariantState.FocusVisible);
+            iconButton.SetVariants(VariantState.FocusVisible);
+            graph.Drain();
+
+            AssertFocusStateContrast(button, name + " focused button");
+            AssertFocusStateContrast(iconButton, name + " focused icon button");
+            AssertProjectedFocusRing(composition, button, name + " focused button");
+        }
+    }
+
+    [TestMethod]
+    public void MinimalHighContrastFocusRetainsVisibleRenderedIndication()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "minimal-high-contrast-focus");
+        var theme = new ThemeContext(
+            composition.Root.Scope,
+            ControlThemes.HighContrast,
+            appearance: new(ThemeColorScheme.Light, ThemeContrast.High),
+            presentationMode: ControlPresentationMode.Minimal
+        );
+        composition.Root.Present(theme, author: PresentationStyles.Surface.Width(160).Height(80));
+        var button = composition.Child(composition.Root, "button");
+        Controls.Button(button, theme, "Action");
+        graph.Drain();
+        Assert.AreEqual(
+            (byte?)0,
+            button.Resolve(VisualProperties.Background).Value.Color?.A,
+            "Minimal high-contrast controls must stay undecorated before focus."
+        );
+
+        button.SetVariants(VariantState.FocusVisible);
+        graph.Drain();
+        var background = button.Resolve(VisualProperties.Background).Value.Color;
+        var surface = composition.Root.Resolve(VisualProperties.Background).Value.Color;
+        var ring = button.Resolve(VisualProperties.FocusRing).Value.Brush?.Color;
+        Assert.IsTrue(
+            surface is { } rootSurface
+                && ring is { } ringColor
+                && Contrast(ringColor, background is { A: > 0 } fill ? fill : rootSurface) >= 3,
+            "Minimal high-contrast focus indication must contrast with its composited stock surface."
+        );
+        AssertProjectedFocusRing(composition, button, "minimal high-contrast focused button");
     }
 
     [TestMethod]
@@ -448,5 +529,74 @@ public sealed class StockPresentationContracts
                 && Contrast(ringColor, ringSurface) >= 3,
             $"The {state} focus ring must remain visible against its resolved surface."
         );
+    }
+
+    private static void AssertProjectedFocusRing(
+        Composition composition,
+        Element element,
+        string state
+    )
+    {
+        using var scene = SceneLayout.Project(composition, new(160, 80, 1), new MetricShaper());
+        var resolved = element.Resolve(VisualProperties.FocusRing).Value;
+        var projected = SceneNodes(scene.Nodes)
+            .OfType<PaintSceneNode>()
+            .Single(node =>
+                node.Identity.Element.ElementId == element.Id
+                && node.Identity.Kind == SceneNodeKind.FocusRing
+            );
+        Assert.AreEqual(
+            resolved.Brush,
+            projected.Brush,
+            $"The {state} retained focus paint diverged from its resolved ring."
+        );
+        Assert.AreEqual(resolved.Thickness, projected.InsetWidths?.Left);
+    }
+
+    private static IEnumerable<SceneNode> SceneNodes(IEnumerable<SceneNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            var children = node switch
+            {
+                ClipSceneNode clip => clip.Children,
+                OpacitySceneNode opacity => opacity.Children,
+                _ => null,
+            };
+            if (children is not null)
+                foreach (var child in SceneNodes(children))
+                    yield return child;
+        }
+    }
+
+    private sealed class MetricShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            if (request.Text.Length == 0)
+                return new("empty", 0, 0, []);
+            var glyph = new ShapedGlyph(1, 0, 0, 0, request.Text.Length, 0, 0);
+            var run = new ShapedRun(
+                "metric",
+                "metric",
+                400,
+                5,
+                0,
+                "metric",
+                0,
+                "metric#0",
+                request.Direction,
+                request.Language,
+                request.FontSize,
+                0,
+                request.FontSize,
+                -request.FontSize,
+                0,
+                request.Text.Length,
+                [glyph]
+            );
+            return new("metric", request.Text.Length, request.FontSize, [run]);
+        }
     }
 }

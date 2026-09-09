@@ -28,7 +28,7 @@ public sealed partial class InputRouter
             var element = _composition.Find(identity);
             if (element is null)
                 continue;
-            var intent = element.Resolve(InputProperties.Cursor).Value;
+            var intent = element.ResolveValue(InputProperties.Cursor);
             if (intent != CursorIntent.Auto)
                 return intent;
             if (_textFields.ContainsKey(identity.ElementId))
@@ -210,7 +210,8 @@ public sealed partial class InputRouter
     internal void MoveMenuFocus(FocusTraversalDirection direction)
     {
         var errors = new List<Exception>();
-        MoveFocusCore(direction, errors);
+        if (!MoveFocusCore(direction, errors) && MenuRootTarget() is { } menuRoot)
+            RequestFocus(menuRoot, FocusChangeReason.Traversal, errors);
         Throw(errors);
     }
 
@@ -219,19 +220,15 @@ public sealed partial class InputRouter
         if (_scene is null || !ValidateScene(_scene))
             return false;
         var targets = MenuFocusTargets();
-        if (targets.Length != 0)
-        {
-            var errors = new List<Exception>();
-            SetModality(InputModality.Keyboard, errors);
-            RequestFocus(
-                (first ? targets[0] : targets[^1]).Identity,
-                FocusChangeReason.Traversal,
-                errors
-            );
-            Throw(errors);
-            return true;
-        }
-        return false;
+        var target =
+            targets.Length != 0 ? (first ? targets[0] : targets[^1]).Identity : MenuRootTarget();
+        if (target is not { } identity)
+            return false;
+        var errors = new List<Exception>();
+        SetModality(InputModality.Keyboard, errors);
+        RequestFocus(identity, FocusChangeReason.Traversal, errors);
+        Throw(errors);
+        return true;
     }
 
     /// <summary>Focuses the next eligible item after a trigger, or defers until its scene is installed.</summary>
@@ -262,6 +259,21 @@ public sealed partial class InputRouter
             )
             .OrderBy(item => item.Order)
             .ToArray();
+
+    private ElementIdentity? MenuRootTarget()
+    {
+        if (_composition.MenuSession is null || _scene is null)
+            return null;
+        foreach (var item in _scene.Input.OrderBy(item => item.Order))
+            if (
+                _focusable.TryGetValue(item.Identity.ElementId, out var focusable)
+                && !focusable.TabStop
+                && _composition.Find(item.Identity)?.DeclaredSemanticRole == SemanticRole.Menu
+                && Eligible(item.Identity)
+            )
+                return item.Identity;
+        return null;
+    }
 
     private bool FocusPendingMenuTarget(List<Exception> errors)
     {

@@ -220,6 +220,144 @@ public sealed class InputProjectionCacheContracts
         second.Dispose();
     }
 
+    [TestMethod]
+    public void VariantPrecedenceProjectionMatchesDiagnosticResolutionForEveryStateMask()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "variant-value-oracle");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("variant-value-oracle"));
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Width(1_000).Height(20).Axis(LayoutAxis.Row)
+        );
+        var component = Style.Empty.Width(10);
+        var author = Style.Empty.Width(20);
+        for (var value = 1; value <= 63; value++)
+        {
+            var condition = (VariantState)value;
+            component = component
+                .When(condition, Style.Empty.Width(100 + value))
+                .When(condition, Style.Empty.Width(200 + value));
+            author = author
+                .When(condition, Style.Empty.Width(300 + value))
+                .When(condition, Style.Empty.Width(400 + value));
+        }
+        var child = composition.Child(composition.Root, "variant-value-child");
+        child.Present(theme, component, author);
+
+        for (var value = 0; value <= 63; value++)
+        {
+            var active = (VariantState)value;
+            child.SetVariants(active);
+            var diagnostic = child.Resolve(LayoutProperties.Width);
+            var expected = value == 0 ? 20f : 400f + value;
+            using var scene = SceneLayout.Project(
+                composition,
+                new(1_000, 20, 1),
+                new EmptyShaper()
+            );
+            var projected = scene
+                .Boxes.Single(box => box.Identity.ElementId == child.Id)
+                .Bounds.Width;
+            Assert(
+                diagnostic.Value == expected
+                    && diagnostic.Winner.Source == "author"
+                    && diagnostic.Winner.Condition == active
+                    && (
+                        value == 0
+                        || diagnostic.Overridden.Any(candidate =>
+                            candidate.Source == "author"
+                            && candidate.Condition == active
+                            && candidate.Ordinal < diagnostic.Winner.Ordinal
+                        )
+                    )
+                    && (
+                        value == 0
+                        || diagnostic.Overridden.Any(candidate =>
+                            candidate.Source == "component" && candidate.Condition == active
+                        )
+                    )
+                    && projected == diagnostic.Value,
+                $"Variant mask {value} diverged between equal-rank last-assignment, author precedence, diagnostic resolution, and scene projection."
+            );
+        }
+    }
+
+    [TestMethod]
+    public void LosingCandidateAndInheritedBindingChangesInvalidateInputProjection()
+    {
+        var graph = new ReactiveGraph();
+        var losingWidth = graph.Signal(20f, "losing-width");
+        var winningWidth = graph.Signal(30f, "winning-width");
+        var inheritedFontSize = graph.Signal(12f, "inherited-font-size");
+        using var composition = new Composition(graph, "value-resolution-dependencies");
+        var theme = new ThemeContext(
+            composition.Root.Scope,
+            new Theme("value-resolution-dependencies")
+        );
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Width(100)
+                .Height(40)
+                .Bind(TypographyProperties.FontSize, () => inheritedFontSize.Value)
+        );
+        var child = composition.Child(composition.Root, "candidate-child");
+        child.Present(
+            theme,
+            author: Style
+                .Empty.Bind(LayoutProperties.Width, () => losingWidth.Value)
+                .Bind(LayoutProperties.Width, () => winningWidth.Value)
+                .Height(20)
+                .Set(ProjectionProperties.Text, "dependency")
+        );
+        graph.Drain();
+        var shaper = new CapturingShaper();
+        var router = composition.Input;
+        var initial = SceneLayout.Project(composition, new(100, 40, 1), shaper);
+        TestAssert.IsTrue(router.SetScene(initial));
+        var before = child.Resolve(LayoutProperties.Width);
+        TestAssert.AreEqual(30f, before.Value);
+        TestAssert.AreEqual("author", before.Winner.Source);
+        TestAssert.AreEqual(1, before.Winner.Ordinal);
+        TestAssert.IsTrue(
+            before.Overridden.Any(candidate => candidate is { Source: "author", Ordinal: 0 })
+        );
+        var inheritedBefore = child.Resolve(TypographyProperties.FontSize);
+        TestAssert.AreEqual(12f, inheritedBefore.Value);
+        TestAssert.AreEqual("inherited", inheritedBefore.Winner.Source);
+        TestAssert.AreEqual(inheritedBefore.Value, shaper.Last.FontSize);
+
+        losingWidth.Value = 25;
+        graph.Drain();
+        var afterLosingChange = child.Resolve(LayoutProperties.Width);
+        TestAssert.AreEqual(before.Value, afterLosingChange.Value);
+        TestAssert.AreEqual(before.Winner, afterLosingChange.Winner);
+        TestAssert.AreEqual(
+            InputRejection.StaleScene,
+            router.DispatchPointer(new(PointerCommandKind.Move, 1, 1, 1)).Rejection,
+            "Changing a losing active binding retained an input scene with unchanged winner/value."
+        );
+
+        var refreshed = SceneLayout.Project(composition, new(100, 40, 1), shaper);
+        TestAssert.IsTrue(router.SetScene(refreshed));
+        initial.Dispose();
+        inheritedFontSize.Value = 18;
+        graph.Drain();
+        var inheritedAfter = child.Resolve(TypographyProperties.FontSize);
+        TestAssert.AreEqual(18f, inheritedAfter.Value);
+        TestAssert.AreEqual("inherited", inheritedAfter.Winner.Source);
+        TestAssert.AreEqual(
+            InputRejection.StaleScene,
+            router.DispatchPointer(new(PointerCommandKind.Move, 1, 1, 1)).Rejection,
+            "Changing an inherited ancestor binding retained the installed input scene."
+        );
+        var inherited = SceneLayout.Project(composition, new(100, 40, 1), shaper);
+        TestAssert.AreEqual(inheritedAfter.Value, shaper.Last.FontSize);
+        refreshed.Dispose();
+        inherited.Dispose();
+    }
+
     private static void Assert(bool value, string message)
     {
         if (!value)

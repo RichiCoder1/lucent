@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -15,6 +16,9 @@ namespace Lucent.Lui.Compiler;
 /// <remarks>Use from build or editor tooling only. The output source and map have no runtime dependency or runtime role.</remarks>
 public static class LuiCompiler
 {
+    private static readonly ConditionalWeakTable<Compilation, CompilationFingerprint> Fingerprints =
+        new();
+
     private static Optional<object?> ImageLabelConstant(IOperation operation) =>
         operation switch
         {
@@ -61,10 +65,35 @@ public static class LuiCompiler
             throw new ArgumentNullException(nameof(compilation));
         if (identity is null)
             throw new ArgumentNullException(nameof(identity));
+        return Compile(document, compilation, identity, identity.Document.LogicalPath);
+    }
+
+    /// <summary>Binds a parsed document and maps generated C# locations to its physical source path.</summary>
+    /// <param name="document">Recovered syntax whose spans identify the authored <c>.lui</c> text.</param>
+    /// <param name="compilation">Current Roslyn compilation used for component and expression binding.</param>
+    /// <param name="identity">Host freshness inputs; the compiler snapshots the actual Roslyn state before publication.</param>
+    /// <param name="mappedPath">Physical document path written to generated <c>#line</c> directives.</param>
+    /// <returns>Generated source, source map, diagnostics, and the identity that must match before publishing.</returns>
+    /// <exception cref="ArgumentNullException">Any argument is <see langword="null"/>.</exception>
+    public static LuiCompilationResult Compile(
+        LuiDocumentSyntax document,
+        Compilation compilation,
+        LuiFreshnessIdentity identity,
+        string mappedPath
+    )
+    {
+        if (document is null)
+            throw new ArgumentNullException(nameof(document));
+        if (compilation is null)
+            throw new ArgumentNullException(nameof(compilation));
+        if (identity is null)
+            throw new ArgumentNullException(nameof(identity));
+        if (mappedPath is null)
+            throw new ArgumentNullException(nameof(mappedPath));
         identity = Snapshot(identity, compilation);
         var rootTokens = RootTokens(compilation, identity.RootNamespace);
         var diagnostics = new List<LuiDiagnostic>(document.Diagnostics);
-        var writer = new Writer(document, identity, null, []);
+        var writer = new Writer(document, identity, mappedPath, null, []);
         if (document.Component is not null)
             writer.Document(diagnostics);
 
@@ -87,7 +116,13 @@ public static class LuiCompiler
                 writer.Text
             );
 
-        var componentWriter = new Writer(document, identity, null, ["Lucent.Core.Components"]);
+        var componentWriter = new Writer(
+            document,
+            identity,
+            mappedPath,
+            null,
+            ["Lucent.Core.Components"]
+        );
         componentWriter.Document(diagnostics);
         var componentTree = CSharpSyntaxTree.ParseText(
             componentWriter.Text,
@@ -98,7 +133,13 @@ public static class LuiCompiler
         var componentModel = componentCompilation.GetSemanticModel(componentTree);
         var componentMap = new LuiSourceMap(identity, componentWriter.Entries);
         var contentContributions = ContentContributionPlans(probeModel, probeTree, writer);
-        var propertyWriter = new Writer(document, identity, null, ImplicitStylePropertyTypes);
+        var propertyWriter = new Writer(
+            document,
+            identity,
+            mappedPath,
+            null,
+            ImplicitStylePropertyTypes
+        );
         propertyWriter.Document(diagnostics);
         var propertyTree = CSharpSyntaxTree.ParseText(
             propertyWriter.Text,
@@ -114,7 +155,13 @@ public static class LuiCompiler
         var styleValueBranches = new Dictionary<int, IReadOnlyList<StyleValueBranchPlan>>();
         if (rootTokens is not null)
         {
-            var tokenWriter = new Writer(document, identity, null, [rootTokens.ToDisplayString()]);
+            var tokenWriter = new Writer(
+                document,
+                identity,
+                mappedPath,
+                null,
+                [rootTokens.ToDisplayString()]
+            );
             tokenWriter.Document(diagnostics);
             var tokenTree = CSharpSyntaxTree.ParseText(
                 tokenWriter.Text,
@@ -234,7 +281,7 @@ public static class LuiCompiler
                 diagnostics.OrderBy(item => item.Span.Start).ToArray(),
                 writer.Text
             );
-        writer = new Writer(document, identity, plans, []);
+        writer = new Writer(document, identity, mappedPath, plans, []);
         writer.Document(diagnostics);
         var map = new LuiSourceMap(identity, writer.Entries);
         if (HasBlockingErrors(diagnostics))
@@ -317,7 +364,7 @@ public static class LuiCompiler
                 );
         }
         foreach (
-            var diagnostic in bound
+            var diagnostic in model
                 .GetDiagnostics()
                 .Where(item =>
                     item.Severity >= DiagnosticSeverity.Warning && item.Location.SourceTree == tree
@@ -723,6 +770,45 @@ public static class LuiCompiler
         Compilation compilation
     )
     {
+        if (identity is null)
+            throw new ArgumentNullException(nameof(identity));
+        if (compilation is null)
+            throw new ArgumentNullException(nameof(compilation));
+        var fingerprint = Fingerprints.GetValue(compilation, CreateFingerprint);
+        return new LuiFreshnessIdentity(
+            identity.ProjectEpoch,
+            identity.ProjectIdentity,
+            identity.Document,
+            identity.DocumentVersion,
+            fingerprint.Compilation,
+            identity.SiblingIndexGeneration,
+            fingerprint.LanguageVersion,
+            fingerprint.CompilerVersion,
+            fingerprint.References,
+            fingerprint.GlobalUsings,
+            identity.Options,
+            identity.Defines,
+            identity.RootNamespace
+        );
+    }
+
+    private sealed class CompilationFingerprint(
+        string compilation,
+        string languageVersion,
+        string compilerVersion,
+        string references,
+        string globalUsings
+    )
+    {
+        public string Compilation { get; } = compilation;
+        public string LanguageVersion { get; } = languageVersion;
+        public string CompilerVersion { get; } = compilerVersion;
+        public string References { get; } = references;
+        public string GlobalUsings { get; } = globalUsings;
+    }
+
+    private static CompilationFingerprint CreateFingerprint(Compilation compilation)
+    {
         var parse =
             compilation
                 .SyntaxTrees.Select(tree => tree.Options)
@@ -748,20 +834,12 @@ public static class LuiCompiler
             .Where(@using => @using.GlobalKeyword.RawKind != 0)
             .OrderBy(@using => @using.ToString(), StringComparer.Ordinal)
             .Select(@using => @using.ToString());
-        return new LuiFreshnessIdentity(
-            identity.ProjectEpoch,
-            identity.ProjectIdentity,
-            identity.Document,
-            identity.DocumentVersion,
+        return new CompilationFingerprint(
             LuiDocumentIdentity.Hash(String.Join("\n", trees) + "\0" + compilation.Options),
-            identity.SiblingIndexGeneration,
             parse.LanguageVersion.ToString(),
             typeof(LuiCompiler).Assembly.GetName().Version?.ToString() ?? "unknown",
             LuiDocumentIdentity.Hash(String.Join("\n", references)),
-            LuiDocumentIdentity.Hash(String.Join("\n", globals)),
-            identity.Options,
-            identity.Defines,
-            identity.RootNamespace
+            LuiDocumentIdentity.Hash(String.Join("\n", globals))
         );
     }
 
@@ -1057,19 +1135,45 @@ public static class LuiCompiler
         if (diagnostic.Id is not ("CS0200" or "CS0191"))
             return null;
         var node = tree.GetRoot().FindNode(diagnostic.Location.SourceSpan, true);
-        var assignment = node.AncestorsAndSelf()
-            .OfType<AssignmentExpressionSyntax>()
-            .FirstOrDefault();
+        var target = node.AncestorsAndSelf()
+            .Select(ancestor =>
+                ancestor switch
+                {
+                    AssignmentExpressionSyntax assignment => assignment.Left,
+                    PrefixUnaryExpressionSyntax prefix
+                        when prefix.IsKind(SyntaxKind.PreIncrementExpression)
+                            || prefix.IsKind(SyntaxKind.PreDecrementExpression) => prefix.Operand,
+                    PostfixUnaryExpressionSyntax postfix
+                        when postfix.IsKind(SyntaxKind.PostIncrementExpression)
+                            || postfix.IsKind(SyntaxKind.PostDecrementExpression) =>
+                        postfix.Operand,
+                    _ => null,
+                }
+            )
+            .FirstOrDefault(expression => expression is not null);
+        if (target is null)
+            return null;
+        var symbol = model.GetSymbolInfo(target);
+        var property =
+            symbol.Symbol as IPropertySymbol
+            ?? (
+                symbol.CandidateReason == CandidateReason.NotAVariable
+                && symbol.CandidateSymbols.Length == 1
+                    ? symbol.CandidateSymbols[0] as IPropertySymbol
+                    : null
+            );
         if (
-            assignment is null
-            || model.GetSymbolInfo(assignment.Left).Symbol is not IPropertySymbol property
+            property is null
+            || !SymbolEqualityComparer.Default.Equals(
+                property.ContainingType,
+                model.GetEnclosingSymbol(target.SpanStart)?.ContainingType
+            )
             || !plans.TryGetValue(property.Name, out var plan)
             || plan.Kind is not (StateKind.Derived or StateKind.Snapshot)
         )
             return null;
         var source =
-            Translate(map, new LuiSpan(assignment.Left.SpanStart, assignment.Left.Span.Length))
-            ?? plan.Source;
+            Translate(map, new LuiSpan(target.SpanStart, target.Span.Length)) ?? plan.Source;
         return plan.Kind == StateKind.Derived
             ? new LuiDiagnostic(
                 "LUI2013",
@@ -1723,6 +1827,7 @@ public static class LuiCompiler
         var writer = new Writer(
             document,
             identity,
+            identity.Document.LogicalPath,
             new BindingPlans(
                 new Dictionary<int, string>(),
                 new Dictionary<int, ContentPlan> { [elementStart] = candidate },
@@ -2131,7 +2236,7 @@ public static class LuiCompiler
     {
         foreach (
             var diagnostic in model
-                .Compilation.GetDiagnostics()
+                .GetDiagnostics()
                 .Where(item =>
                     item.Location.SourceTree == tree && (item.Id == "CS0104" || item.Id == "CS0229")
                 )
@@ -2373,6 +2478,7 @@ public static class LuiCompiler
     {
         private readonly LuiDocumentSyntax document;
         private readonly LuiFreshnessIdentity identity;
+        private readonly string mappedPath;
         private readonly StringBuilder text = new StringBuilder();
         private readonly BindingPlans? plans;
         private readonly IReadOnlyList<string> implicitStaticTypes;
@@ -2454,6 +2560,7 @@ public static class LuiCompiler
         internal Writer(
             LuiDocumentSyntax document,
             LuiFreshnessIdentity identity,
+            string mappedPath,
             BindingPlans? plans,
             IReadOnlyList<string> implicitStaticTypes,
             bool suppressDefaultContentAttribute = false
@@ -2461,6 +2568,7 @@ public static class LuiCompiler
         {
             this.document = document;
             this.identity = identity;
+            this.mappedPath = mappedPath;
             this.plans = plans;
             this.implicitStaticTypes = implicitStaticTypes;
             this.suppressDefaultContentAttribute = suppressDefaultContentAttribute;
@@ -2771,7 +2879,18 @@ public static class LuiCompiler
                 Hidden(" = __luiParameter" + parameterIndex.ToString(CultureInfo.InvariantCulture));
                 Hidden(";\n");
             }
-            Hidden("            var owner = " + stateOwner + ";\n");
+            // The convenient mount owner must not shadow an authored member or parameter.
+            if (
+                !component.Parameters.Any(parameter =>
+                    parameter.Name.Text.TrimStart('@') == "owner"
+                )
+                && !fields.Any(field => field.Variable.Identifier.ValueText == "owner")
+                && !members.Any(member =>
+                    member.Declaration is MethodDeclarationSyntax method
+                    && method.Identifier.ValueText == "owner"
+                )
+            )
+                Hidden("            var owner = " + stateOwner + ";\n");
             foreach (var field in fields)
                 EmitStateInitializer(
                     component,
@@ -4341,7 +4460,7 @@ public static class LuiCompiler
                 + ","
                 + end.Column.ToString(System.Globalization.CultureInfo.InvariantCulture)
                 + ") \""
-                + identity.Document.LogicalPath.Replace("\\", "\\\\").Replace("\"", "\\\"")
+                + mappedPath.Replace("\\", "\\\\").Replace("\"", "\\\"")
                 + "\"\n";
         }
     }

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Runtime.ExceptionServices;
@@ -235,6 +236,53 @@ public sealed class Element : IDisposable
         return resolved!;
     }
 
+    /// <summary>Resolves only the current value for Core hot paths that do not need provenance.</summary>
+    internal T ResolveValue<T>(Property<T> property)
+    {
+        Composition.CheckThread();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(property);
+        if (!property.Inherits)
+            return _presentation is null
+                ? property.DefaultValue
+                : _presentation.ResolveValueLocal(property, false, default!);
+
+        if (_parent is null)
+            return _presentation is null
+                ? property.DefaultValue
+                : _presentation.ResolveValueLocal(property, false, default!);
+
+        var depth = 0;
+        for (Element? current = this; current is not null; current = current._parent)
+            depth = checked(depth + 1);
+
+        var lineage = ArrayPool<Element>.Shared.Rent(depth);
+        try
+        {
+            var index = depth;
+            for (Element? current = this; current is not null; current = current._parent)
+                lineage[--index] = current;
+
+            var hasInherited = false;
+            var value = default(T)!;
+            for (index = 0; index < depth; index++)
+            {
+                var current = lineage[index];
+                value = current._presentation is null
+                    ? hasInherited
+                        ? value
+                        : property.DefaultValue
+                    : current._presentation.ResolveValueLocal(property, hasInherited, value);
+                hasInherited = true;
+            }
+            return value;
+        }
+        finally
+        {
+            ArrayPool<Element>.Shared.Return(lineage, clearArray: true);
+        }
+    }
+
     /// <summary>Attaches interaction behavior transactionally; all cleanup remains in element-owned child scopes.</summary>
     public void AttachBehaviors(params Behavior[] behaviors)
     {
@@ -250,7 +298,7 @@ public sealed class Element : IDisposable
         {
             foreach (var behavior in behaviors)
             {
-                var scope = Scope.CreateChild(Name + ".behavior." + behavior.Name);
+                var scope = Scope.CreateBehaviorChild(Name + ".behavior." + behavior.Name);
                 var context = new BehaviorContext(
                     Id,
                     Composition,
@@ -625,7 +673,7 @@ public sealed class Element : IDisposable
     {
         get
         {
-            var value = Resolve(VisualProperties.Participation).Value;
+            var value = ResolveValue(VisualProperties.Participation);
             if (
                 value
                 is not (
@@ -649,8 +697,8 @@ public sealed class Element : IDisposable
     internal bool InputAvailable() =>
         !IsDisposed
         && (_parent is null || _parent.InputAvailable())
-        && Resolve(InputProperties.Enabled).Value
-        && Resolve(InputProperties.Visible).Value
+        && ResolveValue(InputProperties.Enabled)
+        && ResolveValue(InputProperties.Visible)
         && Participation == ElementParticipation.Visible;
 
     private void BehaviorStateChanged()
@@ -710,9 +758,23 @@ public sealed class Element : IDisposable
         Composition.UnregisterSubtree(this);
         if (reachable)
             Composition.InvalidateInputProjection();
-        Composition.InvalidateSemantics();
-        Composition.Transitions.Remove(this);
         List<Exception>? errors = null;
+        try
+        {
+            Composition.InvalidateSemantics();
+        }
+        catch (Exception exception)
+        {
+            (errors ??= []).Add(exception);
+        }
+        try
+        {
+            Composition.Transitions.Remove(this);
+        }
+        catch (Exception exception)
+        {
+            (errors ??= []).Add(exception);
+        }
         try
         {
             if (Composition.InputIfCreated is { } input)
@@ -720,7 +782,7 @@ public sealed class Element : IDisposable
         }
         catch (Exception exception)
         {
-            errors = [exception];
+            (errors ??= []).Add(exception);
         }
         var children = _children.ToArray();
         _children.Clear();

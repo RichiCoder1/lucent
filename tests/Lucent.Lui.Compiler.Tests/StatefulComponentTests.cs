@@ -120,6 +120,91 @@ public static class Harness {
     }
 
     [TestMethod]
+    [DataRow("int total = count * 2;", "total++;", "LUI2013")]
+    [DataRow("int total = count * 2;", "++total;", "LUI2013")]
+    [DataRow("int total = count * 2;", "total--;", "LUI2013")]
+    [DataRow("int total = count * 2;", "--total;", "LUI2013")]
+    [DataRow("readonly int total = count;", "total++;", "LUI2014")]
+    [DataRow("readonly int total = count;", "--total;", "LUI2014")]
+    public void ReadOnlyStateIncrementReportsTheAuthoredTarget(
+        string declaration,
+        string statement,
+        string diagnosticId
+    )
+    {
+        var source = Source
+            .Replace("int count = Constants.Start;", "int count = Constants.Start; " + declaration)
+            .Replace("count += 1;", statement);
+        var (result, _) = Compile(source, Api);
+        Assert.IsFalse(result.Success);
+        var diagnostic = result.Diagnostics.SingleOrDefault(d => d.Id == diagnosticId);
+        Assert.IsNotNull(diagnostic, Describe(result));
+        Assert.AreEqual("total", source.Substring(diagnostic.Span.Start, diagnostic.Span.Length));
+        Assert.IsFalse(
+            result.Diagnostics.Any(d => d.Message.Contains("__lui", StringComparison.Ordinal)),
+            Describe(result)
+        );
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void AuthoredOwnerNamesKeepTheirResourceLifetime(bool declaredField)
+    {
+        var source = """
+namespace AuthoredOwner;
+using Lucent.Core;
+public component Trial(ReactiveScope owner) {
+    readonly Signal<int> value = owner.Signal(0, "external-value");
+    Setup() { Harness.Captured = value; Harness.CapturedOwner = owner; }
+    <Text>ready</Text>
+}
+""";
+        if (declaredField)
+            source = source.Replace(
+                "Trial(ReactiveScope owner) {",
+                "Trial(ReactiveScope external) { readonly ReactiveScope owner = external;"
+            );
+        const string api = """
+namespace AuthoredOwner;
+using Lucent.Core;
+public static class Harness {
+    public static Signal<int> Captured = null!;
+    public static ReactiveScope CapturedOwner = null!;
+    public static int Run() {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "authored-owner");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("trial"));
+        using var external = graph.CreateScope("external");
+        var mounted = composition.Mount(composition.Root, theme, Components.Trial(external));
+        if (!object.ReferenceEquals(external, CapturedOwner))
+            throw new System.Exception("The authored owner was not initialized.");
+        mounted.Dispose();
+        Captured.Value = 7;
+        return Captured.Value;
+    }
+}
+""";
+        var (result, compilation) = Compile(source, api);
+        Assert.IsTrue(result.Success, Describe(result));
+        using var output = new MemoryStream();
+        var emitted = compilation
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    result.Source!,
+                    new CSharpParseOptions(LanguageVersion.Preview)
+                )
+            )
+            .Emit(output);
+        Assert.IsTrue(emitted.Success, string.Join("\n", emitted.Diagnostics));
+        var assembly = Assembly.Load(output.ToArray());
+        Assert.AreEqual(
+            7,
+            (int)assembly.GetType("AuthoredOwner.Harness")!.GetMethod("Run")!.Invoke(null, null)!
+        );
+    }
+
+    [TestMethod]
     public void ReactiveValuesCannotSilentlyFreezeAtStaticInputs()
     {
         const string source = """

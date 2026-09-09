@@ -32,8 +32,12 @@ public static class SceneLayout
                 "The projection drain limit must be positive."
             );
         viewport.Validate();
-        composition.Flush(maximumWorkItems);
         var structuralDiscoveryRounds = 0;
+        FlushAndSynchronizeAvailability(
+            composition,
+            maximumWorkItems,
+            ref structuralDiscoveryRounds
+        );
         var windowBreakpointDiscovery = DiscoverWindowBreakpoints(
             composition,
             viewport.Width,
@@ -71,13 +75,17 @@ public static class SceneLayout
                 foreach (var item in responsive)
                 {
                     var inner = ContentBounds(
+                        item.Element,
                         assignedById[item.Element.Id],
-                        item.Element.Resolve(LayoutProperties.Padding).Value,
                         viewport.Scale
                     );
                     item.State.Assign(new(inner.Width, inner.Height));
                 }
-                composition.Flush(maximumWorkItems);
+                FlushAndSynchronizeAvailability(
+                    composition,
+                    maximumWorkItems,
+                    ref structuralDiscoveryRounds
+                );
                 var previousWindowBreakpoints = windowBreakpoints;
                 var discoveredWindows = DiscoverWindowBreakpoints(
                     composition,
@@ -160,7 +168,12 @@ public static class SceneLayout
                             "A virtualized region has no assigned viewport after responsive layout."
                         )
             );
-            composition.Flush(maximumWorkItems); // Responsive branches and newly realized rows commit before the final projection.
+            // Newly realized rows must have their disabled styles before final geometry is captured.
+            FlushAndSynchronizeAvailability(
+                composition,
+                maximumWorkItems,
+                ref structuralDiscoveryRounds
+            );
             EnsureResponsiveElementsUnchanged(composition, responsive);
             if (!composition.VirtualizedViewportIds.SequenceEqual(virtualizedViewportIds))
                 throw new InvalidOperationException(
@@ -214,13 +227,13 @@ public static class SceneLayout
                                 "Input projection state changed while the scene was being produced."
                             );
                         var bounds = byId[element.Id].Bounds;
-                        var clip = element.Resolve(LayoutProperties.Clip).Value;
+                        var clip = element.ResolveValue(LayoutProperties.Clip);
                         LayoutRect? childClipBounds = clip
                             ? ContentBounds(element, bounds, viewport.Scale)
                             : null;
                         var childClipCornerRadius = childClipBounds is { } childClip
                             ? InnerCornerRadius(
-                                element.Resolve(VisualProperties.CornerRadius).Value,
+                                element.ResolveValue(VisualProperties.CornerRadius),
                                 bounds,
                                 childClip
                             )
@@ -233,12 +246,12 @@ public static class SceneLayout
                             bounds,
                             childClipBounds,
                             order,
-                            element.Resolve(InputProperties.Enabled).Value,
-                            element.Resolve(InputProperties.Visible).Value
+                            element.ResolveValue(InputProperties.Enabled),
+                            element.ResolveValue(InputProperties.Visible)
                                 && element.ParticipatesInInput(),
                             signature,
                             childClipCornerRadius,
-                            element.Resolve(InputProperties.PointerTransparent).Value
+                            element.ResolveValue(InputProperties.PointerTransparent)
                         );
                     }
                 )
@@ -265,17 +278,18 @@ public static class SceneLayout
                 throw new InvalidOperationException(
                     "Responsive container was removed during its constraint pass."
                 );
-            var inner = ContentBounds(
-                outer,
-                item.Element.Resolve(LayoutProperties.Padding).Value,
-                viewport.Scale
-            );
+            var inner = ContentBounds(item.Element, outer, viewport.Scale);
             if (item.State!.Current != new ContainerConstraints(inner.Width, inner.Height))
                 throw new InvalidOperationException(
                     "Responsive container feedback changed its own assigned constraints after the bounded correction pass."
                 );
         }
-        var scrollBars = BuildScrollBars(composition, projected.Boxes, viewport);
+        var scrollBars = BuildScrollBars(
+            composition,
+            projected.Boxes,
+            projected.Collapsed,
+            viewport
+        );
         // Only the final assigned boxes establish image demand. Discovery layouts
         // create borrowed slots, never leases or IO, and may be discarded.
         foreach (var box in projected.Boxes)
@@ -286,8 +300,8 @@ public static class SceneLayout
             image.Request(
                 ContentBounds(element, box.Bounds, viewport.Scale),
                 viewport.Scale,
-                element.Resolve(ImageProperties.Fit).Value,
-                element.Resolve(ImageProperties.ImageZoom).Value
+                element.ResolveValue(ImageProperties.Fit),
+                element.ResolveValue(ImageProperties.ImageZoom)
             );
         }
         var nodes = ResolveImages(InsertScrollBars(projected.Nodes, scrollBars), viewport.Scale);
@@ -420,6 +434,7 @@ public static class SceneLayout
     private static RetainedScrollBar[] BuildScrollBars(
         Composition composition,
         IReadOnlyList<LayoutBox> boxes,
+        IReadOnlyCollection<long> collapsed,
         LayoutViewport viewport
     )
     {
@@ -435,25 +450,27 @@ public static class SceneLayout
             .ToHashSet();
         if (scrollableIds.Count == 0)
             return [];
+        var collapsedIds = collapsed.ToHashSet();
         var boxesById = boxes.ToDictionary(box => box.Identity.ElementId);
         var bars = new List<RetainedScrollBar>();
         foreach (var element in elements)
         {
             if (
                 !scrollableIds.Contains(element.Id)
+                || collapsedIds.Contains(element.Id)
                 || !boxesById.TryGetValue(element.Id, out var box)
             )
                 continue;
-            var visibility = element.Resolve(ScrollBarProperties.Visibility).Value;
+            var visibility = element.ResolveValue(ScrollBarProperties.Visibility);
             if (!Enum.IsDefined(visibility) || visibility == ScrollBarVisibility.Hidden)
                 continue;
-            var thickness = element.Resolve(ScrollBarProperties.Thickness).Value;
-            var minimumThumb = element.Resolve(ScrollBarProperties.MinimumThumbLength).Value;
-            var cornerRadius = element.Resolve(ScrollBarProperties.ThumbCornerRadius).Value;
-            var trackBrush = element.Resolve(ScrollBarProperties.TrackBrush).Value;
-            var thumbBrush = element.Resolve(ScrollBarProperties.ThumbBrush).Value;
-            var hoverThumbBrush = element.Resolve(ScrollBarProperties.HoverThumbBrush).Value;
-            var pressedThumbBrush = element.Resolve(ScrollBarProperties.PressedThumbBrush).Value;
+            var thickness = element.ResolveValue(ScrollBarProperties.Thickness);
+            var minimumThumb = element.ResolveValue(ScrollBarProperties.MinimumThumbLength);
+            var cornerRadius = element.ResolveValue(ScrollBarProperties.ThumbCornerRadius);
+            var trackBrush = element.ResolveValue(ScrollBarProperties.TrackBrush);
+            var thumbBrush = element.ResolveValue(ScrollBarProperties.ThumbBrush);
+            var hoverThumbBrush = element.ResolveValue(ScrollBarProperties.HoverThumbBrush);
+            var pressedThumbBrush = element.ResolveValue(ScrollBarProperties.PressedThumbBrush);
             if (
                 !float.IsFinite(thickness)
                 || thickness < 0
@@ -468,7 +485,7 @@ public static class SceneLayout
                 );
             var padded = ContentBounds(
                 box.Bounds,
-                element.Resolve(LayoutProperties.Padding).Value,
+                element.ResolveValue(LayoutProperties.Padding),
                 viewport.Scale
             );
             if (thickness <= 0 || padded.Width <= thickness)
@@ -476,13 +493,14 @@ public static class SceneLayout
             var content = ContentBounds(element, box.Bounds, viewport.Scale);
             if (thickness <= 0 || content.Width <= 0 || content.Height <= 0)
                 continue;
-            var offset = element.Resolve(LayoutProperties.Scroll).Value;
+            var offset = element.ResolveValue(LayoutProperties.Scroll);
             var right = content.X;
             var bottom = content.Y;
             foreach (var candidate in boxes)
             {
                 if (
                     candidate.Identity.ElementId == element.Id
+                    || collapsedIds.Contains(candidate.Identity.ElementId)
                     || !boxesById.ContainsKey(candidate.Identity.ElementId)
                     || composition.Find(candidate.Identity) is not { } child
                     || !IsScrollContentDescendant(child, element, scrollableIds)
@@ -491,7 +509,7 @@ public static class SceneLayout
                 right = Math.Max(right, candidate.Bounds.X + candidate.Bounds.Width + offset.X);
                 bottom = Math.Max(bottom, candidate.Bounds.Y + candidate.Bounds.Height + offset.Y);
             }
-            if (element.Resolve(ProjectionProperties.TextMultiline).Value && box.Text is { } text)
+            if (element.ResolveValue(ProjectionProperties.TextMultiline) && box.Text is { } text)
             {
                 right = Math.Max(right, content.X + text.Width);
                 bottom = Math.Max(bottom, content.Y + text.Height);
@@ -571,7 +589,7 @@ public static class SceneLayout
             .Select(element =>
                 (
                     Element: element,
-                    State: element.Resolve(ProjectionProperties.ResponsiveConstraints).Value
+                    State: element.ResolveValue(ProjectionProperties.ResponsiveConstraints)
                 )
             )
             .Where(value => value.State is not null)
@@ -581,7 +599,7 @@ public static class SceneLayout
     private static WindowBreakpoints[] WindowBreakpointElements(Composition composition) =>
         composition
             .Elements()
-            .Select(element => element.Resolve(ProjectionProperties.WindowBreakpoints).Value)
+            .Select(element => element.ResolveValue(ProjectionProperties.WindowBreakpoints))
             .Where(state => state is not null)
             .Select(state => state!)
             .ToArray();
@@ -605,7 +623,11 @@ public static class SceneLayout
         {
             foreach (var state in elements)
                 state.Assign(composition, width);
-            composition.Flush(maximumWorkItems);
+            FlushAndSynchronizeAvailability(
+                composition,
+                maximumWorkItems,
+                ref structuralDiscoveryRounds
+            );
             var current = WindowBreakpointElements(composition);
             if (current.SequenceEqual(elements))
                 return (current, registrationChanged);
@@ -624,6 +646,34 @@ public static class SceneLayout
             return false;
         rounds++;
         return true;
+    }
+
+    private static void FlushAndSynchronizeAvailability(
+        Composition composition,
+        int maximumWorkItems,
+        ref int structuralDiscoveryRounds
+    )
+    {
+        composition.Flush(maximumWorkItems);
+        while (true)
+        {
+            // The router still reconciles focus/capture and rejects changes during installation.
+            // Settle element-owned availability here so disabled variants participate in layout.
+            var changed = composition.WithoutProjectionTracking(() =>
+            {
+                var visualChanged = false;
+                foreach (var element in composition.Elements().ToArray())
+                    visualChanged |= element.SetInputDisabledVariant(!element.InputAvailable());
+                return visualChanged;
+            });
+            if (!changed)
+                return;
+            if (!TryConsumeStructuralDiscoveryRound(ref structuralDiscoveryRounds))
+                throw new InvalidOperationException(
+                    "Input availability did not stabilize within eight pre-layout discovery passes."
+                );
+            composition.Flush(maximumWorkItems);
+        }
     }
 
     private static void EnsureWindowBreakpointElementsUnchanged(
@@ -980,10 +1030,10 @@ public static class SceneLayout
                     new(identity, SceneNodeKind.Image),
                     inner,
                     image,
-                    element.Resolve(ImageProperties.Fit).Value,
-                    element.Resolve(ImageProperties.ColorMode).Value,
-                    element.Resolve(ImageProperties.ImageZoom).Value,
-                    element.Resolve(TypographyProperties.TextColor).Value
+                    element.ResolveValue(ImageProperties.Fit),
+                    element.ResolveValue(ImageProperties.ColorMode),
+                    element.ResolveValue(ImageProperties.ImageZoom),
+                    element.ResolveValue(TypographyProperties.TextColor)
                 )
             );
         if (text is not null)
@@ -1403,7 +1453,7 @@ public static class SceneLayout
         var height = textMetrics?.Height ?? 0f;
         if (
             element.Image is not null
-            && element.Resolve(ImageProperties.Source).Value is { } imageSource
+            && element.ResolveValue(ImageProperties.Source) is { } imageSource
         )
         {
             width = imageSource.Metadata.Width;
@@ -1854,11 +1904,11 @@ public static class SceneLayout
     internal static LayoutRect ContentBounds(Element element, LayoutRect outer, float scale)
     {
         ArgumentNullException.ThrowIfNull(element);
-        var content = ContentBounds(outer, element.Resolve(LayoutProperties.Padding).Value, scale);
-        var visibility = element.Resolve(ScrollBarProperties.Visibility).Value;
+        var content = ContentBounds(outer, element.ResolveValue(LayoutProperties.Padding), scale);
+        var visibility = element.ResolveValue(ScrollBarProperties.Visibility);
         if (!Enum.IsDefined(visibility) || visibility == ScrollBarVisibility.Hidden)
             return content;
-        var thickness = element.Resolve(ScrollBarProperties.Thickness).Value;
+        var thickness = element.ResolveValue(ScrollBarProperties.Thickness);
         if (!float.IsFinite(thickness) || thickness < 0)
             throw new ArgumentOutOfRangeException(nameof(element));
         if (thickness == 0 || content.Width <= thickness)
@@ -1925,9 +1975,13 @@ public static class SceneLayout
         );
         request.Validate();
         if (cache.Shapes.TryGetValue(request, out var cached))
+        {
+            cached.SetSourceText(request.Text);
             return cached;
+        }
         var shaped = shaper.Shape(request);
         shaped.Validate(request);
+        shaped.SetSourceText(request.Text);
         cache.Shapes.Add(request, shaped);
         return shaped;
     }
@@ -1990,9 +2044,9 @@ public static class SceneLayout
 
     private static (Brush Background, float Opacity, Color TextColor) ReadPaint(Element element) =>
         (
-            element.Resolve(VisualProperties.Background).Value,
-            element.Resolve(VisualProperties.Opacity).Value,
-            element.Resolve(TypographyProperties.TextColor).Value
+            element.ResolveValue(VisualProperties.Background),
+            element.ResolveValue(VisualProperties.Opacity),
+            element.ResolveValue(TypographyProperties.TextColor)
         );
 
     private static Values ReadResolved(
@@ -2003,52 +2057,52 @@ public static class SceneLayout
     )
     {
         var values = new Values(
-            element.Resolve(LayoutProperties.Mode).Value,
-            element.Resolve(LayoutProperties.Algorithm).Value,
-            element.Resolve(LayoutProperties.Axis).Value,
-            element.Resolve(LayoutProperties.Columns).Value,
-            element.Resolve(LayoutProperties.Rows).Value,
-            element.Resolve(LayoutProperties.ColumnGap).Value,
-            element.Resolve(LayoutProperties.RowGap).Value,
-            element.Resolve(LayoutProperties.GridPlacement).Value,
-            element.Resolve(LayoutProperties.Width).Value,
-            element.Resolve(LayoutProperties.Height).Value,
-            element.Resolve(LayoutProperties.MinWidth).Value,
-            element.Resolve(LayoutProperties.MinHeight).Value,
-            element.Resolve(LayoutProperties.MaxWidth).Value,
-            element.Resolve(LayoutProperties.MaxHeight).Value,
-            element.Resolve(LayoutProperties.Spacing).Value,
-            element.Resolve(LayoutProperties.MainGrow).Value,
-            element.Resolve(LayoutProperties.MainBasis).Value,
-            element.Resolve(LayoutProperties.MainShrink).Value,
-            element.Resolve(LayoutProperties.Wrap).Value,
-            element.Resolve(LayoutProperties.MainAlignment).Value,
-            element.Resolve(LayoutProperties.CrossAlignment).Value,
-            element.Resolve(LayoutProperties.Clip).Value,
-            element.Resolve(LayoutProperties.Padding).Value,
-            element.Resolve(LayoutProperties.Scroll).Value,
-            element.Resolve(LayoutProperties.VirtualRowHeight).Value,
-            element.Resolve(LayoutProperties.VirtualItemCount).Value,
-            element.Resolve(LayoutProperties.VirtualRowIndex).Value,
+            element.ResolveValue(LayoutProperties.Mode),
+            element.ResolveValue(LayoutProperties.Algorithm),
+            element.ResolveValue(LayoutProperties.Axis),
+            element.ResolveValue(LayoutProperties.Columns),
+            element.ResolveValue(LayoutProperties.Rows),
+            element.ResolveValue(LayoutProperties.ColumnGap),
+            element.ResolveValue(LayoutProperties.RowGap),
+            element.ResolveValue(LayoutProperties.GridPlacement),
+            element.ResolveValue(LayoutProperties.Width),
+            element.ResolveValue(LayoutProperties.Height),
+            element.ResolveValue(LayoutProperties.MinWidth),
+            element.ResolveValue(LayoutProperties.MinHeight),
+            element.ResolveValue(LayoutProperties.MaxWidth),
+            element.ResolveValue(LayoutProperties.MaxHeight),
+            element.ResolveValue(LayoutProperties.Spacing),
+            element.ResolveValue(LayoutProperties.MainGrow),
+            element.ResolveValue(LayoutProperties.MainBasis),
+            element.ResolveValue(LayoutProperties.MainShrink),
+            element.ResolveValue(LayoutProperties.Wrap),
+            element.ResolveValue(LayoutProperties.MainAlignment),
+            element.ResolveValue(LayoutProperties.CrossAlignment),
+            element.ResolveValue(LayoutProperties.Clip),
+            element.ResolveValue(LayoutProperties.Padding),
+            element.ResolveValue(LayoutProperties.Scroll),
+            element.ResolveValue(LayoutProperties.VirtualRowHeight),
+            element.ResolveValue(LayoutProperties.VirtualItemCount),
+            element.ResolveValue(LayoutProperties.VirtualRowIndex),
             background,
-            element.Resolve(VisualProperties.CornerRadius).Value,
+            element.ResolveValue(VisualProperties.CornerRadius),
             opacity,
             textColor,
-            element.Resolve(ProjectionProperties.Text).Value,
-            element.Resolve(ProjectionProperties.TextMeasure).Value,
-            element.Resolve(TypographyProperties.FontFamily).Value,
-            element.Resolve(TypographyProperties.FontSize).Value,
-            element.Resolve(TypographyProperties.FontWeight).Value,
-            element.Resolve(TypographyProperties.Language).Value,
-            element.Resolve(TypographyProperties.Direction).Value,
-            element.Resolve(TypographyProperties.TextWrap).Value,
-            element.Resolve(TypographyProperties.MaxLines).Value,
-            element.Resolve(TypographyProperties.Overflow).Value,
-            element.Resolve(ProjectionProperties.TextSelectionStart).Value,
-            element.Resolve(ProjectionProperties.TextSelectionEnd).Value,
-            element.Resolve(ProjectionProperties.TextCaret).Value,
-            element.Resolve(ProjectionProperties.TextMultiline).Value,
-            element.Resolve(ProjectionProperties.TextCaretAffinity).Value
+            element.ResolveValue(ProjectionProperties.Text),
+            element.ResolveValue(ProjectionProperties.TextMeasure),
+            element.ResolveValue(TypographyProperties.FontFamily),
+            element.ResolveValue(TypographyProperties.FontSize),
+            element.ResolveValue(TypographyProperties.FontWeight),
+            element.ResolveValue(TypographyProperties.Language),
+            element.ResolveValue(TypographyProperties.Direction),
+            element.ResolveValue(TypographyProperties.TextWrap),
+            element.ResolveValue(TypographyProperties.MaxLines),
+            element.ResolveValue(TypographyProperties.Overflow),
+            element.ResolveValue(ProjectionProperties.TextSelectionStart),
+            element.ResolveValue(ProjectionProperties.TextSelectionEnd),
+            element.ResolveValue(ProjectionProperties.TextCaret),
+            element.ResolveValue(ProjectionProperties.TextMultiline),
+            element.ResolveValue(ProjectionProperties.TextCaretAffinity)
         );
         if (
             !Enum.IsDefined(values.Mode)
@@ -2175,7 +2229,7 @@ public static class SceneLayout
                     parent = parent.Parent;
                 resolved = resolved with
                 {
-                    Axis = parent?.Resolve(LayoutProperties.Axis).Value ?? LayoutAxis.Column,
+                    Axis = parent?.ResolveValue(LayoutProperties.Axis) ?? LayoutAxis.Column,
                     Width = content.Width,
                     Height = content.Height,
                     MinWidth = content.MinWidth,
@@ -2190,9 +2244,9 @@ public static class SceneLayout
             }
             _styles.Add(element.Id, resolved);
             var decorations = new DecorationValues(
-                element.Resolve(VisualProperties.Border).Value,
-                element.Resolve(VisualProperties.FocusRing).Value,
-                element.Resolve(VisualProperties.CornerRadius).Value
+                element.ResolveValue(VisualProperties.Border),
+                element.ResolveValue(VisualProperties.FocusRing),
+                element.ResolveValue(VisualProperties.CornerRadius)
             );
             if (decorations != default)
                 _decorations.Add(element.Id, decorations);
@@ -2421,8 +2475,8 @@ public static class SceneLayout
         var cornerRadius = values.CornerRadius;
         var padding = values.Padding;
         var scroll = values.Scroll;
-        var scrollbarVisibility = element.Resolve(ScrollBarProperties.Visibility).Value;
-        var scrollbarThickness = element.Resolve(ScrollBarProperties.Thickness).Value;
+        var scrollbarVisibility = element.ResolveValue(ScrollBarProperties.Visibility);
+        var scrollbarThickness = element.ResolveValue(ScrollBarProperties.Thickness);
         var virtualRowHeight = values.VirtualRowHeight;
         var virtualItemCount = values.VirtualItemCount;
         var virtualRowIndex = values.VirtualRowIndex;
@@ -2441,9 +2495,9 @@ public static class SceneLayout
         var caret = values.Caret;
         var multiline = values.Multiline;
         var caretAffinity = values.CaretAffinity;
-        var enabled = element.Resolve(InputProperties.Enabled).Value;
-        var visible = element.Resolve(InputProperties.Visible).Value;
-        var pointerTransparent = element.Resolve(InputProperties.PointerTransparent).Value;
+        var enabled = element.ResolveValue(InputProperties.Enabled);
+        var visible = element.ResolveValue(InputProperties.Visible);
+        var pointerTransparent = element.ResolveValue(InputProperties.PointerTransparent);
         var participation = element.Participation;
         return Hash(writer =>
         {

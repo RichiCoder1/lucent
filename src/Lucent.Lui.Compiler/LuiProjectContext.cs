@@ -196,7 +196,12 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
             .GetTypeByMetadataName(declaration.ContainingType)
             ?.GetMembers(declaration.MetadataName)
             .OfType<IMethodSymbol>()
-            .Any() == true;
+            .Any(method =>
+                StringComparer.Ordinal.Equals(
+                    method.GetDocumentationCommentId(),
+                    declaration.SignatureIdentity
+                )
+            ) == true;
 
     private static string DeclarationSource(LuiDocumentSyntax document)
     {
@@ -329,6 +334,7 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
             string identity = "",
             string containingType = "",
             string metadataName = "",
+            string signatureIdentity = "",
             string fingerprint = "",
             bool isValid = false
         )
@@ -338,6 +344,7 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
             Identity = identity;
             ContainingType = containingType;
             MetadataName = metadataName;
+            SignatureIdentity = signatureIdentity;
             Fingerprint = fingerprint;
             IsValid = isValid;
         }
@@ -351,6 +358,7 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
         internal SyntaxTree Tree { get; }
         internal string ContainingType { get; }
         internal string MetadataName { get; }
+        internal string SignatureIdentity { get; }
         internal string Fingerprint { get; }
         internal bool IsValid { get; }
 
@@ -377,6 +385,7 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
                     + symbol.MetadataName,
                 symbol.ContainingType.ToDisplayString(),
                 symbol.MetadataName,
+                symbol.GetDocumentationCommentId() ?? "",
                 Tree.GetRoot().NormalizeWhitespace().ToFullString(),
                 true
             );

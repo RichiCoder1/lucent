@@ -1,6 +1,6 @@
 # Scene projection evidence
 
-Issue [#114](https://github.com/RichiCoder1/lucent/issues/114) measured repeated retained projection before selecting an optimization. The maintained probe measures only calls to `SceneLayout.Project`; graph mutation, input installation, and snapshot disposal occur outside the measured interval. If input installation rejects a scene after a responsive branch remount, the sample includes each projection attempt needed to reach an accepted scene. Allocated bytes are `GC.GetAllocatedBytesForCurrentThread` deltas, so they describe managed allocation churn on the projection thread rather than retained heap growth.
+Issue [#114](https://github.com/RichiCoder1/lucent/issues/114) measured repeated retained projection before selecting an optimization. The maintained probe measures only calls to `SceneLayout.Project`; graph mutation, input installation, and snapshot disposal occur outside the measured interval. If input installation rejects a scene, the sample includes each projection attempt needed to reach an accepted scene. Allocated bytes are `GC.GetAllocatedBytesForCurrentThread` deltas, so they describe managed allocation churn on the projection thread rather than retained heap growth.
 
 The September 9, 2026 run used MORO-DESKTOP with an AMD Ryzen 9 9900X (12 cores, 24 logical processors), 66,188,967,936 bytes of physical memory, Windows 10.0.26200, .NET 10.0.11, X64, and Release configuration. Each scenario used 10 warmups and 40 recorded samples. The wide fixture projected 501 boxes, the deep fixture projected 129 boxes, and Issue Browser projected 94 boxes with 12 realized rows.
 
@@ -17,11 +17,26 @@ The baseline used the committed `SceneLayout.cs` Git blob `66d75caf3b893ad11ab94
 | Issue Browser, scroll change | 44.53 ms | 39.26 ms | 76,077,888 B | 68,378,872 B |
 | Issue Browser, input change | 43.74 ms | 35.84 ms | 74,670,208 B | 66,970,616 B |
 
-The first after run is retained at `artifacts/scene-projection-114/after.json`, SHA-256 `de7e8a2fb35a22b425aa4fe6ea47e613d49d66911179457337cb3d3cae79501d`. Its scale-change p50 was 44.55 ms while the repeat was 37.25 ms, which demonstrates enough timing variance to reject a new fixed latency gate. Allocation results varied by less than 0.1% for most scenarios. Breakpoint transitions required exactly two projection attempts per sample before and after because the branch remount invalidates the first input projection by design.
+The first after run is retained at `artifacts/scene-projection-114/after.json`, SHA-256 `de7e8a2fb35a22b425aa4fe6ea47e613d49d66911179457337cb3d3cae79501d`. Its scale-change p50 was 44.55 ms while the repeat was 37.25 ms, which demonstrates enough timing variance to reject a new fixed latency gate. Allocation results varied by less than 0.1% for most scenarios. Breakpoint transitions required exactly two projection attempts per sample before and after. The earlier attribution to a branch remount was incorrect: these shells retain their responsive elements. Issue #174 independently reproduces install-time availability synchronization invalidating a projected scene; the exact contribution to these historical runs was not traced.
 
 The implemented optimization retains resolved style values already captured for the input mutation guard and reuses them during the final layout in the same projection pass. Paint-only background, opacity, and text-color reads remain outside input tracking. A fresh post-layout signature still detects style, typography, scrolling, input, and participation changes made while producing the scene. The snapshot does not survive into another projection and does not implement dirty-subtree caching.
 
 The after worktree also contained the focused #116 Grid/Flex allocation correction and #117 paragraph-width correction, so elapsed-time changes cannot be attributed solely to #114. The allocation reduction is consistent with removing one repeated property-resolution pass, but it is still evidence from the combined source. Allocations remain substantial, especially for deep inherited-property resolution, and warrant later measurement before another narrow optimization. These results do not establish a release threshold, a universal frame budget, cold-start behavior, renderer cost, or performance on other hardware.
+
+## September 9 review remediation
+
+The combined #172–#193 working tree was measured with the same maintained probe, machine, runtime, ten warmups and forty samples. This includes value-only resolution on hot paths and availability synchronization before final projection; results must not be attributed to either change alone.
+
+| Scenario | Earlier #114 after-repeat p50 | Review p50 | Earlier allocation | Review allocation |
+| --- | ---: | ---: | ---: | ---: |
+| Wide, unchanged | 27.15 ms | 11.57 ms | 93,869,504 B | 3,729,584 B |
+| Deep, unchanged | 51.09 ms | 6.61 ms | 234,311,776 B | 1,373,912 B |
+| Issue Browser, unchanged | 39.22 ms | 8.72 ms | 66,970,248 B | 2,144,712 B |
+| Issue Browser, breakpoint change | 69.69 ms | 7.51 ms | 116,531,616 B | 1,796,344 B |
+
+All eight scenarios (including same-bucket, scale, scroll and input updates) accepted their first projection in every recorded sample. The input freshness signatures and rejection guards remain enabled. The deep fixture still walks inherited values; this is not dirty-subtree or cross-frame caching.
+
+The report is `artifacts/review-scene-projection.json`, SHA-256 `7f8135c98c9792471f479decb340112cd4aa1a44f786042a68781a975a6ba3da`. The measured Core DLL is `72c3dfe8b81d6d24fd7f9a8b0767ec8f98e07da6c51b3f50c3b273df838d8ac9`; the verifier DLL is `3f5d927f170041c8293630c5418b46f9b10f69bb9bb5a473929c47428129dbd7`. `artifacts/review-projection-binary-identities.json` records their paths and the renderer identity, and `artifacts/review-integrated-source-sha256.json` records the modified production sources used by this run. These are JIT Release projection measurements, not NativeAOT frame rates, painting costs or a universal latency guarantee.
 
 ## Independent Light Notes consumer
 

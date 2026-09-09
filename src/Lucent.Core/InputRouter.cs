@@ -202,15 +202,12 @@ public sealed partial class InputRouter
             )
                 RequestFocus(null, FocusChangeReason.Reordered, errors);
             _ = FocusPendingMenuTarget(errors);
-            if (RevealEditorCaret() || _composition.InteractionVisualGeneration != visualGeneration)
-            {
-                _scene = null;
-                ClearInputCaches();
-                Throw(errors);
-                return false;
-            }
+            // Establish pending focus before revealing its caret. Both operations may
+            // invalidate this candidate's interaction visuals, but they can safely be
+            // coalesced into one bounded rejection when the paragraph source is fresh.
             ProcessFocusTargets(errors);
-            if (_composition.InteractionVisualGeneration != visualGeneration)
+            var caretRevealed = RevealEditorCaret();
+            if (caretRevealed || _composition.InteractionVisualGeneration != visualGeneration)
             {
                 _scene = null;
                 ClearInputCaches();
@@ -338,7 +335,7 @@ public sealed partial class InputRouter
             var errors = new List<Exception>();
             if (EnsureScene(errors) is { } rejection)
                 return Reject(rejection, "Wheel", errors);
-            var target = Hit(command.X, command.Y);
+            var target = HitWheel(command.X, command.Y);
             if (target is null)
                 return Reject(InputRejection.NoTarget, "Wheel", errors);
             var route = Path(target.Value).Reverse().ToArray();
@@ -347,7 +344,10 @@ public sealed partial class InputRouter
             var handled = false;
             foreach (var identity in route)
             {
-                if (!_scrollable.TryGetValue(identity.ElementId, out var scrollable))
+                if (
+                    !Available(identity)
+                    || !_scrollable.TryGetValue(identity.ElementId, out var scrollable)
+                )
                     continue;
                 var current = scrollable.State.Offset;
                 var bounds = ScrollBounds(identity, scrollable.InstalledOffset);
@@ -579,33 +579,53 @@ public sealed partial class InputRouter
                 || !ValidateScene(_scene)
                 || _focused is not { } focus
                 || !Eligible(focus.Identity)
-                || !_textFields.TryGetValue(focus.Identity.ElementId, out var textState)
+                || !_textFields.ContainsKey(focus.Identity.ElementId)
+                || !_input.TryGetValue(focus.Identity.ElementId, out var field)
             )
                 return false;
             var caret = FindCaret(_scene.Nodes, focus.Identity);
             if (caret is null)
                 return false;
             rectangle = caret.Bounds;
-            if (
-                textState.IsMultiline && _input.TryGetValue(focus.Identity.ElementId, out var field)
-            )
+            var clip = field.ChildClipBounds ?? field.Bounds;
+            foreach (var ancestor in _effectiveClips[focus.Identity.ElementId])
             {
-                var clip = field.ChildClipBounds ?? field.Bounds;
-                rectangle = new(
-                    Math.Clamp(
-                        rectangle.X,
-                        clip.X,
-                        Math.Max(clip.X, clip.X + clip.Width - rectangle.Width)
-                    ),
-                    Math.Clamp(
-                        rectangle.Y,
-                        clip.Y,
-                        Math.Max(clip.Y, clip.Y + clip.Height - rectangle.Height)
-                    ),
-                    Math.Min(rectangle.Width, clip.Width),
-                    Math.Min(rectangle.Height, clip.Height)
+                var left = Math.Max(clip.X, ancestor.Bounds.X);
+                var top = Math.Max(clip.Y, ancestor.Bounds.Y);
+                var right = Math.Min(
+                    clip.X + clip.Width,
+                    ancestor.Bounds.X + ancestor.Bounds.Width
                 );
+                var bottom = Math.Min(
+                    clip.Y + clip.Height,
+                    ancestor.Bounds.Y + ancestor.Bounds.Height
+                );
+                if (right <= left || bottom <= top)
+                {
+                    rectangle = default;
+                    return false;
+                }
+                clip = new(left, top, right - left, bottom - top);
             }
+            if (clip.Width <= 0 || clip.Height <= 0)
+            {
+                rectangle = default;
+                return false;
+            }
+            rectangle = new(
+                Math.Clamp(
+                    rectangle.X,
+                    clip.X,
+                    Math.Max(clip.X, clip.X + clip.Width - rectangle.Width)
+                ),
+                Math.Clamp(
+                    rectangle.Y,
+                    clip.Y,
+                    Math.Max(clip.Y, clip.Y + clip.Height - rectangle.Height)
+                ),
+                Math.Min(rectangle.Width, clip.Width),
+                Math.Min(rectangle.Height, clip.Height)
+            );
             return true;
         }
         finally
@@ -1536,6 +1556,18 @@ public sealed partial class InputRouter
         return null;
     }
 
+    private ElementIdentity? HitWheel(float x, float y)
+    {
+        foreach (var candidate in _hitOrder)
+            if (
+                _pointerVisible.GetValueOrDefault(candidate.Identity.ElementId)
+                && Contains(candidate.Bounds, x, y)
+                && ClippedIn(candidate.Identity, x, y)
+            )
+                return candidate.Identity;
+        return null;
+    }
+
     private RetainedScrollBar? HitScrollBar(float x, float y)
     {
         foreach (var scrollBar in _scrollBarHitOrder)
@@ -1589,14 +1621,14 @@ public sealed partial class InputRouter
             if (
                 (_input.TryGetValue(current.ElementId, out var retained) && !retained.Visible)
                 || _composition.Find(current) is { IsDisposed: false } element
-                    && !element.Resolve(InputProperties.Visible).Value
+                    && !element.ResolveValue(InputProperties.Visible)
             )
                 return Unavailable.Hidden;
         foreach (var current in chain)
             if (
                 (_input.TryGetValue(current.ElementId, out var retained) && !retained.Enabled)
                 || _composition.Find(current) is { IsDisposed: false } element
-                    && !element.Resolve(InputProperties.Enabled).Value
+                    && !element.ResolveValue(InputProperties.Enabled)
             )
                 return Unavailable.Disabled;
         return Unavailable.Scene;
@@ -1833,9 +1865,14 @@ public sealed partial class InputRouter
 
     internal ShapedText? TextParagraph(ElementIdentity identity)
     {
-        if (_scene is null)
+        if (_scene is null || !_textFields.TryGetValue(identity.ElementId, out var state))
             return null;
-        return _scene.Boxes.FirstOrDefault(box => box.Identity == identity).Text;
+        var paragraph = _scene.Boxes.FirstOrDefault(box => box.Identity == identity).Text;
+        return
+            paragraph?.SourceText is { } source
+            && StringComparer.Ordinal.Equals(source, state.DisplayText)
+            ? paragraph
+            : null;
     }
 
     internal ParagraphHitTest? HitTestText(ElementIdentity identity, float x, float y)
@@ -1845,7 +1882,13 @@ public sealed partial class InputRouter
         if (state.DisplayText.Length == 0)
             return new(0, TextAffinity.Downstream, 0);
         var text = FindTextNode(_scene.Nodes, identity);
-        return text?.Text.HitTest(state.DisplayText, x - text.Bounds.X, y - text.Bounds.Y);
+        if (
+            text is null
+            || text.Text.SourceText is not { } source
+            || !StringComparer.Ordinal.Equals(source, state.DisplayText)
+        )
+            return null;
+        return text.Text.HitTest(state.DisplayText, x - text.Bounds.X, y - text.Bounds.Y);
     }
 
     private static TextSceneNode? FindTextNode(
@@ -1878,13 +1921,15 @@ public sealed partial class InputRouter
         )
             return false;
         var box = _scene.Boxes.FirstOrDefault(item => item.Identity == identity);
-        if (box.Text is null || textOffset < 0 || textOffset > state.DisplayText.Length)
+        if (
+            box.Text is not { } text
+            || text.SourceText is not { } source
+            || !StringComparer.Ordinal.Equals(source, state.DisplayText)
+            || textOffset < 0
+            || textOffset > state.DisplayText.Length
+        )
             return false;
-        var caret = box.Text.CaretBounds(
-            state.DisplayText,
-            textOffset,
-            state.Session.CaretAffinity
-        );
+        var caret = text.CaretBounds(state.DisplayText, textOffset, state.Session.CaretAffinity);
         var viewport = _input.TryGetValue(identity.ElementId, out var retained)
             ? retained.ChildClipBounds ?? retained.Bounds
             : box.Bounds;
@@ -1920,9 +1965,10 @@ public sealed partial class InputRouter
         );
         if (scrollable.CaretStamp == stamp)
             return false;
-        scrollable.CaretStamp = stamp;
         var before = scrollable.State.Offset;
-        _ = ScrollTextIntoView(focus.Identity, state.DisplayCaret, alignToTop: false);
+        if (!ScrollTextIntoView(focus.Identity, state.DisplayCaret, alignToTop: false))
+            return false;
+        scrollable.CaretStamp = stamp;
         return before != scrollable.State.Offset;
     }
 
@@ -2007,7 +2053,8 @@ public sealed partial class InputRouter
         var bottom = content.Y;
         foreach (
             var child in _input.Values.Where(item =>
-                IsScrollContentDescendant(item.Identity, identity)
+                _scene?.IsCollapsed(item.Identity.ElementId) != true
+                && IsScrollContentDescendant(item.Identity, identity)
             )
         )
         {

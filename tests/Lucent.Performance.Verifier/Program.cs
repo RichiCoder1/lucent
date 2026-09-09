@@ -211,7 +211,7 @@ static ManagedObservation ManagedCycles()
         using var renderer = new SkiaSceneRenderer();
         WaitForIssues(graph, composition, renderer);
         var viewport = new LayoutViewport(800, 500, 1);
-        var first = SceneLayout.Project(composition, viewport, renderer);
+        using var first = SceneLayout.Project(composition, viewport, renderer);
         if (!composition.Input.SetScene(first))
             throw new InvalidOperationException("Managed performance baseline scene was rejected.");
         var list = Flatten(composition.SemanticSnapshot()!)
@@ -231,7 +231,7 @@ static ManagedObservation ManagedCycles()
         )
             throw new InvalidOperationException("10,000-row semantic scroll to end was rejected.");
         graph.Drain();
-        var last = SceneLayout.Project(composition, viewport, renderer);
+        using var last = SceneLayout.Project(composition, viewport, renderer);
         if (!composition.Input.SetScene(last))
             throw new InvalidOperationException("Managed performance end scene was rejected.");
         MeasureVirtualization(
@@ -289,7 +289,7 @@ static void PrimeManagedBaseline()
     using var composition = CreateVirtualizationFixture(graph, out _);
     using var renderer = new SkiaSceneRenderer();
     WaitForIssues(graph, composition, renderer);
-    _ = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+    using var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
 }
 
 static void CompactCollect()
@@ -352,7 +352,7 @@ static void WaitForIssues(ReactiveGraph graph, Composition composition, SkiaScen
     while (Stopwatch.GetTimestamp() < until)
     {
         graph.Drain();
-        var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+        using var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
         if (
             composition.Input.SetScene(scene)
             && composition.SemanticSnapshot() is { } snapshot

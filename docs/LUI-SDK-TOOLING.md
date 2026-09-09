@@ -52,7 +52,7 @@ The evaluated `RootNamespace` participates in that freshness identity. If an acc
 
 Build and editor use the actual Roslyn `Compilation`, global/static usings, analyzer options, references, defines, language version, nullability, and `.lui` items. Component tags resolve `[LucentComponent]` methods by normal C# accessibility, overload, exact camel-case parameter, conversion, default-value, and `[DefaultContent]` rules. The editor evaluates the real project through `MSBuildWorkspace`; there is no custom `.csproj` parser or approximate reference resolver.
 
-Generated C# uses enhanced `#line` spans for compiler/debugger mapping and `#line hidden` for scaffolding. The compiler's deterministic map retains source/generated document identity and exact spans in both directions. Tests use `GetMappedLineSpan` and map round trips rather than prose claims.
+Generated C# uses enhanced `#line` spans with the physical `.lui` path for compiler/debugger source lookup and `#line hidden` for scaffolding. The physical path does not change logical document identity, generated hint names, map identity, or the compiler freshness identity; hosts still use the physical file path or URI to track the file itself. The compiler's deterministic map retains source/generated document identity and exact spans in both directions. Tests use `GetMappedLineSpan` and map round trips rather than prose claims.
 
 Map entries support one-to-many and many-to-one spans, distinguish symbol/expression/structure/scaffolding kinds, mark hidden synthetic output, and sort deterministically. Rename/references use symbol provenance plus the current map identity; `#line` alone is not a bidirectional map.
 
@@ -88,7 +88,7 @@ The .lui tooling contract covers every frozen construct: components, parameters,
 
 The Filter Bar prototype establishes an honest editor baseline. Budgets are frozen before optimization for cold project load, warm completion, edit-to-diagnostic, rename, formatting, incremental no-op, and one-file invalidation. The Issue Row/keyed slice must pass those budgets before application cutover.
 
-Review occurs once at each meaningful authoring boundary: runtime primitives; syntax/recovery; binding/lowering/maps; SDK/incrementality; Filter Bar parity; Issue Row parity; editor/cutover. Only blocker/high/medium findings block the boundary. Full runtime, NativeAOT, package, or manual checks run when their evidence is invalidated or when a release decision requires them, not after every parser-only edit.
+Follow the [pre-release verification policy](agents/verification.md): select compiler, generator and editor checks by the behavior changed, and use the SDK/NativeAOT consumer when lowering or generated runtime behavior changes. Independent review is for substantial correctness or architecture risk. Broad runtime, package and manual checks belong to affected risks or release decisions, rather than routine authoring milestones.
 
 ## Component-local state
 

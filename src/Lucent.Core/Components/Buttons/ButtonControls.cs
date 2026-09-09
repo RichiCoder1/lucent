@@ -34,7 +34,7 @@ internal static partial class Controls
                     .Empty.Set(VisualProperties.Background, ControlThemes.AccentPressed)
                     .Set(TypographyProperties.TextColor, ControlThemes.SurfaceColor)
             )
-            .When(VariantState.FocusVisible, FocusStyle(theme))
+            .When(VariantState.FocusVisible, AccentFocusStyle(theme))
             .When(
                 VariantState.Disabled,
                 Style

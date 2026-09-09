@@ -168,15 +168,15 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         viewport.Validate();
         if (_updating)
             throw new InvalidOperationException("A virtualized region cannot realize reentrantly.");
-        var outerWidth = _viewport.Resolve(LayoutProperties.Width).Value ?? viewport.Width;
-        var outerHeight = _viewport.Resolve(LayoutProperties.Height).Value ?? viewport.Height;
+        var outerWidth = _viewport.ResolveValue(LayoutProperties.Width) ?? viewport.Width;
+        var outerHeight = _viewport.ResolveValue(LayoutProperties.Height) ?? viewport.Height;
         var outer =
             assignedBounds ?? LayoutRect.Round(0, 0, outerWidth, outerHeight, viewport.Scale);
         var viewportHeight = SceneLayout.ContentBounds(_viewport, outer, viewport.Scale).Height;
         // Source or viewport changes can precede the input router's scroll clamp.
         // Realize against the new extent now, before slicing the accepted keys.
         var maximum = Math.Max(0, (double)_items.Length * RowHeight - viewportHeight);
-        var requested = _viewport.Resolve(LayoutProperties.Scroll).Value.Y;
+        var requested = _viewport.ResolveValue(LayoutProperties.Scroll).Y;
         var offset = float.IsNaN(requested) ? 0 : Math.Clamp((double)requested, 0, maximum);
         var first = (int)Math.Clamp(Math.Floor(offset / RowHeight) - Overscan, 0, _items.Length);
         var last = (int)

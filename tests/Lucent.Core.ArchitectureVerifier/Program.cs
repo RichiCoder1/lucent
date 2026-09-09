@@ -44,6 +44,18 @@ static void VerifyLuiMetadata(
 )
 {
     var definitions = metadata.TypeDefinitions.ToArray();
+    foreach (var handle in definitions)
+    {
+        var definition = metadata.GetTypeDefinition(handle);
+        if (
+            metadata.GetString(definition.Name) == "Components"
+            && metadata.GetString(definition.Namespace) != "Lucent.Core"
+        )
+            violations.Add(
+                "Core component factories use an unexpected namespace: "
+                    + TypeDefinitionName(metadata, handle)
+            );
+    }
     if (
         definitions.Any(handle =>
             TypeDefinitionName(metadata, handle)

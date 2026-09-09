@@ -785,6 +785,19 @@ public sealed class ShapedText
     /// <summary>Gets constrained paragraph line geometry.</summary>
     public IReadOnlyList<ParagraphLine> Lines => _lines;
 
+    /// <summary>Gets the exact source snapshot validated by scene projection, when available.</summary>
+    internal string? SourceText { get; private set; }
+
+    internal void SetSourceText(string source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (SourceText is not null && !StringComparer.Ordinal.Equals(SourceText, source))
+            throw new InvalidOperationException(
+                "A shaped text result cannot represent multiple source snapshots."
+            );
+        SourceText = source;
+    }
+
     /// <summary>Gets whether inline, block, or line-count limits omitted content.</summary>
     public bool DidOverflow { get; }
 

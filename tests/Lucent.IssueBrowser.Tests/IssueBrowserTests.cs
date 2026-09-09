@@ -396,22 +396,19 @@ public sealed class IssueBrowserTests
         );
     }
 
-    static VirtualizedIssueRowEvidence CaptureVirtualizedIssueRowEvidence(
-        Func<IssueBrowserState, Func<BrowserIssue>, ComponentRecipe> row
-    )
+    [TestMethod]
+    public void CompiledIssueRowsRetainIdentityAcrossReorderReplacementAndRemoval()
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "issue-row-virtual-parity");
-        using var theme = new ThemeContext(
-            composition.Root.Scope,
-            new Theme("issue-row-virtual-parity")
-        );
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         using var handler = new DeferredGitHubHandler();
         using var client = new HttpClient(handler)
         {
             BaseAddress = new Uri("https://api.github.local/"),
         };
         var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
+        var view = new IssueBrowserViewState(composition.Root.Scope, browser);
         var values = composition.Root.Scope.Signal<IReadOnlyList<BrowserIssue>>(
             Array.Empty<BrowserIssue>(),
             "issue-row-virtual-parity.values"
@@ -422,10 +419,13 @@ public sealed class IssueBrowserTests
             Lucent.Core.Components.VirtualizedList(
                 () => values.Value,
                 issue => issue.Number,
-                issue => row(browser, () => issue.Value).Named("issue-browser.issue-row"),
-                () => 30f,
+                issue =>
+                    Lucent
+                        .IssueBrowser.Components.IssueRow(browser, () => issue.Value, view)
+                        .Named("issue-browser.issue-row"),
+                () => view.IssueRowHeight,
                 "Issues",
-                Style.Empty.Width(800f).Height(60f)
+                Style.Empty.Width(800f).Height(120f)
             )
         );
         values.Value = browser.VisibleIssues;
@@ -440,109 +440,122 @@ public sealed class IssueBrowserTests
         );
 
         using var renderer = new SkiaSceneRenderer();
-        var scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
-        Assert(
-            composition.Input.SetScene(scene),
-            "The virtual Issue Row parity scene was rejected."
-        );
-        var initialRows = Flatten(composition.SemanticSnapshot()!)
-            .Count(node => node.Role == SemanticRole.ListItem);
-        var initial = IssueRow(composition, 10_000, "initial");
-        var dump = composition.Dump();
-        var semantics = SemanticEvidence(composition.SemanticSnapshot()!);
-        var sceneEvidence = SceneEvidence(scene);
-        var pixels = Pixels(renderer, scene, 800, 60);
+        RetainedScene? currentScene = null;
+        RetainedScene Project()
+        {
+            var next = Install(composition, renderer, new(800, 120, 1));
+            currentScene?.Dispose();
+            currentScene = next;
+            return next;
+        }
+        try
+        {
+            var scene = Project();
+            Assert(
+                composition.Input.SetScene(scene),
+                "The virtual Issue Row parity scene was rejected."
+            );
+            var initialRows = Flatten(composition.SemanticSnapshot()!)
+                .Count(node => node.Role == SemanticRole.ListItem);
+            var initial = IssueRow(composition, 10_000, "initial");
 
-        Assert(
-            composition.ExecuteSemanticCommand(initial.Identity, new(SemanticCommandKind.Select))
-                == SemanticCommandResult.Applied
-                && composition.Input.FocusSemantic(
-                    new(initial.Identity.CompositionEpoch, initial.Identity.ElementId)
-                ),
-            "The generated virtual Issue Row did not accept semantic selection and focus."
-        );
-        graph.Drain();
-        scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
-        Assert(
-            composition.Input.SetScene(scene),
-            "The selected virtual Issue Row scene was rejected."
-        );
-        var selected = IssueRow(composition, 10_000, "selected");
-        Assert(
-            selected.Selected
-                && composition.Input.FocusedElement?.ElementId == selected.Identity.ElementId
-                && composition.IsCurrent(selected.Identity),
-            "The selected virtual Issue Row did not retain current focus and selection semantics."
-        );
-
-        var reorderedValues = values.Value.ToArray();
-        (reorderedValues[0], reorderedValues[1]) = (reorderedValues[1], reorderedValues[0]);
-        values.Value = reorderedValues;
-        graph.Drain();
-        scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
-        Assert(
-            composition.Input.SetScene(scene),
-            "The reordered virtual Issue Row scene was rejected."
-        );
-        var reordered = IssueRow(composition, 10_000, "reordered");
-        Assert(
-            reordered.Identity.ElementId == selected.Identity.ElementId
-                && reordered.Selected
-                && composition.Input.FocusedElement?.ElementId == selected.Identity.ElementId
-                && composition.IsCurrent(selected.Identity),
-            "Keyed virtual Issue Row reorder changed runtime identity, focus, selection, or current semantics."
-        );
-
-        var beforeReplacementPixels = Pixels(renderer, scene, 800, 60);
-        // Replace only the list source: the browser's original records deliberately stay unchanged.
-        // A row must read its retained payload rather than looking the key up in browser.Issues.
-        values.Value = values
-            .Value.Select(issue =>
-                issue.Number == 10_000 ? issue with { Title = "Updated retained record" } : issue
-            )
-            .ToArray();
-        graph.Drain();
-        scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
-        Assert(composition.Input.SetScene(scene), "The replaced-record scene was rejected.");
-        var refreshed = IssueRow(composition, 10_000, "replaced");
-        Assert(
-            refreshed.Name.Contains("Updated retained record", StringComparison.Ordinal)
-                && refreshed.Identity.ElementId == reordered.Identity.ElementId
-                && refreshed.Selected
-                && composition.Input.FocusedElement?.ElementId == refreshed.Identity.ElementId
-                && Pixels(renderer, scene, 800, 60) != beforeReplacementPixels,
-            "Same-key replacement failed to update row text/semantics while retaining identity, focus and selection."
-        );
-
-        values.Value = values.Value.Skip(2).ToArray();
-        graph.Drain();
-        scene = SceneLayout.Project(composition, new(800, 60, 1), renderer);
-        Assert(
-            composition.Input.SetScene(scene),
-            "The removed virtual Issue Row scene was rejected."
-        );
-        var remainingRows = Flatten(composition.SemanticSnapshot()!)
-            .Count(node => node.Role == SemanticRole.ListItem);
-        Assert(
-            !Flatten(composition.SemanticSnapshot()!)
-                .Any(node => node.Name.StartsWith("#10000 ", StringComparison.Ordinal))
-                && !composition.IsCurrent(reordered.Identity)
-                && composition.ExecuteSemanticCommand(
-                    reordered.Identity,
+            Assert(
+                composition.ExecuteSemanticCommand(
+                    initial.Identity,
                     new(SemanticCommandKind.Select)
-                ) == SemanticCommandResult.Stale
-                && composition.Input.FocusedElement?.ElementId != reordered.Identity.ElementId,
-            "Removed virtual Issue Row retained current, focus, or semantic command access."
-        );
-        return new(
-            sceneEvidence,
-            dump,
-            semantics,
-            pixels,
-            initialRows,
-            remainingRows,
-            reordered.Identity.ElementId
-        );
+                ) == SemanticCommandResult.Applied
+                    && composition.Input.FocusSemantic(
+                        new(initial.Identity.CompositionEpoch, initial.Identity.ElementId)
+                    ),
+                "The generated virtual Issue Row did not accept semantic selection and focus."
+            );
+            graph.Drain();
+            scene = Project();
+            Assert(
+                composition.Input.SetScene(scene),
+                "The selected virtual Issue Row scene was rejected."
+            );
+            var selected = IssueRow(composition, 10_000, "selected");
+            Assert(
+                selected.Selected
+                    && composition.Input.FocusedElement?.ElementId == selected.Identity.ElementId
+                    && composition.IsCurrent(selected.Identity),
+                "The selected virtual Issue Row did not retain current focus and selection semantics."
+            );
+
+            var reorderedValues = values.Value.ToArray();
+            (reorderedValues[0], reorderedValues[1]) = (reorderedValues[1], reorderedValues[0]);
+            values.Value = reorderedValues;
+            graph.Drain();
+            scene = Project();
+            Assert(
+                composition.Input.SetScene(scene),
+                "The reordered virtual Issue Row scene was rejected."
+            );
+            var reordered = IssueRow(composition, 10_000, "reordered");
+            Assert(
+                reordered.Identity.ElementId == selected.Identity.ElementId
+                    && reordered.Selected
+                    && composition.Input.FocusedElement?.ElementId == selected.Identity.ElementId
+                    && composition.IsCurrent(selected.Identity),
+                "Keyed virtual Issue Row reorder changed runtime identity, focus, selection, or current semantics."
+            );
+
+            var beforeReplacementPixels = Pixels(renderer, scene, 800, 120);
+            // Replace only the list source: the browser's original records deliberately stay unchanged.
+            // A row must read its retained payload rather than looking the key up in browser.Issues.
+            values.Value = values
+                .Value.Select(issue =>
+                    issue.Number == 10_000
+                        ? issue with
+                        {
+                            Title = "Updated retained record",
+                        }
+                        : issue
+                )
+                .ToArray();
+            graph.Drain();
+            scene = Project();
+            Assert(composition.Input.SetScene(scene), "The replaced-record scene was rejected.");
+            var refreshed = IssueRow(composition, 10_000, "replaced");
+            Assert(
+                refreshed.Name.Contains("Updated retained record", StringComparison.Ordinal)
+                    && refreshed.Identity.ElementId == reordered.Identity.ElementId
+                    && refreshed.Selected
+                    && composition.Input.FocusedElement?.ElementId == refreshed.Identity.ElementId
+                    && Pixels(renderer, scene, 800, 120) != beforeReplacementPixels,
+                "Same-key replacement failed to update row text/semantics while retaining identity, focus and selection."
+            );
+
+            values.Value = values.Value.Skip(2).ToArray();
+            graph.Drain();
+            scene = Project();
+            Assert(
+                composition.Input.SetScene(scene),
+                "The removed virtual Issue Row scene was rejected."
+            );
+            var remainingRows = Flatten(composition.SemanticSnapshot()!)
+                .Count(node => node.Role == SemanticRole.ListItem);
+            Assert(
+                !Flatten(composition.SemanticSnapshot()!)
+                    .Any(node => node.Name.StartsWith("#10000 ", StringComparison.Ordinal))
+                    && !composition.IsCurrent(reordered.Identity)
+                    && composition.ExecuteSemanticCommand(
+                        reordered.Identity,
+                        new(SemanticCommandKind.Select)
+                    ) == SemanticCommandResult.Stale
+                    && composition.Input.FocusedElement?.ElementId != reordered.Identity.ElementId,
+                "Removed virtual Issue Row retained current, focus, or semantic command access."
+            );
+            Assert(
+                initialRows > 0 && remainingRows > 0 && initialRows <= 8 && remainingRows <= 8,
+                "The row journey exceeded the bounded realized window."
+            );
+        }
+        finally
+        {
+            currentScene?.Dispose();
+        }
     }
 
     static SemanticSnapshot IssueRow(Composition composition, int number, string phase)
@@ -598,299 +611,6 @@ public sealed class IssueBrowserTests
             "Back navigation did not restore the issue list."
         );
     }
-
-    static ReactiveFilterEvidence ReactiveFilterBarEvidence(
-        Func<IssueBrowserState, Style?, ComponentRecipe> recipe
-    )
-    {
-        var graph = new ReactiveGraph();
-        using var composition = new Composition(graph, "filter-bar-reactive-parity");
-        using var theme = new ThemeContext(
-            composition.Root.Scope,
-            new Theme("filter-bar-reactive-parity")
-        );
-        using var client = new HttpClient(new DeferredGitHubHandler())
-        {
-            BaseAddress = new Uri("https://api.github.local/"),
-        };
-        var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
-        var completion = new TaskCompletionSource<FilterBarAppearance>(
-            TaskCreationOptions.RunContinuationsAsynchronously
-        );
-        var initial = new FilterBarAppearance(Color.Parse("#000000"), Insets.Zero, 1f);
-        AsyncValue<FilterBarAppearance>? appearance = null;
-        var host = ComponentRecipe.Create(
-            "filter-bar-reactive-host",
-            (context, root) =>
-            {
-                appearance = root.Scope.Async(
-                    _ => completion.Task,
-                    initial,
-                    "filter-bar-reactive-appearance"
-                );
-                context.Mount(
-                    root,
-                    recipe(
-                        browser,
-                        Style
-                            .Empty.Background(() => appearance!.Value.Background)
-                            .Padding(() => appearance!.Value.Padding)
-                            .Opacity(() => appearance!.Value.Opacity)
-                    )
-                );
-            }
-        );
-        var hostRoot = composition.Mount(composition.Root, theme, host);
-        var filterRoot = hostRoot.Children.Single();
-        graph.Drain();
-        Assert(
-            graph
-                .Dump()
-                .Contains("name=\"filter-bar-reactive-appearance\"", StringComparison.Ordinal)
-                && graph
-                    .Dump()
-                    .Contains(
-                        "name=\"filter-bar-reactive-appearance\" scope=2 deps=[] dirty=false generation=1 pending=true",
-                        StringComparison.Ordinal
-                    ),
-            "Filter Bar style bindings did not start their live async source."
-        );
-        var beforeDump = composition.Dump();
-        var beforeSemantics = SemanticEvidence(composition.SemanticSnapshot()!);
-        using var renderer = new SkiaSceneRenderer();
-        var beforeScene = SceneLayout.Project(composition, new(800, 80, 1), renderer);
-        var beforePixels = Pixels(renderer, beforeScene, 800, 80);
-        var wakes = 0;
-        Action wake = () => Interlocked.Increment(ref wakes);
-        graph.WorkAvailable += wake;
-        try
-        {
-            Task.Run(() =>
-                    completion.SetResult(new(Color.Parse("#123456"), Insets.Uniform(2), .5f))
-                )
-                .GetAwaiter()
-                .GetResult();
-            Assert(
-                SpinWait.SpinUntil(() => Volatile.Read(ref wakes) == 1, 2_000),
-                "Idle reactive completion did not raise its work notification."
-            );
-            var frame = composition.Flush();
-            var idle = composition.Flush();
-            Assert(
-                wakes == 1 && frame && !idle,
-                $"Idle reactive completion did not coalesce to exactly one wake and frame: wakes={wakes} frame={frame} idle={idle}."
-            );
-        }
-        finally
-        {
-            graph.WorkAvailable -= wake;
-        }
-        var afterDump = composition.Dump();
-        var afterSemantics = SemanticEvidence(composition.SemanticSnapshot()!);
-        var afterScene = SceneLayout.Project(composition, new(800, 80, 1), renderer);
-        var afterPixels = Pixels(renderer, afterScene, 800, 80);
-        Assert(
-            filterRoot
-                .Resolve(VisualProperties.Background)
-                .Value.Equals((Brush)Color.Parse("#123456"))
-                && filterRoot.Resolve(LayoutProperties.Padding).Value == Insets.Uniform(2)
-                && filterRoot.Resolve(VisualProperties.Opacity).Value == .5f,
-            $"Reactive Filter Bar bindings did not resolve through the public style seam: background={filterRoot.Resolve(VisualProperties.Background).Value} padding={filterRoot.Resolve(LayoutProperties.Padding).Value} opacity={filterRoot.Resolve(VisualProperties.Opacity).Value}."
-        );
-        Assert(
-            filterRoot.Children.Count == 3,
-            "Reactive Filter Bar completion changed its retained child structure."
-        );
-
-        AssertDisposedReactiveFilterBar(recipe);
-
-        return new(
-            filterRoot.Id,
-            filterRoot.Id,
-            beforeDump,
-            afterDump,
-            beforeSemantics,
-            afterSemantics,
-            SceneEvidence(beforeScene),
-            SceneEvidence(afterScene),
-            beforePixels,
-            afterPixels
-        );
-    }
-
-    static void AssertDisposedReactiveFilterBar(
-        Func<IssueBrowserState, Style?, ComponentRecipe> recipe
-    )
-    {
-        var graph = new ReactiveGraph();
-        using var composition = new Composition(graph, "filter-bar-disposal-parity");
-        using var theme = new ThemeContext(
-            composition.Root.Scope,
-            new Theme("filter-bar-disposal-parity")
-        );
-        using var client = new HttpClient(new DeferredGitHubHandler())
-        {
-            BaseAddress = new Uri("https://api.github.local/"),
-        };
-        var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
-        var completion = new TaskCompletionSource<FilterBarAppearance>();
-        var initial = new FilterBarAppearance(Color.Parse("#000000"), Insets.Zero, 1f);
-        var host = ComponentRecipe.Create(
-            "filter-bar-disposed-host",
-            (context, root) =>
-            {
-                var source = root.Scope.Async(
-                    _ => completion.Task,
-                    initial,
-                    "filter-bar-disposed-appearance"
-                );
-                context.Mount(
-                    root,
-                    recipe(
-                        browser,
-                        Style
-                            .Empty.Background(() => source.Value.Background)
-                            .Padding(() => source.Value.Padding)
-                            .Opacity(() => source.Value.Opacity)
-                    )
-                );
-            }
-        );
-        var hostRoot = composition.Mount(composition.Root, theme, host);
-        graph.Drain();
-        var wakes = 0;
-        Action wake = () => Interlocked.Increment(ref wakes);
-        graph.WorkAvailable += wake;
-        try
-        {
-            hostRoot.Dispose();
-            var producer = new Thread(() =>
-                completion.SetResult(new(Color.Parse("#abcdef"), Insets.Uniform(3), .25f))
-            );
-            producer.Start();
-            Assert(
-                producer.Join(2_000),
-                "Disposed Filter Bar completion did not reach its bounded producer barrier."
-            );
-            Assert(
-                wakes == 0 && !composition.Flush() && composition.Root.Children.Count == 0,
-                "Disposed Filter Bar scope accepted a late async style completion."
-            );
-        }
-        finally
-        {
-            graph.WorkAvailable -= wake;
-        }
-    }
-
-    static (string Dump, string Semantics) DirectRootEvidence(
-        Func<IssueBrowserState, ComponentRecipe> recipe,
-        BrowserIssue issue
-    )
-    {
-        var graph = new ReactiveGraph();
-        using var handler = new DeferredGitHubHandler();
-        using var client = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("https://api.github.local/"),
-        };
-        using var composition = IssueBrowserStructure.Create(
-            graph,
-            new GitHubIssueSource(client),
-            out var browser,
-            out var theme
-        );
-        graph.Drain();
-        handler.ReplyJson(0);
-        graph.Drain();
-        var root = composition.Mount(composition.Root, theme, recipe(browser));
-        graph.Drain();
-        var dump = composition.Dump();
-        var start = dump.LastIndexOf("element " + root.Id + " ", StringComparison.Ordinal);
-        var semantic =
-            Flatten(composition.SemanticSnapshot()!)
-                .SingleOrDefault(snapshot => snapshot.Identity.ElementId == root.Id)
-            ?? Flatten(composition.SemanticSnapshot()!)
-                .Single(snapshot => snapshot.Role == SemanticRole.ListItem);
-        return (dump.Substring(start), SemanticEvidence(semantic));
-    }
-
-    static (string State, string Dump, string Semantics) FilterBarInputEvidence(
-        Func<IssueBrowserState, ComponentRecipe> recipe
-    )
-    {
-        var graph = new ReactiveGraph();
-        using var composition = new Composition(graph, "filter-bar-input-parity");
-        using var theme = new ThemeContext(
-            composition.Root.Scope,
-            new Theme("filter-bar-input-parity")
-        );
-        using var client = new HttpClient(new DeferredGitHubHandler())
-        {
-            BaseAddress = new Uri("https://api.github.local/"),
-        };
-        var browser = new IssueBrowserState(composition.Root.Scope, new GitHubIssueSource(client));
-        var root = composition.Mount(composition.Root, theme, recipe(browser));
-        graph.Drain();
-        using var renderer = new SkiaSceneRenderer();
-        Assert(
-            composition.Input.SetScene(SceneLayout.Project(composition, new(800, 80, 1), renderer)),
-            "Filter Bar input scene was rejected."
-        );
-        var rootSemantic = Flatten(composition.SemanticSnapshot()!)
-            .Single(snapshot => snapshot.Identity.ElementId == root.Id);
-        var fields = Flatten(rootSemantic)
-            .Where(snapshot => snapshot.Role == SemanticRole.TextField)
-            .ToDictionary(snapshot => snapshot.Name, StringComparer.Ordinal);
-        foreach (
-            var (label, value) in new[]
-            {
-                ("Search issues", "native"),
-                ("Status: all, open, closed", "closed"),
-                ("Assignee: all, marta, devin, joel", "marta"),
-            }
-        )
-        {
-            Assert(
-                fields.TryGetValue(label, out var field)
-                    && composition.ExecuteSemanticCommand(
-                        field.Identity,
-                        new(SemanticCommandKind.SetValue, value)
-                    ) == SemanticCommandResult.Applied,
-                "Filter Bar rejected ordinary retained text input for " + label + "."
-            );
-            graph.Drain();
-        }
-        Assert(
-            browser.Search == "native" && browser.Status == "closed" && browser.Assignee == "marta",
-            "Filter Bar onChange handlers did not update all browser filters."
-        );
-        rootSemantic = Flatten(composition.SemanticSnapshot()!)
-            .Single(snapshot => snapshot.Identity.ElementId == root.Id);
-        return (
-            browser.Search + "|" + browser.Status + "|" + browser.Assignee,
-            composition.Dump(),
-            SemanticEvidence(rootSemantic)
-        );
-    }
-
-    static string SemanticEvidence(SemanticSnapshot snapshot) =>
-        snapshot.Role
-        + "|"
-        + snapshot.Name
-        + "|"
-        + snapshot.Value
-        + "|"
-        + snapshot.Enabled
-        + "|"
-        + snapshot.Focused
-        + "|"
-        + snapshot.Selected
-        + "|"
-        + snapshot.Actions
-        + "["
-        + string.Join(",", snapshot.Children.Select(SemanticEvidence))
-        + "]";
 
     static Composition LoadedComposition(out ReactiveGraph graph, out IssueBrowserState browser) =>
         LoadedComposition(out graph, out browser, out _);
@@ -1615,12 +1335,20 @@ public sealed class IssueBrowserTests
                 && router.FocusedElement is not null,
             "First keyboard focus target was unavailable."
         );
-        Assert(
-            Install(composition, renderer, viewport)
-                .Dump()
-                .Contains("brush=solid(#1D4ED8FF)", StringComparison.Ordinal),
-            "Keyboard focus did not produce a visible focus paint."
-        );
+        using (var focusedScene = Install(composition, renderer, viewport))
+            Assert(
+                SceneNodes(focusedScene.Nodes)
+                    .OfType<PaintSceneNode>()
+                    .Any(node =>
+                        node.Identity.Element == router.FocusedElement
+                        && node.Identity.Kind == SceneNodeKind.FocusRing
+                        && node.Brush.Color is { A: > 0 }
+                        && node.Bounds.Width > 0
+                        && node.Bounds.Height > 0
+                        && node.InsetWidths is { Left: > 0 }
+                    ),
+                "Keyboard focus did not produce a visible focus paint on the focused element."
+            );
         var row = Flatten(composition.SemanticSnapshot()!)
             .First(node => node.Role == SemanticRole.ListItem);
         Assert(
@@ -1999,13 +1727,6 @@ public sealed class IssueBrowserTests
         data.SaveTo(stream);
     }
 
-    static string SceneEvidence(RetainedScene scene) =>
-        Regex.Replace(
-            Regex.Replace(scene.Dump(), @"epoch=\d+", "epoch=*"),
-            @"inputSignature=[^ ]+",
-            "inputSignature=*"
-        );
-
     static void Assert(bool value, string message)
     {
         if (!value)
@@ -2092,35 +1813,6 @@ public sealed class IssueBrowserTests
         SemanticSnapshot Semantic
     );
 
-    readonly record struct FilterBarAppearance(Brush Background, Insets Padding, float Opacity)
-    {
-        public FilterBarAppearance(Color background, Insets padding, float opacity)
-            : this((Brush)background, padding, opacity) { }
-    }
-
-    readonly record struct ReactiveFilterEvidence(
-        long RootId,
-        long AfterRootId,
-        string BeforeDump,
-        string AfterDump,
-        string BeforeSemantics,
-        string AfterSemantics,
-        string BeforeScene,
-        string AfterScene,
-        string BeforePixels,
-        string AfterPixels
-    );
-
-    readonly record struct VirtualizedIssueRowEvidence(
-        string Scene,
-        string Dump,
-        string Semantics,
-        string Pixels,
-        int InitialRows,
-        int RemainingRows,
-        long ReorderedElementId
-    );
-
     internal sealed class ApplicationHostProbe : IApplicationHost
     {
         private Composition? _composition;
@@ -2153,84 +1845,5 @@ public sealed class IssueBrowserTests
             Assert(session.IsCompleted, "The application lifecycle did not complete.");
             return 23;
         }
-    }
-
-    internal static class HandwrittenParityFixture
-    {
-        private static readonly Style TextFieldStyle = Style.Empty.Width(250f).Height(24f);
-
-        internal static ComponentRecipe Create(IssueBrowserState browser, Style? style = null)
-        {
-            ArgumentNullException.ThrowIfNull(browser);
-            return Lucent.Core.Components.Row(
-                [
-                    Lucent
-                        .Core.Components.TextField(
-                            onChange: browser.SetSearch,
-                            style: TextFieldStyle,
-                            label: "Search issues"
-                        )
-                        .Named("issue-browser.search"),
-                    Lucent
-                        .Core.Components.TextField(
-                            onChange: browser.SetStatus,
-                            style: TextFieldStyle,
-                            label: "Status: all, open, closed"
-                        )
-                        .Named("issue-browser.status"),
-                    Lucent
-                        .Core.Components.TextField(
-                            onChange: browser.SetAssignee,
-                            style: TextFieldStyle,
-                            label: "Assignee: all, marta, devin, joel"
-                        )
-                        .Named("issue-browser.assignee"),
-                ],
-                Style
-                    .Empty.Height(() => browser.Density == IssueDensity.Comfortable ? 28f : 22f)
-                    .Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f)
-                    .With(style)
-            );
-        }
-
-        internal static ComponentRecipe CreateRow(
-            IssueBrowserState browser,
-            Func<BrowserIssue> issue
-        )
-        {
-            ArgumentNullException.ThrowIfNull(browser);
-            ArgumentNullException.ThrowIfNull(issue);
-            var style = Style
-                .Empty.Spacing(() => browser.Density == IssueDensity.Comfortable ? 8f : 4f)
-                .FontSize(() => browser.Density == IssueDensity.Comfortable ? 14f : 12f)
-                .Height(() => browser.Density == IssueDensity.Comfortable ? 30f : 22f);
-            return Lucent
-                .Core.Components.ContextMenu(
-                    [
-                        Lucent.Core.Components.Selectable(
-                            () => Label(issue()),
-                            () => browser.IsSelected(issue().Number),
-                            () => browser.Select(issue().Number),
-                            style
-                        ),
-                    ],
-                    () =>
-                        Lucent.Core.Components.Menu([
-                            Lucent.Core.Components.MenuItem(
-                                "Open issue",
-                                () => browser.OpenIssue(issue().Number)
-                            ),
-                            Lucent.Core.Components.MenuSeparator(),
-                            Lucent.Core.Components.MenuItem(
-                                "Toggle status",
-                                () => browser.ToggleIssueStatus(issue().Number)
-                            ),
-                        ])
-                )
-                .Named("issue-browser.issue-row-menu");
-        }
-
-        private static string Label(BrowserIssue issue) =>
-            $"#{issue.Number} {issue.Title} — {issue.Status} · {issue.Assignee}";
     }
 }

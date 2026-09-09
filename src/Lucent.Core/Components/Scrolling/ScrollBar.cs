@@ -3,7 +3,7 @@ namespace Lucent.Core;
 /// <summary>Controls whether a viewport exposes its default vertical scrollbar.</summary>
 public enum ScrollBarVisibility
 {
-    /// <summary>Shows the bar only when the viewport has vertical overflow.</summary>
+    /// <summary>Reserves a stable gutter and shows the bar only when the viewport has vertical overflow.</summary>
     Auto,
 
     /// <summary>Never reserves scrollbar space or paints a scrollbar.</summary>

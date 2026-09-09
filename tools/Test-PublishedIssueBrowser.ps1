@@ -29,7 +29,7 @@ public static class PublishedWindow {
     public uint Compression, SizeImage; public int XPelsPerMeter, YPelsPerMeter; public uint ColorsUsed, ColorsImportant;
   }
   [DllImport("gdi32.dll")] private static extern int GetDIBits(IntPtr hdc, IntPtr bitmap, uint start, uint lines, [Out] uint[] pixels, ref BITMAPINFO info, uint usage);
-  public static bool ContainsScreenColor(IntPtr hwnd, int width, int height, uint color) {
+  public static uint[] CapturePixels(IntPtr hwnd, int width, int height) {
     var origin = new POINT();
     if (!ClientToScreen(hwnd, ref origin)) throw new InvalidOperationException("Could not locate focus capture.");
     var screen = GetDC(IntPtr.Zero); var memory = IntPtr.Zero; var bitmap = IntPtr.Zero; var prior = IntPtr.Zero;
@@ -42,15 +42,23 @@ public static class PublishedWindow {
       var info = new BITMAPINFO { Size = 40, Width = width, Height = -height, Planes = 1, BitCount = 32 };
       var pixels = new uint[checked(width * height)];
       if (GetDIBits(memory, bitmap, 0, (uint)height, pixels, ref info, 0) != height) throw new InvalidOperationException("Could not read focus capture.");
-      var dibColor = ((color & 255) << 16) | (color & 0xff00) | ((color >> 16) & 255);
-      foreach (var pixel in pixels) if ((pixel & 0xffffff) == dibColor) return true;
-      return false;
+      return pixels;
     } finally {
       if (prior != IntPtr.Zero) SelectObject(memory, prior);
       if (bitmap != IntPtr.Zero) DeleteObject(bitmap);
       if (memory != IntPtr.Zero) DeleteDC(memory);
       if (screen != IntPtr.Zero) ReleaseDC(IntPtr.Zero, screen);
     }
+  }
+  public static int CountFocusChanges(uint[] before, uint[] focused, uint color, uint[] after = null) {
+    if (before.Length != focused.Length || (after != null && after.Length != before.Length)) throw new ArgumentException("Focus captures must have equal dimensions.");
+    var dibColor = ((color & 255) << 16) | (color & 0xff00) | ((color >> 16) & 255);
+    var count = 0;
+    for (var i = 0; i < before.Length; i++) {
+      var prior = before[i] & 0xffffff;
+      if (prior != dibColor && (focused[i] & 0xffffff) == dibColor && (after == null || (after[i] & 0xffffff) == prior)) count++;
+    }
+    return count;
   }
   [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
   [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct HIGHCONTRAST { public uint Size; public uint Flags; public IntPtr Scheme; }
@@ -120,8 +128,8 @@ function Get-EffectiveAppearance {
     if (($contrast.Flags -band 1) -ne 0) { return [pscustomobject]@{ Name = 'high-contrast'; Header = 0x000000; Page = 0x000000; Focus = 0x00FFFF } }
     try { $light = [int](Get-ItemPropertyValue -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name AppsUseLightTheme -ErrorAction Stop) }
     catch { throw "Could not read Windows app color preference: $($_.Exception.Message)" }
-    if ($light -eq 1) { return [pscustomobject]@{ Name = 'light'; Header = 0xFFFFFF; Page = 0xFFFFFF; Focus = 0x00FFFF } }
-    if ($light -eq 0) { return [pscustomobject]@{ Name = 'dark'; Header = 0x271811; Page = 0x271811; Focus = 0x15CCFA } }
+    if ($light -eq 1) { return [pscustomobject]@{ Name = 'light'; Header = 0xFFFFFF; Page = 0xFFFFFF; Focus = 0xFFFFFF } }
+    if ($light -eq 0) { return [pscustomobject]@{ Name = 'dark'; Header = 0x271811; Page = 0x271811; Focus = 0x271811 } }
     throw "Windows AppsUseLightTheme was not finite: $light"
 }
 
@@ -187,26 +195,34 @@ function Assert-ResizePixels([IntPtr] $Hwnd, [uint32] $Dpi, [PublishedWindow+REC
     }
 }
 function Assert-KeyboardFocusPixels([IntPtr] $Hwnd, [uint32] $Dpi, [PublishedWindow+RECT] $Client, $Appearance, [int] $Iteration) {
+    $scale = $Dpi / 96.0
+    $height = [int][Math]::Min($Client.Bottom, [Math]::Ceiling(220 * $scale))
+    $before = [PublishedWindow]::CapturePixels($Hwnd, $Client.Right, $height)
     if (-not [PublishedWindow]::PostMessage($Hwnd, 0x0100, [UIntPtr]::new(0x09), [IntPtr]::Zero) -or
         -not [PublishedWindow]::PostMessage($Hwnd, 0x0101, [UIntPtr]::new(0x09), [IntPtr]::Zero)) {
         throw "Iteration $Iteration could not post ordinary Tab input."
     }
     $deadline = [Environment]::TickCount64 + 5000
-    $located = $false
+    $focused = $null
     do {
-        $origin = [PublishedWindow+POINT]::new()
-        if (-not [PublishedWindow]::ClientToScreen($Hwnd, [ref]$origin)) { Start-Sleep -Milliseconds 100; continue }
-        $located = $true
-        $scale = $Dpi / 96.0
-        # Capture once; per-pixel desktop GetPixel calls can each stall on composition.
-        $height = [int][Math]::Min($Client.Bottom, [Math]::Ceiling(220 * $scale))
-        if ([PublishedWindow]::ContainsScreenColor($Hwnd, $Client.Right, $height, $Appearance.Focus)) {
-            return "ordinary Tab input produced $($Appearance.Name) visible focus"
+        $candidate = [PublishedWindow]::CapturePixels($Hwnd, $Client.Right, $height)
+        if ([PublishedWindow]::CountFocusChanges($before, $candidate, $Appearance.Focus) -ge 8) { $focused = $candidate; break }
+        Start-Sleep -Milliseconds 100
+    } until ([Environment]::TickCount64 -ge $deadline)
+    if ($null -eq $focused) { throw "Iteration $Iteration did not add visible stock focus pixels after ordinary Tab input." }
+    if (-not [PublishedWindow]::PostMessage($Hwnd, 0x0100, [UIntPtr]::new(0x09), [IntPtr]::Zero) -or
+        -not [PublishedWindow]::PostMessage($Hwnd, 0x0101, [UIntPtr]::new(0x09), [IntPtr]::Zero)) {
+        throw "Iteration $Iteration could not advance keyboard focus."
+    }
+    $deadline = [Environment]::TickCount64 + 5000
+    do {
+        $after = [PublishedWindow]::CapturePixels($Hwnd, $Client.Right, $height)
+        if ([PublishedWindow]::CountFocusChanges($before, $focused, $Appearance.Focus, $after) -ge 8) {
+            return "ordinary Tab input added then moved $($Appearance.Name) stock focus pixels"
         }
         Start-Sleep -Milliseconds 100
     } until ([Environment]::TickCount64 -ge $deadline)
-    if (-not $located) { throw "Iteration $Iteration could not locate the client for keyboard focus observation." }
-    throw "Iteration $Iteration did not paint the keyboard-visible focus color after ordinary Tab input."
+    throw "Iteration $Iteration did not remove the previous focus paint after advancing Tab input."
 }
 
 function Assert-SettingsListener([IntPtr] $Hwnd, [uint32] $Dpi, [PublishedWindow+RECT] $Client, $Appearance, [int] $Iteration) {

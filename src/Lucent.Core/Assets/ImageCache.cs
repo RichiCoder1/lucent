@@ -366,15 +366,29 @@ public sealed class ImageCache : IDisposable
                 entry.State = EntryState.Loading;
                 entry.Generation++;
                 publishGeneration = entry.Generation;
-                foreach (var handle in entry.Handles)
-                    if (!ReferenceEquals(handle, sourceHandle))
-                        handle.SchedulePublish(
-                            ImageLoadStatus.Loading,
-                            null,
-                            null,
-                            entry.Generation
-                        );
                 Schedule_NoLock(entry);
+                if (entry.State == EntryState.BudgetDeclined)
+                {
+                    publishStatus = ImageLoadStatus.BudgetDeclined;
+                    publishError = entry.Error;
+                    foreach (var handle in entry.Handles)
+                        if (!ReferenceEquals(handle, sourceHandle))
+                            handle.SchedulePublish(
+                                publishStatus,
+                                publishError,
+                                null,
+                                entry.Generation
+                            );
+                }
+                else
+                    foreach (var handle in entry.Handles)
+                        if (!ReferenceEquals(handle, sourceHandle))
+                            handle.SchedulePublish(
+                                ImageLoadStatus.Loading,
+                                null,
+                                null,
+                                entry.Generation
+                            );
             }
         }
         if (publishGeneration != 0)
@@ -407,6 +421,9 @@ public sealed class ImageCache : IDisposable
     internal void ReleaseLease(SharedPreparedImage shared)
     {
         List<PreparedImage>? release = null;
+        List<ImageLoadHandle>? declined = null;
+        ImageLoadException? decline = null;
+        var declineGeneration = 0;
         lock (_gate)
         {
             if (shared.Leases <= 0 || shared.References <= 0)
@@ -424,11 +441,29 @@ public sealed class ImageCache : IDisposable
                         _cachedBytes += shared.ByteCount;
                     else
                     {
-                        _entries.Remove(shared.Entry.Key);
-                        shared.Entry.State = EntryState.Abandoned;
-                        shared.Entry.Shared = null;
-                        shared.HasCacheReference = false;
-                        shared.References--;
+                        if (shared.Entry.Handles.Count != 0)
+                        {
+                            decline = Budget(
+                                "Live image resources exhaust the configured cache budget."
+                            );
+                            shared.Entry.State = EntryState.BudgetDeclined;
+                            shared.Entry.Error = decline;
+                            shared.Entry.Shared = null;
+                            shared.HasCacheReference = false;
+                            shared.References--;
+                            ReleaseLeaseReservation_NoLock(shared);
+                            _budgetDeclines++;
+                            declineGeneration = shared.Entry.Generation;
+                            declined = [.. shared.Entry.Handles];
+                        }
+                        else
+                        {
+                            _entries.Remove(shared.Entry.Key);
+                            shared.Entry.State = EntryState.Abandoned;
+                            shared.Entry.Shared = null;
+                            shared.HasCacheReference = false;
+                            shared.References--;
+                        }
                     }
                 }
             }
@@ -436,6 +471,14 @@ public sealed class ImageCache : IDisposable
                 AddRelease(ref release, TakeResource_NoLock(shared));
         }
         DisposeAll(release, "Image lease cleanup failed.");
+        if (declined is not null)
+            foreach (var handle in declined)
+                handle.SchedulePublish(
+                    ImageLoadStatus.BudgetDeclined,
+                    decline,
+                    null,
+                    declineGeneration
+                );
     }
 
     internal void CancelPreload(PreloadDemand demand)

@@ -13,6 +13,16 @@ function Get-RelativeFiles([string] $Directory) {
     } | Sort-Object)
 }
 
+function Remove-OwnedTemporaryDirectory([string] $Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\', '/')
+    if ([IO.Path]::GetDirectoryName($full) -ne $temporaryRoot -or
+        [IO.Path]::GetFileName($full) -notmatch '^lucent-inventory-negative-[0-9a-f-]{36}$') {
+        throw "Refusing cleanup outside this test's temporary directories: $full"
+    }
+    Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 function Assert-Inventory([string] $Directory) {
     $expected = @($manifest.files.path | Sort-Object)
     $actual = Get-RelativeFiles $Directory
@@ -33,7 +43,7 @@ function Assert-Rejected([string] $Name, [scriptblock] $Mutate) {
             $Name
         }
     }
-    finally { Remove-Item $copy -Recurse -Force -ErrorAction SilentlyContinue }
+    finally { Remove-OwnedTemporaryDirectory $copy }
 }
 
 $resolved = (Resolve-Path $PublishDirectory).Path
@@ -41,6 +51,7 @@ if ($Negative) {
     $negativeCases = @()
     $negativeCases += Assert-Rejected 'missing native asset rejected' { param($copy) Remove-Item (Join-Path $copy 'SDL3.dll') -Force }
     $negativeCases += Assert-Rejected 'missing notice rejected' { param($copy) Remove-Item (Join-Path $copy 'notices/SDL3-CS.txt') -Force }
+    $negativeCases += Assert-Rejected 'build-only asset tool rejected' { param($copy) Set-Content (Join-Path $copy 'Lucent.Lui.Tooling.exe') 'build-only tool output' }
     $negativeCases += Assert-Rejected 'undeclared nested asset rejected' { param($copy) New-Item (Join-Path $copy 'nested') -ItemType Directory | Out-Null; Set-Content (Join-Path $copy 'nested/rogue.bin') rogue }
     $negativeCases += Assert-Rejected 'undeclared nested notice rejected' { param($copy) Set-Content (Join-Path $copy 'notices/rogue.txt') rogue }
     $negativeCases += Assert-Rejected 'undeclared hidden system asset rejected' { param($copy) $rogue = Join-Path $copy 'nested/.rogue.bin'; New-Item (Split-Path $rogue) -ItemType Directory -Force | Out-Null; Set-Content $rogue rogue; (Get-Item $rogue).Attributes = [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System }

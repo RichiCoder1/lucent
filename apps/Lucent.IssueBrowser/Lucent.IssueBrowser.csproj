@@ -19,7 +19,7 @@
     <ProjectReference Include="../../src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
     <ProjectReference Include="../../src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
     <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
-    <ProjectReference Include="../../src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
+    <ProjectReference Include="../../src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" ReferenceOutputAssembly="false" Private="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
   </ItemGroup>
   <ItemGroup>
     <LucentAsset Include="Artwork/issue-browser.svg" Path="Artwork/issue-browser.svg" ApplicationIcon="true" />

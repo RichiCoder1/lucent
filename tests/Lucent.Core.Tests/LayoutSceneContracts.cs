@@ -268,7 +268,7 @@ public sealed class LayoutSceneContracts
             author: Style.Empty.Width(30).Height(30).Background(Color.Parse("#FF0000"))
         );
 
-        foreach (var scale in new[] { 1f, 1.25f, 1.5f, 2f })
+        foreach (var scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f })
         {
             var scene = SceneLayout.Project(composition, new(20, 20, scale), new ProbeShaper());
             var nodes = scene.Nodes.ToList();
@@ -345,7 +345,7 @@ public sealed class LayoutSceneContracts
                 .Set(ProjectionProperties.Text, "x")
                 .Set(ProjectionProperties.TextCaret, 0)
         );
-        foreach (var scale in new[] { 1f, 1.25f, 1.5f, 2f })
+        foreach (var scale in new[] { 1f, 1.25f, 1.5f, 1.75f, 2f })
         {
             var scene = SceneLayout.Project(composition, new(20, 20, scale), new ProbeShaper());
             var box = scene.Boxes.Single(box => box.Identity.ElementId == child.Id);
@@ -1534,7 +1534,7 @@ public sealed class LayoutSceneContracts
         var right = composition.Child(composition.Root, "right");
         right.Present(theme, author: Style.Empty.GridPlacement(new(1, 1)));
 
-        foreach (var scale in new[] { 1f, 1.5f, 2f })
+        foreach (var scale in new[] { 1f, 1.5f, 1.75f, 2f })
         {
             var scene = SceneLayout.Project(composition, new(100, 50, scale), new ProbeShaper());
             var boxes = scene.Boxes.ToDictionary(box => box.Identity.ElementId, box => box.Bounds);

@@ -493,6 +493,11 @@ public sealed class ApplicationSession
                         if (subscribed.Contains(handler))
                             rearm += handler;
                 }
+                // The finalizer is deliberately posted without a second edge. If every
+                // captured observer failed or unsubscribed, wake the current observers once
+                // so a host that subscribed during shutdown can drain that finalizer.
+                if (finalize && rearm is null)
+                    rearm = _workAvailable;
             }
 
             if (finalize)
@@ -812,6 +817,7 @@ public sealed class ApplicationSession
         {
             List<Exception>? errors = null;
             var processed = 0;
+            var exhausted = false;
 
             while (processed < maximumCallbacks)
             {
@@ -819,7 +825,11 @@ public sealed class ApplicationSession
                 lock (_gate)
                 {
                     if (_queue.Count == 0)
+                    {
+                        _signaled = false;
+                        exhausted = true;
                         break;
+                    }
                     work = _queue.Dequeue();
                 }
                 processed++;
@@ -842,7 +852,7 @@ public sealed class ApplicationSession
                 else
                 {
                     notifyMore = _accepting;
-                    limitReached = true;
+                    limitReached = !exhausted;
                 }
             }
             if (notifyMore)

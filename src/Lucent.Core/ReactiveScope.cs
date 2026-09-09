@@ -19,10 +19,19 @@ public sealed partial class ReactiveScope : IDisposable
     private Action<Action>? _factoryRollback;
 
     internal ReactiveScope(ReactiveGraph graph, ReactiveScope? parent, string name)
+        : this(graph, parent, name, inheritMutationGuard: true) { }
+
+    private ReactiveScope(
+        ReactiveGraph graph,
+        ReactiveScope? parent,
+        string name,
+        bool inheritMutationGuard
+    )
     {
         ReactiveGraph.ValidateName(name, nameof(name));
         _graph = graph;
         _parent = parent;
+        _mutationGuard = inheritMutationGuard ? parent?._mutationGuard : null;
         _factoryGuard = parent?._factoryGuard;
         _factoryRollback = parent?._factoryRollback;
         Name = name;
@@ -68,6 +77,13 @@ public sealed partial class ReactiveScope : IDisposable
         CheckActive();
         ReactiveGraph.ValidateName(name, nameof(name));
         return new ReactiveScope(_graph, this, name);
+    }
+
+    internal ReactiveScope CreateBehaviorChild(string name)
+    {
+        CheckActive();
+        ReactiveGraph.ValidateName(name, nameof(name));
+        return new ReactiveScope(_graph, this, name, inheritMutationGuard: false);
     }
 
     internal ReactiveScope CreateElementChild(string name)

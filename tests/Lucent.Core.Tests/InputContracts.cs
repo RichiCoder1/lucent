@@ -281,15 +281,12 @@ public sealed class InputContracts
         var third = SceneLayout.Project(composition, new(40, 40, 1), new EmptyShaper());
         Assert(
             !router.SetScene(second)
-                && !router.SetScene(third)
-                && router.SetScene(
-                    SceneLayout.Project(composition, new(40, 40, 1), new EmptyShaper())
-                )
+                && router.SetScene(third)
                 && router
                     .DispatchPointer(new(PointerCommandKind.Down, 5, 1, 1, PointerButton.Primary))
                     .Target?.ElementId != child.Id
                 && router.Dump().Contains("kind=Pointer/Down", StringComparison.Ordinal),
-            "Router accepted a superseded or unreconciled scene, or used hidden retained input."
+            "Router accepted a superseded scene, rejected settled availability, or used hidden retained input."
         );
 
         var retry = composition.Child(composition.Root, "retry");
@@ -626,11 +623,8 @@ public sealed class InputContracts
         Assert(
             second.Boxes.Single(box => box.Identity.ElementId == child.Id).Text!.Width
                 != first.Boxes.Single(box => box.Identity.ElementId == child.Id).Text!.Width
-                && !router.SetScene(second)
-                && router.SetScene(
-                    SceneLayout.Project(composition, new(40, 40, 1), new MetricShaper())
-                ),
-            "Collision repro did not change geometry and reject old scene."
+                && router.SetScene(second),
+            "Collision repro did not update geometry and install reconciled availability."
         );
         var disabled = composition.SemanticSnapshot()!.Children.Single();
         Assert(

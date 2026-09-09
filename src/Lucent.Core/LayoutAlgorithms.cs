@@ -121,9 +121,7 @@ public sealed class LayoutChild
     {
         ArgumentNullException.ThrowIfNull(property);
         _context.CheckActive();
-        return _element.Composition.ResumeProjectionTracking(() =>
-            _element.Resolve(property).Value
-        );
+        return _element.Composition.ResumeProjectionTracking(() => _element.ResolveValue(property));
     }
 
     internal Element Element => _element;
@@ -199,7 +197,7 @@ public sealed class LayoutAlgorithmContext
         ArgumentNullException.ThrowIfNull(property);
         CheckActive();
         return _container.Composition.ResumeProjectionTracking(() =>
-            _container.Resolve(property).Value
+            _container.ResolveValue(property)
         );
     }
 

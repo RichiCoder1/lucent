@@ -6,6 +6,10 @@ internal sealed record Item(int Id, string Title);
 
 internal static class RetainedConsumer
 {
+    [LucentComponent]
+    internal static ComponentRecipe SnapshotLabel(string label) =>
+        Lucent.Core.Components.Text(() => "static:" + label);
+
     public static void Run()
     {
         var graph = new ReactiveGraph();
@@ -17,6 +21,10 @@ internal static class RetainedConsumer
         graph.Drain();
         var before = Flatten(composition.SemanticSnapshot()!).ToArray();
         var rowId = before.Single(node => node.Name == "live:before").Identity.ElementId;
+        var implicitLiveId = before
+            .Single(node => node.Name == "implicit-live:before")
+            .Identity.ElementId;
+        var snapshotId = before.Single(node => node.Name == "static:before").Identity.ElementId;
         var detailId = before.Single(node => node.Name == "detail:before").Identity.ElementId;
         items.Value = [new(1, "after")];
         selected.Value = new(1, "after");
@@ -27,12 +35,17 @@ internal static class RetainedConsumer
             "Same-key replacement lost row identity or retained stale text."
         );
         Require(
+            after.Single(node => node.Name == "implicit-live:after").Identity.ElementId
+                == implicitLiveId,
+            "A plain expression supplied to a live input did not update in place."
+        );
+        Require(
             after.Single(node => node.Name == "detail:after").Identity.ElementId == detailId,
             "Same-branch replacement lost identity or retained stale pattern data."
         );
         Require(
-            after.Count(node => node.Name == "static:before") == 1,
-            "A construction-time value became implicitly live."
+            after.Single(node => node.Name == "static:before").Identity.ElementId == snapshotId,
+            "A plain component parameter did not retain its construction-time value."
         );
         items.Value = [];
         selected.Value = null;
@@ -40,7 +53,10 @@ internal static class RetainedConsumer
         Require(
             !Flatten(composition.SemanticSnapshot()!)
                 .Any(node =>
-                    node.Identity.ElementId == rowId || node.Identity.ElementId == detailId
+                    node.Identity.ElementId == rowId
+                    || node.Identity.ElementId == implicitLiveId
+                    || node.Identity.ElementId == snapshotId
+                    || node.Identity.ElementId == detailId
                 ),
             "Removing retained content left its semantics mounted."
         );

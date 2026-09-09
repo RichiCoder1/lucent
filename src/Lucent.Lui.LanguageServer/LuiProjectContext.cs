@@ -41,6 +41,7 @@ internal sealed class LuiProjectContext : IDisposable
     private long compilationEpoch = -1;
     private int evaluationBuildCount;
     private int evaluationDocumentReadCount;
+    private int graphCompilationCount;
     private CachedHover? cachedHover;
     private MSBuildWorkspace workspace;
     private ProjectId projectId;
@@ -93,6 +94,8 @@ internal sealed class LuiProjectContext : IDisposable
                 return evaluationDocumentReadCount;
         }
     }
+
+    internal int GraphCompilationCount => Volatile.Read(ref graphCompilationCount);
 
     internal static async Task<LuiProjectContext> LoadAsync(
         string projectPath,
@@ -652,6 +655,15 @@ internal sealed class LuiProjectContext : IDisposable
     )
     {
         var semantic = await SemanticAsync(uri, offset, cancellationToken).ConfigureAwait(false);
+        if (
+            uri.IsFile
+            && uri.LocalPath.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+            && (
+                semantic?.Entry is null
+                || semantic.Entry.Kind is LuiMapKind.Structure or LuiMapKind.Scaffolding
+            )
+        )
+            return null;
         if (semantic is not null)
         {
             var root = semantic.Tree.GetRoot(cancellationToken);
@@ -1154,10 +1166,12 @@ internal sealed class LuiProjectContext : IDisposable
                     defines ?? "",
                     current.DefaultNamespace ?? ""
                 );
+                Interlocked.Increment(ref graphCompilationCount);
                 var result = LuiCompiler.Compile(
                     document.Syntax,
                     index.Augment(compilation, document.Path),
-                    identity
+                    identity,
+                    document.Path
                 );
                 if (transformGenerated is not null)
                     result = transformGenerated(result);
@@ -2232,7 +2246,8 @@ internal sealed class LuiProjectContext : IDisposable
         var result = LuiCompiler.Compile(
             snapshot.Document.Syntax,
             snapshot.Compilation,
-            snapshot.Identity
+            snapshot.Identity,
+            snapshot.Document.Path
         );
         cancellationToken.ThrowIfCancellationRequested();
         lock (gate)

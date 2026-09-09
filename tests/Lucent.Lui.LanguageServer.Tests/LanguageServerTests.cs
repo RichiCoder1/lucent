@@ -207,6 +207,95 @@ public component Counter() {
     }
 
     [TestMethod]
+    public async Task StructureAndWhitespaceHoverAvoidWholeGraphCompilation()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-structure-hover-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            var project = Path.Combine(root, "StructureHover.csproj");
+            await File.WriteAllTextAsync(
+                project,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                    + core
+                    + "\"/><AdditionalFiles Include=\"*.lui\"/></ItemGroup></Project>"
+            );
+            const string source = """
+namespace HoverScale;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Main(bool visible) {
+    <Column>if (visible) { <Row style={Panel} /> }</Column>
+}
+style Panel { Opacity: .5f; }
+""";
+            var uri = new Uri(Path.Combine(root, "Main.lui"));
+            await File.WriteAllTextAsync(uri.LocalPath, source);
+            for (var index = 0; index < 9; index++)
+                await File.WriteAllTextAsync(
+                    Path.Combine(root, $"Sibling{index}.lui"),
+                    $"namespace HoverScale; using Lucent.Core; using static Lucent.Core.Components; internal component Sibling{index}() {{ <Row /> }}"
+                );
+
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+            foreach (
+                var offset in new[]
+                {
+                    source.IndexOf("component", StringComparison.Ordinal),
+                    source.IndexOf("if (", StringComparison.Ordinal),
+                    source.IndexOf("style Panel", StringComparison.Ordinal),
+                    source.IndexOf("<Column>", StringComparison.Ordinal) + "<Column>".Length,
+                }
+            )
+                Assert(
+                    await context.HoverAsync(uri, offset, CancellationToken.None) is null,
+                    "Structure or whitespace unexpectedly produced hover content."
+                );
+            Assert(
+                context.GraphCompilationCount == 0,
+                "Structure or whitespace hover compiled the whole LUI project graph "
+                    + context.GraphCompilationCount
+                    + " times."
+            );
+
+            var componentHover = await context.HoverAsync(
+                uri,
+                source.IndexOf("Row style", StringComparison.Ordinal),
+                CancellationToken.None
+            );
+            var styleHover = await context.HoverAsync(
+                uri,
+                source.IndexOf("Panel}", StringComparison.Ordinal),
+                CancellationToken.None
+            );
+            Assert(
+                componentHover is not null && styleHover is not null,
+                "The fast structure path removed component or authored-style hover."
+            );
+            Assert(
+                context.GraphCompilationCount == 0,
+                "Ordinary LUI symbol hover unexpectedly compiled the project graph."
+            );
+
+            await ExpectExceptionAsync<OperationCanceledException>(() =>
+                context.HoverAsync(
+                    uri,
+                    source.IndexOf("if (", StringComparison.Ordinal),
+                    new CancellationToken(canceled: true)
+                )
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task LiveTokenChoiceHasProjectDiagnosticsHoverAndNavigation()
     {
         var root = Path.Combine(

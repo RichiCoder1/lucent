@@ -14,6 +14,8 @@ symbols; the files are grouped by the component family that owns each recipe.
 | Text fields | `src/Lucent.Core/Components/TextField` | `TextField`, `TextArea`, editor state, pointer editing, IME and placeholder projection |
 | Scrolling | `src/Lucent.Core/Components/Scrolling` | Scroll viewports, virtualized lists and scrollbar presentation |
 | Status | `src/Lucent.Core/Components/Status` | Status and progress recipes, plus `.lui` composites such as `ErrorNotice` |
+| Menus | `src/Lucent.Core/ContextMenus.cs` | Context-menu recipes and their shared command, focus and session contracts |
+| Split panes | `src/Lucent.Core/SplitPane.cs` | Split-pane recipe and retained resizing/keyboard state |
 | Shared | `src/Lucent.Core/Components/Shared` | Mount configuration, validation and state used by more than one family |
 | Presentation | `src/Lucent.Core/Presentation` | Shared `ControlThemes` tokens and stock theme values |
 

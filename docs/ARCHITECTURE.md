@@ -95,7 +95,7 @@ Property resolution proceeds from lowest to highest:
 5. active variants, with component variants resolved before author variants;
 6. active transition sample.
 
-Variant priority is `Disabled > Invalid > Pressed > Selected > FocusVisible > Hover`; compound variants beat single-state variants and authored order breaks ties. Author variants override component variants at the same state priority. Two behaviors that claim exclusive focus, action, or semantic ownership fail closed. Every resolved property reports its winner and overridden candidates in diagnostic dumps.
+Variant priority is `Disabled > Invalid > Pressed > Selected > FocusVisible > Hover`; compound variants beat single-state variants at the same leading priority, and authored order breaks ties. Author variants override component variants at the same state priority; an authored single-state rule does not automatically override a component compound-state rule. Two behaviors that claim exclusive focus, action, or semantic ownership fail closed. Every resolved property reports its winner and overridden candidates in diagnostic dumps.
 
 Only documented text and token context inherits. Transitions are scheduler-owned, reduced-motion-aware, and initially bounded to color, opacity, transform, and focus-ring changes. Runtime CSS, selectors, specificity, reflection-based property discovery, and string property bags are excluded.
 

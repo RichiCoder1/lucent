@@ -6,6 +6,102 @@ namespace Lucent.Core.Tests;
 public sealed class ParticipationContracts
 {
     [TestMethod]
+    public void NewlyMountedDisabledResponsiveContentInstallsItsFirstScene()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "disabled-responsive");
+        using var constraints = new ResponsiveConstraints(composition.Root.Scope);
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var button = Components.Button(
+            "Disabled",
+            style: Style
+                .Empty.Width(80)
+                .Set(InputProperties.Enabled, false)
+                .When(VariantState.Disabled, Style.Empty.Width(120))
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.ResponsiveContainer(
+                [ContentRecipe.When("wide", () => constraints.Current.Width >= 800, button)],
+                constraints
+            )
+        );
+        using var narrow = SceneLayout.Project(composition, new(700, 120, 1), new MetricShaper());
+        Assert.IsTrue(composition.Input.SetScene(narrow));
+        using var wide = SceneLayout.Project(composition, new(900, 120, 1), new MetricShaper());
+        var disabled = wide.Input.Single(item => !item.Enabled);
+        Assert.AreEqual(
+            120f,
+            disabled.Bounds.Width,
+            "Disabled geometry must be settled before installation."
+        );
+        Assert.IsTrue(
+            composition.Input.SetScene(wide),
+            "New disabled content required a redundant projection."
+        );
+    }
+
+    [TestMethod]
+    [DataRow(ElementParticipation.Hidden)]
+    [DataRow(ElementParticipation.Collapsed)]
+    public void RetainedParticipationChangesInstallWithoutAvailabilityRetry(
+        ElementParticipation unavailable
+    )
+    {
+        using var composition = new Composition(new ReactiveGraph(), "availability-participation");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var participation = composition.Root.Scope.Signal(
+            ElementParticipation.Visible,
+            "participation"
+        );
+        var child = composition.Child(composition.Root, "child");
+        Controls.Panel(
+            child,
+            theme,
+            "Child",
+            Style
+                .Empty.Width(80)
+                .Height(20)
+                .Participation(() => participation.Value)
+                .When(VariantState.Disabled, Style.Empty.Width(120))
+        );
+        using var first = SceneLayout.Project(composition, new(200, 120, 1), new MetricShaper());
+        Assert.IsTrue(composition.Input.SetScene(first));
+        participation.Value = unavailable;
+        using var hidden = SceneLayout.Project(composition, new(200, 120, 1), new MetricShaper());
+        Assert.IsTrue(
+            composition.Input.SetScene(hidden),
+            "Hiding content required an availability retry."
+        );
+        participation.Value = ElementParticipation.Visible;
+        using var restored = SceneLayout.Project(composition, new(200, 120, 1), new MetricShaper());
+        Assert.AreEqual(80f, Box(restored, child).Width);
+        Assert.IsTrue(
+            composition.Input.SetScene(restored),
+            "Restoring content required an availability retry."
+        );
+    }
+
+    [TestMethod]
+    public void SelfContradictoryDisabledStyleFailsBoundedAvailabilitySynchronization()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "availability-feedback");
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Panel(
+            composition.Root,
+            theme,
+            "Root",
+            Style
+                .Empty.Set(InputProperties.Enabled, false)
+                .When(VariantState.Disabled, Style.Empty.Set(InputProperties.Enabled, true))
+        );
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            SceneLayout.Project(composition, new(200, 120, 1), new MetricShaper())
+        );
+        Assert.IsTrue(error.Message.Contains("availability", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [TestMethod]
     public void HiddenRetainsSpaceCollapsedRemovesSpaceAndBothRetainOwnership()
     {
         using var composition = new Composition(new ReactiveGraph(), "participation");

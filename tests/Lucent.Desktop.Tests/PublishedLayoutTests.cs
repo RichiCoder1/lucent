@@ -9,7 +9,7 @@ public sealed class PublishedLayoutTests
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
 
     [TestMethod]
-    public void PublishedFixtureProvesResponsiveParagraphResizeDpiAndPaint()
+    public async Task PublishedFixtureProvesResponsiveParagraphResizeDpiAndPaint()
     {
         var path = Environment.GetEnvironmentVariable("LUCENT_DESKTOP_HOST");
         if (string.IsNullOrWhiteSpace(path))
@@ -25,6 +25,8 @@ public sealed class PublishedLayoutTests
             );
 
         using var process = Start(fullPath);
+        var outputRead = process.StandardOutput.ReadToEndAsync();
+        var errorRead = process.StandardError.ReadToEndAsync();
         try
         {
             if (!process.WaitForExit((int)Timeout.TotalMilliseconds))
@@ -36,8 +38,8 @@ public sealed class PublishedLayoutTests
                 );
             }
 
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
+            var output = await outputRead;
+            var error = await errorRead;
             Assert.IsTrue(
                 process.ExitCode == 0
                     && output.Contains("layout-fixture: PASS", StringComparison.Ordinal),
