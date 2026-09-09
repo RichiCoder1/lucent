@@ -64,7 +64,10 @@ internal sealed class RowActionBehavior(
                     route.Focus();
                 route.Handled = armed;
             }
-            else if (route.Command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
+            else if (
+                route.Command.Kind == PointerCommandKind.Cancel
+                || route.Command.Releases(PointerButton.Primary)
+            )
             {
                 if (armedPointer != route.Command.PointerId)
                     return;
@@ -155,7 +158,10 @@ internal sealed class ButtonBehavior(
                     route.Focus();
                 route.Handled = armed;
             }
-            else if (route.Command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
+            else if (
+                route.Command.Kind == PointerCommandKind.Cancel
+                || route.Command.Releases(PointerButton.Primary)
+            )
             {
                 if (armedPointer != route.Command.PointerId)
                     return;

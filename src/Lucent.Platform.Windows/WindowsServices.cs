@@ -41,12 +41,12 @@ internal sealed unsafe partial class WindowsSettings(Func<WindowsSettingsSnapsho
         );
         var changed =
             appearance != theme.Appearance
-            || next.ReducedMotion is { } motion && motion != theme.ReducedMotion;
+            || next.ReducedMotion is { } motion && motion != theme.PlatformReducedMotion;
         if (!changed)
             return false;
         theme.Appearance = appearance;
         if (next.ReducedMotion is { } reducedMotion)
-            theme.ReducedMotion = reducedMotion;
+            theme.SetPlatformReducedMotion(reducedMotion);
         return true;
     }
 

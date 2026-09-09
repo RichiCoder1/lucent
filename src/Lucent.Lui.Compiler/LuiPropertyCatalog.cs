@@ -15,4 +15,22 @@ public static class LuiPropertyCatalog
             "Lucent.Core.ScrollBarProperties",
             "Lucent.Core.ImageProperties",
         ]);
+
+    /// <summary>Fully qualified property identities supported by the first transition authoring surface.</summary>
+    public static IReadOnlyList<string> TransitionPropertyIdentities { get; } =
+        new ReadOnlyCollection<string>([
+            "global::Lucent.Core.VisualProperties.Background",
+            "global::Lucent.Core.VisualProperties.Opacity",
+            "global::Lucent.Core.TypographyProperties.TextColor",
+        ]);
+
+    /// <summary>Returns the value type required by a supported transition property identity.</summary>
+    public static string? TransitionPropertyValueType(string identity) =>
+        identity switch
+        {
+            "global::Lucent.Core.VisualProperties.Background" => "global::Lucent.Core.Brush",
+            "global::Lucent.Core.VisualProperties.Opacity" => "float",
+            "global::Lucent.Core.TypographyProperties.TextColor" => "global::Lucent.Core.Color",
+            _ => null,
+        };
 }

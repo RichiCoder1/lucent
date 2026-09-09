@@ -209,6 +209,38 @@ public sealed class ImageComponentContracts
     }
 
     [TestMethod]
+    public void PaintReplayOwnsImagesAfterPriorFramesAndCompositionAreDisposed()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "image-paint-retention");
+        var cache = new ImageCache(new ImmediatePreparer());
+        composition.ConfigureImages(cache);
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        composition.Mount(composition.Root, theme, Components.Icon(Source(1)));
+        using (var ready = ReadyScene(composition)) { }
+        var shaper = new EmptyShaper();
+        using var original = SceneLayout.ProjectFrame(composition, new(100, 100, 1), shaper, null);
+        using var replay = SceneLayout.ProjectFrame(
+            composition,
+            original.Viewport,
+            shaper,
+            original
+        );
+        Assert.IsTrue(replay.IsPaintOnly);
+        original.Dispose();
+        using var next = SceneLayout.ProjectFrame(composition, replay.Viewport, shaper, replay);
+        Assert.IsTrue(next.IsPaintOnly);
+        replay.Dispose();
+        composition.Dispose();
+        var image = (RasterImage)Nodes(next.Nodes).OfType<ImageSceneNode>().Single().Image;
+        Assert.AreEqual((byte)255, image.Pixels.Span[3]);
+        Assert.IsTrue(cache.Metrics.LeasedBytes > 0);
+        next.Dispose();
+        Assert.AreEqual(0L, cache.Metrics.LeasedBytes);
+        Assert.IsTrue(image.IsDisposed);
+    }
+
+    [TestMethod]
     public void SourceReplacementClearsOldPixelsWhileSameContentUpgradeRetainsThem()
     {
         var graph = new ReactiveGraph();

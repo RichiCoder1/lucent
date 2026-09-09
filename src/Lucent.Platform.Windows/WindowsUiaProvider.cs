@@ -28,6 +28,10 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     private readonly NodeKey? _key;
     private readonly Dictionary<NodeKey, WindowsUiaProvider>? _cache;
     private Snapshot _snapshot = Snapshot.Empty;
+    private IReadOnlyList<RetainedInputElement>? _lastInput;
+    private LayoutViewport _lastViewport;
+    private long _lastSemanticRevision;
+    private bool _hasSnapshot;
     private nint _unknown,
         _simple;
     private int _disposed;
@@ -97,6 +101,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     // Counts detected semantic changes, even when no external UIA client is listening.
     internal long DetectedStructureChanges { get; private set; }
     internal long DetectedPropertyChanges { get; private set; }
+    internal long SemanticSnapshotBuilds { get; private set; }
 
     /// <summary>Called only at the Bootstrap safe point after Core projects a scene.</summary>
     internal void Refresh(RetainedScene scene)
@@ -104,8 +109,18 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         ArgumentNullException.ThrowIfNull(scene);
         if (!IsRoot || Volatile.Read(ref _disposed) != 0)
             return;
+        var semanticRevision = _composition.SemanticRevision;
+        if (
+            scene.IsPaintOnly
+            && _hasSnapshot
+            && ReferenceEquals(_lastInput, scene.Input)
+            && _lastViewport == scene.Viewport
+            && _lastSemanticRevision == semanticRevision
+        )
+            return;
         var next = Flatten(_composition.SemanticSnapshot(), scene)
             .ToFrozenDictionary(node => node.Key);
+        SemanticSnapshotBuilds++;
         var prior = Volatile.Read(ref _snapshot);
         var snapshot = new Snapshot(next);
         if (!HasAcyclicTree(snapshot))
@@ -113,6 +128,10 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 "UIA fragment navigation does not match the retained semantic tree."
             );
         Volatile.Write(ref _snapshot, snapshot);
+        _lastInput = scene.Input;
+        _lastViewport = scene.Viewport;
+        _lastSemanticRevision = semanticRevision;
+        _hasSnapshot = true;
         var cache =
             _cache ?? throw new InvalidOperationException("Only the UIA root owns a cache.");
         WindowsUiaProvider[] stale;

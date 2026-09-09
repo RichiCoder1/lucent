@@ -272,14 +272,22 @@ internal sealed class SplitterBehavior(SplitPaneState state, string label) : Beh
             }
             else if (_pointer == command.PointerId)
             {
-                if (command.Kind is PointerCommandKind.Move or PointerCommandKind.Up)
+                if (
+                    command.Kind == PointerCommandKind.Move
+                    || command.Releases(PointerButton.Primary)
+                )
                     state.Resize((double)_startExtent + Coordinate(command) - _startPosition);
-                if (command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
+                if (
+                    command.Kind == PointerCommandKind.Cancel
+                    || command.Releases(PointerButton.Primary)
+                )
                 {
                     _pointer = null;
                     context.SetState(BehaviorState.Pressed, false);
                 }
-                route.Handled = true;
+                route.Handled =
+                    command.Kind is PointerCommandKind.Move or PointerCommandKind.Cancel
+                    || command.Releases(PointerButton.Primary);
             }
         });
         context.OnKey(route =>

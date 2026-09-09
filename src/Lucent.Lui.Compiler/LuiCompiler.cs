@@ -297,6 +297,7 @@ public static class LuiCompiler
         var bound = compilation.AddSyntaxTrees(tree);
         var model = bound.GetSemanticModel(tree);
         StyleSnapshotDiagnostics(document, model, tree, map, writer, statePlans, diagnostics);
+        TransitionDiagnostics(document, model, tree, map, writer, statePlans, diagnostics);
         foreach (
             var invocation in tree.GetRoot().DescendantNodes().OfType<InvocationExpressionSyntax>()
         )
@@ -371,6 +372,8 @@ public static class LuiCompiler
                 )
         )
         {
+            if (diagnostic.Id == "CS0825" && diagnostics.Any(item => item.Id == "LUI2023"))
+                continue;
             var generated = new LuiSpan(
                 diagnostic.Location.SourceSpan.Start,
                 diagnostic.Location.SourceSpan.Length
@@ -666,6 +669,7 @@ public static class LuiCompiler
         diagnostics.Any(diagnostic =>
             diagnostic.Severity == DiagnosticSeverity.Error
             && !diagnostic.Id.StartsWith("LUI1", StringComparison.Ordinal)
+            && diagnostic.Id != "LUI2023"
         );
 
     private static IEnumerable<LuiElementSyntax> Elements(IEnumerable<LuiBodySyntax> body) =>
@@ -1029,7 +1033,27 @@ public static class LuiCompiler
                 );
             if (expression is not null)
                 initializers[declaration.Name] = expression;
-            plans[declaration.Name] = new StatePlan(declaration.Name, kind, declaration.Source);
+            plans[declaration.Name] = new StatePlan(
+                declaration.Name,
+                kind,
+                declaration.Source,
+                initializerType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            );
+        }
+        foreach (var declaration in writer.StateInitializers)
+        {
+            var plan = plans[declaration.Name];
+            if (
+                plan.Kind != StateKind.Derived
+                || !initializers.TryGetValue(declaration.Name, out var initializer)
+            )
+                continue;
+            plan.HasTrackedDependencies = HasTrackedStateDependency(
+                model,
+                initializer,
+                plans,
+                declaration.Name
+            );
         }
         var order = writer
             .StateInitializers.Select((declaration, index) => (declaration.Name, index))
@@ -1089,6 +1113,28 @@ public static class LuiCompiler
                 );
         }
         return plans;
+    }
+
+    private static bool HasTrackedStateDependency(
+        SemanticModel model,
+        ExpressionSyntax initializer,
+        IReadOnlyDictionary<string, StatePlan> plans,
+        string currentName
+    )
+    {
+        var owner = model.GetEnclosingSymbol(initializer.SpanStart)?.ContainingType;
+        return initializer
+            .DescendantNodesAndSelf()
+            .OfType<IdentifierNameSyntax>()
+            .Select(identifier => model.GetSymbolInfo(identifier).Symbol)
+            .OfType<IPropertySymbol>()
+            .Any(property =>
+                property.Name != currentName
+                && owner is not null
+                && SymbolEqualityComparer.Default.Equals(property.ContainingType, owner)
+                && plans.TryGetValue(property.Name, out var dependency)
+                && dependency.Kind != StateKind.Snapshot
+            );
     }
 
     private static bool IsTaskLike(ITypeSymbol? type)
@@ -1371,6 +1417,239 @@ public static class LuiCompiler
                     )
                 );
             }
+        }
+    }
+
+    private static void TransitionDiagnostics(
+        LuiDocumentSyntax document,
+        SemanticModel model,
+        SyntaxTree tree,
+        LuiSourceMap map,
+        Writer writer,
+        IReadOnlyDictionary<string, StatePlan> statePlans,
+        List<LuiDiagnostic> diagnostics
+    )
+    {
+        if (writer.TransitionMappings.Count == 0)
+            return;
+        var root = tree.GetRoot();
+        var mappings = writer.TransitionMappings;
+        var identities = new Dictionary<LuiStyleTransitionSyntax, string>();
+        foreach (var mapping in mappings)
+        {
+            var propertyNode = root.FindNode(
+                new TextSpan(mapping.GeneratedProperty.Start, mapping.GeneratedProperty.Length),
+                getInnermostNodeForTie: true
+            );
+            var propertyInfo = model.GetSymbolInfo(propertyNode);
+            var property =
+                propertyInfo.Symbol
+                ?? propertyInfo.CandidateSymbols.FirstOrDefault(candidate =>
+                    candidate is IFieldSymbol or IPropertySymbol
+                );
+            var identity = property is null ? null : PropertyIdentity(property);
+            if (identity is not null)
+                identities[mapping.Source] = identity;
+            var expected = identity is null
+                ? null
+                : LuiPropertyCatalog.TransitionPropertyValueType(identity);
+            if (expected is null)
+            {
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2024",
+                        "Transition policies support only VisualProperties.Background, VisualProperties.Opacity, and TypographyProperties.TextColor.",
+                        mapping.Source.Property.Span
+                    )
+                );
+            }
+            else if (
+                property is IFieldSymbol or IPropertySymbol
+                    && (property as IFieldSymbol)?.Type is INamedTypeSymbol propertyFieldType
+                    && propertyFieldType.TypeArguments.Length == 1
+                    && propertyFieldType
+                        .TypeArguments[0]
+                        .ToDisplayString(FullyQualifiedNullableFormat) != expected
+                || property is IPropertySymbol
+                    && (property as IPropertySymbol)?.Type is INamedTypeSymbol propertyType
+                    && propertyType.TypeArguments.Length == 1
+                    && propertyType.TypeArguments[0].ToDisplayString(FullyQualifiedNullableFormat)
+                        != expected
+            )
+            {
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2024",
+                        "The selected transition property has an unsupported value type.",
+                        mapping.Source.Property.Span
+                    )
+                );
+            }
+
+            var expressionNode = root.FindNode(
+                new TextSpan(mapping.GeneratedExpression.Start, mapping.GeneratedExpression.Length),
+                getInnermostNodeForTie: true
+            );
+            var expression =
+                expressionNode as ExpressionSyntax
+                ?? expressionNode.AncestorsAndSelf().OfType<ExpressionSyntax>().FirstOrDefault();
+            if (expression is null)
+                continue;
+            var expressionType = model.GetTypeInfo(expression).Type;
+            if (
+                expressionType is not null
+                && expressionType is not IErrorTypeSymbol
+                && expressionType.ToDisplayString(FullyQualifiedNullableFormat)
+                    != "global::Lucent.Core.Motion"
+            )
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2025",
+                        "A transition policy must resolve to Lucent.Core.Motion.",
+                        mapping.Source.Expression.Span
+                    )
+                );
+
+            if (ReferencesComponentState(model, expression, statePlans))
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2028",
+                        "A transition policy reads changing component state and is captured when the style is constructed. Use a reactive when group or a stable construction-time value.",
+                        mapping.Source.Expression.Span
+                    )
+                );
+
+            var duration = expression
+                .DescendantNodesAndSelf()
+                .OfType<InvocationExpressionSyntax>()
+                .FirstOrDefault(invocation =>
+                {
+                    var target = model.GetSymbolInfo(invocation).Symbol as IMethodSymbol;
+                    return target?.Name == "Duration"
+                        && target.ContainingType?.ToDisplayString(
+                            SymbolDisplayFormat.FullyQualifiedFormat
+                        ) == "global::Lucent.Core.Motion";
+                });
+            if (duration is null || duration.ArgumentList.Arguments.Count == 0)
+                continue;
+            var constant = model.GetConstantValue(duration.ArgumentList.Arguments[0].Expression);
+            if (!constant.HasValue || !TryDuration(constant.Value, out var milliseconds))
+                continue;
+            if (
+                milliseconds is < 0 or > 60000
+                || double.IsNaN(milliseconds)
+                || double.IsInfinity(milliseconds)
+            )
+            {
+                var authored =
+                    Translate(
+                        map,
+                        new LuiSpan(
+                            duration.ArgumentList.Arguments[0].Expression.SpanStart,
+                            duration.ArgumentList.Arguments[0].Expression.Span.Length
+                        )
+                    ) ?? mapping.Source.Expression.Span;
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2026",
+                        "Motion.Duration milliseconds must be an integer from 0 through 60000.",
+                        authored
+                    )
+                );
+            }
+        }
+
+        foreach (var members in StyleMemberContainers(document))
+        {
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var transition in members.OfType<LuiStyleTransitionSyntax>())
+            {
+                var identity = identities.TryGetValue(transition, out var resolved)
+                    ? resolved
+                    : transition.Property.Text;
+                if (!seen.Add(identity))
+                    diagnostics.Add(
+                        new LuiDiagnostic(
+                            "LUI2027",
+                            "A style body cannot declare more than one unconditional transition policy for the same property.",
+                            transition.Property.Span
+                        )
+                    );
+            }
+        }
+    }
+
+    private static bool TryDuration(object? value, out double milliseconds)
+    {
+        switch (value)
+        {
+            case byte item:
+                milliseconds = item;
+                return true;
+            case sbyte item:
+                milliseconds = item;
+                return true;
+            case short item:
+                milliseconds = item;
+                return true;
+            case ushort item:
+                milliseconds = item;
+                return true;
+            case int item:
+                milliseconds = item;
+                return true;
+            case uint item:
+                milliseconds = item;
+                return true;
+            case long item:
+                milliseconds = item;
+                return true;
+            case ulong item:
+                milliseconds = item;
+                return true;
+            case float item:
+                milliseconds = item;
+                return true;
+            case double item:
+                milliseconds = item;
+                return true;
+            case decimal item:
+                milliseconds = (double)item;
+                return true;
+            default:
+                milliseconds = 0;
+                return false;
+        }
+    }
+
+    private static string PropertyIdentity(ISymbol symbol)
+    {
+        var owner = symbol.ContainingType?.ToDisplayString(
+            SymbolDisplayFormat.FullyQualifiedFormat
+        );
+        return owner is null ? symbol.Name : owner + "." + symbol.Name;
+    }
+
+    private static IEnumerable<IReadOnlyList<LuiStyleMemberSyntax>> StyleMemberContainers(
+        LuiDocumentSyntax document
+    )
+    {
+        foreach (var style in document.Styles)
+        {
+            yield return style.Members;
+            foreach (var group in StyleGroups(style.Members))
+                yield return group.Members;
+        }
+        foreach (
+            var style in Elements(document.Component?.Body ?? Array.Empty<LuiBodySyntax>())
+                .SelectMany(element => element.Attributes)
+                .Select(attribute => attribute.Value)
+                .OfType<LuiStyleWithSyntax>()
+        )
+        {
+            yield return style.Members;
+            foreach (var group in StyleGroups(style.Members))
+                yield return group.Members;
         }
     }
 
@@ -2414,16 +2693,19 @@ public static class LuiCompiler
 
     private sealed class StatePlan
     {
-        internal StatePlan(string name, StateKind kind, LuiSpan source)
+        internal StatePlan(string name, StateKind kind, LuiSpan source, string? inferredType = null)
         {
             Name = name;
             Kind = kind;
             Source = source;
+            InferredType = inferredType;
         }
 
         internal string Name { get; }
         internal StateKind Kind { get; }
         internal LuiSpan Source { get; }
+        internal string? InferredType { get; }
+        internal bool HasTrackedDependencies { get; set; }
     }
 
     private sealed class BindingPlans
@@ -2496,6 +2778,7 @@ public static class LuiCompiler
         internal readonly List<LuiSpan> StyleExpressionSpans = new List<LuiSpan>();
         internal readonly List<(LuiSpan Source, LuiSpan Generated)> ContentExpressions = [];
         internal readonly List<StateInitializerMapping> StateInitializers = [];
+        internal readonly List<TransitionMapping> TransitionMappings = [];
 
         internal sealed class StateInitializerMapping
         {
@@ -2519,6 +2802,24 @@ public static class LuiCompiler
             internal LuiSpan Generated { get; }
             internal bool IsOnce { get; }
             internal bool IsReadonly { get; }
+        }
+
+        internal sealed class TransitionMapping
+        {
+            internal TransitionMapping(
+                LuiStyleTransitionSyntax source,
+                LuiSpan generatedProperty,
+                LuiSpan generatedExpression
+            )
+            {
+                Source = source;
+                GeneratedProperty = generatedProperty;
+                GeneratedExpression = generatedExpression;
+            }
+
+            internal LuiStyleTransitionSyntax Source { get; }
+            internal LuiSpan GeneratedProperty { get; }
+            internal LuiSpan GeneratedExpression { get; }
         }
 
         private sealed class PatternLocal
@@ -2936,6 +3237,19 @@ public static class LuiCompiler
             Hidden("    }\n");
         }
 
+        private string StateType(FieldDeclarationSyntax field, string name)
+        {
+            if (
+                field.Declaration.Type is IdentifierNameSyntax type
+                && type.Identifier.ValueText == "var"
+                && plans is not null
+                && plans.States.TryGetValue(name, out var plan)
+                && plan.InferredType is not null
+            )
+                return plan.InferredType;
+            return field.Declaration.Type.ToString();
+        }
+
         private void StateProperty(
             LuiMemberSyntax member,
             FieldDeclarationSyntax field,
@@ -2944,20 +3258,36 @@ public static class LuiCompiler
         )
         {
             var name = variable.Identifier.ValueText;
+            if (
+                IsVarField(field)
+                && (
+                    plans is null
+                    || !plans.States.TryGetValue(name, out var varPlan)
+                    || varPlan.InferredType is null
+                )
+            )
+                return;
             var nameSpan = new LuiSpan(
                 member.Span.Start + variable.Identifier.SpanStart,
                 variable.Identifier.Span.Length
             );
-            var type = field.Declaration.Type.ToString();
+            var type = StateType(field, name);
             var kind =
                 plans is not null && plans.States.TryGetValue(name, out var resolved)
                     ? resolved.Kind
                 : field.Modifiers.Any(SyntaxKind.ReadOnlyKeyword) ? StateKind.Snapshot
                 : HasOnce(field) ? StateKind.Once
                 : StateKind.Writable;
+            var stateFreeDerived =
+                kind == StateKind.Derived
+                && plans is not null
+                && plans.States.TryGetValue(name, out var statePlan)
+                && !statePlan.HasTrackedDependencies;
             var summary = kind switch
             {
                 StateKind.Writable => "Writable component state.",
+                StateKind.Derived when stateFreeDerived =>
+                    "Read-only derived component value; no direct component-state reads were identified in this initializer. Runtime reads, including those made by helpers, determine whether it updates.",
                 StateKind.Derived =>
                     "Read-only derived component value; updates when tracked dependencies change.",
                 StateKind.Once => "Writable component state initialized once per mount.",
@@ -3041,15 +3371,35 @@ public static class LuiCompiler
                 : field.Modifiers.Any(SyntaxKind.ReadOnlyKeyword) ? StateKind.Snapshot
                 : HasOnce(field) ? StateKind.Once
                 : StateKind.Writable;
+            var localVar =
+                IsVarField(field)
+                && (
+                    plans is null
+                    || !plans.States.TryGetValue(name, out var varPlan)
+                    || varPlan.InferredType is null
+                );
             Hidden("            ");
-            if (kind == StateKind.Snapshot)
+            if (localVar)
+            {
+                Hidden("var ");
+                Mapped(
+                    EscapeIdentifier(name),
+                    new LuiSpan(
+                        member.Span.Start + variable.Identifier.SpanStart,
+                        variable.Identifier.Span.Length
+                    ),
+                    LuiMapKind.Symbol
+                );
+                Hidden(" = ");
+            }
+            else if (kind == StateKind.Snapshot)
                 Hidden(EscapeIdentifier(name) + " = ");
             else
             {
                 Hidden("__luiState_" + name + " = " + stateOwner + ".");
                 Hidden(kind == StateKind.Derived ? "Derived<" : "Signal<");
                 Mapped(
-                    field.Declaration.Type.ToString(),
+                    StateType(field, name),
                     new LuiSpan(
                         member.Span.Start + field.Declaration.Type.SpanStart,
                         field.Declaration.Type.Span.Length
@@ -3074,7 +3424,7 @@ public static class LuiCompiler
                     field.Modifiers.Any(SyntaxKind.ReadOnlyKeyword)
                 )
             );
-            if (kind != StateKind.Snapshot)
+            if (kind != StateKind.Snapshot && !localVar)
             {
                 Hidden(", ");
                 Hidden(Escape(component.Name.Text + "." + name));
@@ -3113,12 +3463,31 @@ public static class LuiCompiler
                     attribute.Name.ToString() == "Once" && attribute.ArgumentList is null
                 );
 
+        private static bool IsVarField(FieldDeclarationSyntax field) =>
+            field.Declaration.Type is IdentifierNameSyntax type
+            && type.Identifier.ValueText == "var";
+
         private static void ValidateStateField(
             LuiMemberSyntax member,
             FieldDeclarationSyntax field,
             List<LuiDiagnostic> diagnostics
         )
         {
+            if (IsVarField(field))
+            {
+                var span = new LuiSpan(
+                    member.Span.Start + field.Declaration.Type.SpanStart,
+                    field.Declaration.Type.Span.Length
+                );
+                if (!diagnostics.Any(item => item.Id == "LUI2023" && item.Span.Start == span.Start))
+                    diagnostics.Add(
+                        new LuiDiagnostic(
+                            "LUI2023",
+                            "Component fields require an explicit type; 'var' is only valid for local variables.",
+                            span
+                        )
+                    );
+            }
             foreach (
                 var modifier in field.Modifiers.Where(modifier =>
                     !modifier.IsKind(SyntaxKind.ReadOnlyKeyword)
@@ -3658,6 +4027,10 @@ public static class LuiCompiler
                     assignment.Expression.Expression,
                     name
                 ),
+                LuiStyleTransitionSyntax transition => References(
+                    transition.Expression.Expression,
+                    name
+                ),
                 LuiVariantGroupSyntax group => (
                     group.ConditionExpression is { } condition
                     && References(condition.Expression, name)
@@ -3675,8 +4048,8 @@ public static class LuiCompiler
                         if (attribute.Value is LuiExpressionSyntax expression)
                             yield return expression;
                         else if (attribute.Value is LuiStyleWithSyntax style)
-                            foreach (var assignment in style.Assignments)
-                                yield return assignment.Expression;
+                            foreach (var styleExpression in StyleMemberExpressions(style.Members))
+                                yield return styleExpression;
                     }
                     foreach (var child in element.Children)
                     foreach (var expression in Expressions(child))
@@ -3704,6 +4077,28 @@ public static class LuiCompiler
                     foreach (var expression in Expressions(child))
                         yield return expression;
                     break;
+            }
+        }
+
+        private static IEnumerable<LuiExpressionSyntax> StyleMemberExpressions(
+            IReadOnlyList<LuiStyleMemberSyntax> members
+        )
+        {
+            foreach (var member in members)
+            {
+                switch (member)
+                {
+                    case LuiStyleAssignmentSyntax assignment:
+                        yield return assignment.Expression;
+                        break;
+                    case LuiStyleTransitionSyntax transition:
+                        yield return transition.Expression;
+                        break;
+                    case LuiVariantGroupSyntax group:
+                        foreach (var expression in StyleMemberExpressions(group.Members))
+                            yield return expression;
+                        break;
+                }
             }
         }
 
@@ -3806,6 +4201,8 @@ public static class LuiCompiler
                     continue;
                 if (member is LuiStyleAssignmentSyntax assignment)
                     Assignment(assignment, live);
+                else if (member is LuiStyleTransitionSyntax transition)
+                    Transition(transition);
                 else if (member is LuiVariantGroupSyntax group)
                 {
                     Write(".When(");
@@ -4097,6 +4494,32 @@ public static class LuiCompiler
             Write(")");
             Mark(assignment.Colon.Span, LuiMapKind.Structure);
             Mark(assignment.Terminator.Span, LuiMapKind.Structure);
+        }
+
+        private void Transition(LuiStyleTransitionSyntax transition)
+        {
+            StylePropertyNames.Add(transition.Property.Span.Start);
+            var property =
+                plans is not null
+                && plans.Properties.TryGetValue(transition.Property.Span.Start, out var resolved)
+                    ? resolved
+                    : new StylePropertyPlan(transition.Property.Text, "");
+            Write(".Transition(");
+            var generatedPropertyStart = text.Length;
+            Mapped(property.Name, transition.Property.Span, LuiMapKind.Symbol);
+            var generatedProperty = new LuiSpan(
+                generatedPropertyStart,
+                text.Length - generatedPropertyStart
+            );
+            Write(", ");
+            var generatedExpression = Expression(transition.Expression);
+            Write(")");
+            TransitionMappings.Add(
+                new TransitionMapping(transition, generatedProperty, generatedExpression)
+            );
+            Mark(transition.TransitionKeyword.Span, LuiMapKind.Structure);
+            Mark(transition.Colon.Span, LuiMapKind.Structure);
+            Mark(transition.Terminator.Span, LuiMapKind.Structure);
         }
 
         private LuiSpan Expression(

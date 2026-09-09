@@ -15,7 +15,7 @@ public sealed class Composition : IDisposable
     private readonly Dictionary<long, Element> _elements = [];
     private readonly InputProjectionTracker _inputProjection;
     private readonly HashSet<SemanticIdentity> _emittedSemantics = [];
-    private readonly TransitionController _transitions = new();
+    private readonly MotionTimeline _motion;
     private long _nextElementId;
     private CompositionContext? _factory;
     private int _behaviorDepth;
@@ -35,6 +35,7 @@ public sealed class Composition : IDisposable
         var scope = graph.CreateScope(name);
         Root = new Element(this, null, scope, NextId(), name);
         _elements.Add(Root.Id, Root);
+        _motion = new(() => PresentationDemandAvailable?.Invoke());
         _inputProjection = scope.Own(
             new InputProjectionTracker(graph, scope, name + ".input-projection")
         );
@@ -77,6 +78,74 @@ public sealed class Composition : IDisposable
     /// <summary>Raised after the retained semantic tree changes and consumers should request a fresh snapshot.</summary>
     public event Action? SemanticsChanged;
 
+    /// <summary>Raised when an idle composition first acquires future presentation work.</summary>
+    public event Action? PresentationDemandAvailable;
+
+    /// <summary>Gets the current portable presentation-frame demand.</summary>
+    public PresentationFrameDemand PresentationDemand
+    {
+        get
+        {
+            _graph.CheckThread();
+            ThrowIfDisposed();
+            return _motion.Demand;
+        }
+    }
+
+    /// <summary>Gets bounded aggregate timeline counters without retaining per-frame history.</summary>
+    public PresentationDiagnostics PresentationDiagnostics
+    {
+        get
+        {
+            _graph.CheckThread();
+            ThrowIfDisposed();
+            return _motion.Diagnostics;
+        }
+    }
+
+    /// <summary>Returns deterministic bounded diagnostics for the three eligible paint properties.</summary>
+    public string PresentationDump()
+    {
+        _graph.CheckThread();
+        ThrowIfDisposed();
+        return _motion.Dump();
+    }
+
+    /// <summary>Samples existing tracks at an absolute monotonic timestamp without resolving targets.</summary>
+    public PresentationSampleResult SamplePresentation(TimeSpan monotonicTimestamp)
+    {
+        _graph.CheckThread();
+        ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        try
+        {
+            return _motion.Sample(monotonicTimestamp);
+        }
+        catch
+        {
+            _motion.CancelForFailure();
+            throw;
+        }
+    }
+
+    /// <summary>Arms or disarms presentation work for a renderable host surface.</summary>
+    public void SetPresentationAvailable(bool available)
+    {
+        _graph.CheckThread();
+        ThrowIfBehaviorAttachment();
+        ThrowIfDisposed();
+        _motion.SetAvailable(available);
+    }
+
+    /// <summary>Acknowledges that the exact captured scene generation was presented successfully.</summary>
+    public bool TryAcknowledgePresentation(long sceneGeneration)
+    {
+        _graph.CheckThread();
+        if (IsDisposed)
+            return false;
+        return _motion.Acknowledge(sceneGeneration);
+    }
+
     /// <summary>Composition-owned portable input, focus, and capture router.</summary>
     public InputRouter Input
     {
@@ -91,7 +160,6 @@ public sealed class Composition : IDisposable
     internal ContextMenuRequest? MenuSession { get; set; }
     internal CompositionContext? Factory => _factory;
     internal long Epoch => _epoch;
-    internal TransitionController Transitions => _transitions;
     internal InputRouter? InputIfCreated => _input;
 
     internal long NextSceneGeneration()
@@ -104,6 +172,61 @@ public sealed class Composition : IDisposable
     internal long LatestSceneGeneration => _nextSceneGeneration;
     internal long InputProjectionRevision => _inputProjection.Revision;
     internal long InteractionVisualGeneration => _interactionVisualGeneration;
+
+    internal bool CommitPresentationTargets()
+    {
+        _graph.CheckThread();
+        ThrowIfDisposed();
+        try
+        {
+            var elements = Elements().ToArray();
+            foreach (var element in elements)
+                if (IsPresentationVisible(element))
+                    element.ValidatePresentationTargets();
+            var changed = false;
+            _motion.BeginCommitBatch();
+            for (var index = elements.Length - 1; index >= 0; index--)
+            {
+                var element = elements[index];
+                if (IsPresentationVisible(element))
+                    changed |= element.CommitPresentationTargets(_motion);
+                else
+                    _motion.Remove(element);
+            }
+            _motion.EndCommitBatch();
+            return changed;
+        }
+        catch
+        {
+            _motion.CancelForFailure();
+            throw;
+        }
+    }
+
+    private static bool IsPresentationVisible(Element element)
+    {
+        for (Element? current = element; current is not null; current = current.Parent)
+            if (current.Participation != ElementParticipation.Visible)
+                return false;
+        return true;
+    }
+
+    internal T ReadPresentedValue<T>(Element element, Property<T> property)
+    {
+        if (_motion.TryRead(element, property, out T value))
+            return value;
+        if (property.Inherits && element.Parent is { } parent)
+            return ReadPresentedValue(parent, property);
+        return element.ResolveValue(property);
+    }
+
+    internal void CapturePresentationFrame(long sceneGeneration) =>
+        _motion.Capture(
+            sceneGeneration,
+            Elements().Where(IsPresentationVisible).Select(element => element.Id)
+        );
+
+    internal void RemovePresentation(Element element) => _motion.Remove(element);
 
     internal T CaptureInputProjection<T>(Func<T> project) => _inputProjection.Capture(project);
 
@@ -149,15 +272,6 @@ public sealed class Composition : IDisposable
     {
         add => _graph.WorkAvailable += value;
         remove => _graph.WorkAvailable -= value;
-    }
-
-    /// <summary>Advances bounded presentation samples; it queues no background work.</summary>
-    public void AdvanceTransitions(int milliseconds)
-    {
-        _graph.CheckThread();
-        ThrowIfBehaviorAttachment();
-        ThrowIfDisposed();
-        _transitions.Advance(milliseconds);
     }
 
     /// <summary>Adds fixed authored structure below an already-mounted element.</summary>
@@ -864,6 +978,7 @@ public sealed class Composition : IDisposable
             return;
         List<Exception>? errors = null;
         IsDisposed = true;
+        _motion.Clear();
         RunOwnedCleanup(
             Root,
             () =>

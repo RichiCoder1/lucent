@@ -23,6 +23,8 @@ internal static class Program
             ["--lifecycle-cleanup-failure"] => LifecycleFixture.Run(
                 LifecycleFixtureMode.CleanupFailure
             ),
+            ["--motion-fixture"] => MotionFixture.Run(reducedMotion: false),
+            ["--motion-reduced-fixture"] => MotionFixture.Run(reducedMotion: true),
             _ => 2,
         };
 }

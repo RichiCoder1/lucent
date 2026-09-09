@@ -20,6 +20,7 @@ internal sealed partial class WindowsPopupChain : IDisposable
     private readonly WindowsUiaDispatcher _uiaDispatcher;
     private readonly WindowsClipboard _clipboard;
     private readonly WindowsCursor _cursor;
+    private readonly Action _wakePresentation;
     private readonly List<WindowsPopupHost> _levels = [];
     private readonly WindowsPopupSafeIntentSet _safeIntents = new();
     private readonly Dictionary<uint, PopupScreenPoint> _lastPointers = [];
@@ -37,7 +38,8 @@ internal sealed partial class WindowsPopupChain : IDisposable
         ContextMenuRequest request,
         WindowsUiaDispatcher uiaDispatcher,
         WindowsClipboard clipboard,
-        WindowsCursor cursor
+        WindowsCursor cursor,
+        Action? wakePresentation = null
     )
     {
         ArgumentOutOfRangeException.ThrowIfZero(ownerWindow);
@@ -52,6 +54,7 @@ internal sealed partial class WindowsPopupChain : IDisposable
         _uiaDispatcher = uiaDispatcher;
         _clipboard = clipboard;
         _cursor = cursor;
+        _wakePresentation = wakePresentation ?? (static () => { });
         _request.ActiveLevelsChanged += OnActiveLevelsChanged;
         try
         {
@@ -92,6 +95,28 @@ internal sealed partial class WindowsPopupChain : IDisposable
         return _safeIntents.WaitMilliseconds(parent, Stopwatch.GetTimestamp());
     }
 
+    internal int PresentationWaitMilliseconds(TimeSpan now)
+    {
+        CheckThread();
+        if (_disposed)
+            return -1;
+        var wait = -1;
+        foreach (var level in _levels)
+            wait = WindowsPresentationTiming.Earlier(wait, level.PresentationWaitMilliseconds(now));
+        return wait;
+    }
+
+    internal bool TickPresentation(TimeSpan now)
+    {
+        CheckThread();
+        if (_disposed)
+            return false;
+        var presented = false;
+        foreach (var level in _levels)
+            presented |= level.TickPresentation(now);
+        return presented;
+    }
+
     /// <summary>Replays the last deferred pointer sample once the bounded intent grace expires.</summary>
     internal bool Tick()
     {
@@ -125,15 +150,14 @@ internal sealed partial class WindowsPopupChain : IDisposable
         var windowId = WindowsPopupHost.EventWindowId(@event);
         if (type is SDL.EventType.WindowFocusLost or SDL.EventType.WindowFocusGained)
         {
-            if (!OwnsWindow(windowId) && windowId != SDL.GetWindowID(_ownerWindow))
+            var ownerWindowId = SDL.GetWindowID(_ownerWindow);
+            if (!OwnsWindow(windowId) && windowId != ownerWindowId)
                 return false;
             if (type == SDL.EventType.WindowFocusLost)
-            {
                 _focusGate.LostFocus();
-                return true;
-            }
-            _focusGate.GainedFocus();
-            return true;
+            else
+                _focusGate.GainedFocus();
+            return ShouldConsumeFocusEvent(windowId, ownerWindowId);
         }
 
         WindowsPopupHost? host = null;
@@ -306,7 +330,8 @@ internal sealed partial class WindowsPopupChain : IDisposable
                 _uiaDispatcher,
                 _clipboard,
                 _cursor,
-                parent
+                parent,
+                _wakePresentation
             );
             _levels.Add(popup);
             if (active[i].FocusFirst || _keyboardHost is null)
@@ -414,6 +439,14 @@ internal sealed partial class WindowsPopupChain : IDisposable
 
     private bool OwnsWindow(uint windowId) =>
         windowId != 0 && _levels.Any(level => level.WindowId == windowId);
+
+    /// <summary>Popup focus is private to the chain; owner focus must still reach owner input cleanup.</summary>
+    internal static bool ShouldConsumeFocusEvent(uint windowId, uint ownerWindowId)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(windowId);
+        ArgumentOutOfRangeException.ThrowIfZero(ownerWindowId);
+        return windowId != ownerWindowId;
+    }
 
     private static bool SameLevel(MenuLevelSnapshot? current, MenuLevelSnapshot next) =>
         current is not null

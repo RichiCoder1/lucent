@@ -129,6 +129,8 @@ SkiaSceneRenderer.Render(RetainedScene, SKCanvas)
 
 Windows owns a `WindowsViewport`: SDL render output is the backing-pixel size, `GetDpiForWindow / 96` is the only scale authority, and logical viewport dimensions are backing pixels divided by that scale. Per-Monitor V2 startup fails unless the effective thread context is already Per-Monitor V2. Skia applies that scale once; SDL receives the matching backing-sized texture without logical presentation scaling. A zero backing size retains its pending frame and waits for the next window event rather than spinning. The CPU presenter owns its target surface and frame lifecycle.
 
+The Windows input adapter currently translates SDL mouse button, motion and wheel events. Touch and pen events are outside this mouse-only transport boundary until Lucent defines their identity, contact, pressure and capture contracts; they are not inferred from mouse compatibility events.
+
 Production starts with a persistent CPU Skia raster surface and persistent SDL streaming texture. Resources are recreated only when backing size or format changes. Format, alpha, vsync, logical-to-device transforms, and mixed-DPI behavior are explicit; production rendering does not read frames back.
 
 This is a Skia CPU/GPU seam, not a public arbitrary-renderer abstraction. A GPU spike is authorized only after resource reuse and caching are correct, the Issue Browser misses its declared frame budget on supported hardware, and profiling attributes roughly half the frame cost to raster plus transfer. CPU Skia remains the headless raster oracle if a GPU presenter is later added.

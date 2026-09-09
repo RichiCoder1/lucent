@@ -291,6 +291,50 @@ public sealed class ImageLoadingContracts
     }
 
     [TestMethod]
+    public void CacheDisposalPreservesAndReleasesAnInflightTemporaryReservation()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("image-owner");
+        var preparer = new ControlledPreparer();
+        var cache = new ImageCache(preparer, new ImageLoadLimits(maximumTemporaryBytes: 16));
+        using var handle = cache.Acquire(scope, Source('8'), new ImageRendition(1, 1));
+        var call = preparer.Next();
+        var reservation = call.Request.ReserveTemporaryBytes(8);
+        Assert.AreEqual(8L, cache.Metrics.TemporaryBytes);
+
+        cache.Dispose();
+        Assert.AreEqual(
+            8L,
+            cache.Metrics.TemporaryBytes,
+            "Disposal must not erase an in-flight reservation before its owner releases it."
+        );
+        reservation.Dispose();
+        Assert.AreEqual(0L, cache.Metrics.TemporaryBytes);
+
+        var late = new TrackingImage(1, 1, 4);
+        call.Complete(late);
+        Assert.IsTrue(SpinWait.SpinUntil(() => late.IsDisposed, 5000));
+    }
+
+    [TestMethod]
+    public void CacheDisposalRejectsANewTemporaryReservationWithoutRelabelingTheFailure()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("image-owner");
+        var preparer = new ControlledPreparer();
+        var cache = new ImageCache(preparer);
+        using var handle = cache.Acquire(scope, Source('9'), new ImageRendition(1, 1));
+        var call = preparer.Next();
+
+        cache.Dispose();
+        Assert.ThrowsExactly<ObjectDisposedException>(() => call.Request.ReserveTemporaryBytes(1));
+
+        var late = new TrackingImage(1, 1, 4);
+        call.Complete(late);
+        Assert.IsTrue(SpinWait.SpinUntil(() => late.IsDisposed, 5000));
+    }
+
+    [TestMethod]
     public void RetryPublishesOutsideCacheLockAndSubscriberFailureLeavesWorkReleasable()
     {
         var graph = new ReactiveGraph();

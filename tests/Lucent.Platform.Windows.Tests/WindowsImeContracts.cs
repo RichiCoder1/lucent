@@ -8,6 +8,37 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed class WindowsImeContracts
 {
     [TestMethod]
+    public void OwnerFocusRoundTripCancelsImeBeforeAcceptingNewText()
+    {
+        using var composition = CreateComposition(out var state, multiline: false);
+        Install(composition);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        var clears = 0;
+        using var adapter = CreateAdapter(composition, () => clears++);
+
+        Assert.IsTrue(adapter.DispatchText(new(TextInputKind.Preedit, "候", 0, 1)));
+        Assert.IsTrue(state.HasPreedit);
+        adapter.Dispatch(new SDL.Event { Window = new() { Type = SDL.EventType.WindowFocusLost } });
+
+        Assert.AreEqual(1, clears, "Owner focus loss did not clear the native IME composition.");
+        Assert.IsFalse(state.HasPreedit, "Owner focus loss retained Core preedit state.");
+        Assert.IsFalse(
+            adapter.DispatchText(new(TextInputKind.Commit, "stale")),
+            "Owner focus loss accepted queued text."
+        );
+
+        adapter.Dispatch(
+            new SDL.Event { Window = new() { Type = SDL.EventType.WindowFocusGained } }
+        );
+        Assert.IsTrue(adapter.DispatchText(new(TextInputKind.Commit, "new")));
+        Assert.AreEqual(
+            "draftnew",
+            state.Value,
+            "Focus return did not restore text input lifetime."
+        );
+    }
+
+    [TestMethod]
     public void EscapeCancelsNativeCompositionOnceAndPlainEscapeBubbles()
     {
         using var composition = CreateComposition(out var state, multiline: false);

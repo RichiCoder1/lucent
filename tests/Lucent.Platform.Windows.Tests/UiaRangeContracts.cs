@@ -8,6 +8,98 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed unsafe partial class UiaLifecycleContracts
 {
     [TestMethod]
+    public void PaintOnlyFramesDoNotRebuildUiaSemanticSnapshots()
+    {
+        Assert(SDL.Init(SDL.InitFlags.Video), "SDL_Init(UIA paint replay) failed.");
+        var window = CreateWindow("Lucent UIA paint replay");
+        try
+        {
+            using var composition = new Composition(new ReactiveGraph(), "uia-paint-replay");
+            using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            var active = composition.Root.Scope.Signal(false, "uia-paint-replay.active");
+            composition.Root.Present(
+                theme,
+                author: Style
+                    .Empty.Width(80)
+                    .Height(40)
+                    .Background(Color.Parse("#FF246BCE"))
+                    .Bind(VisualProperties.Opacity, () => active.Value ? 0.2f : 1f)
+                    .Transition(VisualProperties.Opacity, Motion.Duration(100))
+            );
+            using var renderer = new SkiaSceneRenderer();
+            composition.SamplePresentation(TimeSpan.Zero);
+            using var initial = SceneLayout.ProjectFrame(
+                composition,
+                new(80, 40, 1),
+                renderer,
+                null
+            );
+            Assert(composition.Input.SetScene(initial), "Initial UIA paint scene was rejected.");
+            Assert(
+                composition.TryAcknowledgePresentation(initial.Generation),
+                "Initial UIA paint scene was not acknowledged."
+            );
+            using var dispatcher = new WindowsUiaDispatcher();
+            using var provider = new WindowsUiaProvider(
+                Hwnd(window),
+                composition,
+                dispatcher,
+                "Lucent UIA paint replay"
+            );
+            provider.Refresh(initial);
+
+            active.Value = true;
+            using var target = SceneLayout.ProjectFrame(
+                composition,
+                initial.Viewport,
+                renderer,
+                initial
+            );
+            Assert(composition.Input.SetScene(target), "Target UIA paint scene was rejected.");
+            Assert(
+                composition.TryAcknowledgePresentation(target.Generation),
+                "Target UIA paint scene was not acknowledged."
+            );
+            provider.Refresh(target);
+            composition.SamplePresentation(TimeSpan.FromMilliseconds(50));
+            using var middle = SceneLayout.ProjectFrame(
+                composition,
+                target.Viewport,
+                renderer,
+                target
+            );
+            Assert(middle.IsPaintOnly, "The animation frame did not use paint replay.");
+            provider.Refresh(middle);
+            Assert(
+                provider.SemanticSnapshotBuilds == 2,
+                "A paint-only animation frame rebuilt the UIA semantic snapshot."
+            );
+            using var lateProvider = new WindowsUiaProvider(
+                Hwnd(window),
+                composition,
+                dispatcher,
+                "Lucent late UIA paint replay"
+            );
+            lateProvider.Refresh(middle);
+            Assert(
+                lateProvider.SemanticSnapshotBuilds == 1,
+                "A first paint-only provider refresh failed to populate its semantic snapshot."
+            );
+            composition.InvalidateSemantics();
+            provider.Refresh(middle);
+            Assert(
+                provider.SemanticSnapshotBuilds == 3,
+                "A semantic-only revision was hidden by the UIA paint replay fast path."
+            );
+        }
+        finally
+        {
+            SDL.DestroyWindow(window);
+            SDL.Quit();
+        }
+    }
+
+    [TestMethod]
     public void SplitterExposesFiniteRangeValuePatternAndBoundedMutation()
     {
         Assert(SDL.Init(SDL.InitFlags.Video), "SDL_Init(UIA range) failed.");

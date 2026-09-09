@@ -76,6 +76,18 @@ public sealed class ImageSceneNode : SceneNode
 
     /// <summary>The inherited text color, sampled for this frame.</summary>
     public Color Tint { get; }
+
+    private ImageSceneNode(ImageSceneNode source, Color tint)
+        : base(source.Identity, source.Bounds)
+    {
+        SourceLease = source.SourceLease;
+        Image = source.Image;
+        SourceBounds = source.SourceBounds;
+        ColorMode = source.ColorMode;
+        Tint = tint;
+    }
+
+    internal ImageSceneNode WithTint(Color tint) => Tint == tint ? this : new(this, tint);
 }
 
 internal sealed class ImageSlotSceneNode(

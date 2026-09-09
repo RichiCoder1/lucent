@@ -10,8 +10,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $dotnet = Join-Path $root '.dotnet/dotnet.exe'
 if (!(Test-Path -LiteralPath $dotnet)) { $dotnet = 'dotnet' }
 
-if ([bool]$Feed -xor [bool]$Version) {
-    throw 'Feed and Version must be supplied together.'
+if ($Feed -and !$Version) {
+    throw 'Version must be supplied with Feed.'
 }
 if (!$Version) { $Version = '0.3.0-dev.assets-proof' }
 
@@ -169,7 +169,7 @@ function Build-ProbeExpectedFailure([string]$directory, [string]$project, [strin
     ) $diagnostic
 }
 
-function New-JpegWithExif([byte[]]$jpeg, [bool]$littleEndian, [bool]$badOffset = $false) {
+function New-JpegWithExif([byte[]]$jpeg, [bool]$littleEndian, [bool]$badOffset = $false, [int]$orientation = 6) {
     $marker = if ($littleEndian) {
         [byte[]](0x49,0x49,0x2a,0x00,0x08,0x00,0x00,0x00,0x01,0x00,0x12,0x01,0x03,0x00,0x01,0x00,0x00,0x00,0x06,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
     } else {
@@ -183,10 +183,43 @@ function New-JpegWithExif([byte[]]$jpeg, [bool]$littleEndian, [bool]$badOffset =
             $marker[4] = 0x00; $marker[5] = 0x01; $marker[6] = 0x00; $marker[7] = 0x00
         }
     }
+    if ($littleEndian) {
+        $marker[18] = [byte]$orientation; $marker[19] = [byte]($orientation -shr 8)
+    }
+    else {
+        $marker[18] = [byte]($orientation -shr 8); $marker[19] = [byte]$orientation
+    }
     $payload = [byte[]](0x45,0x78,0x69,0x66,0x00,0x00) + $marker
     $length = $payload.Length + 2
     $segment = [byte[]](0xff,0xe1,[byte]($length -shr 8),[byte]$length) + $payload
     return [byte[]](0xff,0xd8) + $segment + $jpeg[2..($jpeg.Length - 1)]
+}
+
+function Get-Crc32([byte[]]$bytes) {
+    [uint32]$crc = [uint32]::MaxValue
+    foreach ($value in $bytes) {
+        $crc = [uint32]($crc -bxor $value)
+        for ($bit = 0; $bit -lt 8; $bit++) {
+            if (($crc -band 1) -ne 0) { $crc = [uint32](0xedb88320 -bxor ($crc -shr 1)) }
+            else { $crc = [uint32]($crc -shr 1) }
+        }
+    }
+    return [uint32](-bnot $crc)
+}
+
+function New-PngWithExif([byte[]]$png, [int]$orientation) {
+    $tiff = [byte[]](0x49,0x49,0x2a,0x00,0x08,0x00,0x00,0x00,0x01,0x00,0x12,0x01,0x03,0x00,0x01,0x00,0x00,0x00,$orientation,0x00,0x00,0x00,0x00,0x00,0x00,0x00)
+    $type = [Text.Encoding]::ASCII.GetBytes('eXIf')
+    $crc = Get-Crc32 ([byte[]]($type + $tiff))
+    $length = [byte[]](0x00,0x00,0x00,$tiff.Length)
+    $checksum = [byte[]]@(
+        [byte](($crc -shr 24) -band 0xff)
+        [byte](($crc -shr 16) -band 0xff)
+        [byte](($crc -shr 8) -band 0xff)
+        [byte]($crc -band 0xff)
+    )
+    $chunk = [byte[]]($length + $type + $tiff + $checksum)
+    return [byte[]]($png[0..32] + $chunk + $png[33..($png.Length - 1)])
 }
 
 function Set-JpegFrameWidth([byte[]]$jpeg, [int]$width, [int]$height) {
@@ -492,13 +525,22 @@ try {
     # Metadata reader contracts are exercised through the shipped generator, not a fake decoder.
     $baseJpeg = [IO.File]::ReadAllBytes((Join-Path $libraryFixture 'Artwork/rotated.jpeg'))
     $asymmetricJpeg = Set-JpegFrameWidth $baseJpeg 2 1
+    $jpegFirstUnrotated = New-JpegWithExif (New-JpegWithExif $asymmetricJpeg $true $false 6) $true $false 1
+    $jpegFirstRotated = New-JpegWithExif (New-JpegWithExif $asymmetricJpeg $true $false 1) $true $false 6
     $png = [IO.File]::ReadAllBytes((Join-Path $libraryFixture 'Artwork/tiny.png'))
+    $asymmetricPng = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR42mNkYPj/n4GBgQEABQAB/4jX1GQAAAAASUVORK5CYII=')
+    $pngUnrotated = New-PngWithExif $asymmetricPng 1
+    $pngRotated = New-PngWithExif $asymmetricPng 6
     $svgComma = [Text.Encoding]::UTF8.GetBytes('<svg xmlns="http://www.w3.org/2000/svg" width="50%" height="auto" viewBox="0,0,20,10" />')
     $svgOneAxis = [Text.Encoding]::UTF8.GetBytes('<svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0,0,2,1" />')
     $svgPercent = [Text.Encoding]::UTF8.GetBytes('<svg xmlns="http://www.w3.org/2000/svg" width="50%" height="25%" viewBox="0,0,2,1" />')
     $metadataCases = @(
         @{ Name='jpeg-little-endian'; Bytes=(New-JpegWithExif $asymmetricJpeg $true); File='orientation.jpg'; Path='orientation.jpg'; Density='2'; Expected=@{ Path='orientation.jpg'; Format='Jpeg'; Width=.5; Height=1; Density=2 } },
         @{ Name='jpeg-big-endian'; Bytes=(New-JpegWithExif $asymmetricJpeg $false); File='orientation.jpg'; Path='orientation.jpg'; Density='2'; Expected=@{ Path='orientation.jpg'; Format='Jpeg'; Width=.5; Height=1; Density=2 } },
+        @{ Name='jpeg-multiple-app1-first-unrotated'; Bytes=$jpegFirstUnrotated; File='orientation.jpg'; Path='orientation.jpg'; Density='2'; Expected=@{ Path='orientation.jpg'; Format='Jpeg'; Width=1; Height=.5; Density=2 } },
+        @{ Name='jpeg-multiple-app1-first-rotated'; Bytes=$jpegFirstRotated; File='orientation.jpg'; Path='orientation.jpg'; Density='2'; Expected=@{ Path='orientation.jpg'; Format='Jpeg'; Width=.5; Height=1; Density=2 } },
+        @{ Name='png-exif-unrotated'; Bytes=$pngUnrotated; File='orientation.png'; Path='orientation.png'; Density='2'; Expected=@{ Path='orientation.png'; Format='Png'; Width=1; Height=.5; Density=2 } },
+        @{ Name='png-exif-runtime-ignores-orientation'; Bytes=$pngRotated; File='orientation.png'; Path='orientation.png'; Density='2'; Expected=@{ Path='orientation.png'; Format='Png'; Width=1; Height=.5; Density=2 } },
         @{ Name='svg-comma-viewbox'; Bytes=$svgComma; File='icon.svg'; Path='icon.svg'; Density=$null; Expected=@{ Path='icon.svg'; Format='Svg'; Width=300; Height=150; Density=1; RelativeWidth=.5; RelativeHeight=$null } },
         @{ Name='svg-one-axis'; Bytes=$svgOneAxis; File='icon.svg'; Path='icon.svg'; Density=$null; Expected=@{ Path='icon.svg'; Format='Svg'; Width=40; Height=20; Density=1 } },
         @{ Name='svg-percent-axes'; Bytes=$svgPercent; File='icon.svg'; Path='icon.svg'; Density=$null; Expected=@{ Path='icon.svg'; Format='Svg'; Width=300; Height=150; Density=1; RelativeWidth=.5; RelativeHeight=.25 } }
@@ -516,7 +558,9 @@ try {
         @{ Name='png-truncated-ihdr'; Bytes=$png[0..23]; File='bad.png'; Path='bad.png'; Density=$null },
         @{ Name='svg-invalid-axis'; Bytes=([Text.Encoding]::UTF8.GetBytes('<svg xmlns="http://www.w3.org/2000/svg" width="not-a-length" height="12" />')); File='bad.svg'; Path='bad.svg'; Density=$null },
         @{ Name='svg-density-rejected'; Bytes=$svgComma; File='bad.svg'; Path='bad.svg'; Density='2' },
-        @{ Name='density-outside-single'; Bytes=$png; File='bad.png'; Path='bad.png'; Density='1e100' }
+        @{ Name='density-outside-single'; Bytes=$png; File='bad.png'; Path='bad.png'; Density='1e100' },
+        @{ Name='svg-runtime-script-policy'; Bytes=([Text.Encoding]::UTF8.GetBytes('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><script /></svg>')); File='bad.svg'; Path='bad.svg'; Density=$null },
+        @{ Name='svg-runtime-encoded-budget'; Bytes=([Text.Encoding]::UTF8.GetBytes('<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><!--' + ('x' * (2 * 1024 * 1024)) + '--></svg>')); File='bad.svg'; Path='bad.svg'; Density=$null }
     )
     foreach ($case in $invalidMetadata) {
         $caseRoot = Join-Path $metadataRoot $case.Name

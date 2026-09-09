@@ -853,6 +853,146 @@ style Workspace(float width) {
     }
 
     [TestMethod]
+    public void TransitionStatementsLowerAcrossStylesInlineBodiesAndVariants()
+    {
+        const string source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Example() {
+    <Button style={Base with {
+        transition TextColor: Motion.Duration(240, Easing.Linear);
+        when Hover { transition Background: Motion.None; }
+    }}>Save</Button>
+}
+style Base {
+    transition Background: Motion.Quick;
+    transition Opacity: Motion.Duration(120, Easing.EaseOut);
+    when Pressed { transition Background: Motion.None; }
+}
+""";
+        var document = LuiParser.Parse(source);
+        Assert(document.Diagnostics.Count == 0, Diagnostics(document));
+        var inline =
+            ((LuiElementSyntax)document.Component!.Body.Single()).Attributes.Single().Value
+            as LuiStyleWithSyntax;
+        Assert(inline is not null, "Inline transition style was not retained.");
+        Assert(
+            document.Styles.Single().Transitions.Count == 3 && inline!.Transitions.Count == 2,
+            "Transition policies or variant policies were not flattened for tooling."
+        );
+
+        var formatted = LuiFormatter.Format(source, LuiLineEnding.Lf);
+        Assert(
+            formatted == LuiFormatter.Format(formatted, LuiLineEnding.Lf)
+                && formatted.Contains(
+                    "transition Background: Motion.Quick;",
+                    StringComparison.Ordinal
+                )
+                && formatted.Contains(
+                    "transition TextColor: Motion.Duration(240, Easing.Linear);",
+                    StringComparison.Ordinal
+                ),
+            "Transition formatting was not idempotent or lost authored policy text."
+        );
+
+        var result = LuiCompiler.Compile(
+            document,
+            CSharpCompilation.Create("transition-lowering", references: References()),
+            new LuiFreshnessIdentity(
+                "transition-lowering",
+                "transition-lowering",
+                new LuiDocumentIdentity("Transitions.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "Transition lowering failed: "
+                + String.Join(
+                    " | ",
+                    result.Diagnostics.Select(item => item.Id + ": " + item.Message)
+                )
+                + "\n"
+                + result.Source
+        );
+        Assert(
+            result.Source!.Contains(
+                ".Transition(global::Lucent.Core.VisualProperties.Background,",
+                StringComparison.Ordinal
+            )
+                && result.Source.Contains("Motion.Quick", StringComparison.Ordinal)
+                && result.Source.Contains(
+                    ".Transition(global::Lucent.Core.VisualProperties.Opacity,",
+                    StringComparison.Ordinal
+                )
+                && result.Source.Contains(
+                    "Motion.Duration(120, Easing.EaseOut)",
+                    StringComparison.Ordinal
+                )
+                && result
+                    .Map.FromSource(document.Styles.Single().Transitions[0].Expression.Span)
+                    .Any(entry => entry.Generated.Length != 0),
+            "Transition policies did not lower through typed Core calls or receive source maps."
+        );
+    }
+
+    [TestMethod]
+    public void TransitionDiagnosticsRejectUnsupportedDuplicatesBoundsAndReactiveSnapshots()
+    {
+        const string source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Example() {
+    int count = 1;
+    <Button style={Base with {
+        transition Opacity: Motion.Duration(count, Easing.Linear);
+        transition Background: Motion.Quick;
+        transition Width: Motion.Quick;
+    }} />
+}
+style Base {
+    transition Background: Motion.Duration(-1, Easing.Linear);
+    transition Background: Motion.Quick;
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("transition-diagnostics", references: References()),
+            new LuiFreshnessIdentity(
+                "transition-diagnostics",
+                "transition-diagnostics",
+                new LuiDocumentIdentity("TransitionDiagnostics.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(!result.Success, "Invalid transition policies unexpectedly compiled.");
+        foreach (var id in new[] { "LUI2024", "LUI2026", "LUI2027", "LUI2028" })
+            Assert(
+                result.Diagnostics.Any(diagnostic => diagnostic.Id == id),
+                "Missing transition diagnostic "
+                    + id
+                    + ": "
+                    + String.Join(
+                        " | ",
+                        result.Diagnostics.Select(item => item.Id + ": " + item.Message)
+                    )
+            );
+        var invalidDuration = source.IndexOf("-1", StringComparison.Ordinal);
+        Assert(
+            result.Diagnostics.Any(diagnostic =>
+                diagnostic.Id == "LUI2026"
+                && diagnostic.Span.Start <= invalidDuration
+                && diagnostic.Span.End >= invalidDuration + 2
+            ),
+            "Invalid duration diagnostic did not retain the authored numeric span."
+        );
+    }
+
+    [TestMethod]
     public void ParameterizedStyleLiteralsDoNotBecomeLiveBindings()
     {
         const string source = """
@@ -904,6 +1044,51 @@ style Workspace(float width) {
                 )
                 && result.Source.Contains(".5f", StringComparison.Ordinal),
             "literal parameterized assignments were lowered as live bindings.\n" + result.Source
+        );
+    }
+
+    [TestMethod]
+    public void RetainedStructuralStyleArgumentsKeepSnapshotsAndLiveCallbacksDistinct()
+    {
+        const string source = """
+namespace Sample;
+using System;
+using System.Collections.Generic;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Current(IEnumerable<(int Id, float Width)> rows) {
+    <Column>
+        foreach (var item in rows) keyed by item.Id {
+            <Row style={RowStyle(item.Width, () => item.Width)} />
+        }
+    </Column>
+}
+style RowStyle(float snapshot, Func<float> live) {
+    Width: snapshot;
+    Height: live();
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("retained-style-readers", references: References()),
+            new LuiFreshnessIdentity(
+                "retained-style-readers",
+                "retained-style-readers",
+                new LuiDocumentIdentity("RetainedStyleReaders.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(
+            result.Success,
+            "retained style arguments did not compile: "
+                + String.Join(" | ", result.Diagnostics.Select(item => item.Message))
+        );
+        Assert(
+            result.Source!.Contains("item.Value.Width", StringComparison.Ordinal)
+                && result.Source.Contains("() => item.Value.Width", StringComparison.Ordinal),
+            "retained style lowering blurred the scalar snapshot and live callback forms.\n"
+                + result.Source
         );
     }
 

@@ -2,6 +2,32 @@ namespace Lucent.Core;
 
 internal static partial class Controls
 {
+    // Only hover entry is cosmetic. Leaving hover or entering an actionable
+    // state snaps, so selection, focus and press feedback never wait for motion.
+    private static readonly Style HoverMotionStyle = Style
+        .Empty.Transition(VisualProperties.Background, Motion.None)
+        .When(VariantState.Hover, Style.Empty.Transition(VisualProperties.Background, Motion.Quick))
+        .When(
+            VariantState.FocusVisible,
+            Style.Empty.Transition(VisualProperties.Background, Motion.None)
+        )
+        .When(
+            VariantState.Selected,
+            Style.Empty.Transition(VisualProperties.Background, Motion.None)
+        )
+        .When(
+            VariantState.Pressed,
+            Style.Empty.Transition(VisualProperties.Background, Motion.None)
+        )
+        .When(
+            VariantState.Invalid,
+            Style.Empty.Transition(VisualProperties.Background, Motion.None)
+        )
+        .When(
+            VariantState.Disabled,
+            Style.Empty.Transition(VisualProperties.Background, Motion.None)
+        );
+
     private static Style ButtonStyle(ThemeContext theme) =>
         RowStyle
             .Set(LayoutProperties.Clip, true)
@@ -44,7 +70,8 @@ internal static partial class Controls
                         VisualProperties.Border,
                         () => ResolveBorder(theme, ControlThemes.Disabled)
                     )
-            );
+            )
+            .With(HoverMotionStyle);
 
     private static Style ComposedButtonStyle(ThemeContext theme) =>
         ButtonStyle(theme).Set(LayoutProperties.Spacing, 8f);
@@ -95,7 +122,8 @@ internal static partial class Controls
                         VisualProperties.Border,
                         () => ResolveBorder(theme, ControlThemes.Disabled)
                     )
-            );
+            )
+            .With(HoverMotionStyle);
 
     public static void Button(
         Element element,

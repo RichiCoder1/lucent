@@ -1,0 +1,12 @@
+namespace Consumer;
+using Lucent.Core;
+using static Lucent.Core.Components;
+style MotionWidgetStyle(Func<float> opacity) {
+    Background: Brush.Solid(Color.FromRgb(0x33, 0x66, 0x99));
+    Opacity: opacity();
+    transition Opacity: Motion.Duration(120, Easing.Linear);
+}
+
+internal component MotionWidget(Func<float> opacity) {
+    <Row style={MotionWidgetStyle(opacity)} />
+}

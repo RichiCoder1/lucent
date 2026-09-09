@@ -420,6 +420,49 @@ public static class LuiParser
                         SkipBalancedBrace();
                     continue;
                 }
+                if (Word("transition"))
+                {
+                    var transitionKeyword = Token("transition", start, "transition".Length);
+                    var transitionProperty = Name("transition property");
+                    var transitionColon = Expect(':');
+                    if (transitionProperty.IsMissing)
+                    {
+                        RecoverTo(end, ';');
+                        continue;
+                    }
+                    var transitionValueStart = position;
+                    var transitionValueEnd = IslandScanner.StyleEnd(text, position);
+                    position = transitionValueEnd;
+                    var transitionExpression = Expression(
+                        new LuiSpan(
+                            transitionValueStart,
+                            transitionValueEnd - transitionValueStart
+                        ),
+                        text.Substring(
+                            transitionValueStart,
+                            transitionValueEnd - transitionValueStart
+                        )
+                    );
+                    var transitionTerminator =
+                        Current == ';' ? Token(";", position++, 1) : Missing(";");
+                    result.Add(
+                        new LuiStyleTransitionSyntax(
+                            LuiSpan.From(start, position),
+                            transitionKeyword,
+                            transitionProperty,
+                            transitionColon,
+                            transitionExpression,
+                            transitionTerminator
+                        )
+                    );
+                    if (transitionTerminator.IsMissing && !transitionColon.IsMissing)
+                        Error(
+                            "LUI1015",
+                            "Expected ';' after style transition.",
+                            transitionTerminator.Span
+                        );
+                    continue;
+                }
                 var property = Name("style property");
                 var colon = Expect(':');
                 if (property.IsMissing)
@@ -583,6 +626,8 @@ public static class LuiParser
                 || declaration.Span.Length == 0
             )
             {
+                if (TryRecoverField(start, out member))
+                    return true;
                 member = null!;
                 return false;
             }
@@ -607,6 +652,58 @@ public static class LuiParser
                 declaration
             );
             return true;
+        }
+
+        private bool TryRecoverField(int start, out LuiMemberSyntax member)
+        {
+            foreach (var boundary in MemberRecoveryBoundaries(start))
+            {
+                var end = boundary;
+                while (end > start && char.IsWhiteSpace(text[end - 1]))
+                    end--;
+                if (end <= start || text[end - 1] == ';')
+                    continue;
+                var authored = text.Substring(start, end - start);
+                var recovered = SyntaxFactory.ParseMemberDeclaration(
+                    authored + ";",
+                    options: CSharpParseOptions.Default.WithLanguageVersion(
+                        LanguageVersion.Preview
+                    ),
+                    consumeFullText: true
+                );
+                if (
+                    recovered is not FieldDeclarationSyntax field
+                    || recovered.ContainsDiagnostics
+                    || recovered.SpanStart != 0
+                    || recovered.Span.Length == 0
+                    || field.Declaration.Variables.Count == 0
+                )
+                    continue;
+                position = end;
+                Error(
+                    "LUI1023",
+                    "Expected ';' after component member declaration.",
+                    new LuiSpan(end, 0)
+                );
+                member = new LuiMemberSyntax(
+                    LuiSpan.From(start, end),
+                    authored,
+                    LuiMemberKind.Field,
+                    recovered
+                );
+                return true;
+            }
+            member = null!;
+            return false;
+        }
+
+        private IEnumerable<int> MemberRecoveryBoundaries(int start)
+        {
+            for (var cursor = start; cursor < text.Length; cursor++)
+            {
+                if (text[cursor] is '\r' or '\n' or '<' or '}')
+                    yield return cursor;
+            }
         }
 
         private bool TrySetup(int start, out LuiMemberSyntax member)
@@ -1350,6 +1447,13 @@ public static class LuiParser
                     );
                     continue;
                 }
+                if (StartsWord(content, p, "transition"))
+                {
+                    if (!InlineTransition(content, contentStart, close, ref p, out var transition))
+                        return false;
+                    members.Add(transition);
+                    continue;
+                }
                 if (!InlineAssignment(content, contentStart, close, ref p, out var normal))
                     return false;
                 members.Add(normal);
@@ -1367,6 +1471,68 @@ public static class LuiParser
                 return false;
             return start + word.Length == source.Length
                 || !WordCharacter(source[start + word.Length]);
+        }
+
+        private bool InlineTransition(
+            string content,
+            int contentStart,
+            int close,
+            ref int p,
+            out LuiStyleTransitionSyntax result
+        )
+        {
+            var transitionStart = p;
+            p += "transition".Length;
+            var keyword = new LuiToken(
+                "transition",
+                new LuiSpan(contentStart + transitionStart, "transition".Length),
+                false
+            );
+            Skip(content, ref p);
+            if (!TryLocalName(content, ref p, contentStart, out var property))
+            {
+                result = null!;
+                return false;
+            }
+            Skip(content, ref p);
+            if (p >= close || content[p] != ':')
+            {
+                result = null!;
+                return false;
+            }
+            var colon = new LuiToken(":", new LuiSpan(contentStart + p, 1), false);
+            p++;
+            var expressionStart = p;
+            var expressionEnd = IslandScanner.StyleEnd(content, p);
+            if (expressionEnd > close)
+                expressionEnd = close;
+            p = expressionEnd;
+            var terminator =
+                p < close && content[p] == ';'
+                    ? new LuiToken(";", new LuiSpan(contentStart + p++, 1), false)
+                    : new LuiToken(";", new LuiSpan(contentStart + p, 0), true);
+            if (expressionEnd == expressionStart)
+            {
+                result = null!;
+                return false;
+            }
+            result = new LuiStyleTransitionSyntax(
+                new LuiSpan(
+                    contentStart + transitionStart,
+                    terminator.Span.End - contentStart - transitionStart
+                ),
+                keyword,
+                property,
+                colon,
+                Expression(
+                    new LuiSpan(contentStart + expressionStart, expressionEnd - expressionStart),
+                    content.Substring(expressionStart, expressionEnd - expressionStart)
+                ),
+                terminator
+            );
+            if (terminator.IsMissing)
+                Error("LUI1015", "Expected ';' after style transition.", terminator.Span);
+            return true;
         }
 
         private bool InlineAssignment(

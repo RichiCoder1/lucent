@@ -10,33 +10,20 @@ internal sealed class ElementPresentation
     internal ThemeContext Theme => _theme;
     private readonly FlatAssignment[] _component;
     private readonly FlatAssignment[] _author;
-    private readonly Transition[] _transitions;
-    private readonly Dictionary<IProperty, Signal<TransitionController.Sample?>> _samples;
+    private readonly FlatMotion[] _componentMotion;
+    private readonly FlatMotion[] _authorMotion;
     private readonly Signal<VariantState> _variants;
     private readonly Signal<VariantState> _behaviorVariants;
     private readonly Dictionary<IProperty, IControlValue> _control = [];
+    private readonly Dictionary<IProperty, object?> _delegatedTargets = [];
+    private readonly Dictionary<IProperty, bool> _delegatedAnimatedPolicy = [];
     internal Element Element => _element;
 
-    internal ElementPresentation(
-        Element element,
-        ThemeContext theme,
-        Style component,
-        Style author,
-        Transition[] transitions
-    )
+    internal ElementPresentation(Element element, ThemeContext theme, Style component, Style author)
     {
         _element = element;
         _theme = theme;
-        _transitions = [.. transitions];
-        Validate(component, author, _transitions);
-        _samples = _transitions.ToDictionary(
-            item => item.Property,
-            item =>
-                element.Scope.Signal<TransitionController.Sample?>(
-                    null,
-                    element.Name + ".transition." + item.Property.Name
-                )
-        );
+        Validate(component, author);
         _variants = element.Scope.Signal(VariantState.None, element.Name + ".variants");
         _behaviorVariants = element.Scope.Signal(
             VariantState.None,
@@ -44,6 +31,9 @@ internal sealed class ElementPresentation
         );
         _component = Materialize(component.Flatten(), "component").ToArray();
         _author = Materialize(author.Flatten(), "author").ToArray();
+        _componentMotion = MaterializeMotion(component.FlattenMotion(), "component-motion")
+            .ToArray();
+        _authorMotion = MaterializeMotion(author.FlattenMotion(), "author-motion").ToArray();
         foreach (var assignment in _component.Concat(_author).Select(item => item.Assignment))
             assignment.Prime(theme);
     }
@@ -90,24 +80,6 @@ internal sealed class ElementPresentation
             && !ReferenceEquals(property, TypographyProperties.TextColor)
         )
             _element.Composition.InvalidateInputProjection();
-    }
-
-    internal void Start<T>(Property<T> property, T value)
-    {
-        var spec =
-            _transitions.SingleOrDefault(spec => ReferenceEquals(spec.Property, property))
-            ?? throw new InvalidOperationException(
-                "No transition specification exists for this property."
-            );
-        var slot = _samples[property];
-        _element.Composition.Transitions.Start(
-            _element,
-            property,
-            value,
-            spec,
-            sample => slot.Value = sample,
-            () => slot.Value = null
-        );
     }
 
     internal ResolvedProperty<T> Resolve<T>(Property<T> property) => _element.Resolve(property);
@@ -168,10 +140,6 @@ internal sealed class ElementPresentation
 
         if (_control.TryGetValue(property, out var control))
             value = (T)control.Value!;
-
-        if (_samples.TryGetValue(property, out var slot) && slot.Value is { } sample)
-            if (!_theme.IsReducedMotion)
-                value = (T)sample.Value!;
 
         return value;
     }
@@ -304,21 +272,171 @@ internal sealed class ElementPresentation
             candidates.Add((item.Value, item.Provenance));
         if (_control.TryGetValue(property, out var control))
             candidates.Add(((T)control.Value!, new("control", 0)));
-        PropertyProvenance? suppressed = null;
-        if (_samples.TryGetValue(property, out var slot) && slot.Value is { } sample)
-        {
-            if (_theme.IsReducedMotion)
-                suppressed = new("transition-suppressed", sample.Ordinal);
-            else
-                candidates.Add(((T)sample.Value!, new("transition", sample.Ordinal)));
-        }
         var winner = candidates[^1];
         return new(
             winner.Value,
             winner.Provenance,
-            candidates.Take(candidates.Count - 1).Select(item => item.Provenance).ToArray(),
-            suppressed
+            candidates.Take(candidates.Count - 1).Select(item => item.Provenance).ToArray()
         );
+    }
+
+    internal bool CommitPresentationTargets(MotionTimeline timeline) =>
+        Commit(timeline, VisualProperties.Background)
+        | Commit(timeline, VisualProperties.Opacity)
+        | Commit(timeline, TypographyProperties.TextColor);
+
+    internal void ValidatePresentationTargets()
+    {
+        Validate(VisualProperties.Background);
+        Validate(VisualProperties.Opacity);
+        Validate(TypographyProperties.TextColor);
+    }
+
+    private void Validate<T>(Property<T> property) =>
+        MotionTimeline.ValidateTarget(property.Transition, _element.ResolveValue(property));
+
+    private bool Commit<T>(MotionTimeline timeline, Property<T> property)
+    {
+        var local = HasLocalValue(property);
+        var policy = ResolveMotion(property, out var policySource);
+        var target = _element.ResolveValue(property);
+        if (property.Inherits && !local)
+        {
+            if (policy is null)
+            {
+                _delegatedTargets.Remove(property);
+                _delegatedAnimatedPolicy.Remove(property);
+                timeline.Remove(_element, property);
+                return false;
+            }
+            if (policy.Value.DurationMilliseconds != 0)
+            {
+                if (!_delegatedTargets.TryGetValue(property, out var previous))
+                {
+                    _delegatedTargets[property] = target;
+                    _delegatedAnimatedPolicy[property] = true;
+                    timeline.Remove(_element, property);
+                    return false;
+                }
+                if (EqualityComparer<T>.Default.Equals((T)previous!, target))
+                {
+                    if (_delegatedAnimatedPolicy.GetValueOrDefault(property) == false)
+                    {
+                        _delegatedAnimatedPolicy[property] = true;
+                        timeline.Remove(_element, property);
+                        return false;
+                    }
+                    if (!timeline.Contains(_element, property))
+                        return false;
+                }
+                else
+                {
+                    if (!timeline.Contains(_element, property))
+                    {
+                        var presented = _element.Parent is { } parent
+                            ? _element.Composition.ReadPresentedValue(parent, property)
+                            : (T)previous!;
+                        timeline.SeedAcknowledged(
+                            _element,
+                            property,
+                            (T)previous!,
+                            presented,
+                            policy.Value,
+                            policySource,
+                            _theme,
+                            _theme.AppearanceGeneration,
+                            timeline.IsAcknowledged(_element)
+                        );
+                    }
+                    _delegatedTargets[property] = target;
+                }
+                _delegatedAnimatedPolicy[property] = true;
+            }
+            else
+            {
+                _delegatedTargets[property] = target;
+                _delegatedAnimatedPolicy[property] = false;
+            }
+        }
+        return timeline.Commit(
+            _element,
+            property,
+            target,
+            policy,
+            policySource,
+            _theme,
+            _control.ContainsKey(property),
+            _theme.IsReducedMotion || _theme.Appearance.Contrast == ThemeContrast.High,
+            _theme.IsReducedMotion ? "reduced-motion"
+                : _theme.Appearance.Contrast == ThemeContrast.High ? "high-contrast"
+                : null,
+            _theme.AppearanceGeneration
+        );
+    }
+
+    private bool HasLocalValue<T>(Property<T> property)
+    {
+        if (_control.ContainsKey(property))
+            return true;
+        var active = _variants.Value | _behaviorVariants.Value;
+        return _component
+            .Concat(_author)
+            .Any(item =>
+                ReferenceEquals(item.Assignment.Property, property)
+                && item.Assignment.IsAvailable
+                && (active & item.Condition) == item.Condition
+                && item.MountedConditions.All(read => read())
+            );
+    }
+
+    private Motion? ResolveMotion<T>(Property<T> property, out string? policySource)
+    {
+        var active = _variants.Value | _behaviorVariants.Value;
+        var found = false;
+        var value = Motion.None;
+        var winnerKey = int.MinValue;
+        var winnerSource = int.MinValue;
+        var winnerOrdinal = int.MinValue;
+        policySource = null;
+        foreach (
+            var entry in _componentMotion
+                .Select(item => (item, source: 0))
+                .Concat(_authorMotion.Select(item => (item, source: 1)))
+        )
+        {
+            var item = entry.item;
+            if (
+                !ReferenceEquals(item.Property, property)
+                || (active & item.Condition) != item.Condition
+                || !item.MountedConditions.All(read => read())
+            )
+                continue;
+            var key = VariantOrder.Key(item.Condition);
+            if (
+                !found
+                || key > winnerKey
+                || (
+                    key == winnerKey
+                    && (
+                        entry.source > winnerSource
+                        || (entry.source == winnerSource && item.Ordinal > winnerOrdinal)
+                    )
+                )
+            )
+            {
+                found = true;
+                value = item.Motion;
+                winnerKey = key;
+                winnerSource = entry.source;
+                winnerOrdinal = item.Ordinal;
+                policySource =
+                    (entry.source == 0 ? "component" : "author")
+                    + "#"
+                    + item.Ordinal.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + (item.Condition == VariantState.None ? "" : "[" + item.Condition + "]");
+            }
+        }
+        return found ? value : null;
     }
 
     internal void AppendDump(StringBuilder dump)
@@ -354,26 +472,24 @@ internal sealed class ElementPresentation
             .Concat(_author)
             .Select(item => item.Assignment.Property)
             .Concat(_control.Keys)
-            .Concat(_transitions.Select(item => item.Property));
+            .Concat(_componentMotion.Select(item => item.Property))
+            .Concat(_authorMotion.Select(item => item.Property));
 
-    internal static void Validate(Style component, Style author, Transition[] transitions)
+    internal static void Validate(Style component, Style author)
     {
         ArgumentNullException.ThrowIfNull(component);
         ArgumentNullException.ThrowIfNull(author);
-        ArgumentNullException.ThrowIfNull(transitions);
         var componentAssignments = component.Flatten().ToArray();
         var authorAssignments = author.Flatten().ToArray();
+        var componentMotion = component.FlattenMotion().ToArray();
+        var authorMotion = author.FlattenMotion().ToArray();
         ValidateProperties(
             componentAssignments
                 .Concat(authorAssignments)
                 .Select(item => item.Assignment.Property)
-                .Concat(transitions.Select(item => item.Property))
+                .Concat(componentMotion.Select(item => item.Property))
+                .Concat(authorMotion.Select(item => item.Property))
         );
-        if (transitions.GroupBy(item => item.Property).Any(group => group.Count() != 1))
-            throw new ArgumentException(
-                "Transition properties must be unique.",
-                nameof(transitions)
-            );
     }
 
     private static void ValidateProperties(IEnumerable<IProperty> properties)
@@ -449,6 +565,52 @@ internal sealed class ElementPresentation
         }
     }
 
+    private IEnumerable<FlatMotion> MaterializeMotion(
+        IEnumerable<FlatMotion> policies,
+        string group
+    )
+    {
+        var mounted = new Dictionary<StyleCondition, MountedCondition>(
+            ReferenceEqualityComparer.Instance
+        );
+        foreach (var item in policies)
+        {
+            Derived<bool>? parent = null;
+            var conditions = item
+                .Conditions.Select(condition =>
+                {
+                    if (!mounted.TryGetValue(condition, out var value))
+                    {
+                        var name = _element.Name + ".style-when." + group + "." + mounted.Count;
+                        var enclosing = parent;
+                        var gate = _element.Scope.Derived(
+                            () =>
+                                (enclosing?.Value ?? true)
+                                && (
+                                    condition.Variants == VariantState.None
+                                    || IsActive(condition.Variants)
+                                )
+                                && _element.Composition.RunStyleCondition(condition.Read),
+                            name + ".gate"
+                        );
+                        value = new(gate, _element.Scope.Signal(false, name));
+                        mounted.Add(condition, value);
+                        _ = _element.Scope.Effect(
+                            () => value.Published.Value = gate.Value,
+                            name + ".effect"
+                        );
+                    }
+                    parent = value.Gate;
+                    return (Func<bool>)(() => value.Published.Value);
+                })
+                .ToArray();
+            yield return item with
+            {
+                MountedConditions = conditions,
+            };
+        }
+    }
+
     private sealed record MountedCondition(Derived<bool> Gate, Signal<bool> Published);
 
     private interface IControlValue
@@ -475,69 +637,14 @@ internal sealed class ElementPresentation
     private static string Quote(string value) => DiagnosticText.Quote(value);
 }
 
-internal sealed class TransitionController
-{
-    private readonly Dictionary<(long Element, IProperty Property), Entry> _samples = [];
-    private long _clock;
-    private int _nextOrdinal;
-
-    internal void Start<T>(
-        Element element,
-        Property<T> property,
-        T value,
-        Transition spec,
-        Action<Sample> set,
-        Action clear
-    )
-    {
-        var sample = new Sample(value, checked(_clock + spec.DurationMilliseconds), ++_nextOrdinal);
-        set(sample);
-        _samples[(element.Id, property)] = new(sample, clear);
-    }
-
-    internal void Advance(int milliseconds)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(milliseconds, nameof(milliseconds));
-        _clock = checked(_clock + milliseconds);
-        Expire();
-    }
-
-    internal void Remove(Element element)
-    {
-        foreach (var key in _samples.Keys.Where(key => key.Element == element.Id).ToArray())
-        {
-            _samples[key].Clear();
-            _samples.Remove(key);
-        }
-    }
-
-    private void Expire()
-    {
-        foreach (
-            var item in _samples
-                .Where(item => item.Value.Sample.ExpiresAt <= _clock)
-                .Select(item => item.Key)
-                .ToArray()
-        )
-        {
-            _samples[item].Clear();
-            _samples.Remove(item);
-        }
-    }
-
-    internal readonly record struct Sample(object? Value, long ExpiresAt, int Ordinal);
-
-    private readonly record struct Entry(Sample Sample, Action Clear);
-}
-
 internal static class TransitionTypes
 {
     internal static bool Matches(TransitionKind kind, Type type) =>
         kind switch
         {
             TransitionKind.Color => type == typeof(Color),
-            TransitionKind.Opacity or TransitionKind.FocusRing => type == typeof(float),
-            TransitionKind.Transform => type == typeof(Matrix3x2),
+            TransitionKind.Opacity => type == typeof(float),
+            TransitionKind.Brush => type == typeof(Brush),
             _ => true,
         };
 }

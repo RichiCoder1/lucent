@@ -1,5 +1,7 @@
 using System.Linq;
 using Lucent.Lui.Compiler;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -68,6 +70,100 @@ internal component Disclosure(string value) {
     }
 
     [TestMethod]
+    public void MissingFieldSemicolonRecoversMarkupAndRetainsNativeDiagnosticSpan()
+    {
+        const string source =
+            "internal component X() { string label = Missing()\n <Text>{label}</Text> }";
+        var document = LuiParser.Parse(source);
+        var member = document.Component!.Body.OfType<LuiMemberSyntax>().Single();
+        var element = document.Component.Body.OfType<LuiElementSyntax>().Single();
+        var missingSemicolon = document.Diagnostics.Single(diagnostic =>
+            diagnostic.Id == "LUI1023"
+        );
+        Assert.AreEqual(
+            "string label = Missing()",
+            member.Text,
+            "member recovery consumed the following markup"
+        );
+        Assert.AreEqual(source.IndexOf("<Text>", StringComparison.Ordinal), element.Span.Start);
+        Assert.AreEqual(source.IndexOf('\n'), missingSemicolon.Span.Start);
+
+        var result = LuiCompiler.Compile(
+            document,
+            CSharpCompilation.Create("member-recovery", references: References()),
+            new LuiFreshnessIdentity(
+                "member-recovery",
+                "member-recovery",
+                new LuiDocumentIdentity("MemberRecovery.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        var native = result.Diagnostics.Single(diagnostic => diagnostic.Id == "LUI2000");
+        Assert.AreEqual(source.IndexOf("Missing", StringComparison.Ordinal), native.Span.Start);
+        Assert.IsTrue(
+            result.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1023"),
+            "the missing-semicolon diagnostic was lost during lowering"
+        );
+    }
+
+    [TestMethod]
+    public void VarFieldsReportAnAuthoredStateDiagnosticWithoutNativeFieldError()
+    {
+        const string source =
+            "internal component X() { var label = \"value\"; <Text>{label}</Text> }";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("var-field", references: References()),
+            new LuiFreshnessIdentity(
+                "var-field",
+                "var-field",
+                new LuiDocumentIdentity("VarField.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        var diagnostic = result.Diagnostics.Single(item => item.Id == "LUI2023");
+        Assert.AreEqual(source.IndexOf("var", StringComparison.Ordinal), diagnostic.Span.Start);
+        Assert.IsFalse(
+            result.Diagnostics.Any(item => item.Id == "LUI2000"),
+            "the unsupported var field should not be replaced by a generated CS0825 diagnostic"
+        );
+    }
+
+    [TestMethod]
+    public void VarFieldKeepsNativeInitializerDiagnosticsAtAuthoredSpan()
+    {
+        const string source =
+            "internal component X() { var label = Missing(); <Column><Row /></Column> }";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("var-field-native", references: References()),
+            new LuiFreshnessIdentity(
+                "var-field-native",
+                "var-field-native",
+                new LuiDocumentIdentity("VarFieldNative.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert.IsTrue(result.Diagnostics.Any(item => item.Id == "LUI2023"));
+        Assert.IsTrue(
+            result.Diagnostics.Any(item =>
+                item.Id == "LUI2000"
+                && item.Span.Start == source.IndexOf("Missing", StringComparison.Ordinal)
+            ),
+            "the native initializer error was hidden or lost its authored span: "
+                + string.Join(
+                    " | ",
+                    result.Diagnostics.Select(item =>
+                        item.Id + "@" + item.Span.Start + ":" + item.Message
+                    )
+                )
+        );
+    }
+
+    [TestMethod]
     public void FormatterPreservesMemberTextAndIsIdempotent()
     {
         const string source =
@@ -81,4 +177,15 @@ internal component Disclosure(string value) {
 
     private static string Diagnostics(LuiDocumentSyntax document) =>
         string.Join(" | ", document.Diagnostics.Select(item => item.Id + ": " + item.Message));
+
+    private static MetadataReference[] References() =>
+        ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator)
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .Append(
+                MetadataReference.CreateFromFile(
+                    Path.Combine(AppContext.BaseDirectory, "Lucent.Core.dll")
+                )
+            )
+            .ToArray();
 }

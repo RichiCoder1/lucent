@@ -123,6 +123,19 @@ public sealed partial class InputRouter
                     Throw(rejectedErrors);
                 return false;
             }
+            if (
+                scene.IsPaintOnly
+                && _scene is not null
+                && ReferenceEquals(scene.Input, _scene.Input)
+                && scene.PaintSnapshot is { } paintSnapshot
+                && paintSnapshot.CanReuseInput(_composition)
+            )
+            {
+                _scene = scene;
+                foreach (var capture in _captures.ToArray())
+                    _captures[capture.Key] = capture.Value with { Generation = scene.Generation };
+                return true;
+            }
             var priorInput = _input;
             var priorScene = _scene;
             var nextInput = scene.Input.ToDictionary(item => item.Identity.ElementId);
@@ -157,7 +170,7 @@ public sealed partial class InputRouter
                         || !Path(focused.Identity).SequenceEqual(focused.Path)
                     )
                 )
-                    RequestFocus(null, FocusChangeReason.SceneChanged, rejectedErrors);
+                    LoseSceneFocus(FocusChangeReason.SceneChanged, rejectedErrors);
                 _scene = null;
                 _input.Clear();
                 ClearInputCaches();
@@ -200,12 +213,13 @@ public sealed partial class InputRouter
                     || !Path(focus.Identity).SequenceEqual(focus.Path)
                 )
             )
-                RequestFocus(null, FocusChangeReason.Reordered, errors);
+                LoseSceneFocus(FocusChangeReason.Reordered, errors);
             _ = FocusPendingMenuTarget(errors);
             // Establish pending focus before revealing its caret. Both operations may
             // invalidate this candidate's interaction visuals, but they can safely be
             // coalesced into one bounded rejection when the paragraph source is fresh.
             ProcessFocusTargets(errors);
+            RecoverSceneFocus(errors);
             var caretRevealed = RevealEditorCaret();
             if (caretRevealed || _composition.InteractionVisualGeneration != visualGeneration)
             {
@@ -296,23 +310,30 @@ public sealed partial class InputRouter
                     ? capturedScrollBar.GetValueOrDefault()
                     : scrollbar.GetValueOrDefault();
                 var scrollbarResult = RouteScrollbarPointer(command, barForRoute, errors);
-                if (command.Kind == PointerCommandKind.Up)
+                if (
+                    _captures.TryGetValue(command.PointerId, out var scrollCapture)
+                    && command.Releases(scrollCapture.Button)
+                )
                     Release(command.PointerId, PointerCaptureLossReason.Released, errors);
                 if (command.Kind == PointerCommandKind.Cancel)
                     Release(command.PointerId, PointerCaptureLossReason.Cancelled, errors);
                 Throw(errors);
                 return scrollbarResult;
             }
-            var result = HandleContextPointer(command, target.Value)
-                ? new InputDispatchResult(
-                    InputDispatchStatus.Delivered,
-                    InputRejection.None,
-                    target,
-                    Path(target.Value),
-                    true
-                )
-                : RoutePointer(command, target.Value, errors);
-            if (command.Kind == PointerCommandKind.Up)
+            var result =
+                !hadCapture && HandleContextPointer(command, target.Value)
+                    ? new InputDispatchResult(
+                        InputDispatchStatus.Delivered,
+                        InputRejection.None,
+                        target,
+                        Path(target.Value),
+                        true
+                    )
+                    : RoutePointer(command, target.Value, errors);
+            if (
+                _captures.TryGetValue(command.PointerId, out var buttonCapture)
+                && command.Releases(buttonCapture.Button)
+            )
                 Release(command.PointerId, PointerCaptureLossReason.Released, errors);
             if (command.Kind == PointerCommandKind.Cancel)
                 Release(command.PointerId, PointerCaptureLossReason.Cancelled, errors);
@@ -954,11 +975,16 @@ public sealed partial class InputRouter
         )
             Release(pointer, reason, errors);
         if (_focused is { } focus && IsWithin(focus.Identity, removed))
-            RequestFocus(null, FocusChangeReason.Disposed, errors);
+            LoseSceneFocus(FocusChangeReason.Disposed, errors);
         Throw(errors);
     }
 
-    internal bool TryCapture(int pointerId, ElementIdentity owner, bool isDown)
+    internal bool TryCapture(
+        int pointerId,
+        ElementIdentity owner,
+        PointerButton button,
+        bool isDown
+    )
     {
         if (
             !isDown
@@ -969,7 +995,7 @@ public sealed partial class InputRouter
             return false;
         if (_captures.TryGetValue(pointerId, out var current))
             return current.Owner == owner && current.Generation == _scene.Generation;
-        _captures.Add(pointerId, new(owner, _scene.Generation));
+        _captures.Add(pointerId, new(owner, _scene.Generation, button));
         return true;
     }
 
@@ -979,6 +1005,8 @@ public sealed partial class InputRouter
         List<Exception> errors
     )
     {
+        _focusToRecover = null;
+        _focusRequestSerial = checked(_focusRequestSerial + 1);
         _pendingFocus = new(identity, reason);
         if (_focusing)
             return;
@@ -1154,7 +1182,11 @@ public sealed partial class InputRouter
                                 command.Y,
                                 scrollable.State.Offset.Y
                             );
-                            _captures[command.PointerId] = new(target, _scene!.Generation);
+                            _captures[command.PointerId] = new(
+                                target,
+                                _scene!.Generation,
+                                command.Button
+                            );
                             SetPressedVisual(target, true, errors);
                         }
                         handled = true;
@@ -1490,7 +1522,7 @@ public sealed partial class InputRouter
             if (_composition.Find(retained.Identity) is { } element)
                 element.SetInputDisabledVariant(!Available(retained.Identity));
         if (_focused is { } focus && !Eligible(focus.Identity))
-            RequestFocus(null, FocusReason(focus.Identity), errors);
+            LoseSceneFocus(FocusReason(focus.Identity), errors);
         foreach (var capture in _captures.ToArray())
             if (!Eligible(capture.Value.Owner))
                 Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
@@ -1507,7 +1539,7 @@ public sealed partial class InputRouter
         foreach (var capture in _captures.ToArray())
             Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
         if (_focused is { } focus)
-            RequestFocus(null, FocusReason(focus.Identity), errors);
+            LoseSceneFocus(FocusReason(focus.Identity), errors);
         ClearHover(errors);
         UpdateScrollBarHover(null);
         _scene = null;
@@ -2208,7 +2240,11 @@ public sealed partial class InputRouter
         long Generation
     );
 
-    private readonly record struct Capture(ElementIdentity Owner, long Generation);
+    private readonly record struct Capture(
+        ElementIdentity Owner,
+        long Generation,
+        PointerButton Button
+    );
 
     private readonly record struct FocusState(
         ElementIdentity Identity,

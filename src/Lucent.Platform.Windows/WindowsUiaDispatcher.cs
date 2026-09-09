@@ -17,6 +17,7 @@ internal sealed class WindowsUiaDispatcher : IDisposable
     private readonly ConcurrentQueue<Request> _pending = [];
     private readonly ConcurrentDictionary<long, Request> _requests = [];
     private readonly SemaphoreSlim _slots = new(Capacity, Capacity);
+    private readonly object _lifetime = new();
     private readonly UiaDiagnostics _diagnostics = new();
     private readonly TimeSpan _timeout;
     private readonly PushEvent _push;
@@ -66,13 +67,13 @@ internal sealed class WindowsUiaDispatcher : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(callback);
         ArgumentNullException.ThrowIfNull(action);
-        if (Volatile.Read(ref _disposed) != 0)
-        {
-            result = default!;
-            return false;
-        }
         if (Environment.CurrentManagedThreadId == _ownerThread)
         {
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                result = default!;
+                return false;
+            }
             try
             {
                 result = action();
@@ -84,33 +85,37 @@ internal sealed class WindowsUiaDispatcher : IDisposable
                 return false;
             }
         }
-        if (!_slots.Wait(0))
+        Request request;
+        lock (_lifetime)
         {
-            result = default!;
-            return false;
-        }
-        var request = new Request(
-            Interlocked.Increment(ref _nextId),
-            callback,
-            Environment.CurrentManagedThreadId,
-            () => action(),
-            () => _slots.Release()
-        );
-        if (!_requests.TryAdd(request.Id, request))
-        {
-            request.Release();
-            result = default!;
-            return false;
-        }
-        _diagnostics.Enqueue(request);
-        _pending.Enqueue(request);
-        var @event = new SDL.Event { Type = _eventType };
-        if (!_push(ref @event))
-        {
-            _requests.TryRemove(request.Id, out _);
-            request.CancelQueued();
-            result = default!;
-            return false;
+            if (_disposed != 0 || !_slots.Wait(0))
+            {
+                result = default!;
+                return false;
+            }
+            request = new Request(
+                Interlocked.Increment(ref _nextId),
+                callback,
+                Environment.CurrentManagedThreadId,
+                () => action(),
+                () => _slots.Release()
+            );
+            if (!_requests.TryAdd(request.Id, request))
+            {
+                request.Release();
+                result = default!;
+                return false;
+            }
+            _diagnostics.Enqueue(request);
+            _pending.Enqueue(request);
+            var @event = new SDL.Event { Type = _eventType };
+            if (!_push(ref @event))
+            {
+                _requests.TryRemove(request.Id, out _);
+                request.CancelQueued();
+                result = default!;
+                return false;
+            }
         }
         if (!request.Wait(_timeout))
         {
@@ -177,16 +182,20 @@ internal sealed class WindowsUiaDispatcher : IDisposable
 
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-            return;
-        foreach (var request in _requests.Values)
-            request.CancelQueued();
-        while (_pending.TryDequeue(out var request))
+        lock (_lifetime)
         {
-            _requests.TryRemove(request.Id, out _);
-            request.Release();
+            if (_disposed != 0)
+                return;
+            _disposed = 1;
+            foreach (var request in _requests.Values)
+                request.CancelQueued();
+            while (_pending.TryDequeue(out var request))
+            {
+                _requests.TryRemove(request.Id, out _);
+                request.Release();
+            }
+            _requests.Clear();
         }
-        _requests.Clear();
         _diagnostics.Write(_ownerThread);
     }
 

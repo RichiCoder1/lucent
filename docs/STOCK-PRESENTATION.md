@@ -4,9 +4,15 @@ Lucent applications start with a stock surface and readable foreground. Built-in
 
 Stock focus rings and disabled text keep contrast against their resolved control state, including pressed and high-contrast states. The Windows host updates `ThemeContext.Appearance` when system settings change; applications that map appearance to a theme therefore update mounted controls without remounting them.
 
-## Experimental transitions
+## Focus continuity
 
-The current manual transition facilities are experimental. They do not provide complete production animation scheduling, automatic style-winner interpolation, interruption or reduced-motion handling. Applications should use immediate stock hover, focus and pressed states for supported behavior. Declarative `.lui` transitions remain unavailable pending the dedicated transition design and its implementation; manual samples are not a substitute for that contract. The [full transition design (#142)](https://github.com/RichiCoder1/lucent/issues/142) is an immediate follow-up to the correctness work in [#119](https://github.com/RichiCoder1/lucent/issues/119), coordinated with [#140](https://github.com/RichiCoder1/lucent/issues/140).
+`composition.Input.FocusRecovery = FocusRecoveryPolicy.NearestAvailable` opts an application into recovery when responsive participation or virtualization removes the focused owner. The next fresh scene prefers the surviving owner, then its nearest eligible focusable ancestor (such as a scroll viewport), then the next tab stop near the old document order, falling back to the previous last stop. If no eligible target survives, focus stays cleared. `Clear` is the default for applications that manage their own focus handoff.
+
+Recovery does not activate or select an item, retain an evicted row, or replay when a pane returns. Explicit focus requests take priority; disabled controls clear focus without choosing another control. Input against an invalidated scene remains rejected until a fresh scene is installed. Focus routes and the input diagnostic dump report `Recovery`; the preceding loss keeps its hidden, disposed or scene-change reason. `FocusTarget.Request` stays a one-shot request and editor sessions keep their independent draft/selection ownership. Light Notes opts into recovery at application setup.
+
+## Presentation transitions
+
+Typed style policies interpolate solid backgrounds, text colors and opacity through composition-owned motion. Stock buttons and selectable rows animate hover entry; hover exit, press, focus, selection, disabled and invalid feedback remain immediate. Reduced motion and high contrast suppress cosmetic motion. See [Presentation transitions](TRANSITIONS.md) for `.lui` syntax, lifetime, hosting and migration from the removed experimental held-sample APIs.
 
 ## Text roles and density
 

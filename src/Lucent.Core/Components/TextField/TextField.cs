@@ -625,7 +625,10 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
             }
             if (
                 _dragPointer == route.Command.PointerId
-                && route.Command.Kind is PointerCommandKind.Move or PointerCommandKind.Up
+                && (
+                    route.Command.Kind == PointerCommandKind.Move
+                    || route.Command.Releases(PointerButton.Primary)
+                )
             )
             {
                 if (
@@ -642,7 +645,7 @@ internal sealed class TextFieldBehavior(TextFieldState state, string name) : Beh
                         hit.Affinity
                     );
                 }
-                if (route.Command.Kind == PointerCommandKind.Up)
+                if (route.Command.Releases(PointerButton.Primary))
                     _dragPointer = null;
                 route.Handled = true;
             }

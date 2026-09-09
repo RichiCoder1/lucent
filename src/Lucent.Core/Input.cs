@@ -60,10 +60,10 @@ public enum PointerCommandKind
     Cancel,
 }
 
-/// <summary>The button carried only by a pointer-down command.</summary>
+/// <summary>The button that starts or ends a pointer sequence.</summary>
 public enum PointerButton
 {
-    /// <summary>Carries no button outside pointer down.</summary>
+    /// <summary>Carries no button for movement/cancellation, or an unspecified legacy release on pointer up.</summary>
     None,
 
     /// <summary>Identifies the primary pointing button.</summary>
@@ -252,6 +252,9 @@ public enum FocusChangeReason
 
     /// <summary>The installed scene no longer contains the target.</summary>
     SceneChanged,
+
+    /// <summary>The configured recovery policy selected a valid owner after scene replacement.</summary>
+    Recovery,
 }
 
 /// <summary>Whether a focus route announces gaining or losing focus.</summary>
@@ -319,6 +322,11 @@ public enum InputRejection
 }
 
 /// <summary>A pointer phase with finite logical-pixel coordinates and native modifier state.</summary>
+/// <remarks>
+/// New platform adapters must identify the released button on <see cref="PointerCommandKind.Up"/>
+/// so another button cannot end an active capture. <see cref="PointerButton.None"/> remains an
+/// unspecified legacy release for existing producers.
+/// </remarks>
 public readonly record struct PointerCommand(
     PointerCommandKind Kind,
     int PointerId,
@@ -328,6 +336,10 @@ public readonly record struct PointerCommand(
     KeyModifiers Modifiers = KeyModifiers.None
 )
 {
+    /// <summary>Gets whether this command releases capture owned by the supplied initiating button.</summary>
+    internal bool Releases(PointerButton button) =>
+        Kind == PointerCommandKind.Up && (Button == PointerButton.None || Button == button);
+
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
     public void Validate()
     {
@@ -338,7 +350,10 @@ public readonly record struct PointerCommand(
             || !float.IsFinite(X)
             || !float.IsFinite(Y)
             || (Kind == PointerCommandKind.Down && Button == PointerButton.None)
-            || (Kind != PointerCommandKind.Down && Button != PointerButton.None)
+            || (
+                Kind is PointerCommandKind.Move or PointerCommandKind.Cancel
+                && Button != PointerButton.None
+            )
             || (
                 (uint)Modifiers
                 & ~(uint)(
@@ -347,7 +362,7 @@ public readonly record struct PointerCommand(
             ) != 0
         )
             throw new ArgumentException(
-                "Pointer commands require finite logical coordinates, valid modifiers, and a button only on down."
+                "Pointer commands require finite logical coordinates, valid modifiers, a button on down, and an optional released button on up."
             );
     }
 }
@@ -497,6 +512,7 @@ public sealed class PointerRoute
         return _router.TryCapture(
             Command.PointerId,
             CurrentTarget,
+            Command.Button,
             Command.Kind == PointerCommandKind.Down
         );
     }

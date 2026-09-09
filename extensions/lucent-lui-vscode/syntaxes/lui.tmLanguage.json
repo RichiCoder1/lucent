@@ -126,7 +126,7 @@
       "patterns": [
         {
           "name": "keyword.control.lui",
-          "match": "\\b(public|internal|if|else|foreach|keyed|by|when|with)\\b"
+          "match": "\\b(public|internal|if|else|foreach|keyed|by|when|with|transition)\\b"
         },
         {
           "name": "constant.language.lui",

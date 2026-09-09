@@ -12,7 +12,13 @@ The assets/icons batch and its actionable older backlog are delivered. The reque
 
 The mixed-DPI test additions are committed in `0b8dbfc`; its [CI run](https://github.com/RichiCoder1/lucent/actions/runs/34378586116) owns the subsequent verification status. Runtime delivery remains the verified `905bd1c`/53.1 package set. Documentation-only closeout does not require another package upgrade.
 
-## Separate follow-ups
+## Active sequence
+
+The current framework batch implements #194–196, opt-in focus recovery for Light Notes #8, and production transitions #198–201 from the accepted #142 design. The complete managed check passes 706/706, including Core 349, Windows 94, renderer 82, Issue Browser 20, compiler 60 and LSP 26 contracts. The warning-clean solution build, authored formatting, architecture preflight/negative fixtures, VS Code extension tests 13/13 and SDK NativeAOT consumer proof pass. Three fresh published motion checks pass; earlier source-affected pointer/popup checks passed 2/2. See [transition usage and frame measurements](../TRANSITIONS.md) and [runtime evidence](../MOTION-RUNTIME-EVIDENCE.md).
+
+Publication and the independent Light Notes package upgrade complete #202. Its focus recovery already passed 41 managed app contracts (one optional probe skipped) and a physical responsive-collapse check against a unique local review/focus package. Final transition-package integration remains in progress; do not substitute that earlier package for the final consumer proof. Component Gaps #155–171 and context/navigation #203–222 remain separate.
+
+Shared-tree builds and foreground checks are serialized. Follow-up owners are split across authoring, native input/lifetime, image policy, and focus recovery; the coordinator owns integration and delivery. Do not close investigations until their actual reproduced behavior and limits are recorded.
 
 - #194: retained-data diagnostics and completion ergonomics.
 - #195: multi-button capture, popup focus and UIA shutdown investigations.
@@ -21,7 +27,7 @@ The mixed-DPI test additions are committed in `0b8dbfc`; its [CI run](https://gi
 - #155–171: the separately ordered Component Gaps waves.
 - #142: transitions and `.lui` animation design.
 
-These investigations require concrete reproducers or explicit behavior decisions; the review did not establish every suggested defect. Component-family organization and the framework-authored `.lui` ErrorNotice are already delivered in #143. A separate controls package and broad conversion remain deferred.
+The investigations have concrete reproducers and bounded behavior decisions; large-image copies remain explicitly documented rather than presented as a new cache optimization. Component-family organization and the framework-authored `.lui` ErrorNotice are already delivered in #143. A separate controls package and broad conversion remain deferred.
 
 ## Local workspace
 

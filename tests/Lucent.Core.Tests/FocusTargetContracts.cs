@@ -6,6 +6,126 @@ namespace Lucent.Core.Tests;
 public sealed class FocusTargetContracts
 {
     [TestMethod]
+    public void CollapsedPaneRecoversToVisibleTabStopWithoutReplayingOnReveal()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "focus-recovery-collapse");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var router = composition.Input;
+        router.FocusRecovery = FocusRecoveryPolicy.NearestAvailable;
+        Controls.Column(composition.Root, theme, "root");
+        var shown = composition.Root.Scope.Signal(true, "shown");
+        var pane = composition.Child(composition.Root, "pane");
+        Controls.Column(
+            pane,
+            theme,
+            "Pane",
+            style: Style.Empty.Participation(() =>
+                shown.Value ? ElementParticipation.Visible : ElementParticipation.Collapsed
+            )
+        );
+        var field = composition.Child(pane, "field");
+        var editor = Controls.TextField(field, theme, "Field", value: "draft");
+        var fallback = composition.Child(composition.Root, "fallback");
+        Controls.Button(fallback, theme, "Visible action");
+        using var initial = Install(composition, router);
+        Assert.IsTrue(router.FocusSemantic(new(composition.Epoch, field.Id)));
+        using var focused = Install(composition, router);
+
+        shown.Value = false;
+        composition.Flush();
+        Assert.IsFalse(router.DispatchText(new(TextInputKind.Commit, "stale")).Handled);
+        using var collapsed = Install(composition, router);
+        Assert.AreEqual(fallback.Id, router.FocusedElement?.ElementId);
+        Assert.AreEqual("draft", editor.Value);
+        StringAssert.Contains(router.Dump(), "Recovery");
+
+        shown.Value = true;
+        using var revealed = Install(composition, router);
+        Assert.AreEqual(
+            fallback.Id,
+            router.FocusedElement?.ElementId,
+            "Revealing a retained pane must not steal focus from its replacement."
+        );
+    }
+
+    [TestMethod]
+    public void EvictedVirtualizedRowRecoversToItsSurvivingScrollViewport()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "focus-recovery-eviction");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var router = composition.Input;
+        router.FocusRecovery = FocusRecoveryPolicy.NearestAvailable;
+        Controls.Column(composition.Root, theme, "root");
+        var selected = 0;
+        var list = composition.Mount(
+            composition.Root,
+            theme,
+            Components.VirtualizedList(
+                () => Enumerable.Range(0, 1000),
+                value => value,
+                value => Components.Selectable("Row " + value.Value, () => selected++),
+                () => 24f,
+                label: "Rows"
+            )
+        );
+        using var initial = Install(composition, router);
+        var row = composition
+            .Elements()
+            .First(element => element.Resolve(ProjectionProperties.Text).Value == "Row 0");
+        var oldIdentity = new ElementIdentity(composition.Epoch, row.Id);
+        Assert.IsTrue(router.FocusSemantic(oldIdentity));
+        using var focused = Install(composition, router);
+        Assert.IsTrue(
+            router.ScrollSemantic(
+                new(composition.Epoch, list.Id),
+                new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)
+            )
+        );
+        using var scrolled = Install(composition, router);
+        Assert.IsTrue(row.IsDisposed, "The fixture must actually evict the focused row.");
+        Assert.AreEqual(list.Id, router.FocusedElement?.ElementId);
+        Assert.IsFalse(router.FocusSemantic(oldIdentity));
+        Assert.AreEqual(0, selected, "Recovery must never activate or select a row.");
+    }
+
+    [TestMethod]
+    public void ExplicitTargetWinsOverPendingRecoveryAndDisabledOwnersStayCleared()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "focus-recovery-request");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var router = composition.Input;
+        router.FocusRecovery = FocusRecoveryPolicy.NearestAvailable;
+        Controls.Column(composition.Root, theme, "root");
+        var first = composition.Child(composition.Root, "first");
+        Controls.Button(first, theme, "First");
+        var neighbor = composition.Child(composition.Root, "neighbor");
+        Controls.Button(neighbor, theme, "Neighbor");
+        var target = new FocusTarget(composition.Root.Scope, "explicit");
+        var enabled = composition.Root.Scope.Signal(true, "enabled");
+        var last = composition.Child(composition.Root, "last");
+        Controls.TextField(
+            last,
+            theme,
+            "Explicit",
+            focusTarget: target,
+            style: Style.Empty.Bind(InputProperties.Enabled, () => enabled.Value)
+        );
+        using var initial = Install(composition, router);
+        Assert.IsTrue(router.FocusSemantic(new(composition.Epoch, first.Id)));
+        using var focused = Install(composition, router);
+        first.Dispose();
+        target.Request();
+        using var recovered = Install(composition, router);
+        Assert.AreEqual(last.Id, router.FocusedElement?.ElementId);
+        enabled.Value = false;
+        using var disabled = Install(composition, router);
+        Assert.IsNull(router.FocusedElement);
+    }
+
+    [TestMethod]
     public void PendingTextFocusWaitsForSceneAndSelectsWithoutResettingSession()
     {
         var graph = new ReactiveGraph();
@@ -212,6 +332,7 @@ public sealed class FocusTargetContracts
             scene = SceneLayout.Project(composition, new(200, 80, 1), shaper);
             if (router.SetScene(scene))
                 return scene;
+            scene.Dispose();
         }
         Assert.Fail("Focus target scene did not converge. " + router.Dump());
         return scene;

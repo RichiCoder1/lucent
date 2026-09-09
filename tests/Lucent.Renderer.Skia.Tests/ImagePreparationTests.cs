@@ -117,6 +117,49 @@ public sealed class ImagePreparationTests
     }
 
     [TestMethod]
+    public void PinnedCodecUsesTheFirstExifApp1Orientation()
+    {
+        var firstUnrotated = AddJpegExifOrientation(
+            AddJpegExifOrientation(EncodeJpeg(2, 1), orientation: 6),
+            orientation: 1
+        );
+        var firstRotated = AddJpegExifOrientation(
+            AddJpegExifOrientation(EncodeJpeg(2, 1), orientation: 1),
+            orientation: 6
+        );
+
+        using var unrotatedCodec = SKCodec.Create(new MemoryStream(firstUnrotated, false));
+        using var rotatedCodec = SKCodec.Create(new MemoryStream(firstRotated, false));
+        Assert.IsNotNull(unrotatedCodec);
+        Assert.IsNotNull(rotatedCodec);
+        Assert.AreEqual(SKEncodedOrigin.TopLeft, unrotatedCodec.EncodedOrigin);
+        Assert.AreEqual(SKEncodedOrigin.RightTop, rotatedCodec.EncodedOrigin);
+
+        using var unrotated = Prepare(Source(firstUnrotated, AssetFormat.Jpeg, 2, 1), 2, 2);
+        using var rotated = Prepare(Source(firstRotated, AssetFormat.Jpeg, 1, 2), 2, 2);
+        Assert.AreEqual((2, 1), (unrotated.Width, unrotated.Height));
+        Assert.AreEqual((1, 2), (rotated.Width, rotated.Height));
+    }
+
+    [TestMethod]
+    public void PinnedCodecIgnoresPngExifOrientation()
+    {
+        var unrotatedBytes = AddPngExifOrientation(EncodePng(2, 1), orientation: 1);
+        var rotatedBytes = AddPngExifOrientation(EncodePng(2, 1), orientation: 6);
+        using var unrotatedCodec = SKCodec.Create(new MemoryStream(unrotatedBytes, false));
+        using var rotatedCodec = SKCodec.Create(new MemoryStream(rotatedBytes, false));
+        Assert.IsNotNull(unrotatedCodec);
+        Assert.IsNotNull(rotatedCodec);
+        Assert.AreEqual(SKEncodedOrigin.TopLeft, unrotatedCodec.EncodedOrigin);
+        Assert.AreEqual(SKEncodedOrigin.TopLeft, rotatedCodec.EncodedOrigin);
+
+        using var unrotated = Prepare(Source(unrotatedBytes, AssetFormat.Png, 2, 1), 2, 2);
+        using var rotated = Prepare(Source(rotatedBytes, AssetFormat.Png, 2, 1), 2, 2);
+        Assert.AreEqual((2, 1), (unrotated.Width, unrotated.Height));
+        Assert.AreEqual((2, 1), (rotated.Width, rotated.Height));
+    }
+
+    [TestMethod]
     public void ResamplingKeepsPremultipliedAlphaInvariant()
     {
         using var image = Prepare(Source(EncodeAlphaPatternPng(), AssetFormat.Png, 2, 2), 1, 1);
@@ -352,6 +395,50 @@ public sealed class ImagePreparationTests
         Assert.IsTrue(renderer.RetainedImageBytes <= 32L * 1024 * 1024);
     }
 
+    [TestMethod]
+    public void LargerThanNativeCopyCacheUsesABoundedUnretainedImagePerRender()
+    {
+        const int side = 2_900;
+        var pixels = new byte[side * side * 4];
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "renderer-large-image-policy");
+        var preparer = new ImmediatePreparer(side, side, pixels);
+        composition.ConfigureImages(new ImageCache(preparer));
+        var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Image(
+                Source(PngBytes, AssetFormat.Png, side, side),
+                "large transparent image",
+                style: Style.Empty.Set(LayoutProperties.Width, 1f).Set(LayoutProperties.Height, 1f)
+            )
+        );
+
+        using var renderer = new SkiaSceneRenderer();
+        using var scene = ReadyScene(composition, renderer, new(1, 1, 1));
+        using var bitmap = new SKBitmap(1, 1, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using var canvas = new SKCanvas(bitmap);
+        renderer.Render(scene, canvas);
+        renderer.Render(scene, canvas);
+
+        Assert.AreEqual(
+            2L,
+            renderer.ImageCreationCount,
+            "The explicit over-budget path must remain visible as one native copy per paint."
+        );
+        Assert.AreEqual(0, renderer.LiveImageCount);
+        Assert.AreEqual(0L, renderer.RetainedImageBytes);
+        scene.Dispose();
+        composition.Dispose();
+        Assert.IsTrue(
+            preparer.LatestImage is { IsDisposed: true },
+            "Releasing the retained scene and composition did not release the large source."
+        );
+        Assert.AreEqual(0, renderer.LiveImageCount);
+        Assert.AreEqual(0L, renderer.RetainedImageBytes);
+    }
+
     private static SKBitmap RenderImage(
         byte[] pixels,
         int pixelWidth,
@@ -582,6 +669,71 @@ public sealed class ImagePreparationTests
         return output.ToArray();
     }
 
+    private static byte[] AddPngExifOrientation(byte[] png, ushort orientation)
+    {
+        if (png.Length < 33 || !png.AsSpan(1, 3).SequenceEqual("PNG"u8))
+            throw new InvalidDataException("The test PNG did not have a complete IHDR chunk.");
+        var tiff = new byte[]
+        {
+            (byte)'I',
+            (byte)'I',
+            0x2a,
+            0x00,
+            0x08,
+            0x00,
+            0x00,
+            0x00,
+            0x01,
+            0x00,
+            0x12,
+            0x01,
+            0x03,
+            0x00,
+            0x01,
+            0x00,
+            0x00,
+            0x00,
+            (byte)orientation,
+            (byte)(orientation >> 8),
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+        };
+        var chunk = new byte[12 + tiff.Length];
+        WriteBigEndian(chunk, 0, (uint)tiff.Length);
+        "eXIf"u8.CopyTo(chunk.AsSpan(4));
+        tiff.CopyTo(chunk, 8);
+        WriteBigEndian(chunk, 8 + tiff.Length, Crc32(chunk.AsSpan(4, 4 + tiff.Length)));
+        var output = new byte[png.Length + chunk.Length];
+        png.AsSpan(0, 33).CopyTo(output);
+        chunk.CopyTo(output, 33);
+        png.AsSpan(33).CopyTo(output.AsSpan(33 + chunk.Length));
+        return output;
+    }
+
+    private static void WriteBigEndian(byte[] destination, int offset, uint value)
+    {
+        destination[offset] = (byte)(value >> 24);
+        destination[offset + 1] = (byte)(value >> 16);
+        destination[offset + 2] = (byte)(value >> 8);
+        destination[offset + 3] = (byte)value;
+    }
+
+    private static uint Crc32(ReadOnlySpan<byte> bytes)
+    {
+        var crc = uint.MaxValue;
+        foreach (var value in bytes)
+        {
+            crc ^= value;
+            for (var bit = 0; bit < 8; bit++)
+                crc = (crc >> 1) ^ ((crc & 1) == 0 ? 0 : 0xedb88320u);
+        }
+        return ~crc;
+    }
+
     private static RetainedScene ReadyScene(
         Composition composition,
         ITextShaper shaper,
@@ -634,9 +786,15 @@ public sealed class ImagePreparationTests
             _pixels = pixels ?? [255, 0, 0, 255];
         }
 
+        public RasterImage? LatestImage { get; private set; }
+
         public ValueTask<PreparedImage> PrepareAsync(
             ImagePreparationRequest request,
             CancellationToken cancellationToken
-        ) => ValueTask.FromResult<PreparedImage>(new RasterImage(_width, _height, _pixels));
+        )
+        {
+            LatestImage = new RasterImage(_width, _height, _pixels);
+            return ValueTask.FromResult<PreparedImage>(LatestImage);
+        }
     }
 }

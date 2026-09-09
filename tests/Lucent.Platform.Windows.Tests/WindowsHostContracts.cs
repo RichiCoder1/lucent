@@ -287,7 +287,7 @@ public sealed class WindowsHostContracts
             () =>
             {
                 motionRuns++;
-                return theme.ReducedMotion;
+                return theme.EffectiveReducedMotion;
             },
             "platform-motion-reader"
         );
@@ -298,14 +298,20 @@ public sealed class WindowsHostContracts
                 && appearance.Value
                     == new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.High)
                 && !motion.Value
+                && theme.PlatformReducedMotion == false
                 && appearanceRuns == 2
-                && motionRuns == 1
+                && motionRuns == 2
                 && !settings.Apply(theme),
             "Settings did not coalesce equal values or invalidate only changed portable facets."
         );
         settingsSnapshot = settingsSnapshot with { ReducedMotion = true };
         Assert(
-            settings.Apply(theme) && appearanceRuns == 2 && motion.Value && motionRuns == 2,
+            settings.Apply(theme)
+                && appearanceRuns == 2
+                && motion.Value
+                && motionRuns == 3
+                && !theme.ReducedMotion
+                && theme.PlatformReducedMotion == true,
             "Reduced motion invalidated an unrelated appearance reader."
         );
         settingsSnapshot = new(null, null, null);
@@ -313,8 +319,19 @@ public sealed class WindowsHostContracts
             !settings.Apply(theme)
                 && theme.Appearance
                     == new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.High)
-                && theme.ReducedMotion,
+                && theme.EffectiveReducedMotion
+                && !theme.ReducedMotion
+                && theme.PlatformReducedMotion == true,
             "Unknown theme or failed SPI fields fabricated a settings update."
+        );
+        theme.ReducedMotion = true;
+        settingsSnapshot = settingsSnapshot with { ReducedMotion = false };
+        Assert(
+            settings.Apply(theme)
+                && theme.ReducedMotion
+                && theme.PlatformReducedMotion == false
+                && theme.EffectiveReducedMotion,
+            "Windows reduced motion overwrote the independent application preference."
         );
 
         var startupGraph = new ReactiveGraph();
@@ -335,7 +352,9 @@ public sealed class WindowsHostContracts
             WindowsBootstrap.ApplySettings(startupComposition, startupSettings, startupTheme)
                 && firstAppearance
                     == new ThemeAppearance(ThemeColorScheme.Dark, ThemeContrast.Normal)
-                && startupTheme.ReducedMotion,
+                && startupTheme.EffectiveReducedMotion
+                && !startupTheme.ReducedMotion
+                && startupTheme.PlatformReducedMotion == true,
             "Initial settings did not drain appearance authoring before the first frame."
         );
         var diagnosticSettings = new WindowsSettings(() =>

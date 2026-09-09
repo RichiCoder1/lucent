@@ -62,6 +62,36 @@ desktop frame budgets. Twelve rendition requests left 11 ready entries and
 active or temporary work. Application-icon generation packages PNG renditions
 ahead of runtime startup, while ordinary SVG controls still prepare asynchronously.
 
+The September 9 issue 196 renderer probe exercises a 2,900-by-2,900 RGBA
+prepared raster (33,640,000 bytes), just above the renderer's 32 MiB native-copy
+cache. Two consecutive paints created two owner-thread native images and retained
+zero native image entries and zero native image bytes. Releasing the retained
+scene and composition disposed the Core `RasterImage`; renderer retention
+remained zero. The focused command was:
+
+```powershell
+./tools/Test-Repository.ps1 -Project Lucent.Renderer.Skia.Tests -Filter 'FullyQualifiedName~ImagePreparationTests'
+```
+
+All 16 focused tests passed. This probe characterizes the deliberate bounded
+one-off path: it demonstrates repeat native-copy churn, but it does not justify
+retaining an oversized exception or raising the 32 MiB cache budget. Timing and
+native allocator peaks were not measured by this managed contract test.
+
+The same focused run compared orientation metadata against the actual pinned
+Skia codec. For JPEGs with two conflicting EXIF APP1 segments, Skia uses the
+first segment. For PNG, Skia accepts an eXIf chunk but reports `TopLeft` and
+does not rotate the decoded pixels. Generated asset metadata therefore follows
+the first JPEG APP1 orientation and intentionally ignores PNG eXIf orientation;
+otherwise layout dimensions would describe pixels the runtime does not present.
+The packaged generator proof used the unique local version
+`0.3.0-dev.followup196.1`; all 16 metadata cases passed, including both JPEG
+segment orders, both PNG eXIf values, unsupported SVG script content and the
+2 MiB SVG encoded-input ceiling. Its project-reference and package-reference
+NativeAOT consumers both exited zero after their source, feed and package cache
+were removed. The ignored evidence is under
+`artifacts/lui-assets-proof-followup196/`.
+
 After running the maintained runner, reproduce the additional cases with:
 
 ```powershell

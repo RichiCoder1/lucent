@@ -496,6 +496,8 @@ internal sealed class LuiProjectContext : IDisposable
         {
             if (descriptionLabel is not null && item.DisplayText != descriptionLabel)
                 continue;
+            if (IsCompilerGeneratedCompletion(semantic, item.DisplayText))
+                continue;
             var description = deferDocumentation
                 ? null
                 : await service
@@ -514,6 +516,40 @@ internal sealed class LuiProjectContext : IDisposable
             );
         }
         return DistinctCompletions(results);
+    }
+
+    private static bool IsCompilerGeneratedCompletion(SemanticDocument semantic, string displayText)
+    {
+        var name = displayText.TrimStart('@');
+        if (!name.StartsWith("__lui", StringComparison.Ordinal))
+            return false;
+
+        var userSymbols = semantic
+            .Model.LookupSymbols(semantic.Position, name: name)
+            .Where(symbol =>
+                symbol.Locations.Length == 0
+                || symbol.Locations.Any(location =>
+                    location.SourceTree != semantic.Tree
+                    || semantic
+                        .Document.Result.Map.FromGenerated(
+                            new LuiSpan(location.SourceSpan.Start, location.SourceSpan.Length)
+                        )
+                        .Any(entry => !entry.Hidden && entry.Source.Length != 0)
+                )
+            );
+        if (userSymbols.Any())
+            return false;
+
+        return !semantic
+            .Tree.GetRoot()
+            .DescendantTokens()
+            .Where(token => token.ValueText == name)
+            .SelectMany(token =>
+                semantic.Document.Result.Map.FromGenerated(
+                    new LuiSpan(token.SpanStart, token.Span.Length)
+                )
+            )
+            .Any(entry => !entry.Hidden && entry.Source.Length != 0);
     }
 
     private static LuiCompletionItem[]? SpecialCompletions(SemanticDocument semantic, int offset)
@@ -539,6 +575,11 @@ internal sealed class LuiProjectContext : IDisposable
                     .Append(new LuiCompletionItem("name", 6, "string name", null))
             );
 
+        if (StyleTransitionAt(syntax, offset) is { } transition)
+        {
+            if (Contains(transition.Property.Span, offset))
+                return Symbols(TransitionProperties(semantic));
+        }
         if (StyleAssignmentAt(syntax, offset) is { } assignment)
         {
             if (Contains(assignment.Property.Span, offset))
@@ -2845,6 +2886,16 @@ internal sealed class LuiProjectContext : IDisposable
                     []
                 ),
             ],
+            LuiStyleTransitionSyntax transition =>
+            [
+                new LuiDocumentSymbol(
+                    "transition " + transition.Property.Text,
+                    7,
+                    transition.Span,
+                    transition.Property.Span,
+                    []
+                ),
+            ],
             LuiVariantGroupSyntax variant =>
             [
                 new LuiDocumentSymbol(
@@ -2963,6 +3014,15 @@ internal sealed class LuiProjectContext : IDisposable
             )
             .Where(symbol => IsAccessible(semantic, symbol));
 
+    private static IEnumerable<ISymbol> TransitionProperties(SemanticDocument semantic) =>
+        StyleProperties(semantic)
+            .Where(symbol =>
+                LuiPropertyCatalog.TransitionPropertyIdentities.Contains(
+                    PropertyIdentity(symbol),
+                    StringComparer.Ordinal
+                )
+            );
+
     private static IEnumerable<ISymbol> RootTokens(SemanticDocument semantic)
     {
         var root = semantic.Document.Result.Identity.RootNamespace;
@@ -3044,6 +3104,14 @@ internal sealed class LuiProjectContext : IDisposable
         type is INamedTypeSymbol { Name: "Property", Arity: 1, ContainingNamespace: { } @namespace }
         && @namespace.ToDisplayString() == "Lucent.Core";
 
+    private static string PropertyIdentity(ISymbol symbol)
+    {
+        var owner = symbol.ContainingType?.ToDisplayString(
+            SymbolDisplayFormat.FullyQualifiedFormat
+        );
+        return owner is null ? symbol.Name : owner + "." + symbol.Name;
+    }
+
     private static bool IsToken(ITypeSymbol type) =>
         type is INamedTypeSymbol { Name: "Token", Arity: 1, ContainingNamespace: { } @namespace }
         && @namespace.ToDisplayString() == "Lucent.Core";
@@ -3052,6 +3120,11 @@ internal sealed class LuiProjectContext : IDisposable
         LuiDocumentSyntax syntax,
         int offset
     ) => StyleAssignments(syntax).FirstOrDefault(assignment => Contains(assignment.Span, offset));
+
+    private static LuiStyleTransitionSyntax? StyleTransitionAt(
+        LuiDocumentSyntax syntax,
+        int offset
+    ) => StyleTransitions(syntax).FirstOrDefault(transition => Contains(transition.Span, offset));
 
     private static LuiVariantGroupSyntax? VariantAt(LuiDocumentSyntax syntax, int offset) =>
         StyleMembers(syntax)
@@ -3132,6 +3205,22 @@ internal sealed class LuiProjectContext : IDisposable
     private static IEnumerable<LuiSemanticSpan> SyntaxSemanticSpans(LuiDocumentSyntax syntax) =>
         StyleAssignments(syntax)
             .Select(assignment => new LuiSemanticSpan(assignment.Property.Span, "property", 0))
+            .Concat(
+                StyleTransitions(syntax)
+                    .Select(transition => new LuiSemanticSpan(
+                        transition.Property.Span,
+                        "property",
+                        0
+                    ))
+            )
+            .Concat(
+                StyleTransitions(syntax)
+                    .Select(transition => new LuiSemanticSpan(
+                        transition.TransitionKeyword.Span,
+                        "keyword",
+                        0
+                    ))
+            )
             .Concat(
                 Elements(syntax)
                     .SelectMany(element => element.Attributes)
@@ -3252,6 +3341,10 @@ internal sealed class LuiProjectContext : IDisposable
                     ? new[] { assignment }
                     : Array.Empty<LuiStyleAssignmentSyntax>()
             );
+
+    private static IEnumerable<LuiStyleTransitionSyntax> StyleTransitions(
+        LuiDocumentSyntax syntax
+    ) => StyleMembers(syntax).OfType<LuiStyleTransitionSyntax>();
 
     private static bool IsComponent(IMethodSymbol method) =>
         method.IsStatic

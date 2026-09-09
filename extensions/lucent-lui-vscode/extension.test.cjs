@@ -56,6 +56,14 @@ test("grammar retains parameterized component and style declaration headers", ()
     ));
 });
 
+test("grammar marks declarative transition policies as keywords", () => {
+    const grammar = JSON.parse(
+        fs.readFileSync(path.join(__dirname, "syntaxes", "lui.tmLanguage.json"), "utf8")
+    );
+    const keywords = grammar.repository.keywords.patterns;
+    assert.ok(keywords.some(pattern => pattern.match.includes("transition")));
+});
+
 test("activates only Lucent workspaces and registers C# cross-language selectors", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
     assert.deepEqual(manifest.activationEvents, ["onLanguage:lui", "workspaceContains:**/*.lui"]);

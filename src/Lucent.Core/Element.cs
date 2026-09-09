@@ -149,20 +149,14 @@ public sealed class Element : IDisposable
             );
 
     /// <summary>Associates the one typed property model with this retained element.</summary>
-    public void Present(
-        ThemeContext theme,
-        Style? component = null,
-        Style? author = null,
-        params Transition[] transitions
-    )
+    public void Present(ThemeContext theme, Style? component = null, Style? author = null)
     {
-        ValidatePresentation(theme, component, author, transitions);
+        ValidatePresentation(theme, component, author);
         _presentation = new ElementPresentation(
             this,
             theme,
             component ?? Style.Empty,
-            author ?? Style.Empty,
-            transitions
+            author ?? Style.Empty
         );
         if (Composition.IsReachable(this))
             Composition.InvalidateInputProjection();
@@ -172,8 +166,7 @@ public sealed class Element : IDisposable
     internal void ValidatePresentation(
         ThemeContext theme,
         Style? component = null,
-        Style? author = null,
-        params Transition[] transitions
+        Style? author = null
     )
     {
         Composition.CheckThread();
@@ -192,12 +185,9 @@ public sealed class Element : IDisposable
                 nameof(theme)
             );
         theme.ValidateLive();
-        ArgumentNullException.ThrowIfNull(transitions);
         if (_presentation is not null)
             throw new InvalidOperationException("An element has one presentation model.");
-        if (transitions.Any(transition => transition is null))
-            throw new ArgumentException("Transitions cannot contain null.", nameof(transitions));
-        ElementPresentation.Validate(component ?? Style.Empty, author ?? Style.Empty, transitions);
+        ElementPresentation.Validate(component ?? Style.Empty, author ?? Style.Empty);
     }
 
     /// <summary>Updates finite interaction state without creating a second modifier model.</summary>
@@ -280,6 +270,75 @@ public sealed class Element : IDisposable
         finally
         {
             ArrayPool<Element>.Shared.Return(lineage, clearArray: true);
+        }
+    }
+
+    internal bool CommitPresentationTargets(MotionTimeline timeline)
+    {
+        if (_presentation is not null)
+            return _presentation.CommitPresentationTargets(timeline);
+        var changed =
+            timeline.Commit(
+                this,
+                VisualProperties.Background,
+                VisualProperties.Background.DefaultValue,
+                null,
+                null,
+                null,
+                false,
+                false,
+                null,
+                0
+            )
+            | timeline.Commit(
+                this,
+                VisualProperties.Opacity,
+                VisualProperties.Opacity.DefaultValue,
+                null,
+                null,
+                null,
+                false,
+                false,
+                null,
+                0
+            );
+        if (_parent is null)
+            changed |= timeline.Commit(
+                this,
+                TypographyProperties.TextColor,
+                TypographyProperties.TextColor.DefaultValue,
+                null,
+                null,
+                null,
+                false,
+                false,
+                null,
+                0
+            );
+        else
+            timeline.Remove(this, TypographyProperties.TextColor);
+        return changed;
+    }
+
+    internal void ValidatePresentationTargets()
+    {
+        if (_presentation is not null)
+            _presentation.ValidatePresentationTargets();
+        else
+        {
+            MotionTimeline.ValidateTarget(
+                VisualProperties.Background.Transition,
+                VisualProperties.Background.DefaultValue
+            );
+            MotionTimeline.ValidateTarget(
+                VisualProperties.Opacity.Transition,
+                VisualProperties.Opacity.DefaultValue
+            );
+            if (_parent is null)
+                MotionTimeline.ValidateTarget(
+                    TypographyProperties.TextColor.Transition,
+                    TypographyProperties.TextColor.DefaultValue
+                );
         }
     }
 
@@ -521,21 +580,6 @@ public sealed class Element : IDisposable
             children
         );
 
-    /// <summary>Starts a bounded, composition-owned sample for an eligible transition specification.</summary>
-    public void StartTransition<T>(Property<T> property, T value)
-    {
-        Composition.CheckThread();
-        Composition.ValidateFactoryMutation(this);
-        Composition.ThrowIfBehaviorAttachment();
-        ThrowIfDisposed();
-        (
-            _presentation
-            ?? throw new InvalidOperationException(
-                "An element needs a presentation before transition samples can start."
-            )
-        ).Start(property, value);
-    }
-
     internal void AppendPresentationDump(StringBuilder dump)
     {
         _presentation?.AppendDump(dump);
@@ -769,7 +813,7 @@ public sealed class Element : IDisposable
         }
         try
         {
-            Composition.Transitions.Remove(this);
+            Composition.RemovePresentation(this);
         }
         catch (Exception exception)
         {

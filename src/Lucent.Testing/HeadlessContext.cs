@@ -98,6 +98,15 @@ public sealed class HeadlessContext
         }
     }
 
+    internal RetainedScene? CurrentScene
+    {
+        get
+        {
+            CheckOwner();
+            return _scene;
+        }
+    }
+
     /// <summary>Finds a retained element from an immutable semantic snapshot.</summary>
     public Element RequireElement(SemanticSnapshot semantic)
     {

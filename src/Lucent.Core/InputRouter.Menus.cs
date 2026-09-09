@@ -73,7 +73,7 @@ public sealed partial class InputRouter
             return target is not null;
         }
         if (
-            command.Kind != PointerCommandKind.Up
+            !command.Releases(PointerButton.Secondary)
             || _contextPointer is not { } pending
             || pending.Pointer != command.PointerId
         )

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Lucent.Core;
 
 namespace Lucent.Platform.Windows;
 
@@ -277,4 +278,23 @@ internal readonly record struct FrameRequest(
 )
 {
     internal FrameRequest Complete(long timestamp) => this with { Presented = timestamp };
+}
+
+/// <summary>Converts absolute portable presentation deadlines into bounded SDL waits.</summary>
+internal static class WindowsPresentationTiming
+{
+    internal static int WaitMilliseconds(PresentationFrameDemand demand, TimeSpan now)
+    {
+        if (!demand.IsActive)
+            return -1;
+        if (demand.NextDeadline is not { } deadline || deadline <= now)
+            return 0;
+        var remaining = deadline - now;
+        return remaining.TotalMilliseconds >= int.MaxValue
+            ? int.MaxValue
+            : Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds));
+    }
+
+    internal static int Earlier(int current, int candidate) =>
+        candidate >= 0 && (current < 0 || candidate < current) ? candidate : current;
 }

@@ -271,6 +271,11 @@ public static class LuiFormatter
                 Assignment(output, assignment, indent, nl);
                 continue;
             }
+            if (member is LuiStyleTransitionSyntax transition)
+            {
+                Transition(output, transition, indent, nl);
+                continue;
+            }
             var group = (LuiVariantGroupSyntax)member;
             Pad(output, indent);
             output.Append("when ");
@@ -297,6 +302,23 @@ public static class LuiFormatter
             .Append(assignment.Property.Text)
             .Append(": ")
             .Append(assignment.Expression.Text)
+            .Append(';')
+            .Append(nl);
+    }
+
+    private static void Transition(
+        StringBuilder output,
+        LuiStyleTransitionSyntax transition,
+        int indent,
+        string nl
+    )
+    {
+        Pad(output, indent);
+        output
+            .Append("transition ")
+            .Append(transition.Property.Text)
+            .Append(": ")
+            .Append(transition.Expression.Text)
             .Append(';')
             .Append(nl);
     }
@@ -336,6 +358,16 @@ public static class LuiFormatter
                     .Append(assignment.Property.Text)
                     .Append(": ")
                     .Append(assignment.Expression.Text)
+                    .Append(';');
+                continue;
+            }
+            if (members[index] is LuiStyleTransitionSyntax transition)
+            {
+                output
+                    .Append("transition ")
+                    .Append(transition.Property.Text)
+                    .Append(": ")
+                    .Append(transition.Expression.Text)
                     .Append(';');
                 continue;
             }

@@ -819,28 +819,52 @@ public sealed class LayoutSceneContracts
             transitioned.Root.Scope,
             new Theme("opacity-transition")
         );
+        var opacityTarget = transitionGraph.Signal(.4f, "opacity-target");
         transitioned.Root.Present(
             transitionTheme,
-            author: Style.Empty.Set(VisualProperties.Background, Color.Parse("#ffffff")),
-            transitions: [Transition.For(VisualProperties.Opacity, 100)]
+            author: Style
+                .Empty.Set(VisualProperties.Background, Color.Parse("#ffffff"))
+                .Bind(VisualProperties.Opacity, () => opacityTarget.Value)
+                .Transition(VisualProperties.Opacity, Motion.Duration(100, Easing.Linear))
         );
-        transitioned.Root.StartTransition(VisualProperties.Opacity, .4f);
-        var activeTransition = SceneLayout.Project(transitioned, new(10, 10, 1), new ProbeShaper());
+        var transitionShaper = new ProbeShaper();
+        transitioned.SamplePresentation(TimeSpan.Zero);
+        using var firstTransition = SceneLayout.Project(
+            transitioned,
+            new(10, 10, 1),
+            transitionShaper
+        );
         Assert(
-            activeTransition.Nodes.Single() is OpacitySceneNode { Opacity: .4f },
-            "Active manual opacity transition did not project a composited group."
+            transitioned.TryAcknowledgePresentation(firstTransition.Generation),
+            "Initial presentation was not acknowledged."
+        );
+        opacityTarget.Value = 1;
+        using var targetTransition = SceneLayout.Project(
+            transitioned,
+            new(10, 10, 1),
+            transitionShaper
+        );
+        transitioned.SamplePresentation(TimeSpan.FromMilliseconds(50));
+        using var activeTransition = SceneLayout.ProjectFrame(
+            transitioned,
+            new(10, 10, 1),
+            transitionShaper,
+            targetTransition
+        );
+        Assert(
+            activeTransition.Nodes.Single() is OpacitySceneNode { Opacity: > .69f and < .71f },
+            "Active target opacity transition did not project a sampled composited group."
         );
         transitionTheme.ReducedMotion = true;
-        var suppressedTransition = SceneLayout.Project(
+        using var suppressedTransition = SceneLayout.Project(
             transitioned,
             new(10, 10, 1),
             new ProbeShaper()
         );
         Assert(
             suppressedTransition.Nodes.Single() is PaintSceneNode
-                && transitioned.Root.Resolve(VisualProperties.Opacity).SuppressedTransition?.Source
-                    == "transition-suppressed",
-            "Reduced motion did not suppress projected opacity transition output."
+                && transitioned.Root.Resolve(VisualProperties.Opacity).Value == 1,
+            "Reduced motion did not snap projected opacity to its authoritative target."
         );
     }
 

@@ -121,11 +121,6 @@ public sealed class HeadlessApplication : IAsyncDisposable
             context =>
             {
                 context.TimeProvider.Advance(elapsed);
-                var milliseconds = elapsed.TotalMilliseconds;
-                if (milliseconds > 0)
-                    context.Composition.AdvanceTransitions(
-                        milliseconds >= int.MaxValue ? int.MaxValue : (int)milliseconds
-                    );
             },
             static context => Snapshot(context)
         );
@@ -280,11 +275,13 @@ public sealed class HeadlessApplication : IAsyncDisposable
         _context = new HeadlessContext(session, clock, _options.Viewport);
         void Wake() => _available.Set();
         session.WorkAvailable += Wake;
+        session.Composition.PresentationDemandAvailable += Wake;
         try
         {
             session.Theme.Appearance = _options.Appearance;
             if (_options.ImagePreparer is { } preparer)
                 session.Composition.ConfigureImages(new ImageCache(preparer, _options.ImageLimits));
+            session.Composition.SetPresentationAvailable(true);
             session.Start();
             PumpToRunning(session);
             Project();
@@ -303,6 +300,8 @@ public sealed class HeadlessApplication : IAsyncDisposable
             var disposed = new ObjectDisposedException(nameof(HeadlessApplication));
             while (_work.TryDequeue(out var item))
                 item.Fail(disposed);
+            if (!session.Composition.IsDisposed)
+                session.Composition.SetPresentationAvailable(false);
             _context?.DisposeScene();
             Shutdown(session);
         }
@@ -310,6 +309,7 @@ public sealed class HeadlessApplication : IAsyncDisposable
         {
             _context?.DisposeScene();
             session.WorkAvailable -= Wake;
+            session.Composition.PresentationDemandAvailable -= Wake;
         }
     }
 
@@ -403,13 +403,17 @@ public sealed class HeadlessApplication : IAsyncDisposable
     private void Project()
     {
         var context = _context!;
+        _ = context.Composition.SamplePresentation(
+            context.TimeProvider.GetElapsedTime(0, context.TimeProvider.GetTimestamp())
+        );
         for (var attempt = 0; attempt < InstallAttempts; attempt++)
         {
             context.Composition.Flush(_options.MaximumWorkItems);
-            var scene = SceneLayout.Project(
+            var scene = SceneLayout.ProjectFrame(
                 context.Composition,
                 context.Viewport,
                 _shaper!,
+                context.CurrentScene,
                 _options.MaximumWorkItems
             );
             bool accepted;
@@ -425,6 +429,7 @@ public sealed class HeadlessApplication : IAsyncDisposable
             if (accepted)
             {
                 context.SetScene(scene);
+                _ = context.Composition.TryAcknowledgePresentation(scene.Generation);
                 return;
             }
             scene.Dispose();

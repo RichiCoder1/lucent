@@ -36,7 +36,7 @@ public sealed class PresentationContracts
         var author = Style
             .Empty.Set(Value, 5)
             .When(VariantState.Hover | VariantState.Selected, Style.Empty.Set(Value, 6));
-        child.Present(theme, nested, author, Transition.For(VisualProperties.Opacity, 100));
+        child.Present(theme, nested, author);
         child.SetVariants(VariantState.Hover | VariantState.Selected | VariantState.Pressed);
         var resolved = child.Resolve(Value);
         Assert(
@@ -93,42 +93,6 @@ public sealed class PresentationContracts
         Assert(
             equal.Resolve(Value).Value == 3,
             "Equal-cardinality compound vector order was not deterministic."
-        );
-        var transitionRuns = 0;
-        var transition = composition.Root.Scope.Derived(
-            () =>
-            {
-                transitionRuns++;
-                return child.Resolve(VisualProperties.Opacity).Value;
-            },
-            "transition-slot"
-        );
-        Assert(
-            transition.Value == 1f && transitionRuns == 1,
-            "Transition reader did not resolve before a sample."
-        );
-        child.StartTransition(VisualProperties.Opacity, .4f);
-        Assert(
-            transition.Value == .4f && transitionRuns == 2,
-            "Transition start did not invalidate a prior derived reader."
-        );
-        composition.AdvanceTransitions(50);
-        Assert(
-            transition.Value == .4f && transitionRuns == 2,
-            "Non-expiring transition advance created work."
-        );
-        composition.AdvanceTransitions(50);
-        Assert(
-            transition.Value == 1f && transitionRuns == 3,
-            "Transition expiry did not invalidate a derived reader."
-        );
-        child.StartTransition(VisualProperties.Opacity, .5f);
-        theme.ReducedMotion = true;
-        Assert(
-            child.Resolve(VisualProperties.Opacity).SuppressedTransition?.Source
-                == "transition-suppressed"
-                && child.Resolve(VisualProperties.Opacity).Winner.Source == "default",
-            "Reduced motion did not suppress the active sample."
         );
         var appearanceRuns = 0;
         var appearance = composition.Root.Scope.Derived(
@@ -232,28 +196,12 @@ public sealed class PresentationContracts
                 author: Style.Empty.Set(Value, 1).Set(new Property<int>("value", 0), 2)
             )
         );
-        var transitions = composition.Child(composition.Root, "duplicate-transitions");
-        var beforeTransitions = graph.Dump();
-        Expect<ArgumentException>(() =>
-            transitions.Present(
-                theme,
-                transitions:
-                [
-                    Transition.For(VisualProperties.Opacity, 1),
-                    Transition.For(VisualProperties.Opacity, 2),
-                ]
-            )
-        );
-        Assert(
-            graph.Dump() == beforeTransitions,
-            "Duplicate transition validation created graph nodes."
-        );
         Expect<ArgumentException>(() =>
             new Property<int>("bad-transition", 0, transition: (TransitionKind)99)
         );
         Assert(
             TypographyProperties.TextColor.Transition == TransitionKind.Color
-                && VisualProperties.Background.Transition == TransitionKind.None
+                && VisualProperties.Background.Transition == TransitionKind.Brush
                 && VisualProperties.Opacity.Transition == TransitionKind.Opacity
                 && !VisualProperties.Opacity.Inherits
                 && VisualProperties.Opacity.DefaultValue == 1f,

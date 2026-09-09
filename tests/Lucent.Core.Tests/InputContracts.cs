@@ -71,6 +71,12 @@ public sealed class InputContracts
             calls.SequenceEqual(["child", "parent", "root"]),
             "Capture did not route moves through the original path."
         );
+        router.DispatchPointer(new(PointerCommandKind.Down, 1, 99, 99, PointerButton.Secondary));
+        router.DispatchPointer(new(PointerCommandKind.Up, 1, 99, 99, PointerButton.Secondary));
+        Assert(
+            lost == 0 && router.Dump().Contains("capture pointer=1", StringComparison.Ordinal),
+            "A different mouse button ended the active primary capture."
+        );
         router.DispatchPointer(new(PointerCommandKind.Up, 1, 99, 99));
         Assert(
             lost == 1 && !router.Dump().Contains("capture pointer=1", StringComparison.Ordinal),

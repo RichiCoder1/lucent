@@ -545,6 +545,17 @@ internal static class AssetCatalogGenerator
         try
         {
             var result = AssetImageMetadataReader.Read(format.Name, bytes, density, source);
+            if (format.Name == "Svg")
+                SkiaImagePreparer.ValidateSvgBuildAsset(
+                    bytes,
+                    new AssetImageMetadata(
+                        (float)result.Width,
+                        (float)result.Height,
+                        (float)result.Density,
+                        (float?)result.RelativeWidth,
+                        (float?)result.RelativeHeight
+                    )
+                );
             return new(
                 result.Width,
                 result.Height,
@@ -556,6 +567,13 @@ internal static class AssetCatalogGenerator
         catch (InvalidDataException exception)
         {
             throw new AssetGenerationException(4, exception.Message);
+        }
+        catch (ImageLoadException exception)
+        {
+            throw new AssetGenerationException(
+                4,
+                $"Asset '{source}' does not satisfy the {SkiaImagePreparer.SvgPolicyIdentity} policy: {exception.Message}"
+            );
         }
     }
 

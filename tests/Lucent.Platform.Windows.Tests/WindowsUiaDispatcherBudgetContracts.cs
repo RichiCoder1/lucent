@@ -6,6 +6,47 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed class WindowsUiaDispatcherBudgetContracts
 {
     [TestMethod]
+    public void OwnerShutdownCancelsQueuedRequestBeforeNativeDestruction()
+    {
+        if (!SDL.Init(SDL.InitFlags.Video))
+            throw new InvalidOperationException("SDL_Init(UIA shutdown): " + SDL.GetError());
+
+        try
+        {
+            var dispatcher = new WindowsUiaDispatcher(
+                TimeSpan.FromSeconds(5),
+                (ref SDL.Event _) => true
+            );
+            var actionRan = false;
+            var request = Task.Factory.StartNew(
+                () => dispatcher.TryInvoke("shutdown", () => actionRan = true, out _),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default
+            );
+            Assert.IsTrue(
+                SpinWait.SpinUntil(() => dispatcher.PendingCount == 1, 1_000),
+                "The queued UIA request did not reach the shutdown boundary."
+            );
+
+            var errors = new List<Exception>();
+            WindowsBootstrap.ShutdownUia(dispatcher, listener: null, provider: null, errors);
+
+            Assert.IsTrue(
+                request.Wait(250),
+                "Native destruction began while a queued UIA caller was still blocked."
+            );
+            Assert.AreEqual(0, errors.Count, "UIA shutdown unexpectedly reported an error.");
+            Assert.IsFalse(request.Result, "Shutdown executed queued UIA work.");
+            Assert.IsFalse(actionRan, "Shutdown ran a queued provider action after cancellation.");
+        }
+        finally
+        {
+            SDL.Quit();
+        }
+    }
+
+    [TestMethod]
     public void RefillableProducerYieldsAndRewakesTheOwnerLoop()
     {
         if (!SDL.Init(SDL.InitFlags.Video))

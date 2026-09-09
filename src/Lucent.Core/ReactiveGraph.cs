@@ -26,6 +26,13 @@ public sealed class ReactiveGraph
     private int _nextNodeId;
     private int _nextScopeId;
 
+    // Ordinary reactive writes invalidate retained paint plans. Presentation samples
+    // live outside this graph and therefore do not turn animation into layout work.
+    internal long MutationRevision { get; private set; }
+    internal bool HasPendingProjectionWork => HasPendingWork();
+
+    internal void RecordMutation() => MutationRevision = checked(MutationRevision + 1);
+
     /// <summary>Raised when worker-posted work changes from empty to nonempty.</summary>
     /// <remarks>Observers are notified independently. Their failures are posted for aggregation by <see cref="Drain()"/>; a new edge for those failures re-notifies only still-subscribed observers that succeeded.</remarks>
     public event Action? WorkAvailable;
@@ -333,6 +340,7 @@ public sealed class ReactiveGraph
 
     internal int Register(ReactiveNode node)
     {
+        RecordMutation();
         var id = ++_nextNodeId;
         _nodes.Add(id, node);
         return id;
@@ -345,7 +353,11 @@ public sealed class ReactiveGraph
         return id;
     }
 
-    internal void Unregister(ReactiveNode node) => _nodes.Remove(node.Id);
+    internal void Unregister(ReactiveNode node)
+    {
+        if (_nodes.Remove(node.Id))
+            RecordMutation();
+    }
 
     internal void Unregister(ReactiveScope scope) => _scopes.Remove(scope.Id);
 

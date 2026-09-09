@@ -13,6 +13,7 @@ internal sealed class WindowsInputAdapter : IDisposable
     private readonly TextInputTransport _textInput;
     private readonly WindowsCoordinateScale? _coordinateScaleOverride;
     private readonly Dictionary<int, (float X, float Y)> _pointers = [];
+    private readonly Dictionary<int, HashSet<PointerButton>> _pressedButtons = [];
     private bool _disposed;
     private bool _windowFocused = true;
     private bool _repaintRequested;
@@ -132,6 +133,7 @@ internal sealed class WindowsInputAdapter : IDisposable
         finally
         {
             _pointers.Clear();
+            _pressedButtons.Clear();
             _repaintRequested = true;
         }
         if (errors is { Count: > 0 })
@@ -178,7 +180,7 @@ internal sealed class WindowsInputAdapter : IDisposable
             kind,
             @event.X,
             @event.Y,
-            kind == PointerCommandKind.Down ? button : PointerButton.None,
+            kind is PointerCommandKind.Down or PointerCommandKind.Up ? button : PointerButton.None,
             MapModifiers(SDL.GetModState())
         );
     }
@@ -209,11 +211,29 @@ internal sealed class WindowsInputAdapter : IDisposable
         finally
         {
             if (kind == PointerCommandKind.Down)
+            {
                 _pointers[pointer] = (x, y);
+                if (!_pressedButtons.TryGetValue(pointer, out var buttons))
+                    _pressedButtons.Add(pointer, buttons = []);
+                buttons.Add(button);
+            }
             else if (kind == PointerCommandKind.Move && _pointers.ContainsKey(pointer))
                 _pointers[pointer] = (x, y);
-            else if (kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
+            else if (kind == PointerCommandKind.Up)
+            {
+                if (!_pressedButtons.TryGetValue(pointer, out var buttons))
+                    _pointers.Remove(pointer);
+                else if (buttons.Remove(button) && buttons.Count == 0)
+                {
+                    _pressedButtons.Remove(pointer);
+                    _pointers.Remove(pointer);
+                }
+            }
+            else if (kind == PointerCommandKind.Cancel)
+            {
+                _pressedButtons.Remove(pointer);
                 _pointers.Remove(pointer);
+            }
         }
         return true;
     }

@@ -29,6 +29,7 @@ internal sealed class WindowsWorkDispatcher : IDisposable
         _eventType = SDL.RegisterEvents(1);
         ValidateEventType(_eventType);
         composition.WorkAvailable += Wake;
+        composition.PresentationDemandAvailable += Wake;
     }
 
     internal WindowsWorkDispatcher(
@@ -44,6 +45,7 @@ internal sealed class WindowsWorkDispatcher : IDisposable
         _eventType = SDL.RegisterEvents(1);
         ValidateEventType(_eventType);
         session.WorkAvailable += Wake;
+        _composition.PresentationDemandAvailable += Wake;
     }
 
     internal uint EventType => _eventType;
@@ -57,6 +59,8 @@ internal sealed class WindowsWorkDispatcher : IDisposable
     }
 
     internal bool IsWakeEvent(SDL.Event @event) => @event.Type == _eventType;
+
+    internal void RequestWake() => Wake();
 
     /// <summary>Resets before draining so a post after the empty check gets a new wake.</summary>
     internal bool Process()
@@ -87,6 +91,7 @@ internal sealed class WindowsWorkDispatcher : IDisposable
                 _composition.WorkAvailable -= Wake;
             else
                 _session.WorkAvailable -= Wake;
+            _composition.PresentationDemandAvailable -= Wake;
         }
     }
 

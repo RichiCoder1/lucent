@@ -42,6 +42,24 @@ public sealed class SkiaImagePreparer : IImagePreparer
     /// <summary>Gets the fixed font-content identity used by this preparer's cache environment.</summary>
     public string SvgFontIdentity { get; }
 
+    /// <summary>
+    /// Applies the runtime Secure Static structural policy while generating an asset catalog.
+    /// Text is admitted here because applications may supply the one explicitly pinned SVG font
+    /// when they construct their runtime preparer; all source-independent limits remain identical.
+    /// </summary>
+    internal static void ValidateSvgBuildAsset(byte[] encoded, AssetImageMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(encoded);
+        ArgumentNullException.ThrowIfNull(metadata);
+        _ = SecureSvgDocument.Read(
+            encoded,
+            metadata,
+            hasFont: true,
+            static _ => EmptyReservation.Instance,
+            CancellationToken.None
+        );
+    }
+
     /// <summary>Shares one static vector preparation across output sizes; raster renditions remain size-specific.</summary>
     public ImageRendition GetCacheRendition(ImageSource source, ImageRendition requested) =>
         source.PackagedAsset?.Format == AssetFormat.Svg ? VectorRendition : requested;
@@ -53,6 +71,13 @@ public sealed class SkiaImagePreparer : IImagePreparer
     // additional intermediate-sized allowance so a large source cannot bypass the cache-wide
     // temporary budget merely because the managed destination is small.
     private const long CodecScratchAllowance = 256 * 1024;
+
+    private sealed class EmptyReservation : IDisposable
+    {
+        internal static EmptyReservation Instance { get; } = new();
+
+        public void Dispose() { }
+    }
 
     /// <summary>Prepares one packaged raster source without accessing the render owner.</summary>
     public ValueTask<PreparedImage> PrepareAsync(

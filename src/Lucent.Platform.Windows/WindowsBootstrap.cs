@@ -187,6 +187,7 @@ public static class WindowsBootstrap
             var scheduler = new WindowsFrameScheduler();
             var caretBlink = new WindowsCaretBlink(WindowsCaretBlink.GetCaretBlinkTime());
             static long NowMilliseconds() => (long)Stopwatch.GetElapsedTime(0).TotalMilliseconds;
+            static TimeSpan NowMonotonic() => Stopwatch.GetElapsedTime(0);
             input = new WindowsInputAdapter(composition, window, clipboard);
             popupRequested = request =>
             {
@@ -312,7 +313,8 @@ public static class WindowsBootstrap
                     request,
                     uiaDispatcher,
                     clipboard,
-                    cursor
+                    cursor,
+                    workDispatcher.RequestWake
                 );
                 popupInputGate.Opened();
             }
@@ -331,7 +333,11 @@ public static class WindowsBootstrap
                     input.ProcessClipboardRequests();
                     var liveViewport = GetViewport(window, sdlRenderer);
                     if (!liveViewport.IsRenderable)
+                    {
+                        composition.SetPresentationAvailable(false);
                         return;
+                    }
+                    composition.SetPresentationAvailable(true);
                     var liveScene = ProjectAndInstall(
                         composition,
                         new(
@@ -339,7 +345,9 @@ public static class WindowsBootstrap
                             liveViewport.LogicalHeight,
                             liveViewport.Scale
                         ),
-                        sceneRenderer
+                        sceneRenderer,
+                        lastScene,
+                        NowMonotonic()
                     );
                     ReplaceScene(ref lastScene, liveScene);
                     uiaProvider.Refresh(liveScene);
@@ -364,6 +372,7 @@ public static class WindowsBootstrap
                         sceneRenderer,
                         caretBlink.Visible
                     );
+                    _ = composition.TryAcknowledgePresentation(liveScene.Generation);
                     caretBlink.Presented(NowMilliseconds());
                 }
             );
@@ -378,8 +387,20 @@ public static class WindowsBootstrap
                         ? caretBlink.WaitMilliseconds(NowMilliseconds())
                         : -1;
                     var safeIntentTimeout = popup?.SafeIntentWaitMilliseconds() ?? -1;
-                    if (safeIntentTimeout >= 0 && (timeout < 0 || safeIntentTimeout < timeout))
-                        timeout = safeIntentTimeout;
+                    timeout = WindowsPresentationTiming.Earlier(timeout, safeIntentTimeout);
+                    timeout = WindowsPresentationTiming.Earlier(
+                        timeout,
+                        scheduler.IsVisible
+                            ? WindowsPresentationTiming.WaitMilliseconds(
+                                composition.PresentationDemand,
+                                NowMonotonic()
+                            )
+                            : -1
+                    );
+                    timeout = WindowsPresentationTiming.Earlier(
+                        timeout,
+                        popup?.PresentationWaitMilliseconds(NowMonotonic()) ?? -1
+                    );
                     SDL.Event @event;
                     bool received;
                     liveResize.EnterPump();
@@ -414,6 +435,7 @@ public static class WindowsBootstrap
                 while (PollEvent(out var @event))
                     refreshSettings |= ObserveHostEvent(@event);
                 _ = popup?.Tick();
+                _ = popup?.TickPresentation(NowMonotonic());
                 liveResize.ThrowIfFailed();
                 SynchronizePopup();
 
@@ -459,6 +481,15 @@ public static class WindowsBootstrap
                 }
 
                 var viewport = GetViewport(window, sdlRenderer);
+                composition.SetPresentationAvailable(viewport.IsRenderable && scheduler.IsVisible);
+                if (
+                    scheduler.IsVisible
+                    && WindowsPresentationTiming.WaitMilliseconds(
+                        composition.PresentationDemand,
+                        NowMonotonic()
+                    ) == 0
+                )
+                    scheduler.Request();
                 if (windowOptions is not null && configuredWindowScale != viewport.Scale)
                 {
                     configuredWindowScale = viewport.Scale;
@@ -486,7 +517,9 @@ public static class WindowsBootstrap
                     : ProjectAndInstall(
                         composition,
                         new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
-                        sceneRenderer
+                        sceneRenderer,
+                        lastScene,
+                        NowMonotonic()
                     );
                 if (!caretOnly)
                 {
@@ -509,6 +542,8 @@ public static class WindowsBootstrap
                 var projected = Stopwatch.GetTimestamp();
                 caretBlink.BeforePresent(NowMilliseconds());
                 var phase = presenter.Present(scene, viewport, sceneRenderer, caretBlink.Visible);
+                if (!caretOnly)
+                    _ = composition.TryAcknowledgePresentation(scene.Generation);
                 caretBlink.Presented(NowMilliseconds());
                 var timing = FrameTiming.FromTimestamps(
                     started,
@@ -551,6 +586,8 @@ public static class WindowsBootstrap
         }
         finally
         {
+            if (!composition.IsDisposed)
+                Capture(errors, () => composition.SetPresentationAvailable(false));
             Capture(errors, () => liveResize?.Dispose());
             if (popupRequested is not null && contextMenuRouter is not null)
             {
@@ -559,6 +596,7 @@ public static class WindowsBootstrap
                 Capture(errors, () => router.ContextMenuRequested -= handler);
             }
             Capture(errors, () => pendingPopup?.Dispose());
+            ShutdownUia(uiaDispatcher, uiaListener, uiaProvider, errors);
             Capture(errors, () => popup?.Dispose());
             Capture(errors, () => input?.Dispose());
             Capture(errors, () => lastScene?.Dispose());
@@ -573,8 +611,6 @@ public static class WindowsBootstrap
                 Capture(errors, () => SDL.DestroyRenderer(sdlRenderer));
             if (window != 0)
                 Capture(errors, () => SDL.DestroyWindow(window));
-            Capture(errors, () => uiaListener?.Dispose());
-            Capture(errors, () => uiaProvider?.Dispose());
             if (performanceDiagnostics is not null)
                 Capture(
                     errors,
@@ -587,7 +623,6 @@ public static class WindowsBootstrap
                         )
                 );
             Capture(errors, () => performanceDiagnostics?.Dispose());
-            Capture(errors, () => uiaDispatcher?.Dispose());
             Capture(errors, SDL.Quit);
         }
 
@@ -704,6 +739,20 @@ public static class WindowsBootstrap
         }
     }
 
+    /// <summary>Cancels queued UIA calls, removes delivery, then disconnects providers before HWND destruction.</summary>
+    internal static void ShutdownUia(
+        WindowsUiaDispatcher? dispatcher,
+        WindowsUiaListener? listener,
+        WindowsUiaProvider? provider,
+        List<Exception> errors
+    )
+    {
+        ArgumentNullException.ThrowIfNull(errors);
+        Capture(errors, () => dispatcher?.Dispose());
+        Capture(errors, () => listener?.Dispose());
+        Capture(errors, () => provider?.Dispose());
+    }
+
     private static void ThrowAll(List<Exception> errors)
     {
         if (errors.Count == 0)
@@ -772,15 +821,19 @@ public static class WindowsBootstrap
     internal static RetainedScene ProjectAndInstall(
         Composition composition,
         LayoutViewport viewport,
-        ITextShaper shaper
+        ITextShaper shaper,
+        RetainedScene? previousScene = null,
+        TimeSpan? monotonicTimestamp = null
     )
     {
         ArgumentNullException.ThrowIfNull(composition);
         ArgumentNullException.ThrowIfNull(shaper);
+        var timestamp = monotonicTimestamp ?? Stopwatch.GetElapsedTime(0);
+        _ = composition.SamplePresentation(timestamp);
         for (var attempt = 0; attempt < InstallAttempts; attempt++)
         {
             composition.Flush();
-            var scene = SceneLayout.Project(composition, viewport, shaper);
+            var scene = SceneLayout.ProjectFrame(composition, viewport, shaper, previousScene);
             bool accepted;
             try
             {

@@ -24,6 +24,18 @@ _Avoid_: Trace, log bundle, telemetry export
 An immutable set of typed assignments that determines an element's arrangement and visual representation. It does not own interaction, semantics, lifecycle, or content structure.
 _Avoid_: CSS rule, property bag, modifier
 
+**Target value**:
+The authoritative winner of a typed property after ordinary style and control resolution. It expresses current intent independently of any visual transition.
+_Avoid_: Animated value, sampled target
+
+**Presented value**:
+The value used to draw a property at a particular frame time. It can temporarily differ from its target without delaying interaction or changing application state.
+_Avoid_: Override, logical value
+
+**Motion track**:
+One mounted element property's finite progression from a presented value toward its target. It belongs to that mount rather than to a reusable style or recipe.
+_Avoid_: Animation timer, style state
+
 **Layout container**:
 A retained owner of child content whose arrangement is selected through style. Changing its arrangement does not change the ownership of those children.
 _Avoid_: Responsive branch, layout instance

@@ -5,7 +5,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>Projects a retained composition into immutable layout, scene, and input data.</summary>
-public static class SceneLayout
+public static partial class SceneLayout
 {
     private const int MaxStructuralDiscoveryRounds = 8;
 
@@ -181,6 +181,7 @@ public static class SceneLayout
                 );
         }
         EnsureWindowBreakpointElementsUnchanged(composition, windowBreakpoints);
+        composition.CommitPresentationTargets();
         var projected = composition.CaptureInputProjection(() =>
         {
             var elements = composition.Elements().ToArray();
@@ -257,7 +258,7 @@ public static class SceneLayout
                 )
                 .ToArray();
             var collapsed = elements.Where(IsCollapsed).Select(element => element.Id).ToArray();
-            return (Boxes: boxes, Nodes: nodes, Input: input, Collapsed: collapsed);
+            return (Boxes: boxes, Nodes: nodes, Input: input, Collapsed: collapsed, Cache: cache);
         });
         var finalById = projected.Boxes.ToDictionary(
             box => box.Identity.ElementId,
@@ -305,7 +306,7 @@ public static class SceneLayout
             );
         }
         var nodes = ResolveImages(InsertScrollBars(projected.Nodes, scrollBars), viewport.Scale);
-        return new RetainedScene(
+        var scene = new RetainedScene(
             composition.NextSceneGeneration(),
             viewport,
             projected.Boxes,
@@ -315,6 +316,14 @@ public static class SceneLayout
             projected.Collapsed,
             scrollBars
         );
+        scene.PaintSnapshot = new PaintSnapshot(
+            composition,
+            shaper,
+            projected.Cache.PaintPlans.GetValueOrDefault(composition.Root.Id),
+            viewport
+        );
+        composition.CapturePresentationFrame(scene.Generation);
+        return scene;
     }
 
     private static IReadOnlyList<SceneNode> ResolveImages(
@@ -1015,15 +1024,6 @@ public static class SceneLayout
             return [];
         var identity = new ElementIdentity(element.Composition.Epoch, element.Id);
         var result = new List<SceneNode>();
-        if (style.Background.Color is not { A: 0 })
-            result.Add(
-                new PaintSceneNode(
-                    new(identity, SceneNodeKind.Paint),
-                    bounds,
-                    style.Background,
-                    style.CornerRadius
-                )
-            );
         if (element.Image is { } image)
             result.Add(
                 new ImageSlotSceneNode(
@@ -1033,7 +1033,12 @@ public static class SceneLayout
                     element.ResolveValue(ImageProperties.Fit),
                     element.ResolveValue(ImageProperties.ColorMode),
                     element.ResolveValue(ImageProperties.ImageZoom),
-                    element.ResolveValue(TypographyProperties.TextColor)
+                    cache.CapturePaint
+                        ? element.Composition.ReadPresentedValue(
+                            element,
+                            TypographyProperties.TextColor
+                        )
+                        : element.ResolveValue(TypographyProperties.TextColor)
                 )
             );
         if (text is not null)
@@ -1166,41 +1171,29 @@ public static class SceneLayout
                 )
             );
         }
-        result.AddRange(childNodes);
-        if (style.Clip)
-        {
-            var clipped = new List<SceneNode>();
-            if (
-                result.FirstOrDefault()
-                    is PaintSceneNode { Identity.Kind: SceneNodeKind.Paint } background
-                && background.Identity.Element == identity
-            )
-            {
-                clipped.Add(background);
-                result.RemoveAt(0);
-            }
-            clipped.Add(
-                new ClipSceneNode(
-                    new(identity, SceneNodeKind.Clip),
-                    inner,
-                    result,
-                    InnerCornerRadius(style.CornerRadius, bounds, inner)
-                )
-            );
-            result = clipped;
-        }
-        AddDecorations(result, element, identity, bounds, viewport.Scale, cache);
-        return style.Opacity == 1 || result.Count == 0
-            ? result
-            :
-            [
-                new OpacitySceneNode(
-                    new(identity, SceneNodeKind.Opacity),
-                    VisibleBounds(result, viewport),
-                    style.Opacity,
-                    result
-                ),
-            ];
+        var decorations = new List<SceneNode>();
+        AddDecorations(decorations, element, identity, bounds, viewport.Scale, cache);
+        var plan = new ElementPaintPlan(
+            identity,
+            bounds,
+            inner,
+            style.CornerRadius,
+            style.Clip,
+            result.ToArray(),
+            decorations.ToArray(),
+            cache.CapturePaint
+                ? element
+                    .Children.Where(child => cache.PaintPlans.ContainsKey(child.Id))
+                    .Select(child => cache.PaintPlans[child.Id])
+                    .ToArray()
+                : []
+        );
+        if (cache.CapturePaint)
+            cache.PaintPlans[element.Id] = plan;
+        var paint = cache.CapturePaint
+            ? ReadPresentedPaint(element)
+            : (style.Background, style.Opacity, style.TextColor);
+        return PaintElement(plan, paint, childNodes, viewport);
     }
 
     private static (float X, float Y) LeafTextOffset(
@@ -2168,6 +2161,8 @@ public static class SceneLayout
 
     private sealed class ProjectionCache
     {
+        internal Dictionary<long, ElementPaintPlan> PaintPlans { get; } = [];
+        internal bool CapturePaint => _resolvedStyles is not null;
         private readonly Dictionary<long, Values> _styles = [];
         private readonly IReadOnlyDictionary<long, Values>? _resolvedStyles;
         private readonly Dictionary<long, DecorationValues> _decorations = [];

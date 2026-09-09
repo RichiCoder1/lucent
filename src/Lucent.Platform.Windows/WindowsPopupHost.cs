@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
@@ -43,6 +44,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private readonly WindowsInputAdapter _input;
     private readonly WindowsUiaProvider _uiaProvider;
     private readonly WindowsUiaListener _uiaListener;
+    private readonly Action _wakePresentation;
     private nint _window;
     private nint _sdlRenderer;
     private RetainedScene? _scene;
@@ -65,7 +67,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
             clipboard,
             cursor,
             parent: null,
-            ownsRequest: true
+            ownsRequest: true,
+            wakePresentation: null
         ) { }
 
     internal WindowsPopupHost(
@@ -76,7 +79,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
         WindowsUiaDispatcher uiaDispatcher,
         WindowsClipboard clipboard,
         WindowsCursor cursor,
-        WindowsPopupHost? parent
+        WindowsPopupHost? parent,
+        Action? wakePresentation = null
     )
         : this(
             rootOwnerWindow,
@@ -87,7 +91,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
             clipboard,
             cursor,
             parent,
-            ownsRequest: false
+            ownsRequest: false,
+            wakePresentation
         ) { }
 
     private WindowsPopupHost(
@@ -99,7 +104,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
         WindowsClipboard clipboard,
         WindowsCursor cursor,
         WindowsPopupHost? parent,
-        bool ownsRequest
+        bool ownsRequest,
+        Action? wakePresentation
     )
     {
         ArgumentOutOfRangeException.ThrowIfZero(rootOwnerWindow);
@@ -119,6 +125,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
         _cursor = cursor;
         _composition = level?.Composition ?? request.CreateComposition();
         _sceneRenderer = new SkiaSceneRenderer();
+        _wakePresentation = wakePresentation ?? (static () => { });
         _drawShadow = canvas => WindowsPopupShadow.Draw(canvas, _menuBounds, _cornerRadius, _scale);
 
         nint window = 0;
@@ -161,6 +168,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _input = input;
             _uiaProvider = provider;
             _uiaListener = listener;
+            _composition.PresentationDemandAvailable += _wakePresentation;
             Refresh();
             if (level is null || level.Depth == 0 || level.FocusFirst)
                 FocusFirstItem();
@@ -173,16 +181,19 @@ internal sealed partial class WindowsPopupHost : IDisposable
         catch (Exception error)
         {
             List<Exception> cleanup = [];
+            Capture(cleanup, () => _composition.PresentationDemandAvailable -= _wakePresentation);
+            if (!_composition.IsDisposed)
+                Capture(cleanup, () => _composition.SetPresentationAvailable(false));
             Capture(cleanup, () => input?.Dispose());
             Capture(cleanup, () => _scene?.Dispose());
             Capture(cleanup, () => presenter?.Dispose());
             Capture(cleanup, _sceneRenderer.Dispose);
             if (renderer != 0)
                 Capture(cleanup, () => SDL.DestroyRenderer(renderer));
-            if (window != 0)
-                Capture(cleanup, () => SDL.DestroyWindow(window));
             Capture(cleanup, () => listener?.Dispose());
             Capture(cleanup, () => provider?.Dispose());
+            if (window != 0)
+                Capture(cleanup, () => SDL.DestroyWindow(window));
             if (_ownsRequest)
                 Capture(cleanup, request.Dispose);
             if (cleanup.Count == 0)
@@ -205,6 +216,23 @@ internal sealed partial class WindowsPopupHost : IDisposable
     internal bool IsDisposed => _disposed;
     internal bool OpensLeft => _opensLeft;
 
+    internal int PresentationWaitMilliseconds(TimeSpan now)
+    {
+        CheckThread();
+        return _disposed || _composition.IsDisposed
+            ? -1
+            : WindowsPresentationTiming.WaitMilliseconds(_composition.PresentationDemand, now);
+    }
+
+    internal bool TickPresentation(TimeSpan now)
+    {
+        CheckThread();
+        if (PresentationWaitMilliseconds(now) != 0)
+            return false;
+        Refresh(now);
+        return true;
+    }
+
     internal static void EnsureHostPadding(Composition composition)
     {
         ArgumentNullException.ThrowIfNull(composition);
@@ -224,6 +252,17 @@ internal sealed partial class WindowsPopupHost : IDisposable
         if (_disposed || !TargetsPopup(@event, WindowId, _ownerWindowId))
             return false;
         var type = (SDL.EventType)@event.Type;
+        if (type == SDL.EventType.WindowMinimized)
+        {
+            _composition.SetPresentationAvailable(false);
+            return true;
+        }
+        if (type == SDL.EventType.WindowRestored)
+        {
+            _composition.SetPresentationAvailable(true);
+            Refresh();
+            return true;
+        }
         if (_presenter.HandleRendererEvent(type))
         {
             Refresh();
@@ -284,18 +323,26 @@ internal sealed partial class WindowsPopupHost : IDisposable
         Refresh();
     }
 
-    internal void Refresh()
+    internal void Refresh() => Refresh(Stopwatch.GetElapsedTime(0));
+
+    private void Refresh(TimeSpan now)
     {
         CheckThread();
         if (_disposed || _request.IsDismissed || _composition.IsDisposed)
             return;
         var viewport = Viewport(_window, _sdlRenderer);
         if (!viewport.IsRenderable)
+        {
+            _composition.SetPresentationAvailable(false);
             return;
+        }
+        _composition.SetPresentationAvailable(true);
         var scene = WindowsBootstrap.ProjectAndInstall(
             _composition,
             new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
-            _sceneRenderer
+            _sceneRenderer,
+            _scene,
+            now
         );
         var previous = _scene;
         try
@@ -317,6 +364,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
                     ? null
                     : _drawShadow
             );
+            _ = _composition.TryAcknowledgePresentation(scene.Generation);
             _ = _cursor.Activate(
                 _input.PointerPosition is { } point
                     ? _composition.Input.CursorAt(point.X, point.Y)
@@ -380,6 +428,11 @@ internal sealed partial class WindowsPopupHost : IDisposable
             return;
         _disposed = true;
         var errors = new List<Exception>();
+        if (!_composition.IsDisposed)
+        {
+            Capture(errors, () => _composition.PresentationDemandAvailable -= _wakePresentation);
+            Capture(errors, () => _composition.SetPresentationAvailable(false));
+        }
         Capture(errors, _input.Dispose);
         Capture(
             errors,
@@ -396,13 +449,13 @@ internal sealed partial class WindowsPopupHost : IDisposable
             Capture(errors, () => SDL.DestroyRenderer(_sdlRenderer));
             _sdlRenderer = 0;
         }
+        Capture(errors, _uiaListener.Dispose);
+        Capture(errors, _uiaProvider.Dispose);
         if (_window != 0)
         {
             Capture(errors, () => SDL.DestroyWindow(_window));
             _window = 0;
         }
-        Capture(errors, _uiaListener.Dispose);
-        Capture(errors, _uiaProvider.Dispose);
         if (_ownsRequest)
         {
             Capture(

@@ -138,6 +138,7 @@ public abstract class ReactiveNode : IDisposable
     /// <summary>Invalidates dependents after this node changes.</summary>
     protected void Changed()
     {
+        Graph.RecordMutation();
         Version++;
         NotifyDependents(definite: true);
     }

@@ -32,6 +32,27 @@ public sealed class Style
     public Style BindValue<T>(Property<T> property, Func<StyleValue<T>> read) =>
         Add(new ValueBindingAssignment<T>(property, read));
 
+    /// <summary>Returns a new style with an implicit motion policy for one eligible property.</summary>
+    public Style Transition<T>(Property<T> property, Motion motion)
+    {
+        ArgumentNullException.ThrowIfNull(property);
+        if (
+            !ReferenceEquals(property, VisualProperties.Background)
+            && !ReferenceEquals(property, VisualProperties.Opacity)
+            && !ReferenceEquals(property, TypographyProperties.TextColor)
+        )
+            throw new ArgumentException(
+                "The property does not support presentation motion.",
+                nameof(property)
+            );
+        if (_nodes.OfType<MotionNode>().Any(node => ReferenceEquals(node.Property, property)))
+            throw new ArgumentException(
+                "A style body can declare one unconditional motion policy per property.",
+                nameof(property)
+            );
+        return new([.. _nodes, new MotionNode(property, motion)]);
+    }
+
     /// <summary>Returns a new style with the assignments from <paramref name="style"/> appended.</summary>
     public Style With(Style? style) => style is null ? this : new([.. _nodes, .. style._nodes]);
 
@@ -74,6 +95,42 @@ public sealed class Style
             };
     }
 
+    internal IEnumerable<FlatMotion> FlattenMotion()
+    {
+        var ordinal = 0;
+        foreach (var policy in FlattenMotion(VariantState.None, []))
+            yield return policy with
+            {
+                Ordinal = ordinal++,
+            };
+    }
+
+    private IEnumerable<FlatMotion> FlattenMotion(
+        VariantState condition,
+        StyleCondition[] conditions
+    )
+    {
+        foreach (var node in _nodes)
+            if (node is MotionNode motion)
+                yield return new(motion.Property, motion.Motion, condition, conditions, [], 0);
+            else if (node is VariantNode variant)
+                foreach (
+                    var policy in variant.Style.FlattenMotion(
+                        condition | variant.Condition,
+                        conditions
+                    )
+                )
+                    yield return policy;
+            else if (node is ConditionNode conditional)
+                foreach (
+                    var policy in conditional.Style.FlattenMotion(
+                        condition,
+                        [.. conditions, new StyleCondition(conditional.Condition, condition)]
+                    )
+                )
+                    yield return policy;
+    }
+
     private IEnumerable<FlatAssignment> Flatten(VariantState condition, StyleCondition[] conditions)
     {
         foreach (var node in _nodes)
@@ -109,6 +166,8 @@ public sealed class Style
 
     private sealed record AssignmentNode(IAssignment Assignment) : Node;
 
+    private sealed record MotionNode(IProperty Property, Motion Motion) : Node;
+
     private sealed record VariantNode(VariantState Condition, Style Style) : Node;
 
     private sealed record ConditionNode(Func<bool> Condition, Style Style) : Node;
@@ -118,35 +177,6 @@ internal sealed class StyleCondition(Func<bool> read, VariantState variants)
 {
     internal Func<bool> Read { get; } = read;
     internal VariantState Variants { get; } = variants;
-}
-
-/// <summary>Specifies how long an eligible property takes to change between values.</summary>
-public sealed class Transition
-{
-    private Transition(IProperty property, int durationMilliseconds)
-    {
-        Property = property;
-        DurationMilliseconds = durationMilliseconds;
-    }
-
-    internal IProperty Property { get; }
-
-    /// <summary>Gets the transition duration in milliseconds.</summary>
-    public int DurationMilliseconds { get; }
-
-    /// <summary>Creates a transition for a property that supports animation; duration must be from 1 through 500 milliseconds.</summary>
-    public static Transition For<T>(Property<T> property, int durationMilliseconds)
-    {
-        ArgumentNullException.ThrowIfNull(property);
-        if (!Enum.IsDefined(property.Transition) || property.Transition == TransitionKind.None)
-            throw new ArgumentException(
-                "Only fixed transition channels are eligible.",
-                nameof(property)
-            );
-        if (durationMilliseconds is < 1 or > 500)
-            throw new ArgumentOutOfRangeException(nameof(durationMilliseconds));
-        return new(property, durationMilliseconds);
-    }
 }
 
 /// <summary>Resolved presentation value with the winning and overridden style assignments.</summary>
@@ -290,6 +320,15 @@ internal sealed class BoundAssignment<T> : IAssignment
 
 internal readonly record struct FlatAssignment(
     IAssignment Assignment,
+    VariantState Condition,
+    StyleCondition[] Conditions,
+    Func<bool>[] MountedConditions,
+    int Ordinal
+);
+
+internal readonly record struct FlatMotion(
+    IProperty Property,
+    Motion Motion,
     VariantState Condition,
     StyleCondition[] Conditions,
     Func<bool>[] MountedConditions,

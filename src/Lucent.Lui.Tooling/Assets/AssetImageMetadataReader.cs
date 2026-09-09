@@ -74,8 +74,6 @@ internal static class AssetImageMetadataReader
         var height = BinaryPrimitives.ReadUInt32BigEndian(bytes.Slice(20, 4));
         if (width is 0 or > int.MaxValue || height is 0 or > int.MaxValue)
             throw new InvalidDataException("PNG dimensions must be positive 31-bit integers.");
-        var orientation = 1;
-        var hasExif = false;
         var offset = 33;
         while (offset < bytes.Length)
         {
@@ -86,16 +84,11 @@ internal static class AssetImageMetadataReader
                 throw new InvalidDataException("PNG chunk extends beyond its content.");
             if (bytes.Slice(offset + 4, 4).SequenceEqual("IEND"u8))
                 break;
-            if (bytes.Slice(offset + 4, 4).SequenceEqual("eXIf"u8))
-            {
-                if (hasExif)
-                    throw new InvalidDataException("PNG contains more than one EXIF chunk.");
-                orientation = ReadOrientation(bytes.Slice(offset + 8, (int)length));
-                hasExif = true;
-            }
             offset += (int)length + 12;
         }
-        return orientation >= 5 ? new(height, width, 1) : new(width, height, 1);
+        // The pinned Skia codec accepts PNG eXIf chunks but reports TopLeft origin. Keep
+        // generated logical dimensions aligned with the pixels the runtime actually presents.
+        return new(width, height, 1);
     }
 
     private static AssetImageMetadataResult ReadJpeg(ReadOnlySpan<byte> bytes)
@@ -104,6 +97,7 @@ internal static class AssetImageMetadataReader
             throw new InvalidDataException("Expected a JPEG start marker.");
         var offset = 2;
         var orientation = 1;
+        var hasExif = false;
         int width = 0,
             height = 0;
         while (offset < bytes.Length)
@@ -125,8 +119,11 @@ internal static class AssetImageMetadataReader
             if (length < 2 || length > bytes.Length - offset)
                 throw new InvalidDataException("JPEG segment extends beyond its content.");
             var segment = bytes.Slice(offset + 2, length - 2);
-            if (marker == 0xe1 && segment.StartsWith("Exif\0\0"u8))
+            if (marker == 0xe1 && !hasExif && segment.StartsWith("Exif\0\0"u8))
+            {
                 orientation = ReadOrientation(segment[6..]);
+                hasExif = true;
+            }
             if (
                 marker
                 is >= 0xc0

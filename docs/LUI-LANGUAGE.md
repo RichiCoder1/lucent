@@ -130,6 +130,8 @@ Before its one markup root, a component can declare typed initialized fields, or
 | `[Once] string draft = model.Title;` | Writable state initialized once for each mount. |
 | `readonly string initial = model.Title;` | A read-only initial snapshot; `readonly` does not make a referenced object deeply immutable. |
 
+An unmarked nonconstant initializer with no direct component-state reads is still a derived value. That static result does not prove that it is constant: runtime reads, including reads made by helper methods called by the initializer, determine whether it updates after mount. Hover text calls out that no direct reads were identified; literal and `readonly` inference rules remain unchanged.
+
 Ordinary locals inside methods and setup are not reactive declarations. Methods assign writable component values using ordinary C# assignment. Derived/snapshot assignments produce authored diagnostics. Task-valued inferred derived declarations require an explicit async-state facility; setup itself cannot await. Lucent `AsyncValue<T>` remains the explicit asynchronous resource contract.
 
 The compiler uses `ComponentRecipe.Defer` and generated private implementation code. Recipe creation captures its ordinary inputs; mounting allocates its state. Initializers run in declaration order, derived computations are lazy, and setup runs before authored children mount. Setup is not an after-layout callback. Independently mounting the same recipe creates independent state without an extra layout or accessibility element.
@@ -227,6 +229,8 @@ foreach (var issue in state.Issues) keyed by issue.Id {
 
 These examples assume the receiving component declares a live reader parameter, such as `Func<Issue> issue`. A structural local still has the authored record's type: `issue.Title` is ordinary member access. Body reads lower through a scope-owned current-item reader, so `() => issue.Title` reads the latest same-key record without remounting the row. An attribute such as `issue={issue}` becomes a live reader when the receiving parameter accepts a compatible `Func<Issue>`; a plain `Issue` parameter remains a construction-time value. Styles and live component inputs retain their existing dependency-tracking rules.
 
+This snapshot/live choice also applies to retained `ForEach` and pattern locals passed to child and style APIs. A scalar `item.Title` argument is an intentional construction-time snapshot; a compatible `Func<string>` argument such as `() => item.Title` is the live callback form. Choose the receiving overload deliberately so a snapshot does not discard an update that the author expected to observe.
+
 Pattern locals carried into a retained conditional body use the same current-item rule. A compatible same-branch update replaces the matched payload while preserving the mounted root and local state. Branch changes mount a fresh root. The compiler must reject unsupported pattern-local capture shapes instead of silently retaining a stale value.
 
 In handwritten C#, retained collection factories receive `CurrentItem<T>` and read `.Value`; source enumeration and key selection still receive `T`. `VirtualizedList` row factories use this same reader. The capability is read-only, bound to the mounted entry's scope, and throws after disposal. A retained update installs the exact replacement record even if value equality considers it equal to the prior record. Virtualization eviction ends the mounted entry; later re-entry creates a new scope from the latest accepted source.
@@ -281,20 +285,48 @@ style Pane(WindowBreakpoints breakpoints, ViewState view) {
 
 `ViewState` and `AppBreakpoints` above are application types. `style Name { ... }` remains a static style value; a declaration with parentheses becomes a typed factory method. Parameters are construction-time captures, so pass a state object or live reader when its contents must change. Passing an already evaluated scalar does not turn that scalar into a live source. Each application of a factory-produced style owns its bindings and releases them with the element. Style factories themselves do not create subscriptions.
 
+The same rule applies when a style factory is called from a retained loop or conditional: pass a scalar structural-local member when a mount-time snapshot is intended, and pass a `Func<T>` callback when the factory API is designed to re-read the current value. Inline style expressions remain the live binding seam.
+
 `when (expression)` requires a Boolean C# expression and lowers to `Style.When(Func<bool>, Style)`. Bare `when Hover` and other interaction variants retain their existing meaning. Nested groups combine their conditions; inactive assignments stop observing their value expressions. Conditions filter eligibility without adding a new specificity tier: ordinary component/author, interaction variant and source-order precedence remains in effect. A false group reveals the previous eligible value instead of retaining its last active value. Conditions are memoized per applied group; unchanged Boolean results do not rebuild styles or remount content.
 
 The grammar, formatter and source maps preserve parameter declarations, references and nested condition expressions. Ordinary C# diagnostics, hover and completion apply at the corresponding authored spans. Named styles remain document-local; public style exports are still deferred.
 
 When a style factory receives a changing scalar component value, the compiler reports `LUI2016` instead of silently freezing that value at construction time. Use a compatible `Func<T>` input for a live reader, or make the snapshot explicit with a `readonly` declaration or `[Once]` state when that is the intended lifetime. `readonly` is a per-mount initial snapshot and remains read-only; `[Once]` is a writable per-mount copy. Mutable collection initializers inferred as derived state produce warning `LUI2017`; choose `[Once]` when the mounted component owns the collection and its mutations must be observable through ordinary assignments.
 
+### Declarative transitions
+
+Transition policies are style members and use the same named, parameterized, inline, nested-variant, and reactive-`when` bodies as ordinary assignments:
+
+```lui
+using Lucent.Core;
+
+style GentleFeedback {
+    transition Background: Motion.Quick;
+    transition Opacity: Motion.Duration(120, Easing.EaseOut);
+
+    when Pressed {
+        transition Background: Motion.None;
+    }
+}
+
+<Button style={GentleFeedback with {
+    transition TextColor: Motion.Duration(240, Easing.Linear);
+}} onInvoke={save}>Save</Button>
+```
+
+The compiler lowers a policy to the typed `Style.Transition(Property<T>, Motion)` API. Policies are immutable construction-time values; a direct component-state read in a policy is diagnosed as a captured reactive snapshot. Use a reactive `when (expression)` group to choose between construction-time policies. `Motion.None` disables interpolation, `Motion.Quick` is the 120 ms ease-out preset, and `Motion.Duration` accepts an integer duration from 0 through 60,000 milliseconds with `Easing.Linear` or `Easing.EaseOut`.
+
+The first authoring surface supports only the exact property identities `VisualProperties.Background` (`Brush`), `VisualProperties.Opacity` (`float`), and `TypographyProperties.TextColor` (`Color`). An unknown or custom `Property<T>` is diagnosed unless a later catalog explicitly marks that identity as eligible. A style body may declare one unconditional policy per property; variant bodies may override the policy. Invalid duration constants and policies with the wrong type are reported on their authored expression spans. Completion, hover, definition, rename, references, semantic tokens, document symbols, and formatting use the same resolved property symbols as ordinary style assignments.
+
 ### Authoring conventions
 
 - End every named, inline, and variant style assignment with `;`. A missing terminator is a recoverable parse error so later assignments remain available to diagnostics and editor features.
+- Component fields use an explicit C# type. `var` is valid for locals inside methods and `Setup`, but a component field reports an authored diagnostic instead of emitting an invalid generated field. A missing field semicolon is recovered at the next member or markup boundary so the following root remains available and native diagnostics in the field keep their authored spans.
 - Prefer bare numeric literals when ordinary C# conversion is unambiguous. Use a suffix only when it is needed to select a type, overload, or arithmetic behavior.
 - Put literal text and component/default content between tags. A single dynamic scalar expression may appear between tags. For body and named-attribute expressions, a compatible live `Func<T>` input receives a target-typed reader, including when the authored expression is a plain scalar. Already compatible delegates remain unchanged. Scalar parameters and quoted attributes remain construction-time values; the receiving C# parameter type defines whether an input is live.
 - Application theme keys conventionally live in an accessible top-level static `<RootNamespace>.Tokens` class. Its `Token<T>` fields and properties are implicitly available only inside named, inline, and variant style-value expressions. The compiler resolves them through ordinary C# rules and lowers fully qualified symbols; component parameters and structural expressions receive no implicit token scope. Runtime `ThemeContext` state remains composition-owned; token declarations are not mutable global theme state.
 
-`with` is the sole initial style composition syntax. It accepts named style values, nullable style parameters, and inline bodies; evaluation is left to right and the rightmost assignment wins. It lowers to ordered `Style.With` and `Style.When` calls. Compound variants use the real finite flags expression, for example `when Selected | FocusVisible`. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are internal to the document initially. `public style` is reserved as the fast-follow export syntax; shared styles remain ordinary public C# symbols until cross-document component binding/maps prove that feature. Declarative transitions and keyframes are excluded until Core owns automatic style-winner sampling, interpolation, clock/frame wake, interruption, and reduced-motion behavior; manual transition samples are not sufficient.
+`with` is the sole initial style composition syntax. It accepts named style values, nullable style parameters, and inline bodies; evaluation is left to right and the rightmost assignment wins. It lowers to ordered `Style.With` and `Style.When` calls. Compound variants use the real finite flags expression, for example `when Selected | FocusVisible`. A bound candidate's expression is evaluated only while its variant condition is satisfied; inactive variants retain no live expression dependency. Named styles are internal to the document initially. `public style` is reserved as the fast-follow export syntax; shared styles remain ordinary public C# symbols until cross-document component binding/maps prove that feature. Declarative transitions use the typed Core motion contract above; keyframes and other motion policy forms remain deferred.
 
 The Lucent SDK supplies an opt-out ordinary `Lucent.Core` namespace using only. Built-in `Components` are tag-only, framework properties are style-left-hand-side-only, and `VariantState` is `when`-only; application and third-party modules may publish ordinary static imports. All names remain real C# symbols and participate in completion, rename, references, and diagnostics. A unique built-in style name is resolved only in the property position on the left of `:`. This lets `GridPlacement: new GridPlacement(...)` and `TextWrap: TextWrap.WordWithGraphemeFallback` use the normal C# type names on the value side; ordinary C# member access keeps its usual binding rules.
 
@@ -359,7 +391,7 @@ The exact initial author-facing property surface is:
 | `Overflow` | `TextOverflow` | `Clip` | yes |
 | `InputProperties.Enabled` / `Visible` | `bool` | `true` | no |
 
-`Arrangement`, public `SceneProperties`, `Fill`, and `Foreground` are removed during the unreleased API change. The typography inheritance table is an intentional behavior change from the current surface and receives resolution/dump/row-scale cost evidence. `TextColor` remains eligible for the existing manual `TransitionKind.Color` channel after that channel is retyped to `Color`; `Background : Brush` is transition-ineligible initially. Raw text, selection, caret, virtual-row metadata, and projection bookkeeping are internal/compiler-excluded. Portable retained-scene DTOs remain the explicit Core-to-renderer seam.
+`Arrangement`, public `SceneProperties`, `Fill`, and `Foreground` are removed during the unreleased API change. The typography inheritance table is an intentional behavior change from the current surface and receives resolution/dump/row-scale cost evidence. `TextColor` remains eligible for the existing manual `TransitionKind.Color` channel after that channel is retyped to `Color`; `Background : Brush` and `Opacity : float` are eligible for the declarative `Motion` policy surface above. Other properties remain outside that authoring surface initially. Raw text, selection, caret, virtual-row metadata, and projection bookkeeping are internal/compiler-excluded. Portable retained-scene DTOs remain the explicit Core-to-renderer seam.
 
 `Color` stores canonical 8-bit sRGB RGBA channels and equality/hash follows those channels. `Parse`/`TryParse` initially accept invariant `#RRGGBB` and `#RRGGBBAA` only. `LinearGradient` uses normalized box-relative start/end points, two to sixteen opaque stops with finite nondecreasing positions in `[0,1]`, permits equal-position hard stops, and rejects a degenerate vector. Invalid constructors throw argument exceptions; try-parse returns false. The first renderer uses SkiaSharp's native sRGB interpolation. Transparent and selectable linear-light gradients are deferred until the renderer binding can prove their interpolation contract; solid brushes continue to support alpha.
 

@@ -361,6 +361,30 @@ public sealed class ControlsContracts
                 )
             );
             router.DispatchPointer(
+                new(
+                    PointerCommandKind.Down,
+                    (int)element.Id + 20,
+                    box.X + 1,
+                    box.Y + 1,
+                    PointerButton.Secondary
+                )
+            );
+            router.DispatchPointer(
+                new(
+                    PointerCommandKind.Up,
+                    (int)element.Id + 20,
+                    box.X + 1,
+                    box.Y + 1,
+                    PointerButton.Secondary
+                )
+            );
+            Assert(
+                calls == expectedCalls,
+                "Secondary release activated or consumed the armed primary gesture for "
+                    + element.Name
+                    + "."
+            );
+            router.DispatchPointer(
                 new(PointerCommandKind.Up, (int)element.Id + 20, box.X + 1, box.Y + 1)
             );
             expectedCalls++;

@@ -207,6 +207,53 @@ public sealed class PlatformContracts
     }
 
     [TestMethod]
+    public void PresentationDeadlineWaitIsAbsoluteRoundedAndBounded()
+    {
+        var now = TimeSpan.FromMilliseconds(100.25);
+        Assert(
+            WindowsPresentationTiming.WaitMilliseconds(new(false, null, 1), now) == -1,
+            "Inactive presentation demand installed a timer."
+        );
+        Assert(
+            WindowsPresentationTiming.WaitMilliseconds(new(true, null, 2), now) == 0,
+            "Immediate presentation demand did not request an immediate frame."
+        );
+        Assert(
+            WindowsPresentationTiming.WaitMilliseconds(
+                new(true, TimeSpan.FromMilliseconds(100), 3),
+                now
+            ) == 0,
+            "An expired presentation deadline did not request an immediate frame."
+        );
+        Assert(
+            WindowsPresentationTiming.WaitMilliseconds(
+                new(true, TimeSpan.FromMilliseconds(100.5), 4),
+                now
+            ) == 1,
+            "A fractional future deadline was not rounded up to a non-spinning wait."
+        );
+        Assert(
+            WindowsPresentationTiming.WaitMilliseconds(
+                new(true, TimeSpan.FromMilliseconds(116.251), 5),
+                now
+            ) == 17,
+            "The absolute presentation deadline was not converted from the supplied current time."
+        );
+        Assert(
+            WindowsPresentationTiming.WaitMilliseconds(
+                new(true, now + TimeSpan.FromDays(30), 6),
+                now
+            ) == int.MaxValue,
+            "An excessive presentation wait was not bounded to SDL's integer timeout."
+        );
+        Assert(
+            WindowsPresentationTiming.Earlier(12, 4) == 4
+                && WindowsPresentationTiming.Earlier(4, -1) == 4,
+            "Independent host deadlines did not coalesce to the earliest active wait."
+        );
+    }
+
+    [TestMethod]
     public void TelemetryContract()
     {
         using var activities = new System.Diagnostics.ActivityListener();

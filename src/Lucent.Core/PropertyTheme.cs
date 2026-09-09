@@ -82,11 +82,8 @@ public enum TransitionKind
     /// <summary>Allows opacity interpolation.</summary>
     Opacity,
 
-    /// <summary>Reserves transform interpolation.</summary>
-    Transform,
-
-    /// <summary>Reserves focus-ring interpolation.</summary>
-    FocusRing,
+    /// <summary>Allows compatible brush interpolation.</summary>
+    Brush,
 }
 
 /// <summary>Interaction-state bits used to select conditional style assignments.</summary>
@@ -211,10 +208,12 @@ public sealed class ThemeContext : IDisposable
     private readonly ReactiveScope _scope;
     private readonly Signal<Theme> _theme;
     private readonly Signal<bool> _reducedMotion;
+    private readonly Signal<bool?> _platformReducedMotion;
     private readonly Signal<ThemeAppearance> _appearance;
     private readonly Signal<ControlPresentationMode> _presentationMode;
     private readonly Dictionary<object, ITokenSlot> _tokens = [];
     private bool _disposed;
+    private long _appearanceGeneration;
     internal ReactiveGraph Graph { get; }
     internal ReactiveScope Scope => _scope;
     internal int TokenCount => _tokens.Count;
@@ -237,6 +236,7 @@ public sealed class ThemeContext : IDisposable
         Graph = scope.Graph;
         _theme = scope.Signal(theme, "theme");
         _reducedMotion = scope.Signal(reducedMotion, "reduced-motion");
+        _platformReducedMotion = scope.Signal<bool?>(null, "platform-reduced-motion");
         _appearance = scope.Signal(initialAppearance, "theme-appearance");
         _presentationMode = scope.Signal(presentationMode, "control-presentation-mode");
         scope.Own(this);
@@ -250,7 +250,10 @@ public sealed class ThemeContext : IDisposable
         {
             _scope.CheckMutationGuard();
             var theme = value ?? throw new ArgumentNullException(nameof(value));
+            if (ReferenceEquals(Graph.Untracked(() => _theme.Value), theme))
+                return;
             _theme.Value = theme;
+            _appearanceGeneration = checked(_appearanceGeneration + 1);
             foreach (var slot in _tokens.Values)
                 slot.Update(theme);
         }
@@ -267,6 +270,20 @@ public sealed class ThemeContext : IDisposable
         }
     }
 
+    /// <summary>Gets the effective motion suppression from application or platform preference.</summary>
+    public bool EffectiveReducedMotion =>
+        _reducedMotion.Value || _platformReducedMotion.Value == true;
+
+    /// <summary>Gets the latest platform preference, or null when the platform cannot determine it.</summary>
+    public bool? PlatformReducedMotion => _platformReducedMotion.Value;
+
+    /// <summary>Updates the portable platform motion preference without overwriting the application choice.</summary>
+    public void SetPlatformReducedMotion(bool? reducedMotion)
+    {
+        _scope.CheckMutationGuard();
+        _platformReducedMotion.Value = reducedMotion;
+    }
+
     /// <summary>Portable system appearance. Authors choose typed theme/token values for each appearance.</summary>
     public ThemeAppearance Appearance
     {
@@ -275,7 +292,10 @@ public sealed class ThemeContext : IDisposable
         {
             _scope.CheckMutationGuard();
             value.Validate();
+            if (Graph.Untracked(() => _appearance.Value) == value)
+                return;
             _appearance.Value = value;
+            _appearanceGeneration = checked(_appearanceGeneration + 1);
         }
     }
 
@@ -288,12 +308,16 @@ public sealed class ThemeContext : IDisposable
         {
             _scope.CheckMutationGuard();
             ValidatePresentationMode(value, nameof(value));
+            if (Graph.Untracked(() => _presentationMode.Value) == value)
+                return;
             _presentationMode.Value = value;
+            _appearanceGeneration = checked(_appearanceGeneration + 1);
         }
     }
 
     internal Theme CurrentTheme => _theme.Value;
-    internal bool IsReducedMotion => _reducedMotion.Value;
+    internal bool IsReducedMotion => EffectiveReducedMotion;
+    internal long AppearanceGeneration => _appearanceGeneration;
 
     internal void ValidateLive()
     {
@@ -345,6 +369,7 @@ public sealed class ThemeContext : IDisposable
         _tokens.Clear();
         _appearance.Dispose();
         _presentationMode.Dispose();
+        _platformReducedMotion.Dispose();
         _reducedMotion.Dispose();
         _theme.Dispose();
     }

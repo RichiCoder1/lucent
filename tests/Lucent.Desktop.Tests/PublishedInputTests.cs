@@ -13,6 +13,27 @@ namespace Lucent.Desktop.Tests;
 public sealed partial class PublishedInputTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
+    private static readonly nint DpiAwarenessContextPerMonitorAwareV2 = (nint)(-4);
+    private nint _priorDpiAwarenessContext;
+
+    [TestInitialize]
+    public void EnablePerMonitorV2ForPhysicalCoordinates()
+    {
+        _priorDpiAwarenessContext = SetThreadDpiAwarenessContext(
+            DpiAwarenessContextPerMonitorAwareV2
+        );
+        if (_priorDpiAwarenessContext == 0)
+            throw new InvalidOperationException(
+                "Could not establish a per-monitor-v2 physical-input test driver context."
+            );
+    }
+
+    [TestCleanup]
+    public void RestoreDpiAwarenessContext()
+    {
+        if (_priorDpiAwarenessContext != 0)
+            _ = SetThreadDpiAwarenessContext(_priorDpiAwarenessContext);
+    }
 
     [TestMethod]
     public void FlaUiDeliversRealCaptureFindSaveKeysAndMouseWheel()
@@ -411,7 +432,43 @@ public sealed partial class PublishedInputTests
                 Mouse.Down(MouseButton.Left);
                 try
                 {
-                    Mouse.MoveTo(new Point(textBounds.Left + 1, y));
+                    if (isMultiline)
+                    {
+                        Mouse.MoveTo(new Point(textBounds.Left + textBounds.Width / 2, y));
+                        var selectionBeforeSecondary = 0;
+                        WaitUntil(
+                            process,
+                            () =>
+                            {
+                                selectionBeforeSecondary =
+                                    editor.Patterns.Text.Pattern.GetSelection()
+                                        is { Length: 1 } ranges
+                                        ? ranges[0].GetText(-1).Length
+                                        : 0;
+                                return selectionBeforeSecondary > 0;
+                            },
+                            "Multiline primary drag did not establish selection before the secondary click."
+                        );
+                        Mouse.Down(MouseButton.Right);
+                        try
+                        {
+                            Wait.UntilInputIsProcessed();
+                        }
+                        finally
+                        {
+                            Mouse.Up(MouseButton.Right);
+                        }
+                        Mouse.MoveTo(new Point(textBounds.Left + 1, y));
+                        WaitUntil(
+                            process,
+                            () =>
+                                editor.Patterns.Text.Pattern.GetSelection() is { Length: 1 } ranges
+                                && ranges[0].GetText(-1).Length > selectionBeforeSecondary,
+                            "Secondary click consumed or ended the active primary text-selection capture."
+                        );
+                    }
+                    else
+                        Mouse.MoveTo(new Point(textBounds.Left + 1, y));
                 }
                 finally
                 {
@@ -617,4 +674,7 @@ public sealed partial class PublishedInputTests
     [LibraryImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool PostMessage(nint window, uint message, nint wParam, nint lParam);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    private static partial nint SetThreadDpiAwarenessContext(nint dpiContext);
 }

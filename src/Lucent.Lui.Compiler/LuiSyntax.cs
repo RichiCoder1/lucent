@@ -620,6 +620,7 @@ public sealed class LuiStyleWithSyntax : LuiValueSyntax
                 }
             )
             .ToArray();
+        Transitions = members.SelectMany(TransitionsOf).ToArray();
         CloseBrace = closeBrace;
         OuterCloseBrace = outerCloseBrace;
         Tail = tail;
@@ -643,6 +644,9 @@ public sealed class LuiStyleWithSyntax : LuiValueSyntax
     /// <summary>Immutable flattened assignments from <see cref="Members"/>, including variant-group assignments.</summary>
     public IReadOnlyList<LuiStyleAssignmentSyntax> Assignments { get; }
 
+    /// <summary>Immutable flattened transition policies from <see cref="Members"/>, including variant-group policies.</summary>
+    public IReadOnlyList<LuiStyleTransitionSyntax> Transitions { get; }
+
     /// <summary>Closing brace for the assignment block, possibly recovered.</summary>
     public LuiToken CloseBrace { get; }
 
@@ -651,6 +655,16 @@ public sealed class LuiStyleWithSyntax : LuiValueSyntax
 
     /// <summary>Expression tail after <c>with</c>, when the value is not an assignment block.</summary>
     public LuiToken? Tail { get; }
+
+    private static IEnumerable<LuiStyleTransitionSyntax> TransitionsOf(
+        LuiStyleMemberSyntax member
+    ) =>
+        member switch
+        {
+            LuiStyleTransitionSyntax transition => [transition],
+            LuiVariantGroupSyntax group => group.Transitions,
+            _ => [],
+        };
 }
 
 /// <summary>Conditional body with a C# condition and optional <c>else</c> body.</summary>
@@ -853,6 +867,7 @@ public sealed class LuiStyleSyntax : LuiSyntaxNode
                 }
             )
             .ToArray();
+        Transitions = members.SelectMany(TransitionsOf).ToArray();
         CloseBrace = closeBrace;
     }
 
@@ -880,8 +895,21 @@ public sealed class LuiStyleSyntax : LuiSyntaxNode
     /// <summary>Immutable flattened assignments from <see cref="Members"/>, including variant groups.</summary>
     public IReadOnlyList<LuiStyleAssignmentSyntax> Assignments { get; }
 
+    /// <summary>Immutable flattened transition policies from <see cref="Members"/>, including variant-group policies.</summary>
+    public IReadOnlyList<LuiStyleTransitionSyntax> Transitions { get; }
+
     /// <summary>Closing declaration brace, possibly recovered.</summary>
     public LuiToken CloseBrace { get; }
+
+    private static IEnumerable<LuiStyleTransitionSyntax> TransitionsOf(
+        LuiStyleMemberSyntax member
+    ) =>
+        member switch
+        {
+            LuiStyleTransitionSyntax transition => [transition],
+            LuiVariantGroupSyntax group => group.Transitions,
+            _ => [],
+        };
 }
 
 /// <summary>Single style property assignment with a C# expression value.</summary>
@@ -913,6 +941,43 @@ public sealed class LuiStyleAssignmentSyntax : LuiStyleMemberSyntax
     public LuiExpressionSyntax Expression { get; }
 
     /// <summary>Assignment semicolon, possibly recovered.</summary>
+    public LuiToken Terminator { get; }
+}
+
+/// <summary>Single immutable transition policy with a C# motion expression.</summary>
+public sealed class LuiStyleTransitionSyntax : LuiStyleMemberSyntax
+{
+    /// <summary>Creates a transition policy from its keyword, property, delimiter, motion expression, and terminator tokens.</summary>
+    public LuiStyleTransitionSyntax(
+        LuiSpan span,
+        LuiToken transitionKeyword,
+        LuiToken property,
+        LuiToken colon,
+        LuiExpressionSyntax expression,
+        LuiToken terminator
+    )
+        : base(span)
+    {
+        TransitionKeyword = transitionKeyword;
+        Property = property;
+        Colon = colon;
+        Expression = expression;
+        Terminator = terminator;
+    }
+
+    /// <summary><c>transition</c> keyword token.</summary>
+    public LuiToken TransitionKeyword { get; }
+
+    /// <summary>Transition property-name token.</summary>
+    public LuiToken Property { get; }
+
+    /// <summary>Property/motion separator token.</summary>
+    public LuiToken Colon { get; }
+
+    /// <summary>C# expression supplying the motion policy.</summary>
+    public LuiExpressionSyntax Expression { get; }
+
+    /// <summary>Transition semicolon, possibly recovered.</summary>
     public LuiToken Terminator { get; }
 }
 
@@ -956,6 +1021,7 @@ public sealed class LuiVariantGroupSyntax : LuiStyleMemberSyntax
         OpenBrace = openBrace;
         Members = members;
         Assignments = members.SelectMany(AssignmentsOf).ToArray();
+        Transitions = members.SelectMany(TransitionsOf).ToArray();
         CloseBrace = closeBrace;
         ConditionExpression = conditionExpression;
         OpenCondition = openCondition;
@@ -986,6 +1052,9 @@ public sealed class LuiVariantGroupSyntax : LuiStyleMemberSyntax
     /// <summary>Conditional assignments flattened recursively for existing consumers.</summary>
     public IReadOnlyList<LuiStyleAssignmentSyntax> Assignments { get; }
 
+    /// <summary>Conditional transition policies flattened recursively for tooling.</summary>
+    public IReadOnlyList<LuiStyleTransitionSyntax> Transitions { get; }
+
     /// <summary>Closing assignment-group brace, possibly recovered.</summary>
     public LuiToken CloseBrace { get; }
 
@@ -999,6 +1068,16 @@ public sealed class LuiVariantGroupSyntax : LuiStyleMemberSyntax
         {
             LuiStyleAssignmentSyntax assignment => [assignment],
             LuiVariantGroupSyntax group => group.Assignments,
+            _ => [],
+        };
+
+    private static IEnumerable<LuiStyleTransitionSyntax> TransitionsOf(
+        LuiStyleMemberSyntax member
+    ) =>
+        member switch
+        {
+            LuiStyleTransitionSyntax transition => [transition],
+            LuiVariantGroupSyntax group => group.Transitions,
             _ => [],
         };
 }

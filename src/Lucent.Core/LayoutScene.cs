@@ -126,7 +126,8 @@ public static class VisualProperties
     /// <summary>Paints the element's background with the supplied brush.</summary>
     public static readonly Property<Brush> Background = new(
         "visual-background",
-        Brush.Solid(default)
+        Brush.Solid(default),
+        transition: TransitionKind.Brush
     );
 
     /// <summary>Paints an inset border independently of the element background.</summary>
@@ -1506,6 +1507,10 @@ public sealed class RetainedScene : IDisposable
 {
     private readonly object _imageGate = new();
     private ImageLease[]? _imageLeases;
+    internal SceneLayout.PaintSnapshot? PaintSnapshot { get; set; }
+
+    /// <summary>Whether this frame reused the prior scene's geometry, shaping and input snapshot.</summary>
+    public bool IsPaintOnly { get; private init; }
 
     /// <summary>Whether this snapshot has released its image leases.</summary>
     public bool IsDisposed
@@ -1551,6 +1556,40 @@ public sealed class RetainedScene : IDisposable
         InputProjectionRevision = scene.InputProjectionRevision;
         _collapsedElementIds = scene._collapsedElementIds;
         InputSignature = scene.InputSignature;
+        PaintSnapshot = scene.PaintSnapshot;
+        IsPaintOnly = scene.IsPaintOnly;
+        _imageLeases = RetainLeases(leases);
+    }
+
+    internal RetainedScene WithPaint(long generation, IReadOnlyList<SceneNode> nodes)
+    {
+        lock (_imageGate)
+        {
+            ObjectDisposedException.ThrowIf(_imageLeases is null, this);
+            return new RetainedScene(this, generation, nodes, _imageLeases!);
+        }
+    }
+
+    private RetainedScene(
+        RetainedScene scene,
+        long generation,
+        IReadOnlyList<SceneNode> nodes,
+        ImageLease[] leases
+    )
+    {
+        Generation = generation;
+        Viewport = scene.Viewport;
+        Boxes = scene.Boxes;
+        Nodes = Array.AsReadOnly(nodes.ToArray());
+        Input = scene.Input;
+        ScrollBars = scene.ScrollBars;
+        InputProjectionRevision = scene.InputProjectionRevision;
+        _collapsedElementIds = scene._collapsedElementIds;
+        InputSignature = scene.InputSignature;
+        PaintSnapshot = scene.PaintSnapshot;
+        IsPaintOnly = true;
+        // Nodes reference immutable prepared resources. Retain the scene's owned
+        // leases, rather than a source cache lease which may already be retired.
         _imageLeases = RetainLeases(leases);
     }
 

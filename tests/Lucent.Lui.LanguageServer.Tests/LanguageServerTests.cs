@@ -147,9 +147,11 @@ namespace StatefulEditor;
 public component Counter() {
     int count = 0;
     string label = count.ToString();
+    string stable = BuildLabel();
+    string BuildLabel() => count.ToString();
     void Increment() { count++; }
     Setup(owner) { var local = "setup"; _ = local.Length; }
-    <Column><Button onInvoke={Increment}>{label}</Button></Column>
+    <Column><Button onInvoke={Increment}>{label}</Button><Text>{stable}</Text></Column>
 }
 """;
             await File.WriteAllTextAsync(path, source);
@@ -168,6 +170,25 @@ public component Counter() {
                     + hover?.Value
                     + " / "
                     + hover?.Documentation
+            );
+            var stableUse = source.IndexOf("{stable}", StringComparison.Ordinal) + 1;
+            var stableHover = await context.HoverAsync(uri, stableUse, CancellationToken.None);
+            Assert(
+                stableHover is not null
+                    && stableHover.Documentation is not null
+                    && stableHover.Documentation.Contains(
+                        "no direct component-state reads were identified",
+                        StringComparison.Ordinal
+                    )
+                    && stableHover.Documentation.Contains(
+                        "Runtime reads, including those made by helpers",
+                        StringComparison.Ordinal
+                    )
+                    && !stableHover.Documentation.Contains(
+                        "unchanged after mount",
+                        StringComparison.Ordinal
+                    ),
+                "Derived hover overstated static dependency analysis: " + stableHover?.Documentation
             );
             var definition = await context.DefinitionAsync(uri, use, CancellationToken.None);
             Assert(
@@ -199,6 +220,51 @@ public component Counter() {
             );
             var tokens = await context.SemanticTokensAsync(uri, CancellationToken.None);
             Assert(tokens is { Length: > 0 }, "Stateful source has no semantic highlighting.");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task ExpressionCompletionHidesGeneratedHelpersButKeepsAuthoredNames()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-generated-completion-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "Completion.csproj");
+            var path = Path.Combine(root, "Main.lui");
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            await File.WriteAllTextAsync(
+                project,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\"{core}\"/><AdditionalFiles Include=\"Main.lui\"/></ItemGroup></Project>"
+            );
+            const string source = """
+namespace CompletionEditor;
+public component Main() {
+    string __luiUser = "user";
+    <Text>{__lui}</Text>
+}
+""";
+            await File.WriteAllTextAsync(path, source);
+            var uri = new Uri(path);
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+            var offset = source.IndexOf("{__lui}", StringComparison.Ordinal) + 1 + "__lui".Length;
+            var completions = await context.CompletionsAsync(uri, offset, CancellationToken.None);
+            Assert(
+                completions.Any(item => item.Label == "__luiUser")
+                    && completions.All(item =>
+                        !item.Label.StartsWith("__lui", StringComparison.Ordinal)
+                        || item.Label == "__luiUser"
+                    ),
+                "expression completion leaked compiler helpers or dropped the authored __lui symbol: "
+                    + string.Join(", ", completions.Select(item => item.Label))
+            );
         }
         finally
         {
@@ -2684,6 +2750,77 @@ style ScrollStyle {
                         StringComparison.OrdinalIgnoreCase
                     ),
                 "ScrollBarProperties were not resolved consistently by compilation and editor tooling: "
+                    + String.Join(
+                        ", ",
+                        completions.Select(item => item.Label + "/" + item.Kind + "/" + item.Detail)
+                    )
+                    + " hover="
+                    + (hover?.Value ?? "null")
+                    + " definition="
+                    + (definition?.Uri.ToString() ?? "null")
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task TransitionPropertiesShareCompletionHoverDefinitionAndSymbols()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-transition-property-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+            var projectPath = Path.Combine(root, "Transitions.csproj");
+            var uri = new Uri(Path.Combine(root, "Transitions.lui"));
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup><ProjectReference Include=\""
+                    + core
+                    + "\" /><AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            var source = """
+namespace Sample;
+using Lucent.Core;
+using static Lucent.Core.Components;
+internal component Example() { <Button style={MotionStyle}>Save</Button> }
+style MotionStyle {
+    transition Background: Motion.Quick;
+    transition Opacity: Motion.Duration(120, Easing.EaseOut);
+}
+""";
+            await File.WriteAllTextAsync(uri.LocalPath, source);
+            using var context = await LuiProjectContext.LoadAsync(
+                projectPath,
+                CancellationToken.None
+            );
+            var compiled = await context.CompileAsync(uri, CancellationToken.None);
+            var property = source.IndexOf("Background", StringComparison.Ordinal);
+            var completions = await context.CompletionsAsync(uri, property, CancellationToken.None);
+            var hover = await context.HoverAsync(uri, property, CancellationToken.None);
+            var definition = await context.DefinitionAsync(uri, property, CancellationToken.None);
+            var symbols = await context.DocumentSymbolsAsync(uri, CancellationToken.None);
+            var style = symbols!.Single(symbol => symbol.Name == "MotionStyle");
+            Assert(
+                compiled is not null
+                    && completions.Any(item => item.Label == "Background" && item.Kind == 5)
+                    && completions.Any(item => item.Label == "Opacity" && item.Kind == 5)
+                    && completions.Any(item => item.Label == "TextColor" && item.Kind == 5)
+                    && !completions.Any(item => item.Label == "Width")
+                    && hover?.Value.Contains("Property", StringComparison.Ordinal) == true
+                    && definition?.Uri.LocalPath.EndsWith(
+                        Path.Combine("src", "Lucent.Core", "LayoutScene.cs"),
+                        StringComparison.OrdinalIgnoreCase
+                    ) == true
+                    && style.Children.Any(child => child.Name == "transition Background")
+                    && style.Children.Any(child => child.Name == "transition Opacity"),
+                "Transition property completion, hover, definition, or symbols were not shared across tooling: "
                     + String.Join(
                         ", ",
                         completions.Select(item => item.Label + "/" + item.Kind + "/" + item.Detail)

@@ -12,7 +12,7 @@ using SkiaSharp;
 namespace Lucent.IssueBrowser.Tests;
 
 [TestClass]
-public sealed class IssueBrowserTests
+public sealed partial class IssueBrowserTests
 {
     [TestMethod]
     public void FixtureIdentity()

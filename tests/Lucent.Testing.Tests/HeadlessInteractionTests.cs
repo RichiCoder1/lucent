@@ -286,6 +286,74 @@ public sealed class HeadlessInteractionTests
     }
 
     [TestMethod]
+    public async Task AdvanceSamplesFractionalMotionWhileDrainKeepsTheClockFixed()
+    {
+        Action activate = null!;
+        await using var app = await HeadlessApplication.StartAsync(context =>
+        {
+            var active = context.Composition.Root.Scope.Signal(false, "headless-motion-active");
+            activate = () => active.Value = true;
+            return ComponentRecipe.Create(
+                "headless-motion",
+                (factory, root) =>
+                    root.Present(
+                        factory.Theme,
+                        author: Style
+                            .Empty.Width(40)
+                            .Height(20)
+                            .Background(Color.Parse("#FF336699"))
+                            .Bind(VisualProperties.Opacity, () => active.Value ? 0.2f : 1f)
+                            .Transition(
+                                VisualProperties.Opacity,
+                                Motion.Duration(100, Easing.Linear)
+                            )
+                    )
+            );
+        });
+
+        await app.InvokeAsync(context =>
+        {
+            activate();
+            return 0;
+        });
+        Assert.IsTrue(
+            await app.InvokeAfterSettleAsync(context =>
+                context.Composition.PresentationDemand.IsActive
+            )
+        );
+
+        using var middle = await app.AdvanceAsync(TimeSpan.FromMilliseconds(12.5));
+        var middleOpacity = Flatten(middle.Scene.Nodes).OfType<OpacitySceneNode>().Single().Opacity;
+        Assert.AreEqual(0.9f, middleOpacity, 0.001f);
+        var timestamp = await app.InvokeAfterSettleAsync(context =>
+            context.TimeProvider.GetTimestamp()
+        );
+
+        using var drained = await app.DrainAsync();
+        Assert.AreEqual(
+            timestamp,
+            await app.InvokeAfterSettleAsync(context => context.TimeProvider.GetTimestamp())
+        );
+        Assert.AreEqual(
+            middleOpacity,
+            Flatten(drained.Scene.Nodes).OfType<OpacitySceneNode>().Single().Opacity,
+            0.001f
+        );
+
+        using var completed = await app.AdvanceAsync(TimeSpan.FromSeconds(1));
+        Assert.AreEqual(
+            0.2f,
+            Flatten(completed.Scene.Nodes).OfType<OpacitySceneNode>().Single().Opacity,
+            0.001f
+        );
+        Assert.IsFalse(
+            await app.InvokeAfterSettleAsync(context =>
+                context.Composition.PresentationDemand.IsActive
+            )
+        );
+    }
+
+    [TestMethod]
     public async Task DebounceCancelSuppressesAlreadyQueuedCallback()
     {
         await using var app = await HeadlessApplication.StartAsync(
@@ -383,6 +451,22 @@ public sealed class HeadlessInteractionTests
         foreach (var child in root.Children)
         foreach (var descendant in Descendants(child))
             yield return descendant;
+    }
+
+    private static IEnumerable<SceneNode> Flatten(IEnumerable<SceneNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            var children = node switch
+            {
+                ClipSceneNode clip => clip.Children,
+                OpacitySceneNode opacity => opacity.Children,
+                _ => [],
+            };
+            foreach (var child in Flatten(children))
+                yield return child;
+        }
     }
 
     private static void InstallPopup(Composition popup, LayoutViewport viewport)

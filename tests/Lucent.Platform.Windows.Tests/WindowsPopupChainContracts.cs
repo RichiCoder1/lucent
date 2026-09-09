@@ -8,6 +8,19 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed class WindowsPopupChainContracts
 {
     [TestMethod]
+    public void OwnerFocusEventsContinueToOwnerInputWhilePopupFocusEventsAreConsumed()
+    {
+        Assert.IsFalse(
+            WindowsPopupChain.ShouldConsumeFocusEvent(windowId: 17, ownerWindowId: 17),
+            "The popup chain swallowed owner focus loss before SDL text input and IME cleanup."
+        );
+        Assert.IsTrue(
+            WindowsPopupChain.ShouldConsumeFocusEvent(windowId: 29, ownerWindowId: 17),
+            "A popup focus event fell through to owner input."
+        );
+    }
+
+    [TestMethod]
     public void RetainedCompositionCanBeHostedAgainWithoutSecondPresentation()
     {
         using var composition = new Composition(new ReactiveGraph(), "retained-popup");
