@@ -68,6 +68,8 @@ The incremental editor contract is exercised by `IncrementalToolingContracts`. I
 
 The .lui tooling contract covers every frozen construct: components, parameters, overloads, enums, literals, expression islands, default content, styles, tokens, variants, conditionals, keyed loops, namespaces/usings, locals, and XML documentation. It provides completion, signature help, document symbols, hover, diagnostics, semantic navigation, cross-language rename/references, stable formatting, generated navigation, and mapped expression breakpoints/exceptions. Unsafe or ambiguous rename is refused rather than partially applied.
 
+XML documentation authored for a component is written immediately before its declaration with contiguous `///` comments. The compiler carries those comments onto the generated `Components` factory, so generated C# metadata contains the same `<summary>`, `<param>`, and other XML sections. Roslyn-backed completion and hover read that metadata through the normal symbol API; ordinary comments or a non-documentation comment between the documentation and declaration do not attach. Documentation is compile-time source text and has no runtime representation.
+
 One formatter implementation serves editor document/range formatting, a repository CLI, and optional check-only CI/MSBuild integration. Builds never rewrite source. Hot reload, markup stepping, and a visual designer are follow-ups; initial DevX requires correct incremental build and fast restart.
 
 The first formatter preserves Roslyn expression-island token text rather than independently formatting C#. Document, range, CLI, and check surfaces share that policy and cover malformed trees, comments at recovery boundaries, significant text, CRLF/LF, and source-map stability.

@@ -91,9 +91,9 @@ internal static class ManagedLayout
             {
                 var autoCross = axis == LayoutAxis.Row ? item.Spec.AutoHeight : item.Spec.AutoWidth;
                 var cross =
-                    crossAlignment == LayoutAlignment.Stretch && autoCross
-                        ? lineCross
-                        : Math.Min(item.Cross, lineCross);
+                    crossAlignment == LayoutAlignment.Stretch && autoCross ? lineCross
+                    : autoCross ? Math.Min(item.Cross, lineCross)
+                    : item.Cross;
                 var crossOffset = crossAlignment switch
                 {
                     LayoutAlignment.Center => (lineCross - cross) / 2,
@@ -241,21 +241,32 @@ internal static class ManagedLayout
             var deficit = Math.Max(0, contribution.Contribution - current);
             if (deficit == 0)
                 continue;
-            var eligible = Enumerable
-                .Range(contribution.Start, contribution.Span)
-                .Where(index =>
-                    tracks[index].Kind != GridTrackKind.Fixed
-                    && tracks[index].FractionWeight == 0
-                    && sizes[index] < tracks[index].Maximum
-                )
-                .ToArray();
-            if (eligible.Length == 0)
-                continue;
-            foreach (var index in eligible)
-                sizes[index] = Math.Min(
-                    tracks[index].Maximum,
-                    sizes[index] + deficit / eligible.Length
-                );
+            for (var pass = 0; pass < contribution.Span && deficit > .0001f; pass++)
+            {
+                var eligible = Enumerable
+                    .Range(contribution.Start, contribution.Span)
+                    .Where(index =>
+                        tracks[index].Kind != GridTrackKind.Fixed
+                        && tracks[index].FractionWeight == 0
+                        && sizes[index] < tracks[index].Maximum
+                    )
+                    .ToArray();
+                if (eligible.Length == 0)
+                    break;
+                var consumed = 0f;
+                foreach (var index in eligible)
+                {
+                    var next = Math.Min(
+                        tracks[index].Maximum,
+                        sizes[index] + deficit / eligible.Length
+                    );
+                    consumed += next - sizes[index];
+                    sizes[index] = next;
+                }
+                if (consumed <= .0001f)
+                    break;
+                deficit -= consumed;
+            }
         }
         var remaining = Math.Max(0, available - sizes.Sum() - gap * Math.Max(0, tracks.Count - 1));
         for (var pass = 0; pass < tracks.Count && remaining > .0001f; pass++)

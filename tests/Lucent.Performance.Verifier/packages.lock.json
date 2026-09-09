@@ -93,6 +93,29 @@
       "lucent.core": {
         "type": "Project"
       },
+      "lucent.icons.lucide": {
+        "type": "Project",
+        "dependencies": {
+          "Lucent.Core": "[1.0.0, )"
+        }
+      },
+      "lucent.issuebrowser": {
+        "type": "Project",
+        "dependencies": {
+          "Lucent.Core": "[1.0.0, )",
+          "Lucent.Icons.Lucide": "[1.0.0, )",
+          "Lucent.Platform.Windows": "[1.0.0, )"
+        }
+      },
+      "lucent.platform.windows": {
+        "type": "Project",
+        "dependencies": {
+          "Lucent.Core": "[1.0.0, )",
+          "Lucent.Renderer.Skia": "[1.0.0, )",
+          "SDL3-CS": "[3.4.14.1, )",
+          "SDL3-CS.Windows": "[3.4.14.1, )"
+        }
+      },
       "lucent.renderer.skia": {
         "type": "Project",
         "dependencies": {
@@ -101,6 +124,18 @@
           "SkiaSharp.HarfBuzz": "[4.151.1, )",
           "Svg.Skia": "[5.2.3, )"
         }
+      },
+      "SDL3-CS": {
+        "type": "CentralTransitive",
+        "requested": "[3.4.14.1, )",
+        "resolved": "3.4.14.1",
+        "contentHash": "o3X50ZpVw20wtCQZO/To9b5aesE22ZcYE9fL/2IOd4KCuT9q1DBsa8PHJJIcxt9sW4uHvjj8gP6n5KPMzzxeKA=="
+      },
+      "SDL3-CS.Windows": {
+        "type": "CentralTransitive",
+        "requested": "[3.4.14.1, )",
+        "resolved": "3.4.14.1",
+        "contentHash": "Be2vHp02n5wWJgX3CGicmohg5+QjleULdbJgQtCKis+2r53VaIwTdt0OYx8wCARYCuS17OSHXj8AMhoCo41qyA=="
       },
       "SkiaSharp": {
         "type": "CentralTransitive",
@@ -173,6 +208,12 @@
         "type": "Transitive",
         "resolved": "4.151.1",
         "contentHash": "G+nln30ZX2ZuhH+ungf6x/QMXCje38KTS0VTfQeMyeY8uyMBmsZwFz2D30ZxUjZqsVbEIcaC2bsYF65876s4Yg=="
+      },
+      "SDL3-CS.Windows": {
+        "type": "CentralTransitive",
+        "requested": "[3.4.14.1, )",
+        "resolved": "3.4.14.1",
+        "contentHash": "Be2vHp02n5wWJgX3CGicmohg5+QjleULdbJgQtCKis+2r53VaIwTdt0OYx8wCARYCuS17OSHXj8AMhoCo41qyA=="
       }
     }
   }

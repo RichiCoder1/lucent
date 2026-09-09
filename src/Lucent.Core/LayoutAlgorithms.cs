@@ -228,6 +228,11 @@ public sealed class LayoutAlgorithmContext
     }
 
     /// <summary>Gets retained per-container state scoped to this algorithm instance and state type.</summary>
+    /// <remarks>
+    /// Disposable state is released when another algorithm is activated or the container is disposed.
+    /// A collapsed container defers algorithm activation until it participates in layout again;
+    /// component-local state has its own retained lifetime.
+    /// </remarks>
     public T GetOrCreateState<T>(Func<T> create)
         where T : class
     {

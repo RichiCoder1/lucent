@@ -215,8 +215,12 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
         if (!namespaceWritten)
             text.Append("namespace Lucent.Lui.Generated;\n");
         var component = document.Component!;
-        return text.Append("public static partial class Components { ")
-            .Append("[global::Lucent.Core.LucentComponentAttribute] ")
+        text.Append(
+            "/// <summary>Generated Lucent component recipes.</summary>\npublic static partial class Components {\n"
+        );
+        foreach (var comment in LuiDocumentation.ForComponent(document, component))
+            text.Append(LuiDocumentation.Indent(comment));
+        return text.Append("[global::Lucent.Core.LucentComponentAttribute] ")
             .Append(component.Accessibility.IsMissing ? "internal" : component.Accessibility.Text)
             .Append(" static global::Lucent.Core.ComponentRecipe ")
             .Append(component.Name.Text)

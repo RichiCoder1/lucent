@@ -88,6 +88,7 @@ public sealed class WindowBreakpoints : IDisposable
         ArgumentNullException.ThrowIfNull(breakpoints);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         _scope = owner.CreateChild(name);
+        _scope.DiagnosticState = "window-breakpoints: unregistered";
         Breakpoints = breakpoints;
         _width = _scope.Signal(0f, name + ".width");
         _bucket = _scope.Signal(Bucket(0), name + ".bucket");
@@ -97,6 +98,7 @@ public sealed class WindowBreakpoints : IDisposable
     public BreakpointSet Breakpoints { get; }
 
     /// <summary>Gets the latest assigned logical window width.</summary>
+    /// <remarks>Starts at zero before the first mounted projection and retains the last value after unmounting.</remarks>
     public float Width
     {
         get
@@ -139,7 +141,12 @@ public sealed class WindowBreakpoints : IDisposable
                 "Window breakpoints can have one established layout mount."
             );
         _composition = mount.Composition;
-        mount.Scope.OnDispose(() => _composition = null);
+        _scope.DiagnosticState = "window-breakpoints: mounted, awaiting viewport";
+        mount.Scope.OnDispose(() =>
+        {
+            _composition = null;
+            _scope.DiagnosticState = "window-breakpoints: unregistered";
+        });
     }
 
     internal void Assign(Composition composition, float width)
@@ -153,6 +160,7 @@ public sealed class WindowBreakpoints : IDisposable
             throw new ArgumentOutOfRangeException(nameof(width));
         _width.Value = width == 0 ? 0 : width;
         _bucket.Value = Bucket(width);
+        _scope.DiagnosticState = "window-breakpoints: mounted, viewport assigned";
     }
 
     private int Bucket(float width)

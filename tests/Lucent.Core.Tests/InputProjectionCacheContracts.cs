@@ -1,4 +1,5 @@
 using Lucent.Core;
+using TestAssert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
 
 namespace Lucent.Core.Tests;
 
@@ -154,6 +155,71 @@ public sealed class InputProjectionCacheContracts
         }
     }
 
+    [TestMethod]
+    public void PassLocalSnapshotRefreshesGeometryTypographyScaleScrollAndInput()
+    {
+        var graph = new ReactiveGraph();
+        var width = graph.Signal(20f, "snapshot-width");
+        var fontSize = graph.Signal(12f, "snapshot-font-size");
+        var scroll = graph.Signal(default(ScrollOffset), "snapshot-scroll");
+        var pointerTransparent = graph.Signal(false, "snapshot-pointer-transparent");
+        using var composition = new Composition(graph, "pass-local-snapshot");
+        var theme = new ThemeContext(composition.Root.Scope, new Theme("pass-local-snapshot"));
+        composition.Root.Present(
+            theme,
+            author: Style
+                .Empty.Set(LayoutProperties.Width, 40f)
+                .Set(LayoutProperties.Height, 40f)
+                .Set(LayoutProperties.Clip, true)
+                .Bind(LayoutProperties.Scroll, () => scroll.Value)
+        );
+        var child = composition.Child(composition.Root, "child");
+        child.Present(
+            theme,
+            author: Style
+                .Empty.Bind(LayoutProperties.Width, () => width.Value)
+                .Set(LayoutProperties.Height, 20f)
+                .Set(ProjectionProperties.Text, "cache")
+                .Bind(TypographyProperties.FontSize, () => fontSize.Value)
+                .Bind(InputProperties.PointerTransparent, () => pointerTransparent.Value)
+        );
+        graph.Drain();
+        var shaper = new CapturingShaper();
+        var router = composition.Input;
+        var first = SceneLayout.Project(composition, new(40, 40, 1), shaper);
+        TestAssert.IsTrue(router.SetScene(first));
+        var firstBox = first.Boxes.Single(box => box.Identity.ElementId == child.Id);
+        var firstInput = first.Input.Single(input => input.Identity.ElementId == child.Id);
+        TestAssert.AreEqual(20f, firstBox.Bounds.Width);
+        TestAssert.AreEqual(12f, shaper.Last.FontSize);
+        TestAssert.AreEqual(1f, shaper.Last.Scale);
+        TestAssert.IsFalse(firstInput.PointerTransparent);
+
+        width.Value = 30;
+        fontSize.Value = 20;
+        scroll.Value = new(5, 0);
+        pointerTransparent.Value = true;
+        graph.Drain();
+        var second = SceneLayout.Project(composition, new(40, 40, 1.5f), shaper);
+        TestAssert.IsTrue(router.SetScene(second));
+        first.Dispose();
+
+        var secondBox = second.Boxes.Single(box => box.Identity.ElementId == child.Id);
+        var secondInput = second.Input.Single(input => input.Identity.ElementId == child.Id);
+        TestAssert.IsTrue(first.IsDisposed, "The caller did not release the superseded snapshot.");
+        TestAssert.IsFalse(
+            second.IsDisposed,
+            "Releasing the prior snapshot invalidated the replacement."
+        );
+        TestAssert.AreEqual(30f, secondBox.Bounds.Width, 1f);
+        TestAssert.IsTrue(secondBox.Bounds.X < 0, "The refreshed scroll offset was not projected.");
+        TestAssert.AreEqual(20f, shaper.Last.FontSize);
+        TestAssert.AreEqual(1.5f, shaper.Last.Scale);
+        TestAssert.IsTrue(secondInput.PointerTransparent);
+        TestAssert.AreNotEqual(firstInput.Signature, secondInput.Signature);
+        second.Dispose();
+    }
+
     private static void Assert(bool value, string message)
     {
         if (!value)
@@ -199,6 +265,42 @@ public sealed class InputProjectionCacheContracts
                         0,
                         1,
                         [new ShapedGlyph(1, 0, 0, 0, 1, 0, 0)]
+                    ),
+                ]
+            );
+        }
+    }
+
+    private sealed class CapturingShaper : ITextShaper
+    {
+        internal TextMeasureRequest Last { get; private set; }
+
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            Last = request;
+            return new(
+                "captured",
+                10,
+                request.FontSize,
+                [
+                    new ShapedRun(
+                        "captured",
+                        request.FontFamily,
+                        400,
+                        5,
+                        0,
+                        request.Language,
+                        0,
+                        "captured#0",
+                        request.Direction,
+                        request.Language,
+                        request.FontSize,
+                        0,
+                        request.FontSize,
+                        -request.FontSize,
+                        0,
+                        10,
+                        [new ShapedGlyph(1, 0, 0, 0, 10, 0, 0)]
                     ),
                 ]
             );

@@ -2630,11 +2630,21 @@ style ScrollStyle {
             var filterBar = headerText.IndexOf("FilterBar", StringComparison.Ordinal);
             var layoutTag = headerText.IndexOf("<Layout", StringComparison.Ordinal);
             var buttonAttribute = headerText.IndexOf("onInvoke", StringComparison.Ordinal);
-            var styleProperty = headerText.IndexOf("Width", StringComparison.Ordinal);
-            var styleReference = headerText.LastIndexOf(
-                "HeaderTitleStyle",
+            var styleDeclaration = headerText.IndexOf("    Axis:", StringComparison.Ordinal);
+            Assert(
+                styleDeclaration >= 0,
+                "Header.lui no longer contains the authored HeaderStyle Axis declaration."
+            );
+            var styleProperty = styleDeclaration + "    ".Length;
+            var styleReferenceMarker = headerText.IndexOf(
+                "style={HeaderStyle}",
                 StringComparison.Ordinal
             );
+            Assert(
+                styleReferenceMarker >= 0,
+                "Header.lui no longer contains the authored HeaderStyle reference."
+            );
+            var styleReference = styleReferenceMarker + "style={".Length;
             Assert(
                 await issueBrowser.NavigateAsync(header, filterBar, CancellationToken.None)
                     is not null,
@@ -2805,7 +2815,21 @@ style ScrollStyle {
                     item.Label == "Width"
                     && item.Kind == 5
                     && item.Detail.Contains("Property", StringComparison.Ordinal)
-                ) && !properties.Any(item => item.Label == "VirtualRowHeight"),
+                )
+                    && !properties.Any(item => item.Label == "VirtualRowHeight")
+                    && !properties.Any(item =>
+                        item.Label
+                            is "Bind"
+                                or "BindValue"
+                                or "Equals"
+                                or "GetHashCode"
+                                or "GetType"
+                                or "Set"
+                                or "SetValue"
+                                or "ToString"
+                                or "When"
+                                or "With"
+                    ),
                 "style property completion was not limited to public typed Property<T> declarations: "
                     + String.Join(
                         ", ",
@@ -2819,7 +2843,8 @@ style ScrollStyle {
             );
             Assert(
                 references.Any(item => item.Label == "HeaderStyle" && item.Kind == 5)
-                    && references.Any(item => item.Label == "DensityButtonStyle" && item.Kind == 5),
+                    && references.Any(item => item.Label == "HeaderTitleStyle" && item.Kind == 5)
+                    && references.Any(item => item.Label == "HeaderContentStyle" && item.Kind == 5),
                 "style-reference completion omitted compiler-owned style declarations."
             );
             var namespaceCompletions = await issueBrowser.CompletionsAsync(
@@ -3189,7 +3214,7 @@ style ScrollStyle {
                         + literal
                 );
             }
-            AssertSemanticToken(headerTokens, headerText, "MaxWidth", "property");
+            AssertSemanticToken(headerTokens, headerText, "Axis", "property");
             AssertSemanticToken(headerTokens, headerText, "IssueBrowserState", "type");
             AssertSemanticToken(errorTokens, errorText, "LayoutAxis", "type");
             AssertSemanticToken(errorTokens, errorText, "Column", "enumMember");

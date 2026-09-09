@@ -86,6 +86,18 @@ public component FilterBar(Query query, Action clear, Style? style = null) {
 
 A component lowers to a `[LucentComponent]` method returning `ComponentRecipe` in the namespace's partial static `Components` class. Default accessibility is `internal`; `public` is explicit. An adjacent C# partial may provide normal helpers. Component-level state declarations, ordinary methods, and synchronous `Setup` are supported by the language extension below. Generic `.lui` declarations and a general embedded `code` block remain deferred; generated implementation objects are not public mounted-component handles.
 
+Public component documentation uses ordinary contiguous C# XML documentation comments immediately before the declaration:
+
+```lui
+/// <summary>Displays one issue row.</summary>
+/// <param name="issue">The issue to display.</param>
+public component IssueRow(BrowserIssue issue) {
+    <Text content={issue.Title} />
+}
+```
+
+The generator preserves these comments on the generated `Components.IssueRow` factory. They therefore appear in the assembly documentation file and in Roslyn-backed completion or hover. A regular comment between the XML comments and the declaration ends the documentation block.
+
 Component parameters use normal C# types, nullability, camel-case names, and constant default values. `ref`, `out`, `in`, `params`, generic declarations, parameter attributes, and destructuring are deferred. Ordinary parameters are construction-time values. Explicitly live component inputs use signal-bearing models or typed readers such as `Func<T>`; At compatible live value inputs, `.lui` supplies a target-typed reader for an ordinary value expression; an already compatible delegate remains unchanged. Generated code never reruns a component to make values reactive.
 
 Every component body has one component-element root for its mounted lifetime. A caller may choose between recipes from construction-time C# or place a component inside a retained `if`; reactively replacing the component document's own root is deferred. There is no duck-typed recipe scan or string registry.

@@ -43,6 +43,9 @@ public sealed partial class ReactiveScope : IDisposable
     public bool IsDisposed { get; private set; }
     internal ReactiveGraph Graph => _graph;
 
+    // Framework lifecycle metadata only; graph dumps must not include application values.
+    internal string? DiagnosticState { get; set; }
+
     internal void Rename(string name)
     {
         _graph.CheckThread();

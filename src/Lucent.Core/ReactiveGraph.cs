@@ -294,13 +294,17 @@ public sealed class ReactiveGraph
         CheckThread();
         var dump = new StringBuilder("reactive-graph\n");
         foreach (var scope in _scopes.Values.OrderBy(scope => scope.Id))
+        {
             dump.Append("scope ")
                 .Append(scope.Id.ToString(CultureInfo.InvariantCulture))
                 .Append(" name=")
                 .Append(Quote(scope.Name))
                 .Append(" parent=")
-                .Append(scope.Parent?.Id.ToString(CultureInfo.InvariantCulture) ?? "-")
-                .Append('\n');
+                .Append(scope.Parent?.Id.ToString(CultureInfo.InvariantCulture) ?? "-");
+            if (scope.DiagnosticState is { } state)
+                dump.Append(" state=").Append(Quote(state));
+            dump.Append('\n');
+        }
         foreach (var node in _nodes.Values.OrderBy(node => node.Id))
         {
             dump.Append("node ")

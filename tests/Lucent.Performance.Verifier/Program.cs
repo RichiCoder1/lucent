@@ -20,8 +20,11 @@ const int SurfaceLimit = 1,
 if (args.Length == 1 && args[0] == "--input-dispatch")
     return InputDispatchProbe.Run();
 
+if (args.Length == 1 && args[0] == "--scene-projection")
+    return SceneProjectionProbe.Run();
+
 if (args.Length != 2 || args[0] != "--app")
-    return Fail("usage: --app <published-exe>");
+    return Fail("usage: --app <published-exe> | --input-dispatch | --scene-projection");
 var app = Path.GetFullPath(args[1]);
 if (!File.Exists(app))
     return Fail("missing published app: " + app);

@@ -57,7 +57,16 @@ Implementation status, September 8, 2026: retained paragraph caching and per-pro
 
 The first Grid subset is explicit tracks (`fixed`, `auto`, `fr`, and `minmax`), row/column gaps, explicit placement, and contiguous spans. The first Flex subset is row/column direction, basis, grow, shrink, gaps, alignment, and wrapping. Unsupported combinations fail during authored-style validation rather than silently approximating CSS. Responsive choice reads the shell's assigned content box once per projection; a child contribution cannot select its own breakpoint.
 
+## Grid allocation and overflow clarification (September 9, 2026; #116)
+
+Grid allocates fixed sizes and explicit minimums first, then grows non-fractional content tracks from child contributions, and finally distributes the remaining available space by fractional weight. Fractional shares are added to each track's minimum; they do not equalize final sizes. At width 300, `MinMax(100, Fraction()), Fraction()` therefore resolves to 200 / 100. An ordinary `Fraction()` has a zero intrinsic minimum, including when a child spans several tracks. Use `Content()` or an explicit `MinMax` floor when content should reserve space before fractional allocation.
+
+A spanning contribution includes the gaps inside its span. Its remaining deficit is shared by eligible content tracks; when one reaches its maximum, the unused share is redistributed to the others until the contribution fits or every eligible track is capped. For example, a width-200 child spanning `MinMax(0, Fixed(50)), Content()` with no gap produces 50 / 150. Fixed and fractional tracks do not absorb this content deficit. If no eligible capacity remains, the child can overflow; declared maxima and available-space limits do not silently change the authored child size.
+
+For Flex cross-axis alignment, an explicitly sized child retains its authored size. Center and End positions are calculated from that actual size, allowing negative offsets when the child is larger than its line. A height-80 child in a height-40 row starts at -20 for Center and -40 for End. Start and Stretch preserve the explicit size at the start edge. These are Lucent contracts, not a claim of CSS Grid or Flexbox equivalence.
+
 ## Constrained paragraph contract
+
 
 A paragraph request contains the immutable text snapshot or stable text-version identity; resolved font family, size, weight, style, language, and base direction; finite or unbounded inline and block constraints; wrap policy; optional maximum line count and overflow policy; and device scale. The initial wrap policy is no-wrap, word wrap with grapheme fallback, or explicit line breaks. Both dimensions are explicit even when one is unbounded, so a vertical scroller can request a finite inline width and unbounded block extent without losing its viewport constraint.
 

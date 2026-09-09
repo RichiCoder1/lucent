@@ -1752,7 +1752,10 @@ public static class LuiCompiler
         );
         var bound = compilation
             .RemoveSyntaxTrees(
-                compilation.SyntaxTrees.Where(item => item.FilePath == identity.HintName)
+                compilation.SyntaxTrees.Where(item =>
+                    StringComparer.Ordinal.Equals(item.FilePath, identity.HintName)
+                    || item.FilePath.StartsWith(identity.HintName + ".", StringComparison.Ordinal)
+                )
             )
             .AddSyntaxTrees(tree);
         var model = bound.GetSemanticModel(tree);
@@ -2569,7 +2572,9 @@ public static class LuiCompiler
             }
             if (!namespaceWritten)
                 Hidden("namespace Lucent.Lui.Generated;\n");
-            Hidden("\npublic static partial class Components\n{\n");
+            Hidden(
+                "\n/// <summary>Generated Lucent component recipes.</summary>\npublic static partial class Components\n{\n"
+            );
             for (var index = 0; index < document.Styles.Count; index++)
                 Style(document.Styles[index], index, diagnostics);
             Component(document.Component!, diagnostics);
@@ -2610,6 +2615,7 @@ public static class LuiCompiler
                 : "";
             var stateBuild = stateful ? UniqueGeneratedName("__luiBuild") : "";
             var stateOwner = stateful ? UniqueGeneratedName("__luiOwner") : "";
+            Documentation(component);
             Hidden(
                 "    [global::System.CodeDom.Compiler.GeneratedCodeAttribute(\"Lucent.Lui.Generator\", \""
                     + typeof(LuiCompiler).Assembly.GetName().Version
@@ -2691,6 +2697,12 @@ public static class LuiCompiler
             Mark(component.CloseBrace.Span, LuiMapKind.Structure);
             foreach (var parameter in component.Parameters)
                 Mark(parameter.Separator.Span, LuiMapKind.Structure);
+        }
+
+        private void Documentation(LuiComponentSyntax component)
+        {
+            foreach (var comment in LuiDocumentation.ForComponent(document, component))
+                Mapped(LuiDocumentation.Indent(comment), comment.Span, LuiMapKind.Structure);
         }
 
         private void StateClass(

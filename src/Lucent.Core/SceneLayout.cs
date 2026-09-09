@@ -171,9 +171,21 @@ public static class SceneLayout
         var projected = composition.CaptureInputProjection(() =>
         {
             var elements = composition.Elements().ToArray();
-            var signatures = elements.Select(InputSignature).ToArray();
+            // The mutation guard already resolves every input-relevant style before
+            // layout. Reuse that pass-local snapshot for participating elements;
+            // the fresh signatures below still reject changes made during layout.
+            var resolvedStyles = elements
+                .Where(element => element.Participation != ElementParticipation.Collapsed)
+                .ToDictionary(element => element.Id, ReadInputTrackedResolved);
+            var signatures = elements
+                .Select(element =>
+                    resolvedStyles.TryGetValue(element.Id, out var resolved)
+                        ? InputSignature(element, resolved)
+                        : InputSignature(element)
+                )
+                .ToArray();
             var boxes = new List<LayoutBox>();
-            var cache = new ProjectionCache();
+            var cache = new ProjectionCache(resolvedStyles);
             var nodes = composition.WithoutProjectionTracking(() =>
                 Layout(
                     composition.Root,
@@ -653,6 +665,16 @@ public static class SceneLayout
             return [];
         }
         var style = cache.Read(element);
+        var shapeOuterWidth = Constrain(
+            style.Width ?? allotted.Width,
+            style.MinWidth,
+            style.MaxWidth
+        );
+        if (widthAllotted)
+            shapeOuterWidth = Constrain(allotted.Width, style.MinWidth, style.MaxWidth);
+        if (element.Parent is null)
+            shapeOuterWidth = allotted.Width;
+        var shapeContentWidth = ContentWidth(element, allotted.X, shapeOuterWidth, viewport.Scale);
         var text =
             style.TextWrap == TextWrap.NoWrap
                 ? Shape(element, style, viewport.Scale, shaper, cache)
@@ -662,13 +684,7 @@ public static class SceneLayout
                     viewport.Scale,
                     shaper,
                     cache,
-                    new LayoutConstraint(
-                        ContentBounds(
-                            element,
-                            new LayoutRect(0, 0, style.Width ?? allotted.Width, 0),
-                            viewport.Scale
-                        ).Width
-                    ),
+                    new LayoutConstraint(shapeContentWidth),
                     new LayoutConstraint(
                         Math.Max(0, (style.Height ?? allotted.Height) - style.Padding.Vertical)
                     )
@@ -1376,7 +1392,7 @@ public static class SceneLayout
                 ? Constrain(availableWidth, style.MinWidth, style.MaxWidth)
             : (float?)null;
         var constrainedContentWidth = constrainedOuterWidth is { } outerWidth
-            ? Math.Max(0, Finite(outerWidth - style.Padding.Horizontal))
+            ? ContentWidth(element, 0, outerWidth, scale)
             : (float?)null;
         if (cache.TryReadIntrinsic(element.Id, constrainedOuterWidth, out var cachedIntrinsic))
             return cachedIntrinsic;
@@ -1777,28 +1793,34 @@ public static class SceneLayout
             children,
             MeasureChild
         );
-        LayoutAlgorithmResult result;
         try
         {
             container.ActivateLayoutAlgorithm(algorithm);
-            result =
+            var result =
                 container.Composition.RunLayoutCallback(() => algorithm.Layout(context))
                 ?? throw new InvalidOperationException("A layout algorithm returned null.");
+            var placements = result.Placements;
+            if (
+                placements.Count != children.Count
+                || placements.Select(value => value.ChildIndex).Distinct().Count() != children.Count
+                || placements.Any(value => value.ChildIndex >= children.Count)
+            )
+                throw new InvalidOperationException(
+                    "A layout algorithm must place every participating direct child exactly once."
+                );
+            return result;
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException(
+                $"Layout algorithm '{algorithm.Name}' failed for container '{container.Name}' (element {container.Id}).",
+                exception
+            );
         }
         finally
         {
             context.Complete();
         }
-        var placements = result.Placements;
-        if (
-            placements.Count != children.Count
-            || placements.Select(value => value.ChildIndex).Distinct().Count() != children.Count
-            || placements.Any(value => value.ChildIndex >= children.Count)
-        )
-            throw new InvalidOperationException(
-                "A layout algorithm must place every participating direct child exactly once."
-            );
-        return result;
     }
 
     private static (float Width, float Height) Outer(
@@ -1843,6 +1865,13 @@ public static class SceneLayout
             return content;
         var right = Math.Max(content.X, content.X + content.Width - thickness);
         return new(content.X, content.Y, right - content.X, content.Height);
+    }
+
+    private static float ContentWidth(Element element, float x, float width, float scale)
+    {
+        if (!float.IsFinite(x) || !float.IsFinite(width) || width < 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        return ContentBounds(element, LayoutRect.Round(x, 0, width, 0, scale), scale).Width;
     }
 
     private static ShapedText? Shape(
@@ -1949,6 +1978,30 @@ public static class SceneLayout
 
     private static Values ReadResolved(Element element)
     {
+        var paint = ReadPaint(element);
+        return ReadResolved(element, paint.Background, paint.Opacity, paint.TextColor);
+    }
+
+    private static Values ReadInputTrackedResolved(Element element)
+    {
+        var paint = element.Composition.WithoutProjectionTracking(() => ReadPaint(element));
+        return ReadResolved(element, paint.Background, paint.Opacity, paint.TextColor);
+    }
+
+    private static (Brush Background, float Opacity, Color TextColor) ReadPaint(Element element) =>
+        (
+            element.Resolve(VisualProperties.Background).Value,
+            element.Resolve(VisualProperties.Opacity).Value,
+            element.Resolve(TypographyProperties.TextColor).Value
+        );
+
+    private static Values ReadResolved(
+        Element element,
+        Brush background,
+        float opacity,
+        Color textColor
+    )
+    {
         var values = new Values(
             element.Resolve(LayoutProperties.Mode).Value,
             element.Resolve(LayoutProperties.Algorithm).Value,
@@ -1977,10 +2030,10 @@ public static class SceneLayout
             element.Resolve(LayoutProperties.VirtualRowHeight).Value,
             element.Resolve(LayoutProperties.VirtualItemCount).Value,
             element.Resolve(LayoutProperties.VirtualRowIndex).Value,
-            element.Resolve(VisualProperties.Background).Value,
+            background,
             element.Resolve(VisualProperties.CornerRadius).Value,
-            element.Resolve(VisualProperties.Opacity).Value,
-            element.Resolve(TypographyProperties.TextColor).Value,
+            opacity,
+            textColor,
             element.Resolve(ProjectionProperties.Text).Value,
             element.Resolve(ProjectionProperties.TextMeasure).Value,
             element.Resolve(TypographyProperties.FontFamily).Value,
@@ -2062,6 +2115,7 @@ public static class SceneLayout
     private sealed class ProjectionCache
     {
         private readonly Dictionary<long, Values> _styles = [];
+        private readonly IReadOnlyDictionary<long, Values>? _resolvedStyles;
         private readonly Dictionary<long, DecorationValues> _decorations = [];
         private readonly Dictionary<
             (long ElementId, float? Width),
@@ -2069,6 +2123,13 @@ public static class SceneLayout
         > _intrinsics = [];
 
         internal Dictionary<TextMeasureRequest, ShapedText> Shapes { get; } = [];
+
+        internal ProjectionCache() { }
+
+        internal ProjectionCache(IReadOnlyDictionary<long, Values> resolvedStyles)
+        {
+            _resolvedStyles = resolvedStyles;
+        }
 
         internal bool TryReadIntrinsic(
             long elementId,
@@ -2090,7 +2151,11 @@ public static class SceneLayout
         {
             if (_styles.TryGetValue(element.Id, out var cached))
                 return cached;
-            var resolved = ReadResolved(element);
+            var resolved =
+                _resolvedStyles is not null
+                && _resolvedStyles.TryGetValue(element.Id, out var snapshot)
+                    ? snapshot
+                    : ReadResolved(element);
             element.ActivateLayoutAlgorithm(
                 resolved.Algorithm is { BuiltInMode: null } ? resolved.Algorithm : null
             );
@@ -2320,56 +2385,62 @@ public static class SceneLayout
 
     internal static string InputSignature(Element element)
     {
-        var mode = element.Resolve(LayoutProperties.Mode).Value;
-        var algorithm = element.Resolve(LayoutProperties.Algorithm).Value;
-        var axis = element.Resolve(LayoutProperties.Axis).Value;
-        var columns = element.Resolve(LayoutProperties.Columns).Value;
-        var rows = element.Resolve(LayoutProperties.Rows).Value;
+        ArgumentNullException.ThrowIfNull(element);
+        return InputSignature(element, ReadInputTrackedResolved(element));
+    }
+
+    private static string InputSignature(Element element, in Values values)
+    {
+        var mode = values.Mode;
+        var algorithm = values.Algorithm;
+        var axis = values.Axis;
+        var columns = values.Columns;
+        var rows = values.Rows;
         if (columns is null || rows is null)
             throw new ArgumentOutOfRangeException(
                 nameof(element),
                 "Grid track collections must not be null."
             );
-        var columnGap = element.Resolve(LayoutProperties.ColumnGap).Value;
-        var rowGap = element.Resolve(LayoutProperties.RowGap).Value;
-        var placement = element.Resolve(LayoutProperties.GridPlacement).Value;
-        var width = element.Resolve(LayoutProperties.Width).Value;
-        var height = element.Resolve(LayoutProperties.Height).Value;
-        var minWidth = element.Resolve(LayoutProperties.MinWidth).Value;
-        var minHeight = element.Resolve(LayoutProperties.MinHeight).Value;
-        var maxWidth = element.Resolve(LayoutProperties.MaxWidth).Value;
-        var maxHeight = element.Resolve(LayoutProperties.MaxHeight).Value;
-        var spacing = element.Resolve(LayoutProperties.Spacing).Value;
-        var mainGrow = element.Resolve(LayoutProperties.MainGrow).Value;
-        var mainBasis = element.Resolve(LayoutProperties.MainBasis).Value;
-        var mainShrink = element.Resolve(LayoutProperties.MainShrink).Value;
-        var wrap = element.Resolve(LayoutProperties.Wrap).Value;
-        var mainAlignment = element.Resolve(LayoutProperties.MainAlignment).Value;
-        var crossAlignment = element.Resolve(LayoutProperties.CrossAlignment).Value;
-        var clip = element.Resolve(LayoutProperties.Clip).Value;
-        var cornerRadius = element.Resolve(VisualProperties.CornerRadius).Value;
-        var padding = element.Resolve(LayoutProperties.Padding).Value;
-        var scroll = element.Resolve(LayoutProperties.Scroll).Value;
+        var columnGap = values.ColumnGap;
+        var rowGap = values.RowGap;
+        var placement = values.GridPlacement;
+        var width = values.Width;
+        var height = values.Height;
+        var minWidth = values.MinWidth;
+        var minHeight = values.MinHeight;
+        var maxWidth = values.MaxWidth;
+        var maxHeight = values.MaxHeight;
+        var spacing = values.Spacing;
+        var mainGrow = values.MainGrow;
+        var mainBasis = values.MainBasis;
+        var mainShrink = values.MainShrink;
+        var wrap = values.Wrap;
+        var mainAlignment = values.MainAlignment;
+        var crossAlignment = values.CrossAlignment;
+        var clip = values.Clip;
+        var cornerRadius = values.CornerRadius;
+        var padding = values.Padding;
+        var scroll = values.Scroll;
         var scrollbarVisibility = element.Resolve(ScrollBarProperties.Visibility).Value;
         var scrollbarThickness = element.Resolve(ScrollBarProperties.Thickness).Value;
-        var virtualRowHeight = element.Resolve(LayoutProperties.VirtualRowHeight).Value;
-        var virtualItemCount = element.Resolve(LayoutProperties.VirtualItemCount).Value;
-        var virtualRowIndex = element.Resolve(LayoutProperties.VirtualRowIndex).Value;
-        var text = element.Resolve(ProjectionProperties.Text).Value;
-        var textMeasure = element.Resolve(ProjectionProperties.TextMeasure).Value;
-        var fontFamily = element.Resolve(TypographyProperties.FontFamily).Value;
-        var fontSize = element.Resolve(TypographyProperties.FontSize).Value;
-        var fontWeight = element.Resolve(TypographyProperties.FontWeight).Value;
-        var language = element.Resolve(TypographyProperties.Language).Value;
-        var direction = element.Resolve(TypographyProperties.Direction).Value;
-        var textWrap = element.Resolve(TypographyProperties.TextWrap).Value;
-        var maxLines = element.Resolve(TypographyProperties.MaxLines).Value;
-        var textOverflow = element.Resolve(TypographyProperties.Overflow).Value;
-        var selectionStart = element.Resolve(ProjectionProperties.TextSelectionStart).Value;
-        var selectionEnd = element.Resolve(ProjectionProperties.TextSelectionEnd).Value;
-        var caret = element.Resolve(ProjectionProperties.TextCaret).Value;
-        var multiline = element.Resolve(ProjectionProperties.TextMultiline).Value;
-        var caretAffinity = element.Resolve(ProjectionProperties.TextCaretAffinity).Value;
+        var virtualRowHeight = values.VirtualRowHeight;
+        var virtualItemCount = values.VirtualItemCount;
+        var virtualRowIndex = values.VirtualRowIndex;
+        var text = values.Text;
+        var textMeasure = values.TextMeasure;
+        var fontFamily = values.FontFamily;
+        var fontSize = values.FontSize;
+        var fontWeight = values.FontWeight;
+        var language = values.Language;
+        var direction = values.Direction;
+        var textWrap = values.TextWrap;
+        var maxLines = values.MaxLines;
+        var textOverflow = values.TextOverflow;
+        var selectionStart = values.SelectionStart;
+        var selectionEnd = values.SelectionEnd;
+        var caret = values.Caret;
+        var multiline = values.Multiline;
+        var caretAffinity = values.CaretAffinity;
         var enabled = element.Resolve(InputProperties.Enabled).Value;
         var visible = element.Resolve(InputProperties.Visible).Value;
         var pointerTransparent = element.Resolve(InputProperties.PointerTransparent).Value;
