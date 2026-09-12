@@ -176,6 +176,25 @@ public sealed class ComponentBrowserTests
     }
 
     [TestMethod]
+    public void SelectingAnotherExampleResetsRetainedDetailAndSourceScroll()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("component-browser-view-test");
+        var browser = new ComponentBrowserState(scope);
+        var view = new ComponentBrowserViewState(scope, browser);
+
+        graph.Drain();
+        view.DetailViewport.Offset = new(0, 240);
+        view.SourceViewport.Offset = new(0, 96);
+
+        browser.Select("navigation");
+        graph.Drain();
+
+        Assert.AreEqual(default, view.DetailViewport.Offset);
+        Assert.AreEqual(default, view.SourceViewport.Offset);
+    }
+
+    [TestMethod]
     public void DialogSubmissionOwnsTheAcceptedStatusAfterTheSessionCompletes()
     {
         var graph = new ReactiveGraph();
@@ -296,6 +315,56 @@ public sealed class ComponentBrowserTests
         using var canvas = new SKCanvas(bitmap);
         renderer.Render(scene, canvas);
         Assert.IsTrue(scene.Boxes.Count != 0);
+    }
+
+    [TestMethod]
+    public void ComponentNavigationKeepsOverflowInsideItsBoundedViewport()
+    {
+        using var composition = new Composition(
+            new ReactiveGraph(),
+            "component-browser-navigation"
+        );
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        _ = composition.Mount(composition.Root, theme, ComponentBrowserStructure.Create());
+        composition.Flush();
+
+        var semantic = composition.SemanticSnapshot();
+        Assert.IsNotNull(semantic);
+        var navigation = Flatten(semantic!)
+            .Single(node => node.Role == SemanticRole.Group && node.Name == "Component navigation");
+        var navigationItems = ComponentCatalog
+            .Items.Select(item =>
+                Flatten(semantic!)
+                    .Single(node =>
+                        node.Role == SemanticRole.ListItem
+                        && node.Name == item.Title + " · " + item.Family
+                    )
+            )
+            .ToArray();
+
+        using var renderer = new SkiaSceneRenderer();
+        using var scene = SceneLayout.Project(composition, new(1282, 872, 1), renderer);
+        Assert.IsTrue(composition.Input.SetScene(scene));
+
+        var viewport = scene
+            .Boxes.Single(box => box.Identity.ElementId == navigation.Identity.ElementId)
+            .Bounds;
+        var contentBottom = navigationItems.Max(item =>
+        {
+            var bounds = scene
+                .Boxes.Single(box => box.Identity.ElementId == item.Identity.ElementId)
+                .Bounds;
+            return bounds.Y + bounds.Height;
+        });
+        var scrollbar = scene.ScrollBars.SingleOrDefault(bar =>
+            bar.Viewport.ElementId == navigation.Identity.ElementId
+        );
+
+        Assert.IsTrue(
+            scrollbar.Maximum.Y > 0 && contentBottom > viewport.Y + viewport.Height,
+            $"Navigation content was not projected into a bounded scrolling viewport: viewport={viewport}, contentBottom={contentBottom}, maximum={scrollbar.Maximum}."
+        );
     }
 
     [TestMethod]

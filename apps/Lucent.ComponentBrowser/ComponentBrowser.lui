@@ -26,7 +26,7 @@ public component ComponentBrowser(ComponentBrowserState browser, ThemeContext th
     [Once] ComponentBrowserViewState view = null!;
 
     Setup(owner) {
-        view = new ComponentBrowserViewState(owner);
+        view = new ComponentBrowserViewState(owner, browser);
     }
 
     <Layout style={PresentationStyles.Surface.With(BrowserRootStyle)}>

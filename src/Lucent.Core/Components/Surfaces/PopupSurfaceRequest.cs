@@ -52,6 +52,14 @@ public abstract class PopupSurfaceRequest : IDisposable
     /// <summary>Measures content within the host's available logical work area.</summary>
     public abstract LayoutRect Measure(ITextShaper shaper, LayoutViewport available);
 
+    /// <summary>Captures the current mutation revision shared by this surface and its owner.</summary>
+    /// <remarks>Hosts can compare snapshots around popup input to decide whether the owner's retained scene needs projection.</remarks>
+    public long CaptureSharedMutationRevision()
+    {
+        Owner.CheckThread();
+        return Owner.Graph.MutationRevision;
+    }
+
     /// <summary>Sets platform-owned safe-area padding on a popup composition on this request's graph.</summary>
     /// <remarks>The owner composition itself is rejected; menu hosts may pass an active child-level composition.</remarks>
     public void ConfigureHostPadding(Composition popup, Insets padding)

@@ -64,7 +64,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
         }
         _pending?.Dispose();
         _pending = request;
-        _wake();
+        InvalidateOwner();
     }
 
     private void RequestMenu(ContextMenuRequest request)
@@ -74,7 +74,10 @@ internal sealed class WindowsSurfaceManager : IDisposable
         _wake();
     }
 
-    internal bool Dispatch(SDL.Event value)
+    internal bool Dispatch(SDL.Event value) =>
+        DispatchAndInvalidateOwner(_request, () => DispatchCore(value), _invalidateOwner, _wake);
+
+    private bool DispatchCore(SDL.Event value)
     {
         if (_children?.Dispatch(value) == true)
             return true;
@@ -123,6 +126,30 @@ internal sealed class WindowsSurfaceManager : IDisposable
         return _host.Dispatch(value, dismissOnFocusLoss: false);
     }
 
+    internal static bool DispatchAndInvalidateOwner(
+        PopupSurfaceRequest? request,
+        Func<bool> dispatch,
+        Action? invalidateOwner,
+        Action wake
+    )
+    {
+        ArgumentNullException.ThrowIfNull(dispatch);
+        ArgumentNullException.ThrowIfNull(wake);
+        var revision = request?.CaptureSharedMutationRevision();
+        var handled = dispatch();
+        if (
+            handled
+            && revision is { } before
+            && !request!.Owner.IsDisposed
+            && request.CaptureSharedMutationRevision() != before
+        )
+        {
+            invalidateOwner?.Invoke();
+            wake();
+        }
+        return handled;
+    }
+
     internal void Synchronize()
     {
         _menu?.ResolveFocus();
@@ -137,9 +164,11 @@ internal sealed class WindowsSurfaceManager : IDisposable
         {
             if (pending.IsDismissed)
             {
+                var revision = pending.CaptureSharedMutationRevision();
                 _pending = null;
                 pending.Dispose();
                 _ownerInput.CompleteSurface(pending);
+                InvalidateOwnerIfChanged(pending, revision);
             }
             else if (pending.HasAnchor)
             {
@@ -161,11 +190,6 @@ internal sealed class WindowsSurfaceManager : IDisposable
                         _wake,
                         () => _host?.Refresh()
                     );
-                    if (pending.IsModal)
-                    {
-                        _invalidateOwner?.Invoke();
-                        _wake();
-                    }
                 }
                 catch
                 {
@@ -264,6 +288,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
     {
         var errors = new List<Exception>();
         var request = _request;
+        var revision = request?.CaptureSharedMutationRevision();
         _request = null;
         Capture(errors, () => _children?.Dispose());
         _children = null;
@@ -284,15 +309,19 @@ internal sealed class WindowsSurfaceManager : IDisposable
             Capture(errors, () => request?.Dispose());
         if (!_disposed && request is not null && !request.Owner.IsDisposed)
             Capture(errors, () => _ownerInput.CompleteSurface(request));
-        if (!_disposed && request?.IsModal == true)
-            Capture(
-                errors,
-                () =>
-                {
-                    _invalidateOwner?.Invoke();
-                    _wake();
-                }
-            );
+        if (
+            !_disposed
+            && request is not null
+            && (
+                request.IsModal
+                || (
+                    revision is { } before
+                    && !request.Owner.IsDisposed
+                    && request.CaptureSharedMutationRevision() != before
+                )
+            )
+        )
+            Capture(errors, InvalidateOwner);
         Capture(errors, RestoreFinalFocus);
         Throw(errors);
     }
@@ -324,6 +353,22 @@ internal sealed class WindowsSurfaceManager : IDisposable
     {
         _returnFocus = null;
         _ownsReturnFocus = false;
+    }
+
+    private void InvalidateOwnerIfChanged(PopupSurfaceRequest request, long before)
+    {
+        if (
+            !_disposed
+            && !request.Owner.IsDisposed
+            && request.CaptureSharedMutationRevision() != before
+        )
+            InvalidateOwner();
+    }
+
+    private void InvalidateOwner()
+    {
+        _invalidateOwner?.Invoke();
+        _wake();
     }
 
     public void Dispose()

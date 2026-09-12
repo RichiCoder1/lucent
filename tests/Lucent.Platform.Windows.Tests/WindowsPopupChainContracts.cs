@@ -22,6 +22,71 @@ public sealed class WindowsPopupChainContracts
     }
 
     [TestMethod]
+    public void PopupActionsCanInvalidateTheirOwnerWithoutTurningHoverIntoOwnerFrames()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "popup-owner-invalidation");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Child(owner.Root, "popup-owner-target");
+        target.Present(theme);
+        using var request = new OwnedSurfaceRequest(
+            target,
+            theme,
+            Components.Text("Action"),
+            interactive: true,
+            consumeOutsideClick: true,
+            closed: null
+        );
+        var selected = graph.Signal("keyboard", "selected-behavior");
+        var hover = graph.Signal(false, "popup-hover");
+        var invalidations = 0;
+        var wakes = 0;
+
+        Assert.IsTrue(
+            WindowsSurfaceManager.DispatchAndInvalidateOwner(
+                request,
+                () =>
+                {
+                    selected.Value = "pointer";
+                    return true;
+                },
+                () => invalidations++,
+                () => wakes++
+            )
+        );
+        Assert.AreEqual("pointer", selected.Value);
+        Assert.AreEqual(1, invalidations, "The popup action did not invalidate its owner.");
+        Assert.AreEqual(1, wakes, "The owner frame request was not woken.");
+
+        Assert.IsTrue(
+            WindowsSurfaceManager.DispatchAndInvalidateOwner(
+                request,
+                () => true,
+                () => invalidations++,
+                () => wakes++
+            )
+        );
+        Assert.AreEqual(1, invalidations, "Unchanged popup input invalidated the owner.");
+        Assert.AreEqual(1, wakes, "Unchanged popup input woke an owner frame.");
+
+        Assert.IsTrue(
+            WindowsSurfaceManager.DispatchAndInvalidateOwner(
+                request,
+                () =>
+                {
+                    hover.Value = true;
+                    return true;
+                },
+                () => invalidations++,
+                () => wakes++
+            )
+        );
+        Assert.IsTrue(hover.Value);
+        Assert.AreEqual(2, invalidations, "Shared hover state did not invalidate the owner.");
+        Assert.AreEqual(2, wakes, "Shared hover state did not wake an owner frame.");
+    }
+
+    [TestMethod]
     public void RetainedCompositionCanBeHostedAgainWithoutSecondPresentation()
     {
         using var owner = new Composition(new ReactiveGraph(), "retained-popup-owner");

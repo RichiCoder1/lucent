@@ -159,6 +159,78 @@ public sealed class ListsContracts
     }
 
     [TestMethod]
+    [DataRow(0, 100f)]
+    [DataRow(1, 100f)]
+    [DataRow(3, 160f)]
+    [DataRow(20, 280f)]
+    public void SelectPopupTracksAnchorWidthAndBoundsHeightToChoiceRows(
+        int choiceCount,
+        float maximumHeight
+    )
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "select-popup-geometry");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var choices = Enumerable
+            .Range(0, choiceCount)
+            .Select(index => new ChoiceItem<int>(index, index == 0 ? "Alpha" : $"Choice {index}"))
+            .ToArray();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Select(
+                "Workspace",
+                () => choices,
+                () => SelectedKey.None<int>(),
+                _ => { },
+                rowHeight: 32,
+                style: Style.Empty.Width(880).Height(40)
+            )
+        );
+        graph.Drain();
+        using var ownerScene = Install(composition, graph, 920, 100);
+        var anchor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ComboBox);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(anchor.Identity, new(SemanticCommandKind.Expand))
+        );
+        graph.Drain();
+
+        var request = composition.Input.ActiveSurface!;
+        var measured = request.Measure(new MetricShaper(), new(1200, 800, 1));
+        Assert.IsTrue(
+            measured.Width >= request.Anchor.Width,
+            $"The {measured.Width}-pixel Select popup was narrower than its {request.Anchor.Width}-pixel anchor."
+        );
+        Assert.IsTrue(
+            measured.Height <= maximumHeight,
+            $"The {choiceCount}-row Select popup measured {measured.Height} pixels tall."
+        );
+
+        if (choiceCount == 3)
+        {
+            var popup = request.CreateComposition();
+            using var popupScene = Install(
+                popup,
+                graph,
+                measured.Width,
+                Math.Max(measured.Height, 1)
+            );
+            var labels = SceneNodes(popupScene.Nodes)
+                .OfType<TextSceneNode>()
+                .Where(node => node.Text.SourceText is "Alpha" or "Choice 1" or "Choice 2")
+                .ToArray();
+            Assert.HasCount(3, labels);
+            Assert.IsFalse(
+                labels.Any(label => label.Text.DidOverflow),
+                "Short Select choices wrapped or overflowed in an anchor-width popup."
+            );
+        }
+    }
+
+    [TestMethod]
     public void SelectSeparatesActiveAndAppliedKeysAndEscapeCancelsMovement()
     {
         var graph = new ReactiveGraph();
@@ -281,6 +353,23 @@ public sealed class ListsContracts
 
     private static IEnumerable<SemanticSnapshot> Options(Composition composition) =>
         Nodes(composition.SemanticSnapshot()!).Where(node => node.Role == SemanticRole.ListItem);
+
+    private static IEnumerable<SceneNode> SceneNodes(IEnumerable<SceneNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            var children = node switch
+            {
+                ClipSceneNode clip => clip.Children,
+                OpacitySceneNode opacity => opacity.Children,
+                _ => null,
+            };
+            if (children is not null)
+                foreach (var child in SceneNodes(children))
+                    yield return child;
+        }
+    }
 
     private static IEnumerable<SemanticSnapshot> Nodes(SemanticSnapshot node)
     {

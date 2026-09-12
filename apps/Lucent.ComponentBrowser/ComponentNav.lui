@@ -2,6 +2,8 @@ namespace Lucent.ComponentBrowser;
 
 style ComponentNavStyle {
     Axis: LayoutAxis.Column;
+    MainGrow: 1;
+    MainBasis: 0;
     Padding: Insets.Symmetric(16, 16);
     Spacing: 12;
     MinWidth: 0;

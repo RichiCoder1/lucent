@@ -69,6 +69,14 @@ public sealed class SurfaceContracts
         var popup = first.CreateComposition();
         Assert.AreSame(popup, first.CreateComposition());
         Assert.AreEqual(1, mounted);
+        var popupState = popup.Root.Scope.Signal(false, "popup-state");
+        var mutationRevision = first.CaptureSharedMutationRevision();
+        popupState.Value = true;
+        Assert.AreNotEqual(
+            mutationRevision,
+            first.CaptureSharedMutationRevision(),
+            "The surface host could not observe a mutation made through its shared popup graph."
+        );
         first.Dismiss();
         first.Dismiss();
         owner.Flush();
