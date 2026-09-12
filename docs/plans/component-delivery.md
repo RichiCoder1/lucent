@@ -22,24 +22,36 @@ Keep portable behavior and semantics in Core, native adaptation in Windows, stoc
 
 Context/injection/navigation #203–222 remains separate work. This component program does not introduce another router, live compiler or product-specific workflow to demonstrate controls.
 
-## Integration checkpoint — September 9
+## Integration — September 9
 
-The first implementation includes Field/FormSession, CheckBox/RadioGroup/Switch,
+The implementation includes Field/FormSession, CheckBox/RadioGroup/Switch,
 Tooltip/Popover/Dialog, ListBox/Select, NumberField/Slider, Tabs/Disclosure,
-ProgressBar/InlineNotice and Link with an explicit Windows URI-launch service.
-The Component Browser compiles and embeds its real `.lui` examples, and its test
-project participates in normal affected-project verification.
+ProgressBar/InlineNotice, Link, PasswordField, ComboBox, DatePicker/TimePicker,
+TreeView and TableView. Windows provides explicit URI launching and native
+open/save/folder selection. Portable contracts do not depend on the Windows host.
 
-Verification: 397 Core contracts, 102 Windows contracts and five browser contracts
-passed in Release. Browser coverage includes a real Skia render; Windows coverage
-includes compound automation patterns, confidential-value rejection and modal
-scrim pixels. The compiled Core API/dependency preflight also passed. These are
-automated contract checks, not a fresh interactive walkthrough. The computer-use
-launch timed out awaiting app approval, so that interaction check did not run.
+The Component Browser compiles and embeds fourteen real `.lui` examples. Its
+ordinary managed suite captures every example under stock light, dark and high
+contrast with both densities. Issue Browser replaces fixed-choice text filters
+with Select; Light Notes adopts Field for URL label semantics while retaining its
+workspace-owned EditorSession. Live compilation remains separate.
 
-This checkpoint does not close the component program. PasswordField and the native
-file-picker adapter remain in progress (their shared semantic/service contracts
-are present). Editable ComboBox, DatePicker/TimePicker, TreeView, TableView, broader
-browser examples, consumer adoption and published NativeAOT interaction evidence
-remain. Extend tests and documentation with each delivered family; do not infer
-their completion from the shared foundations above.
+Computer Use exercised actual Windows open-file multiple selection, save
+destination selection and folder selection in the managed browser. Save selection
+returned a URI without creating a file. Automated Windows contracts additionally
+exercise Grid/Table/ItemContainer through their COM ABI, bounded offscreen
+realization, password confidentiality and picker lifecycle outcomes. The desktop
+suite includes a published native-dialog cancellation proof.
+
+September 12 integration passes Core 448/448, Windows 120/120 and Component
+Browser 11/11, with 84 fresh example captures. All six selected desktop checks
+pass against fresh NativeAOT Browser/TestHost outputs: popup dimensions and
+lifetimes, password pointer toggling, calendar/suggestion geometry, submenu
+placement, modal focus and native file-picker cancellation. The reported visual
+defects are fixed in the framework; radio labels and slider alignment were
+inspected across all six stock theme/density combinations.
+
+CI/package publication and independent Light Notes adoption remain before
+closing #171 and the parent. The computer-use runtime is unavailable in the
+current session, so these results do not claim a fresh free-form walkthrough,
+broad manual accessibility, real-language IME or physical mixed-DPI certification.

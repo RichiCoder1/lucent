@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Lucent.Core;
+using Lucent.Renderer.Skia;
 using SDL3;
 
 namespace Lucent.Platform.Windows.Tests;
@@ -23,14 +24,133 @@ public sealed class WindowsPopupChainContracts
     [TestMethod]
     public void RetainedCompositionCanBeHostedAgainWithoutSecondPresentation()
     {
-        using var composition = new Composition(new ReactiveGraph(), "retained-popup");
+        using var owner = new Composition(new ReactiveGraph(), "retained-popup-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, new Theme("authored-popup"));
+        var target = owner.Child(owner.Root, "popup-target");
+        target.Present(theme);
+        using var request = new OwnedSurfaceRequest(
+            target,
+            theme,
+            Components.Text("Popup content"),
+            interactive: true,
+            consumeOutsideClick: true,
+            closed: null
+        );
+        var composition = request.CreateComposition();
 
-        WindowsPopupHost.EnsureHostPadding(composition);
+        WindowsPopupHost.EnsureHostPadding(composition, request);
+        Assert.AreEqual(
+            LayoutAlignment.Start,
+            composition.Root.Resolve(LayoutProperties.CrossAlignment).Value,
+            "Native host padding replaced the popup's authored root presentation."
+        );
+        Assert.AreEqual(
+            Insets.Uniform(WindowsPopupHost.ShadowMargin),
+            composition.Root.Resolve(LayoutProperties.Padding).Value
+        );
 
         // Closing a popup retains its composition so a branch can reopen without
         // rebuilding semantic identities. Hosting it again must reuse the one
         // presentation model attached to the retained root.
-        WindowsPopupHost.EnsureHostPadding(composition);
+        WindowsPopupHost.EnsureHostPadding(composition, request);
+    }
+
+    [TestMethod]
+    public void CustomSurfaceWithoutRootPresentationReceivesNeutralHostPadding()
+    {
+        using var owner = new Composition(new ReactiveGraph(), "custom-popup-owner");
+        using var popup = new Composition(owner.Graph, "custom-popup");
+        using var request = new UnpresentedPopupRequest(owner, popup);
+
+        WindowsPopupHost.EnsureHostPadding(popup, request);
+
+        Assert.AreEqual(
+            Insets.Uniform(WindowsPopupHost.ShadowMargin),
+            popup.Root.Resolve(LayoutProperties.Padding).Value
+        );
+    }
+
+    [TestMethod]
+    public void RefreshStopsWhenControlledCloseDisposesPopupDuringReactiveFlush()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "closing-popup-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Child(owner.Root, "closing-popup-target");
+        target.Present(theme);
+        using var request = new OwnedSurfaceRequest(
+            target,
+            theme,
+            Components.Text("Closing popup"),
+            interactive: true,
+            consumeOutsideClick: true,
+            closed: null
+        );
+        var popup = request.CreateComposition();
+        var close = graph.Signal(false, "close-popup");
+        _ = owner.Root.Scope.Effect(
+            () =>
+            {
+                if (close.Value)
+                    request.Dispose();
+            },
+            "dispose-popup"
+        );
+        graph.Drain();
+
+        close.Value = true;
+
+        Assert.IsFalse(WindowsPopupHost.PrepareRefresh(request, popup));
+        Assert.IsTrue(popup.IsDisposed, "The controlled close did not release its popup.");
+    }
+
+    [TestMethod]
+    public void EscapeDisposalStopsWindowsPostDispatchClipboardReconciliation()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "escape-disposal-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Mount(
+            owner.Root,
+            theme,
+            Components.Button("Target", () => { }, Style.Empty.Height(40))
+        );
+        ContextMenuRequest? request = null;
+        request = new ContextMenuRequest(
+            owner,
+            new(owner.Epoch, target.Id),
+            new(12, 12, 1, 1),
+            Components.Menu([Components.MenuItem("Run", () => { })]),
+            theme,
+            () => request!.Dispose()
+        );
+        using (request)
+        {
+            var popup = request.CreateComposition();
+            using var renderer = new SkiaSceneRenderer();
+            using var scene = SceneLayout.Project(popup, new(240, 160, 1), renderer);
+            Assert.IsTrue(popup.Input.SetScene(scene));
+            Assert.IsTrue(request.FocusFirst(request.ActiveLevels.Single()));
+            using var clipboard = new WindowsClipboard(
+                () => "clipboard",
+                _ => true,
+                () => "clipboard failure"
+            );
+            using var adapter = new WindowsInputAdapter(popup, clipboard: clipboard);
+            var escape = new SDL.Event
+            {
+                Key = new()
+                {
+                    Type = SDL.EventType.KeyDown,
+                    Key = SDL.Keycode.Escape,
+                    Down = true,
+                },
+            };
+
+            Assert.IsTrue(adapter.Dispatch(escape));
+            Assert.IsTrue(popup.IsDisposed, "Escape did not synchronously release the popup.");
+            adapter.ProcessClipboardRequests();
+        }
     }
 
     [TestMethod]
@@ -54,11 +174,59 @@ public sealed class WindowsPopupChainContracts
         );
 
         Assert.IsTrue(placement.OpensLeft, "The submenu did not choose the available left side.");
+        Assert.AreEqual(900 - 240 - WindowsPopupHost.ShadowMargin - parent.Left, placement.OffsetX);
         Assert.AreEqual(
-            900 - 240 - 2 * WindowsPopupHost.ShadowMargin - parent.Left,
-            placement.OffsetX
+            trigger.Top - WindowsPopupHost.ShadowMargin - parent.Top,
+            placement.OffsetY
         );
-        Assert.AreEqual(trigger.Top - parent.Top, placement.OffsetY);
+        Assert.AreEqual(
+            trigger.Left,
+            parent.Left + placement.OffsetX + 240 + WindowsPopupHost.ShadowMargin,
+            "The left-opening submenu's visible surface was not flush with its trigger."
+        );
+    }
+
+    [TestMethod]
+    public void SubmenuPlacementAlignsVisibleSurfaceWithTriggerTopAndRightEdge()
+    {
+        var trigger = new PopupScreenRect(200, 120, 360, 152);
+        var parent = new PopupScreenRect(100, 80, 400, 420);
+        var placement = WindowsPopupPlacement.Submenu(
+            trigger,
+            new LayoutRect(0, 0, 240, 160),
+            parent,
+            new SDL.Rect
+            {
+                X = 0,
+                Y = 0,
+                W = 1000,
+                H = 700,
+            },
+            scale: 1,
+            density: 1
+        );
+
+        Assert.IsFalse(placement.OpensLeft);
+        Assert.AreEqual(
+            trigger.Right,
+            parent.Left + placement.OffsetX + WindowsPopupHost.ShadowMargin,
+            "The right-opening submenu's visible surface was not flush with its trigger."
+        );
+        Assert.AreEqual(
+            trigger.Top,
+            parent.Top + placement.OffsetY + WindowsPopupHost.ShadowMargin,
+            "The submenu's visible surface was not aligned with the trigger row."
+        );
+    }
+
+    [TestMethod]
+    public void ContentResizeOccursOnlyWhenMeasuredPopupDimensionsChange()
+    {
+        var unchanged = new PopupHostPlacement(10, 20, 240, 132, false);
+        var oneSuggestion = new PopupHostPlacement(10, 20, 240, 68, false);
+
+        Assert.IsFalse(WindowsPopupHost.NeedsContentResize(240, 132, unchanged));
+        Assert.IsTrue(WindowsPopupHost.NeedsContentResize(240, 132, oneSuggestion));
     }
 
     [TestMethod]
@@ -254,5 +422,26 @@ public sealed class WindowsPopupChainContracts
             gate.ShouldDismiss(focusWithinChain: false),
             "External focus loss did not dismiss the chain."
         );
+    }
+
+    private sealed class UnpresentedPopupRequest(Composition owner, Composition popup)
+        : PopupSurfaceRequest
+    {
+        public override Composition Owner => owner;
+        public override LayoutRect Anchor => default;
+        public override ThemeAppearance Appearance => default;
+        public override bool IsValid => true;
+        public override bool IsDismissed => false;
+
+        public override Composition CreateComposition() => popup;
+
+        public override LayoutRect Measure(ITextShaper shaper, LayoutViewport available) =>
+            new(0, 0, 1, 1);
+
+        public override void Dismiss() { }
+
+        public override bool RestoreFocus() => false;
+
+        public override void Dispose() { }
     }
 }

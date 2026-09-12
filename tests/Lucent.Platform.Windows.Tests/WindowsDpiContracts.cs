@@ -262,7 +262,7 @@ public sealed class WindowsDpiContracts
             placement.OpensLeft,
             "The screen work area was incorrectly enlarged by backing pixel density."
         );
-        Assert.AreEqual(780 - 200 - 2 * WindowsPopupHost.ShadowMargin - 580, placement.OffsetX);
+        Assert.AreEqual(780 - 200 - WindowsPopupHost.ShadowMargin - 580, placement.OffsetX);
     }
 
     private static void AssertLogicalPoint(

@@ -9,6 +9,7 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
     private readonly ElementIdentity? _returnFocus;
     private readonly Action? _closed;
     private readonly Action<bool>? _pointerInsideChanged;
+    private readonly LayoutRect? _anchorOverride;
     private Composition? _popup;
     private Element? _root;
     private bool _dismissed;
@@ -21,7 +22,8 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         bool interactive,
         bool consumeOutsideClick,
         Action? closed,
-        Action<bool>? pointerInsideChanged = null
+        Action<bool>? pointerInsideChanged = null,
+        LayoutRect? anchorOverride = null
     )
     {
         Owner = target.Composition;
@@ -30,6 +32,7 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         _content = content;
         _closed = closed;
         _pointerInsideChanged = pointerInsideChanged;
+        _anchorOverride = anchorOverride;
         _returnFocus = Owner.Input.FocusedElement;
         IsInteractive = interactive;
         ConsumeOutsideClick = consumeOutsideClick;
@@ -39,7 +42,8 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
     public override Composition Owner { get; }
 
     /// <inheritdoc />
-    public override LayoutRect Anchor => Owner.Input.SurfaceAnchor(_target) ?? default;
+    public override LayoutRect Anchor =>
+        _anchorOverride ?? Owner.Input.SurfaceAnchor(_target) ?? default;
 
     /// <inheritdoc />
     public override ThemeAppearance Appearance => _theme.Appearance;
@@ -51,7 +55,8 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         && element.InputAvailable();
 
     /// <summary>Whether a projected anchor is available for native placement.</summary>
-    public override bool HasAnchor => IsValid && Owner.Input.SurfaceAnchor(_target) is not null;
+    public override bool HasAnchor =>
+        IsValid && (_anchorOverride is not null || Owner.Input.SurfaceAnchor(_target) is not null);
 
     /// <inheritdoc />
     public override bool IsDismissed => _dismissed || !IsValid;
@@ -105,6 +110,10 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
                     theme.PresentationMode = _theme.PresentationMode;
                 },
                 "surface-theme"
+            );
+            popup.Root.Present(
+                theme,
+                component: Style.Empty.Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)
             );
             var presentation = Style
                 .Empty.Set(LayoutProperties.Padding, Insets.Uniform(12))

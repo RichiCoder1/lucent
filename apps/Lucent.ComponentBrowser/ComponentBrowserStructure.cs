@@ -2,7 +2,10 @@ namespace Lucent.ComponentBrowser;
 
 public static class ComponentBrowserStructure
 {
-    public static ComponentRecipe Create() =>
+    public static ComponentRecipe Create(
+        IFilePicker? filePicker = null,
+        IUriLauncher? uriLauncher = null
+    ) =>
         ComponentRecipe.Create(
             "component-browser-application",
             (context, root) =>
@@ -11,7 +14,7 @@ public static class ComponentBrowserStructure
                     context.Theme,
                     author: PresentationStyles.Surface.MainGrow(1).MainBasis(0)
                 );
-                var browser = new ComponentBrowserState(root.Scope);
+                var browser = new ComponentBrowserState(root.Scope, filePicker, uriLauncher);
                 _ = context.Mount(
                     root,
                     Components.ComponentBrowser(browser, context.Theme).Named("Component Browser")

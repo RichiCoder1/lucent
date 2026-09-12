@@ -20,6 +20,13 @@ Run the reference application:
 dotnet run --project apps/Lucent.IssueBrowser
 ```
 
+Explore the [stock components](docs/COMPONENTS.md) with interactive compiled
+`.lui` examples, source, themes and density controls:
+
+```powershell
+dotnet run --project apps/Lucent.ComponentBrowser
+```
+
 Run the managed tests:
 
 ```powershell

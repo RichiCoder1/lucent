@@ -210,6 +210,147 @@ public sealed class ContextMenuTests
     }
 
     [TestMethod]
+    public void ShortStockMenuDoesNotReserveUnusedScrollbarGutter()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "short-menu-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Mount(
+            owner.Root,
+            theme,
+            Components.Button("Target", () => { }, Style.Empty.Height(40))
+        );
+        using var request = new ContextMenuRequest(
+            owner,
+            new(owner.Epoch, target.Id),
+            new(12, 12, 1, 1),
+            Components.Menu([Components.MenuItem("Run command", () => { })]),
+            theme
+        );
+        var popup = request.CreateComposition();
+        var available = new LayoutViewport(240, 200, 1);
+        var measured = request.Measure(new EmptyShaper(), available);
+        using var scene = SceneLayout.Project(
+            popup,
+            new(measured.Width, measured.Height, 1),
+            new EmptyShaper()
+        );
+        var nodes = Nodes(popup.SemanticSnapshot()!).ToArray();
+        var menu = nodes.Single(node => node.Role == SemanticRole.Menu);
+        var item = nodes.Single(node => node.Role == SemanticRole.MenuItem);
+        var menuBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == menu.Identity.ElementId)
+            .Bounds;
+        var itemBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == item.Identity.ElementId)
+            .Bounds;
+
+        Assert.AreEqual(6f, itemBounds.X - menuBounds.X);
+        Assert.AreEqual(
+            6f,
+            menuBounds.X + menuBounds.Width - itemBounds.X - itemBounds.Width,
+            0.001f,
+            "A short stock menu retained an unused scrollbar gutter on its right edge."
+        );
+        Assert.AreEqual(0, scene.ScrollBars.Count);
+
+        var stableRevision = graph.MutationRevision;
+        _ = request.Measure(new EmptyShaper(), available);
+        Assert.AreEqual(
+            stableRevision,
+            graph.MutationRevision,
+            "Remeasuring unchanged stock-menu content churned its input projection."
+        );
+    }
+
+    [TestMethod]
+    public void StockMenuRemeasuresWhenConditionalRowParticipationChanges()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "conditional-menu-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Mount(
+            owner.Root,
+            theme,
+            Components.Button("Target", () => { }, Style.Empty.Height(40))
+        );
+        var showExtra = graph.Signal(false, "show-extra-menu-row");
+        using var request = new ContextMenuRequest(
+            owner,
+            new(owner.Epoch, target.Id),
+            new(12, 12, 1, 1),
+            Components.Menu([
+                Components.MenuItem("Run", () => { }),
+                ContentRecipe.When(
+                    "extra-menu-row",
+                    () => showExtra.Value,
+                    Components.MenuItem("Inspect", () => { })
+                ),
+            ]),
+            theme
+        );
+        var popup = request.CreateComposition();
+        var available = new LayoutViewport(240, 200, 1);
+        var compact = request.Measure(new EmptyShaper(), available);
+        var compactRevision = graph.MutationRevision;
+
+        showExtra.Value = true;
+        graph.Drain();
+        var expanded = request.Measure(new EmptyShaper(), available);
+
+        Assert.IsTrue(expanded.Height > compact.Height, "The visible row did not resize the menu.");
+        Assert.AreNotEqual(
+            compactRevision,
+            graph.MutationRevision,
+            "Conditional row participation did not invalidate adaptive menu measurement."
+        );
+    }
+
+    [TestMethod]
+    public void AuthoredMenuScrollbarVisibilityRemainsLiveAfterMeasurement()
+    {
+        var graph = new ReactiveGraph();
+        using var owner = new Composition(graph, "authored-menu-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Mount(
+            owner.Root,
+            theme,
+            Components.Button("Target", () => { }, Style.Empty.Height(40))
+        );
+        var visibility = graph.Signal(ScrollBarVisibility.Auto, "menu-scrollbar-visibility");
+        using var request = new ContextMenuRequest(
+            owner,
+            new(owner.Epoch, target.Id),
+            new(12, 12, 1, 1),
+            Components.Menu(
+                [Components.MenuItem("Run command", () => { })],
+                Style.Empty.Bind(ScrollBarProperties.Visibility, () => visibility.Value)
+            ),
+            theme
+        );
+        var popup = request.CreateComposition();
+        var menu = popup.Root.Children.Single();
+        var available = new LayoutViewport(240, 200, 1);
+
+        _ = request.Measure(new EmptyShaper(), available);
+        Assert.AreEqual(
+            ScrollBarVisibility.Auto,
+            menu.Resolve(ScrollBarProperties.Visibility).Value
+        );
+        Assert.AreEqual("author", menu.Resolve(ScrollBarProperties.Visibility).Winner.Source);
+
+        visibility.Value = ScrollBarVisibility.Hidden;
+        graph.Drain();
+        _ = request.Measure(new EmptyShaper(), available);
+        Assert.AreEqual(
+            ScrollBarVisibility.Hidden,
+            menu.Resolve(ScrollBarProperties.Visibility).Value,
+            "Menu measurement replaced a live authored scrollbar binding."
+        );
+        Assert.AreEqual("author", menu.Resolve(ScrollBarProperties.Visibility).Winner.Source);
+    }
+
+    [TestMethod]
     public void OversizedMenuIsBoundedAndSemanticallyScrollable()
     {
         var graph = new ReactiveGraph();
@@ -258,6 +399,7 @@ public sealed class ContextMenuTests
             scrollbar.Maximum.Y > 0,
             "An oversized menu did not project a scrollable retained viewport."
         );
+        var preScrollRevision = graph.MutationRevision;
         Assert.AreEqual(
             SemanticCommandResult.Applied,
             popup.ExecuteSemanticCommand(
@@ -271,6 +413,20 @@ public sealed class ContextMenuTests
                 && scroll.Value.Offset.Y > 0
                 && scroll.Value.Offset.Y <= scroll.Value.Maximum.Y,
             "Semantic End did not move the bounded menu viewport."
+        );
+
+        measured = request.Measure(new EmptyShaper(), available);
+        using var remeasured = SceneLayout.Project(popup, available, new EmptyShaper());
+        Assert.AreEqual(
+            1,
+            remeasured.ScrollBars.Count,
+            "Remeasuring a menu scrolled to its end hid its overflow scrollbar."
+        );
+        Assert.IsTrue(measured.Height <= available.Height);
+        Assert.AreNotEqual(
+            preScrollRevision,
+            graph.MutationRevision,
+            "Scrolling did not invalidate the cached adaptive menu measurement."
         );
     }
 

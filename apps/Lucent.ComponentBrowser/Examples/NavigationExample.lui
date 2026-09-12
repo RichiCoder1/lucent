@@ -1,0 +1,82 @@
+namespace Lucent.ComponentBrowser;
+
+style NavigationExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 14;
+    MinWidth: 0;
+}
+
+style NavigationExampleChoiceStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 220;
+}
+
+style NavigationExampleDialogBodyStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 8;
+}
+
+public component NavigationExample(ComponentBrowserState browser) {
+    <Layout style={NavigationExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These recipes keep navigation policy and modal lifetime explicit. Select an item, switch tabs, expand the disclosure, follow the typed link, or open the dialog to inspect focus and application-owned completion.</Text>
+        <Tabs
+            label="Navigation contract"
+            items={() => browser.TabItems}
+            readSelectedKey={() => browser.TabSelection}
+            onSelectionRequested={browser.SetTabSelection}
+            activation={TabActivationMode.Automatic}
+            name="component-browser.navigation.tabs"
+        />
+        <Layout style={NavigationExampleChoiceStyle}>
+            <ListBox
+                label="Visible choices"
+                items={() => browser.ListItems}
+                readSelectedKey={() => browser.ListSelection}
+                onSelectionRequested={browser.SetListSelection}
+                name="component-browser.navigation.list"
+            />
+            <Select
+                label="Compact choice"
+                items={() => browser.SelectItems}
+                readSelectedKey={() => browser.SelectSelection}
+                onSelectionRequested={browser.SetSelectSelection}
+                name="component-browser.navigation.select"
+            />
+        </Layout>
+        <Disclosure
+            heading="Why the selection is controlled"
+            readExpanded={() => browser.DisclosureExpanded}
+            onExpandedRequested={browser.SetDisclosureExpanded}
+            name="component-browser.navigation.disclosure"
+        >
+            <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>The browser owns selected keys so remounting the example does not silently change the authoring decision. The stock controls keep keyboard movement, applied selection, and semantic relationships separate.</Text>
+        </Disclosure>
+        <Link onInvoke={browser.SetLinkMessage} name="component-browser.navigation.link">Read the navigation contract</Link>
+        <Link onInvoke={browser.OpenDocumentation} name="component-browser.navigation.external-link">Open Lucent documentation in your browser</Link>
+        <Status content={() => browser.LinkMessage} style={PresentationStyles.Secondary} name="component-browser.navigation.link-status" />
+        <Button onInvoke={browser.OpenDialog} style={Style.Empty.Enabled(() => !browser.Dialog.IsOpen)} name="component-browser.navigation.open-dialog">Review changes</Button>
+        <Status content={() => browser.DialogMessage} style={PresentationStyles.Secondary} name="component-browser.navigation.dialog-status" />
+        <Dialog
+            controller={browser.Dialog}
+            title="Review component changes"
+            actions={[Lucent.Core.Components.Button("Apply changes", browser.SubmitDialog), Lucent.Core.Components.DialogCancel("Cancel", browser.CancelDialog)]}
+            defaultAccept={browser.SubmitDialog}
+            initialFocus={browser.FocusDialog}
+        >
+            <Layout style={NavigationExampleDialogBodyStyle}>
+                <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>The typed dialog session keeps its owner, modal focus, and application write separate from the surrounding browser.</Text>
+                <Text>1. The list selection stays controlled.</Text>
+                <Text>2. The link remains a named action.</Text>
+                <Text>3. The default action runs only when the dialog owns focus.</Text>
+                <Text>4. Escape cancels the session when no IME composition is active.</Text>
+                <Text>5. A pending application write keeps its accepted value alive.</Text>
+                <Text>6. The action row stays available while this body scrolls.</Text>
+                <Text>7. Closing the surface returns focus to the invoking action.</Text>
+                <Text>8. Accessibility clients receive the dialog title and relationships.</Text>
+                <Text>9. The owner may safely dispose while the application work finishes.</Text>
+                <Text>10. This example uses the same public controller API authors can adopt.</Text>
+            </Layout>
+        </Dialog>
+    </Layout>
+}

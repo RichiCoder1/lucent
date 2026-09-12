@@ -52,6 +52,26 @@ public abstract class PopupSurfaceRequest : IDisposable
     /// <summary>Measures content within the host's available logical work area.</summary>
     public abstract LayoutRect Measure(ITextShaper shaper, LayoutViewport available);
 
+    /// <summary>Sets platform-owned safe-area padding on a popup composition on this request's graph.</summary>
+    /// <remarks>The owner composition itself is rejected; menu hosts may pass an active child-level composition.</remarks>
+    public void ConfigureHostPadding(Composition popup, Insets padding)
+    {
+        ArgumentNullException.ThrowIfNull(popup);
+        Owner.CheckThread();
+        if (ReferenceEquals(popup, Owner) || !ReferenceEquals(popup.Graph, Owner.Graph))
+            throw new ArgumentException(
+                "A popup host can configure only a non-owner composition on the request owner's graph.",
+                nameof(popup)
+            );
+        if (popup.Root.HasPresentation)
+            popup.Root.UpdateControl(LayoutProperties.Padding, padding);
+        else
+            popup.Root.Present(
+                new ThemeContext(popup.Root.Scope, new Theme("popup-host")),
+                Style.Empty.Padding(padding)
+            );
+    }
+
     /// <summary>Requests idempotent host dismissal.</summary>
     public abstract void Dismiss();
 

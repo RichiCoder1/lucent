@@ -62,11 +62,21 @@ public component FilterBar(IssueBrowserState browser, IssueBrowserViewState view
         <Layout style={FilterSecondaryStyle(view.Breakpoints)}>
             <Layout style={FilterStatusColumnStyle(view.Breakpoints)}>
                 <Text style={PresentationStyles.Caption}>Status</Text>
-                <TextField session={view.StatusEditor} name="issue-browser.status" onChange={browser.SetStatus} label="Status: all, open, closed" />
+                <Select
+                    label="Status"
+                    items={() => browser.StatusOptions}
+                    readSelectedKey={() => browser.Status}
+                    onSelectionRequested={browser.SetStatus}
+                />
             </Layout>
             <Layout style={FilterAssigneeColumnStyle(view.Breakpoints)}>
                 <Text style={PresentationStyles.Caption}>Assignee</Text>
-                <TextField session={view.AssigneeEditor} name="issue-browser.assignee" onChange={browser.SetAssignee} label="Assignee: all, marta, devin, joel" />
+                <Select
+                    label="Assignee"
+                    items={() => browser.AssigneeOptions}
+                    readSelectedKey={() => browser.Assignee}
+                    onSelectionRequested={browser.SetAssignee}
+                />
             </Layout>
             <Button onInvoke={view.ClearFilters}>Clear filters</Button>
         </Layout>

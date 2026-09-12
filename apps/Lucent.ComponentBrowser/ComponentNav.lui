@@ -32,7 +32,25 @@ style ComponentNavListStyle {
 
 style ComponentNavItemStyle(ComponentBrowserState browser) {
     MainShrink: 0;
-    Height: browser.Density == BrowserDensity.Compact ? 36 : 44;
+    MinHeight: browser.Density == BrowserDensity.Compact ? 58 : 66;
+}
+
+style ComponentNavItemContentStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 2;
+    MinWidth: 0;
+    MainBasis: 0;
+    MainGrow: 1;
+    MainShrink: 1;
+    CrossAlignment: LayoutAlignment.Stretch;
+}
+
+style ComponentNavItemTextStyle {
+    MinWidth: 0;
+    MainShrink: 1;
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+    MaxLines: 1;
+    Overflow: TextOverflow.Ellipsis;
 }
 
 style ComponentNavEmptyStyle {
@@ -56,7 +74,12 @@ public component ComponentNav(ComponentBrowserState browser, ComponentBrowserVie
                     </Layout>
                 }
                 foreach (var item in browser.VisibleItems) keyed by item.Id {
-                    <Selectable content={() => item.Title + " · " + item.Family} selected={() => browser.IsSelected(item.Id)} onSelect={() => browser.Select(item.Id)} style={ComponentNavItemStyle(browser)} name={"component-browser.nav." + item.Id} />
+                    <Selectable label={() => item.Title + " · " + item.Family} selected={() => browser.IsSelected(item.Id)} onSelect={() => browser.Select(item.Id)} style={ComponentNavItemStyle(browser)} name={"component-browser.nav." + item.Id}>
+                        <Layout style={ComponentNavItemContentStyle}>
+                            <Text style={ComponentNavItemTextStyle}>{item.Title}</Text>
+                            <Text style={PresentationStyles.Caption.With(ComponentNavItemTextStyle)}>{item.Family}</Text>
+                        </Layout>
+                    </Selectable>
                 }
             </Layout>
         </ScrollViewport>

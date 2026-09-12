@@ -9,6 +9,9 @@ style PopoverExampleStyle {
 public component PopoverExample(ComponentBrowserState browser) {
     <Layout style={PopoverExampleStyle}>
         <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>The trigger owns an application-controlled open value. Open the popover, move focus into its content, and close it from the surface or the outside dismissal path.</Text>
+        <Tooltip description="Supporting details open in an owned surface. Escape dismisses the description.">
+            <Button onInvoke={() => browser.SetPopoverOpen(true)} name="component-browser.tooltip.trigger">Hover or focus for help</Button>
+        </Tooltip>
         <Popover
             open={() => browser.PopoverOpen}
             onOpenRequested={browser.SetPopoverOpen}

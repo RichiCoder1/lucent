@@ -67,6 +67,30 @@ The published Windows TestHost includes two focused fixtures for the new framewo
 
 Desktop interaction checks require an interactive Windows session. They launch and close their own application processes. Keep desktop checks separate from unrelated work that changes focus or input.
 
+`PublishedFilePickerTests.NativeOpenSaveAndFolderDialogsCancelThroughTheirOwnerStaPump`
+runs the published Windows TestHost against actual COM open, save and folder
+dialogs. It requires `LUCENT_DESKTOP_HOST` and verifies cancellation through the
+native owner-thread message pump. It does not select or write files. Component
+Browser's Storage example provides the interactive success path, including
+multiple selection and save-destination selection without a write. Managed
+Windows contracts separately cover queued requests, filter snapshots,
+reentrancy, cancellation, close veto and missing-host outcomes.
+
+`PublishedComponentBrowserTests` uses `LUCENT_COMPONENT_BROWSER_APP` to exercise
+the published gallery's public controls. It checks native popup dimensions and
+submenu alignment, calendar and suggestion geometry, password reveal through
+pointer input, HWND ownership, modal owner disablement, tooltip nonactivation,
+typed completion and focus restoration. The Published suite supplies that executable automatically.
+These checks exercise the maintained `.lui` examples, not a private control host.
+
+The Component Browser suite renders each compiled example under stock light,
+dark and high-contrast appearances and both densities, with PNG output under
+`artifacts/component-browser`. Inspect those images when changing presentation;
+successful rendering alone does not establish visual quality or native input.
+Core table/tree contracts exercise bounded 10,000-item realization, while
+Windows contracts call the actual COM Grid/Table/ItemContainer slots and verify
+offscreen selection and stale-provider behavior.
+
 The `PhysicalMixedDpi` category is a separate opt-in check for physical monitor transitions. Set `LUCENT_DESKTOP_APP` to published Issue Browser, `LUCENT_DESKTOP_HOST` to the published Windows TestHost and `LUCENT_PHYSICAL_MIXED_DPI=1`, then run the desktop project with `--filter 'TestCategory=PhysicalMixedDpi'`. The two tests require attached 100% and 150% monitors and report their actual scale and bounds; they leave display settings intact. Issue Browser moves between monitors with an open popup/submenu chain while testing pointer editing, placement and focus. The multiline TestHost checks native caret selection and UIA text screen rectangles at both scales and on return. Set `LUCENT_MIXED_DPI_LOG` to an artifact file to retain coordinates. Tests skip when the required hardware setup or opt-in is absent. UIA text/caret geometry and existing adapter contracts do not certify a real-language IME candidate window. This is a hardware-dependent investigation, not a routine CI requirement.
 
 `PublishedIssueBrowserTests.FlaUiNativeMenuTargetsUnselectedIssueAndPreservesSelection` covers the opt-in `--native-menus` path with keyboard, pointer and UIA invocation cases. It verifies foreground activation, discovers the actual Windows menu and its accessibility roles, invokes a command against an unselected issue, and checks selection preservation and Escape dismissal. The pointer case also checks placement outside the owner and shutdown with a menu open. Native keyboard checks use Windows arrow-key navigation. Run it as part of `Published`, or target it with `dotnet test --project tests/Lucent.Desktop.Tests -c Release --filter 'FullyQualifiedName~FlaUiNativeMenu'` after setting `LUCENT_DESKTOP_APP` to the published executable. This is a desktop test and must stay paused whenever focus testing is paused. Set `LUCENT_MENU_DIAGNOSTICS=1` to include native command outcomes in application standard error.

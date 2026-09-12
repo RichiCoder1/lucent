@@ -540,6 +540,7 @@ internal static class WindowsPopupPlacement
         float density
     )
     {
+        var shadow = WindowsPopupHost.ToWindowUnits(WindowsPopupHost.ShadowMargin, scale, density);
         var width = WindowsPopupHost.ToWindowUnits(
             desired.Width + 2 * WindowsPopupHost.ShadowMargin,
             scale,
@@ -556,12 +557,19 @@ internal static class WindowsPopupPlacement
             checked(usable.X + usable.W),
             checked(usable.Y + usable.H)
         );
-        var right = trigger.Right;
-        var left = trigger.Left - width;
+        // SDL positions the popup's outer window while the trigger names the visible row.
+        // Keep the child's visible surface flush with that row by accounting for the
+        // transparent host shadow on each side.
+        var right = trigger.Right - shadow;
+        var left = trigger.Left - width + shadow;
         var opensLeft = right + width > work.Right && left >= work.Left;
         var x = opensLeft ? left : right;
         x = Math.Clamp(x, work.Left, Math.Max(work.Left, work.Right - width));
-        var y = Math.Clamp(trigger.Top, work.Top, Math.Max(work.Top, work.Bottom - height));
+        var y = Math.Clamp(
+            trigger.Top - shadow,
+            work.Top,
+            Math.Max(work.Top, work.Bottom - height)
+        );
         return new(x - parent.Left, y - parent.Top, opensLeft);
     }
 }

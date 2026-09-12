@@ -279,6 +279,32 @@ public sealed class SelectionContracts
         Assert.AreEqual(0, selected.Value.Value);
     }
 
+    [TestMethod]
+    public void KeyedTargetRemovalCannotEraseAReplacementIdentity()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "keyed-target-removal");
+        using var scope = composition.Root.Scope.CreateChild("policy");
+        IReadOnlyList<RadioOption<string>> items = [new("a", "Alpha")];
+        var policy = new KeyedSelectionPolicy<string, RadioOption<string>>(
+            scope,
+            "policy",
+            () => items,
+            item => item.Key,
+            item => item.Enabled,
+            () => SelectedKey.Some("a"),
+            _ => { }
+        );
+        var departed = new ElementIdentity(composition.Epoch, 11);
+        var replacement = new ElementIdentity(composition.Epoch, 12);
+        policy.RegisterTarget("a", departed);
+        policy.RegisterTarget("a", replacement);
+        Assert.IsFalse(policy.UnregisterTarget("a", departed));
+        Assert.AreEqual(1, policy.RegisteredTargetCount);
+        Assert.IsTrue(policy.UnregisterTarget("a", replacement));
+        Assert.AreEqual(0, policy.RegisteredTargetCount);
+    }
+
     private static RetainedScene Install(
         Composition composition,
         ReactiveGraph graph,

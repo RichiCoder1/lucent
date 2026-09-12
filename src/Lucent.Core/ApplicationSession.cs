@@ -116,6 +116,10 @@ public sealed class ApplicationSession
     /// <summary>Whether terminal stop and both cleanup stages have completed.</summary>
     public bool IsCompleted => Volatile.Read(ref _completed);
 
+    /// <summary>Whether a requested close is waiting for owner-thread negotiation.</summary>
+    /// <remarks>Platform modal loops may observe this flag to dismiss transient UI before negotiation runs.</remarks>
+    public bool IsCloseRequested => Volatile.Read(ref _closeRequested) != 0;
+
     /// <summary>Raised when synchronization-context or reactive work becomes available.</summary>
     public event Action? WorkAvailable
     {

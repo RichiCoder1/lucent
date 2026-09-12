@@ -8,7 +8,8 @@ internal static partial class Controls
         Element element,
         ThemeContext theme,
         string label = "Loading",
-        Style? style = null
+        Style? style = null,
+        SemanticAnnouncement announcement = SemanticAnnouncement.None
     )
     {
         label = Required(label, nameof(label));
@@ -18,15 +19,21 @@ internal static partial class Controls
             theme,
             component,
             style,
-            new SemanticBehavior(new(SemanticRole.Status, label))
+            new SemanticBehavior(new(SemanticRole.Status, label, announcement: announcement))
         );
         var state = new ControlState(element.Scope, element.Name + ".loading", label);
-        ConfigureSemantic(element, theme, component, style, new(SemanticRole.Status, label));
+        ConfigureSemantic(
+            element,
+            theme,
+            component,
+            style,
+            new(SemanticRole.Status, label, announcement: announcement)
+        );
         Bind(
             element,
             state,
             value => element.UpdateControl(ProjectionProperties.Text, value.Label),
-            value => new(SemanticRole.Status, value.Label)
+            value => new(SemanticRole.Status, value.Label, announcement: announcement)
         );
         return state;
     }

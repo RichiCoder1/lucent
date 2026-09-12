@@ -71,7 +71,7 @@ public static partial class Components
                         () => ReconcileVisited(current.Value, readSelectedKey(), visited),
                         root.Name + ".visited-reconcile"
                     );
-                var headers = ContentRecipe.ForEach(
+                var headers = TabHeaders(
                     root.Name + ".headers",
                     () => current.Value,
                     item => item.Key,
@@ -83,8 +83,7 @@ public static partial class Components
                             Enabled = () => item.Value.Enabled,
                             Selected = () => policy.IsApplied(item.Value.Key),
                             Roving = () => policy.IsRoving(item.Value.Key),
-                            Register = behavior =>
-                                policy.RegisterTarget(item.Value.Key, behavior.Identity),
+                            Register = behavior => policy.RegisterTarget(item.Value.Key, behavior),
                             Activate = (behavior, request) =>
                                 policy.Activate(item.Value.Key, request)
                                 && policy.Focus(item.Value.Key, behavior),
@@ -122,6 +121,30 @@ public static partial class Components
             }
         );
     }
+
+    private static ContentRecipe TabHeaders<TKey, TItem>(
+        string name,
+        Func<IEnumerable<TItem>> source,
+        Func<TItem, TKey> key,
+        Func<CurrentItem<TItem>, ComponentRecipe> content
+    )
+        where TKey : notnull =>
+        new(
+            (context, parent) =>
+            {
+                var region = context.ForEach(
+                    parent,
+                    name,
+                    source,
+                    key,
+                    (item, child) => content(item).Mount(child)
+                );
+                region.Region.Present(
+                    context.Theme,
+                    component: Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Row)
+                );
+            }
+        );
 
     /// <summary>Creates a controlled disclosure that retains its lazily mounted content by default.</summary>
     [LucentComponent]

@@ -130,7 +130,8 @@ internal static partial class Controls
         ThemeContext theme,
         string label,
         Action? activate = null,
-        Style? style = null
+        Style? style = null,
+        bool focusOnPointer = true
     )
     {
         label = Required(label, nameof(label));
@@ -142,7 +143,8 @@ internal static partial class Controls
             new ButtonBehavior(
                 "button",
                 new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
-                activate
+                activate,
+                focusOnPointer
             )
         );
     }

@@ -7,7 +7,7 @@ public sealed partial class InputRouter
     internal void RegisterTooltip(
         long elementId,
         ReactiveScope scope,
-        Action<bool> onHoverChanged,
+        Action<bool, float, float> onHoverChanged,
         Action<bool> onFocusChanged,
         Action? onEscape
     )
@@ -34,16 +34,21 @@ public sealed partial class InputRouter
         });
     }
 
-    private void UpdateTooltipHover(ElementIdentity? hit, List<Exception> errors)
+    private void UpdateTooltipHover(
+        ElementIdentity? hit,
+        float pointerX,
+        float pointerY,
+        List<Exception> errors
+    )
     {
         var path = hit is { } identity && Eligible(identity) ? Path(identity) : [];
         foreach (var registration in _tooltips.Values.ToArray())
         {
             var inside = path.Any(identity => identity.ElementId == registration.ElementId);
-            if (inside == registration.Hovered)
+            if (!inside && inside == registration.Hovered)
                 continue;
             registration.Hovered = inside;
-            InvokeTooltip(registration, inside, focused: null, errors);
+            InvokeTooltip(registration, inside, pointerX, pointerY, focused: null, errors);
         }
     }
 
@@ -57,7 +62,7 @@ public sealed partial class InputRouter
             if (inside == registration.Focused)
                 continue;
             registration.Focused = inside;
-            InvokeTooltip(registration, hovered: null, focused: inside, errors);
+            InvokeTooltip(registration, hovered: null, 0, 0, focused: inside, errors);
         }
     }
 
@@ -93,6 +98,8 @@ public sealed partial class InputRouter
     private static void InvokeTooltip(
         TooltipRegistration registration,
         bool? hovered,
+        float pointerX,
+        float pointerY,
         bool? focused,
         List<Exception> errors
     )
@@ -100,7 +107,7 @@ public sealed partial class InputRouter
         try
         {
             if (hovered is { } hover)
-                registration.OnHoverChanged(hover);
+                registration.OnHoverChanged(hover, pointerX, pointerY);
             if (focused is { } focus)
                 registration.OnFocusChanged(focus);
         }
@@ -112,13 +119,13 @@ public sealed partial class InputRouter
 
     private sealed class TooltipRegistration(
         long elementId,
-        Action<bool> onHoverChanged,
+        Action<bool, float, float> onHoverChanged,
         Action<bool> onFocusChanged,
         Action? onEscape
     )
     {
         internal long ElementId { get; } = elementId;
-        internal Action<bool> OnHoverChanged { get; } = onHoverChanged;
+        internal Action<bool, float, float> OnHoverChanged { get; } = onHoverChanged;
         internal Action<bool> OnFocusChanged { get; } = onFocusChanged;
         internal Action? OnEscape { get; } = onEscape;
         internal bool Hovered { get; set; }

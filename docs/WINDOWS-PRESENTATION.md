@@ -17,6 +17,26 @@ Lucent-rendered menus remain separate popup windows that may extend outside thei
 
 Native menus follow the [Windows standard keyboard interface](https://learn.microsoft.com/en-us/windows/win32/menurc/about-menus#standard-keyboard-interface): Up/Down navigate, Enter invokes and Escape dismisses. Lucent-rendered menus additionally support Home/End; native presentation does not promise those bindings.
 
+## Native file and folder selection
+
+Inject the portable `IFilePicker` capability into application state. In a Windows
+application lifecycle, construct `WindowsFilePicker(session.Composition)` and
+pass it to the root recipe. Component Browser's lifecycle and Storage example
+show this wiring without a global service locator.
+
+`OpenFilesAsync`, `SaveFileAsync` and `PickFolderAsync` return typed
+`Selected`, `Canceled`, `Unsupported` or `Failed` results. Filters, initial
+directory and suggested filename are explicit options. Selected items contain
+a display name and location URI. A save result only chooses a destination;
+the application still owns writing, permissions, overwrite policy and recovery.
+
+The Windows host serializes requests and owns the native COM dialog on its STA
+thread. Windows pumps dialog input while ordinary Lucent application callbacks
+resume after dismissal. Cancellation closes the dialog on that same thread;
+owner shutdown cancels queued work and the active request. Use the cancellation
+token for application-owned lifetimes. A picker without a mounted Windows host
+reports `Unsupported`. Other hosts can inject their own implementation.
+
 ## Scrollbar styles
 
 `WindowsControlStyles.ScrollBar(appearance)` returns an opt-in style for the existing Lucent scrollbar: a stable gutter, a usable minimum thumb, and distinct normal/hover/pressed colors. It selects light, dark or high-contrast values. Pass the current `ThemeAppearance` and re-evaluate when it changes; append application overrides with `.With(...)`.

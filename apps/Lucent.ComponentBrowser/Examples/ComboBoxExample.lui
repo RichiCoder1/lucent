@@ -1,0 +1,34 @@
+namespace Lucent.ComponentBrowser;
+
+style ComboBoxExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+style ComboBoxExampleFieldStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinWidth: 280;
+}
+
+public component ComboBoxExample(ComponentBrowserState browser) {
+    <Layout style={ComboBoxExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>Type a workspace name to open the suggestion surface. The selected key remains application-owned while asynchronous results are generation-safe.</Text>
+        <Field
+            label="Workspace"
+            fieldId="component-browser-combo"
+            editor={field => Lucent.Core.Components.ComboBox(
+                field,
+                () => browser.ComboSelection,
+                browser.SetComboSelection,
+                browser.SuggestCombo,
+                browser.ComboOptions,
+                style: ComboBoxExampleFieldStyle
+            )}
+            help={() => "Only an enabled suggestion can be committed in this example."}
+            name="component-browser.combo.field"
+        />
+        <Status content={() => browser.ComboMessage} style={PresentationStyles.Secondary} name="component-browser.combo.status" />
+    </Layout>
+}

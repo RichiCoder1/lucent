@@ -146,7 +146,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             var width = Math.Max(1, placement.Width);
             var height = Math.Max(1, placement.Height);
             // Host padding keeps rendering, hit testing and UIA in the same coordinate space.
-            EnsureHostPadding(_composition);
+            EnsureHostPadding(_composition, request);
             window = request.IsModal
                 ? SDL.CreateWindow(
                     request.Title,
@@ -204,6 +204,9 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _input = input;
             _uiaProvider = provider;
             _uiaListener = listener;
+            // UIA virtualization requests are dispatched onto this SDL owner thread. Refresh
+            // projects the retained composition before the adapter retries its snapshot lookup.
+            _uiaProvider.SetRealizationRefresh(Refresh);
             _composition.PresentationDemandAvailable += _wakePresentation;
             Refresh();
             if (
@@ -234,6 +237,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             if (renderer != 0)
                 Capture(cleanup, () => SDL.DestroyRenderer(renderer));
             Capture(cleanup, () => listener?.Dispose());
+            Capture(cleanup, () => provider?.SetRealizationRefresh(null));
             Capture(cleanup, () => provider?.Dispose());
             if (window != 0)
                 Capture(cleanup, () => SDL.DestroyWindow(window));
@@ -279,16 +283,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
         return true;
     }
 
-    internal static void EnsureHostPadding(Composition composition)
+    internal static void EnsureHostPadding(Composition composition, PopupSurfaceRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(composition);
         if (HostPadding.TryGetValue(composition, out _))
             return;
 
-        composition.Root.Present(
-            new ThemeContext(composition.Root.Scope, new Theme("popup-host")),
-            Style.Empty.Padding(Insets.Uniform(ShadowMargin))
-        );
+        request.ConfigureHostPadding(composition, Insets.Uniform(ShadowMargin));
         HostPadding.Add(composition, HostPaddingMarker);
     }
 
@@ -391,7 +393,9 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private void Refresh(TimeSpan now)
     {
         CheckThread();
-        if (_disposed || _request.IsDismissed || _composition.IsDisposed)
+        if (_disposed || !PrepareRefresh(_request, _composition))
+            return;
+        if (!ResizeToCurrentContent())
             return;
         var viewport = Viewport(_window, _sdlRenderer);
         if (!viewport.IsRenderable)
@@ -489,6 +493,51 @@ internal sealed partial class WindowsPopupHost : IDisposable
         previous?.Dispose();
     }
 
+    private bool ResizeToCurrentContent()
+    {
+        var placement = CalculatePlacement();
+        if (_disposed || _request.IsDismissed || _composition.IsDisposed)
+            return false;
+        if (!SDL.GetWindowSize(_window, out var width, out var height))
+            throw new InvalidOperationException($"SDL_GetWindowSize popup: {SDL.GetError()}");
+        if (!NeedsContentResize(width, height, placement))
+            return true;
+
+        _opensLeft = placement.OpensLeft;
+        var origin = _request.IsModal ? ClientOrigin(Hwnd(_popupParentWindow)) : default;
+        if (
+            !SDL.SetWindowPosition(
+                _window,
+                origin.X + placement.OffsetX,
+                origin.Y + placement.OffsetY
+            )
+        )
+            throw new InvalidOperationException($"SDL_SetWindowPosition popup: {SDL.GetError()}");
+        if (!SDL.SetWindowSize(_window, placement.Width, placement.Height))
+            throw new InvalidOperationException($"SDL_SetWindowSize popup: {SDL.GetError()}");
+        if (!SDL.SyncWindow(_window))
+            throw new InvalidOperationException($"SDL_SyncWindow popup: {SDL.GetError()}");
+        return true;
+    }
+
+    internal static bool NeedsContentResize(
+        int currentWidth,
+        int currentHeight,
+        PopupHostPlacement placement
+    ) => currentWidth != placement.Width || currentHeight != placement.Height;
+
+    internal static bool PrepareRefresh(PopupSurfaceRequest request, Composition composition)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(composition);
+        if (request.IsDismissed || composition.IsDisposed)
+            return false;
+        // Popup state shares the owner's reactive graph. Flushing can acknowledge a
+        // controlled close and dispose this popup composition, so recheck before projection.
+        composition.Flush();
+        return !request.IsDismissed && !composition.IsDisposed;
+    }
+
     internal void Dismiss() => _request.Dismiss();
 
     internal static bool ContainsMenuPoint(LayoutRect bounds, float x, float y) =>
@@ -528,6 +577,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _sdlRenderer = 0;
         }
         Capture(errors, _uiaListener.Dispose);
+        Capture(errors, () => _uiaProvider.SetRealizationRefresh(null));
         Capture(errors, _uiaProvider.Dispose);
         if (_window != 0)
         {

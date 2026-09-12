@@ -1,0 +1,56 @@
+namespace Lucent.Core;
+using System;
+
+style CalendarGridStyle {
+    Mode: LayoutMode.Grid;
+    Columns: GridTracks.Create(
+        GridTrack.Fixed(32), GridTrack.Fixed(32), GridTrack.Fixed(32),
+        GridTrack.Fixed(32), GridTrack.Fixed(32), GridTrack.Fixed(32),
+        GridTrack.Fixed(32)
+    );
+    Rows: GridTracks.Create(
+        GridTrack.Fixed(20), GridTrack.Fixed(32), GridTrack.Fixed(32),
+        GridTrack.Fixed(32), GridTrack.Fixed(32), GridTrack.Fixed(32),
+        GridTrack.Fixed(32)
+    );
+}
+
+style CalendarHeaderStyle {
+    Axis: LayoutAxis.Row;
+    Height: 32;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Center;
+}
+
+style CalendarNavigationStyle {
+    Width: 32;
+    MinHeight: 32;
+    Height: 32;
+    Padding: Insets.Uniform(6);
+}
+
+style CalendarTitleStyle {
+    Axis: LayoutAxis.Row;
+    MainGrow: 1;
+    MinWidth: 0;
+    MainAlignment: LayoutAlignment.Center;
+    CrossAlignment: LayoutAlignment.Center;
+}
+
+internal component CalendarSurfaceView(
+    CalendarState calendar,
+    DateEditSession session,
+    Action close,
+    ComponentContent weekdaysAndDays
+) {
+    <CalendarHost calendar={calendar} session={session} close={close}>
+        <Layout style={CalendarHeaderStyle}>
+            <IconButton source={DateTimeArtwork.PreviousMonth} label="Previous month" onInvoke={() => calendar.MoveMonth(-1)} style={CalendarNavigationStyle} />
+            <Layout style={CalendarTitleStyle}>
+                <Text content={() => calendar.DisplayedMonth.ToString("Y", session.Options.Culture)} />
+            </Layout>
+            <IconButton source={DateTimeArtwork.NextMonth} label="Next month" onInvoke={() => calendar.MoveMonth(1)} style={CalendarNavigationStyle} />
+        </Layout>
+        <Layout content={weekdaysAndDays} style={CalendarGridStyle} />
+    </CalendarHost>
+}

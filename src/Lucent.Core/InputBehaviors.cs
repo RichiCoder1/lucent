@@ -124,7 +124,8 @@ internal sealed class RowActionBehavior(
 internal sealed class ButtonBehavior(
     string name,
     SemanticDeclaration semantics,
-    Action? activate = null
+    Action? activate = null,
+    bool focusOnPointer = true
 ) : Behavior
 {
     public override string Name => name;
@@ -154,7 +155,7 @@ internal sealed class ButtonBehavior(
                 var armed = route.Capture();
                 armedPointer = armed ? route.Command.PointerId : null;
                 context.SetState(BehaviorState.Pressed, armed);
-                if (armed)
+                if (armed && focusOnPointer)
                     route.Focus();
                 route.Handled = armed;
             }

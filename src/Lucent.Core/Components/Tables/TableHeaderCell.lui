@@ -1,0 +1,17 @@
+namespace Lucent.Core;
+
+style TableHeaderTextStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    Padding: Insets.Symmetric(8, 6);
+    Clip: true;
+    TextWrap: TextWrap.NoWrap;
+    Overflow: TextOverflow.Ellipsis;
+}
+
+internal component TableHeaderCell(TableColumnBinding binding) {
+    <Layout style={Style.Empty.Set(LayoutProperties.Axis, LayoutAxis.Row).Bind(LayoutProperties.Width, () => (float?)binding.Width()).Bind(LayoutProperties.Height, () => (float?)binding.HeaderHeight())}>
+        <TableHeading binding={binding} style={TableHeaderTextStyle} />
+        <TableColumnResize binding={binding} />
+    </Layout>
+}

@@ -7,6 +7,7 @@ style ChoiceIndicatorStyle {
 
 style ChoiceContentStyle {
     MainGrow: 1;
+    MinWidth: 0;
     TextWrap: TextWrap.WordWithGraphemeFallback;
 }
 

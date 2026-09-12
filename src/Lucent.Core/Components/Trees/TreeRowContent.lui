@@ -1,0 +1,22 @@
+namespace Lucent.Core;
+
+style TreeChevronStyle {
+    Width: 20;
+    Height: 20;
+    MainShrink: 0;
+}
+
+style TreeRowContentStyle {
+    MainGrow: 1;
+    TextWrap: TextWrap.NoWrap;
+    Overflow: TextOverflow.Ellipsis;
+}
+
+internal component TreeRowContent(TreeRowBinding binding, ComponentRecipe content, Style? style) {
+    <TreeRowHost binding={binding} style={style}>
+        <TreeChevronHost binding={binding} style={TreeChevronStyle} />
+        <Layout style={TreeRowContentStyle}>
+            {content}
+        </Layout>
+    </TreeRowHost>
+}

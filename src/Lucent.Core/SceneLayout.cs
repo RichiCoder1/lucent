@@ -1964,18 +1964,22 @@ public static partial class SceneLayout
             style.TextWrap,
             style.MaxLines,
             style.TextOverflow,
-            style.FontWeight
+            style.FontWeight,
+            style.Confidential
         );
         request.Validate();
-        if (cache.Shapes.TryGetValue(request, out var cached))
+        if (!request.IsConfidential && cache.Shapes.TryGetValue(request, out var cached))
         {
             cached.SetSourceText(request.Text);
             return cached;
         }
         var shaped = shaper.Shape(request);
         shaped.Validate(request);
-        shaped.SetSourceText(request.Text);
-        cache.Shapes.Add(request, shaped);
+        if (!request.IsConfidential)
+        {
+            shaped.SetSourceText(request.Text);
+            cache.Shapes.Add(request, shaped);
+        }
         return shaped;
     }
 
@@ -2095,7 +2099,8 @@ public static partial class SceneLayout
             element.ResolveValue(ProjectionProperties.TextSelectionEnd),
             element.ResolveValue(ProjectionProperties.TextCaret),
             element.ResolveValue(ProjectionProperties.TextMultiline),
-            element.ResolveValue(ProjectionProperties.TextCaretAffinity)
+            element.ResolveValue(ProjectionProperties.TextCaretAffinity),
+            element.ResolveValue(ProjectionProperties.TextConfidential)
         );
         if (
             !Enum.IsDefined(values.Mode)
@@ -2309,7 +2314,8 @@ public static partial class SceneLayout
         int? SelectionEnd,
         int? Caret,
         bool Multiline,
-        TextAffinity CaretAffinity
+        TextAffinity CaretAffinity,
+        bool Confidential
     );
 
     private static ShapedText? EmptyCaretText(

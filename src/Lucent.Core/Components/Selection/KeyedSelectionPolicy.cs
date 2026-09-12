@@ -114,6 +114,23 @@ internal sealed class KeyedSelectionPolicy<TKey, TItem>
 
     internal void RegisterTarget(TKey key, ElementIdentity identity) => _targets[key] = identity;
 
+    internal void RegisterTarget(TKey key, BehaviorContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var identity = context.Identity;
+        RegisterTarget(key, identity);
+        context.OnDispose(() => UnregisterTarget(key, identity));
+    }
+
+    internal bool UnregisterTarget(TKey key, ElementIdentity identity)
+    {
+        if (!_targets.TryGetValue(key, out var current) || current != identity)
+            return false;
+        return _targets.Remove(key);
+    }
+
+    internal int RegisteredTargetCount => _targets.Count;
+
     internal bool RequestRoving()
     {
         var active = EffectiveRoving();

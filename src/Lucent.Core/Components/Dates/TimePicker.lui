@@ -1,0 +1,26 @@
+namespace Lucent.Core;
+using System;
+
+/// <summary>Creates a controlled local-time field with culture-aware text and bounded step actions.</summary>
+public component TimePicker(
+    string label,
+    Func<TimeOnly?> value,
+    Action<TimeOnly?> onValueRequested,
+    TimePickerOptions? options = null,
+    DateTimeFieldOptions? field = null
+) {
+    readonly TimePickerOptions policy = TimePolicy(options);
+    readonly DateTimeFieldOptions fieldPolicy = DateTimeFieldPolicy(field);
+    readonly TimeEditSession time = new(owner, value, onValueRequested, policy, fieldPolicy.FieldId ?? label);
+    <Field
+        label={label}
+        editor={context => TimePickerEditor(context, time, fieldPolicy.Enabled, fieldPolicy.ReadOnly)}
+        validation={() => CombinedValidation(time.Validation, fieldPolicy.Validation)}
+        help={fieldPolicy.Help}
+        session={fieldPolicy.Form}
+        fieldId={fieldPolicy.FieldId}
+        participation={fieldPolicy.Participation}
+        required={fieldPolicy.Required}
+        style={fieldPolicy.Style}
+    />
+}

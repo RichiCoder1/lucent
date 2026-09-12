@@ -1,31 +1,45 @@
 # Current work and follow-ups
 
-The review follow-ups, responsive focus continuity, and first production transition slice are delivered. Lucent runtime commit `bab7cc3523aeeab8d9bce42f0aca5b2955fb1387` is published as `0.3.0-dev.55.1`; [CI 55](https://github.com/RichiCoder1/lucent/actions/runs/34394248585) passed managed, NativeAOT and package-consumer checks and published the immutable set. Light Notes independently adopts it at `9c00f75e8c7231074f8dea8df1a5f5a7d26e5b74`; [app CI 21](https://github.com/RichiCoder1/light-notes/actions/runs/34397155971) passed managed tests, desktop-test compilation and NativeAOT publication.
+## Component delivery status — September 12, 2026
 
-## Completed batch
+The authorized component program is #155–171. Its component families and the maintained Component Browser are implemented in the shared working tree. This checkpoint records verified local evidence and remaining delivery work; it does not claim completion, publication, or issue closure.
 
-- #194: retained-field diagnostics, missing-semicolon recovery, completion filtering and clearer derived-value hover.
-- #195: initiating-button capture continuity, popup owner focus cleanup and synchronized UIA shutdown dispatch.
-- #196: decoder/metadata parity, shared secure SVG admission and cache/disposal evidence. Oversized-image per-paint copies remain an explicit bounded limitation in [asset memory evidence](../ASSET-MEMORY-EVIDENCE.md).
-- #142 and #198–202: typed `.lui` policies, composition-owned motion, retained paint reuse, Windows/headless scheduling, immediate actionable stock states and independent consumers. See [the public guide](../TRANSITIONS.md), [runtime evidence](../MOTION-RUNTIME-EVIDENCE.md) and [execution plan](../plans/transition-implementation.md).
-- Light Notes #8: opt-in nearest-available focus recovery when a focused pane collapses, preserving editor sessions and avoiding replay of an old focus choice. NoteRow and compact Back declare hover motion in `.lui`.
+### Verified local evidence
 
-Local Lucent verification passes 706/706 managed tests: Core 349, headless 46, R3 7, hosting 5, renderer 82, Windows 94, Issue Browser 20, compiler 60, generator 17 and LSP 26. The warning-clean solution build, authored formatting, positive/negative architecture checks, extension tests 13/13 and generated SDK NativeAOT proof pass. The final committed NativeAOT TestHost passes 5/5 physical checks for pointer selection, popup/focus lifetime, autonomous motion, minimize/restore and reduced motion.
+- Lucent Core: 448/448.
+- Lucent Platform Windows: 120/120, including public password/IME, Slider, Tree, DatePicker, ComboBox, notification, popup lifetime, focus return, native UIA ABI, and custom popup-host compatibility contracts.
+- Component Browser: 11/11, including 84 stock theme/density captures across the fourteen compiled `.lui` examples.
+- Issue Browser: 20/20.
+- Skia renderer: 80 passed with three opt-in skips.
+- Repaired real-project LSP reference fixture: 1/1.
+- Positive and negative architecture checks: passed.
 
-Light Notes on the official 55.1 packages passes storage 22/22 and app 42/42, with one separate optional performance probe skipped. Desktop compilation and NativeAOT publish pass. The final published app passes 2/2 physical workflows: responsive focus continuity and capture/autosave/reopen. All six maintained lock graphs were refreshed; only the two graphs whose Lucent dependencies changed produce lockfile diffs.
+The reported Dialog width, calendar alignment, suggestion-list sizing, radio-label clipping, slider-thumb alignment, password-toggle, menu-padding and submenu-placement defects are fixed. Hover tooltips now anchor near the pointer. Native popup windows resize when asynchronous content changes; programmatic focus waits for fresh layout instead of spuriously blurring and remasking a password. Escape cleanup also avoids accessing an already-disposed popup.
 
-The local VS Code extension is `lucent.lucent-lui` 0.3.2. Its server is installed at `C:/Users/richa/.lucent/lui/bab7cc3/server/Lucent.Lui.LanguageServer.dll`, and only the corresponding user setting was updated with a private backup. Evaluated-project initialization, completion/hover capabilities, shutdown and exit pass. Existing VS Code windows need **Developer: Reload Window** to activate the installation.
+Fresh NativeAOT Component Browser and TestHost outputs passed all six selected desktop tests, covering these popup/password interactions, modal ownership/focus, and actual native open/save/folder cancellation. Evidence is in `artifacts/component-native-final-desktop.log`; captures are in `artifacts/component-native-final/captures`. The fresh radio/slider captures were inspected in all six theme/density combinations. Formatting and `git diff --check` pass. Run desktop checks separately from other native Windows tests. The computer-use plugin files are present but its node_repl runtime is absent from this session; do not claim a free-form computer-use walkthrough.
 
-## Earlier delivery and planned work
+Automated UIA and synthetic SDL text-input tests do not certify end-to-end screen-reader delivery or a real installed-language IME candidate window. The existing physical mixed-DPI evidence from #153 remains valid for its recorded source boundary; this batch does not claim a fresh hardware walkthrough.
 
-Assets #144–152, JPEG admission #154, component-family organization and framework-authored ErrorNotice #143, earlier layout/projection #114/#116–118, and confirmed Fable review fixes #172–193/#197 are complete. The [remediation record](../plans/fable-review-remediation.md) maps findings to fixes. [Projection evidence](../SCENE-PROJECTION-EVIDENCE.md) records earlier measurements and their limits.
+### Remaining steps for #155–171
 
-Physical mixed-DPI #153 was completed in the preceding batch with actual 96/144/96-DPI monitors, including open popup/submenu transitions, pointer editing, focus and multiline UIA text geometry. Its [source-bound delivery record](https://github.com/RichiCoder1/lucent/issues/153#issuecomment-5605452916) remains authoritative; this batch does not claim a fresh physical mixed-DPI or real-language IME candidate-window walkthrough.
+1. Commit and push the verified Lucent batch, await required CI and immutable package publication, and record the published package identity. No new CI result, package, or issue closure exists for this batch yet.
+2. Update Light Notes from `0.3.0-dev.55.1` to the newly published immutable package, refresh its lock graphs, and validate the three source changes already waiting in its tree. Those changes adopt `Field` while preserving the workspace-owned URL `EditorSession`; they are source-only and unverified against a new package.
+3. Update the plan, roadmap and child issues with the source/package/native evidence. Close #171 and parent #155 after Light Notes adoption is recorded.
 
-Component Gaps #155–171 and context/navigation #203–222 are separate planned work. A separate controls package, broad framework `.lui` conversion, layout/entry animation and public custom interpolators remain deferred.
+The Design and UI task has published [C# authoring #265](https://github.com/RichiCoder1/lucent/issues/265) and children #266–275 as the next phase, immediately after #155/#171 package and Light Notes closeout and before #203/#204. Begin with #266 on the final accepted source/package baseline; it proves the bounded recipe/capability shape without changing production factory returns. #269 owns the later atomic factory/compiler/metadata/consumer migration. The plan received Fable High review and needs no further owner decisions. Its local design is `D:/.codex/worktrees/1b0a/lucent/advisor-plans/002-csharp-authoring.md`; preserve independently owned advisor plans when integrating it.
 
-## Local workspace
+## Scope and constraints
 
-Lucent: `D:/src/richicoder1/lucent`. Light Notes: `D:/src/richicoder1/light-notes`. Preserve unrelated `.codex/`, `advisor-plans/`, `docs/plans/windows-sandbox-testing.md` and `docs/research/` content; they were not included in this delivery. Use explicit staging paths. Serialize shared-tree builds and foreground tests. UI testing is authorized until the owner pauses it. Apply the [risk-based verification policy](verification.md); broad manual accessibility/IME certification is not implied by automated checks.
+This batch is limited to #155–171. Context, injection, navigation, Design and UI, and other tickets #203–264 are outside it. Do not broaden the current delivery to live compilation, another router, product-specific workflows, or deferred component capabilities.
 
-D: is backed by `C:/DevDrive/Dev.vhdx`. If it disappears after restart, inspect attachment state before changing anything. Do not format, change partitions or relax ACLs to recover repository access.
+The Windows file picker returns selected locations and performs no file I/O. `TableView` remains read-only with fixed-height virtualized rows; editing, formulas, merged cells, grouping, and variable-height rows remain out of scope. Preserve Core portability: Windows owns hosting, input, IME, accessibility, presentation, and native-dialog adaptation.
+
+Lucent is at `D:/src/richicoder1/lucent`; Light Notes is at `D:/src/richicoder1/light-notes`. Preserve unrelated `.codex/`, `advisor-plans/`, `docs/plans/windows-sandbox-testing.md`, and `docs/research/` content. Use explicit staging paths, serialize shared-tree builds and foreground tests, and follow [the risk-based verification policy](verification.md). The Dev Drive is backed by `C:/DevDrive/Dev.vhdx`; if `D:` disappears after restart, inspect attachment state before changing anything. Do not format the volume, change partitions, or relax ACLs.
+
+## Last published baseline
+
+The last published Lucent baseline remains commit `bab7cc3523aeeab8d9bce42f0aca5b2955fb1387`, package `0.3.0-dev.55.1`. [CI 55](https://github.com/RichiCoder1/lucent/actions/runs/34394248585) passed its managed, NativeAOT, and package-consumer checks and published that immutable set.
+
+Light Notes still adopts `0.3.0-dev.55.1` at commit `9c00f75e8c7231074f8dea8df1a5f5a7d26e5b74`. [App CI 21](https://github.com/RichiCoder1/light-notes/actions/runs/34397155971) passed managed tests, desktop-test compilation, and NativeAOT publication for that baseline. Do not attribute the current component working tree or its pending Light Notes changes to those published results.
+
+Earlier completed asset, motion, focus-continuity, responsive-layout, native-menu, and physical mixed-DPI delivery records remain authoritative for their committed source boundaries. See [the component execution plan](../plans/component-delivery.md), [testing guide](../TESTING.md), and individual issue records for their detailed evidence.

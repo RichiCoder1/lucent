@@ -13,6 +13,12 @@ public enum SliderDirection
 }
 
 /// <summary>Validated finite range and interaction policy for a slider.</summary>
+/// <remarks>
+/// Step snapping treats a quotient one representable <see cref="double"/> below a midpoint as
+/// that midpoint. This tolerance preserves intuitive away-from-zero rounding for decimal-looking
+/// values such as 0.3 with a 0.2 increment; values at least two representable quotients below the
+/// midpoint still round down.
+/// </remarks>
 public sealed class SliderOptions
 {
     /// <summary>Creates a finite slider range.</summary>
@@ -122,11 +128,7 @@ internal sealed class SliderState
 
     internal void Complete() => _commit?.Invoke(_draft.Value);
 
-    internal void Cancel(double initial)
-    {
-        Preview(initial);
-        _commit?.Invoke(initial);
-    }
+    internal void Cancel(double initial) => Preview(initial);
 
     private void Reconcile()
     {
@@ -152,10 +154,10 @@ internal sealed class SliderState
     private double Snap(double value)
     {
         var bounded = Math.Clamp(value, Options.Minimum, Options.Maximum);
-        var steps = Math.Round(
-            (bounded - Options.Minimum) / Options.Increment,
-            MidpointRounding.AwayFromZero
-        );
+        var quotient = (bounded - Options.Minimum) / Options.Increment;
+        // Decimal-looking midpoint inputs can divide to one binary value below the half-step.
+        // Advance that single representation error before applying the documented tie-break.
+        var steps = Math.Round(Math.BitIncrement(quotient), MidpointRounding.AwayFromZero);
         return Math.Clamp(
             Options.Minimum + steps * Options.Increment,
             Options.Minimum,

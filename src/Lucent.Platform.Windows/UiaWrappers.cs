@@ -19,7 +19,12 @@ internal sealed unsafe class UiaWrappers : ComWrappers
         RangeValue = new("36dc7aef-33e6-4691-afe1-2be7274b3d33"),
         TogglePattern = new("56d00bd0-c4f4-433c-a836-1a52a57e0892"),
         TextProvider = new("3589c92c-63f3-4367-99bb-ada653b77cf2"),
-        TextProvider2 = new("0dc5e6ed-3e16-4bf1-8f9a-a979878bc195");
+        TextProvider2 = new("0dc5e6ed-3e16-4bf1-8f9a-a979878bc195"),
+        GridProvider = new("b17d6187-0907-464b-a168-0ef17a1572b1"),
+        GridItemProvider = new("d02541f1-fb81-4d64-ae32-f520f8a6dbd1"),
+        TableProvider = new("9c860395-97b3-490a-b52a-858cc22af166"),
+        TableItemProvider = new("b9734fa6-771f-4d78-9c90-2517999349cd"),
+        ItemContainerProvider = new("e747770b-39ce-4382-ab30-d8fb3f336f24");
     private static readonly ComInterfaceEntry* RootEntries,
         NodeEntries;
 
@@ -263,6 +268,80 @@ internal sealed unsafe class UiaWrappers : ComWrappers
                 (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, nint*, int>)
                     &CaretRange
         );
+        // UIAutomationCore.h order is authoritative here. These are native UIA provider
+        // interfaces; the similarly named WinRT XAML contracts have different slot layouts.
+        var grid = Entry(
+            GridProvider,
+            query,
+            addRef,
+            release,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int, int, nint*, int>)
+                    &GridGetItem,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &GridRowCount,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &GridColumnCount
+        );
+        var gridItem = Entry(
+            GridItemProvider,
+            query,
+            addRef,
+            release,
+            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&GridRow,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&GridColumn,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&GridRowSpan,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)
+                    &GridColumnSpan,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &GridContainingGrid
+        );
+        var table = Entry(
+            TableProvider,
+            query,
+            addRef,
+            release,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &TableRowHeaders,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &TableColumnHeaders,
+            (nint)(delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, int*, int>)&TableMajor
+        );
+        var tableItem = Entry(
+            TableItemProvider,
+            query,
+            addRef,
+            release,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &TableItemRowHeaders,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<ComInterfaceDispatch*, nint*, int>)
+                    &TableItemColumnHeaders
+        );
+        var itemContainer = Entry(
+            ItemContainerProvider,
+            query,
+            addRef,
+            release,
+            (nint)
+                (delegate* unmanaged[MemberFunction]<
+                    ComInterfaceDispatch*,
+                    nint,
+                    int,
+                    WindowsUiaProvider.RawVariant,
+                    nint*,
+                    int>)
+                    &FindItem
+        );
         RootEntries = Entries(simple, fragment, root);
         // A stable CCW implements the transport interfaces. Pattern() advertises only
         // capabilities present in the current immutable semantic snapshot. Keeping the
@@ -281,7 +360,12 @@ internal sealed unsafe class UiaWrappers : ComWrappers
             range,
             toggle,
             text,
-            text2
+            text2,
+            grid,
+            gridItem,
+            table,
+            tableItem,
+            itemContainer
         );
     }
 
@@ -296,7 +380,7 @@ internal sealed unsafe class UiaWrappers : ComWrappers
             count = 3;
             return RootEntries;
         }
-        count = 12;
+        count = 17;
         return NodeEntries;
     }
 
@@ -370,6 +454,110 @@ internal sealed unsafe class UiaWrappers : ComWrappers
     {
         *x = 0;
         return Guard(() => P(d).Host(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridGetItem(ComInterfaceDispatch* d, int row, int column, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).GridItem(row, column, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridRowCount(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).GridCount(false, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridColumnCount(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).GridCount(true, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridRow(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).CellCoordinate(false, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridColumn(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).CellCoordinate(true, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridRowSpan(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).CellSpan(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridColumnSpan(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).CellSpan(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int GridContainingGrid(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).ContainingGrid(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int TableRowHeaders(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TableHeaders(false, false, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int TableColumnHeaders(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TableHeaders(true, false, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int TableMajor(ComInterfaceDispatch* d, int* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TableMajor(out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int TableItemRowHeaders(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TableHeaders(false, true, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int TableItemColumnHeaders(ComInterfaceDispatch* d, nint* x)
+    {
+        *x = 0;
+        return Guard(() => P(d).TableHeaders(true, true, out *x));
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
+    private static int FindItem(
+        ComInterfaceDispatch* d,
+        nint startAfter,
+        int propertyId,
+        WindowsUiaProvider.RawVariant propertyValue,
+        nint* x
+    )
+    {
+        *x = 0;
+        return Guard(() => P(d).FindCollectionItem(startAfter, propertyId, propertyValue, out *x));
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]

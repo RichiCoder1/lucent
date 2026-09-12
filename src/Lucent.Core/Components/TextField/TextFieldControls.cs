@@ -56,7 +56,12 @@ internal static partial class Controls
         Func<bool>? enabled = null,
         Func<bool>? readOnly = null,
         Action? committed = null,
-        Action? cancelled = null
+        Action? cancelled = null,
+        Action<bool>? focusChanged = null,
+        bool confidential = false,
+        Func<bool>? reveal = null,
+        int historyLimit = 64,
+        Action? remask = null
     )
     {
         name = Required(name, nameof(name));
@@ -73,15 +78,32 @@ internal static partial class Controls
             element.Name + ".placeholder-active"
         );
         var component = TextFieldStyle(theme, () => placeholderActive.Value)
-            .Set(ProjectionProperties.Text, initialText)
+            .Set(
+                ProjectionProperties.Text,
+                confidential ? TextFieldState.MaskText(initialText) : initialText
+            )
             .Set(ProjectionProperties.TextMeasure, placeholderText);
+        if (confidential)
+            component = component.Set(ProjectionProperties.TextConfidential, true);
         if (enabled is not null)
             component = component.Bind(InputProperties.Enabled, enabled);
         Preflight(element, theme, component, style, new TextFieldBehavior(null!, name));
         var editor =
             session
-            ?? new EditorSession(element.Scope, element.Name, value, element.Name + ".editor");
-        var state = new TextFieldState(element.Scope, element.Name + ".text", editor);
+            ?? new EditorSession(
+                element.Scope,
+                element.Name,
+                value,
+                element.Name + ".editor",
+                historyLimit: historyLimit
+            );
+        var state = new TextFieldState(
+            element.Scope,
+            element.Name + ".text",
+            editor,
+            confidential,
+            reveal
+        );
         field?.AttachEditor(element);
         Configure(
             element,
@@ -95,7 +117,10 @@ internal static partial class Controls
                 field is null ? null : field.Blur,
                 readOnly,
                 committed,
-                cancelled
+                cancelled,
+                focusChanged,
+                confidential,
+                remask
             )
         );
         if (focusTarget is not null)

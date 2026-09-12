@@ -7,6 +7,7 @@ namespace Lucent.Platform.Windows;
 /// <summary>Converts SDL input on the host UI thread; Core receives only portable commands and text.</summary>
 internal sealed class WindowsInputAdapter : IDisposable
 {
+    private readonly Composition _composition;
     private readonly InputRouter _router;
     private readonly nint _window;
     private readonly WindowsClipboard? _clipboard;
@@ -20,6 +21,9 @@ internal sealed class WindowsInputAdapter : IDisposable
     private bool _imeCompositionActive;
     private ElementIdentity? _imeCompositionTarget;
     private bool _rejectQueuedTextUntilRefresh;
+    private ElementIdentity? _classifiedTextInputTarget;
+    private SDL.TextInputType _classifiedTextInputType;
+    private SDL.TextInputType? _startedTextInputType;
 
     internal WindowsInputAdapter(
         Composition composition,
@@ -29,7 +33,8 @@ internal sealed class WindowsInputAdapter : IDisposable
         WindowsCoordinateScale? coordinateScale = null
     )
     {
-        _router = (composition ?? throw new ArgumentNullException(nameof(composition))).Input;
+        _composition = composition ?? throw new ArgumentNullException(nameof(composition));
+        _router = _composition.Input;
         _window = window;
         _clipboard = clipboard;
         _textInput = textInput ?? TextInputTransport.Sdl;
@@ -42,7 +47,7 @@ internal sealed class WindowsInputAdapter : IDisposable
 
     internal bool Dispatch(SDL.Event @event)
     {
-        if (_disposed)
+        if (_disposed || _composition.IsDisposed)
             return false;
         if (
             (SDL.EventType)@event.Type
@@ -149,7 +154,7 @@ internal sealed class WindowsInputAdapter : IDisposable
 
     internal void RefreshTextInput()
     {
-        if (!_disposed)
+        if (!_disposed && !_composition.IsDisposed)
         {
             ReconcileImeComposition();
             SyncTextInput();
@@ -292,6 +297,8 @@ internal sealed class WindowsInputAdapter : IDisposable
             return true;
         }
         _ = _router.DispatchKey(command);
+        if (_composition.IsDisposed)
+            return true;
         ReconcileImeComposition();
         if (@event.Down)
             ProcessClipboardRequests();
@@ -405,11 +412,17 @@ internal sealed class WindowsInputAdapter : IDisposable
     /// <summary>Completes clipboard work requested by portable commands, including popup menu actions.</summary>
     internal void ProcessClipboardRequests()
     {
-        if (_clipboard is null || !_router.TryTakeClipboardRequest(out var request))
+        if (
+            _composition.IsDisposed
+            || _clipboard is null
+            || !_router.TryTakeClipboardRequest(out var request)
+        )
             return;
         if (request.Operation == TextClipboardOperation.Paste)
         {
             var read = _clipboard.Read();
+            if (_composition.IsDisposed)
+                return;
             _repaintRequested |= _router.CompleteClipboardRequest(
                 request,
                 read.Succeeded,
@@ -419,6 +432,8 @@ internal sealed class WindowsInputAdapter : IDisposable
         else
         {
             var write = _clipboard.Write(request.Text!);
+            if (_composition.IsDisposed)
+                return;
             _repaintRequested |= _router.CompleteClipboardRequest(request, write.Succeeded);
         }
     }
@@ -434,6 +449,7 @@ internal sealed class WindowsInputAdapter : IDisposable
         }
         if (_router.TryGetCaretGeometry(out var caret))
         {
+            var inputType = FocusedTextInputType();
             var scale = CoordinateScale;
             var area = new SDL.Rect
             {
@@ -442,8 +458,25 @@ internal sealed class WindowsInputAdapter : IDisposable
                 W = Math.Max(1, scale.LogicalToWindowCeiling(caret.Width)),
                 H = Math.Max(1, scale.LogicalToWindowCeiling(caret.Height)),
             };
-            if (!_textInput.Active(_window) && !_textInput.Start(_window))
-                throw new InvalidOperationException("SDL_StartTextInput: " + SDL.GetError());
+            var active = _textInput.Active(_window);
+            if (
+                active
+                && (
+                    _startedTextInputType is { } configured
+                        ? configured != inputType
+                        : inputType != SDL.TextInputType.Text
+                )
+            )
+            {
+                StopTextInput();
+                active = false;
+            }
+            if (!active)
+            {
+                if (!_textInput.Start(_window, inputType))
+                    throw new InvalidOperationException("SDL_StartTextInput: " + SDL.GetError());
+                _startedTextInputType = inputType;
+            }
             if (!_textInput.SetArea(_window, area, 0))
                 throw new InvalidOperationException("SDL_SetTextInputArea: " + SDL.GetError());
         }
@@ -453,39 +486,85 @@ internal sealed class WindowsInputAdapter : IDisposable
 
     private void StopTextInput()
     {
-        if (_window != 0 && _textInput.Active(_window) && !_textInput.Stop(_window))
+        if (_window == 0)
+            return;
+        if (_textInput.Active(_window) && !_textInput.Stop(_window))
             throw new InvalidOperationException("SDL_StopTextInput: " + SDL.GetError());
+        _startedTextInputType = null;
+    }
+
+    private SDL.TextInputType FocusedTextInputType()
+    {
+        var focused = _router.FocusedElement;
+        if (focused is not { } identity)
+            return SDL.TextInputType.Text;
+        if (_classifiedTextInputTarget == identity)
+            return _classifiedTextInputType;
+        _classifiedTextInputTarget = identity;
+        _classifiedTextInputType = FindSemantic(_composition.SemanticSnapshot(), identity)
+            is { IsPassword: true }
+            ? SDL.TextInputType.TextPasswordHidden
+            : SDL.TextInputType.Text;
+        return _classifiedTextInputType;
+    }
+
+    private static SemanticSnapshot? FindSemantic(SemanticSnapshot? node, ElementIdentity identity)
+    {
+        if (node is null)
+            return null;
+        if (
+            node.Identity.CompositionEpoch == identity.CompositionEpoch
+            && node.Identity.ElementId == identity.ElementId
+        )
+            return node;
+        foreach (var child in node.Children)
+            if (FindSemantic(child, identity) is { } match)
+                return match;
+        return null;
     }
 
     private void CleanupInput()
     {
         var errors = new List<Exception>();
-        try
+        if (!_composition.IsDisposed)
         {
-            // A Core-only focus or semantic cancellation may have ended the
-            // preedit before the host began cleanup.  Reconcile once before
-            // routing the portable cancel so the native IME is still reset.
-            ReconcileImeComposition();
+            try
+            {
+                // A Core-only focus or semantic cancellation may have ended the
+                // preedit before the host began cleanup.  Reconcile once before
+                // routing the portable cancel so the native IME is still reset.
+                ReconcileImeComposition();
+            }
+            catch (Exception error)
+            {
+                errors.Add(error);
+            }
+            try
+            {
+                CancelPointers();
+            }
+            catch (Exception error)
+            {
+                errors.Add(error);
+            }
+            try
+            {
+                _ = CancelText();
+            }
+            catch (Exception error)
+            {
+                errors.Add(error);
+            }
         }
-        catch (Exception error)
+        else
         {
-            errors.Add(error);
-        }
-        try
-        {
-            CancelPointers();
-        }
-        catch (Exception error)
-        {
-            errors.Add(error);
-        }
-        try
-        {
-            _ = CancelText();
-        }
-        catch (Exception error)
-        {
-            errors.Add(error);
+            // A controlled popup may release its Core composition before the native host
+            // observes dismissal. Core input can no longer accept cancellation, but native
+            // text input and host-owned pointer bookkeeping still require deterministic cleanup.
+            _pointers.Clear();
+            _pressedButtons.Clear();
+            PointerPosition = null;
+            _repaintRequested = true;
         }
         try
         {
@@ -643,7 +722,8 @@ internal sealed class TextInputTransport(
     Func<nint, bool> start,
     Func<nint, bool> stop,
     Func<nint, SDL.Rect, int, bool> setArea,
-    Func<nint, bool>? clearComposition = null
+    Func<nint, bool>? clearComposition = null,
+    Func<nint, SDL.TextInputType, bool>? startClassified = null
 )
 {
     internal static TextInputTransport Sdl { get; } =
@@ -652,14 +732,36 @@ internal sealed class TextInputTransport(
             SDL.StartTextInput,
             SDL.StopTextInput,
             SetTextInputArea,
-            SDL.ClearComposition
+            SDL.ClearComposition,
+            StartTextInput
         );
     internal Func<nint, bool> Active { get; } = active;
-    internal Func<nint, bool> Start { get; } = start;
+
+    internal bool Start(nint window, SDL.TextInputType inputType) =>
+        startClassified is null ? start(window) : startClassified(window, inputType);
+
     internal Func<nint, bool> Stop { get; } = stop;
     internal Func<nint, SDL.Rect, int, bool> SetArea { get; } = setArea;
     internal Func<nint, bool> ClearComposition { get; } = clearComposition ?? (_ => true);
 
     private static bool SetTextInputArea(nint window, SDL.Rect area, int cursor) =>
         SDL.SetTextInputArea(window, in area, cursor);
+
+    private static bool StartTextInput(nint window, SDL.TextInputType inputType)
+    {
+        if (inputType == SDL.TextInputType.Text)
+            return SDL.StartTextInput(window);
+        var properties = SDL.CreateProperties();
+        if (properties == 0)
+            return false;
+        try
+        {
+            return SDL.SetNumberProperty(properties, SDL.Props.TextInputTypeNumber, (long)inputType)
+                && SDL.StartTextInputWithProperties(window, properties);
+        }
+        finally
+        {
+            SDL.DestroyProperties(properties);
+        }
+    }
 }

@@ -53,10 +53,14 @@ internal sealed class WindowsSurfaceManager : IDisposable
 
     private void Request(PopupSurfaceRequest request)
     {
-        if (request.IsInteractive && !_ownsReturnFocus)
+        if (request.IsInteractive)
         {
-            _returnFocus = _ownerInput.FocusedElement;
-            _ownsReturnFocus = true;
+            var focused = _ownerInput.FocusedElement;
+            if (!_ownsReturnFocus || focused is not null)
+            {
+                _returnFocus = focused;
+                _ownsReturnFocus = true;
+            }
         }
         _pending?.Dispose();
         _pending = request;
@@ -298,15 +302,28 @@ internal sealed class WindowsSurfaceManager : IDisposable
         if (!_ownsReturnFocus || _host is not null || _pending is { IsDismissed: false })
             return;
         var focus = _returnFocus;
+        if (_disposed || _owner.IsDisposed || focus is null)
+        {
+            ClearReturnFocus();
+            return;
+        }
+        if (_ownerInput.FocusedElement is not null)
+        {
+            // An application-selected focus target wins over the surface's captured return target.
+            ClearReturnFocus();
+            return;
+        }
+        // The opening trigger can still be disabled in the installed owner scene while close
+        // state is settling. Keep the identity when this attempt fails; Synchronize runs again
+        // after the next owner scene is installed and can restore the re-enabled target then.
+        if (_ownerInput.FocusSemantic(focus.Value))
+            ClearReturnFocus();
+    }
+
+    private void ClearReturnFocus()
+    {
         _returnFocus = null;
         _ownsReturnFocus = false;
-        if (
-            !_disposed
-            && !_owner.IsDisposed
-            && focus is { } identity
-            && _ownerInput.FocusedElement is null
-        )
-            _ = _ownerInput.FocusSemantic(identity);
     }
 
     public void Dispose()

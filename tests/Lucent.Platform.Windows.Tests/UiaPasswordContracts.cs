@@ -15,20 +15,19 @@ public sealed unsafe partial class UiaLifecycleContracts
         {
             using var composition = new Composition(new ReactiveGraph(), "password-uia");
             using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            var applied = composition.Root.Scope.Signal("synthetic-fixture-value", "applied");
             composition.Mount(
                 composition.Root,
                 theme,
-                ComponentRecipe.Create(
-                    "password",
-                    (_, root) =>
-                    {
-                        root.Present(theme, Style.Empty.Width(200).Height(36));
-                        root.AttachBehaviors(new PasswordSemanticProbe());
-                    }
+                Components.PasswordField(
+                    "Password",
+                    () => applied.Value,
+                    value => applied.Value = value
                 )
             );
             using var renderer = new SkiaSceneRenderer();
-            using var scene = SceneLayout.Project(composition, new(220, 100, 1), renderer);
+            using var scene = SceneLayout.Project(composition, new(420, 140, 1), renderer);
+            Assert(composition.Input.SetScene(scene), "Password scene was not accepted.");
             using var dispatcher = new WindowsUiaDispatcher();
             using var provider = new WindowsUiaProvider(
                 Hwnd(window),
@@ -63,6 +62,18 @@ public sealed unsafe partial class UiaLifecycleContracts
                 );
                 AssertCompoundPattern(simple, 10014, expected: false);
                 AssertCompoundPattern(simple, 10024, expected: false);
+                fixed (char* replacement = "replacement-fixture-value")
+                {
+                    var set = (
+                        (delegate* unmanaged[Stdcall]<nint, char*, int>)(*(nint**)valuePattern)[3]
+                    )(valuePattern, replacement);
+                    Assert(set == 0, "Native password SetValue was rejected.");
+                    composition.Flush();
+                    Assert(
+                        applied.Value == "replacement-fixture-value",
+                        "Native password SetValue did not reach the controlled consumer."
+                    );
+                }
             }
             finally
             {
@@ -74,26 +85,6 @@ public sealed unsafe partial class UiaLifecycleContracts
         {
             SDL.DestroyWindow(window);
             SDL.Quit();
-        }
-    }
-
-    private sealed class PasswordSemanticProbe : Behavior
-    {
-        public override string Name => "confidential-editor";
-        public override BehaviorOwnership Ownership =>
-            BehaviorOwnership.Action | BehaviorOwnership.Semantics;
-
-        public override void Attach(BehaviorContext context)
-        {
-            context.SetSemantics(
-                new(
-                    SemanticRole.TextField,
-                    "Password",
-                    actions: SemanticAction.SetValue,
-                    isPassword: true
-                )
-            );
-            context.OnSemanticCommand(_ => false);
         }
     }
 }

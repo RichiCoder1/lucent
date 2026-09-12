@@ -601,14 +601,20 @@ public sealed partial class Composition : IDisposable
         if (IsInteractionSuspended || !element.SemanticEnabled())
             return SemanticCommandResult.Disabled;
         var priorToggle = element.SemanticToggleState;
+        var priorAcceptedSelection = element.AcceptedSelectionGeneration;
         if (!element.ExecuteSemanticCommand(command))
             return SemanticCommandResult.Rejected;
         if (command.Kind == SemanticCommandKind.Select)
         {
             // A callback can reject or defer controlled selection. Settle synchronous
-            // application state before reporting whether selection actually took effect.
+            // application state before reporting whether selection actually took effect. A popup
+            // row may acknowledge synchronous acceptance before its selection closes the surface;
+            // that command-local generation remains observable on the captured departed element.
             _graph.DrainPosted();
-            if (element.IsDisposed || !element.SemanticSelected())
+            if (
+                element.AcceptedSelectionGeneration == priorAcceptedSelection
+                && (element.IsDisposed || !element.SemanticSelected())
+            )
                 return SemanticCommandResult.Requested;
         }
         else if (command.Kind == SemanticCommandKind.Toggle)

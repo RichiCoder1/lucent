@@ -106,7 +106,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
         CheckThread();
         ThrowIfDisposed();
         request.Validate();
-        if (_shapes.TryGetValue(request, out var cached))
+        if (!request.IsConfidential && _shapes.TryGetValue(request, out var cached))
         {
             TouchCache(request);
             return cached;
@@ -244,25 +244,23 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             ? MathF.Min(top, request.BlockConstraint.Limit!.Value)
             : top;
         var identity = Identity(request, runs, lines, didOverflow);
-        return Cache(
-            request,
-            new ShapedText(
-                identity,
-                width,
-                Checked(height),
-                runs,
-                lines,
-                didOverflow,
-                request.InlineConstraint,
-                request.BlockConstraint
-            )
+        var shaped = new ShapedText(
+            identity,
+            width,
+            Checked(height),
+            runs,
+            lines,
+            didOverflow,
+            request.InlineConstraint,
+            request.BlockConstraint
         );
+        return request.IsConfidential ? shaped : Cache(request, shaped);
     }
 
     private IReadOnlyList<LineDraft> ShapeParagraph(TextMeasureRequest request, bool hardBreak)
     {
         var key = new ParagraphCacheKey(request, hardBreak);
-        if (_paragraphs.TryGetValue(key, out var cached))
+        if (!request.IsConfidential && _paragraphs.TryGetValue(key, out var cached))
         {
             _paragraphLru.Remove(cached);
             _paragraphLru.AddLast(cached);
@@ -288,7 +286,7 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
                     + 2L * (run.Family.Length + run.Fingerprint.Length + run.SourceIdentity.Length)
                 );
         }
-        if (bytes > ParagraphCacheByteBudget)
+        if (request.IsConfidential || bytes > ParagraphCacheByteBudget)
             return lines;
         while (
             _paragraphLru.First is { } oldest

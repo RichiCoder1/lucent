@@ -1,1 +1,10 @@
 GetDpiForWindow
+CoInitializeEx
+CoUninitialize
+CoCreateInstance
+CoTaskMemFree
+IFileOpenDialog
+IFileSaveDialog
+SHCreateItemFromParsingName
+SetTimer
+KillTimer

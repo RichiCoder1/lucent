@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Lucent.Core;
@@ -101,7 +102,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     // Counts detected semantic changes, even when no external UIA client is listening.
     internal long DetectedStructureChanges { get; private set; }
     internal long DetectedPropertyChanges { get; private set; }
+    internal long DetectedNotificationChanges { get; private set; }
     internal long SemanticSnapshotBuilds { get; private set; }
+    internal Action<string, int, int, string>? NotificationEventPlanned { get; set; }
 
     /// <summary>Called only at the Bootstrap safe point after Core projects a scene.</summary>
     internal void Refresh(RetainedScene scene)
@@ -166,6 +169,12 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         {
             if (!prior.Nodes.TryGetValue(node.Key, out var old))
                 continue;
+            if (
+                old.Announcement == SemanticAnnouncement.Polite
+                && node.Announcement == SemanticAnnouncement.Polite
+                && AnnouncementText(old) != AnnouncementText(node)
+            )
+                RaiseNotification(node, AnnouncementText(node));
             if (old.Name != node.Name)
                 RaiseProperty(node, 30005, old.Name, node.Name);
             if (!old.IsPassword && !node.IsPassword && old.Value != node.Value)
@@ -201,6 +210,20 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 RaiseProperty(node, 30152, old.PositionInSet ?? 0, node.PositionInSet ?? 0);
             if (old.SizeOfSet != node.SizeOfSet)
                 RaiseProperty(node, 30153, old.SizeOfSet ?? 0, node.SizeOfSet ?? 0);
+            if (old.Level != node.Level)
+                RaiseProperty(node, 30154, old.Level ?? 0, node.Level ?? 0);
+            if ((old.Grid is not null) != (node.Grid is not null))
+            {
+                RaiseProperty(node, 30030, old.Grid is not null, node.Grid is not null);
+                RaiseProperty(node, 30038, old.Grid is not null, node.Grid is not null);
+            }
+            if ((old.GridItem is not null) != (node.GridItem is not null))
+            {
+                RaiseProperty(node, 30029, old.GridItem is not null, node.GridItem is not null);
+                RaiseProperty(node, 30039, old.GridItem is not null, node.GridItem is not null);
+            }
+            if ((old.Collection is not null) != (node.Collection is not null))
+                RaiseProperty(node, 30108, old.Collection is not null, node.Collection is not null);
             if (FullDescription(old) != FullDescription(node))
                 RaiseProperty(node, 30159, FullDescription(old), FullDescription(node));
             if (old.Enabled != node.Enabled)
@@ -354,7 +377,13 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 snapshot.Description,
                 snapshot.PositionInSet,
                 snapshot.SizeOfSet,
-                snapshot.IsPassword
+                snapshot.IsPassword,
+                snapshot.Collection,
+                snapshot.Level,
+                snapshot.CollectionIndex,
+                snapshot.Grid,
+                snapshot.GridItem,
+                snapshot.Announcement
             );
             foreach (var child in snapshot.Children)
             foreach (var node in Flatten(child, key))
@@ -476,7 +505,10 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 when node.Role
                     is SemanticRole.List
                         or SemanticRole.RadioGroup
-                        or SemanticRole.TabList => UiaWrappers.SelectionPattern,
+                        or SemanticRole.TabList
+                        or SemanticRole.Tree
+                        or SemanticRole.Calendar
+                        or SemanticRole.Table => UiaWrappers.SelectionPattern,
             10015 when node.Actions.HasFlag(SemanticAction.Toggle) => UiaWrappers.TogglePattern,
             10002
                 when node.Actions.HasFlag(SemanticAction.SetValue)
@@ -485,6 +517,11 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             10004 when node.Actions.HasFlag(SemanticAction.Scroll) => UiaWrappers.Scroll,
             10005 when node.Actions.HasFlag(SemanticAction.ExpandCollapse) =>
                 UiaWrappers.ExpandCollapse,
+            10006 when node.Grid is not null => UiaWrappers.GridProvider,
+            10007 when node.GridItem is not null => UiaWrappers.GridItemProvider,
+            10012 when node.Grid is not null => UiaWrappers.TableProvider,
+            10013 when node.GridItem is not null => UiaWrappers.TableItemProvider,
+            10019 when node.Collection is not null => UiaWrappers.ItemContainerProvider,
             10003 when node.Range is not null => UiaWrappers.RangeValue,
             10010 when node.Actions.HasFlag(SemanticAction.Select) => UiaWrappers.SelectionItem,
             10014 when node.Text is not null && node.Actions.HasFlag(SemanticAction.SelectText) =>
@@ -512,6 +549,8 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 Bstr(value, _applicationName);
             else if (id == 30010 || id == 30016 || id == 30017)
                 Bool(value, true);
+            else if (id is 30029 or 30030 or 30038 or 30039 or 30108)
+                Bool(value, false);
             else if (id == 30011)
                 Bstr(value, "Lucent.Root");
             return Ok;
@@ -544,6 +583,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 break;
             case 30153 when node.SizeOfSet is { } size:
                 I4(value, size);
+                break;
+            case 30154 when node.Level is { } level:
+                I4(value, level);
                 break;
             case 30103:
                 Bool(value, node.Relationships?.IsInvalid != true);
@@ -617,7 +659,16 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 Bool(value, node.Actions.HasFlag(SemanticAction.Select));
                 break;
             case 30037:
-                Bool(value, node.Role == SemanticRole.List);
+                Bool(
+                    value,
+                    node.Role
+                        is SemanticRole.List
+                            or SemanticRole.RadioGroup
+                            or SemanticRole.TabList
+                            or SemanticRole.Tree
+                            or SemanticRole.Calendar
+                            or SemanticRole.Table
+                );
                 break;
             case 30040:
                 Bool(
@@ -626,7 +677,12 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 );
                 break;
             case 30043:
-                Bool(value, node.Actions.HasFlag(SemanticAction.SetValue) || node.Text is not null);
+                Bool(
+                    value,
+                    node.Actions.HasFlag(SemanticAction.SetValue)
+                        || node.Text is not null
+                        || node.Role == SemanticRole.ComboBox
+                );
                 break;
             case 30119:
                 Bool(
@@ -665,6 +721,21 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 break;
             case 30079:
                 Bool(value, node.Selected);
+                break;
+            case 30029:
+                Bool(value, node.GridItem is not null);
+                break;
+            case 30030:
+                Bool(value, node.Grid is not null);
+                break;
+            case 30038:
+                Bool(value, node.Grid is not null);
+                break;
+            case 30039:
+                Bool(value, node.GridItem is not null);
+                break;
+            case 30108:
+                Bool(value, node.Collection is not null);
                 break;
         }
         return Ok;
@@ -993,25 +1064,44 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         var node = CurrentNode(snapshot);
         if (node is null)
             return NotAvailable;
-        var selected = snapshot.Children(node.Key).Where(child => child.Selected).ToArray();
-        value = SafeArrayCreateVector(VtUnknown, 0, (uint)selected.Length);
-        if (value == 0)
-            return OutOfMemory;
-        for (var i = 0; i < selected.Length; i++)
-        {
-            var provider = Provider(selected[i]);
-            var pointer = provider is null ? 0 : Query(provider._unknown, UiaWrappers.Simple);
-            var at = i;
-            var hr = SafeArrayPutElement(value, &at, (void*)pointer);
-            Release(ref pointer);
-            if (hr < 0)
-            {
-                _ = SafeArrayDestroy(value);
-                value = 0;
-                return hr;
-            }
-        }
-        return Ok;
+        var selected = snapshot
+            .Nodes.Values.Where(child =>
+                child.Selected && BelongsToSelection(snapshot, child, node.Key)
+            )
+            .ToArray();
+        if (selected.Length != 0 || node.Collection?.SelectedIndex is null)
+            return ProviderArray(selected, out value);
+        // A single selected offscreen row is realized on the owner thread. No provider
+        // placeholders are allocated for the rest of the logical collection.
+        if (
+            !Try(
+                "Selection.Realize",
+                () =>
+                {
+                    var current = CurrentNode();
+                    if (current is null)
+                        return (NotAvailable, (nint)0);
+                    if (current.Collection?.SelectedIndex is { } index)
+                    {
+                        var realization = Realize(current, index);
+                        if (realization != Ok)
+                            return (realization, (nint)0);
+                    }
+                    var refreshed = CurrentSnapshot();
+                    var members = refreshed
+                        .Nodes.Values.Where(child =>
+                            child.Selected && BelongsToSelection(refreshed, child, current.Key)
+                        )
+                        .ToArray();
+                    var result = ProviderArray(members, out var pointer);
+                    return (result, pointer);
+                },
+                out var realized
+            )
+        )
+            return Fail;
+        value = realized.Item2;
+        return realized.Item1;
     }
 
     internal int Toggle() =>
@@ -1071,7 +1161,17 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         if (node is null)
             return NotAvailable;
         while (node.Parent is { } parent && snapshot.Nodes.TryGetValue(parent, out node))
-            if (node.Role is SemanticRole.List or SemanticRole.RadioGroup or SemanticRole.TabList)
+            if (
+                (
+                    node.Role
+                    is SemanticRole.List
+                        or SemanticRole.RadioGroup
+                        or SemanticRole.TabList
+                        or SemanticRole.Tree
+                        or SemanticRole.Calendar
+                        or SemanticRole.Table
+                ) || node.Collection is not null
+            )
             {
                 var provider = Provider(node);
                 value = provider is null ? 0 : Query(provider._unknown, UiaWrappers.Simple);
@@ -1159,6 +1259,44 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             _ = UiaRaiseAutomationEvent(provider._simple, 20005);
     }
 
+    private static string AnnouncementText(Node node) => node.Value ?? node.Name;
+
+    private void RaiseNotification(Node node, string displayString)
+    {
+        const int notificationKindOther = 4;
+        const int notificationProcessingMostRecent = 3;
+        DetectedNotificationChanges++;
+        var activityId = string.Create(
+            CultureInfo.InvariantCulture,
+            $"lucent:{node.Key.Epoch}:{node.Key.Element}"
+        );
+        NotificationEventPlanned?.Invoke(
+            displayString,
+            notificationKindOther,
+            notificationProcessingMostRecent,
+            activityId
+        );
+        if (!UiaClientsAreListening() || Provider(node) is not { } provider)
+            return;
+        var display = Marshal.StringToBSTR(displayString);
+        var activity = Marshal.StringToBSTR(activityId);
+        try
+        {
+            _ = UiaRaiseNotificationEvent(
+                provider._simple,
+                notificationKindOther,
+                notificationProcessingMostRecent,
+                display,
+                activity
+            );
+        }
+        finally
+        {
+            Marshal.FreeBSTR(activity);
+            Marshal.FreeBSTR(display);
+        }
+    }
+
     private void RaiseTextEvent(Node node, int eventId)
     {
         if (UiaClientsAreListening() && Provider(node) is { } provider)
@@ -1195,6 +1333,11 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0 && _unknown == 0)
             return;
+        if (IsRoot)
+        {
+            _refreshLayout = null;
+            _realizingItem = false;
+        }
         WindowsUiaProvider[] children = [];
         if (_cache is { } cache)
             lock (cache)
@@ -1223,6 +1366,12 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
             SemanticRole.Hyperlink => 50005,
             SemanticRole.ComboBox => 50003,
             SemanticRole.RadioGroup => 50026,
+            SemanticRole.Calendar => 50001,
+            SemanticRole.Tree => 50023,
+            SemanticRole.TreeItem => 50024,
+            SemanticRole.Table => 50036,
+            SemanticRole.DataItem => 50029,
+            SemanticRole.HeaderItem => 50035,
             SemanticRole.ProgressBar => 50012,
             SemanticRole.TextField => 50004,
             SemanticRole.List => 50008,
@@ -1339,7 +1488,13 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         string? Description,
         int? PositionInSet,
         int? SizeOfSet,
-        bool IsPassword
+        bool IsPassword,
+        SemanticCollectionSnapshot? Collection,
+        int? Level,
+        int? CollectionIndex,
+        SemanticGridSnapshot? Grid,
+        SemanticGridItemSnapshot? GridItem,
+        SemanticAnnouncement Announcement
     );
 
     // Immutable after construction: COM readers use one snapshot for every navigation step.
@@ -1425,6 +1580,15 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
 
     [LibraryImport("UIAutomationCore.dll")]
     private static partial int UiaRaiseAutomationEvent(nint provider, int eventId);
+
+    [LibraryImport("UIAutomationCore.dll")]
+    private static partial int UiaRaiseNotificationEvent(
+        nint provider,
+        int notificationKind,
+        int notificationProcessing,
+        nint displayString,
+        nint activityId
+    );
 
     [LibraryImport("UIAutomationCore.dll")]
     private static partial int UiaRaiseStructureChangedEvent(

@@ -29,19 +29,22 @@ public static partial class Components
         NoticeSeverity severity = NoticeSeverity.Information,
         Action? onAction = null,
         string? actionLabel = null,
-        Style? style = null
+        Style? style = null,
+        SemanticAnnouncement announcement = SemanticAnnouncement.None
     )
     {
         ArgumentNullException.ThrowIfNull(message);
         if (!Enum.IsDefined(severity))
             throw new ArgumentOutOfRangeException(nameof(severity));
+        if (!Enum.IsDefined(announcement))
+            throw new ArgumentOutOfRangeException(nameof(announcement));
         if ((onAction is null) != (actionLabel is null))
             throw new ArgumentException(
                 "A notice action requires both its callback and accessible label."
             );
         if (actionLabel is not null)
             _ = Required(actionLabel, nameof(actionLabel));
-        return InlineNoticeContent(message, severity, onAction, actionLabel, style);
+        return InlineNoticeContent(message, severity, onAction, actionLabel, style, announcement);
     }
 
     internal static string NoticeLabel(NoticeSeverity severity) =>

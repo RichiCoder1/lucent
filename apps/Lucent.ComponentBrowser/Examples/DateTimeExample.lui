@@ -1,0 +1,30 @@
+namespace Lucent.ComponentBrowser;
+
+style DateTimeExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+public component DateTimeExample(ComponentBrowserState browser) {
+    <Layout style={DateTimeExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These fields keep date and time drafts in the stock editor sessions while the applied values remain controlled by the browser state. Open the calendar, type a value, or step the time with the keyboard.</Text>
+        <DatePicker
+            label="Due date"
+            value={() => browser.DateValue}
+            onValueRequested={browser.SetDateValue}
+            options={browser.DatePickerOptions}
+            field={browser.DateFieldOptions}
+            name="component-browser.date-time.date"
+        />
+        <TimePicker
+            label="Start time"
+            value={() => browser.TimeValue}
+            onValueRequested={browser.SetTimeValue}
+            options={browser.TimePickerOptions}
+            field={browser.TimeFieldOptions}
+            name="component-browser.date-time.time"
+        />
+        <Status content={() => browser.DateTimeSummary} style={PresentationStyles.Secondary} name="component-browser.date-time.status" />
+    </Layout>
+}

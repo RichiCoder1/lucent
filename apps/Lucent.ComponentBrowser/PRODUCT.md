@@ -14,6 +14,7 @@ Lucent authors need a quick way to find a stock recipe, try it with ordinary poi
 
 - Searchable component navigation with family, usage, and accessibility notes.
 - Interactive examples built from real existing Lucent controls. Examples preserve ordinary hover, pressed, selected, disabled, loading, and error states.
+- Numeric, date/time, password, asynchronous combo box, navigation, list, select, tree, link, dialog, table, and native storage selection examples are added as each public contract lands.
 - Theme switches for the stock light, dark, and high-contrast themes; a comfortable/compact density switch; and example state switches for default, disabled, busy, and error scenarios.
 - Source display and copy use the actual `.lui` files compiled into the application as embedded resources. The browser does not compile user-entered source at runtime.
 - Start with the current stock controls and add family examples as those controls land. Live compilation and an editor workflow belong to a future epic.
@@ -30,4 +31,4 @@ Lucent authors need a quick way to find a stock recipe, try it with ordinary poi
 
 ## Evidence on hand
 
-The first gallery is composed from existing `Button`, `IconButton`, `Selectable`, `TextField`, `TextArea`, `Status`, `Progress`, `ErrorNotice`, `ContextMenu`, `MenuItem`, and controlled `Popover` recipes. The `.lui` sources are included in both the compiler's `AdditionalFiles` and the app's embedded resources, so the source view is tied to the files that produced the examples.
+The maintained gallery is composed from existing `Button`, `IconButton`, `Selectable`, `TextField`, `TextArea`, `PasswordField`, `ComboBox`, `NumberField`, `Slider`, `DatePicker`, `TimePicker`, `ListBox`, `Select`, `TreeView`, `Tabs`, `Disclosure`, `Link`, `Dialog`, `TableView`, `Status`, `Progress`, `ErrorNotice`, `ContextMenu`, `MenuItem`, and controlled `Popover` recipes. The storage example receives `IFilePicker` from the Windows application boundary and reports typed selection outcomes without writing files. The `.lui` sources are included in both the compiler's `AdditionalFiles` and the app's embedded resources, so the source view is tied to the files that produced the examples.

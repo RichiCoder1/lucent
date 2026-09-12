@@ -1,0 +1,32 @@
+namespace Lucent.ComponentBrowser;
+
+style TreeExampleStyle {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+style TreeExampleViewStyle {
+    MinWidth: 0;
+    MainGrow: 1;
+    MainShrink: 1;
+}
+
+public component TreeExample(ComponentBrowserState browser) {
+    <Layout style={TreeExampleStyle}>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>TreeView keeps hierarchy, expansion, focus, and applied selection under application control. Expand a branch or move through the visible rows to inspect the retained relationships.</Text>
+        <TreeView
+            label="Project structure"
+            roots={() => browser.TreeRoots}
+            dataSource={browser.TreeDataSource}
+            readSelectedKey={() => browser.TreeSelection}
+            onSelectionRequested={browser.SetTreeSelection}
+            readExpanded={browser.IsTreeExpanded}
+            onExpansionRequested={browser.SetTreeExpanded}
+            options={browser.TreeOptions}
+            style={TreeExampleViewStyle}
+        />
+        <Status content={() => browser.TreeSelectionLabel} name="component-browser.tree.selection-status" />
+        <Status content={() => browser.TreeExpansionSummary} style={PresentationStyles.Secondary} name="component-browser.tree.expansion-status" />
+    </Layout>
+}

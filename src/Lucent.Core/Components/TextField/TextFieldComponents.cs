@@ -34,7 +34,12 @@ public static partial class Components
         Func<bool>? enabled,
         Func<bool>? readOnly,
         Action? committed = null,
-        Action? cancelled = null
+        Action? cancelled = null,
+        Action<bool>? focusChanged = null,
+        bool confidential = false,
+        Func<bool>? reveal = null,
+        int historyLimit = 64,
+        Action? remask = null
     )
     {
         ArgumentNullException.ThrowIfNull(field);
@@ -66,7 +71,12 @@ public static partial class Components
                     enabled,
                     readOnly,
                     committed,
-                    cancelled
+                    cancelled,
+                    focusChanged,
+                    confidential,
+                    reveal,
+                    historyLimit,
+                    remask
                 );
                 var lastApplied = applied.Value;
                 var lastDraft = state.Value;
@@ -92,6 +102,14 @@ public static partial class Components
                         {
                             lastDraft = currentDraft;
                             onChangeRequested(currentDraft);
+                            var accepted = applied.Value;
+                            if (!string.Equals(accepted, lastApplied, StringComparison.Ordinal))
+                            {
+                                lastApplied = accepted;
+                                lastDraft = accepted;
+                                if (!string.Equals(state.Value, accepted, StringComparison.Ordinal))
+                                    state.Value = accepted;
+                            }
                         }
                     },
                     root.Name + ".controlled-value"

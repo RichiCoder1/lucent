@@ -1,0 +1,13 @@
+namespace Lucent.Core;
+
+style TableCellTextStyle {
+    MainGrow: 0;
+    MainShrink: 0;
+    Clip: true;
+    TextWrap: TextWrap.NoWrap;
+    Overflow: TextOverflow.Ellipsis;
+}
+
+internal component TableCell(TableCellBinding binding) {
+    <TableCellHost binding={binding} style={TableCellTextStyle} />
+}

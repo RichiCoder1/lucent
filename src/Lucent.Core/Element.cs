@@ -21,6 +21,7 @@ public sealed class Element : IDisposable
     private Func<SemanticCommand, bool>? _semanticCommand;
     private Action<bool>? _selectionChanged;
     private long _semanticGeneration;
+    private long _acceptedSelectionGeneration;
     private bool _inputDisabled;
     private EffectiveSemanticState? _effectiveSemanticState;
     private long _nextRecipeOrdinal;
@@ -538,7 +539,13 @@ public sealed class Element : IDisposable
             MergeDescription(_semantics.Description, _supplementalDescription),
             _semantics.PositionInSet,
             _semantics.SizeOfSet,
-            _semantics.IsPassword
+            _semantics.IsPassword,
+            _semantics.Collection,
+            _semantics.Level,
+            _semantics.CollectionIndex,
+            _semantics.Grid,
+            _semantics.GridItem,
+            _semantics.Announcement
         );
     }
 
@@ -557,6 +564,11 @@ public sealed class Element : IDisposable
             return false;
         return _semanticCommand(command);
     }
+
+    internal long AcceptedSelectionGeneration => _acceptedSelectionGeneration;
+
+    internal void AcknowledgeSemanticSelectionApplied() =>
+        _acceptedSelectionGeneration = checked(_acceptedSelectionGeneration + 1);
 
     internal SemanticRole? DeclaredSemanticRole => _semantics?.Role;
     internal bool HasSelectableSemantics =>
@@ -684,6 +696,9 @@ public sealed class Element : IDisposable
                 _semantics!.Actions.HasFlag(SemanticAction.ExpandCollapse),
             SemanticCommandKind.SetRangeValue => _semantics!.Actions.HasFlag(
                 SemanticAction.SetRangeValue
+            ),
+            SemanticCommandKind.RealizeItem => _semantics!.Actions.HasFlag(
+                SemanticAction.RealizeItem
             ),
             _ => false,
         };

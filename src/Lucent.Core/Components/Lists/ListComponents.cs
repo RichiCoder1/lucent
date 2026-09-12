@@ -258,12 +258,13 @@ public static partial class Components
     [LucentComponent]
     internal static ComponentRecipe ChoiceRowHost(
         ChoiceRowBinding binding,
-        [DefaultContent] ComponentContent content
+        [DefaultContent] ComponentContent content,
+        Style? style = null
     ) =>
         Host(
             "choice-row",
             content,
-            (context, root) => Controls.ChoiceRow(root, context.Theme, binding)
+            (context, root) => Controls.ChoiceRow(root, context.Theme, binding, style)
         );
 
     [LucentComponent]
@@ -331,6 +332,10 @@ public static partial class Components
             {
                 var binding = new ChoiceRowBinding
                 {
+                    CollectionIndex = () =>
+                        ChoicePosition(current.Value, item.Value.Key) is { } position
+                            ? position - 1
+                            : null,
                     Label = () => item.Value.Label,
                     Enabled = () => item.Value.Enabled,
                     Selected = () => policy.IsApplied(item.Value.Key),
@@ -340,7 +345,7 @@ public static partial class Components
                         ChoicePosition(current.Value, item.Value.Key) is null
                             ? null
                             : current.Value.Length,
-                    Register = behavior => policy.RegisterTarget(item.Value.Key, behavior.Identity),
+                    Register = behavior => policy.RegisterTarget(item.Value.Key, behavior),
                     Activate = (behavior, shouldRequest) =>
                         policy.Activate(item.Value.Key, shouldRequest)
                         && policy.Focus(item.Value.Key, behavior),
@@ -371,7 +376,17 @@ public static partial class Components
             },
             rowHeight
         );
-        Controls.ListBox(region.Region, context.Theme, new(label, required));
+        Controls.ListBox(
+            region.Region,
+            context.Theme,
+            new(
+                label,
+                required,
+                () => current.Value.Length,
+                () => SelectedChoiceIndex(current.Value, policy),
+                index => RevealChoiceAt(root, current.Value.Length, index, scroll, rowHeight)
+            )
+        );
         region.Configure();
     }
 
@@ -451,6 +466,40 @@ public static partial class Components
         );
         var height = bounds?.Height ?? 240f;
         var top = position * rowHeight;
+        var bottom = top + rowHeight;
+        if (top < scroll.Offset.Y)
+            scroll.Offset = new(scroll.Offset.X, top);
+        else if (bottom > scroll.Offset.Y + height)
+            scroll.Offset = new(scroll.Offset.X, Math.Max(0, bottom - height));
+    }
+
+    private static int? SelectedChoiceIndex<TKey>(
+        ChoiceItem<TKey>[] items,
+        KeyedSelectionPolicy<TKey, ChoiceItem<TKey>> policy
+    )
+        where TKey : notnull
+    {
+        for (var index = 0; index < items.Length; index++)
+            if (policy.IsApplied(items[index].Key))
+                return index;
+        return null;
+    }
+
+    private static void RevealChoiceAt(
+        Element viewport,
+        int count,
+        int index,
+        ScrollViewportState scroll,
+        float rowHeight
+    )
+    {
+        if (index < 0 || index >= count)
+            return;
+        var bounds = viewport.Composition.Input.Bounds(
+            new(viewport.Composition.Epoch, viewport.Id)
+        );
+        var height = bounds?.Height ?? 240f;
+        var top = index * rowHeight;
         var bottom = top + rowHeight;
         if (top < scroll.Offset.Y)
             scroll.Offset = new(scroll.Offset.X, top);

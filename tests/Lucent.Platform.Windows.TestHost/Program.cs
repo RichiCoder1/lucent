@@ -13,6 +13,7 @@ internal static class Program
             ["--layout-fixture"] => LayoutFixture.Run(),
             ["--live-layout-fixture"] => LayoutFixture.RunLive(),
             ["--listener-proof"] => ListenerProof.Run(),
+            ["--file-picker-proof"] => FilePickerProof.Run(),
             ["--uia-fixture"] => UiaFixture.Run(),
             ["--virtualization-fixture"] => VirtualizationFixture.Run(),
             ["--autosized-text-field-fixture"] => AutoSizedTextFieldFixture.Run(),

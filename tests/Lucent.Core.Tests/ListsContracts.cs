@@ -126,9 +126,17 @@ public sealed class ListsContracts
         );
         graph.Drain();
         var scene = Install(composition, graph, 300, 150);
-        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
-        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.End)).Handled);
-        graph.Drain();
+        var list = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.List && node.Name == "Large choices");
+        Assert.AreEqual(10_000, list.Collection!.ItemCount);
+        Assert.AreEqual(0, list.Collection.SelectedIndex);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(
+                list.Identity,
+                new(SemanticCommandKind.RealizeItem, ItemIndex: 9_999)
+            )
+        );
         scene.Dispose();
         scene = Install(composition, graph, 300, 150);
 
@@ -138,8 +146,15 @@ public sealed class ListsContracts
             "Virtualization realized an unbounded number of choices."
         );
         var last = options.Single(node => node.Name == "Choice 9999");
+        Assert.AreEqual(9_999, last.CollectionIndex);
         Assert.AreEqual(10_000, last.PositionInSet);
         Assert.AreEqual(10_000, last.SizeOfSet);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(last.Identity, new(SemanticCommandKind.Focus))
+        );
+        graph.Drain();
+        Assert.AreEqual("Choice 9999", Focused(composition).Name);
         GC.KeepAlive(scene);
     }
 

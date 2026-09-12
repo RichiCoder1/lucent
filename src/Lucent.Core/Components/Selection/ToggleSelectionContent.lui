@@ -7,6 +7,8 @@ style ToggleSelectionIndicatorStyle {
 }
 
 style ToggleSelectionLabelStyle {
+    MainGrow: 1;
+    MinWidth: 0;
     MinHeight: 20;
     TextWrap: TextWrap.WordWithGraphemeFallback;
 }

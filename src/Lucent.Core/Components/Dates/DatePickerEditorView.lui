@@ -1,0 +1,22 @@
+namespace Lucent.Core;
+using System;
+
+style DatePickerEditorStyle {
+    Axis: LayoutAxis.Row;
+    Spacing: 6;
+    CrossAlignment: LayoutAlignment.Center;
+}
+
+internal component DatePickerEditorView(
+    FieldContext field,
+    DateEditSession session,
+    Func<bool>? enabled,
+    Func<bool>? readOnly,
+    Action open,
+    Style actionStyle
+) {
+    <Layout style={DatePickerEditorStyle}>
+        <DateTimeTextField field={field} session={session} enabled={enabled} readOnly={readOnly} />
+        <IconButton source={DateTimeArtwork.Calendar} label={"Open calendar for " + field.AccessibleName} onInvoke={open} style={actionStyle} />
+    </Layout>
+}

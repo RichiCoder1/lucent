@@ -82,6 +82,7 @@ public static class WindowsBootstrap
         WindowsClipboard? clipboard = null;
         WindowsSettingsListener? settingsListener = null;
         WindowsWorkDispatcher? workDispatcher = null;
+        WindowsFilePickerHost? filePickers = null;
         PerformanceDiagnostics? performanceDiagnostics = null;
         WindowsInputAdapter? input = null;
         WindowsLiveResize? liveResize = null;
@@ -181,6 +182,13 @@ public static class WindowsBootstrap
             workDispatcher = session is null
                 ? new WindowsWorkDispatcher(composition)
                 : new WindowsWorkDispatcher(session);
+            filePickers = WindowsFilePicker.Attach(
+                composition,
+                hwnd,
+                SDL.GetWindowID(window),
+                workDispatcher.RequestWake,
+                () => session?.IsCloseRequested == true
+            );
             using var sessionContext = session?.EnterContext();
             if (composition.Images is null)
                 composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
@@ -206,6 +214,37 @@ public static class WindowsBootstrap
                 workDispatcher.RequestWake,
                 () => scheduler.Request(FrameOperation.Other)
             );
+            void RefreshForAutomation()
+            {
+                if (
+                    uiaProvider is null
+                    || sceneRenderer is null
+                    || input is null
+                    || window == 0
+                    || sdlRenderer == 0
+                    || composition.IsDisposed
+                )
+                    return;
+                var viewport = GetViewport(window, sdlRenderer);
+                if (!viewport.IsRenderable)
+                {
+                    composition.SetPresentationAvailable(false);
+                    return;
+                }
+                composition.SetPresentationAvailable(true);
+                var scene = ProjectAndInstall(
+                    composition,
+                    new(viewport.LogicalWidth, viewport.LogicalHeight, viewport.Scale),
+                    sceneRenderer,
+                    lastScene,
+                    NowMonotonic()
+                );
+                ReplaceScene(ref lastScene, scene);
+                uiaProvider.Refresh(scene);
+                input.RefreshTextInput();
+                scheduler.Request();
+            }
+            uiaProvider.SetRealizationRefresh(RefreshForAutomation);
             var settings = new WindowsSettings();
             var diagnostics = WindowsSettingsDiagnostic.None;
             _ = cursor.Activate();
@@ -487,6 +526,8 @@ public static class WindowsBootstrap
                     surfaces.Refresh();
                     SynchronizePopup();
                 }
+                if (!composition.IsInteractionSuspended && filePickers.ProcessOne())
+                    scheduler.Request();
                 refreshSettings |= settingsListener.TakePending();
                 if (refreshSettings)
                 {
@@ -615,6 +656,8 @@ public static class WindowsBootstrap
         }
         finally
         {
+            Capture(errors, () => filePickers?.Dispose());
+            WindowsFilePicker.Detach(composition);
             if (!composition.IsDisposed)
                 Capture(errors, () => composition.SetPresentationAvailable(false));
             Capture(errors, () => liveResize?.Dispose());
@@ -626,6 +669,7 @@ public static class WindowsBootstrap
             }
             Capture(errors, () => pendingPopup?.Dispose());
             Capture(errors, () => surfaces?.Dispose());
+            Capture(errors, () => uiaProvider?.SetRealizationRefresh(null));
             ShutdownUia(uiaDispatcher, uiaListener, uiaProvider, errors);
             Capture(errors, () => popup?.Dispose());
             Capture(errors, () => input?.Dispose());

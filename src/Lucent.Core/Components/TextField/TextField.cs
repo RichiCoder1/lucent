@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Lucent.Core;
@@ -113,15 +114,25 @@ internal class TextFieldState
     private readonly Signal<Preedit> _preedit;
     private readonly Signal<bool> _focused;
     private readonly ScrollViewportState? _scrollState;
+    private readonly bool _confidential;
+    private readonly Func<bool>? _reveal;
     private TextClipboardRequest? _clipboard;
     private long _displayEditGeneration = -1;
     private Preedit _displayPreedit;
     private (string Text, int Caret, int SelectionStart, int SelectionEnd)? _displayCache;
 
-    internal TextFieldState(ReactiveScope scope, string name, EditorSession session)
+    internal TextFieldState(
+        ReactiveScope scope,
+        string name,
+        EditorSession session,
+        bool confidential = false,
+        Func<bool>? reveal = null
+    )
     {
         _scope = scope;
         _session = session ?? throw new ArgumentNullException(nameof(session));
+        _confidential = confidential;
+        _reveal = reveal;
         _ = session.AcquireMount(scope);
         _preedit = scope.Signal(default(Preedit), name + ".preedit");
         _focused = scope.Signal(false, name + ".focused");
@@ -131,11 +142,14 @@ internal class TextFieldState
             : null;
         session.ChangedForMount += SessionChanged;
         scope.OnDispose(() => session.ChangedForMount -= SessionChanged);
+        if (confidential)
+            scope.OnDispose(session.ClearHistory);
     }
 
     internal bool IsMultiline { get; }
     internal ScrollViewportState? ScrollState => _scrollState;
     internal EditorSession Session => _session;
+    internal bool IsConfidential => _confidential;
 
     public string Value
     {
@@ -289,6 +303,8 @@ internal class TextFieldState
         Check();
         if (!Enum.IsDefined(operation))
             throw new ArgumentException("Clipboard operation must be finite.", nameof(operation));
+        if (_confidential && operation is TextClipboardOperation.Copy or TextClipboardOperation.Cut)
+            return;
         var selected = SelectedText;
         if (
             operation is TextClipboardOperation.Copy or TextClipboardOperation.Cut
@@ -346,7 +362,8 @@ internal class TextFieldState
         var anchor = _session.Anchor;
         var editGeneration = _session.EditGeneration;
         if (
-            _displayCache is { } cached
+            !_confidential
+            && _displayCache is { } cached
             && _displayEditGeneration == editGeneration
             && _displayPreedit.Equals(composition)
         )
@@ -377,10 +394,40 @@ internal class TextFieldState
                 selectionEnd
             );
         }
-        _displayEditGeneration = editGeneration;
-        _displayPreedit = composition;
-        _displayCache = display;
-        return display;
+        if (!_confidential)
+        {
+            _displayEditGeneration = editGeneration;
+            _displayPreedit = composition;
+            _displayCache = display;
+            return display;
+        }
+        if (_reveal?.Invoke() == true)
+            return display;
+        return Mask(display);
+    }
+
+    private static (string Text, int Caret, int SelectionStart, int SelectionEnd) Mask(
+        (string Text, int Caret, int SelectionStart, int SelectionEnd) display
+    )
+    {
+        var starts = StringInfo.ParseCombiningCharacters(display.Text);
+        return (
+            MaskText(display.Text),
+            MaskOffset(starts, display.Text.Length, display.Caret),
+            MaskOffset(starts, display.Text.Length, display.SelectionStart),
+            MaskOffset(starts, display.Text.Length, display.SelectionEnd)
+        );
+    }
+
+    internal static string MaskText(string text) =>
+        new('\u25cf', StringInfo.ParseCombiningCharacters(text).Length);
+
+    private static int MaskOffset(int[] starts, int length, int offset)
+    {
+        if (offset >= length)
+            return starts.Length;
+        var index = Array.BinarySearch(starts, offset);
+        return index >= 0 ? index : ~index;
     }
 
     private static int ScalarToUtf16(string text, int scalarCount)
@@ -403,6 +450,8 @@ internal class TextFieldState
         Check();
         _focused.Value = focused;
     }
+
+    internal void ClearHistory() => _session.ClearHistory();
 
     private void SessionChanged()
     {
@@ -486,7 +535,10 @@ internal sealed class TextFieldBehavior(
     Action? blurred = null,
     Func<bool>? readOnly = null,
     Action? committed = null,
-    Action? cancelled = null
+    Action? cancelled = null,
+    Action<bool>? focusChanged = null,
+    bool confidential = false,
+    Action? remask = null
 ) : Behavior
 {
     private int? _dragPointer;
@@ -516,9 +568,10 @@ internal sealed class TextFieldBehavior(
                 SemanticRole.TextField,
                 name,
                 actions: Actions(),
-                value: state.Value,
-                text: state.SemanticTextFor(IsReadOnly()),
-                relationships: relationships?.Invoke()
+                value: confidential ? null : state.Value,
+                text: confidential ? null : state.SemanticTextFor(IsReadOnly()),
+                relationships: relationships?.Invoke(),
+                isPassword: confidential
             )
         );
         context.MakeFocusable();
@@ -589,9 +642,10 @@ internal sealed class TextFieldBehavior(
                         SemanticRole.TextField,
                         name,
                         actions: Actions(),
-                        value: state.Value,
-                        text: state.SemanticTextFor(isReadOnly),
-                        relationships: currentRelationships
+                        value: confidential ? null : state.Value,
+                        text: confidential ? null : state.SemanticTextFor(isReadOnly),
+                        relationships: currentRelationships,
+                        isPassword: confidential
                     )
                 );
             },
@@ -599,10 +653,17 @@ internal sealed class TextFieldBehavior(
         );
         context.OnFocus(route =>
         {
-            state.SetFocused(route.Command.Kind == FocusCommandKind.Gained);
+            var gained = route.Command.Kind == FocusCommandKind.Gained;
+            state.SetFocused(gained);
+            focusChanged?.Invoke(gained);
             if (route.Command.Kind == FocusCommandKind.Lost)
             {
                 state.CancelComposition();
+                if (confidential)
+                {
+                    remask?.Invoke();
+                    state.ClearHistory();
+                }
                 if (!IsReadOnly())
                     committed?.Invoke();
                 blurred?.Invoke();

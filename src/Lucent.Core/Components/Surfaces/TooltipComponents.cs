@@ -66,6 +66,7 @@ public static partial class Components
         private bool _focused;
         private bool _surfacePointerInside;
         private bool _escapeSuppressed;
+        private LayoutRect? _hoverAnchor;
         private long _timerGeneration;
 
         public override string Name => "tooltip";
@@ -103,8 +104,10 @@ public static partial class Components
             DismissSurface();
         }
 
-        private void SetHovered(bool hovered)
+        private void SetHovered(bool hovered, float pointerX, float pointerY)
         {
+            if (hovered)
+                _hoverAnchor = new(pointerX, pointerY, 0, 0);
             if (_hovered == hovered)
                 return;
             _hovered = hovered;
@@ -228,7 +231,8 @@ public static partial class Components
                 interactive: false,
                 consumeOutsideClick: false,
                 closed: () => SurfaceClosed(request),
-                pointerInsideChanged: inside => SurfacePointerChanged(request, inside)
+                pointerInsideChanged: inside => SurfacePointerChanged(request, inside),
+                anchorOverride: _hovered && !_focused ? _hoverAnchor : null
             );
             _surface = request;
             try

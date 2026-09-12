@@ -77,14 +77,21 @@ public static partial class Components
                         LayoutProperties.GridPlacement,
                         horizontal ? new GridPlacement(0, 0, 1, 3) : new GridPlacement(0, 0, 3, 1)
                     )
+                    .Set(LayoutProperties.Axis, horizontal ? LayoutAxis.Column : LayoutAxis.Row)
                     .Set(LayoutProperties.MainAlignment, LayoutAlignment.Center)
-                    .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
-                    .Set(VisualProperties.Background, ControlThemes.Border)
-                    .Set(VisualProperties.CornerRadius, 2f);
+                    .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Stretch);
                 trackStyle = horizontal
-                    ? trackStyle.Set(LayoutProperties.Height, 4f)
-                    : trackStyle.Set(LayoutProperties.Width, 4f);
+                    ? trackStyle.Set(LayoutProperties.Height, 36f)
+                    : trackStyle.Set(LayoutProperties.Width, 36f);
                 track.Present(context.Theme, trackStyle);
+                var trackLine = context.Child(track, "line");
+                var trackLineStyle = Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.Border)
+                    .Set(VisualProperties.CornerRadius, 2f);
+                trackLineStyle = horizontal
+                    ? trackLineStyle.Set(LayoutProperties.Height, 4f)
+                    : trackLineStyle.Set(LayoutProperties.Width, 4f);
+                trackLine.Present(context.Theme, trackLineStyle);
 
                 var fill = context.Child(control, "fill");
                 var fillStartsLeading = options.Direction == SliderDirection.Forward == horizontal;
@@ -95,14 +102,21 @@ public static partial class Components
                             ? new GridPlacement(0, fillStartsLeading ? 0 : 1, 1, 2)
                             : new GridPlacement(fillStartsLeading ? 0 : 1, 0, 2, 1)
                     )
+                    .Set(LayoutProperties.Axis, horizontal ? LayoutAxis.Column : LayoutAxis.Row)
                     .Set(LayoutProperties.MainAlignment, LayoutAlignment.Center)
-                    .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
-                    .Set(VisualProperties.Background, ControlThemes.Accent)
-                    .Set(VisualProperties.CornerRadius, 2f);
+                    .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Stretch);
                 fillStyle = horizontal
-                    ? fillStyle.Set(LayoutProperties.Height, 4f)
-                    : fillStyle.Set(LayoutProperties.Width, 4f);
+                    ? fillStyle.Set(LayoutProperties.Height, 36f)
+                    : fillStyle.Set(LayoutProperties.Width, 36f);
                 fill.Present(context.Theme, fillStyle);
+                var fillLine = context.Child(fill, "line");
+                var fillLineStyle = Style
+                    .Empty.Set(VisualProperties.Background, ControlThemes.Accent)
+                    .Set(VisualProperties.CornerRadius, 2f);
+                fillLineStyle = horizontal
+                    ? fillLineStyle.Set(LayoutProperties.Height, 4f)
+                    : fillLineStyle.Set(LayoutProperties.Width, 4f);
+                fillLine.Present(context.Theme, fillLineStyle);
 
                 var thumb = context.Child(control, "thumb");
                 thumb.Present(
@@ -112,10 +126,18 @@ public static partial class Components
                             LayoutProperties.GridPlacement,
                             horizontal ? new GridPlacement(0, 1) : new GridPlacement(1, 0)
                         )
-                        .Set(LayoutProperties.Width, 16f)
-                        .Set(LayoutProperties.Height, 16f)
+                        .Set(LayoutProperties.Axis, horizontal ? LayoutAxis.Column : LayoutAxis.Row)
+                        .Set(LayoutProperties.Width, horizontal ? 16f : 36f)
+                        .Set(LayoutProperties.Height, horizontal ? 36f : 16f)
                         .Set(LayoutProperties.MainAlignment, LayoutAlignment.Center)
                         .Set(LayoutProperties.CrossAlignment, LayoutAlignment.Center)
+                );
+                var thumbKnob = context.Child(thumb, "knob");
+                thumbKnob.Present(
+                    context.Theme,
+                    Style
+                        .Empty.Set(LayoutProperties.Width, 16f)
+                        .Set(LayoutProperties.Height, 16f)
                         .Set(VisualProperties.Background, ControlThemes.Accent)
                         .Set(VisualProperties.CornerRadius, 8f)
                 );

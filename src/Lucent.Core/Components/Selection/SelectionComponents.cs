@@ -111,7 +111,7 @@ public static partial class Components
                             Selected = () => policy.IsApplied(current.Value.Key),
                             Roving = () => policy.IsRoving(current.Value.Key),
                             Register = behavior =>
-                                policy.RegisterTarget(current.Value.Key, behavior.Identity),
+                                policy.RegisterTarget(current.Value.Key, behavior),
                             Activate = (behavior, request) =>
                             {
                                 var key = current.Value.Key;

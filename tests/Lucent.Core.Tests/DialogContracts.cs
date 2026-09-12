@@ -156,4 +156,328 @@ public sealed class DialogContracts
         request.Dispose();
         Assert.IsTrue(session.GetAwaiter().GetResult().IsCanceled);
     }
+
+    [TestMethod]
+    public void ExplicitInitialFocusKeepsImeKeysInsideDialogBeforeEscapeCancels()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "dialog-ime");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var controller = new DialogController<string>(composition.Root.Scope);
+        PopupSurfaceRequest? request = null;
+        var focusCalls = 0;
+        var defaultInvocations = 0;
+        composition.Input.SurfaceRequested += value => request = value;
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Dialog(
+                controller,
+                "Edit workspace",
+                [Components.TextField(label: "Workspace name"), PassiveFocusTarget()],
+                [Components.Button("Apply", () => { })],
+                defaultAccept: () => defaultInvocations++,
+                initialFocus: popup =>
+                {
+                    focusCalls++;
+                    return popup.Input.MoveFocus(FocusTraversalDirection.Next);
+                }
+            )
+        );
+
+        var session = controller.OpenAsync().AsTask();
+        composition.Flush();
+        Assert.IsNotNull(request);
+        var popup = request!.CreateComposition();
+        popup.Flush();
+        using var scene = SceneLayout.Project(popup, new(420, 340, 1), new EmptyShaper());
+        Assert.IsTrue(popup.Input.SetScene(scene));
+        Assert.IsTrue(request.FocusInitial());
+        Assert.AreEqual(1, focusCalls);
+
+        Assert.IsTrue(popup.Input.DispatchText(new(TextInputKind.Preedit, "候", 0, 1)).Handled);
+        Assert.IsTrue(popup.Input.HasTextComposition);
+        Assert.IsTrue(
+            popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled,
+            "Enter should remain inside the IME-owned editor while preedit is active."
+        );
+        Assert.AreEqual(0, defaultInvocations);
+        Assert.IsTrue(controller.IsOpen);
+
+        Assert.IsTrue(
+            popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Escape)).Handled,
+            "Escape should cancel the active preedit rather than dismissing the dialog."
+        );
+        Assert.IsFalse(popup.Input.HasTextComposition);
+        Assert.IsTrue(controller.IsOpen);
+
+        // A text field owns Enter as its commit key. Move to a focusable child that leaves
+        // Enter unhandled so the dialog's default action can receive the bubbled command.
+        Assert.IsTrue(popup.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.IsTrue(
+            popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled,
+            "Enter should reach the dialog default action after preedit ends."
+        );
+        Assert.AreEqual(1, defaultInvocations);
+        Assert.IsTrue(controller.IsOpen);
+
+        Assert.IsTrue(popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Escape)).Handled);
+        Assert.IsFalse(controller.IsOpen);
+        Assert.IsTrue(session.GetAwaiter().GetResult().IsCanceled);
+    }
+
+    [TestMethod]
+    public void DialogBodyScrollRetainsActionRowAndSemanticScrollContract()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "dialog-scroll");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var controller = new DialogController<int>(composition.Root.Scope);
+        var body = ComponentContent.Create(
+            Enumerable
+                .Range(0, 28)
+                .Select(index =>
+                    (ContentRecipe)
+                        Components.Text($"Scrollable dialog line {index + 1} with useful context.")
+                )
+                .ToArray()
+        );
+        PopupSurfaceRequest? request = null;
+        composition.Input.SurfaceRequested += value => request = value;
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Dialog(
+                controller,
+                "Scrollable review",
+                body,
+                [Components.Button("Apply", () => { }), Components.DialogCancel()]
+            )
+        );
+
+        var session = controller.OpenAsync().AsTask();
+        composition.Flush();
+        Assert.IsNotNull(request);
+        var popup = request!.CreateComposition();
+        popup.Flush();
+        using var scene = SceneLayout.Project(popup, new(360, 220, 1), new EmptyShaper());
+        Assert.IsTrue(popup.Input.SetScene(scene));
+        var semantics = Flatten(popup.SemanticSnapshot()!).ToArray();
+        Assert.IsTrue(
+            semantics.Any(node =>
+                node.Name == "Dialog content" && node.Actions.HasFlag(SemanticAction.Scroll)
+            ),
+            "Dialog content did not retain a semantic scroll surface."
+        );
+        Assert.IsTrue(semantics.Any(node => node.Name == "Apply"));
+        Assert.IsTrue(semantics.Any(node => node.Name == "Cancel"));
+        Assert.IsTrue(scene.Boxes.Count > 0);
+
+        request.Dispose();
+        Assert.IsTrue(session.GetAwaiter().GetResult().IsCanceled);
+    }
+
+    [TestMethod]
+    public void DialogMeasurePreservesStockAndReactiveAuthoredWidthLimitsAcrossRemeasure()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "dialog-measure");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var defaultController = new DialogController<int>(composition.Root.Scope);
+        PopupSurfaceRequest? defaultRequest = null;
+        composition.Input.SurfaceRequested += value => defaultRequest = value;
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Dialog(
+                defaultController,
+                "Review workspace settings",
+                [Components.Text("Confirm the workspace settings before applying them.")]
+            )
+        );
+
+        var defaultSession = defaultController.OpenAsync().AsTask();
+        composition.Flush();
+        Assert.IsNotNull(defaultRequest);
+        var defaultBounds = defaultRequest!.Measure(new EmptyShaper(), new(3440, 1200, 1));
+        Assert.IsTrue(
+            defaultBounds.Width is >= 280 and <= 640,
+            $"The stock dialog measured {defaultBounds.Width} logical pixels wide."
+        );
+        defaultRequest.Dispose();
+        Assert.IsTrue(defaultSession.GetAwaiter().GetResult().IsCanceled);
+
+        using var authoredComposition = new Composition(
+            new ReactiveGraph(),
+            "dialog-authored-measure"
+        );
+        using var authoredTheme = new ThemeContext(
+            authoredComposition.Root.Scope,
+            ControlThemes.Light
+        );
+        using var authoredController = new DialogController<int>(authoredComposition.Root.Scope);
+        var authoredWidth = authoredComposition.Root.Scope.Signal(520f, "dialog-authored-width");
+        PopupSurfaceRequest? authoredRequest = null;
+        authoredComposition.Input.SurfaceRequested += value => authoredRequest = value;
+        _ = authoredComposition.Mount(
+            authoredComposition.Root,
+            authoredTheme,
+            Components.Dialog(
+                authoredController,
+                "Reactive dialog width",
+                [
+                    Components.Text(
+                        "This dialog keeps its authored width across host remeasurement."
+                    ),
+                ],
+                style: Style
+                    .Empty.Bind(LayoutProperties.MinWidth, () => authoredWidth.Value - 40)
+                    .Bind(LayoutProperties.MaxWidth, () => authoredWidth.Value)
+            )
+        );
+
+        var authoredSession = authoredController.OpenAsync().AsTask();
+        authoredComposition.Flush();
+        Assert.IsNotNull(authoredRequest);
+        var narrow = authoredRequest!.Measure(new EmptyShaper(), new(320, 600, 1));
+        Assert.AreEqual(320f, narrow.Width);
+
+        var wide = authoredRequest.Measure(new EmptyShaper(), new(1200, 600, 1));
+        Assert.IsTrue(
+            wide.Width is >= 480 and <= 520,
+            $"The authored dialog measured {wide.Width} logical pixels wide after widening."
+        );
+
+        authoredWidth.Value = 400;
+        authoredComposition.Flush();
+        var updated = authoredRequest.Measure(new EmptyShaper(), new(1200, 600, 1));
+        Assert.IsTrue(
+            updated.Width is >= 360 and <= 400,
+            $"The reactively resized dialog measured {updated.Width} logical pixels wide."
+        );
+
+        authoredRequest.Dispose();
+        Assert.IsTrue(authoredSession.GetAwaiter().GetResult().IsCanceled);
+    }
+
+    [TestMethod]
+    public void DialogCompositionOwnsNestedPopoverSurface()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "dialog-nested-surface");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var controller = new DialogController<int>(composition.Root.Scope);
+        var nestedOpen = composition.Root.Scope.Signal(true, "nested-popover-open");
+        var nested = Components.Popover(
+            () => nestedOpen.Value,
+            value => nestedOpen.Value = value,
+            Components.Text("Nested dialog support content."),
+            [Components.Button("Nested trigger", () => { })]
+        );
+        PopupSurfaceRequest? request = null;
+        composition.Input.SurfaceRequested += value => request = value;
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Dialog(controller, "Nested surface", [nested])
+        );
+
+        var session = controller.OpenAsync().AsTask();
+        composition.Flush();
+        Assert.IsNotNull(request);
+        var popup = request!.CreateComposition();
+        popup.Flush();
+        var nestedSurface = popup.Input.ActiveSurface;
+        Assert.IsNotNull(nestedSurface);
+        Assert.AreSame(popup, nestedSurface!.Owner);
+        Assert.IsFalse(nestedSurface.IsModal);
+        Assert.IsTrue(nestedSurface.IsInteractive);
+
+        request.Dispose();
+        Assert.IsTrue(session.GetAwaiter().GetResult().IsCanceled);
+    }
+
+    private static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot node)
+    {
+        yield return node;
+        foreach (var child in node.Children)
+        foreach (var descendant in Flatten(child))
+            yield return descendant;
+    }
+
+    private static ComponentRecipe PassiveFocusTarget() =>
+        ComponentRecipe.Create(
+            "dialog-passive-focus",
+            static (context, root) =>
+            {
+                root.Present(
+                    context.Theme,
+                    author: Style
+                        .Empty.Set(LayoutProperties.Width, 220f)
+                        .Set(LayoutProperties.Height, 24f)
+                );
+                root.AttachBehaviors(new PassiveFocusBehavior());
+            }
+        );
+
+    private sealed class PassiveFocusBehavior : Behavior
+    {
+        public override string Name => "dialog-passive-focus";
+        public override BehaviorOwnership Ownership => BehaviorOwnership.Focus;
+
+        public override void Attach(BehaviorContext context) => context.MakeFocusable();
+    }
+
+    private sealed class EmptyShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            var glyphs = new List<ShapedGlyph>();
+            var offset = 0;
+            var x = 0f;
+            foreach (var rune in request.Text.EnumerateRunes())
+            {
+                glyphs.Add(new(1, (uint)offset, x, 0, 10, 0, 0));
+                offset += rune.Utf16SequenceLength;
+                x += 10;
+            }
+            var run = new ShapedRun(
+                "dialog-fixed",
+                "dialog-fixed",
+                400,
+                5,
+                0,
+                "dialog-fixed#0",
+                0,
+                "dialog-fixed#0",
+                request.Direction,
+                request.Language,
+                request.FontSize,
+                0,
+                request.FontSize,
+                -request.FontSize,
+                0,
+                x,
+                glyphs
+            );
+            var line = new ParagraphLine(
+                0,
+                request.Text.Length,
+                0,
+                request.FontSize,
+                -request.FontSize,
+                0,
+                0,
+                x,
+                0,
+                false
+            );
+            return new(
+                "dialog-fixed",
+                x,
+                request.FontSize,
+                [run],
+                [line],
+                false,
+                request.InlineConstraint,
+                request.BlockConstraint
+            );
+        }
+    }
 }

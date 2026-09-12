@@ -28,11 +28,11 @@ internal static class Program
                 )
                 .SetTitle("Lucent Component Browser")
                 .Build()
-                .Run(ComponentBrowserStructure.Create());
+                .Run(new ComponentBrowserLifecycle());
         }
         catch (Exception exception)
         {
-            Console.Error.WriteLine($"Lucent startup failed: {exception.Message}");
+            Console.Error.WriteLine($"Lucent Component Browser failed: {exception}");
             return 1;
         }
     }

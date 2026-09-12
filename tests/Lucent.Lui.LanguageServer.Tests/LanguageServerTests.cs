@@ -8,6 +8,7 @@ using Lucent.Lui.LanguageServer;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -2840,6 +2841,7 @@ style MotionStyle {
     [TestMethod]
     public async Task RealIssueBrowserProjectSupportsFormattingNavigationAndCompletion()
     {
+        var expectedLayoutLocations = new HashSet<(Uri Uri, LuiSpan Span)>();
         var projectPath = Path.GetFullPath("apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj");
         // MSBuildWorkspace evaluates the real project with its default Debug configuration.
         // Prepare that exact graph so project-reference analyzers resolve in a fresh checkout.
@@ -2952,10 +2954,9 @@ style MotionStyle {
                 "LayoutReplacement",
                 CancellationToken.None
             );
-            var expectedLayoutLocations = new HashSet<(Uri Uri, LuiSpan Span)>
-            {
-                (new Uri(layoutDeclarationPath), new LuiSpan(layoutDeclaration, "Layout".Length)),
-            };
+            expectedLayoutLocations.Add(
+                (new Uri(layoutDeclarationPath), new LuiSpan(layoutDeclaration, "Layout".Length))
+            );
             foreach (
                 var path in Directory
                     .GetFiles("apps/Lucent.IssueBrowser", "*.lui")
@@ -2981,6 +2982,54 @@ style MotionStyle {
                             (new Uri(Path.GetFullPath(path)), new LuiSpan(start, "Layout".Length))
                         );
                     start = end;
+                }
+            }
+            // Component recipes are also composed in authored C#. Keep these call sites in the
+            // exact expected set so adding a Core consumer does not weaken the rename contract.
+            foreach (var sourceRoot in new[] { "src/Lucent.Core", "apps/Lucent.IssueBrowser" })
+            foreach (
+                var path in Directory.GetFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+            )
+            {
+                var segments = path.Split(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar
+                );
+                if (
+                    segments.Contains("obj", StringComparer.OrdinalIgnoreCase)
+                    || segments.Contains("bin", StringComparer.OrdinalIgnoreCase)
+                )
+                    continue;
+                var syntax = CSharpSyntaxTree.ParseText(await File.ReadAllTextAsync(path));
+                foreach (
+                    var call in syntax
+                        .GetRoot()
+                        .DescendantNodes()
+                        .OfType<InvocationExpressionSyntax>()
+                )
+                {
+                    var name = call.Expression switch
+                    {
+                        IdentifierNameSyntax identifier
+                            when call.Ancestors()
+                                .OfType<ClassDeclarationSyntax>()
+                                .Any(type => type.Identifier.ValueText == "Components") =>
+                            identifier,
+                        MemberAccessExpressionSyntax member
+                            when member.Expression.ToString()
+                                is "Components"
+                                    or "Lucent.Core.Components"
+                                    or "global::Lucent.Core.Components" => member.Name
+                            as IdentifierNameSyntax,
+                        _ => null,
+                    };
+                    if (name?.Identifier.ValueText == "Layout")
+                        expectedLayoutLocations.Add(
+                            (
+                                new Uri(Path.GetFullPath(path)),
+                                new LuiSpan(name.SpanStart, name.Span.Length)
+                            )
+                        );
                 }
             }
             var actualLayoutLocations = layoutReferences
@@ -3269,7 +3318,11 @@ style MotionStyle {
                     )
                 );
             Assert(
-                rpcLayoutReferences.Length == authoredLayoutReferences + 1
+                rpcLayoutReferences.Length == expectedLayoutLocations.Count
+                    && rpcLayoutChanges
+                        .EnumerateObject()
+                        .Sum(change => change.Value.GetArrayLength())
+                        == expectedLayoutLocations.Count
                     && rpcLayoutReferences.Count(location =>
                         location
                             .GetProperty("uri")
@@ -3349,7 +3402,7 @@ style MotionStyle {
             );
             Assert(
                 insertedLineReferences.RootElement.GetProperty("result").GetArrayLength()
-                    == authoredLayoutReferences + 1
+                    == expectedLayoutLocations.Count
                     && sameLineRename
                         .RootElement.GetProperty("result")
                         .GetProperty("changes")

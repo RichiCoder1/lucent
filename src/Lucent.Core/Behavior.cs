@@ -111,6 +111,24 @@ public enum SemanticRole
 
     /// <summary>Exposes an expandable selection editor.</summary>
     ComboBox,
+
+    /// <summary>Exposes a hierarchical collection.</summary>
+    Tree,
+
+    /// <summary>Exposes one entry in a hierarchical collection.</summary>
+    TreeItem,
+
+    /// <summary>Exposes a calendar selection container.</summary>
+    Calendar,
+
+    /// <summary>Exposes a tabular data container.</summary>
+    Table,
+
+    /// <summary>Exposes one selectable row in a data container.</summary>
+    DataItem,
+
+    /// <summary>Exposes one table header.</summary>
+    HeaderItem,
 }
 
 /// <summary>Semantic commands a retained target declares that it handles.</summary>
@@ -146,6 +164,9 @@ public enum SemanticAction
 
     /// <summary>Permits requesting the next toggle state.</summary>
     Toggle = 256,
+
+    /// <summary>Permits realizing one zero-based logical collection item.</summary>
+    RealizeItem = 512,
 }
 
 /// <summary>Finite portable requests accepted by retained semantic behaviors; platform adapters never receive control state.</summary>
@@ -183,6 +204,9 @@ public enum SemanticCommandKind
 
     /// <summary>Requests the next toggle state; the application owns the applied value.</summary>
     Toggle,
+
+    /// <summary>Requests realization of one zero-based logical collection item.</summary>
+    RealizeItem,
 }
 
 /// <summary>Named destinations for semantic scrolling.</summary>
@@ -208,7 +232,8 @@ public readonly record struct SemanticCommand(
     int? Anchor = null,
     int? Caret = null,
     bool AlignToTop = false,
-    double? NumericValue = null
+    double? NumericValue = null,
+    int? ItemIndex = null
 )
 {
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>
@@ -222,6 +247,8 @@ public readonly record struct SemanticCommand(
             || (Kind != SemanticCommandKind.SetValue && Value is not null)
             || (Kind == SemanticCommandKind.SetRangeValue) != NumericValue.HasValue
             || NumericValue is { } numericValue && !double.IsFinite(numericValue)
+            || (Kind == SemanticCommandKind.RealizeItem) != ItemIndex.HasValue
+            || ItemIndex is < 0
             || (
                 Kind != SemanticCommandKind.Scroll
                 && (Horizontal != 0 || Vertical != 0 || Endpoint != SemanticScrollEndpoint.None)
@@ -373,7 +400,13 @@ public sealed class SemanticDeclaration
         string? description = null,
         int? positionInSet = null,
         int? sizeOfSet = null,
-        bool isPassword = false
+        bool isPassword = false,
+        SemanticCollectionSnapshot? collection = null,
+        int? level = null,
+        int? collectionIndex = null,
+        SemanticGridSnapshot? grid = null,
+        SemanticGridItemSnapshot? gridItem = null,
+        SemanticAnnouncement announcement = SemanticAnnouncement.None
     )
     {
         if (
@@ -390,6 +423,7 @@ public sealed class SemanticDeclaration
                     | SemanticAction.ExpandCollapse
                     | SemanticAction.SetRangeValue
                     | SemanticAction.Toggle
+                    | SemanticAction.RealizeItem
                 )
             ) != 0
             || actions.HasFlag(SemanticAction.ExpandCollapse) != expanded.HasValue
@@ -400,8 +434,13 @@ public sealed class SemanticDeclaration
             || role is SemanticRole.CheckBox or SemanticRole.Switch && toggleState is null
             || role == SemanticRole.Switch && toggleState == SemanticToggleState.Indeterminate
             || role is SemanticRole.RadioGroup or SemanticRole.TabList && selection is null
+            || actions.HasFlag(SemanticAction.RealizeItem) && collection is null
             || positionInSet.HasValue != sizeOfSet.HasValue
             || positionInSet is { } position && (position < 1 || sizeOfSet < position)
+            || role == SemanticRole.TreeItem && level is null
+            || level is <= 0
+            || collectionIndex is < 0
+            || !Enum.IsDefined(announcement)
         )
             throw new ArgumentException("Semantic role/actions must be finite.");
         if (string.IsNullOrWhiteSpace(name))
@@ -433,6 +472,12 @@ public sealed class SemanticDeclaration
         PositionInSet = positionInSet;
         SizeOfSet = sizeOfSet;
         IsPassword = isPassword;
+        Collection = collection;
+        Level = level;
+        CollectionIndex = collectionIndex;
+        Grid = grid;
+        GridItem = gridItem;
+        Announcement = announcement;
     }
 
     /// <summary>Gets the accessible role.</summary>
@@ -485,6 +530,44 @@ public sealed class SemanticDeclaration
 
     /// <summary>Whether this editor contains confidential text excluded from accessible value and range reads.</summary>
     public bool IsPassword { get; }
+
+    /// <summary>Gets the complete logical collection size, including virtualized members.</summary>
+    public SemanticCollectionSnapshot? Collection { get; }
+
+    /// <summary>Gets the one-based hierarchical level for a tree item.</summary>
+    public int? Level { get; }
+
+    /// <summary>Gets the zero-based index in the complete flattened collection.</summary>
+    public int? CollectionIndex { get; }
+
+    /// <summary>Gets logical grid dimensions and retained column headers.</summary>
+    public SemanticGridSnapshot? Grid { get; }
+
+    /// <summary>Gets a realized cell's logical grid position.</summary>
+    public SemanticGridItemSnapshot? GridItem { get; }
+
+    /// <summary>Gets the explicit platform accessibility announcement policy.</summary>
+    public SemanticAnnouncement Announcement { get; }
+}
+
+/// <summary>Immutable logical collection metadata exposed to platform automation.</summary>
+public sealed class SemanticCollectionSnapshot
+{
+    /// <summary>Initializes collection metadata with the complete logical item count.</summary>
+    public SemanticCollectionSnapshot(int itemCount, int? selectedIndex = null)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(itemCount);
+        if (selectedIndex is { } index && (index < 0 || index >= itemCount))
+            throw new ArgumentOutOfRangeException(nameof(selectedIndex));
+        ItemCount = itemCount;
+        SelectedIndex = selectedIndex;
+    }
+
+    /// <summary>Gets the complete logical item count, including virtualized members.</summary>
+    public int ItemCount { get; }
+
+    /// <summary>Gets the selected logical index, including an unrealized member, when present.</summary>
+    public int? SelectedIndex { get; }
 }
 
 /// <summary>Immutable finite numeric range state exposed to platform automation.</summary>
@@ -625,7 +708,13 @@ public sealed record SemanticSnapshot(
     string? Description = null,
     int? PositionInSet = null,
     int? SizeOfSet = null,
-    bool IsPassword = false
+    bool IsPassword = false,
+    SemanticCollectionSnapshot? Collection = null,
+    int? Level = null,
+    int? CollectionIndex = null,
+    SemanticGridSnapshot? Grid = null,
+    SemanticGridItemSnapshot? GridItem = null,
+    SemanticAnnouncement Announcement = SemanticAnnouncement.None
 );
 
 /// <summary>Reusable interaction capability that owns input, focus, semantics, and cleanup for one element.</summary>
@@ -676,6 +765,9 @@ public sealed class BehaviorContext
 
     internal InputRouter CompositionInput() => _composition.Input;
 
+    internal void RegisterFocusTarget(FocusTarget target) =>
+        _composition.Input.RegisterFocusTarget(ElementId, _scope, target);
+
     internal void RegisterCommandScope() =>
         _composition.Input.RegisterCommandScope(ElementId, _scope);
 
@@ -691,7 +783,7 @@ public sealed class BehaviorContext
     ) => _composition.Input.RegisterContextMenu(ElementId, _scope, menu, theme, onOpenChanged);
 
     internal void RegisterTooltip(
-        Action<bool> onHoverChanged,
+        Action<bool, float, float> onHoverChanged,
         Action<bool> onFocusChanged,
         Action? onEscape = null
     )
@@ -725,6 +817,12 @@ public sealed class BehaviorContext
     ) => _composition.MenuSession?.RegisterSubmenu(Identity, this, menu, theme, enabled);
 
     internal bool SelectSemantic() => _composition.SelectSemantic(Identity);
+
+    internal void AcknowledgeSemanticSelectionApplied()
+    {
+        CheckLive();
+        _element.AcknowledgeSemanticSelectionApplied();
+    }
 
     /// <summary>Gets the behavior currently being attached.</summary>
     public Behavior Behavior { get; }

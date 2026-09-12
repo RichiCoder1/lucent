@@ -1,13 +1,26 @@
 namespace Lucent.Core;
 
-internal sealed class ListBoxBinding(string label, bool required)
+internal sealed class ListBoxBinding(
+    string label,
+    bool required,
+    Func<int> count,
+    Func<int?> selectedIndex,
+    Action<int> reveal
+)
 {
     internal string Label { get; } = ControlState.Required(label, nameof(label));
     internal bool Required { get; } = required;
+    internal Func<int> Count { get; } = count ?? throw new ArgumentNullException(nameof(count));
+    internal Func<int?> SelectedIndex { get; } =
+        selectedIndex ?? throw new ArgumentNullException(nameof(selectedIndex));
+    internal Action<int> Reveal { get; } =
+        reveal ?? throw new ArgumentNullException(nameof(reveal));
 }
 
 internal sealed class ChoiceRowBinding
 {
+    internal SemanticRole Role { get; init; } = SemanticRole.ListItem;
+    internal Func<int?>? CollectionIndex { get; init; }
     internal required Func<string> Label { get; init; }
     internal required Func<bool> Enabled { get; init; }
     internal required Func<bool> Selected { get; init; }
@@ -38,7 +51,12 @@ internal static partial class Controls
     internal static void ListBox(Element element, ThemeContext theme, ListBoxBinding binding) =>
         Configure(element, theme, PanelStyle, null, new ListBoxBehavior(binding));
 
-    internal static void ChoiceRow(Element element, ThemeContext theme, ChoiceRowBinding binding) =>
+    internal static void ChoiceRow(
+        Element element,
+        ThemeContext theme,
+        ChoiceRowBinding binding,
+        Style? style = null
+    ) =>
         Configure(
             element,
             theme,
@@ -65,7 +83,7 @@ internal static partial class Controls
                         ControlThemes.DisabledForeground
                     )
                 ),
-            null,
+            style,
             new ChoiceRowBehavior(binding)
         );
 
@@ -108,12 +126,33 @@ internal static partial class Controls
     private sealed class ListBoxBehavior(ListBoxBinding binding) : Behavior
     {
         public override string Name => "list-box";
-        public override BehaviorOwnership Ownership => BehaviorOwnership.Semantics;
+        public override BehaviorOwnership Ownership =>
+            BehaviorOwnership.Action | BehaviorOwnership.Semantics;
 
-        public override void Attach(BehaviorContext context) =>
-            context.SetSemantics(
-                new(SemanticRole.List, binding.Label, selection: new(false, binding.Required))
-            );
+        public override void Attach(BehaviorContext context)
+        {
+            SemanticDeclaration Declaration() =>
+                new(
+                    SemanticRole.List,
+                    binding.Label,
+                    actions: SemanticAction.RealizeItem,
+                    selection: new(false, binding.Required),
+                    collection: new(binding.Count(), binding.SelectedIndex())
+                );
+            context.SetSemantics(Declaration());
+            context.Effect(() => context.UpdateSemantics(Declaration()), "list-collection");
+            context.OnSemanticCommand(command =>
+            {
+                if (
+                    command.Kind != SemanticCommandKind.RealizeItem
+                    || command.ItemIndex is not { } index
+                    || index >= binding.Count()
+                )
+                    return false;
+                binding.Reveal(index);
+                return true;
+            });
+        }
     }
 
     private sealed class ChoiceRowBehavior(ChoiceRowBinding binding) : Behavior
@@ -201,6 +240,8 @@ internal static partial class Controls
             {
                 if (!binding.Activate(behavior, true))
                     return false;
+                if (binding.Selected())
+                    behavior.AcknowledgeSemanticSelectionApplied();
                 binding.DismissWithoutCommit?.Invoke();
                 return true;
             }
@@ -256,13 +297,14 @@ internal static partial class Controls
 
         private SemanticDeclaration Declaration(bool? selected = null) =>
             new(
-                SemanticRole.ListItem,
+                binding.Role,
                 ControlState.Required(binding.Label(), nameof(binding.Label)),
                 enabled: binding.Enabled(),
                 selected: selected ?? binding.Selected(),
                 actions: SemanticAction.Select,
                 positionInSet: binding.Position(),
-                sizeOfSet: binding.Size()
+                sizeOfSet: binding.Size(),
+                collectionIndex: binding.CollectionIndex?.Invoke()
             );
     }
 

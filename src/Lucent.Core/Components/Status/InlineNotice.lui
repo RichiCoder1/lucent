@@ -17,13 +17,13 @@ style InlineNoticeMessageStyle {
     TextWrap: TextWrap.WordWithGraphemeFallback;
 }
 
-internal component InlineNoticeContent(Func<string> message, NoticeSeverity severity, Action? onAction, string? actionLabel, Style? style) {
+internal component InlineNoticeContent(Func<string> message, NoticeSeverity severity, Action? onAction, string? actionLabel, Style? style, SemanticAnnouncement announcement) {
     <InlineNoticeFrame style={InlineNoticeStyle.With(style)}>
         <Layout style={InlineNoticeHeadingStyle}>
             <Icon source={Components.NoticeIcon(severity)} />
             <Text>{Components.NoticeLabel(severity)}</Text>
         </Layout>
-        <Status content={message} style={InlineNoticeMessageStyle} />
+        <Status content={message} style={InlineNoticeMessageStyle} announcement={announcement} />
         if (onAction is not null) {
             <Layout style={InlineNoticeHeadingStyle}>
                 <Button onInvoke={onAction}>{actionLabel!}</Button>

@@ -274,6 +274,10 @@ internal static class ProjectionProperties
     );
     internal static readonly Property<int?> TextCaret = new("projection-text-caret", null);
     internal static readonly Property<bool> TextMultiline = new("projection-text-multiline", false);
+    internal static readonly Property<bool> TextConfidential = new(
+        "projection-text-confidential",
+        false
+    );
     internal static readonly Property<TextAffinity> TextCaretAffinity = new(
         "projection-text-caret-affinity",
         TextAffinity.Downstream
@@ -485,7 +489,8 @@ public readonly record struct TextMeasureRequest(
     TextWrap Wrap = TextWrap.NoWrap,
     int? MaxLines = null,
     TextOverflow Overflow = TextOverflow.Clip,
-    FontWeight FontWeight = global::Lucent.Core.FontWeight.Regular
+    FontWeight FontWeight = global::Lucent.Core.FontWeight.Regular,
+    bool IsConfidential = false
 )
 {
     /// <summary>Validates the value and throws when its fields are outside the supported contract.</summary>

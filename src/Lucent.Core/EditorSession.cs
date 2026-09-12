@@ -8,7 +8,7 @@ namespace Lucent.Core;
 /// <remarks>One text field may mount a session at a time. Platform focus, clipboard, and IME resources remain owned by that mount.</remarks>
 public sealed class EditorSession : IDisposable
 {
-    private const int UndoLimit = 64;
+    private const int MaximumHistoryLimit = 64;
     private readonly ReactiveScope _scope;
     private readonly Signal<string> _documentId;
     private readonly Signal<string> _text;
@@ -19,6 +19,7 @@ public sealed class EditorSession : IDisposable
     private readonly Signal<long> _revision;
     private readonly List<Snapshot> _undo = [];
     private readonly List<Snapshot> _redo = [];
+    private readonly int _historyLimit;
     private readonly HashSet<MountLease> _mounts = [];
     private EditKind _lastEditKind;
     private long _editGeneration;
@@ -33,13 +34,17 @@ public sealed class EditorSession : IDisposable
         string documentId,
         string initialText = "",
         string name = "editor-session",
-        bool multiline = false
+        bool multiline = false,
+        int historyLimit = MaximumHistoryLimit
     )
     {
         ArgumentNullException.ThrowIfNull(owner);
+        if (historyLimit is < 0 or > MaximumHistoryLimit)
+            throw new ArgumentOutOfRangeException(nameof(historyLimit));
         documentId = RequiredDocumentId(documentId);
         var normalized = Normalize(initialText, multiline);
         IsMultiline = multiline;
+        _historyLimit = historyLimit;
         _scope = owner.CreateChild(name);
         try
         {
@@ -504,6 +509,15 @@ public sealed class EditorSession : IDisposable
         BreakEditCoalescingState();
     }
 
+    internal void ClearHistory()
+    {
+        CheckMutation();
+        _undo.Clear();
+        _redo.Clear();
+        BreakEditCoalescingState();
+        Changed();
+    }
+
     internal void Replace(
         string text,
         bool coalesceInsert = false,
@@ -646,10 +660,17 @@ public sealed class EditorSession : IDisposable
 
     private void Save(EditKind editKind, bool coalesce)
     {
+        if (_historyLimit == 0)
+        {
+            _undo.Clear();
+            _redo.Clear();
+            _lastEditKind = EditKind.None;
+            return;
+        }
         if (!coalesce || _lastEditKind != editKind)
         {
             _undo.Add(Current());
-            if (_undo.Count > UndoLimit)
+            if (_undo.Count > _historyLimit)
                 _undo.RemoveAt(0);
         }
         _redo.Clear();

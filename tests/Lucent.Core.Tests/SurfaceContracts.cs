@@ -1,4 +1,5 @@
 using Lucent.Core;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Lucent.Core.Tests;
 
@@ -118,9 +119,125 @@ public sealed class SurfaceContracts
         Assert.IsTrue(popup.IsDisposed);
     }
 
+    [TestMethod]
+    public void PopoverMeasuresAuthoredContentWithoutStretchingToTheAvailableWorkArea()
+    {
+        using var owner = new Composition(new ReactiveGraph(), "surface-compact-measure");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        owner.Mount(
+            owner.Root,
+            theme,
+            Components.Popover(
+                () => true,
+                _ => { },
+                Components.Layout([], style: Style.Empty.MinWidth(240)),
+                [Components.Layout([], style: Style.Empty.Width(100).Height(32))]
+            )
+        );
+        owner.Flush();
+        var request = owner.Input.ActiveSurface!;
+        Assert.ThrowsExactly<ArgumentException>(() =>
+            request.ConfigureHostPadding(owner, Insets.Uniform(16))
+        );
+
+        var measured = request.Measure(new EmptyShaper(), new LayoutViewport(1_200, 800, 1));
+
+        Assert.AreEqual(264f, measured.Width);
+        Assert.AreNotEqual(1_200f, measured.Width);
+    }
+
+    [TestMethod]
+    public void TooltipHoverSnapshotsPointerAnchorWhileKeyboardUsesElementBounds()
+    {
+        var clock = new FakeTimeProvider();
+        using var owner = new Composition(new ReactiveGraph(), "tooltip-pointer-anchor");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        owner.Mount(
+            owner.Root,
+            theme,
+            Components.Tooltip(
+                "Wide target help",
+                [Components.Button("Wide target", () => { })],
+                delay: TimeSpan.FromMilliseconds(500),
+                timeProvider: clock,
+                style: Style.Empty.Width(300).Height(32)
+            )
+        );
+        owner.Flush();
+        using var scene = SceneLayout.Project(owner, new(400, 200, 1), new SurfaceShaper());
+        Assert.IsTrue(owner.Input.SetScene(scene));
+        var button = Flatten(owner.SemanticSnapshot()!)
+            .Single(node => node is { Role: SemanticRole.Button, Name: "Wide target" });
+        var bounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == button.Identity.ElementId)
+            .Bounds;
+        var anchorBounds = scene
+            .Boxes.Single(box => box.Bounds.Width == 300 && box.Bounds.Height == 32)
+            .Bounds;
+        var pointerX = bounds.X + bounds.Width - 4;
+        var pointerY = bounds.Y + bounds.Height / 2;
+
+        owner.Input.DispatchPointer(new(PointerCommandKind.Move, 1, pointerX, pointerY));
+        clock.Advance(TimeSpan.FromMilliseconds(500));
+        owner.Flush();
+        var hover = owner.Input.ActiveSurface!;
+        Assert.AreEqual(new LayoutRect(pointerX, pointerY, 0, 0), hover.Anchor);
+
+        owner.Input.ClearPointerHover();
+        hover.Dispose();
+        owner.Input.CompleteSurface(hover);
+        Assert.IsTrue(owner.Input.MoveFocus(FocusTraversalDirection.Next));
+        var keyboard = owner.Input.ActiveSurface!;
+        Assert.AreEqual(anchorBounds, keyboard.Anchor);
+    }
+
+    private static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot root)
+    {
+        yield return root;
+        foreach (var child in root.Children)
+        foreach (var descendant in Flatten(child))
+            yield return descendant;
+    }
+
     private sealed class EmptyShaper : ITextShaper
     {
         public ShapedText Shape(TextMeasureRequest request) => new("empty", 0, 0, []);
+    }
+
+    private sealed class SurfaceShaper : ITextShaper
+    {
+        public ShapedText Shape(TextMeasureRequest request)
+        {
+            if (request.Text.Length == 0)
+                return new("surface-empty", 0, request.FontSize, []);
+            var width = request.Text.Length * 8f;
+            return new(
+                "surface",
+                width,
+                request.FontSize,
+                [
+                    new ShapedRun(
+                        "surface",
+                        "surface",
+                        400,
+                        5,
+                        0,
+                        "surface",
+                        0,
+                        "surface#0",
+                        request.Direction,
+                        request.Language,
+                        request.FontSize,
+                        0,
+                        request.FontSize,
+                        -request.FontSize,
+                        0,
+                        width,
+                        [new(1, 0, 0, 0, width, 0, 0)]
+                    ),
+                ]
+            );
+        }
     }
 
     private sealed class ModalProbe(Composition owner) : PopupSurfaceRequest

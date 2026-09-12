@@ -122,6 +122,10 @@ function Publish-DesktopFixtures {
 
 function Invoke-Published {
     $published = Publish-DesktopFixtures
+    $componentPublish = Reset-ArtifactDirectory 'artifacts/test/component-browser'
+    Invoke-Dotnet @('restore', 'apps/Lucent.ComponentBrowser/Lucent.ComponentBrowser.csproj', '--locked-mode')
+    Invoke-Dotnet @('publish', 'apps/Lucent.ComponentBrowser/Lucent.ComponentBrowser.csproj', '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $componentPublish)
+    $published.ComponentBrowserExe = Join-Path $componentPublish 'Lucent.ComponentBrowser.exe'
     & (Join-Path $PSScriptRoot 'Verify-PublishInventory.ps1') -PublishDirectory $published.AppDirectory
     if ($LASTEXITCODE) { throw 'Publish inventory proof failed.' }
     & (Join-Path $PSScriptRoot 'Verify-PublishInventory.ps1') -PublishDirectory $published.AppDirectory -Negative
@@ -133,7 +137,7 @@ function Invoke-Published {
     if ($LASTEXITCODE) { throw 'Windows application lifecycle proof failed.' }
     & (Join-Path $PSScriptRoot 'Test-WindowsSettingsListener.ps1') -Executable $published.HostExe
     if ($LASTEXITCODE) { throw 'Windows settings listener proof failed.' }
-    Invoke-DesktopTests $published 'FullyQualifiedName~FlaUi'
+    Invoke-DesktopTests $published 'FullyQualifiedName~FlaUi|FullyQualifiedName~PublishedFilePickerTests'
     Invoke-Native
 }
 
@@ -159,16 +163,19 @@ function Invoke-DesktopTests([hashtable] $Published, [string] $TestFilter) {
     Assert-DiscoveredTests 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj'
     $priorApp = $env:LUCENT_DESKTOP_APP
     $priorHost = $env:LUCENT_DESKTOP_HOST
+    $priorComponentBrowser = $env:LUCENT_COMPONENT_BROWSER_APP
     $priorOutput = $env:LUCENT_ACCESSIBILITY_OUTPUT
     try {
         $env:LUCENT_DESKTOP_APP = $Published.AppExe
         $env:LUCENT_DESKTOP_HOST = $Published.HostExe
+        $env:LUCENT_COMPONENT_BROWSER_APP = $Published.ComponentBrowserExe
         $env:LUCENT_ACCESSIBILITY_OUTPUT = Reset-ArtifactDirectory 'artifacts/test/accessibility'
         Invoke-Dotnet @('test', '--project', 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj', '--no-build', '--no-restore', '-c', $configuration, '--filter', $TestFilter)
     }
     finally {
         $env:LUCENT_DESKTOP_APP = $priorApp
         $env:LUCENT_DESKTOP_HOST = $priorHost
+        $env:LUCENT_COMPONENT_BROWSER_APP = $priorComponentBrowser
         $env:LUCENT_ACCESSIBILITY_OUTPUT = $priorOutput
     }
 }

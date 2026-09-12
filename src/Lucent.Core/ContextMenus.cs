@@ -218,7 +218,17 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
             );
             _menuRoot = popup.Mount(popup.Root, theme, _content);
             _popup = popup;
-            _levels.Add(new MenuLevel(popup, _menuRoot, 0, null, active: true, focusFirst: false));
+            _levels.Add(
+                new MenuLevel(
+                    popup,
+                    _menuRoot,
+                    0,
+                    null,
+                    active: true,
+                    focusFirst: false,
+                    adaptiveStockScrollbar: UsesStockScrollbar(_menuRoot)
+                )
+            );
             return popup;
         }
         catch
@@ -232,9 +242,46 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
     public override LayoutRect Measure(ITextShaper shaper, LayoutViewport available)
     {
         var popup = CreateComposition();
-        ConstrainMenuHeight(_menuRoot!, available.Height);
-        using var scene = SceneLayout.Project(popup, available, shaper);
-        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == _menuRoot!.Id).Bounds;
+        return MeasureLevel(_levels[0], shaper, available);
+    }
+
+    /// <summary>Measures one active popup level within its host-provided logical work area.</summary>
+    public LayoutRect Measure(MenuLevelSnapshot level, ITextShaper shaper, LayoutViewport available)
+    {
+        var retained = RequireLevel(level, active: true);
+        return MeasureLevel(retained, shaper, available);
+    }
+
+    private static LayoutRect MeasureLevel(
+        MenuLevel level,
+        ITextShaper shaper,
+        LayoutViewport available
+    )
+    {
+        ConstrainMenuHeight(level.Root, available.Height);
+        var adaptiveMeasurement =
+            level.AdaptiveStockScrollbar
+            && (
+                !level.HasAdaptiveMeasurement
+                || level.AdaptiveRevision != level.Composition.Graph.MutationRevision
+                || level.AdaptiveViewport != available
+            );
+        if (adaptiveMeasurement)
+        {
+            level.Root.UpdateControl(ScrollBarProperties.Visibility, ScrollBarVisibility.Hidden);
+            using var unguttered = SceneLayout.Project(level.Composition, available, shaper);
+            if (HasVerticalOverflow(level, unguttered, available.Scale))
+                level.Root.UpdateControl(ScrollBarProperties.Visibility, ScrollBarVisibility.Auto);
+        }
+
+        using var scene = SceneLayout.Project(level.Composition, available, shaper);
+        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == level.Root.Id).Bounds;
+        if (adaptiveMeasurement)
+        {
+            level.HasAdaptiveMeasurement = true;
+            level.AdaptiveRevision = level.Composition.Graph.MutationRevision;
+            level.AdaptiveViewport = available;
+        }
         return new(
             0,
             0,
@@ -243,19 +290,41 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
         );
     }
 
-    /// <summary>Measures one active popup level within its host-provided logical work area.</summary>
-    public LayoutRect Measure(MenuLevelSnapshot level, ITextShaper shaper, LayoutViewport available)
+    private static bool UsesStockScrollbar(Element root)
     {
-        var retained = RequireLevel(level, active: true);
-        ConstrainMenuHeight(retained.Root, available.Height);
-        using var scene = SceneLayout.Project(retained.Composition, available, shaper);
-        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == retained.Root.Id).Bounds;
-        return new(
-            0,
-            0,
-            Math.Clamp(bounds.Width, 1, available.Width),
-            Math.Clamp(bounds.Height, 1, available.Height)
+        var visibility = root.Resolve(ScrollBarProperties.Visibility);
+        return root.StandardMenuPart == StandardMenuPart.Menu
+            && visibility.Value == ScrollBarVisibility.Auto
+            && visibility.Winner.Source == "component";
+    }
+
+    private static bool HasVerticalOverflow(MenuLevel level, RetainedScene scene, float scale)
+    {
+        var rootBounds = scene.Boxes.Single(box => box.Identity.ElementId == level.Root.Id).Bounds;
+        var content = SceneLayout.ContentBounds(
+            rootBounds,
+            level.Root.ResolveValue(LayoutProperties.Padding),
+            scale
         );
+        var contentTop = content.Y;
+        var contentBottom = content.Y + content.Height;
+        foreach (var box in scene.Boxes)
+        {
+            var element = level.Composition.Find(box.Identity);
+            if (element is null || ReferenceEquals(element, level.Root))
+                continue;
+            for (var parent = element.Parent; parent is not null; parent = parent.Parent)
+                if (ReferenceEquals(parent, level.Root))
+                {
+                    if (
+                        box.Bounds.Y < contentTop - 0.01f
+                        || box.Bounds.Y + box.Bounds.Height > contentBottom + 0.01f
+                    )
+                        return true;
+                    break;
+                }
+        }
+        return false;
     }
 
     private static void ConstrainMenuHeight(Element root, float availableHeight)
@@ -461,7 +530,8 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
                 depth,
                 registration.Trigger,
                 active: false,
-                focusFirst: false
+                focusFirst: false,
+                adaptiveStockScrollbar: UsesStockScrollbar(root)
             );
             registration.Level = level;
             _levels.Add(level);
@@ -635,7 +705,8 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
             int depth,
             ElementIdentity? parentTrigger,
             bool active,
-            bool focusFirst
+            bool focusFirst,
+            bool adaptiveStockScrollbar
         )
         {
             Composition = composition;
@@ -643,6 +714,7 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
             Depth = depth;
             ParentTrigger = parentTrigger;
             Active = active;
+            AdaptiveStockScrollbar = adaptiveStockScrollbar;
             Snapshot = new(depth, composition, parentTrigger, focusFirst);
         }
 
@@ -651,6 +723,10 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
         internal int Depth { get; }
         internal ElementIdentity? ParentTrigger { get; }
         internal bool Active { get; set; }
+        internal bool AdaptiveStockScrollbar { get; }
+        internal bool HasAdaptiveMeasurement { get; set; }
+        internal long AdaptiveRevision { get; set; }
+        internal LayoutViewport AdaptiveViewport { get; set; }
         internal MenuLevelSnapshot Snapshot { get; set; }
     }
 

@@ -8,6 +8,12 @@ public component ComponentExample(ComponentBrowserState browser) {
         if (browser.SelectedId == "fields") {
             <FieldsExample browser={browser} />
         }
+        if (browser.SelectedId == "password") {
+            <PasswordExample browser={browser} />
+        }
+        if (browser.SelectedId == "combo-box") {
+            <ComboBoxExample browser={browser} />
+        }
         if (browser.SelectedId == "selection") {
             <SelectionExample browser={browser} />
         }
@@ -19,6 +25,24 @@ public component ComponentExample(ComponentBrowserState browser) {
         }
         if (browser.SelectedId == "surfaces") {
             <PopoverExample browser={browser} />
+        }
+        if (browser.SelectedId == "numeric") {
+            <NumericExample browser={browser} />
+        }
+        if (browser.SelectedId == "date-time") {
+            <DateTimeExample browser={browser} />
+        }
+        if (browser.SelectedId == "navigation") {
+            <NavigationExample browser={browser} />
+        }
+        if (browser.SelectedId == "tree") {
+            <TreeExample browser={browser} />
+        }
+        if (browser.SelectedId == "storage") {
+            <StorageExample browser={browser} />
+        }
+        if (browser.SelectedId == "table") {
+            <TableExample browser={browser} />
         }
     </Layout>
 }

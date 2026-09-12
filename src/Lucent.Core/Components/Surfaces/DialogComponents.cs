@@ -134,7 +134,7 @@ public static partial class Components
                     .Set(VisualProperties.CornerRadius, 8f);
                 root.Present(context.Theme, component, style);
                 root.AttachBehaviors(
-                    new DialogBehavior(controller, defaultAccept, defaultAcceptAsync)
+                    new DialogBehavior(controller, title, defaultAccept, defaultAcceptAsync)
                 );
                 context.Mount(root, content);
             }
@@ -143,15 +143,18 @@ public static partial class Components
 
     private sealed class DialogBehavior(
         DialogControllerBase controller,
+        string title,
         Action? defaultAccept,
         Func<ValueTask>? defaultAcceptAsync
     ) : Behavior
     {
         public override string Name => "dialog";
-        public override BehaviorOwnership Ownership => BehaviorOwnership.Action;
+        public override BehaviorOwnership Ownership =>
+            BehaviorOwnership.Action | BehaviorOwnership.Semantics;
 
         public override void Attach(BehaviorContext context)
         {
+            context.SetSemantics(new(SemanticRole.Group, title));
             context.OnKey(route =>
             {
                 if (

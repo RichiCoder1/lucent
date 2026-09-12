@@ -1,7 +1,8 @@
 namespace Lucent.Core;
 
 style TabHeaderLabelStyle {
-    TextWrap: TextWrap.WordWithGraphemeFallback;
+    TextWrap: TextWrap.NoWrap;
+    Overflow: TextOverflow.Ellipsis;
 }
 
 internal component TabHeaderContent(TabHeaderBinding binding) {

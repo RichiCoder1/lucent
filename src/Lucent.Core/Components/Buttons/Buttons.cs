@@ -23,6 +23,13 @@ public static partial class Components
         [DefaultContent] Func<string> content,
         Action? onInvoke = null,
         Style? style = null
+    ) => ButtonCore(content, onInvoke, style, focusOnPointer: true);
+
+    private static ComponentRecipe ButtonCore(
+        Func<string> content,
+        Action? onInvoke,
+        Style? style,
+        bool focusOnPointer
     )
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -34,7 +41,7 @@ public static partial class Components
                     () => Required(content(), nameof(content)),
                     root.Name + ".button-label"
                 );
-                Controls.Button(root, context.Theme, label.Value, onInvoke, style);
+                Controls.Button(root, context.Theme, label.Value, onInvoke, style, focusOnPointer);
                 _ = root.Scope.Effect(
                     () =>
                     {

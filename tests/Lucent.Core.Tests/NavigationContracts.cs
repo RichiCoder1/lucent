@@ -41,6 +41,14 @@ public sealed class NavigationContracts
         Assert.AreEqual(1, mounts["a"]);
         var alphaPanel = Node(composition, "Alpha panel");
         var scene = Install(composition, graph);
+        var tabBounds = Tabs(composition)
+            .Select(tab =>
+                scene.Boxes.Single(box => box.Identity.ElementId == tab.Identity.ElementId).Bounds
+            )
+            .ToArray();
+        Assert.IsTrue(tabBounds[0].X < tabBounds[1].X && tabBounds[1].X < tabBounds[2].X);
+        Assert.AreEqual(tabBounds[0].Y, tabBounds[1].Y);
+        Assert.AreEqual(tabBounds[1].Y, tabBounds[2].Y);
         Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
         Assert.AreEqual("Alpha", FocusedTab(composition).Name);
         Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Down)).Handled);

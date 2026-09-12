@@ -4,18 +4,26 @@ public static partial class Components
 {
     /// <summary>Creates a noninteractive component that displays status text.</summary>
     [LucentComponent]
-    public static ComponentRecipe Status([DefaultContent] string content, Style? style = null)
+    public static ComponentRecipe Status(
+        [DefaultContent] string content,
+        Style? style = null,
+        SemanticAnnouncement announcement = SemanticAnnouncement.None
+    )
     {
         content = Required(content, nameof(content));
         return ComponentRecipe.Create(
             "status",
-            (context, root) => Controls.Loading(root, context.Theme, content, style)
+            (context, root) => Controls.Loading(root, context.Theme, content, style, announcement)
         );
     }
 
     /// <summary>Creates a noninteractive status component whose text follows the supplied reader.</summary>
     [LucentComponent]
-    public static ComponentRecipe Status([DefaultContent] Func<string> content, Style? style = null)
+    public static ComponentRecipe Status(
+        [DefaultContent] Func<string> content,
+        Style? style = null,
+        SemanticAnnouncement announcement = SemanticAnnouncement.None
+    )
     {
         ArgumentNullException.ThrowIfNull(content);
         return ComponentRecipe.Create(
@@ -26,7 +34,7 @@ public static partial class Components
                     () => Required(content(), nameof(content)),
                     root.Name + ".status-read"
                 );
-                var state = Controls.Loading(root, context.Theme, value.Value, style);
+                var state = Controls.Loading(root, context.Theme, value.Value, style, announcement);
                 _ = root.Scope.Effect(() => state.Label = value.Value, root.Name + ".status");
             }
         );

@@ -15,8 +15,6 @@ public sealed class IssueBrowserViewState
         ListViewport = new(owner, name: "browser-view.list");
         DetailViewport = new(owner, name: "browser-view.detail");
         SearchEditor = new(owner, "issue-search", browser.Search);
-        StatusEditor = new(owner, "issue-status", browser.Status);
-        AssigneeEditor = new(owner, "issue-assignee", browser.Assignee);
         int? previous = null;
         _ = owner.Effect(
             () =>
@@ -37,8 +35,6 @@ public sealed class IssueBrowserViewState
     public ViewportState ListViewport { get; }
     public ViewportState DetailViewport { get; }
     public EditorSession SearchEditor { get; }
-    public EditorSession StatusEditor { get; }
-    public EditorSession AssigneeEditor { get; }
 
     /// <summary>Gets the route signal used by responsive pane styles without starting issue loading.</summary>
     public bool DetailsRoute => _showDetails.Value;
@@ -71,8 +67,6 @@ public sealed class IssueBrowserViewState
     public void ClearFilters()
     {
         SearchEditor.Text = "";
-        StatusEditor.Text = "all";
-        AssigneeEditor.Text = "all";
         _browser.Search = "";
         _browser.Status = "all";
         _browser.Assignee = "all";

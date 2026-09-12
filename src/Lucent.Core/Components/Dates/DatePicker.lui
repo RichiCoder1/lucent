@@ -1,0 +1,26 @@
+namespace Lucent.Core;
+using System;
+
+/// <summary>Creates a controlled local-date field with Gregorian localized text and an anchored calendar.</summary>
+public component DatePicker(
+    string label,
+    Func<DateOnly?> value,
+    Action<DateOnly?> onValueRequested,
+    DatePickerOptions? options = null,
+    DateTimeFieldOptions? field = null
+) {
+    readonly DatePickerOptions policy = DatePolicy(options);
+    readonly DateTimeFieldOptions fieldPolicy = DateTimeFieldPolicy(field);
+    readonly DateEditSession date = new(owner, value, onValueRequested, policy, fieldPolicy.FieldId ?? label);
+    <Field
+        label={label}
+        editor={context => DatePickerEditor(context, date, fieldPolicy.Enabled, fieldPolicy.ReadOnly)}
+        validation={() => CombinedValidation(date.Validation, fieldPolicy.Validation)}
+        help={fieldPolicy.Help}
+        session={fieldPolicy.Form}
+        fieldId={fieldPolicy.FieldId}
+        participation={fieldPolicy.Participation}
+        required={fieldPolicy.Required}
+        style={fieldPolicy.Style}
+    />
+}

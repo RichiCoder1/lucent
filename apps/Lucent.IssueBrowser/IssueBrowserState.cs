@@ -133,6 +133,18 @@ public sealed class IssueBrowserState
         _selectedNumber.Value is { } number && _messages.Value.TryGetValue(number, out var message)
             ? message
             : null;
+
+    public IReadOnlyList<ChoiceItem<string>> StatusOptions { get; } =
+    [new("all", "All statuses"), new("open", "Open"), new("closed", "Closed")];
+
+    public IReadOnlyList<ChoiceItem<string>> AssigneeOptions { get; } =
+    [
+        new("all", "All assignees"),
+        new("marta", "Marta"),
+        new("devin", "Devin"),
+        new("joel", "Joel"),
+    ];
+
     public bool CanRetrySelected
     {
         get

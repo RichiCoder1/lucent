@@ -7,6 +7,29 @@ namespace Lucent.Renderer.Skia.Tests;
 public sealed class CacheOwnershipTests
 {
     [TestMethod]
+    public void ConfidentialTextBypassesRetainedShapeAndParagraphCaches()
+    {
+        using var renderer = new SkiaSceneRenderer();
+        var request = new TextMeasureRequest(
+            "example-only-secret",
+            "Segoe UI",
+            16,
+            "en",
+            TextDirection.LeftToRight,
+            1,
+            IsConfidential: true
+        );
+
+        var first = renderer.Shape(request);
+        var paragraphs = renderer.ParagraphShapeCount;
+        var second = renderer.Shape(request);
+
+        Assert.AreEqual(paragraphs + 1, renderer.ParagraphShapeCount);
+        Assert.AreEqual(0L, renderer.RetainedParagraphBytes);
+        Assert.AreEqual(first.Identity, second.Identity);
+    }
+
+    [TestMethod]
     [DataRow("width")]
     [DataRow("scale")]
     [DataRow("family")]

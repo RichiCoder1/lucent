@@ -115,6 +115,10 @@ public sealed class DialogSurfaceRequest : PopupSurfaceRequest
                 },
                 "dialog-theme"
             );
+            popup.Root.Present(
+                theme,
+                component: Style.Empty.Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)
+            );
             _root = popup.Mount(
                 popup.Root,
                 theme,
@@ -144,10 +148,9 @@ public sealed class DialogSurfaceRequest : PopupSurfaceRequest
     {
         ArgumentNullException.ThrowIfNull(shaper);
         var popup = CreateComposition();
-        _root!.UpdateControl(LayoutProperties.MaxWidth, Math.Max(1, available.Width));
-        _root.UpdateControl(LayoutProperties.MaxHeight, Math.Max(1, available.Height));
+        var root = _root ?? throw new InvalidOperationException("Dialog content is unavailable.");
         using var scene = SceneLayout.Project(popup, available, shaper);
-        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == _root.Id).Bounds;
+        var bounds = scene.Boxes.Single(box => box.Identity.ElementId == root.Id).Bounds;
         return new(
             0,
             0,

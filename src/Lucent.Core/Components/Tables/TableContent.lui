@@ -1,0 +1,24 @@
+namespace Lucent.Core;
+
+style TableOuterStyle {
+    Axis: LayoutAxis.Column;
+    Height: 280;
+    Clip: true;
+}
+
+style TableHorizontalStyle {
+    MainGrow: 1;
+    MainShrink: 1;
+    MinHeight: 0;
+}
+
+internal component TableContent(TableBinding binding, ComponentRecipe header, ComponentRecipe rows, Style? style) {
+    <TableHost binding={binding} style={TableOuterStyle.With(style)}>
+        <ScrollViewport label="Table columns" style={TableHorizontalStyle.Set(ScrollBarProperties.Visibility, ScrollBarVisibility.Hidden)}>
+            <Layout style={Style.Empty.Bind(LayoutProperties.Width, () => (float?)binding.Width()).Bind(LayoutProperties.Height, () => (float?)binding.Height())}>
+                {header}
+                {rows}
+            </Layout>
+        </ScrollViewport>
+    </TableHost>
+}

@@ -83,11 +83,12 @@ public sealed partial class IssueBrowserTests
             nodes
                 .Where(node => node.Role == SemanticRole.TextField)
                 .Select(node => node.Name)
-                .SequenceEqual([
-                    "Search issues",
-                    "Status: all, open, closed",
-                    "Assignee: all, marta, devin, joel",
-                ])
+                .SequenceEqual(["Search issues"])
+                && nodes.Count(node => node.Role == SemanticRole.ComboBox && node.Name == "Status")
+                    == 1
+                && nodes.Count(node =>
+                    node.Role == SemanticRole.ComboBox && node.Name == "Assignee"
+                ) == 1
                 && nodes.Any(node => node.Role == SemanticRole.ListItem)
                 && nodes.Count(node => node.Role == SemanticRole.ListItem)
                     <= RealizedRowBound(scene, composition, 30f)
@@ -156,7 +157,7 @@ public sealed partial class IssueBrowserTests
     }
 
     [TestMethod]
-    public void CompiledFilterBarUsesHoistedEditors()
+    public void CompiledFilterBarKeepsHoistedSearchEditor()
     {
         using var composition = LoadedComposition(out var graph, out var browser);
         using var renderer = new SkiaSceneRenderer();

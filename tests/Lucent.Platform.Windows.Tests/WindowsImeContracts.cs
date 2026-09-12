@@ -8,6 +8,99 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed class WindowsImeContracts
 {
     [TestMethod]
+    public void PublicPasswordFieldKeepsWindowsImeCommitAndCancelConfidential()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "windows-password-ime");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var applied = graph.Signal("synthetic-secret", "password-applied");
+        var requests = new List<string>();
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Width(320).Height(80).Axis(LayoutAxis.Column)
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.PasswordField(
+                "Password",
+                () => applied.Value,
+                value =>
+                {
+                    requests.Add(value);
+                    applied.Value = value;
+                }
+            )
+        );
+        graph.Drain();
+        Install(composition);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Install(composition);
+
+        var active = false;
+        var starts = 0;
+        var clears = 0;
+        SDL.TextInputType? startedInputType = null;
+        using var adapter = new WindowsInputAdapter(
+            composition,
+            1,
+            textInput: new TextInputTransport(
+                _ => active,
+                _ =>
+                {
+                    active = true;
+                    starts++;
+                    return true;
+                },
+                _ =>
+                {
+                    active = false;
+                    return true;
+                },
+                (_, _, _) => true,
+                _ =>
+                {
+                    clears++;
+                    return true;
+                },
+                (_, inputType) =>
+                {
+                    active = true;
+                    starts++;
+                    startedInputType = inputType;
+                    return true;
+                }
+            )
+        );
+
+        adapter.RefreshTextInput();
+        Assert.AreEqual(1, starts, "The focused password editor did not start SDL text input.");
+        Assert.AreEqual(
+            SDL.TextInputType.TextPasswordHidden,
+            startedInputType,
+            "The public password editor did not request SDL's confidential input type."
+        );
+        AssertPasswordSemanticsAreConfidential(composition, "synthetic-secret");
+
+        // Synthetic SDL text events prove Lucent's composition routing contract here. They do
+        // not stand in for certification with a particular installed language IME.
+        Assert.IsTrue(adapter.DispatchText(new(TextInputKind.Preedit, "候", 0, 1)));
+        Assert.AreEqual(0, requests.Count, "Password preedit escaped as an applied value request.");
+        AssertPasswordSemanticsAreConfidential(composition, "候");
+
+        Assert.IsTrue(adapter.DispatchText(new(TextInputKind.Cancel, "")));
+        Assert.AreEqual(1, clears, "Cancel did not clear the native password composition.");
+        Assert.AreEqual(0, requests.Count, "Cancel changed the controlled password value.");
+
+        Assert.IsTrue(adapter.DispatchText(new(TextInputKind.Preedit, "候", 0, 1)));
+        Assert.IsTrue(adapter.DispatchText(new(TextInputKind.Commit, "候")));
+        graph.Drain();
+        Assert.AreEqual("synthetic-secret候", requests.Single());
+        Assert.AreEqual(requests.Single(), applied.Value);
+        AssertPasswordSemanticsAreConfidential(composition, applied.Value);
+    }
+
+    [TestMethod]
     public void OwnerFocusRoundTripCancelsImeBeforeAcceptingNewText()
     {
         using var composition = CreateComposition(out var state, multiline: false);
@@ -155,6 +248,32 @@ public sealed class WindowsImeContracts
         Assert.AreEqual("draft", state.Value);
     }
 
+    [TestMethod]
+    public void DisposedPopupCompositionStillStopsNativeTextInputDuringHostCleanup()
+    {
+        var composition = new Composition(new ReactiveGraph(), "disposed-popup-input");
+        var stops = 0;
+        var adapter = new WindowsInputAdapter(
+            composition,
+            1,
+            textInput: new TextInputTransport(
+                _ => true,
+                _ => true,
+                _ =>
+                {
+                    stops++;
+                    return true;
+                },
+                (_, _, _) => true
+            )
+        );
+
+        composition.Dispose();
+        adapter.Dispose();
+
+        Assert.AreEqual(1, stops, "Disposed Core state prevented native input cleanup.");
+    }
+
     private static WindowsInputAdapter CreateAdapter(Composition composition, Action clear)
     {
         return new WindowsInputAdapter(
@@ -236,6 +355,27 @@ public sealed class WindowsImeContracts
         composition.Flush();
         var scene = SceneLayout.Project(composition, new(220, 100, 1), renderer);
         Assert.IsTrue(composition.Input.SetScene(scene), "Windows IME scene did not install.");
+    }
+
+    private static void AssertPasswordSemanticsAreConfidential(
+        Composition composition,
+        string forbiddenText
+    )
+    {
+        var editor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.IsTrue(editor.IsPassword, "PasswordField lost its confidential classification.");
+        Assert.IsNull(editor.Value, "PasswordField exposed a semantic value.");
+        Assert.IsNull(editor.Text, "PasswordField exposed semantic text.");
+        Assert.IsFalse(composition.Dump().Contains(forbiddenText, StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<SemanticSnapshot> Nodes(SemanticSnapshot node)
+    {
+        yield return node;
+        foreach (var child in node.Children)
+        foreach (var descendant in Nodes(child))
+            yield return descendant;
     }
 
     private static SDL.Event Key(SDL.Keycode key, SDL.Keymod modifiers = 0) =>

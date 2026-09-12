@@ -294,6 +294,8 @@ public sealed partial class InputRouter
                 command.Kind == PointerCommandKind.Cancel ? null
                     : scrollbar is { } hoveredBar ? hoveredBar.Viewport
                     : Hit(command.X, command.Y),
+                command.X,
+                command.Y,
                 errors
             );
             UpdateScrollBarHover(
@@ -959,10 +961,19 @@ public sealed partial class InputRouter
         ReactiveScope scope,
         TextFieldState state,
         FocusTarget target
+    ) => RegisterFocusTarget(elementId, scope, target, state);
+
+    internal void RegisterFocusTarget(long elementId, ReactiveScope scope, FocusTarget target) =>
+        RegisterFocusTarget(elementId, scope, target, null);
+
+    private void RegisterFocusTarget(
+        long elementId,
+        ReactiveScope scope,
+        FocusTarget target,
+        TextFieldState? state
     )
     {
         ArgumentNullException.ThrowIfNull(scope);
-        ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(target);
         if (!ReferenceEquals(target.Graph, _composition.Graph))
             throw new ArgumentException(
@@ -971,7 +982,7 @@ public sealed partial class InputRouter
             );
         if (_focusTargets.ContainsKey(target))
             throw new InvalidOperationException(
-                "A focus target can have only one live mounted text control."
+                "A focus target can have only one live mounted control."
             );
         var registration = new FocusTargetRegistration(elementId, state);
         _focusTargets.Add(target, registration);
@@ -1408,9 +1419,14 @@ public sealed partial class InputRouter
         }
     }
 
-    private void UpdateHover(ElementIdentity? hit, List<Exception> errors)
+    private void UpdateHover(
+        ElementIdentity? hit,
+        float pointerX,
+        float pointerY,
+        List<Exception> errors
+    )
     {
-        UpdateTooltipHover(hit, errors);
+        UpdateTooltipHover(hit, pointerX, pointerY, errors);
         ElementIdentity? next = null;
         if (hit is { } identity && Eligible(identity))
         {
@@ -1432,7 +1448,7 @@ public sealed partial class InputRouter
             SetHoverVisual(current, true, errors);
     }
 
-    private void ClearHover(List<Exception> errors) => UpdateHover(null, errors);
+    private void ClearHover(List<Exception> errors) => UpdateHover(null, 0, 0, errors);
 
     private void UpdateScrollBarHover(ElementIdentity? viewport)
     {
@@ -1539,7 +1555,10 @@ public sealed partial class InputRouter
     {
         if (!target.TryGetPending(out var request) || _scene is null)
             return false;
-        if (EnsureScene(errors) is not null)
+        // A programmatic focus request can be raised by the same mutation that
+        // invalidates layout. Keep it pending for SetScene rather than clearing
+        // an existing editor focus against geometry that is already stale.
+        if (_composition.IsInteractionSuspended || !ValidateScene(_scene))
             return false;
         if (
             !_input.TryGetValue(registration.ElementId, out var retained)
@@ -1554,8 +1573,8 @@ public sealed partial class InputRouter
             return false;
         if (request.SelectAll)
         {
-            registration.State.CancelComposition();
-            registration.State.SelectAll();
+            registration.State?.CancelComposition();
+            registration.State?.SelectAll();
         }
         return target.TryConsume(request.Generation);
     }
@@ -1947,8 +1966,12 @@ public sealed partial class InputRouter
             return null;
         var paragraph = _scene.Boxes.FirstOrDefault(box => box.Identity == identity).Text;
         return
-            paragraph?.SourceText is { } source
-            && StringComparer.Ordinal.Equals(source, state.DisplayText)
+            paragraph is not null
+            && (
+                state.IsConfidential
+                || paragraph.SourceText is { } source
+                    && StringComparer.Ordinal.Equals(source, state.DisplayText)
+            )
             ? paragraph
             : null;
     }
@@ -1962,8 +1985,13 @@ public sealed partial class InputRouter
         var text = FindTextNode(_scene.Nodes, identity);
         if (
             text is null
-            || text.Text.SourceText is not { } source
-            || !StringComparer.Ordinal.Equals(source, state.DisplayText)
+            || (
+                !state.IsConfidential
+                && (
+                    text.Text.SourceText is not { } source
+                    || !StringComparer.Ordinal.Equals(source, state.DisplayText)
+                )
+            )
         )
             return null;
         return text.Text.HitTest(state.DisplayText, x - text.Bounds.X, y - text.Bounds.Y);
@@ -2250,10 +2278,10 @@ public sealed partial class InputRouter
         public BehaviorContext Context { get; } = context;
     }
 
-    private sealed class FocusTargetRegistration(long elementId, TextFieldState state)
+    private sealed class FocusTargetRegistration(long elementId, TextFieldState? state)
     {
         public long ElementId { get; } = elementId;
-        public TextFieldState State { get; } = state;
+        public TextFieldState? State { get; } = state;
     }
 
     private sealed class Scrollable(ScrollViewportState state)
