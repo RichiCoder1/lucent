@@ -1,45 +1,40 @@
 # Current work and follow-ups
 
-## Component delivery status — September 12, 2026
+## Published checkpoint — September 12, 2026
 
-The authorized component program is #155–171. Its component families and the maintained Component Browser are implemented in the shared working tree. This checkpoint records verified local evidence and remaining delivery work; it does not claim completion, publication, or issue closure.
+The component program #155–171 is delivered, closed and Done in Project 4. [Final delivery evidence](https://github.com/RichiCoder1/lucent/issues/171#issuecomment-5649183562) records the source boundaries and verification limits.
 
-### Verified local evidence
+- Lucent: `f6fbc4ff29fcd9ab4e5c390825e663fba3d6548a`, immutable package `0.3.0-dev.60.1`. [CI 60](https://github.com/RichiCoder1/lucent/actions/runs/34722441727) passed managed, NativeAOT and package-only consumer checks, then published the verified packages.
+- Light Notes: `48a404d37ff1f1380ab3b549c86d6c46c24f8f07`, independently consuming `0.3.0-dev.60.1`. [App CI](https://github.com/RichiCoder1/light-notes/actions/runs/34723338988) passed managed tests, desktop-test compilation and NativeAOT publication.
 
-- Lucent Core: 448/448.
-- Lucent Platform Windows: 120/120, including public password/IME, Slider, Tree, DatePicker, ComboBox, notification, popup lifetime, focus return, native UIA ABI, and custom popup-host compatibility contracts.
-- Component Browser: 11/11, including 84 stock theme/density captures across the fourteen compiled `.lui` examples.
-- Issue Browser: 20/20.
-- Skia renderer: 80 passed with three opt-in skips.
-- Repaired real-project LSP reference fixture: 1/1.
-- Positive and negative architecture checks: passed.
+The maintained Component Browser contains fourteen compiled `.lui` examples with their actual source. Issue Browser adopts Select for fixed-choice filters. Light Notes adopts Field for URL semantics while preserving its workspace-owned EditorSession, draft and focus through responsive layouts. The reported dialog width, calendar alignment, suggestion sizing, radio clipping, slider alignment, password toggling, menu padding and submenu placement defects are fixed; hover tooltips anchor near the pointer.
 
-The reported Dialog width, calendar alignment, suggestion-list sizing, radio-label clipping, slider-thumb alignment, password-toggle, menu-padding and submenu-placement defects are fixed. Hover tooltips now anchor near the pointer. Native popup windows resize when asynchronous content changes; programmatic focus waits for fresh layout instead of spuriously blurring and remasking a password. Escape cleanup also avoids accessing an already-disposed popup.
+### Verification and performance
 
-Fresh NativeAOT Component Browser and TestHost outputs passed all six selected desktop tests, covering these popup/password interactions, modal ownership/focus, and actual native open/save/folder cancellation. Evidence is in `artifacts/component-native-final-desktop.log`; captures are in `artifacts/component-native-final/captures`. The fresh radio/slider captures were inspected in all six theme/density combinations. Formatting and `git diff --check` pass. Run desktop checks separately from other native Windows tests. The computer-use plugin files are present but its node_repl runtime is absent from this session; do not claim a free-form computer-use walkthrough.
+Local suites passed Core 449/449, Windows 120/120, Component Browser 11/11 with 84 stock theme/density captures, Issue Browser 20/20, Skia 80 with three opt-in skips, and LSP 26/26. Architecture and formatting checks passed. Six selected desktop tests passed against fresh NativeAOT Component Browser/TestHost outputs; radio and slider captures were inspected across all six theme/density combinations. Logs and captures are under `artifacts/component-native-final*`.
 
-Automated UIA and synthetic SDL text-input tests do not certify end-to-end screen-reader delivery or a real installed-language IME candidate window. The existing physical mixed-DPI evidence from #153 remains valid for its recorded source boundary; this batch does not claim a fresh hardware walkthrough.
+The later Enter hotfix lets single-line TextField bubble Enter to CommandScope when no commit callback owns it. Light Notes verifies this final package with physical Enter capture/autosave/reopen, responsive URL draft/focus continuity, and focus rehoming: all three selected native workflows passed. Its managed suites passed storage 22/22 and app 42 with one intentional opt-in skip. Evidence is under Light Notes `artifacts/delivery-*-60.1.log`.
 
-### Remaining steps for #155–171
+Test setup now uses Core metadata for synthetic LSP fixtures that do not require Core source navigation, removes duplicate test-discovery processes, rejects empty runs, and records TRX timings. Managed and package verification run concurrently; publication waits for both and consumes the exact verified artifact. No existing assertions or native/package checks were removed. Measured local LSP time fell from 10m05s to 6m33s (35%); [CI 58](https://github.com/RichiCoder1/lucent/actions/runs/34721289961) took 15m23s versus CI 57's 37m59s. These are observed runs, not runtime IDE-performance claims. A separate Skia churn-fixture fix deterministically admits its intended workload while retaining renderer entry/byte limits and the existing timeout.
 
-1. Commit and push the verified Lucent batch, await required CI and immutable package publication, and record the published package identity. No new CI result, package, or issue closure exists for this batch yet.
-2. Update Light Notes from `0.3.0-dev.55.1` to the newly published immutable package, refresh its lock graphs, and validate the three source changes already waiting in its tree. Those changes adopt `Field` while preserving the workspace-owned URL `EditorSession`; they are source-only and unverified against a new package.
-3. Update the plan, roadmap and child issues with the source/package/native evidence. Close #171 and parent #155 after Light Notes adoption is recorded.
+## Outstanding manual walkthrough
 
-The Design and UI task has published [C# authoring #265](https://github.com/RichiCoder1/lucent/issues/265) and children #266–275 as the next phase, immediately after #155/#171 package and Light Notes closeout and before #203/#204. Begin with #266 on the final accepted source/package baseline; it proves the bounded recipe/capability shape without changing production factory returns. #269 owns the later atomic factory/compiler/metadata/consumer migration. The plan received Fable High review and needs no further owner decisions. Its local design is `D:/.codex/worktrees/1b0a/lucent/advisor-plans/002-csharp-authoring.md`; preserve independently owned advisor plans when integrating it.
+The owner requested one more manual Computer Use walkthrough of every component after delivery. This remains pending: the skill is installed, but this task has no callable `node_repl` runtime. Automated desktop checks and inspected captures do not substitute for the requested walkthrough.
 
-## Scope and constraints
+The fresh NativeAOT browser is ready at `artifacts/component-manual-ready/browser/Lucent.ComponentBrowser.exe`, built from `f6fbc4ff29fcd9ab4e5c390825e663fba3d6548a`; `artifacts/component-manual-ready/source.json` records its SHA-256. When Computer Use becomes callable, exercise all fourteen examples, stock appearances and densities, pointer/keyboard interaction, hover/press/focus, popup placement and resizing. Repeat the owner's calendar, repeated password-toggle, suggestion-width, radio-label, menu/submenu, tooltip-anchor and slider-alignment cases. Record observed results and fix reproduced defects before claiming this pass complete.
 
-This batch is limited to #155–171. Context, injection, navigation, Design and UI, and other tickets #203–264 are outside it. Do not broaden the current delivery to live compilation, another router, product-specific workflows, or deferred component capabilities.
+This delivery also does not claim broad manual accessibility, real-language IME or fresh physical mixed-DPI certification. Earlier #153 hardware evidence remains valid for its recorded source boundary.
 
-The Windows file picker returns selected locations and performs no file I/O. `TableView` remains read-only with fixed-height virtualized rows; editing, formulas, merged cells, grouping, and variable-height rows remain out of scope. Preserve Core portability: Windows owns hosting, input, IME, accessibility, presentation, and native-dialog adaptation.
+## Next implementation
 
-Lucent is at `D:/src/richicoder1/lucent`; Light Notes is at `D:/src/richicoder1/light-notes`. Preserve unrelated `.codex/`, `advisor-plans/`, `docs/plans/windows-sandbox-testing.md`, and `docs/research/` content. Use explicit staging paths, serialize shared-tree builds and foreground tests, and follow [the risk-based verification policy](verification.md). The Dev Drive is backed by `C:/DevDrive/Dev.vhdx`; if `D:` disappears after restart, inspect attachment state before changing anything. Do not format the volume, change partitions, or relax ACLs.
+[Tooling follow-up #276](https://github.com/RichiCoder1/lucent/issues/276) is Todo in Project 4. Metadata-only Find References shares rename's source-definition requirement and can omit authored uses of stock properties. The existing source-project regression and assertions remain intact; the issue records focused acceptance criteria.
 
-## Last published baseline
+The next approved phase is [C# authoring #265](https://github.com/RichiCoder1/lucent/issues/265), children #266–275, before context/navigation #203/#204. Begin with #266 on the final package baseline above: prove the bounded recipe/capability shape without changing production factory returns. #269 owns the later atomic factory/compiler/metadata/consumer migration. The Design and UI task's plan received Fable High review and needs no further owner decisions. Its local design is `D:/.codex/worktrees/1b0a/lucent/advisor-plans/002-csharp-authoring.md`; preserve independently owned advisor plans when integrating it.
 
-The last published Lucent baseline remains commit `bab7cc3523aeeab8d9bce42f0aca5b2955fb1387`, package `0.3.0-dev.55.1`. [CI 55](https://github.com/RichiCoder1/lucent/actions/runs/34394248585) passed its managed, NativeAOT, and package-consumer checks and published that immutable set.
+## Scope and workspace constraints
 
-Light Notes still adopts `0.3.0-dev.55.1` at commit `9c00f75e8c7231074f8dea8df1a5f5a7d26e5b74`. [App CI 21](https://github.com/RichiCoder1/light-notes/actions/runs/34397155971) passed managed tests, desktop-test compilation, and NativeAOT publication for that baseline. Do not attribute the current component working tree or its pending Light Notes changes to those published results.
+The completed component batch was limited to #155–171. Live compilation, context/injection/navigation, and other #203–264 work remain separate. The Windows file picker selects locations without file I/O. TableView remains read-only with fixed-height virtualized rows. Preserve Core portability; Windows owns hosting, input, IME, accessibility, presentation and native-dialog adaptation.
 
-Earlier completed asset, motion, focus-continuity, responsive-layout, native-menu, and physical mixed-DPI delivery records remain authoritative for their committed source boundaries. See [the component execution plan](../plans/component-delivery.md), [testing guide](../TESTING.md), and individual issue records for their detailed evidence.
+Lucent is at `D:/src/richicoder1/lucent`; Light Notes is at `D:/src/richicoder1/light-notes`. Preserve unrelated `.codex/`, `.dotnet-home/`, `advisor-plans/`, `docs/plans/windows-sandbox-testing.md`, and `docs/research/` content. Use explicit staging paths, serialize shared-tree builds and foreground tests, and follow [risk-based verification](verification.md). The Dev Drive is backed by `C:/DevDrive/Dev.vhdx`; if `D:` disappears after restart, inspect attachment state before changing anything. Do not format the volume, change partitions or relax ACLs.
+
+Earlier asset, motion, focus-continuity, responsive-layout, native-menu and mixed-DPI records remain authoritative for their committed source boundaries. See [the component execution plan](../plans/component-delivery.md), [testing guide](../TESTING.md) and individual delivery issues for details.

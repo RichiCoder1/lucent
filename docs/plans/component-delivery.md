@@ -1,6 +1,6 @@
 # Component program execution
 
-Status: authorized September 9, 2026. Parent [#155](https://github.com/RichiCoder1/lucent/issues/155) and children #156–171 own the full baseline component delivery. The accepted ticket contracts remain authoritative; recheck them against the current runtime rather than treating the original audit as current code.
+Status: delivered September 12, 2026. Parent [#155](https://github.com/RichiCoder1/lucent/issues/155) and children #156–171 are closed. The accepted ticket contracts remain authoritative; the original audit is historical context.
 
 ## Owner decisions
 
@@ -43,7 +43,7 @@ exercise Grid/Table/ItemContainer through their COM ABI, bounded offscreen
 realization, password confidentiality and picker lifecycle outcomes. The desktop
 suite includes a published native-dialog cancellation proof.
 
-September 12 integration passes Core 448/448, Windows 120/120 and Component
+September 12 integration passes Core 449/449, Windows 120/120 and Component
 Browser 11/11, with 84 fresh example captures. All six selected desktop checks
 pass against fresh NativeAOT Browser/TestHost outputs: popup dimensions and
 lifetimes, password pointer toggling, calendar/suggestion geometry, submenu
@@ -51,7 +51,18 @@ placement, modal focus and native file-picker cancellation. The reported visual
 defects are fixed in the framework; radio labels and slider alignment were
 inspected across all six stock theme/density combinations.
 
-CI/package publication and independent Light Notes adoption remain before
-closing #171 and the parent. The computer-use runtime is unavailable in the
-current session, so these results do not claim a fresh free-form walkthrough,
-broad manual accessibility, real-language IME or physical mixed-DPI certification.
+The final implementation is published from `f6fbc4ff29fcd9ab4e5c390825e663fba3d6548a`
+as `0.3.0-dev.60.1`; [CI 60](https://github.com/RichiCoder1/lucent/actions/runs/34722441727)
+passed managed, NativeAOT and package-only consumer checks. Light Notes independently
+adopts it at `48a404d37ff1f1380ab3b549c86d6c46c24f8f07`, with
+[App CI](https://github.com/RichiCoder1/light-notes/actions/runs/34723338988) green.
+Its local checks passed 22 storage tests, 42 app tests with one opt-in skip, and
+three native workflows covering physical Enter capture/autosave/reopen and
+responsive URL draft/focus continuity. The physical Enter workflow covers the
+TextField command-routing fix made after the component desktop run.
+
+The additionally requested final Computer Use walkthrough remains pending because
+its runtime is unavailable in this task. These automated results do not claim that
+walkthrough, broad manual accessibility, real-language IME or fresh physical
+mixed-DPI certification. The [handoff](../agents/remaining-work-handoff.md) identifies
+the prepared browser build and outstanding manual scope.
