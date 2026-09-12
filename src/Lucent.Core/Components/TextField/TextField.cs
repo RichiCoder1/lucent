@@ -846,9 +846,11 @@ internal sealed class TextFieldBehavior(
                 switch (route.Command.Key)
                 {
                     case Key.Enter when !state.IsMultiline:
+                        if (committed is null)
+                            return;
                         if (IsReadOnly())
                             break;
-                        committed?.Invoke();
+                        committed();
                         break;
                     case Key.Escape when !state.IsMultiline && cancelled is not null:
                         if (IsReadOnly())

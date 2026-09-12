@@ -306,6 +306,53 @@ public sealed class CommandContracts
     }
 
     [TestMethod]
+    public void UnownedSingleLineEnterBubblesToNearestCommandScope()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "text-field-command-scope");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var runs = 0;
+        using var capture = new ApplicationCommand(
+            composition.Root.Scope,
+            _ =>
+            {
+                runs++;
+                return Task.CompletedTask;
+            },
+            name: "capture"
+        );
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.CommandScope(
+                [Components.TextField(label: "Capture", placeholder: "")],
+                new CommandBindings([new(capture, new(Key.Enter, KeyModifiers.None))])
+            )
+        );
+        composition.Flush();
+        using var initial = SceneLayout.Project(composition, new(300, 100, 1), new EmptyShaper());
+        Assert.IsTrue(composition.Input.SetScene(initial));
+        var field = composition
+            .SemanticSnapshot()!
+            .Children.SelectMany(Flatten)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.IsTrue(
+            composition.Input.FocusSemantic(
+                new(field.Identity.CompositionEpoch, field.Identity.ElementId)
+            )
+        );
+        composition.Flush();
+        using var focused = SceneLayout.Project(composition, new(300, 100, 1), new EmptyShaper());
+        Assert.IsTrue(composition.Input.SetScene(focused));
+
+        Assert.IsTrue(
+            composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled,
+            "The nearest command scope did not consume Enter from its focused public TextField."
+        );
+        Assert.AreEqual(1, runs, "The public TextField swallowed an unowned Enter chord.");
+    }
+
+    [TestMethod]
     public void CommandBindingsRejectDuplicateChords()
     {
         var graph = new ReactiveGraph();
@@ -329,6 +376,14 @@ public sealed class CommandContracts
                 .Set(LayoutProperties.Axis, LayoutAxis.Column)
                 .Set(LayoutProperties.Clip, true)
         );
+
+    private static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot node)
+    {
+        yield return node;
+        foreach (var child in node.Children)
+        foreach (var descendant in Flatten(child))
+            yield return descendant;
+    }
 
     private sealed class FocusTarget : Behavior
     {
