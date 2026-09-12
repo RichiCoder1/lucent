@@ -341,7 +341,12 @@ public sealed class ImagePreparationTests
         const int imageCount = 260;
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "renderer-image-cache-churn");
-        composition.ConfigureImages(new ImageCache(new ImmediatePreparer()));
+        var preparer = new GatedPreparer();
+        var cache = new ImageCache(
+            preparer,
+            new ImageLoadLimits(maximumQueuedRequests: imageCount)
+        );
+        composition.ConfigureImages(cache);
         var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         composition.Root.Present(
             theme,
@@ -366,10 +371,26 @@ public sealed class ImagePreparationTests
         }
 
         using var renderer = new SkiaSceneRenderer();
+        var viewport = new LayoutViewport(imageCount + 2, 2, 1);
+        using (var loading = SceneLayout.Project(composition, viewport, renderer))
+        {
+            var metrics = cache.Metrics;
+            Assert.AreEqual(
+                imageCount,
+                metrics.Active + metrics.Queued,
+                "The renderer churn fixture did not hold every unique preparation concurrently."
+            );
+            Assert.AreEqual(
+                0L,
+                metrics.BudgetDeclines,
+                "The renderer cache fixture exceeded its declared Core admission budget."
+            );
+        }
+        preparer.Release();
         using var scene = ReadyScene(
             composition,
             renderer,
-            new(imageCount + 2, 2, 1),
+            viewport,
             minimumImageCount: imageCount
         );
         using var bitmap = new SKBitmap(
@@ -795,6 +816,24 @@ public sealed class ImagePreparationTests
         {
             LatestImage = new RasterImage(_width, _height, _pixels);
             return ValueTask.FromResult<PreparedImage>(LatestImage);
+        }
+    }
+
+    private sealed class GatedPreparer : IImagePreparer
+    {
+        private readonly TaskCompletionSource _release = new(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+
+        internal void Release() => _release.TrySetResult();
+
+        public async ValueTask<PreparedImage> PrepareAsync(
+            ImagePreparationRequest request,
+            CancellationToken cancellationToken
+        )
+        {
+            await _release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new RasterImage(1, 1, [255, 0, 0, 255]);
         }
     }
 }
