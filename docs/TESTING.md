@@ -18,6 +18,8 @@ Use the smallest meaningful check for the behavior you changed. The repository u
 
 The affected-file helper includes relevant downstream suites and falls back to all managed tests for shared or unrecognized changes. Documentation-only changes need content and link inspection. Select additional checks by behavior; a path-based selection does not establish that published interaction or packaging works.
 
+Managed runs write per-test results and durations to `artifacts/test/managed/<project>/results.trx`; CI retains these reports for five days, including failed runs. Test execution requires at least one matching test, so an empty filter fails without a separate discovery process.
+
 ## Additional suites
 
 Presentation motion uses deterministic `MotionContracts`, `StockMotionContracts` and `MotionProjectionContracts` in Core, real-pixel `MotionPaintTests` in Skia, and the headless and Windows scheduling contracts. They cover retargeting, cancellation, retained geometry/shaping, image ownership, reduced motion and accessibility snapshot reuse. The opt-in `MotionPerformanceTests` compares 1, 100 and 1,000 active tracks with `Motion.None`; set `LUCENT_MOTION_CHARACTERIZATION` to an artifact directory to write phase/allocations reports. Issue Browser's `StockRowHoverUsesRetainedPaintAndKeepsSelectionImmediate` adds its 10,000-item virtualized source as a consumer. These measurements characterize the current machine rather than imposing a universal timing threshold.
@@ -58,6 +60,8 @@ node --test extensions/lucent-lui-vscode/extension.test.cjs
 ```
 
 Windows CI runs this short contract check before the managed .NET suite. The managed check performs the Core architecture/public API preflight after restore/build and before the longer tests; its negative fixture proof remains after those tests.
+
+On main, managed tests and package verification run independently. Publication waits for both to pass and publishes the exact verified package artifact without rebuilding it. NativeAOT and package-consumer checks remain part of package verification.
 
 Tooling measurements use [LuiTooling.Measurements.json](../tools/LuiTooling.Measurements.json). Results distinguish whole-corpus timings from completion, diagnostics, and rename operation timings. Builds happen before measurement; timing limits are optional configuration, not a frozen milestone baseline.
 

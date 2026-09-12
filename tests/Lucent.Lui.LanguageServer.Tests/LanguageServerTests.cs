@@ -138,10 +138,9 @@ public sealed class LanguageServerTests
         {
             var project = Path.Combine(root, "Stateful.csproj");
             var path = Path.Combine(root, "Counter.lui");
-            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
             await File.WriteAllTextAsync(
                 project,
-                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\"{core}\"/><AdditionalFiles Include=\"Counter.lui\"/></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Counter.lui\"/></ItemGroup></Project>"
             );
             const string source = """
 namespace StatefulEditor;
@@ -240,10 +239,9 @@ public component Counter() {
         {
             var project = Path.Combine(root, "Completion.csproj");
             var path = Path.Combine(root, "Main.lui");
-            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
             await File.WriteAllTextAsync(
                 project,
-                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\"{core}\"/><AdditionalFiles Include=\"Main.lui\"/></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Main.lui\"/></ItemGroup></Project>"
             );
             const string source = """
 namespace CompletionEditor;
@@ -283,13 +281,10 @@ public component Main() {
         Directory.CreateDirectory(root);
         try
         {
-            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
             var project = Path.Combine(root, "StructureHover.csproj");
             await File.WriteAllTextAsync(
                 project,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\"/><AdditionalFiles Include=\"*.lui\"/></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"*.lui\"/></ItemGroup></Project>"
             );
             const string source = """
 namespace HoverScale;
@@ -375,10 +370,9 @@ style Panel { Opacity: .5f; }
             var project = Path.Combine(root, "TokenChoice.csproj");
             var helperPath = Path.Combine(root, "Helpers.cs");
             var luiPath = Path.Combine(root, "MenuButton.lui");
-            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
             await File.WriteAllTextAsync(
                 project,
-                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\"{core}\"/><AdditionalFiles Include=\"MenuButton.lui\"/></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"MenuButton.lui\"/></ItemGroup></Project>"
             );
             const string helper = """
 namespace TokenChoice;
@@ -2456,13 +2450,10 @@ public component MenuButton() {
         Directory.CreateDirectory(root);
         try
         {
-            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
             var projectPath = Path.Combine(root, "Content.csproj");
             await File.WriteAllTextAsync(
                 projectPath,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
             );
             var shellUri = new Uri(Path.Combine(root, "Shell.lui"));
             var callerUri = new Uri(Path.Combine(root, "Caller.lui"));
@@ -2634,14 +2625,11 @@ public component MenuButton() {
         Directory.CreateDirectory(root);
         try
         {
-            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
             var projectPath = Path.Combine(root, "ParameterizedStyle.csproj");
             var uri = new Uri(Path.Combine(root, "ParameterizedStyle.lui"));
             await File.WriteAllTextAsync(
                 projectPath,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><Nullable>enable</Nullable><RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
             );
             var source = """
 namespace Sample;
@@ -3670,42 +3658,68 @@ style MotionStyle {
     [TestMethod]
     public async Task DiagnosticsMatchCompilerAndGenerator()
     {
-        await RunDiagnosticParityAsync(CoreProject);
+        await RunDiagnosticParityAsync();
     }
 
     [TestMethod]
     public async Task InvalidLogicalSiblingDoesNotPoisonProject()
     {
-        await RunInvalidLogicalSiblingAsync(CoreProject);
+        await RunInvalidLogicalSiblingAsync();
     }
 
     [TestMethod]
     public async Task AncestorInputReloadInvalidatesDependents()
     {
-        await RunAncestorInputReloadAsync(CoreProject);
+        await RunAncestorInputReloadAsync();
     }
 
     [TestMethod]
     public async Task FreshnessAndProjectGraphChangesInvalidatePublishedDocuments()
     {
-        await RunFreshnessAndProjectGraphRegressionsAsync(CoreProject);
+        await RunFreshnessAndProjectGraphRegressionsAsync();
     }
 
     [TestMethod]
     public async Task DiamondProjectGraphDeduplicatesSharedInputs()
     {
-        await RunDiamondProjectGraphRegressionAsync(CoreProject);
+        await RunDiamondProjectGraphRegressionAsync();
     }
 
     [TestMethod]
     public async Task ExactFreshnessIdentityControlsPublication()
     {
-        await RunExactFreshnessIdentityRegressionAsync(CoreProject);
+        await RunExactFreshnessIdentityRegressionAsync();
     }
 
-    private static string CoreProject => Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
+    private static string CoreMetadataReference
+    {
+        get
+        {
+            var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name;
+            if (String.IsNullOrWhiteSpace(configuration))
+                throw new InvalidOperationException(
+                    "Cannot determine the test build configuration."
+                );
+            var assembly = Path.GetFullPath(
+                Path.Combine(
+                    "src",
+                    "Lucent.Core",
+                    "bin",
+                    configuration,
+                    "net10.0",
+                    "Lucent.Core.dll"
+                )
+            );
+            if (!File.Exists(assembly))
+                throw new FileNotFoundException(
+                    "Build Lucent.Core for the active test configuration before loading metadata-only LSP fixtures.",
+                    assembly
+                );
+            return $"<Reference Include=\"Lucent.Core\"><HintPath>{System.Security.SecurityElement.Escape(assembly)}</HintPath></Reference>";
+        }
+    }
 
-    static async Task RunDiagnosticParityAsync(string core)
+    static async Task RunDiagnosticParityAsync()
     {
         var cases = new[]
         {
@@ -3778,9 +3792,8 @@ style MotionStyle {
             {
                 var projectPath = Path.Combine(root, "Sample.csproj");
                 var project =
-                    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" />"
+                    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>"
+                    + CoreMetadataReference
                     + String.Join(
                         "",
                         testCase.Files.Select(
@@ -3841,7 +3854,7 @@ style MotionStyle {
         }
     }
 
-    static async Task RunInvalidLogicalSiblingAsync(string core)
+    static async Task RunInvalidLogicalSiblingAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-invalid-sibling-" + Guid.NewGuid());
         Directory.CreateDirectory(root);
@@ -3852,9 +3865,7 @@ style MotionStyle {
             var invalid = Path.Combine(root, "Invalid.lui");
             await File.WriteAllTextAsync(
                 projectPath,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><AdditionalFiles Include=\"Consumer.lui\" LucentLuiLogicalPath=\"Consumer.lui\" /><AdditionalFiles Include=\"Invalid.lui\" LucentLuiLogicalPath=\"../Invalid.lui\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Consumer.lui\" LucentLuiLogicalPath=\"Consumer.lui\" /><AdditionalFiles Include=\"Invalid.lui\" LucentLuiLogicalPath=\"../Invalid.lui\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" /></ItemGroup></Project>"
             );
             await File.WriteAllTextAsync(
                 consumer,
@@ -3888,7 +3899,7 @@ style MotionStyle {
         }
     }
 
-    static async Task RunAncestorInputReloadAsync(string core)
+    static async Task RunAncestorInputReloadAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-ancestor-input-" + Guid.NewGuid());
         var projectRoot = Path.Combine(root, "project");
@@ -3898,9 +3909,7 @@ style MotionStyle {
             var projectPath = Path.Combine(projectRoot, "Sample.csproj");
             await File.WriteAllTextAsync(
                 projectPath,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>"
             );
             await File.WriteAllTextAsync(
                 Path.Combine(projectRoot, "Widget.lui"),
@@ -3929,7 +3938,7 @@ style MotionStyle {
         }
     }
 
-    static async Task RunFreshnessAndProjectGraphRegressionsAsync(string core)
+    static async Task RunFreshnessAndProjectGraphRegressionsAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-project-graph-" + Guid.NewGuid());
         var hostRoot = Path.Combine(root, "host");
@@ -3942,16 +3951,12 @@ style MotionStyle {
         var referencedSource = Path.Combine(referencedRoot, "Components.cs");
         var referencedLui = Path.Combine(referencedRoot, "Imported.lui");
         var hostProjectText =
-            "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Host</RootNamespace></PropertyGroup><ItemGroup><ProjectReference Include=\""
-            + core
-            + "\" /><ProjectReference Include=\"../referenced/Referenced.csproj\" /><AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>";
+            $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Host</RootNamespace></PropertyGroup><ItemGroup>{CoreMetadataReference}<ProjectReference Include=\"../referenced/Referenced.csproj\" /><AdditionalFiles Include=\"Widget.lui\" /></ItemGroup></Project>";
         try
         {
             await File.WriteAllTextAsync(
                 referencedProject,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}</ItemGroup></Project>"
             );
             await File.WriteAllTextAsync(
                 referencedSource,
@@ -4069,9 +4074,7 @@ style MotionStyle {
             );
             await File.WriteAllTextAsync(
                 referencedProject,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><AdditionalFiles Include=\"Imported.lui\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Imported.lui\" /></ItemGroup></Project>"
             );
             Assert(
                 await context.ReloadIfRelevantAsync(
@@ -4238,7 +4241,7 @@ style MotionStyle {
         }
     }
 
-    static async Task RunDiamondProjectGraphRegressionAsync(string core)
+    static async Task RunDiamondProjectGraphRegressionAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-diamond-" + Guid.NewGuid());
         var sharedRoot = Path.Combine(root, "shared");
@@ -4264,9 +4267,7 @@ style MotionStyle {
         {
             await File.WriteAllTextAsync(
                 sharedProject,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><AdditionalFiles Include=\"Shared.lui\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Shared.lui\" /></ItemGroup></Project>"
             );
             await File.WriteAllTextAsync(
                 sharedLui,
@@ -4277,10 +4278,7 @@ style MotionStyle {
                 "namespace Linked; using static Lucent.Core.Components; internal component LinkedWidget() { <Row /> }"
             );
             var branchProject =
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                + core
-                + "\" /><ProjectReference Include=\"shared/Shared.csproj\" /><AdditionalFiles Include=\""
-                + "{0}.lui\" /><AdditionalFiles Include=\"Linked.lui\" /></ItemGroup></Project>";
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<ProjectReference Include=\"shared/Shared.csproj\" /><AdditionalFiles Include=\"{{0}}.lui\" /><AdditionalFiles Include=\"Linked.lui\" /></ItemGroup></Project>";
             await File.WriteAllTextAsync(
                 leftProject,
                 String.Format(CultureInfo.InvariantCulture, branchProject, "Left")
@@ -4301,9 +4299,7 @@ style MotionStyle {
             );
             await File.WriteAllTextAsync(
                 hostProject,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><ProjectReference Include=\"../Left.csproj\" /><ProjectReference Include=\"../Right.csproj\" /><AdditionalFiles Include=\"Host.lui\" /></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<ProjectReference Include=\"../Left.csproj\" /><ProjectReference Include=\"../Right.csproj\" /><AdditionalFiles Include=\"Host.lui\" /></ItemGroup></Project>"
             );
             var hostSource =
                 "namespace Host; using static Left.Components; internal component Host() { <LeftWidget /> }";
@@ -4559,7 +4555,7 @@ style MotionStyle {
         }
     }
 
-    static async Task RunExactFreshnessIdentityRegressionAsync(string core)
+    static async Task RunExactFreshnessIdentityRegressionAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-exact-freshness-" + Guid.NewGuid());
         var hostRoot = Path.Combine(root, "host");
@@ -4576,9 +4572,7 @@ style MotionStyle {
                 " LucentLuiLogicalPath=\"Widget.lui\" LucentLuiDocumentVersion=\"same\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiDocumentVersion\" />";
             await File.WriteAllTextAsync(
                 referencedProject,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><AdditionalFiles Include=\"Widget.lui\""
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Widget.lui\""
                     + metadata
                     + "</ItemGroup></Project>"
             );
@@ -4588,9 +4582,7 @@ style MotionStyle {
             );
             await File.WriteAllTextAsync(
                 hostProject,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><ProjectReference Include=\"../referenced/Referenced.csproj\" /><AdditionalFiles Include=\"Widget.lui\""
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<ProjectReference Include=\"../referenced/Referenced.csproj\" /><AdditionalFiles Include=\"Widget.lui\""
                     + metadata
                     + "</ItemGroup></Project>"
             );

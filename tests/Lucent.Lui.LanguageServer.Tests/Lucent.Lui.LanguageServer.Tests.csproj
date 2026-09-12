@@ -5,6 +5,7 @@
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj" />
     <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" />
     <ProjectReference

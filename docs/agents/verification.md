@@ -11,6 +11,8 @@ Use risk-based verification for pre-release work so routine changes stay fast an
 
 The managed repository check runs the inexpensive Core architecture/public API preflight after restore/build and before managed test execution. The negative dependency/public-API fixtures still run after the managed tests, preserving both fast failure and negative evidence. For VS Code extension changes, also run `node --test extensions/lucent-lui-vscode/extension.test.cjs`.
 
+Synthetic language-server fixtures reference the built Core assembly when they only need its public types. Tests for navigation into Core source still load the Core project; project-graph and freshness tests retain their authored project dependencies. Keep these distinctions when adding tests instead of loading the full framework graph by default.
+
 ## Add checks when the change reaches them
 
 - Compiler/language/editor changes: affected parser/compiler/generator/LSP/extension tests. Use the SDK/NativeAOT consumer proof when lowering, packaging, or generated-runtime behavior changes. Measure the affected tooling operation for a credible performance regression.

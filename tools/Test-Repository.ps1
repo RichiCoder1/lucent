@@ -46,17 +46,6 @@ function Resolve-ManagedProjects {
     @($resolved | Sort-Object -Unique)
 }
 
-function Assert-DiscoveredTests([string] $TestProject) {
-    $arguments = @('test', '--project', $TestProject, '--no-build', '--no-restore', '-c', $configuration, '--list-tests')
-    $output = @(& $dotnet @arguments 2>&1)
-    $output | Write-Output
-    if ($LASTEXITCODE) { throw "Test discovery failed ($LASTEXITCODE): $TestProject" }
-    $joined = $output -join [Environment]::NewLine
-    if ($joined -notmatch 'Discovered\s+[1-9][0-9]*\s+tests?\.') {
-        throw "No tests were discovered: $TestProject"
-    }
-}
-
 function Invoke-Managed {
     $selected = @(Resolve-ManagedProjects)
     $runCoreArchitecture = $Project.Count -eq 0 -or $selected -contains 'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj'
@@ -83,8 +72,9 @@ function Invoke-Managed {
         if ($LASTEXITCODE) { throw 'Core architecture preflight failed.' }
     }
     foreach ($testProject in $selected) {
-        Assert-DiscoveredTests $testProject
-        $arguments = @('test', '--project', $testProject, '--no-build', '--no-restore', '-c', $configuration)
+        $results = Reset-ArtifactDirectory ('artifacts/test/managed/' + [IO.Path]::GetFileNameWithoutExtension($testProject))
+        $arguments = @('test', '--project', $testProject, '--no-build', '--no-restore', '-c', $configuration,
+            '--minimum-expected-tests', '1', '--report-trx', '--report-trx-filename', 'results.trx', '--results-directory', $results)
         if (-not [string]::IsNullOrWhiteSpace($Filter)) { $arguments += @('--filter', $Filter) }
         Invoke-Dotnet $arguments
     }
@@ -152,7 +142,7 @@ function Invoke-Native {
         Invoke-Dotnet @('restore', $testProject, '--locked-mode')
         Invoke-Dotnet @('publish', $testProject, '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $publish)
         $executable = Join-Path $publish ([IO.Path]::GetFileNameWithoutExtension($testProject) + '.exe')
-        & $executable
+        & $executable --minimum-expected-tests 1
         if ($LASTEXITCODE) { throw "NativeAOT test executable failed: $executable" }
     }
 }
@@ -160,7 +150,6 @@ function Invoke-Native {
 function Invoke-DesktopTests([hashtable] $Published, [string] $TestFilter) {
     Invoke-Dotnet @('restore', 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj', '--locked-mode')
     Invoke-Dotnet @('build', 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj', '--no-restore', '-c', $configuration)
-    Assert-DiscoveredTests 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj'
     $priorApp = $env:LUCENT_DESKTOP_APP
     $priorHost = $env:LUCENT_DESKTOP_HOST
     $priorComponentBrowser = $env:LUCENT_COMPONENT_BROWSER_APP
@@ -170,7 +159,7 @@ function Invoke-DesktopTests([hashtable] $Published, [string] $TestFilter) {
         $env:LUCENT_DESKTOP_HOST = $Published.HostExe
         $env:LUCENT_COMPONENT_BROWSER_APP = $Published.ComponentBrowserExe
         $env:LUCENT_ACCESSIBILITY_OUTPUT = Reset-ArtifactDirectory 'artifacts/test/accessibility'
-        Invoke-Dotnet @('test', '--project', 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj', '--no-build', '--no-restore', '-c', $configuration, '--filter', $TestFilter)
+        Invoke-Dotnet @('test', '--project', 'tests/Lucent.Desktop.Tests/Lucent.Desktop.Tests.csproj', '--no-build', '--no-restore', '-c', $configuration, '--minimum-expected-tests', '1', '--filter', $TestFilter)
     }
     finally {
         $env:LUCENT_DESKTOP_APP = $priorApp
