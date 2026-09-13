@@ -17,6 +17,13 @@ The language server loads the evaluated `.csproj`, including its project
 references and `.lui` additional documents. Use the repository's pinned .NET
 SDK when building the server.
 
+Keep the server and Core/SDK authoring versions aligned; property discovery uses
+Core's attributed metadata. For repository project references, build the selected
+application once in the default Debug configuration before opening its editor
+project so MSBuild can load the generated style/state analyzers. Package consumers
+receive those analyzers during SDK restore. Use workspace-specific settings when
+different applications are pinned to different Lucent versions.
+
 ## Development
 
 Run the extension tests from the repository root:

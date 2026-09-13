@@ -36,8 +36,8 @@ The earlier interaction implementation `a18d662` also has successful
 and published `0.3.0-dev.68.1`. Publication of the additional native closeout
 fixes must be checked against their own subsequent CI commit.
 
-The bounded C# authoring implementation for #265 is source-complete in the current
-candidate. The historical #266 gate remains integrated in `f7c2712`, `da5d28d`
+The bounded C# authoring implementation for #265 is delivered. The historical
+#266 gate remains integrated in `f7c2712`, `da5d28d`
 and `ca45fd7`; it established the closed capability wrapper, C# 14 overload and
 conversion behavior, `.lui` source/metadata recognition, package-only generation
 and the public scope-owned `BehaviorContext.BindSemantics` seam. The embedded
@@ -62,7 +62,15 @@ is rejected. Unattached, off-thread and disposed access continues through the
 existing reactive guards, while initialization failures roll back through the
 existing mount transaction.
 
-The implementation candidate is `0a2ae12546228e953ac06bf65632d6fd51a9eddc`.
+The implementation landed in `0a2ae12546228e953ac06bf65632d6fd51a9eddc`, with
+package-proof and CI follow-ups in `ff11a7c` and `15ff070`. All nine packages are
+published as `0.3.0-dev.73.1` from `15ff0709f1a938a10e438ed161c36eda3db74a61`;
+[CI 34781813597](https://github.com/RichiCoder1/lucent/actions/runs/34781813597)
+passes managed, package verification and publication jobs. The first CI attempt
+found the authoring script's assumption of a repository-local SDK. It now also
+uses the pinned SDK on PATH, matching the existing verification scripts, and
+that path passes an isolated managed/NativeAOT proof without a local SDK folder.
+The smaller authoring package check runs before the longer asset checks.
 Managed verification passes Core **543/543**, Renderer **85/85** with three
 intentional opt-in skips, Testing **46/46**, Compiler **69/69**, Generator
 **23/23**, Windows **129/129**, Component Browser **15/15**, Issue Browser
@@ -90,9 +98,18 @@ space; sources, logs, package identity and published executable remain.
 Computer Use verified the local C# counter, reset on remount, and Gauge updates
 in dark, light and high contrast. The refreshed NativeAOT Component Browser
 SHA-256 is `6AF6F18A2A224361DEC566B6BE21D51D5F848D1F117C38BFE5C6CA247D7FB157`.
-The final repeat for its wrapped source note and constrained Gauge was interrupted
-by physical Escape before inspection; a resume question is pending. No fresh
-manual pass is claimed for that executable yet. Publication is also pending.
+The optional final repeat for its wrapped source note and constrained Gauge could
+not inspect the app: Computer Use reported Escape, and reported it again after
+the user authorized resumption. A fresh-session retry question remains pending.
+No fresh manual pass is claimed for that executable. Current CI pixel and native
+Windows contracts pass; this optional repeat does not replace those checks.
+
+The matching language server is installed and configured only for the local
+Lucent VS Code workspace; a window reload activates it. Other workspaces keep
+their existing version settings. Source-project editor setup and package/version
+alignment are documented in the extension README. Follow-up
+[#290](https://github.com/RichiCoder1/lucent/issues/290) tracks the assignment-lambda
+diagnostic boundary exposed by the controlled-form fixture; it is triaged in Todo.
 See [ADR 0008](../adr/0008-bounded-csharp-authoring.md) and the
 [C# authoring guide](../CSHARP-AUTHORING.md) for contracts, migration and measured
 build/member/allocation costs.
