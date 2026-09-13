@@ -98,11 +98,14 @@ space; sources, logs, package identity and published executable remain.
 Computer Use verified the local C# counter, reset on remount, and Gauge updates
 in dark, light and high contrast. The refreshed NativeAOT Component Browser
 SHA-256 is `6AF6F18A2A224361DEC566B6BE21D51D5F848D1F117C38BFE5C6CA247D7FB157`.
-The optional final repeat for its wrapped source note and constrained Gauge could
-not inspect the app: Computer Use reported Escape, and reported it again after
-the user authorized resumption. A fresh-session retry question remains pending.
-No fresh manual pass is claimed for that executable. Current CI pixel and native
-Windows contracts pass; this optional repeat does not replace those checks.
+The optional final repeat for its wrapped source note and constrained Gauge remains
+unverified. After earlier Escape reports, the user authorized finalization on
+2026-09-13. A fresh Computer Use session successfully listed desktop windows, but
+both launch attempts returned `accessibility window-opened handler did not become ready`;
+the intervening window list contained no Component Browser. The executable hash
+above was rechecked. No fresh manual pass is claimed for that executable, and no
+permission question remains pending. Current CI pixel and native Windows contracts
+pass; the optional visual repeat can resume when the Computer Use helper works.
 
 The matching language server is installed and configured only for the local
 Lucent VS Code workspace; a window reload activates it. Other workspaces keep
