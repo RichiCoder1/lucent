@@ -4,7 +4,7 @@ using Lucent.Core;
 internal component IntegrationView(CounterState state, AsyncValue<string[]> items) {
     <Column style={Style.Empty.Spacing(8)}>
         <Button onInvoke={() => state.Count++} aria={() => new AriaMetadata(name: "Activate counter")} style={Style.Empty.Height(40)}>{"Count " + state.Count}</Button>
-        <Field label="Draft" editor={field => Lucent.Core.Components.TextField(field, () => state.Draft, value => state.Draft = value)} />
+        <Field label="Draft" editor={field => Lucent.Core.Components.TextField(field, () => state.Draft, state.SetDraft)} />
         <Gauge label="Count range" value={() => state.Count} options={new GaugeOptions(0, 10)} style={Style.Empty.Width(96)} />
         {Integration.Items(items)}
     </Column>

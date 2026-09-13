@@ -5,7 +5,8 @@ Status: accepted and implemented direction for
 executable [#266 feasibility gate](https://github.com/RichiCoder1/lucent/issues/266)
 is preserved as historical evidence for the concrete signatures below. The
 current source implements the bounded authoring runtime and its first stock
-adoption; package, NativeAOT and native desktop verification remain pending.
+adoption. Package-only C# and `.lui` consumers execute in managed and NativeAOT
+modes; the handoff records exact verification and publication status.
 
 `.lui` remains the primary authoring language. Concise C# authoring uses the same
 `ComponentRecipe.Defer(string, Func<ReactiveScope, ComponentRecipe>)` lifetime:

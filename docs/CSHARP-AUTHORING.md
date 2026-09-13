@@ -222,3 +222,20 @@ mount/drain/dispose cycles while asserting one retained root and no child roots.
 Drawing contracts separately verify that idle frames and equality-suppressed
 updates do not rerecord commands. Package verification in CI executes this proof
 alongside the maintained headless package consumer.
+
+The first package-only observation used Core/SDK
+`0.3.0-dev.authoring265.1` from `0a2ae12`:
+
+| Counter construction | Managed bytes per cycle | NativeAOT bytes per cycle |
+| --- | ---: | ---: |
+| Raw deferred recipe | 70,657 | 72,606 |
+| ComponentContext | 70,665 | 72,614 |
+| Generated partial state | 70,689 | 72,638 |
+
+These totals include the same Button, graph work and disposal, not just state
+construction. The facade adds eight observed bytes and generated state adds
+32 bytes over that baseline. The corresponding 256-cycle elapsed times were
+19.389/17.113/15.871 ms managed and 10.833/9.714/7.911 ms NativeAOT. Warmup,
+tiering and measurement order make these timings unsuitable for ranking the
+APIs. Rerun the maintained script for another environment; the values are not
+acceptance thresholds.

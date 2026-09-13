@@ -62,14 +62,40 @@ is rejected. Unattached, off-thread and disposed access continues through the
 existing reactive guards, while initialization failures roll back through the
 existing mount transaction.
 
-The latest integrated managed verification passes Core **543/543**, Renderer
-**85/85** with three intentional opt-in skips, and Testing **46/46**. The focused
-component-state generator suite passes **3/3**. These results include the stock
-capability correction and its semantic-target inventory regression. Package-only
-consumption, the current-candidate NativeAOT build and native desktop smoke are
-still pending; do not infer publication, delivery or issue closure from these
-managed results. See [ADR 0008](../adr/0008-bounded-csharp-authoring.md) for the
-concrete contracts and preserved gate evidence.
+The implementation candidate is `0a2ae12546228e953ac06bf65632d6fd51a9eddc`.
+Managed verification passes Core **543/543**, Renderer **85/85** with three
+intentional opt-in skips, Testing **46/46**, Compiler **69/69**, Generator
+**23/23**, Windows **129/129**, Component Browser **15/15**, Issue Browser
+**20/20**, Hosting **5/5**, and R3 **7/7**. The final editor suite passes
+**27/27** in 2m34s. The full solution builds with zero warnings/errors; Core
+architecture positive/negative checks and the maintained SDK suite pass.
+
+Final Gauge containment adds a renderer regression: all **3/3** focused Gauge
+pixel checks and **3/3** Core Gauge contracts pass after constraining long text
+and clipping to its box. Its full semantic value remains available. The actual
+Windows Gauge Name/HelpText/read-only RangeValue check also passes.
+
+Local nine-package set `0.3.0-dev.authoring265.1` is source-bound to `0a2ae12`.
+The package-only authoring proof executes C# and `.lui` counter, controlled form,
+owned async/keyed content, generated state and Gauge in managed and NativeAOT
+modes. The fixture uses a method-group editor callback within the supported
+`.lui` expression grammar. Native executable SHA-256:
+`0A306F22F87F0DCE5617069C368551F64A466CB7E579BED8BFBB22E76BAF0170`.
+The maintained headless package consumer also passes. Logs are
+`artifacts/authoring-package-proof.log` and `artifacts/authoring-headless-proof.log`;
+package hashes/source commits are recorded with the authoring consumer evidence.
+Only its disposable restore cache was removed after execution to recover disk
+space; sources, logs, package identity and published executable remain.
+
+Computer Use verified the local C# counter, reset on remount, and Gauge updates
+in dark, light and high contrast. The refreshed NativeAOT Component Browser
+SHA-256 is `6AF6F18A2A224361DEC566B6BE21D51D5F848D1F117C38BFE5C6CA247D7FB157`.
+The final repeat for its wrapped source note and constrained Gauge was interrupted
+by physical Escape before inspection; a resume question is pending. No fresh
+manual pass is claimed for that executable yet. Publication is also pending.
+See [ADR 0008](../adr/0008-bounded-csharp-authoring.md) and the
+[C# authoring guide](../CSHARP-AUTHORING.md) for contracts, migration and measured
+build/member/allocation costs.
 
 The first integrated CI run, 34753499084, passed managed and NativeAOT suites
 but stopped before publication at the asset-workspace helper's stale Roslyn

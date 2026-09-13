@@ -190,4 +190,6 @@ internal sealed partial class CounterState
 
     [State("seed")]
     public partial string Draft { get; set; }
+
+    public void SetDraft(string value) => Draft = value;
 }
