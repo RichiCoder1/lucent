@@ -199,6 +199,151 @@ public sealed class DateTimeEditingContracts
     }
 
     [TestMethod]
+    [DataRow("enabled", "pointer")]
+    [DataRow("enabled", "keyboard")]
+    [DataRow("enabled", "semantics")]
+    [DataRow("read-only", "pointer")]
+    [DataRow("read-only", "keyboard")]
+    [DataRow("read-only", "semantics")]
+    [DataRow("inherited", "pointer")]
+    [DataRow("inherited", "keyboard")]
+    [DataRow("inherited", "semantics")]
+    public void CalendarRechecksLiveAvailabilityBeforeEveryDateRequest(
+        string unavailableBy,
+        string activation
+    )
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "calendar-live-availability");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var enabled = graph.Signal(true, "calendar-enabled");
+        var readOnly = graph.Signal(false, "calendar-read-only");
+        var inherited = graph.Signal(true, "calendar-inherited-enabled");
+        var requests = new List<DateOnly?>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.DatePicker(
+                "Due date",
+                static () => new DateOnly(2024, 2, 15),
+                requests.Add,
+                new DatePickerOptions(
+                    CultureInfo.GetCultureInfo("en-US"),
+                    today: static () => new(2024, 2, 15)
+                ),
+                new DateTimeFieldOptions(
+                    enabled: () => enabled.Value,
+                    readOnly: () => readOnly.Value,
+                    style: Style.Empty.Bind(InputProperties.Enabled, () => inherited.Value)
+                )
+            )
+        );
+        graph.Drain();
+        var ownerScene = Install(composition, graph);
+        var open = Nodes(composition.SemanticSnapshot()!)
+            .Single(node =>
+                node.Role == SemanticRole.Button
+                && node.Name.StartsWith("Open calendar", StringComparison.Ordinal)
+            );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(open.Identity, new(SemanticCommandKind.Invoke))
+        );
+        graph.Drain();
+        var request = composition.Input.ActiveSurface!;
+        var popup = request.CreateComposition();
+        var popupScene = Install(popup, graph);
+        var calendar = Nodes(popup.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.Calendar);
+        var day = Nodes(popup.SemanticSnapshot()!)
+            .First(node => node is { Role: SemanticRole.ListItem, Enabled: true, Selected: false });
+        if (activation == "keyboard")
+            Assert.AreEqual(
+                SemanticCommandResult.Applied,
+                popup.ExecuteSemanticCommand(calendar.Identity, new(SemanticCommandKind.Focus))
+            );
+
+        void AttemptSelection()
+        {
+            try
+            {
+                if (activation == "semantics")
+                    _ = popup.ExecuteSemanticCommand(day.Identity, new(SemanticCommandKind.Select));
+                else if (activation == "keyboard")
+                    _ = popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter));
+                else
+                {
+                    var bounds = popupScene
+                        .Boxes.Single(box => box.Identity.ElementId == day.Identity.ElementId)
+                        .Bounds;
+                    var x = bounds.X + bounds.Width / 2;
+                    var y = bounds.Y + bounds.Height / 2;
+                    _ = popup.Input.DispatchPointer(
+                        new(PointerCommandKind.Down, 1, x, y, PointerButton.Primary)
+                    );
+                    _ = popup.Input.DispatchPointer(
+                        new(PointerCommandKind.Up, 1, x, y, PointerButton.Primary)
+                    );
+                }
+            }
+            catch (ObjectDisposedException) when (unavailableBy == "inherited") { }
+            Assert.HasCount(0, requests, "An unavailable calendar requested a date.");
+        }
+
+        if (unavailableBy == "inherited")
+        {
+            inherited.Value = false;
+            graph.Drain();
+            AttemptSelection();
+        }
+        else
+        {
+            graph.Batch(() =>
+            {
+                if (unavailableBy == "enabled")
+                    enabled.Value = false;
+                else if (unavailableBy == "read-only")
+                    readOnly.Value = true;
+                else
+                    throw new InvalidOperationException("Unknown availability case.");
+                AttemptSelection();
+            });
+        }
+
+        Assert.IsTrue(request.IsDismissed, "The unavailable calendar surface stayed open.");
+        switch (unavailableBy)
+        {
+            case "enabled":
+                enabled.Value = true;
+                break;
+            case "read-only":
+                readOnly.Value = false;
+                break;
+            case "inherited":
+                inherited.Value = true;
+                break;
+        }
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph);
+        open = Nodes(composition.SemanticSnapshot()!)
+            .Single(node =>
+                node.Role == SemanticRole.Button
+                && node.Name.StartsWith("Open calendar", StringComparison.Ordinal)
+            );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(open.Identity, new(SemanticCommandKind.Invoke)),
+            "The available calendar did not reopen."
+        );
+        graph.Drain();
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+        popupScene.Dispose();
+        ownerScene.Dispose();
+    }
+
+    [TestMethod]
     public void DateDraftRejectsInvalidAndOutOfRangeWithoutChangingAppliedValue()
     {
         var graph = new ReactiveGraph();
@@ -369,6 +514,52 @@ public sealed class DateTimeEditingContracts
         Assert.IsFalse(session.Commit());
         Assert.AreEqual(ValidationStatus.Invalid, session.Validation.Status);
         Assert.AreEqual(new TimeOnly(9, 0), applied.Value);
+    }
+
+    [TestMethod]
+    public void DefaultTimeStepClampsAtTheLastWholeStepWithoutInventingFractionalTicks()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("time-default-end-step");
+        var requests = new List<TimeOnly?>();
+        var session = new TimeEditSession(
+            scope,
+            static () => new TimeOnly(23, 59),
+            requests.Add,
+            new TimePickerOptions(CultureInfo.InvariantCulture),
+            "time"
+        );
+        graph.Drain();
+
+        Assert.IsTrue(session.Step(1));
+        Assert.AreEqual(new TimeOnly(23, 59), requests[^1]);
+        Assert.AreEqual("23:59", session.Draft);
+        Assert.IsTrue(session.Step(-1));
+        Assert.AreEqual(new TimeOnly(23, 58), requests[^1]);
+    }
+
+    [TestMethod]
+    public void TimeStepPreservesAnExplicitFractionalUpperBound()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("time-explicit-fractional-bound");
+        var requests = new List<TimeOnly?>();
+        var maximum = new TimeOnly(23, 59, 59, 500);
+        var session = new TimeEditSession(
+            scope,
+            static () => new TimeOnly(23, 59),
+            requests.Add,
+            new TimePickerOptions(
+                CultureInfo.InvariantCulture,
+                maximum: maximum,
+                step: TimeSpan.FromMinutes(1)
+            ),
+            "time"
+        );
+        graph.Drain();
+
+        Assert.IsTrue(session.Step(1));
+        Assert.AreEqual(maximum, requests.Single());
     }
 
     [TestMethod]

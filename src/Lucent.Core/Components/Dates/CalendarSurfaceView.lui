@@ -41,9 +41,10 @@ internal component CalendarSurfaceView(
     CalendarState calendar,
     DateEditSession session,
     Action close,
+    Func<bool> editable,
     ComponentContent weekdaysAndDays
 ) {
-    <CalendarHost calendar={calendar} session={session} close={close}>
+    <CalendarHost calendar={calendar} session={session} close={close} editable={editable}>
         <Layout style={CalendarHeaderStyle}>
             <IconButton source={DateTimeArtwork.PreviousMonth} label="Previous month" onInvoke={() => calendar.MoveMonth(-1)} style={CalendarNavigationStyle} />
             <Layout style={CalendarTitleStyle}>

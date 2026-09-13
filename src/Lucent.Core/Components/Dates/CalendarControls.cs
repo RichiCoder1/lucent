@@ -8,7 +8,8 @@ internal static partial class Controls
         CalendarState calendar,
         DateEditSession session,
         int slot,
-        Action close
+        Action close,
+        Func<bool> editable
     )
     {
         CalendarDay Current() => calendar.Day(slot, session.Applied);
@@ -73,7 +74,7 @@ internal static partial class Controls
             theme,
             style,
             null,
-            new CalendarDayBehavior(calendar, session, slot, close)
+            new CalendarDayBehavior(calendar, session, slot, close, editable)
         );
     }
 }
@@ -81,7 +82,8 @@ internal static partial class Controls
 internal sealed class CalendarBehavior(
     CalendarState calendar,
     DateEditSession session,
-    Action close
+    Action close,
+    Func<bool> editable
 ) : Behavior
 {
     public override string Name => "calendar";
@@ -95,6 +97,7 @@ internal sealed class CalendarBehavior(
                 SemanticRole.Calendar,
                 "Calendar",
                 description: calendar.Focused.ToString("D", session.Options.Culture),
+                enabled: editable(),
                 selection: new(false, !session.Options.AllowNull)
             );
         context.SetSemantics(Declaration());
@@ -132,6 +135,8 @@ internal sealed class CalendarBehavior(
         });
         bool Select()
         {
+            if (!editable())
+                return false;
             session.Select(calendar.Focused);
             close();
             return true;
@@ -148,7 +153,8 @@ internal sealed class CalendarDayBehavior(
     CalendarState calendar,
     DateEditSession session,
     int slot,
-    Action close
+    Action close,
+    Func<bool> editable
 ) : Behavior
 {
     public override string Name => "calendar-day";
@@ -161,12 +167,13 @@ internal sealed class CalendarDayBehavior(
         SemanticDeclaration Declaration()
         {
             var day = Current();
+            var enabled = day.IsEnabled && editable();
             return new(
                 SemanticRole.ListItem,
                 day.AccessibleName,
-                enabled: day.IsEnabled,
+                enabled: enabled,
                 selected: day.IsSelected,
-                actions: day.IsEnabled ? SemanticAction.Select : SemanticAction.None,
+                actions: enabled ? SemanticAction.Select : SemanticAction.None,
                 positionInSet: slot + 1,
                 sizeOfSet: 42
             );
@@ -183,7 +190,7 @@ internal sealed class CalendarDayBehavior(
         bool Select()
         {
             var day = Current();
-            if (!day.IsEnabled || day.Date is not { } date)
+            if (!editable() || !day.IsEnabled || day.Date is not { } date)
                 return false;
             session.Select(date);
             close();

@@ -106,7 +106,10 @@ public sealed class TimePickerOptions
     /// <summary>Gets the inclusive maximum time.</summary>
     public TimeOnly? Maximum { get; }
 
-    /// <summary>Gets the positive step smaller than one day.</summary>
+    /// <summary>
+    /// Gets the positive step smaller than one day. Stepping clamps exactly to explicit bounds;
+    /// at a default day boundary it retains the last reachable value on the configured step.
+    /// </summary>
     public TimeSpan Step { get; }
 
     internal string Format(TimeOnly? value)
@@ -364,6 +367,10 @@ internal sealed class TimeEditSession
         var ticks = basis.Ticks + direction * _options.Step.Ticks;
         var min = _options.Minimum?.Ticks ?? TimeOnly.MinValue.Ticks;
         var max = _options.Maximum?.Ticks ?? TimeOnly.MaxValue.Ticks;
+        if (_options.Minimum is null && ticks < min)
+            ticks = basis.Ticks;
+        if (_options.Maximum is null && ticks > max)
+            ticks = basis.Ticks;
         var value = new TimeOnly(Math.Clamp(ticks, min, max));
         _draft.Value = _options.Format(value);
         _validation.Value = ValidationState.Valid;

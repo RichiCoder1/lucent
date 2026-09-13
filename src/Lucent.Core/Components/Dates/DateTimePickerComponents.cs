@@ -51,6 +51,10 @@ public static partial class Components
             (context, root) =>
             {
                 OwnedSurfaceRequest? surface = null;
+                bool Editable() =>
+                    enabled?.Invoke() != false
+                    && readOnly?.Invoke() != true
+                    && root.InputAvailable();
                 void Close()
                 {
                     surface?.Dispose();
@@ -58,16 +62,12 @@ public static partial class Components
                 }
                 void Open()
                 {
-                    if (
-                        enabled?.Invoke() == false
-                        || readOnly?.Invoke() == true
-                        || surface is not null
-                    )
+                    if (!Editable() || surface is not null)
                         return;
                     surface = new OwnedSurfaceRequest(
                         root,
                         context.Theme,
-                        CalendarPopup(session, Close),
+                        CalendarPopup(session, Close, Editable),
                         true,
                         true,
                         Close
@@ -85,11 +85,23 @@ public static partial class Components
                         DatePickerEditorView(field, session, enabled, readOnly, Open, actionStyle),
                     ])
                 );
+                _ = root.Scope.Effect(
+                    () =>
+                    {
+                        if (!Editable())
+                            Close();
+                    },
+                    root.Name + ".calendar-availability"
+                );
             }
         );
     }
 
-    private static ComponentRecipe CalendarPopup(DateEditSession session, Action close) =>
+    private static ComponentRecipe CalendarPopup(
+        DateEditSession session,
+        Action close,
+        Func<bool> editable
+    ) =>
         ComponentRecipe.Create(
             "calendar",
             (context, root) =>
@@ -114,7 +126,7 @@ public static partial class Components
                 }
                 for (var index = 0; index < 42; index++)
                 {
-                    days.Add(CalendarDaySlot(calendar, session, index, close));
+                    days.Add(CalendarDaySlot(calendar, session, index, close, editable));
                 }
                 context.Mount(
                     root,
@@ -123,6 +135,7 @@ public static partial class Components
                             calendar,
                             session,
                             close,
+                            editable,
                             ComponentContent.Create(days.ToArray())
                         ),
                     ])
@@ -198,6 +211,7 @@ public static partial class Components
         CalendarState calendar,
         DateEditSession session,
         Action close,
+        Func<bool> editable,
         [DefaultContent] ComponentContent content
     ) =>
         Host(
@@ -212,7 +226,7 @@ public static partial class Components
                         .Set(LayoutProperties.Width, 224f)
                         .Set(LayoutProperties.Height, 244f)
                 );
-                root.AttachBehaviors(new CalendarBehavior(calendar, session, close));
+                root.AttachBehaviors(new CalendarBehavior(calendar, session, close, editable));
             }
         );
 
@@ -220,12 +234,13 @@ public static partial class Components
         CalendarState calendar,
         DateEditSession session,
         int slot,
-        Action close
+        Action close,
+        Func<bool> editable
     ) =>
         ComponentRecipe.Create(
             "calendar-day",
             (context, root) =>
-                Controls.CalendarDay(root, context.Theme, calendar, session, slot, close)
+                Controls.CalendarDay(root, context.Theme, calendar, session, slot, close, editable)
         );
 
     private static ValidationState CombinedValidation(
