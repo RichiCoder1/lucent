@@ -6,6 +6,8 @@
 
 The fresh Computer Use recheck is pending after a physical Escape interruption. Ask to resume UI input while continuing independent code work; do not treat an interruption as cancellation of the whole task. Do not close #278 or claim the original hover/scroll/editing recordings fixed by manual observation until that recheck is performed. The earlier walkthrough below is historical evidence, not a pass for these changes.
 
+The NativeAOT recheck candidate is `artifacts/component-input-278/browser/Lucent.ComponentBrowser.exe`, built from `4705924ea85c6c5aa45f1fa6219e8b23156d7257`, SHA-256 `9E96D0A9FE5F785C871FAF185F2975FE6A07D04AA4FD0746441AEDA31711092D`. Its source manifest is `artifacts/component-input-278/source.json`. Launch this candidate for the recheck; the earlier baseline app may still be open. This is a local published executable, not a claim of NuGet publication.
+
 The independent Fable High review and primary-source control comparison are complete. The review inspected a frozen source snapshot and ran no tests or UI checks. Active-fix overlap is tracked in #278; independent follow-ups are ordered below and require focused reproductions before implementation:
 
 1. [#279](https://github.com/RichiCoder1/lucent/issues/279): closed-tooltip Escape routing.
