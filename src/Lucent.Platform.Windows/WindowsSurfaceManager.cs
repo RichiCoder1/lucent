@@ -26,6 +26,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
     private ElementIdentity? _returnFocus;
     private bool _ownsReturnFocus;
     private LayoutRect? _hostAnchor;
+    private bool _ownerPlacementDirty;
     internal Action<SKCanvas> OwnerOverlay { get; }
 
     internal WindowsSurfaceManager(
@@ -116,7 +117,10 @@ internal sealed class WindowsSurfaceManager : IDisposable
                 WindowsPopupHost.RequiresOwnerReposition(type)
                 || type is SDL.EventType.WindowResized or SDL.EventType.WindowPixelSizeChanged
             )
+            {
+                _ownerPlacementDirty |= RequiresPostProjectionReposition(type);
                 _host.Reposition();
+            }
         }
         if (_host is null)
             return false;
@@ -284,10 +288,11 @@ internal sealed class WindowsSurfaceManager : IDisposable
                 return;
             }
             var anchor = request.Anchor;
-            if (AnchorChanged(_hostAnchor, anchor))
+            if (NeedsOwnerReposition(_hostAnchor, anchor, _ownerPlacementDirty))
             {
                 _hostAnchor = anchor;
                 _host.Reposition();
+                _ownerPlacementDirty = false;
             }
         }
         _children?.OwnerProjected();
@@ -295,6 +300,21 @@ internal sealed class WindowsSurfaceManager : IDisposable
 
     internal static bool AnchorChanged(LayoutRect? previous, LayoutRect current) =>
         previous is null || previous.Value != current;
+
+    internal static bool NeedsOwnerReposition(
+        LayoutRect? previous,
+        LayoutRect current,
+        bool ownerPlacementDirty
+    ) => ownerPlacementDirty || AnchorChanged(previous, current);
+
+    internal static bool RequiresPostProjectionReposition(SDL.EventType type) =>
+        type
+            is SDL.EventType.WindowExposed
+                or SDL.EventType.WindowResized
+                or SDL.EventType.WindowPixelSizeChanged
+                or SDL.EventType.WindowDisplayChanged
+                or SDL.EventType.WindowDisplayScaleChanged
+                or SDL.EventType.WindowRestored;
 
     internal void Dismiss()
     {
@@ -334,6 +354,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
         var revision = request?.CaptureSharedMutationRevision();
         _request = null;
         _hostAnchor = null;
+        _ownerPlacementDirty = false;
         Capture(errors, () => _children?.Dispose());
         _children = null;
         Capture(errors, () => _pendingMenu?.Dispose());

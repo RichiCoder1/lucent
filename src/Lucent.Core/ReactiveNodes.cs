@@ -187,6 +187,8 @@ public abstract class ReactiveNode : IDisposable
     /// <summary>Handles a possible dependency change without assuming its observable value changed.</summary>
     internal virtual void PotentialDependencyChanged() => PotentiallyChanged();
 
+    internal void AcknowledgeCollectedPotentialChanges() => _dependenciesPotentiallyChanged = false;
+
     /// <summary>Resolves potential dependencies and reports whether an observable input revision changed.</summary>
     protected bool ValidatePotentialDependencies()
     {
@@ -539,6 +541,7 @@ public sealed class ReactiveEffect : ReactiveNode
             // Dependency notifications raised while the callback was collecting are already
             // represented by the collector's final stamps. Keep a retry only when a value
             // changed after its last read.
+            AcknowledgeCollectedPotentialChanges();
             _mustRun = false;
             Graph.Unschedule(this);
         }

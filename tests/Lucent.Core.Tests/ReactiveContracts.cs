@@ -6,6 +6,44 @@ namespace Lucent.Core.Tests;
 public sealed class ReactiveContracts
 {
     [TestMethod]
+    public void EffectKeepsDerivedDependencyAfterWritingAndReadingItAgain()
+    {
+        var graph = new ReactiveGraph();
+        using var scope = graph.CreateScope("derived-acknowledgment");
+        var source = scope.Signal("", "source");
+        var draft = scope.Signal("", "draft");
+        var applied = scope.Derived(() => source.Value, "applied");
+        var lastDraft = "";
+        var observed = "";
+        _ = scope.Effect(
+            () =>
+            {
+                observed = applied.Value;
+                var nextDraft = draft.Value;
+                if (nextDraft != lastDraft)
+                {
+                    lastDraft = nextDraft;
+                    source.Value = nextDraft;
+                    observed = applied.Value;
+                }
+            },
+            "acknowledge"
+        );
+        graph.Drain();
+
+        draft.Value = "Beta";
+        graph.Drain();
+        Assert(observed == "Beta", "The effect did not acknowledge its own source write.");
+
+        source.Value = "Beta workspace";
+        graph.Drain();
+        Assert(
+            observed == "Beta workspace",
+            "A later derived invalidation did not reach the effect."
+        );
+    }
+
+    [TestMethod]
     public void BranchesBatchesAndReentrancy()
     {
         var graph = new ReactiveGraph();

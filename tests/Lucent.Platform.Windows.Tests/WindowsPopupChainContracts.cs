@@ -301,6 +301,23 @@ public sealed class WindowsPopupChainContracts
         var scrolled = initial with { Y = 72 };
 
         Assert.IsFalse(WindowsSurfaceManager.AnchorChanged(initial, initial));
+        Assert.IsFalse(
+            WindowsSurfaceManager.NeedsOwnerReposition(initial, initial, ownerPlacementDirty: false)
+        );
+        Assert.IsTrue(
+            WindowsSurfaceManager.NeedsOwnerReposition(initial, initial, ownerPlacementDirty: true),
+            "The final restored owner frame did not correct its transient popup placement."
+        );
+        Assert.IsTrue(
+            WindowsSurfaceManager.RequiresPostProjectionReposition(SDL.EventType.WindowRestored)
+        );
+        Assert.IsTrue(
+            WindowsSurfaceManager.RequiresPostProjectionReposition(SDL.EventType.WindowResized)
+        );
+        Assert.IsFalse(
+            WindowsSurfaceManager.RequiresPostProjectionReposition(SDL.EventType.WindowMoved),
+            "A move-only owner transition retained a dirty marker without requesting projection."
+        );
         Assert.IsTrue(
             WindowsSurfaceManager.AnchorChanged(initial, scrolled),
             "An owner scroll did not request popup reanchoring."

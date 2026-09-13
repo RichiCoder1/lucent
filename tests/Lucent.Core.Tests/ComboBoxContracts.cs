@@ -242,6 +242,126 @@ public sealed class ComboBoxContracts
     }
 
     [TestMethod]
+    public void PointerSelectionReconcilesEditorCaptionBeforeTheNextEdit()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "combo-pointer-caption");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var choices = new[]
+        {
+            new ChoiceItem<string>("alpha", "Alpha workspace"),
+            new ChoiceItem<string>("beta", "Beta workspace"),
+        };
+        var selected = graph.Signal<ComboBoxSelectedItem<string>?>(null, "combo.selected");
+        var requests = new List<string>();
+        var queries = new List<string>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "Workspace",
+                field =>
+                    Components.ComboBox(
+                        field,
+                        () => selected.Value,
+                        key =>
+                        {
+                            requests.Add(key);
+                            var choice = choices.Single(item => item.Key == key);
+                            selected.Value = new(choice.Key, choice.Label);
+                        },
+                        (query, _) =>
+                        {
+                            queries.Add(query);
+                            return ValueTask.FromResult(
+                                ComboBoxSuggestionResult.Success<string>(choices)
+                            );
+                        },
+                        new ComboBoxOptions(debounce: TimeSpan.Zero)
+                    )
+            )
+        );
+        graph.Drain();
+        var ownerScene = Install(composition, graph, 320, 120);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 320, 120);
+
+        Assert.IsTrue(
+            composition.Input.DispatchText(new(TextInputKind.Commit, "Beta")).Handled,
+            "The owner editor did not accept the initial query."
+        );
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 320, 120);
+
+        var popup = composition.Input.ActiveSurface!.CreateComposition();
+        graph.Drain();
+        var popupScene = Install(popup, graph, 320, 180);
+        var beta = Nodes(popup.SemanticSnapshot()!)
+            .Single(node => node is { Role: SemanticRole.ListItem, Name: "Beta workspace" });
+        var betaBounds = popupScene
+            .Boxes.Single(box => box.Identity.ElementId == beta.Identity.ElementId)
+            .Bounds;
+        var betaX = betaBounds.X + betaBounds.Width / 2;
+        var betaY = betaBounds.Y + betaBounds.Height / 2;
+        Assert.IsTrue(
+            popup
+                .Input.DispatchPointer(
+                    new(PointerCommandKind.Down, 1, betaX, betaY, PointerButton.Primary)
+                )
+                .Handled,
+            "The suggestion row did not capture the pointer press."
+        );
+        Assert.IsTrue(
+            popup.Input.DispatchPointer(new(PointerCommandKind.Up, 1, betaX, betaY)).Handled,
+            "The suggestion row did not apply the pointer selection."
+        );
+        Assert.AreEqual("beta", requests.Single());
+        Assert.AreEqual("Beta workspace", selected.Value?.Label);
+
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 320, 120);
+        Assert.AreEqual(
+            "Beta workspace",
+            Nodes(composition.SemanticSnapshot()!)
+                .Single(node => node.Role == SemanticRole.TextField)
+                .Value,
+            "A pointer-applied selection must replace the query with its full display label."
+        );
+
+        Assert.IsTrue(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.A, KeyModifiers.Control))
+                .Handled,
+            "The owner editor did not select its reconciled caption."
+        );
+        Assert.IsTrue(
+            composition.Input.DispatchText(new(TextInputKind.Commit, "Alpha")).Handled,
+            "The first edit after pointer selection was not delivered to the owner editor."
+        );
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 320, 120);
+        Assert.AreEqual(
+            "Alpha",
+            Nodes(composition.SemanticSnapshot()!)
+                .Single(node => node.Role == SemanticRole.TextField)
+                .Value,
+            "The first post-selection edit must replace the full applied caption."
+        );
+        Assert.IsTrue(
+            queries.Contains("Alpha"),
+            "The replacement query did not reach suggestions."
+        );
+        GC.KeepAlive(ownerScene);
+        GC.KeepAlive(popupScene);
+    }
+
+    [TestMethod]
     public void ExpandedComboBoxKeepsOwnerEditorFocusedForEditingAndArrowCommit()
     {
         var graph = new ReactiveGraph();
