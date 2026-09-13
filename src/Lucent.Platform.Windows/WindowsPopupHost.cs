@@ -384,6 +384,10 @@ internal sealed partial class WindowsPopupHost : IDisposable
         var placement = CalculatePlacement();
         _opensLeft = placement.OpensLeft;
         var origin = _request.IsModal ? ClientOrigin(Hwnd(_popupParentWindow)) : default;
+        // SDL constrains popup positions against their current outer size. Resize first so a
+        // restored owner cannot clamp the new anchor using the prior maximized popup width.
+        if (!SDL.SetWindowSize(_window, placement.Width, placement.Height))
+            throw new InvalidOperationException($"SDL_SetWindowSize popup: {SDL.GetError()}");
         if (
             !SDL.SetWindowPosition(
                 _window,
@@ -392,8 +396,6 @@ internal sealed partial class WindowsPopupHost : IDisposable
             )
         )
             throw new InvalidOperationException($"SDL_SetWindowPosition popup: {SDL.GetError()}");
-        if (!SDL.SetWindowSize(_window, placement.Width, placement.Height))
-            throw new InvalidOperationException($"SDL_SetWindowSize popup: {SDL.GetError()}");
         if (!SDL.SyncWindow(_window))
             throw new InvalidOperationException($"SDL_SyncWindow popup: {SDL.GetError()}");
         Refresh();
@@ -520,6 +522,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
 
         _opensLeft = placement.OpensLeft;
         var origin = _request.IsModal ? ClientOrigin(Hwnd(_popupParentWindow)) : default;
+        if (!SDL.SetWindowSize(_window, placement.Width, placement.Height))
+            throw new InvalidOperationException($"SDL_SetWindowSize popup: {SDL.GetError()}");
         if (
             !SDL.SetWindowPosition(
                 _window,
@@ -528,8 +532,6 @@ internal sealed partial class WindowsPopupHost : IDisposable
             )
         )
             throw new InvalidOperationException($"SDL_SetWindowPosition popup: {SDL.GetError()}");
-        if (!SDL.SetWindowSize(_window, placement.Width, placement.Height))
-            throw new InvalidOperationException($"SDL_SetWindowSize popup: {SDL.GetError()}");
         if (!SDL.SyncWindow(_window))
             throw new InvalidOperationException($"SDL_SyncWindow popup: {SDL.GetError()}");
         return true;

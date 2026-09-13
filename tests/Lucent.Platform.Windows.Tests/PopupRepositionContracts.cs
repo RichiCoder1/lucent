@@ -7,6 +7,70 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed unsafe partial class UiaLifecycleContracts
 {
     [TestMethod]
+    public void ShrinkingPopupAppliesNewSizeBeforeFinalAnchorPosition()
+    {
+        Assert(SDL.Init(SDL.InitFlags.Video), "SDL_Init(popup resize order) failed.");
+        var window = CreateWindow("Lucent popup resize order");
+        try
+        {
+            var display = SDL.GetDisplayForWindow(window);
+            var usable = new SDL.Rect();
+            Assert(
+                display != 0 && SDL.GetDisplayUsableBounds(display, out usable),
+                "Display work area missing."
+            );
+            Assert(
+                SDL.SetWindowPosition(window, usable.X + usable.W - 600, usable.Y + 50),
+                "Owner positioning failed."
+            );
+            Assert(SDL.SetWindowSize(window, 600, 400), "Owner sizing failed.");
+            Assert(SDL.SyncWindow(window), "Owner sync failed.");
+            using var owner = new Composition(new ReactiveGraph(), "popup-resize-order");
+            using var request = new ResizablePopupRequest(
+                owner,
+                new LayoutRect(300, 40, 200, 36),
+                initialWidth: 1_200
+            );
+            using var dispatcher = new WindowsUiaDispatcher();
+            using var cursor = new WindowsCursor();
+            using var popup = new WindowsPopupHost(
+                window,
+                request,
+                dispatcher,
+                new WindowsClipboard(),
+                cursor
+            );
+
+            request.Width = 200;
+            popup.Reposition();
+
+            Assert(
+                SDL.GetWindowPosition(popup.WindowHandle, out var actualX, out _),
+                "Resized popup position missing."
+            );
+            using var shaper = new SkiaSceneRenderer();
+            var expected = WindowsPopupPlacement.Root(
+                request.Anchor with
+                {
+                    Y = request.Anchor.Y + request.AnchorGap,
+                },
+                request.Measure(shaper, new(600, 400, 1)),
+                WindowsPopupHost.ScaleForWindow(window),
+                SDL.GetWindowPixelDensity(window)
+            );
+            Assert(
+                actualX == expected.OffsetX,
+                $"Popup resize retained an old-width constrained X: {actualX}, expected {expected.OffsetX}."
+            );
+        }
+        finally
+        {
+            SDL.DestroyWindow(window);
+            SDL.Quit();
+        }
+    }
+
+    [TestMethod]
     public void PopupRepositionKeepsParentRelativeOffsetsAfterOwnerMovement()
     {
         Assert(SDL.Init(SDL.InitFlags.Video), "SDL_Init(popup reposition) failed.");
@@ -70,6 +134,66 @@ public sealed unsafe partial class UiaLifecycleContracts
         {
             SDL.DestroyWindow(window);
             SDL.Quit();
+        }
+    }
+
+    private sealed class ResizablePopupRequest : PopupSurfaceRequest
+    {
+        private readonly Signal<float> _width;
+        private Composition? _popup;
+        private bool _dismissed;
+
+        internal ResizablePopupRequest(Composition owner, LayoutRect anchor, float initialWidth)
+        {
+            Owner = owner;
+            Anchor = anchor;
+            _width = owner.Root.Scope.Signal(initialWidth, "popup-width");
+        }
+
+        public float Width
+        {
+            get => _width.Value;
+            set => _width.Value = value;
+        }
+
+        public override Composition Owner { get; }
+        public override LayoutRect Anchor { get; }
+        public override ThemeAppearance Appearance => ThemeAppearance.Light;
+        public override bool IsValid => !Owner.IsDisposed;
+        public override bool IsDismissed => _dismissed || !IsValid;
+        public override bool IsInteractive => false;
+
+        public override Composition CreateComposition()
+        {
+            if (_popup is not null)
+                return _popup;
+            var popup = new Composition(Owner.Graph, "resizable-popup");
+            var theme = new ThemeContext(popup.Root.Scope, ControlThemes.Light);
+            popup.Root.Present(theme);
+            popup.Mount(
+                popup.Root,
+                theme,
+                Components.Layout(
+                    [],
+                    style: Style.Empty.Bind(LayoutProperties.Width, () => _width.Value).Height(60)
+                )
+            );
+            _popup = popup;
+            return popup;
+        }
+
+        public override LayoutRect Measure(ITextShaper shaper, LayoutViewport available) =>
+            new(0, 0, Math.Min(Width, available.Width), 60);
+
+        public override void Dismiss() => _dismissed = true;
+
+        public override bool RestoreFocus() => false;
+
+        public override void Dispose()
+        {
+            _dismissed = true;
+            _popup?.Dispose();
+            _popup = null;
         }
     }
 }
