@@ -178,3 +178,53 @@ Core contract evidence rather than a fresh manual pass. Arrow injection retains
 the Computer Use limitation recorded above.
 Independent review findings are ordered in #279–286 and the handoff, with source
 inspection distinguished from a reproduced failure.
+
+## Review follow-ups with UI testing paused — September 12, 2026
+
+The next batch implements #279–285 in the shared runtime. All desktop input and
+focus-taking tests remain paused; earlier #278 Computer Use results are not fresh
+evidence for these changes.
+
+| Issue | Correction and regression boundary |
+| --- | --- |
+| #279 | Only a live tooltip consumes Escape. A tooltip-wrapped dialog action dismisses its tooltip first and cancels the dialog on the next Escape; active IME retains precedence. |
+| #280 | Host dismissal ends presentation while an accepted write continues. Success returns its typed accepted value; failure reports the submission failure and settles the dismissed dialog as canceled. A dismissed modal cannot block a new popover before host cleanup. Windows minimize remains dismissal, explicitly documented. |
+| #281 | Open calendars recheck live enabled, read-only and inherited availability for pointer, keyboard and semantic date selection; unavailable surfaces close and restored pickers reopen. |
+| #282 | Active-drag Escape releases capture and requests the gesture-start value without committing on later release. Idle Escape bubbles; secondary release cannot complete a primary drag. Controlled acceptance, delay, rejection and capture loss remain covered. |
+| #283 | Hover over separators or disabled menu items preserves the keyboard-active route, including nested menu navigation and Escape dismissal. |
+| #284 | Default TimePicker day-boundary stepping stops at the last reachable step without introducing fractional ticks; explicit fractional bounds remain exact. |
+| #285 | Dynamic help notifies the retained editor's semantic relationships. Form errors and first-invalid focus use explicit registration order, avoiding dictionary slot reuse after removal. Valid recovery removes obsolete error relationships. |
+
+The surface regressions failed before correction (closed-tooltip Escape,
+dismissed failed session, and replacement popup). Date regressions reproduced
+unavailable calendars still requesting dates and midnight steps introducing
+`23:59:59.9999999`. Slider/menu regressions also failed on the original behavior;
+the existing accepted capture-loss path already passed and remains protected.
+Detailed final verification counts are recorded in the handoff and issue updates.
+
+Final automated verification passes Core **486/486**, Windows **125/125** and
+Component Browser **13/13** (84 headless theme/density captures). Compiled
+architecture/public API and changed-file formatting/diff checks pass. Logs are
+`artifacts/review-followups-{core,windows,browser,architecture}.log`. The Windows
+project needed a fresh restore after its cached restore state contained a NuGet
+connection failure; normal restore succeeded without weakening audit or warning
+checks. The focused published desktop smoke remains pending for #279–283,
+which remain open rather than implying fresh focus or visual evidence. #284
+and #285 are complete with the focused time-boundary and retained-field/UIA
+automation; no additional broad walkthrough gates their closure.
+
+Field regressions reproduced stale help and `d,c` invalid-field order after
+removing B and appending D. Help notifications now run after the child mount
+transaction commits; the ownership guard remains intact. Semantic generations
+may advance with metadata changes, so retained-editor checks compare composition
+epoch and element identity. The Windows test queries the same retained UIA
+provider after help updates and valid recovery through a hidden window. A further
+queue regression caught a new surface overtaking a waiting modal; completing the
+dismissed request before arbitration preserves modal ordering.
+
+[#286](https://github.com/RichiCoder1/lucent/issues/286) is a design deliverable,
+not an assertion of implemented desktop parity. The [interaction design](desktop-component-interaction.md)
+defines modifier and IME precedence, per-family wrapping/clamping, viewport
+paging, compact bound-aware NumberField actions, free-text confirmation and the
+explicit deferral of hold-repeat. Ordered implementation tickets #287–289 are
+linked under #286 in Project 4, with native dependencies between the tickets.

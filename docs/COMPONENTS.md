@@ -75,6 +75,10 @@ editor can use `FieldContext.Relationships` and `FocusTarget` in its own single
 semantic owner. A second primary `TextField` using the same context fails the
 mount transaction.
 
+Changing a mounted field's help reader refreshes the primary editor's semantic
+help without replacing its identity. Returning validation to valid removes its
+error relationships and invalid state.
+
 `ValidationState` is immutable. Use `Valid`, `Invalid(messages)`, or
 `Pending(generation, completion)`. `TryComplete` applies a result only to the
 matching pending generation, so an older asynchronous response cannot replace
@@ -84,7 +88,9 @@ form submit and update while visible.
 
 `FormSession` is optional and scope owned. It registers mounted `fieldId`
 values, rejects duplicates, removes registrations on mount disposal, and
-focuses the first participating invalid field. The default
+focuses the first participating invalid field in registration order. Unmounting
+removes its place; a later mount appends, even when it reuses a prior identity.
+Reordering retained visual children does not reorder form registration. The default
 `WhenNotCollapsed` participation excludes collapsed retained fields;
 `Always` is an explicit opt-in. `SubmitAsync(Reject)` returns `Pending` while
 validation is in flight. `SubmitAsync(Await)` awaits only pending states that
@@ -114,8 +120,15 @@ they stay at that position while open. Keyboard-triggered tooltips use the
 focused element as their anchor. Both remain within the monitor's work area.
 Popover consumes the dismissing outside gesture by default; pass-through is
 explicit. Dialog adds modal focus containment and typed completion. Expected
-asynchronous submission failures remain in the dialog for recovery, and late
-completion cannot revive a removed owner. The examples show explicit initial
+asynchronous submission failures remain in an attached dialog for recovery.
+Host dismissal (including Windows owner hide/minimize) closes presentation; it
+does not cancel an application write already in progress. That write still
+reports its submission outcome: success completes the typed dialog as accepted,
+while failure completes the dismissed dialog as canceled. Reopening after it
+settles starts a new session. Minimize is dismissal, not hide-and-restore of the
+dialog. Late completion cannot revive a removed owner. A visible tooltip owns
+the first Escape; once closed, it passes Escape to the focused control and its
+ancestors. Active IME composition retains precedence. The examples show explicit initial
 focus, cancellation and destructive-action configuration.
 
 ProgressBar supports determinate and indeterminate presentation. InlineNotice
@@ -155,6 +168,10 @@ applied interaction draft while the caller remains authoritative. Direction,
 vertical orientation, and focused-wheel opt-in are explicit `SliderOptions`;
 separate NumberField and Slider instances synchronize only when their caller
 binds them to the same application value.
+Escape during a captured drag requests the value from gesture start, releases
+capture and prevents the later button release from committing. The caller still
+decides whether to accept that rollback request. Idle Escape bubbles to the
+surrounding UI; a secondary button release cannot complete a primary drag.
 
 ## Password fields
 
@@ -297,6 +314,9 @@ saving conversion. `DatePickerOptions` freezes an explicit culture and installs
 its Gregorian calendar for the first delivery. `TimePickerOptions` freezes the
 culture that selects 12-hour or 24-hour formatting. Null clearing, inclusive
 bounds and the positive time step are explicit options.
+Stepping stops at the last reachable step at an implicit day boundary; it does
+not wrap or introduce fractional seconds. Explicit fractional bounds remain
+exact clamp targets.
 
 Both pickers retain malformed text as an editable draft and publish only parsed,
 in-range values. The caller remains authoritative after a request.
@@ -310,6 +330,8 @@ day or week, Home and End move to culture-specific week edges, Page Up and Page
 Down preserve the focused day where possible across months, Enter commits, and
 Escape dismisses through the owned surface. Today, selected and focused dates
 have separate presentation, while out-of-range days remain visible and disabled.
+An open calendar rechecks live enabled, read-only and inherited availability
+before accepting a date, and closes when its owner becomes unavailable.
 
 Ranges, recurrence, alternate calendar systems, timezone selection and implicit
 daylight-saving conversion are outside this delivery.

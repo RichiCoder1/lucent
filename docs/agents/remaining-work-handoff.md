@@ -10,7 +10,23 @@ The final NativeAOT browser is `artifacts/component-input-278-verified/browser/L
 
 **UI testing is paused at the user's request.** The test app is closed and the desktop has been returned for gaming. Non-interactive work may continue; ask before taking focus again. If physical Escape interrupts future Computer Use, ask to resume while continuing independent code work rather than treating it as cancellation of the whole task.
 
-The independent Fable High review and primary-source control comparison are complete. The review inspected a frozen source snapshot and ran no tests or UI checks. Active-fix overlap is tracked in #278; independent follow-ups are ordered below and require focused reproductions before implementation:
+## Review implementation checkpoint — September 12, 2026
+
+The #279–285 corrections are implemented. Core **486/486**, Windows **125/125**
+and Component Browser **13/13** pass, including 84 headless theme/density captures.
+The Windows field test uses a hidden window and verifies updated help and error
+removal through the same UIA provider. Compiled architecture/public API,
+changed-file formatting and diff checks pass. Logs are
+`artifacts/review-followups-{core,windows,browser,architecture}.log`.
+
+#279–283 remain open for the bounded published desktop smoke: tooltip then
+dialog Escape; pending dialog dismissal/reopen; calendar live availability;
+slider Escape/secondary release; and menu separator/disabled-row keyboard
+continuity. No new manual/native-focus pass is claimed. #284 and #285 are
+complete with the time-boundary and retained-field/UIA automated evidence;
+neither needs a broad new walkthrough.
+
+The independent Fable High review and primary-source control comparison are complete. The review inspected a frozen source snapshot and ran no tests or UI checks. Active-fix overlap is tracked in #278. The implemented follow-ups are:
 
 1. [#279](https://github.com/RichiCoder1/lucent/issues/279): closed-tooltip Escape routing.
 2. [#280](https://github.com/RichiCoder1/lucent/issues/280): pending dialog acceptance, host dismissal and recovery.
@@ -19,7 +35,7 @@ The independent Fable High review and primary-source control comparison are comp
 5. [#283](https://github.com/RichiCoder1/lucent/issues/283): menu keyboard navigation after separator hover.
 6. [#284](https://github.com/RichiCoder1/lucent/issues/284): TimePicker stepping at the end of the day.
 7. [#285](https://github.com/RichiCoder1/lucent/issues/285): dynamic field help and first-invalid order.
-8. [#286](https://github.com/RichiCoder1/lucent/issues/286): planned desktop key/paging and numeric-stepper parity; distinguish design decisions from defects.
+8. [#286](https://github.com/RichiCoder1/lucent/issues/286): design delivered in [desktop component interaction](../plans/desktop-component-interaction.md). Its ordered implementation tickets are [#287 dropdown keys](https://github.com/RichiCoder1/lucent/issues/287), [#288 viewport paging](https://github.com/RichiCoder1/lucent/issues/288), and [#289 compact numeric steppers](https://github.com/RichiCoder1/lucent/issues/289). These enhancements are distinct from the reproduced defects.
 
 The local comparison, review and snapshot provenance are under `artifacts/reviews/control-behavior-20260912-194108/`. Public tickets contain bounded reproductions and acceptance criteria, not the full local review snapshot. Resolve the correctness follow-ups before beginning the next authoring phase.
 
