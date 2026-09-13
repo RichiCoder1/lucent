@@ -9,7 +9,7 @@ public sealed partial class InputRouter
         ReactiveScope scope,
         Action<bool, float, float> onHoverChanged,
         Action<bool> onFocusChanged,
-        Action? onEscape
+        Func<bool>? onEscape
     )
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -78,21 +78,25 @@ public sealed partial class InputRouter
         )
             return false;
         var path = Path(target);
-        TooltipRegistration? registration = null;
         for (var index = path.Count - 1; index >= 0; index--)
-            if (_tooltips.TryGetValue(path[index].ElementId, out registration))
-                break;
-        if (registration?.OnEscape is not { } escape)
-            return false;
-        try
         {
-            escape();
+            if (
+                !_tooltips.TryGetValue(path[index].ElementId, out var registration)
+                || registration.OnEscape is not { } escape
+            )
+                continue;
+            try
+            {
+                if (escape())
+                    return true;
+            }
+            catch (Exception error)
+            {
+                errors.Add(error);
+                return true;
+            }
         }
-        catch (Exception error)
-        {
-            errors.Add(error);
-        }
-        return true;
+        return false;
     }
 
     private static void InvokeTooltip(
@@ -121,13 +125,13 @@ public sealed partial class InputRouter
         long elementId,
         Action<bool, float, float> onHoverChanged,
         Action<bool> onFocusChanged,
-        Action? onEscape
+        Func<bool>? onEscape
     )
     {
         internal long ElementId { get; } = elementId;
         internal Action<bool, float, float> OnHoverChanged { get; } = onHoverChanged;
         internal Action<bool> OnFocusChanged { get; } = onFocusChanged;
-        internal Action? OnEscape { get; } = onEscape;
+        internal Func<bool>? OnEscape { get; } = onEscape;
         internal bool Hovered { get; set; }
         internal bool Focused { get; set; }
     }

@@ -62,7 +62,9 @@ public sealed partial class InputRouter
             );
         if (ReferenceEquals(_surface, request))
             return;
-        if (_surface is { IsModal: true })
+        if (_surface is { IsDismissed: true } completed)
+            CompleteSurface(completed);
+        if (_surface is { IsModal: true, IsDismissed: false })
         {
             if (request.IsModal)
                 _waitingModalSurfaces.Enqueue(request);

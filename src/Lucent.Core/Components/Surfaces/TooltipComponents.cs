@@ -85,8 +85,7 @@ public static partial class Components
                     && !context.CompositionInput().HasTextComposition
                 )
                 {
-                    Escape();
-                    route.Handled = true;
+                    route.Handled = Escape();
                 }
             });
             context.OnDispose(() =>
@@ -97,11 +96,13 @@ public static partial class Components
             });
         }
 
-        private void Escape()
+        private bool Escape()
         {
+            var wasOpen = _surface is { IsDismissed: false };
             _escapeSuppressed = true;
             CancelTimer();
             DismissSurface();
+            return wasOpen;
         }
 
         private void SetHovered(bool hovered, float pointerX, float pointerY)

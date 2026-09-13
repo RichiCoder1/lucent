@@ -6,6 +6,146 @@ namespace Lucent.Core.Tests;
 public sealed class DialogContracts
 {
     [TestMethod]
+    public void SecondEscapePassesClosedTooltipAndCancelsDialog()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "dialog-tooltip-escape");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var controller = new DialogController<int>(composition.Root.Scope);
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Dialog(
+                controller,
+                "Review",
+                [Components.Tooltip("Action help", [Components.Button("Action", () => { })])]
+            )
+        );
+        var session = controller.OpenAsync().AsTask();
+        composition.Flush();
+        var request = composition.Input.ActiveSurface!;
+        var popup = request.CreateComposition();
+        popup.Flush();
+        using var scene = SceneLayout.Project(popup, new(420, 340, 1), new EmptyShaper());
+        Assert.IsTrue(popup.Input.SetScene(scene));
+        Assert.IsTrue(request.FocusInitial());
+        var tooltip = popup.Input.ActiveSurface;
+        Assert.IsNotNull(tooltip);
+        Assert.IsTrue(popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Escape)).Handled);
+        Assert.IsTrue(tooltip.IsDismissed);
+        Assert.IsTrue(controller.IsOpen);
+        Assert.IsTrue(popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Escape)).Handled);
+        Assert.IsFalse(controller.IsOpen, "A closed tooltip swallowed dialog cancellation.");
+        Assert.IsTrue(session.IsCompletedSuccessfully);
+        Assert.IsTrue(session.Result.IsCanceled);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void HostDismissalDuringAcceptanceSettlesSessionWithoutCancelingApplication(
+        bool succeeds
+    )
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "dialog-host-dismissal");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var controller = new DialogController<int>(composition.Root.Scope);
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Dialog(controller, "Review", [Components.Text("Body")])
+        );
+        var session = controller.OpenAsync().AsTask();
+        composition.Flush();
+        var request = composition.Input.ActiveSurface!;
+        var application = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var posted = new ManualResetEventSlim();
+        using var postedLifetime = posted;
+        var submission = controller
+            .AcceptAsync(
+                7,
+                (_, token) =>
+                {
+                    Assert.IsFalse(token.CanBeCanceled);
+                    return new ValueTask(application.Task);
+                }
+            )
+            .AsTask();
+        composition.Flush();
+        graph.WorkAvailable += posted.Set;
+        request.Dismiss();
+        composition.Flush();
+        posted.Reset();
+        Assert.IsFalse(controller.IsOpen);
+        Assert.IsFalse(application.Task.IsCompleted);
+        Assert.IsFalse(session.IsCompleted);
+        if (succeeds)
+            application.SetResult();
+        else
+            application.SetException(new InvalidOperationException("Expected failure"));
+        Assert.IsTrue(posted.Wait(TimeSpan.FromSeconds(5)));
+        graph.Drain();
+        Assert.IsTrue(submission.IsCompletedSuccessfully);
+        Assert.AreEqual(
+            succeeds ? DialogSubmissionStatus.Accepted : DialogSubmissionStatus.Failed,
+            submission.Result.Status
+        );
+        Assert.IsTrue(
+            session.IsCompletedSuccessfully,
+            "A dismissed failed dialog stranded OpenAsync."
+        );
+        Assert.AreEqual(succeeds, session.Result.IsAccepted);
+        Assert.IsFalse(controller.IsOpen);
+        Assert.IsFalse(controller.IsPending);
+        var reopened = controller.OpenAsync().AsTask();
+        composition.Flush();
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+        Assert.IsTrue(controller.TryCancel());
+        Assert.IsTrue(reopened.Result.IsCanceled);
+    }
+
+    [TestMethod]
+    public void DismissedModalDoesNotBlockPopoverBeforeHostCleanup()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "dialog-popover-replacement");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var controller = new DialogController<int>(composition.Root.Scope);
+        var open = composition.Root.Scope.Signal(false, "popover-open");
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Dialog(controller, "Review", [Components.Text("Body")])
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Popover(
+                () => open.Value,
+                value => open.Value = value,
+                Components.Text("Help"),
+                [Components.Button("Help", () => { })]
+            )
+        );
+        var session = controller.OpenAsync().AsTask();
+        composition.Flush();
+        var modal = composition.Input.ActiveSurface!;
+        Assert.IsTrue(controller.TryCancel());
+        open.Value = true;
+        Assert.IsTrue(session.Result.IsCanceled);
+        composition.Flush();
+        Assert.IsTrue(modal.IsDismissed);
+        Assert.IsNotNull(
+            composition.Input.ActiveSurface,
+            "Dismissed modal blocked a new nonmodal request."
+        );
+        Assert.IsFalse(composition.Input.ActiveSurface.IsModal);
+        composition.Input.CompleteSurface(modal);
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+    }
+
+    [TestMethod]
     public async Task AcceptedValueCompletesTypedSessionAndCloses()
     {
         var graph = new ReactiveGraph();

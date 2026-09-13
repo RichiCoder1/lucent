@@ -785,7 +785,7 @@ public sealed class BehaviorContext
     internal void RegisterTooltip(
         Action<bool, float, float> onHoverChanged,
         Action<bool> onFocusChanged,
-        Action? onEscape = null
+        Func<bool>? onEscape = null
     )
     {
         CheckAttachment();

@@ -7,6 +7,29 @@ namespace Lucent.Core.Tests;
 public sealed class SurfaceContracts
 {
     [TestMethod]
+    public void DismissedModalPromotesWaitingModalBeforeNewRequest()
+    {
+        using var owner = new Composition(new ReactiveGraph(), "modal-queue-replacement");
+        var first = new ModalProbe(owner);
+        var second = new ModalProbe(owner);
+        var third = new ModalProbe(owner);
+        owner.Input.RequestSurface(first);
+        owner.Input.RequestSurface(second);
+        first.Dismiss();
+        owner.Input.RequestSurface(third);
+        Assert.AreSame(
+            second,
+            owner.Input.ActiveSurface,
+            "A later request overtook the queued modal."
+        );
+        owner.Input.CompleteSurface(first);
+        Assert.AreSame(second, owner.Input.ActiveSurface);
+        second.Dismiss();
+        owner.Input.CompleteSurface(second);
+        Assert.AreSame(third, owner.Input.ActiveSurface);
+    }
+
+    [TestMethod]
     public void SurfaceAnchorRequiresPositiveIntersectionWithEveryAncestorClip()
     {
         var anchor = new LayoutRect(20, 120, 80, 32);

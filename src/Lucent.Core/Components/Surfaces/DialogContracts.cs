@@ -37,7 +37,7 @@ public enum DialogSubmissionStatus
     /// <summary>The application action completed and the dialog closed.</summary>
     Accepted,
 
-    /// <summary>The application action failed and the dialog remains open.</summary>
+    /// <summary>The application action failed; an attached dialog remains open for recovery.</summary>
     Failed,
 
     /// <summary>An accept action is already running for this dialog.</summary>
@@ -62,7 +62,7 @@ public sealed record DialogSubmissionResult(
     /// <summary>Gets whether the application action committed successfully.</summary>
     public bool IsAccepted => Status == DialogSubmissionStatus.Accepted;
 
-    /// <summary>Gets whether the application action failed while the dialog remained open.</summary>
+    /// <summary>Gets whether the application action failed.</summary>
     public bool IsFailed => Status == DialogSubmissionStatus.Failed;
 }
 
@@ -276,6 +276,8 @@ public sealed class DialogController<T> : DialogControllerBase
         // completion below settles the typed result without canceling that write.
         if (!_pending.Value)
             CompleteCanceled(session);
+        else
+            _open.Value = false;
     }
 
     internal override void OwnerDetached()
@@ -396,6 +398,13 @@ public sealed class DialogController<T> : DialogControllerBase
         }
         if (status == DialogSubmissionStatus.Failed)
         {
+            if (!_open.Value)
+            {
+                // Host dismissal is terminal for presentation. Report the failed write to its
+                // caller and settle OpenAsync as canceled rather than strand an invisible session.
+                CompleteCanceled(session);
+                return new(DialogSubmissionStatus.Failed, GenericFailureMessage);
+            }
             _failure.Value = GenericFailureMessage;
             return new(DialogSubmissionStatus.Failed, GenericFailureMessage);
         }
