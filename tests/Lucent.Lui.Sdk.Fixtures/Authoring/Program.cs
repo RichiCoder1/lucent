@@ -24,8 +24,13 @@ static void Verify(Func<Func<string>, ComponentRecipe> build)
     graph.Drain();
     var after = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "After");
     Require(
-        after.Identity == before.Identity,
+        after.Identity.CompositionEpoch == before.Identity.CompositionEpoch
+            && after.Identity.ElementId == before.Identity.ElementId,
         "A live metadata update replaced the retained root."
+    );
+    Require(
+        !composition.IsCurrent(before.Identity),
+        "The old semantic generation remained current."
     );
     Require(element.Id == after.Identity.ElementId, "Author conversion introduced an extra root.");
 }

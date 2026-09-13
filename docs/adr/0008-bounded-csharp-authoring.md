@@ -1,9 +1,10 @@
 # Bounded C# authoring over retained recipes
 
 Status: accepted direction for [#265](https://github.com/RichiCoder1/lucent/issues/265),
-September 13, 2026. Concrete signatures are subject to the executable
-[#266 feasibility gate](https://github.com/RichiCoder1/lucent/issues/266), currently
-in progress. This record does not assert that downstream APIs are delivered.
+September 13, 2026. The executable
+[#266 feasibility gate](https://github.com/RichiCoder1/lucent/issues/266) passes
+with the concrete signatures below. This record does not assert that downstream
+APIs are delivered.
 
 `.lui` remains the primary authoring language. Concise C# authoring uses the same
 `ComponentRecipe.Defer(string, Func<ReactiveScope, ComponentRecipe>)` lifetime:
@@ -140,6 +141,29 @@ The proof starts from delivered component source `a18d662`, after the editor
 reference and desktop interaction implementation, rather than the older design
 worktree. The pinned SDK/compiler,
 results and final signature deviations will be recorded with gate completion.
+
+### Feasibility evidence
+
+The final isolated candidate passes Core **510/510**, Compiler **66/66**,
+Generator **17/17**, and editor **27/27**, with warning-clean builds and Core
+architecture positive/negative checks. The overload matrix executes all five
+supported families as values, lambdas, method groups, tokens and defaults,
+including typed-null rejection. The SDK is 10.0.401; the embedded Roslyn family
+is 5.0.0.
+
+Core and SDK packages `0.3.0-dev.gate266.2` from candidate `44f2d5d` were restored
+into a fresh cache. A separately packaged proof library and its package-only
+consumer compile and execute generated `.lui` components in managed and
+win-x64 NativeAOT modes. They verify first-presentation width, authored semantics,
+live metadata, stable composition/element identity, and invalidation of the old
+semantic generation. No runtime Roslyn files are present. Native executable
+SHA-256: `50F129797E7173598A7601A1EF2F72F2511DECBB50EF4ABD6573D242BE69EF4B`.
+These local gate package identities are not claims of GitHub package publication.
+
+Logs are under `artifacts/authoring266-worktree/artifacts/` in the main checkout:
+`authoring-bind-core-full.log`, `authoring-compiler-generator-full-final.log`,
+`authoring-editor-full.log`, and `authoring-package-verified.log`. The gate leaves
+stock factories unchanged. Next is #267; #268–275 retain their issue boundaries.
 
 ### Factory-return migration inventory
 
