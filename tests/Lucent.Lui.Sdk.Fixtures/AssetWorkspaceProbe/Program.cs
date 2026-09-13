@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
@@ -23,8 +24,10 @@ if (!MSBuildLocator.IsRegistered)
 
 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 using var workspace = MSBuildWorkspace.Create();
-var workspaceFailures = new List<string>();
-workspace.WorkspaceFailed += (_, failure) => workspaceFailures.Add(failure.Diagnostic.Message);
+var workspaceFailures = new ConcurrentQueue<string>();
+using var failureRegistration = workspace.RegisterWorkspaceFailedHandler(failure =>
+    workspaceFailures.Enqueue(failure.Diagnostic.Message)
+);
 
 var project = await workspace.OpenProjectAsync(projectPath, cancellationToken: timeout.Token);
 var compilation =
@@ -77,5 +80,5 @@ if (errors.Length != 0)
     );
 
 Console.WriteLine($"workspace-assets: PASS ({assetTree.FilePath})");
-if (workspaceFailures.Count != 0)
+if (!workspaceFailures.IsEmpty)
     Console.WriteLine("workspace-diagnostics: " + string.Join(" | ", workspaceFailures));

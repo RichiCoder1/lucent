@@ -57,7 +57,8 @@ function Invoke-Dotnet([string]$label, [string[]]$arguments) {
     Add-Content -LiteralPath $logPath -Value ("`n>>> {0}: dotnet {1}" -f $label, ($arguments -join ' '))
     & $dotnet @arguments 2>&1 | Tee-Object -FilePath $logPath -Append
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet $label failed with exit code $LASTEXITCODE"
+        $failureTail = (Get-Content -LiteralPath $logPath -Tail 30) -join [Environment]::NewLine
+        throw "dotnet $label failed with exit code $LASTEXITCODE`n$failureTail"
     }
 }
 

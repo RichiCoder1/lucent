@@ -56,6 +56,18 @@ reactive primitives. Stock factory migration remains #269; this gate does not
 claim completion of the full authoring epic #265. Check the final integrated
 commit's CI for public package status; the local gate packages are proof assets.
 
+The first integrated CI run, 34753499084, passed managed and NativeAOT suites
+but stopped before publication at the asset-workspace helper's stale Roslyn
+lockfile. The helper now uses the aligned dependency graph and supported owned
+workspace-diagnostic registration. It is included in the solution so future
+solution-wide dependency refreshes cover it. Asset verification now includes
+the failing command's diagnostic tail in CI errors. This repair changes the
+verification helper, not the runtime candidate exercised by the desktop checks.
+The full local asset proof passes after the repair, including cold workspace
+generation, metadata/negative cases and both package/project-reference NativeAOT
+consumers after removing source, feed and cache. Logs are under
+`artifacts/authoring-assets-ci-repair/`; solution locked restore also passes.
+
 ## Completed interaction repairs — September 12, 2026
 
 [#278](https://github.com/RichiCoder1/lucent/issues/278) repairs the user's additional recordings: calendar weekday centering, tooltip shadow hover interception, popup width/scrolling/restore placement, and ComboBox editing/reopening. Suggestion windows retain editor focus and pointer selection; popup width includes its padding. A shared reactive graph fix preserves later notifications after an effect writes and rereads a derived value. Native popups resize before positioning so the old width cannot constrain their new location. Core 461/461, Windows 125/125 and Component Browser 13/13 pass, including the gallery's 84 theme/density captures. Architecture and changed-file formatting checks pass. Logs are `artifacts/component-input-*.log`; the final Windows resize-order proof is recorded in the execution plan.
