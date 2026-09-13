@@ -17,13 +17,15 @@ The later Enter hotfix lets single-line TextField bubble Enter to CommandScope w
 
 Test setup now uses Core metadata for synthetic LSP fixtures that do not require Core source navigation, removes duplicate test-discovery processes, rejects empty runs, and records TRX timings. Managed and package verification run concurrently; publication waits for both and consumes the exact verified artifact. No existing assertions or native/package checks were removed. Measured local LSP time fell from 10m05s to 6m33s (35%); [CI 58](https://github.com/RichiCoder1/lucent/actions/runs/34721289961) took 15m23s versus CI 57's 37m59s. These are observed runs, not runtime IDE-performance claims. A separate Skia churn-fixture fix deterministically admits its intended workload while retaining renderer entry/byte limits and the existing timeout.
 
-## Outstanding manual walkthrough
+## Completed manual walkthrough and follow-up
 
-The owner requested one more manual Computer Use walkthrough of every component after delivery. This remains pending: the skill is installed, but this task has no callable `node_repl` runtime. Automated desktop checks and inspected captures do not substitute for the requested walkthrough.
+The requested Computer Use walkthrough is complete. The runtime became callable in the resumed task; all fourteen examples were visited in the real NativeAOT browser. The [execution plan's walkthrough record](../plans/component-delivery.md#final-computer-use-walkthrough--september-12) distinguishes observed interactions from the automated theme matrix and keyboard evidence.
 
-The fresh NativeAOT browser is ready at `artifacts/component-manual-ready/browser/Lucent.ComponentBrowser.exe`, built from `f6fbc4ff29fcd9ab4e5c390825e663fba3d6548a`; `artifacts/component-manual-ready/source.json` records its SHA-256. When Computer Use becomes callable, exercise all fourteen examples, stock appearances and densities, pointer/keyboard interaction, hover/press/focus, popup placement and resizing. Repeat the owner's calendar, repeated password-toggle, suggestion-width, radio-label, menu/submenu, tooltip-anchor and slider-alignment cases. Record observed results and fix reproduced defects before claiming this pass complete.
+[Follow-up #277](https://github.com/RichiCoder1/lucent/issues/277) fixes the remaining Select popup sizing, gallery navigation/scroll reset and popup-to-owner repaint defects at `364033142d869d4c45646b82802a362e6b04a6ac`. Core surface/list contracts pass 13/13, Windows 121/121 and Component Browser 13/13 with 84 captures. Architecture/public API and formatting checks pass. Geometry/navigation passed a native retest; the final build additionally passed immediate Select feedback, Popover open/close feedback and modal completion through Computer Use.
 
-This delivery also does not claim broad manual accessibility, real-language IME or fresh physical mixed-DPI certification. Earlier #153 hardware evidence remains valid for its recorded source boundary.
+The current tested browser is `artifacts/component-walkthrough-final/browser/Lucent.ComponentBrowser.exe`; `artifacts/component-walkthrough-final/source.json` records the exact source and SHA-256. The earlier `component-manual-ready` build is superseded. Package `0.3.0-dev.60.1` above is the prior published consumer baseline; consult #277 and its CI run for follow-up publication rather than treating the local executable as a published package.
+
+Computer Use's transient-element cache and arrow/Enter injection were unreliable in some cases; the record does not claim a fresh manual keyboard pass for those paths. This delivery also does not claim broad manual accessibility, real-language IME or fresh physical mixed-DPI certification. Earlier #153 hardware evidence remains valid for its recorded source boundary.
 
 ## Next implementation
 

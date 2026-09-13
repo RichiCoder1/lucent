@@ -61,8 +61,60 @@ three native workflows covering physical Enter capture/autosave/reopen and
 responsive URL draft/focus continuity. The physical Enter workflow covers the
 TextField command-routing fix made after the component desktop run.
 
-The additionally requested final Computer Use walkthrough remains pending because
-its runtime is unavailable in this task. These automated results do not claim that
-walkthrough, broad manual accessibility, real-language IME or fresh physical
-mixed-DPI certification. The [handoff](../agents/remaining-work-handoff.md) identifies
-the prepared browser build and outstanding manual scope.
+## Final Computer Use walkthrough — September 12
+
+Computer Use became callable in the resumed task. The walkthrough used the real
+NativeAOT Component Browser, initially built from `f6fbc4f`, and visited all fourteen
+examples. Most interactions used dark/comfortable presentation; representative
+light, high-contrast and compact states were also inspected. The complete 84-image
+theme/density matrix remains automated evidence, rather than 84 manual passes.
+
+| Example | Observed interaction and presentation |
+| --- | --- |
+| Buttons | Invocation feedback, disabled controls, centered labels and selected presentation. |
+| Text fields | Editing, undo, multiline typing, mouse selection and insertion at a clicked text position; caret aligned with text. |
+| Password | Repeated show/hide persisted after release; leaving the field remasked the fake fixture value. |
+| Async ComboBox | Three suggestions and a filtered single result sized to their content and trigger; pointer selection applied. |
+| Selection | CheckBox, Switch and RadioGroup pointer changes; full radio labels with even spacing. |
+| Feedback | Determinate progress, error notice and recovery through Retry. |
+| Menus | Right-click, hover-opened submenu, aligned placement, balanced padding, diagonal pointer travel into the child menu and nested invocation. |
+| Tooltips/popovers | Tooltip appeared near the pointer with readable wrapped text; interactive popover opened and closed through its button and Escape. |
+| Numeric input | Number increment and slider dragging changed values; slider thumb centered on the track. |
+| Date and time | Compact aligned calendar, date selection and time increment. |
+| Navigation/dialogs | Tabs, list choices, disclosure, typed link action and bounded Review changes dialog with completion feedback. Select sizing required the follow-up below. |
+| Tree view | Expansion, child selection and internal scrolling. |
+| Native storage | Real Windows open-file selection, save-picker cancellation and folder selection; no file write. |
+| Data table | Numeric sorting, switching to 10,000 rows and bounded scrolling with retained headers. |
+
+Native window sizing from 1282 to approximately 953 pixels wide reflowed the
+content without a retained black region in the observed frames. This does not
+measure animation frame pacing. The application remained responsive and did not
+crash during the walkthrough.
+
+[Follow-up #277](https://github.com/RichiCoder1/lucent/issues/277) records the newly
+reproduced defects: Select's fixed narrow/tall popup, unbounded gallery navigation,
+retained detail/source scroll when changing examples, and delayed owner feedback
+after owned-popup state changes. These fixes are committed in `3640331`. Select
+geometry and gallery scrolling passed the first native retest. The final native
+build then verified immediate Select label updates, Popover open/close feedback,
+and dialog completion with owner enablement restored. It required no extra owner
+input to repaint the committed choice.
+
+Focused Core surface/list contracts passed 13/13, Windows contracts 121/121 and
+Component Browser contracts 13/13, including the 84 captures. Core architecture,
+compiled public API and changed-file formatting checks passed. The final NativeAOT
+build is `artifacts/component-walkthrough-final/browser/Lucent.ComponentBrowser.exe`,
+SHA-256 `48F1396AECAA1014006E6690F690D4C0D337E0010D5AEF32AC8951DB2E0E1DF2`;
+its source manifest and verification logs are under `artifacts/component-walkthrough*`.
+
+Computer Use's indexed actions sometimes rejected transient-window elements or
+points outside the owner's bounds. Screenshot-guided interaction provided the
+pointer checks. Its arrow/Enter injection did not reliably exercise Lucent choice
+navigation, although native Windows menu arrows worked. The desktop harness uses
+extended scan-code navigation for SDL; this difference is a likely explanation,
+not a manually proven keyboard pass. Existing Core and desktop keyboard evidence
+retains its own source boundary. This walkthrough does not certify a screen
+reader, real-language IME or fresh physical mixed-DPI behavior.
+
+See the [handoff](../agents/remaining-work-handoff.md) for the current build and
+follow-up state.
