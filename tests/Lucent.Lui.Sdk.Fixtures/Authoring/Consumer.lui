@@ -1,0 +1,8 @@
+namespace AuthoringConsumer;
+using System;
+using Lucent.Core;
+using static AuthoringGate.ProofLibrary;
+
+internal component Consumer(Func<string> label) {
+    <Probe label={label} />
+}

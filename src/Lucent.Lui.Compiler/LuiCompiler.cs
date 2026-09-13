@@ -359,7 +359,7 @@ public static class LuiCompiler
                         "LUI2001",
                         "Element tag '"
                             + invocation.Expression
-                            + "' must resolve to an accessible static [LucentComponent] method returning ComponentRecipe.",
+                            + "' must resolve to an accessible static [LucentComponent] method returning ComponentRecipe or a supported AuthorRecipe capability.",
                         mapped.Source
                     )
                 );
@@ -1258,10 +1258,9 @@ public static class LuiCompiler
         return new LuiSpan(start, Math.Max(0, end - start));
     }
 
-    private static bool IsComponent(IMethodSymbol method) =>
+    private static bool IsComponent(Compilation compilation, IMethodSymbol method) =>
         method.IsStatic
-        && method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-            == "global::Lucent.Core.ComponentRecipe"
+        && LuiComponentReturnShape.TryGet(compilation, method.ReturnType, out _)
         && method
             .GetAttributes()
             .Any(attribute =>
@@ -1297,7 +1296,7 @@ public static class LuiCompiler
                         ?? Enumerable.Empty<IMethodSymbol>()
                     : Enumerable.Empty<IMethodSymbol>()
             )
-            .Where(method => method is not null && IsComponent(method!))
+            .Where(method => method is not null && IsComponent(model.Compilation, method!))
             .Cast<IMethodSymbol>()
             .GroupBy(
                 method =>
@@ -1798,13 +1797,14 @@ public static class LuiCompiler
                 );
             var type = expression is null ? null : model.GetTypeInfo(expression).Type;
             var display = type?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            plans[contribution.Source.Start] = display switch
-            {
-                "global::Lucent.Core.ComponentContent" => ContentContributionKind.Collection,
-                "global::Lucent.Core.ComponentRecipe" => ContentContributionKind.Recipe,
-                "global::Lucent.Core.ContentRecipe" => ContentContributionKind.Recipe,
-                _ => ContentContributionKind.Invalid,
-            };
+            plans[contribution.Source.Start] =
+                display == "global::Lucent.Core.ComponentContent"
+                    ? ContentContributionKind.Collection
+                : display == "global::Lucent.Core.ContentRecipe"
+                || type is not null
+                    && LuiComponentReturnShape.TryGet(model.Compilation, type, out _)
+                    ? ContentContributionKind.Recipe
+                : ContentContributionKind.Invalid;
         }
         return plans;
     }
@@ -1835,7 +1835,7 @@ public static class LuiCompiler
             var discoveredMethods = new[] { info.Symbol as IMethodSymbol }
                 .Concat(info.CandidateSymbols.OfType<IMethodSymbol>())
                 .Concat(ComponentMethods(model, invocation))
-                .Where(method => method is not null && IsComponent(method!))
+                .Where(method => method is not null && IsComponent(model.Compilation, method!))
                 .Cast<IMethodSymbol>()
                 .ToArray();
             var methods = discoveredMethods
@@ -1844,7 +1844,7 @@ public static class LuiCompiler
                         method.ContainingType.GetMembers(method.Name).OfType<IMethodSymbol>()
                     )
                 )
-                .Where(IsComponent)
+                .Where(method => IsComponent(model.Compilation, method))
                 .GroupBy(
                     method =>
                         method.GetDocumentationCommentId()

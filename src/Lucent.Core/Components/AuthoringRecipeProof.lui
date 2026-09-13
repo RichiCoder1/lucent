@@ -1,0 +1,5 @@
+namespace Lucent.Core;
+
+internal component AuthoringRecipeLuiProof(Func<string> label) {
+    <AuthoringRecipeCoreProof label={label} />
+}

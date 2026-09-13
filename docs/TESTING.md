@@ -28,6 +28,17 @@ feed and `LUCENT_LSP_PACKAGE_VERSION` to the exact Core version, then run that
 named test. The fixture restores the package before loading its project. Use an
 isolated `NUGET_PACKAGES` directory when checking a fresh package restore.
 
+The bounded C# authoring gate runs in the Core, Compiler and Generator suites.
+`AuthoringRecipeContracts` checks retained ownership, live metadata and same-Core
+`.lui` generation. `AuthoringCapabilityTests` checks source/metadata discovery and
+content expressions; `AuthoringOverloadTests` compiles and executes concrete
+value, reader, token, null and default routes with negative capability cases.
+Run `./tools/Test-AuthoringPackages.ps1 -Feed <local-package-directory> -Version
+<exact-prerelease-version>` after packing Core and the SDK to test a fresh,
+package-only proof library and consumer, including console NativeAOT execution.
+This proof takes no desktop focus. Compiler package changes also require the
+editor suite; the authoring gate uses Roslyn 5.0 and a C# 14-capable host.
+
 ## Additional suites
 
 Presentation motion uses deterministic `MotionContracts`, `StockMotionContracts` and `MotionProjectionContracts` in Core, real-pixel `MotionPaintTests` in Skia, and the headless and Windows scheduling contracts. They cover retargeting, cancellation, retained geometry/shaping, image ownership, reduced motion and accessibility snapshot reuse. The opt-in `MotionPerformanceTests` compares 1, 100 and 1,000 active tracks with `Motion.None`; set `LUCENT_MOTION_CHARACTERIZATION` to an artifact directory to write phase/allocations reports. Issue Browser's `StockRowHoverUsesRetainedPaintAndKeepsSelectionImmediate` adds its 10,000-item virtualized source as a consumer. These measurements characterize the current machine rather than imposing a universal timing threshold.

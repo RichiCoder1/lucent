@@ -1,0 +1,8 @@
+namespace AuthoringGate;
+using System;
+using Lucent.Core;
+using static AuthoringGate.ProofLibrary;
+
+internal component GeneratedProbe(Func<string> label) {
+    <Probe label={label} />
+}

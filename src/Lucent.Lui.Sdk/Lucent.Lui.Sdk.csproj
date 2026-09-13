@@ -34,12 +34,12 @@
       PackagePath="notices/Roslyn-LICENSE.txt"
     />
     <None
-      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.common/4.14.0/ThirdPartyNotices.rtf"
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.common/5.0.0/ThirdPartyNotices.rtf"
       Pack="true"
       PackagePath="notices/Roslyn-Common-NOTICES.rtf"
     />
     <None
-      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp/4.14.0/ThirdPartyNotices.rtf"
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp/5.0.0/ThirdPartyNotices.rtf"
       Pack="true"
       PackagePath="notices/Roslyn-CSharp-NOTICES.rtf"
     />

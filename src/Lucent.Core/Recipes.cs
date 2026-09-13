@@ -10,18 +10,24 @@ public sealed class ComponentRecipe
     private readonly Action<CompositionContext, Element> _content;
     private readonly Func<ReactiveScope, ComponentRecipe>? _deferred;
     private readonly string? _name;
+    private readonly AuthorRecipeContributions? _authoring;
+    private readonly AuthorRecipeTarget? _authoringTarget;
 
     private ComponentRecipe(
         string kind,
         Action<CompositionContext, Element> content,
         string? name = null,
-        Func<ReactiveScope, ComponentRecipe>? deferred = null
+        Func<ReactiveScope, ComponentRecipe>? deferred = null,
+        AuthorRecipeContributions? authoring = null,
+        AuthorRecipeTarget? authoringTarget = null
     )
     {
         Kind = kind;
         _content = content;
         _name = name;
         _deferred = deferred;
+        _authoring = authoring;
+        _authoringTarget = authoringTarget;
     }
 
     private ComponentRecipe(string kind, Func<ReactiveScope, ComponentRecipe> deferred)
@@ -51,7 +57,7 @@ public sealed class ComponentRecipe
     public ComponentRecipe Named(string name)
     {
         ReactiveGraph.ValidateName(name, nameof(name));
-        return new ComponentRecipe(Kind, _content, name, _deferred);
+        return new ComponentRecipe(Kind, _content, name, _deferred, _authoring, _authoringTarget);
     }
 
     /// <summary>Converts one root recipe into one content contribution.</summary>
@@ -61,6 +67,28 @@ public sealed class ComponentRecipe
         return new ContentRecipe((context, parent) => context.Mount(parent, recipe));
     }
 
+    internal AuthorRecipeContributions? Authoring => _authoring;
+
+    internal ComponentRecipe WithAuthoring(AuthorRecipeContributions authoring)
+    {
+        ArgumentNullException.ThrowIfNull(authoring);
+        if (ReferenceEquals(authoring, _authoring))
+            return this;
+        return new ComponentRecipe(Kind, _content, _name, _deferred, authoring, _authoringTarget);
+    }
+
+    internal ComponentRecipe WithAuthoringTarget(AuthorRecipeTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (_authoringTarget is not null && !ReferenceEquals(target, _authoringTarget))
+            throw new InvalidOperationException(
+                "A retained recipe cannot map two different authoring targets."
+            );
+        if (ReferenceEquals(target, _authoringTarget))
+            return this;
+        return new ComponentRecipe(Kind, _content, _name, _deferred, _authoring, target);
+    }
+
     internal Element Mount(CompositionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -68,15 +96,23 @@ public sealed class ComponentRecipe
         {
             var owner = context.BeginDeferredScope(Kind, _name);
             var recipe = ResolveDeferred(context, owner, this, out var preferredName);
+            var authoring = MergeAuthoring(recipe._authoring, _authoring);
+            if (authoring is not null && !ReferenceEquals(authoring, recipe._authoring))
+                recipe = recipe.WithAuthoring(authoring);
+            var target = MergeAuthoringTargets(recipe._authoringTarget, _authoringTarget);
+            if (target is not null && !ReferenceEquals(target, recipe._authoringTarget))
+                recipe = recipe.WithAuthoringTarget(target);
             var deferredRoot = context.RecipeElement(
                 recipe.Kind,
                 preferredName ?? recipe._name,
                 owner
             );
+            recipe.ApplyAuthoring(context, deferredRoot);
             recipe.Apply(context, deferredRoot);
             return deferredRoot;
         }
         var root = context.RecipeElement(Kind, _name);
+        _authoringTarget?.Apply(context, root, AuthorRecipeValues.From(_authoring));
         _content(context, root);
         return root;
     }
@@ -90,18 +126,78 @@ public sealed class ComponentRecipe
     {
         preferredName = recipe._name;
         var seen = new HashSet<ComponentRecipe>();
-        while (recipe._deferred is not null)
+        var layers = new List<ComponentRecipe>();
+        var current = recipe;
+        while (true)
         {
-            if (!seen.Add(recipe))
+            if (!seen.Add(current))
                 throw new InvalidOperationException(
                     "A deferred recipe factory returned a recursive recipe."
                 );
-            var next = context.RunDeferred(owner, () => recipe._deferred(owner));
+            layers.Add(current);
+            if (current._deferred is null)
+                break;
+            var next = context.RunDeferred(owner, () => current._deferred(owner));
             ArgumentNullException.ThrowIfNull(next);
             preferredName ??= next._name;
-            recipe = next;
+            current = next;
         }
-        return recipe;
+
+        // The outer layer is merged by Mount after resolution. Fold every inner layer from the
+        // leaf toward that outer boundary so intermediate authored values survive each deferred
+        // hop without applying the target more than once.
+        var resolved = layers[^1];
+        var authoring = resolved._authoring;
+        var target = resolved._authoringTarget;
+        for (var index = layers.Count - 2; index > 0; index--)
+        {
+            var layer = layers[index];
+            authoring = MergeAuthoring(authoring, layer._authoring);
+            target = MergeAuthoringTargets(target, layer._authoringTarget);
+        }
+        if (authoring is not null && !ReferenceEquals(authoring, resolved._authoring))
+            resolved = resolved.WithAuthoring(authoring);
+        if (target is not null && !ReferenceEquals(target, resolved._authoringTarget))
+            resolved = resolved.WithAuthoringTarget(target);
+        return resolved;
+    }
+
+    private static AuthorRecipeContributions? MergeAuthoring(
+        AuthorRecipeContributions? existing,
+        AuthorRecipeContributions? next
+    )
+    {
+        if (next is null)
+            return existing;
+        if (existing is null)
+            return next;
+        if (ReferenceEquals(existing, next))
+            return existing;
+        var merged = existing;
+        if (next.Style is not null)
+            merged = AuthorRecipeContributions.WithStyle(merged, next.Style);
+        if (next.Aria is not null)
+            merged = AuthorRecipeContributions.WithAria(merged, next.Aria);
+        return merged;
+    }
+
+    private static AuthorRecipeTarget? MergeAuthoringTargets(
+        AuthorRecipeTarget? existing,
+        AuthorRecipeTarget? next
+    )
+    {
+        if (next is null)
+            return existing;
+        if (existing is null || ReferenceEquals(existing, next))
+            return next;
+        throw new InvalidOperationException(
+            "A retained recipe cannot map two different authoring targets."
+        );
+    }
+
+    private void ApplyAuthoring(CompositionContext context, Element root)
+    {
+        _authoringTarget?.Apply(context, root, AuthorRecipeValues.From(_authoring));
     }
 
     internal void Apply(CompositionContext context, Element root)
