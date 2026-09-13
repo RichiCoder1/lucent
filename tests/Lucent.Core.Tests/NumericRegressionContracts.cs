@@ -170,11 +170,29 @@ public sealed class NumericRegressionContracts
     }
 
     [TestMethod]
-    [DataRow(SliderAcceptance.Immediate)]
-    [DataRow(SliderAcceptance.Delayed)]
-    [DataRow(SliderAcceptance.Rejected)]
-    public void SliderEscapeRollsBackTheActiveGestureWithoutRecommitting(
-        SliderAcceptance acceptance
+    public void SliderEscapeRollsBackAnImmediatelyAcceptedGestureWithoutRecommitting() =>
+        AssertSliderEscapeRollsBackWithoutRecommitting(
+            acceptImmediately: true,
+            acceptAfterMove: false
+        );
+
+    [TestMethod]
+    public void SliderEscapeRollsBackADelayedAcceptedGestureWithoutRecommitting() =>
+        AssertSliderEscapeRollsBackWithoutRecommitting(
+            acceptImmediately: false,
+            acceptAfterMove: true
+        );
+
+    [TestMethod]
+    public void SliderEscapeRollsBackARejectedGestureWithoutRecommitting() =>
+        AssertSliderEscapeRollsBackWithoutRecommitting(
+            acceptImmediately: false,
+            acceptAfterMove: false
+        );
+
+    private static void AssertSliderEscapeRollsBackWithoutRecommitting(
+        bool acceptImmediately,
+        bool acceptAfterMove
     )
     {
         var graph = new ReactiveGraph();
@@ -192,7 +210,7 @@ public sealed class NumericRegressionContracts
                 value =>
                 {
                     requests.Add(value);
-                    if (acceptance == SliderAcceptance.Immediate)
+                    if (acceptImmediately)
                         applied.Value = value;
                 },
                 new SliderOptions(0, 100, 1),
@@ -217,7 +235,7 @@ public sealed class NumericRegressionContracts
         Assert.IsTrue(
             composition.Input.DispatchPointer(new(PointerCommandKind.Move, 41, movedX, y)).Handled
         );
-        if (acceptance == SliderAcceptance.Delayed)
+        if (acceptAfterMove)
             applied.Value = requests[^1];
         graph.Drain();
         using var refreshed = ReplaceScene(composition);
@@ -364,13 +382,6 @@ public sealed class NumericRegressionContracts
         return scene
             .Boxes.Single(box => box.Identity.ElementId == slider.Identity.ElementId)
             .Bounds;
-    }
-
-    public enum SliderAcceptance
-    {
-        Immediate,
-        Delayed,
-        Rejected,
     }
 
     private static RetainedScene Install(Composition composition)
