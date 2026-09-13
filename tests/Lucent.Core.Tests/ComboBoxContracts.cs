@@ -6,6 +6,110 @@ namespace Lucent.Core.Tests;
 public sealed class ComboBoxContracts
 {
     [TestMethod]
+    public void ComboBoxDropdownKeysPageSuggestionsWithoutManufacturingAppliedSelection()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "combo-dropdown-paging");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var choices = Enumerable
+            .Range(0, 20)
+            .Select(index => new ChoiceItem<int>(index, "Choice " + index))
+            .ToArray();
+        var selected = graph.Signal<ComboBoxSelectedItem<int>?>(
+            new(0, "Choice 0"),
+            "combo.selected"
+        );
+        var requests = new List<int>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "Choice",
+                field =>
+                    Components.ComboBox(
+                        field,
+                        () => selected.Value,
+                        requests.Add,
+                        (_, _) =>
+                            ValueTask.FromResult(ComboBoxSuggestionResult.Success<int>(choices)),
+                        new ComboBoxOptions(debounce: TimeSpan.Zero)
+                    )
+            )
+        );
+        var ownerScene = Install(composition, graph, 320, 120);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        graph.Drain();
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 320, 120);
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.F4)).Handled);
+        graph.Drain();
+        Assert.IsNull(composition.Input.ActiveSurface);
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 320, 120);
+        Assert.IsFalse(
+            composition
+                .Input.DispatchKey(
+                    new(KeyCommandKind.Down, Key.F4, KeyModifiers.None, IsRepeat: true)
+                )
+                .Handled
+        );
+        Assert.IsFalse(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.Up, KeyModifiers.Alt))
+                .Handled
+        );
+        Assert.IsTrue(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.Down, KeyModifiers.Alt))
+                .Handled
+        );
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 320, 120);
+        var request = composition.Input.ActiveSurface!;
+        var popup = request.CreateComposition();
+        var popupScene = Install(popup, graph, 320, 240);
+        Assert.IsFalse(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.F4, KeyModifiers.Alt))
+                .Handled
+        );
+        Assert.IsFalse(request.IsDismissed);
+        Assert.IsTrue(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.Down, KeyModifiers.Alt))
+                .Handled
+        );
+        Assert.HasCount(0, requests);
+        Assert.IsTrue(
+            composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.PageDown)).Handled
+        );
+        Assert.IsTrue(
+            composition
+                .Input.DispatchKey(
+                    new(KeyCommandKind.Down, Key.Down, KeyModifiers.None, IsRepeat: true)
+                )
+                .Handled,
+            "Held navigation stopped after the first key-down."
+        );
+        graph.Drain();
+        popupScene.Dispose();
+        popupScene = Install(popup, graph, 320, 240);
+        Assert.IsTrue(
+            Nodes(popup.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem) < 15
+        );
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled);
+        graph.Drain();
+        Assert.AreEqual(6, requests.Single());
+        Assert.AreEqual("Choice 0", Combo(composition).Value);
+        Assert.IsNull(composition.Input.ActiveSurface);
+        popupScene.Dispose();
+        ownerScene.Dispose();
+    }
+
+    [TestMethod]
     public void LatestSuggestionGenerationWinsAndSelectionRemainsControlled()
     {
         var graph = new ReactiveGraph();

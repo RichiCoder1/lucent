@@ -145,7 +145,8 @@ public static partial class Components
         Func<ImageSource> source,
         Func<string> label,
         Action? onInvoke,
-        Style? style
+        Style? style,
+        bool focusOnPointer = true
     ) =>
         ComponentRecipe.Create(
             "icon-button",
@@ -167,7 +168,8 @@ public static partial class Components
                     initialSource,
                     accessibleLabel.Value,
                     onInvoke,
-                    style
+                    style,
+                    focusOnPointer
                 );
                 var binding = root.Scope.Own(new ImageBinding(root, initialSource));
                 root.Image = binding;

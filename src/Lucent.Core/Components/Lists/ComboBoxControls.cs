@@ -51,18 +51,34 @@ internal static partial class Controls
             context.Effect(() => context.UpdateSemantics(Declaration()), "combo-box-state");
             context.OnKey(route =>
             {
-                if (route.Command.Kind != KeyCommandKind.Down || route.Command.IsRepeat)
+                if (route.Command.Kind != KeyCommandKind.Down)
                     return;
-                if (route.Command.Key is Key.Down or Key.Up)
-                    route.Handled = binding.Expanded()
-                        ? binding.Navigate(route.Command.Key)
-                        : Open();
-                else if (route.Command.Key == Key.Enter && binding.Expanded())
+                if (DropdownKeyPolicy.Apply(route.Command, binding.Expanded(), Open, Close))
+                {
+                    route.Handled = true;
+                    return;
+                }
+                if (DropdownKeyPolicy.IsTraversalDismissal(route.Command) && binding.Expanded())
+                {
+                    binding.Close();
+                    return;
+                }
+                if (route.Command.Modifiers != KeyModifiers.None)
+                    return;
+                if (route.Command.Key is Key.Down or Key.Up or Key.PageUp or Key.PageDown)
+                {
+                    if (binding.Expanded())
+                        route.Handled = binding.Navigate(route.Command.Key);
+                    else if (!route.Command.IsRepeat && route.Command.Key is Key.Down or Key.Up)
+                        route.Handled = Open();
+                    return;
+                }
+                if (route.Command.IsRepeat)
+                    return;
+                if (route.Command.Key == Key.Enter && binding.Expanded())
                     route.Handled = binding.Commit();
                 else if (route.Command.Key == Key.Escape && binding.Expanded())
                     route.Handled = Close();
-                else if (route.Command.Key == Key.Tab && binding.Expanded())
-                    binding.Close();
             });
             AttachClick(context);
             bool Focus()

@@ -27,6 +27,215 @@ public sealed class NumericRegressionContracts
     }
 
     [TestMethod]
+    public void NumberStepPreviewIsSideEffectFreeAndMatchesBoundedInvocation()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "numeric-step-preview");
+        var requests = new List<decimal?>();
+        using var session = new NumericEditSession(
+            composition.Root.Scope,
+            () => 8m,
+            requests.Add,
+            new NumericEditOptions(
+                3m,
+                minimum: 0m,
+                maximum: 10m,
+                culture: CultureInfo.InvariantCulture
+            ),
+            "step-preview"
+        );
+
+        Assert.IsTrue(session.TryPreviewStep(-1, out var decrease));
+        Assert.AreEqual(5m, decrease);
+        Assert.IsTrue(session.TryPreviewStep(1, out var increase));
+        Assert.AreEqual(10m, increase);
+        Assert.IsTrue(session.CanStep(-1));
+        Assert.IsTrue(session.CanStep(1));
+        Assert.AreEqual("8", session.Draft);
+        Assert.AreEqual(ValidationStatus.Valid, session.Validation.Status);
+        Assert.IsEmpty(requests);
+
+        Assert.IsTrue(session.Step(1));
+        Assert.AreEqual("10", session.Draft);
+        Assert.AreEqual(10m, requests.Single());
+        Assert.IsFalse(session.CanStep(1));
+        Assert.IsTrue(session.CanStep(-1));
+        Assert.IsFalse(session.Step(1));
+        Assert.HasCount(1, requests);
+
+        session.Edit("0");
+        Assert.IsFalse(session.CanStep(-1));
+        Assert.IsTrue(session.CanStep(1));
+    }
+
+    [TestMethod]
+    public void InvalidAndConflictedDraftsDisableBothNumberStepsWithoutReplacingText()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "numeric-step-invalid");
+        var applied = graph.Signal<decimal?>(5m, "numeric-applied");
+        var requests = new List<decimal?>();
+        using var session = new NumericEditSession(
+            composition.Root.Scope,
+            () => applied.Value,
+            requests.Add,
+            new NumericEditOptions(
+                1m,
+                minimum: 0m,
+                maximum: 10m,
+                culture: CultureInfo.InvariantCulture
+            ),
+            "invalid-step"
+        );
+
+        foreach (var draft in new[] { "bad", "", "11" })
+        {
+            session.Edit(draft);
+            Assert.IsFalse(session.CanStep(-1), draft);
+            Assert.IsFalse(session.CanStep(1), draft);
+            Assert.AreEqual(draft, session.Draft);
+        }
+
+        session.Edit("6");
+        applied.Value = 7m;
+        graph.Drain();
+        Assert.IsTrue(session.Validation.IsInvalid);
+        Assert.IsFalse(session.CanStep(-1));
+        Assert.IsFalse(session.CanStep(1));
+        Assert.AreEqual("6", session.Draft);
+        Assert.IsFalse(session.Step(1));
+        Assert.IsEmpty(requests);
+    }
+
+    [TestMethod]
+    public void NumberFieldActionsUseCompactIconsAndDisableOnlyUnavailableDirections()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "number-field-actions");
+        composition.ConfigureImages(new ImageCache(new ImmediatePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var applied = graph.Signal<decimal?>(10m, "number-field-applied");
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.NumberField(
+                "Quantity",
+                () => applied.Value,
+                next => applied.Value = next,
+                new NumericEditOptions(
+                    2m,
+                    minimum: 0m,
+                    maximum: 10m,
+                    culture: CultureInfo.InvariantCulture
+                )
+            )
+        );
+        graph.Drain();
+
+        var nodes = Nodes(composition.SemanticSnapshot()!).ToArray();
+        var decrease = nodes.Single(node => node.Name == "Decrease Quantity");
+        var increase = nodes.Single(node => node.Name == "Increase Quantity");
+        Assert.AreEqual(SemanticRole.Button, decrease.Role);
+        Assert.AreEqual(SemanticRole.Button, increase.Role);
+        Assert.IsTrue(decrease.Enabled);
+        Assert.IsFalse(increase.Enabled);
+
+        applied.Value = 6m;
+        graph.Drain();
+        nodes = Nodes(composition.SemanticSnapshot()!).ToArray();
+        Assert.IsTrue(nodes.Single(node => node.Name == "Decrease Quantity").Enabled);
+        Assert.IsTrue(nodes.Single(node => node.Name == "Increase Quantity").Enabled);
+    }
+
+    [TestMethod]
+    public void NumberFieldStepperPointerActivationRetainsEditorFocusAndSkipsBlurCommit()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "number-field-pointer-step");
+        composition.ConfigureImages(new ImageCache(new ImmediatePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var applied = graph.Signal<decimal?>(3m, "number-field-pointer-applied");
+        var requests = new List<decimal?>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.NumberField(
+                "Quantity",
+                () => applied.Value,
+                next =>
+                {
+                    requests.Add(next);
+                    applied.Value = next;
+                },
+                new NumericEditOptions(1m, 0m, 10m, culture: CultureInfo.InvariantCulture)
+            )
+        );
+        graph.Drain();
+        using var scene = Install(composition);
+        var editor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        var increase = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Name == "Increase Quantity");
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(editor.Identity.ElementId, composition.Input.FocusedElement?.ElementId);
+        Assert.IsTrue(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.A, KeyModifiers.Control))
+                .Handled
+        );
+        graph.Drain();
+        var before = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == editor.Identity.ElementId);
+        Assert.IsNotNull(before.Text);
+        Assert.AreEqual("3", before.Text!.Text);
+        Assert.AreEqual(0, before.Text!.Anchor);
+        Assert.AreEqual(1, before.Text.Caret);
+
+        using var selectedScene = ReplaceScene(composition);
+        var bounds = selectedScene
+            .Boxes.Single(box => box.Identity.ElementId == increase.Identity.ElementId)
+            .Bounds;
+        Assert.IsTrue(
+            composition
+                .Input.DispatchPointer(
+                    new(
+                        PointerCommandKind.Down,
+                        1,
+                        bounds.X + bounds.Width / 2,
+                        bounds.Y + bounds.Height / 2,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled
+        );
+        using var pressedScene = ReplaceScene(composition);
+        Assert.IsTrue(
+            composition
+                .Input.DispatchPointer(
+                    new(
+                        PointerCommandKind.Up,
+                        1,
+                        bounds.X + bounds.Width / 2,
+                        bounds.Y + bounds.Height / 2,
+                        PointerButton.Primary
+                    )
+                )
+                .Handled
+        );
+        graph.Drain();
+
+        Assert.HasCount(1, requests);
+        Assert.AreEqual(4m, requests.Single());
+        Assert.AreEqual(editor.Identity.ElementId, composition.Input.FocusedElement?.ElementId);
+        var after = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Identity.ElementId == editor.Identity.ElementId);
+        Assert.IsNotNull(after.Text);
+        Assert.AreEqual("4", after.Text!.Text);
+        Assert.AreEqual(0, after.Text.Anchor);
+        Assert.AreEqual(1, after.Text.Caret);
+    }
+
+    [TestMethod]
     public void SliderRoundsHalfStepsAwayFromZeroBeforeClamping()
     {
         var graph = new ReactiveGraph();
@@ -441,5 +650,13 @@ public sealed class NumericRegressionContracts
             );
             return new("numeric-regression", request.Text.Length, request.FontSize, [run]);
         }
+    }
+
+    private sealed class ImmediatePreparer : IImagePreparer
+    {
+        public ValueTask<PreparedImage> PrepareAsync(
+            ImagePreparationRequest request,
+            CancellationToken cancellationToken
+        ) => ValueTask.FromResult<PreparedImage>(new RasterImage(1, 1, [0, 0, 0, 255]));
     }
 }

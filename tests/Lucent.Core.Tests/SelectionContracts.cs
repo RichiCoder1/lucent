@@ -236,6 +236,13 @@ public sealed class SelectionContracts
 
         Assert.IsTrue(policy.Move(Key.Down));
         Assert.IsTrue(policy.IsRoving("b"));
+        Assert.IsTrue(policy.Move(Key.Down));
+        Assert.IsTrue(
+            policy.IsRoving("a"),
+            "The shared default stopped wrapping radio/tab families."
+        );
+        Assert.IsTrue(policy.Move(Key.Up));
+        Assert.IsTrue(policy.IsRoving("b"));
         Assert.AreEqual(0, requests.Count);
         Assert.IsTrue(policy.RequestRoving());
         Assert.AreEqual(1, requests.Count);
@@ -243,6 +250,36 @@ public sealed class SelectionContracts
         policy.CancelRoving();
         Assert.IsTrue(policy.IsRoving("a"));
         Assert.IsFalse(policy.Move(Key.Space));
+    }
+
+    [TestMethod]
+    public void ClampedPolicyConsumesDisabledTailWithoutWrappingOrRequesting()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "clamped-policy");
+        using var scope = composition.Root.Scope.CreateChild("clamped-policy");
+        IReadOnlyList<RadioOption<string>> items =
+        [
+            new("a", "Alpha"),
+            new("b", "Beta", enabled: false),
+            new("c", "Charlie", enabled: false),
+        ];
+        var requests = new List<string>();
+        var policy = new KeyedSelectionPolicy<string, RadioOption<string>>(
+            scope,
+            "clamped-policy",
+            () => items,
+            item => item.Key,
+            item => item.Enabled,
+            () => SelectedKey.Some("a"),
+            requests.Add,
+            KeyedSelectionCommitMode.OnConfirmation,
+            KeyedSelectionBoundaryMode.Clamp
+        );
+
+        Assert.IsTrue(policy.Move(Key.Down));
+        Assert.IsTrue(policy.IsRoving("a"));
+        Assert.HasCount(0, requests);
     }
 
     [TestMethod]

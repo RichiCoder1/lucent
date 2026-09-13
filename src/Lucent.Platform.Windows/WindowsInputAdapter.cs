@@ -595,6 +595,7 @@ internal sealed class WindowsInputAdapter : IDisposable
         key switch
         {
             SDL.Keycode.F10 => Core.Key.F10,
+            SDL.Keycode.F4 => Core.Key.F4,
             SDL.Keycode.Application => Core.Key.ContextMenu,
             SDL.Keycode.Tab => Core.Key.Tab,
             SDL.Keycode.Return or SDL.Keycode.KpEnter => Core.Key.Enter,

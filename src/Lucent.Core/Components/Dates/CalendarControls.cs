@@ -116,6 +116,25 @@ internal sealed class CalendarBehavior(
         {
             if (route.Command.Kind != KeyCommandKind.Down)
                 return;
+            var dropdown = DropdownKeyPolicy.Classify(route.Command);
+            if (dropdown is DropdownKeyAction.Toggle or DropdownKeyAction.Close)
+            {
+                close();
+                route.Handled = true;
+                return;
+            }
+            if (dropdown == DropdownKeyAction.Open)
+            {
+                route.Handled = true;
+                return;
+            }
+            if (DropdownKeyPolicy.IsTraversalDismissal(route.Command))
+            {
+                close();
+                return;
+            }
+            if (route.Command.Modifiers != KeyModifiers.None)
+                return;
             var moved = route.Command.Key switch
             {
                 Key.Left => calendar.MoveDays(-1),
@@ -147,6 +166,25 @@ internal sealed class CalendarBehavior(
             return true;
         }
     }
+}
+
+internal sealed class DatePickerDropdownBehavior(
+    Func<bool> expanded,
+    Func<bool> open,
+    Func<bool> close
+) : Behavior
+{
+    public override string Name => "date-picker-dropdown";
+    public override BehaviorOwnership Ownership => BehaviorOwnership.Focus;
+
+    public override void Attach(BehaviorContext context) =>
+        context.OnKey(route =>
+        {
+            if (DropdownKeyPolicy.Apply(route.Command, expanded(), open, close))
+                route.Handled = true;
+            else if (DropdownKeyPolicy.IsTraversalDismissal(route.Command) && expanded())
+                _ = close();
+        });
 }
 
 internal sealed class CalendarDayBehavior(

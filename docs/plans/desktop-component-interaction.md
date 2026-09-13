@@ -125,3 +125,24 @@ desktop smoke covers actual F4/Alt chords, native popup focus, paging after
 resize and pointer focus retention. That focus-requiring smoke remains paused
 until the user authorizes it. No further user design decision is needed for this
 bounded proposal; hold-repeat and new free-text modes remain separate work.
+## September 13 implementation checkpoint
+
+#287–289 are implemented and pass Core 498/498 and Windows 125/125, including
+compiled architecture checks and their negative fixtures. The focused published
+desktop workflows are being verified separately; no completed native pass is
+implied by these managed results. Log: `artifacts/interaction-final-managed.log`.
+
+F4 is appended to the portable key enumeration. Select, ComboBox and DatePicker
+share the specified toggle/modifier policy. Collection paging uses measured
+source-row geometry, preserves disabled-row spacing and clamps at boundaries.
+Pending focus is transferred to row-owned targets after mounting, so both
+already-realized and newly-realized destinations receive focus without creating
+collection-owned resources during provisional row construction. Wrapping control
+families retain their existing navigation policy.
+
+NumberField uses stock compact icon actions through an internal `.lui` step
+component. Directional preview leaves drafts and validation untouched; unavailable
+steps disable independently. Pointer activation preserves editor focus and
+selection through the existing button policy and avoids blur-triggered duplicate
+commits. Public IconButton signatures are unchanged; keyboard and accessibility
+activation remain available.

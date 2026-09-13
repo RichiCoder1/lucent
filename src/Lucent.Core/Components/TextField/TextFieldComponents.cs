@@ -39,7 +39,8 @@ public static partial class Components
         bool confidential = false,
         Func<bool>? reveal = null,
         int historyLimit = 64,
-        Action? remask = null
+        Action? remask = null,
+        bool preserveSelectionOnAppliedChange = false
     )
     {
         ArgumentNullException.ThrowIfNull(field);
@@ -96,7 +97,15 @@ public static partial class Components
                                     StringComparison.Ordinal
                                 )
                             )
-                                state.Value = currentApplied;
+                            {
+                                if (preserveSelectionOnAppliedChange)
+                                    state.Session.SynchronizeExternalText(
+                                        state.Session.DocumentId,
+                                        currentApplied
+                                    );
+                                else
+                                    state.Value = currentApplied;
+                            }
                         }
                         else if (!string.Equals(currentDraft, lastDraft, StringComparison.Ordinal))
                         {

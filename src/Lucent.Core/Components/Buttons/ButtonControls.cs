@@ -177,7 +177,8 @@ internal static partial class Controls
         ImageSource source,
         string label,
         Action? activate = null,
-        Style? style = null
+        Style? style = null,
+        bool focusOnPointer = true
     )
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -190,7 +191,8 @@ internal static partial class Controls
             new ButtonBehavior(
                 "icon-button",
                 new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
-                activate
+                activate,
+                focusOnPointer
             )
         );
     }

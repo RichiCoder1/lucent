@@ -75,6 +75,7 @@ public static partial class Components
                     new TypeAheadController<TKey>(() => current.Value, policy, options.TimeProvider)
                 );
                 OwnedSurfaceRequest? surface = null;
+                Func<Key, bool> navigate = policy.Move;
                 var editorFocused = false;
                 ComboBoxSelectedItem<TKey>? priorApplied = initial;
 
@@ -116,7 +117,7 @@ public static partial class Components
                     Expanded = () => open.Value,
                     Open = () => open.Value = true,
                     Close = () => Close(restore: true),
-                    Navigate = policy.Move,
+                    Navigate = key => navigate(key),
                     Commit = Commit,
                     FocusTarget = field.FocusTarget,
                 };
@@ -184,7 +185,9 @@ public static partial class Components
                                 typeAhead,
                                 onSelectionRequested,
                                 () => Close(restore: true),
-                                options.SelectionPolicy == ComboBoxSelectionPolicy.SelectionRequired
+                                options.SelectionPolicy
+                                    == ComboBoxSelectionPolicy.SelectionRequired,
+                                handler => navigate = handler
                             );
                             surface = new OwnedSurfaceRequest(
                                 root,
@@ -231,7 +234,8 @@ public static partial class Components
         TypeAheadController<TKey> typeAhead,
         Action<TKey> request,
         Action dismiss,
-        bool required
+        bool required,
+        Action<Func<Key, bool>> registerOwnerNavigation
     )
         where TKey : notnull
     {
@@ -256,7 +260,8 @@ public static partial class Components
                         .MaxHeight(240),
                     null,
                     required,
-                    dismiss
+                    dismiss,
+                    registerOwnerNavigation
                 )
         );
         var loading = ContentRecipe.When(

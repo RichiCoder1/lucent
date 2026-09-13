@@ -201,6 +201,9 @@ public enum Key
 
     /// <summary>Undo shortcut key.</summary>
     Z,
+
+    /// <summary>Toggles the focused dropdown surface.</summary>
+    F4,
 }
 
 /// <summary>The direction used when moving among retained tab stops.</summary>

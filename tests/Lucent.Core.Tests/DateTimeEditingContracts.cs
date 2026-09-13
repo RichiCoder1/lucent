@@ -7,6 +7,98 @@ namespace Lucent.Core.Tests;
 public sealed class DateTimeEditingContracts
 {
     [TestMethod]
+    public void DatePickerDropdownKeysToggleWithoutStealingCalendarNavigation()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "date-picker-dropdown-keys");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var readOnly = graph.Signal(false, "date.read-only");
+        var requests = new List<DateOnly?>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.DatePicker(
+                "Due date",
+                static () => new DateOnly(2024, 2, 15),
+                requests.Add,
+                new DatePickerOptions(
+                    CultureInfo.GetCultureInfo("en-US"),
+                    today: static () => new(2024, 2, 15)
+                ),
+                new DateTimeFieldOptions(readOnly: () => readOnly.Value)
+            )
+        );
+        var ownerScene = Install(composition, graph);
+        var editor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(editor.Identity, new(SemanticCommandKind.Focus))
+        );
+        Assert.IsTrue(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.Down, KeyModifiers.Alt))
+                .Handled
+        );
+        graph.Drain();
+        var request = composition.Input.ActiveSurface!;
+        var popup = request.CreateComposition();
+        var popupScene = Install(popup, graph);
+        var calendar = Nodes(popup.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.Calendar);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            popup.ExecuteSemanticCommand(calendar.Identity, new(SemanticCommandKind.Focus))
+        );
+        var before = calendar.Description;
+        Assert.IsTrue(popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.PageDown)).Handled);
+        graph.Drain();
+        popupScene.Dispose();
+        popupScene = Install(popup, graph);
+        calendar = Nodes(popup.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.Calendar);
+        Assert.AreNotEqual(
+            before,
+            calendar.Description,
+            "PageDown stopped moving the calendar month."
+        );
+        Assert.IsTrue(
+            popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Up, KeyModifiers.Alt)).Handled
+        );
+        graph.Drain();
+        Assert.IsTrue(request.IsDismissed);
+        Assert.HasCount(0, requests);
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph);
+        Assert.IsFalse(
+            composition
+                .Input.DispatchKey(
+                    new(KeyCommandKind.Down, Key.F4, KeyModifiers.None, IsRepeat: true)
+                )
+                .Handled
+        );
+        Assert.IsNull(composition.Input.ActiveSurface);
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.F4)).Handled);
+        graph.Drain();
+        request = composition.Input.ActiveSurface!;
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph);
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.F4)).Handled);
+        graph.Drain();
+        Assert.IsTrue(request.IsDismissed);
+
+        readOnly.Value = true;
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph);
+        Assert.IsFalse(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.F4)).Handled);
+        Assert.IsNull(composition.Input.ActiveSurface);
+        popupScene.Dispose();
+        ownerScene.Dispose();
+    }
+
+    [TestMethod]
     public void CalendarPopupKeepsCompactNavigationAndUniformDayGeometry()
     {
         var graph = new ReactiveGraph();

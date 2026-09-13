@@ -187,36 +187,76 @@ public sealed class NumericEditSession : IDisposable
         _pendingRequest = null;
     }
 
-    /// <summary>Requests one checked step when the draft is currently valid.</summary>
-    public bool Step(int direction, bool page = false)
+    /// <summary>Gets whether one checked step would produce a different allowed value.</summary>
+    public bool CanStep(int direction, bool page = false) => TryPreviewStep(direction, out _, page);
+
+    /// <summary>Previews one checked step without changing the draft, validation, or application request.</summary>
+    public bool TryPreviewStep(int direction, out decimal next, bool page = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (direction is not (-1 or 1))
-            throw new ArgumentOutOfRangeException(nameof(direction));
-        if (!TryParse(_draft.Value, out var parsed, out _) || parsed is null)
-        {
-            _validation.Value = ValidationState.Invalid("Enter a valid number before stepping.");
+        ValidateDirection(direction);
+        next = default;
+        if (_validation.Value.IsInvalid)
             return false;
-        }
-        decimal next;
+        if (!TryParse(_draft.Value, out var parsed, out _) || parsed is not { } current)
+            return false;
         try
         {
             next = checked(
-                parsed.Value + direction * (page ? Options.PageIncrement : Options.Increment)
+                current + direction * (page ? Options.PageIncrement : Options.Increment)
             );
         }
         catch (OverflowException)
         {
-            _validation.Value = ValidationState.Invalid("The requested numeric step overflowed.");
             return false;
         }
         next = Clamp(next);
+        return next != current;
+    }
+
+    /// <summary>Requests one checked step when the draft is currently valid.</summary>
+    public bool Step(int direction, bool page = false)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ValidateDirection(direction);
+        if (!TryPreviewStep(direction, out var next, page))
+        {
+            RejectStep(direction, page);
+            return false;
+        }
         _draft.Value = Format(next);
         _validation.Value = ValidationState.Valid;
         _dirty = false;
         _pendingRequest = next;
         _onValueRequested(next);
         return true;
+    }
+
+    private void RejectStep(int direction, bool page)
+    {
+        if (_validation.Value.IsInvalid)
+            return;
+        if (!TryParse(_draft.Value, out var parsed, out _) || parsed is null)
+        {
+            _validation.Value = ValidationState.Invalid("Enter a valid number before stepping.");
+            return;
+        }
+        try
+        {
+            _ = checked(
+                parsed.Value + direction * (page ? Options.PageIncrement : Options.Increment)
+            );
+        }
+        catch (OverflowException)
+        {
+            _validation.Value = ValidationState.Invalid("The requested numeric step overflowed.");
+        }
+    }
+
+    private static void ValidateDirection(int direction)
+    {
+        if (direction is not (-1 or 1))
+            throw new ArgumentOutOfRangeException(nameof(direction));
     }
 
     /// <inheritdoc />

@@ -6,6 +6,65 @@ namespace Lucent.Core.Tests;
 public sealed class TableContracts
 {
     [TestMethod]
+    public void TablePagesByMeasuredRowsWithoutCommittingOrChangingColumns()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "table-paging");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var source = Enumerable
+            .Range(0, 10_000)
+            .Select(index => new Row(index, "Item " + index))
+            .ToArray();
+        var requests = new List<int>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.TableView(
+                "Records",
+                () => source,
+                row => row.Id,
+                [new("name", "Name", row => row.Title, 180)],
+                () => SelectedKey.Some(0),
+                requests.Add,
+                options: new(
+                    rowHeight: 32,
+                    headerHeight: 32,
+                    selectionMode: ListBoxSelectionMode.ExplicitConfirmation
+                ),
+                style: Style.Empty.Width(240).Height(168)
+            )
+        );
+        var scene = Install(composition);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(
+            0,
+            Nodes(composition.SemanticSnapshot()!)
+                .Single(node => node is { Role: SemanticRole.DataItem, Focused: true })
+                .CollectionIndex
+        );
+        var pageDown = composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.PageDown));
+        Assert.IsTrue(
+            pageDown.Handled,
+            $"PageDown was {pageDown.Status}/{pageDown.Rejection} for {pageDown.Target}."
+        );
+        scene.Dispose();
+        scene = Install(composition);
+        composition.Flush();
+        var focused = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node is { Role: SemanticRole.DataItem, Focused: true });
+        Assert.AreEqual(3, focused.CollectionIndex);
+        Assert.HasCount(0, requests);
+        Assert.IsTrue(
+            Nodes(composition.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.DataItem)
+                < 20,
+            "Table paging defeated bounded row realization."
+        );
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled);
+        Assert.AreEqual(3, requests.Single());
+        GC.KeepAlive(scene);
+    }
+
+    [TestMethod]
     public void LargeTableRealizesBoundedRowsAndPublishesLogicalCellCoordinates()
     {
         using var composition = new Composition(new ReactiveGraph(), "table-large");

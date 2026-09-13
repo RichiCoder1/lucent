@@ -27,7 +27,8 @@ internal sealed class ChoiceRowBinding
     internal required Func<bool> Active { get; init; }
     internal required Func<int?> Position { get; init; }
     internal required Func<int?> Size { get; init; }
-    internal required Action<BehaviorContext> Register { get; init; }
+    internal FocusTarget? FocusTarget { get; set; }
+    internal required Action<BehaviorContext, FocusTarget> Register { get; init; }
     internal required Func<BehaviorContext, bool, bool> Activate { get; init; }
     internal required Func<Key, BehaviorContext, bool> Move { get; init; }
     internal required Func<bool> Confirm { get; init; }
@@ -165,7 +166,11 @@ internal static partial class Controls
         {
             context.SetSemantics(Declaration());
             context.MakeFocusable(tabStop: false);
-            binding.Register(context);
+            var focusTarget =
+                binding.FocusTarget
+                ?? throw new InvalidOperationException("Choice row focus target is unavailable.");
+            context.RegisterFocusTarget(focusTarget);
+            binding.Register(context, focusTarget);
             context.OnSemanticCommand(command =>
                 command.Kind switch
                 {
@@ -201,7 +206,25 @@ internal static partial class Controls
             {
                 if (route.Command.Kind != KeyCommandKind.Down)
                     return;
-                if (route.Command is { IsRepeat: false, Key: Key.Enter or Key.Space })
+                if (binding.DismissWithoutCommit is { } dropdownClose)
+                {
+                    var action = DropdownKeyPolicy.Classify(route.Command);
+                    if (action is DropdownKeyAction.Toggle or DropdownKeyAction.Close)
+                    {
+                        dropdownClose();
+                        route.Handled = true;
+                        return;
+                    }
+                    if (action == DropdownKeyAction.Open)
+                    {
+                        route.Handled = true;
+                        return;
+                    }
+                }
+                if (
+                    route.Command is
+                    { IsRepeat: false, Modifiers: KeyModifiers.None, Key: Key.Enter or Key.Space }
+                )
                 {
                     route.Handled = binding.CommitAndDismiss is { } commit
                         ? Commit(commit)
@@ -209,7 +232,8 @@ internal static partial class Controls
                     return;
                 }
                 if (
-                    route.Command is { IsRepeat: false, Key: Key.Escape }
+                    route.Command
+                        is { IsRepeat: false, Modifiers: KeyModifiers.None, Key: Key.Escape }
                     && binding.DismissWithoutCommit is { } dismiss
                 )
                 {
@@ -218,16 +242,22 @@ internal static partial class Controls
                     return;
                 }
                 if (
-                    route.Command.Key
-                    is Key.Left
-                        or Key.Right
-                        or Key.Up
-                        or Key.Down
-                        or Key.Home
-                        or Key.End
+                    route.Command.Modifiers == KeyModifiers.None
+                    && route.Command.Key
+                        is Key.Left
+                            or Key.Right
+                            or Key.Up
+                            or Key.Down
+                            or Key.Home
+                            or Key.End
+                            or Key.PageUp
+                            or Key.PageDown
                 )
                     route.Handled = binding.Move(route.Command.Key, context);
-                else if (route.Command.Key == Key.Tab && binding.DismissWithoutCommit is { } close)
+                else if (
+                    DropdownKeyPolicy.IsTraversalDismissal(route.Command)
+                    && binding.DismissWithoutCommit is { } close
+                )
                     close();
             });
 
@@ -333,7 +363,19 @@ internal static partial class Controls
             AttachClick(context, () => binding.Expanded() ? Close() : Open());
             context.OnKey(route =>
             {
-                if (route.Command.Kind != KeyCommandKind.Down || route.Command.IsRepeat)
+                if (route.Command.Kind != KeyCommandKind.Down)
+                    return;
+                if (DropdownKeyPolicy.Apply(route.Command, binding.Expanded(), Open, Close))
+                {
+                    route.Handled = true;
+                    return;
+                }
+                if (DropdownKeyPolicy.IsTraversalDismissal(route.Command) && binding.Expanded())
+                {
+                    binding.Close();
+                    return;
+                }
+                if (route.Command.IsRepeat || route.Command.Modifiers != KeyModifiers.None)
                     return;
                 if (route.Command.Key is Key.Enter or Key.Space or Key.Down or Key.Up)
                 {

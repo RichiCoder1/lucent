@@ -272,7 +272,13 @@ public static partial class Components
         Host(
             "choice-row",
             content,
-            (context, root) => Controls.ChoiceRow(root, context.Theme, binding, style)
+            (context, root) =>
+            {
+                binding.FocusTarget = root.Scope.Own(
+                    new FocusTarget(root.Scope, root.Name + ".focus-target")
+                );
+                Controls.ChoiceRow(root, context.Theme, binding, style);
+            }
         );
 
     [LucentComponent]
@@ -303,7 +309,8 @@ public static partial class Components
             item => item.Enabled,
             selected,
             request,
-            KeyedSelectionCommitMode.OnConfirmation
+            KeyedSelectionCommitMode.OnConfirmation,
+            KeyedSelectionBoundaryMode.Clamp
         );
 
     private static void MountListBox<TKey>(
@@ -319,7 +326,8 @@ public static partial class Components
         Style? style,
         ViewportState? viewport,
         bool required,
-        Action? dismiss
+        Action? dismiss,
+        Action<Func<Key, bool>>? registerOwnerNavigation = null
     )
         where TKey : notnull
     {
@@ -353,17 +361,13 @@ public static partial class Components
                         ChoicePosition(current.Value, item.Value.Key) is null
                             ? null
                             : current.Value.Length,
-                    Register = behavior => policy.RegisterTarget(item.Value.Key, behavior),
+                    Register = (behavior, focusTarget) =>
+                        policy.RegisterTarget(item.Value.Key, behavior, focusTarget),
                     Activate = (behavior, shouldRequest) =>
                         policy.Activate(item.Value.Key, shouldRequest)
                         && policy.Focus(item.Value.Key, behavior),
                     Move = (key, behavior) =>
-                    {
-                        var moved = policy.Move(key, behavior);
-                        if (moved && policy.TryGetRoving(out var active))
-                            RevealChoice(root, current.Value, active, scroll, rowHeight);
-                        return moved;
-                    },
+                        MoveChoice(key, behavior, root, current.Value, policy, scroll, rowHeight),
                     Confirm = policy.RequestRoving,
                     RequestOnFocus = () => mode == ListBoxSelectionMode.FollowsFocus,
                     Search = typeAhead.Search,
@@ -395,7 +399,41 @@ public static partial class Components
                 index => RevealChoiceAt(root, current.Value.Length, index, scroll, rowHeight)
             )
         );
+        registerOwnerNavigation?.Invoke(key =>
+            MoveChoice(key, null, root, current.Value, policy, scroll, rowHeight)
+        );
         region.Configure();
+    }
+
+    private static bool MoveChoice<TKey>(
+        Key key,
+        BehaviorContext? behavior,
+        Element viewport,
+        ChoiceItem<TKey>[] items,
+        KeyedSelectionPolicy<TKey, ChoiceItem<TKey>> policy,
+        ScrollViewportState scroll,
+        float rowHeight
+    )
+        where TKey : notnull
+    {
+        bool moved;
+        var paging = key is Key.PageUp or Key.PageDown;
+        if (paging)
+        {
+            var identity = new ElementIdentity(viewport.Composition.Epoch, viewport.Id);
+            if (viewport.Composition.Input.GetSemanticScroll(identity) is not { } state)
+                return true;
+            var rows = Math.Max(1, (int)Math.Floor(state.Viewport.Height / rowHeight) - 1);
+            var delta = key == Key.PageUp ? -rows : rows;
+            moved = behavior is null
+                ? policy.MoveBySourceRows(delta)
+                : policy.MoveBySourceRows(delta, behavior);
+        }
+        else
+            moved = behavior is null ? policy.Move(key) : policy.Move(key, behavior);
+        if (moved && policy.TryGetRoving(out var active))
+            RevealChoice(viewport, items, active, scroll, rowHeight);
+        return paging || moved;
     }
 
     private static void ValidateListArguments<TKey>(

@@ -78,6 +78,7 @@ public sealed class NumericContracts
     {
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "number-field");
+        composition.ConfigureImages(new ImageCache(new ImmediatePreparer()));
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         decimal? value = 3m;
         _ = composition.Mount(
@@ -215,6 +216,14 @@ public sealed class NumericContracts
         foreach (var child in node.Children)
         foreach (var descendant in Nodes(child))
             yield return descendant;
+    }
+
+    private sealed class ImmediatePreparer : IImagePreparer
+    {
+        public ValueTask<PreparedImage> PrepareAsync(
+            ImagePreparationRequest request,
+            CancellationToken cancellationToken
+        ) => ValueTask.FromResult<PreparedImage>(new RasterImage(1, 1, [0, 0, 0, 255]));
     }
 
     private sealed class NumericShaper : ITextShaper

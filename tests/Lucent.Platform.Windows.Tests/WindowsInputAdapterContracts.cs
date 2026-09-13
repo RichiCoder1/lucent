@@ -71,6 +71,7 @@ public sealed class WindowsInputAdapterContracts
     {
         var control = KeyModifiers.Control;
         Assert.AreEqual(Key.F10, WindowsInputAdapter.MapKey(SDL.Keycode.F10));
+        Assert.AreEqual(Key.F4, WindowsInputAdapter.MapKey(SDL.Keycode.F4));
         Assert.AreEqual(Key.ContextMenu, WindowsInputAdapter.MapKey(SDL.Keycode.Application));
         Assert.AreEqual(Key.F, WindowsInputAdapter.MapShortcut(SDL.Keycode.F, control));
         Assert.AreEqual(Key.N, WindowsInputAdapter.MapShortcut(SDL.Keycode.N, control));

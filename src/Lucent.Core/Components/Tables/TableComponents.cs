@@ -62,7 +62,8 @@ public static partial class Components
                     _ => true,
                     readSelectedKey,
                     onSelectionRequested,
-                    KeyedSelectionCommitMode.OnConfirmation
+                    KeyedSelectionCommitMode.OnConfirmation,
+                    KeyedSelectionBoundaryMode.Clamp
                 );
                 var widths = columnSnapshot
                     .Select(column =>
@@ -176,17 +177,46 @@ public static partial class Components
                                     Active = () => policy.IsRoving(item.Value.Key),
                                     Position = () => Index() is { } index ? index + 1 : null,
                                     Size = () => Index() is null ? null : current.Value.Rows.Length,
-                                    Register = behavior =>
-                                        policy.RegisterTarget(item.Value.Key, behavior),
+                                    Register = (behavior, focusTarget) =>
+                                        policy.RegisterTarget(
+                                            item.Value.Key,
+                                            behavior,
+                                            focusTarget
+                                        ),
                                     Activate = (behavior, request) =>
                                         policy.Activate(item.Value.Key, request)
                                         && policy.Focus(item.Value.Key, behavior),
                                     Move = (navigation, behavior) =>
                                     {
-                                        if (
-                                            navigation is Key.Left or Key.Right
-                                            || !policy.Move(navigation, behavior)
-                                        )
+                                        if (navigation is Key.Left or Key.Right)
+                                            return false;
+                                        bool moved;
+                                        if (navigation is Key.PageUp or Key.PageDown)
+                                        {
+                                            var identity = new ElementIdentity(
+                                                rowsRoot.Composition.Epoch,
+                                                rowsRoot.Id
+                                            );
+                                            if (
+                                                rowsRoot.Composition.Input.GetSemanticScroll(
+                                                    identity
+                                                )
+                                                is not { } state
+                                            )
+                                                return true;
+                                            var page = Math.Max(
+                                                1,
+                                                (int)Math.Floor(state.Viewport.Height / rowHeight)
+                                                    - 1
+                                            );
+                                            moved = policy.MoveBySourceRows(
+                                                navigation == Key.PageUp ? -page : page,
+                                                behavior
+                                            );
+                                        }
+                                        else
+                                            moved = policy.Move(navigation, behavior);
+                                        if (!moved)
                                             return false;
                                         if (
                                             policy.TryGetRoving(out var active)

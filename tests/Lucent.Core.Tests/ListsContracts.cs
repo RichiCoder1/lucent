@@ -6,6 +6,198 @@ namespace Lucent.Core.Tests;
 public sealed class ListsContracts
 {
     [TestMethod]
+    public void SelectDropdownKeysRespectModifiersRepeatsAndControlledRovingState()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "select-dropdown-keys");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var enabled = graph.Signal(true, "select.enabled");
+        var requests = new List<string>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Select(
+                "Choice",
+                () =>
+                    Enumerable
+                        .Range(0, 10)
+                        .Select(index => new ChoiceItem<string>(
+                            index.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            "Choice " + index
+                        )),
+                () => SelectedKey.Some("0"),
+                requests.Add,
+                style: Style.Empty.Width(220).Bind(InputProperties.Enabled, () => enabled.Value)
+            )
+        );
+        var ownerScene = Install(composition, graph, 280, 100);
+        var anchor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ComboBox);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(anchor.Identity, new(SemanticCommandKind.Focus))
+        );
+        Assert.IsFalse(
+            composition
+                .Input.DispatchKey(new(KeyCommandKind.Down, Key.F4, KeyModifiers.Alt))
+                .Handled
+        );
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.F4)).Handled);
+        graph.Drain();
+        var request = composition.Input.ActiveSurface!;
+        Assert.IsFalse(
+            composition
+                .Input.DispatchKey(
+                    new(KeyCommandKind.Down, Key.F4, KeyModifiers.None, IsRepeat: true)
+                )
+                .Handled
+        );
+        Assert.IsFalse(request.IsDismissed);
+        var popup = request.CreateComposition();
+        var popupScene = Install(popup, graph, 280, 240);
+        Assert.IsTrue(popup.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.IsTrue(popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.PageDown)).Handled);
+        graph.Drain();
+        popupScene.Dispose();
+        popupScene = Install(popup, graph, 280, 240);
+        graph.Drain();
+        Assert.AreEqual("Choice 5", Focused(popup).Name);
+        Assert.HasCount(0, requests);
+        Assert.IsTrue(
+            popup.Input.DispatchKey(new(KeyCommandKind.Down, Key.Up, KeyModifiers.Alt)).Handled
+        );
+        graph.Drain();
+        Assert.IsTrue(request.IsDismissed);
+        Assert.HasCount(0, requests);
+        Assert.IsFalse(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Escape)).Handled);
+
+        enabled.Value = false;
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph, 280, 100);
+        Assert.IsFalse(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.F4)).Handled);
+        Assert.IsNull(composition.Input.ActiveSurface);
+        popupScene.Dispose();
+        ownerScene.Dispose();
+    }
+
+    [TestMethod]
+    public void ListBoxPagesByMeasuredSourceRowsAndClampsAcrossDisabledBoundaries()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "list-box-paging");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var requests = new List<int>();
+        var choices = Enumerable
+            .Range(0, 10_000)
+            .Select(index => new ChoiceItem<int>(
+                index,
+                "Choice " + index,
+                enabled: index < 3 || index >= 101
+            ))
+            .ToArray();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.ListBox(
+                "Paged choices",
+                () => choices,
+                () => 0,
+                requests.Add,
+                ListBoxSelectionMode.ExplicitConfirmation,
+                rowHeight: 30,
+                style: Style.Empty.Width(240).Height(125)
+            )
+        );
+        var scene = Install(composition, graph, 280, 165);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(0, Focused(composition).CollectionIndex);
+        var pageDown = composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.PageDown));
+        Assert.IsTrue(
+            pageDown.Handled,
+            $"PageDown was {pageDown.Status}/{pageDown.Rejection} for {pageDown.Target}."
+        );
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 280, 165);
+        graph.Drain();
+        Assert.AreEqual(
+            101,
+            Focused(composition).CollectionIndex,
+            "Paging did not retain focus when the nearest eligible destination was unrealized."
+        );
+        Assert.HasCount(0, requests);
+        Assert.IsTrue(Options(composition).Count() < 20, "Paging defeated bounded realization.");
+
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.PageUp)).Handled);
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 280, 165);
+        graph.Drain();
+        Assert.AreEqual(2, Focused(composition).CollectionIndex);
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Home)).Handled);
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Up)).Handled);
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 280, 165);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(0, Focused(composition).CollectionIndex);
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled);
+        Assert.AreEqual(0, requests.Single());
+        GC.KeepAlive(scene);
+    }
+
+    [TestMethod]
+    public void FollowsFocusPagingRequestsOnceWithoutManufacturingAppliedSelection()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "list-box-follow-page");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var requests = new List<int>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.ListBox(
+                "Paged choices",
+                () =>
+                    Enumerable
+                        .Range(0, 20)
+                        .Select(index => new ChoiceItem<int>(index, "Choice " + index)),
+                () => 0,
+                requests.Add,
+                rowHeight: 30,
+                style: Style.Empty.Width(240).Height(125)
+            )
+        );
+        var scene = Install(composition, graph, 280, 165);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(0, Focused(composition).CollectionIndex);
+        requests.Clear();
+        var pageDown = composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.PageDown));
+        Assert.IsTrue(
+            pageDown.Handled,
+            $"PageDown was {pageDown.Status}/{pageDown.Rejection} for {pageDown.Target}."
+        );
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 280, 165);
+        graph.Drain();
+
+        Assert.AreEqual(3, Focused(composition).CollectionIndex);
+        Assert.HasCount(1, requests);
+        Assert.AreEqual(3, requests.Single());
+        Assert.AreEqual(
+            0,
+            Selected(composition).CollectionIndex,
+            "A delayed caller request replaced the applied selection."
+        );
+        GC.KeepAlive(scene);
+    }
+
+    [TestMethod]
     public void ListBoxFollowsFocusSkipsDisabledAndPreservesControlledSelection()
     {
         var graph = new ReactiveGraph();

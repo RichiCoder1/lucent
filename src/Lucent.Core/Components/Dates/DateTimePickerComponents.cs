@@ -82,7 +82,27 @@ public static partial class Components
                 context.Mount(
                     root,
                     ComponentContent.Create([
-                        DatePickerEditorView(field, session, enabled, readOnly, Open, actionStyle),
+                        DatePickerEditorView(
+                            field,
+                            session,
+                            enabled,
+                            readOnly,
+                            Open,
+                            () => surface is { IsDismissed: false },
+                            () =>
+                            {
+                                Open();
+                                return surface is { IsDismissed: false };
+                            },
+                            () =>
+                            {
+                                if (surface is not { IsDismissed: false })
+                                    return false;
+                                Close();
+                                return true;
+                            },
+                            actionStyle
+                        ),
                     ])
                 );
                 _ = root.Scope.Effect(
@@ -140,6 +160,24 @@ public static partial class Components
                         ),
                     ])
                 );
+            }
+        );
+
+    [LucentComponent]
+    internal static ComponentRecipe DatePickerEditorHost(
+        Func<bool> expanded,
+        Func<bool> open,
+        Func<bool> close,
+        [DefaultContent] ComponentContent content,
+        Style? style = null
+    ) =>
+        Host(
+            "date-picker-editor-frame",
+            content,
+            (context, root) =>
+            {
+                root.Present(context.Theme, style);
+                root.AttachBehaviors(new DatePickerDropdownBehavior(expanded, open, close));
             }
         );
 
