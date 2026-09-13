@@ -436,6 +436,75 @@ public sealed class DateTimeEditingContracts
     }
 
     [TestMethod]
+    public void ReopenedCalendarAcknowledgesSynchronousSemanticSelectionBeforeDismissal()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "calendar-reopen-semantic-selection");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var enabled = graph.Signal(true, "calendar-enabled");
+        var applied = graph.Signal<DateOnly?>(new(2024, 6, 15), "calendar-applied");
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.DatePicker(
+                "Review date",
+                () => applied.Value,
+                value => applied.Value = value,
+                new DatePickerOptions(
+                    CultureInfo.GetCultureInfo("en-US"),
+                    today: static () => new(2024, 6, 15)
+                ),
+                new DateTimeFieldOptions(enabled: () => enabled.Value)
+            )
+        );
+        graph.Drain();
+        var ownerScene = Install(composition, graph);
+
+        PopupSurfaceRequest OpenCalendar()
+        {
+            var open = Nodes(composition.SemanticSnapshot()!)
+                .Single(node =>
+                    node.Role == SemanticRole.Button
+                    && node.Name.StartsWith("Open calendar", StringComparison.Ordinal)
+                );
+            Assert.AreEqual(
+                SemanticCommandResult.Applied,
+                composition.ExecuteSemanticCommand(open.Identity, new(SemanticCommandKind.Invoke))
+            );
+            graph.Drain();
+            return composition.Input.ActiveSurface!;
+        }
+
+        var first = OpenCalendar();
+        _ = first.CreateComposition();
+        enabled.Value = false;
+        graph.Drain();
+        Assert.IsTrue(first.IsDismissed);
+
+        enabled.Value = true;
+        graph.Drain();
+        ownerScene.Dispose();
+        ownerScene = Install(composition, graph);
+        var reopened = OpenCalendar();
+        var popup = reopened.CreateComposition();
+        using var popupScene = Install(popup, graph);
+        var nextDay = Nodes(popup.SemanticSnapshot()!)
+            .Single(node =>
+                node is { Role: SemanticRole.ListItem, Enabled: true, Selected: false }
+                && node.Name.Contains("June 16, 2024", StringComparison.Ordinal)
+            );
+
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            popup.ExecuteSemanticCommand(nextDay.Identity, new(SemanticCommandKind.Select))
+        );
+        Assert.AreEqual(new DateOnly(2024, 6, 16), applied.Value);
+        Assert.IsTrue(reopened.IsDismissed);
+        ownerScene.Dispose();
+    }
+
+    [TestMethod]
     public void DateDraftRejectsInvalidAndOutOfRangeWithoutChangingAppliedValue()
     {
         var graph = new ReactiveGraph();

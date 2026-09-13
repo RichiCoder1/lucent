@@ -122,8 +122,8 @@ Use Windows translator tests for F4, compiled `.lui` tests for authored controls
 and the existing six theme/density capture combinations for numeric geometry.
 Do not add sleeps or duplicate whole-application test suites. A final published
 desktop smoke covers actual F4/Alt chords, native popup focus, paging after
-resize and pointer focus retention. That focus-requiring smoke remains paused
-until the user authorizes it. No further user design decision is needed for this
+resize and pointer focus retention. The user authorized the final native smoke;
+its results are recorded below. No further user design decision is needed for this
 bounded proposal; hold-repeat and new free-text modes remain separate work.
 ## September 13 implementation checkpoint
 
@@ -146,3 +146,27 @@ steps disable independently. Pointer activation preserves editor focus and
 selection through the existing button policy and avoids blur-triggered duplicate
 commits. Public IconButton signatures are unchanged; keyboard and accessibility
 activation remain available.
+
+## September 13 native closeout
+
+All eight focused `PublishedInteractionReviewTests` workflows pass against the
+fresh NativeAOT TestHost at
+`artifacts/review-closeout-279-289/final-native-host/Lucent.Platform.Windows.TestHost.exe`.
+SHA-256: `323284402F27546440E0461B2AD9256714860311539318DDD021D9405E69FB08`.
+The source and per-test records are in `candidate-manifest.txt` beside the
+`final-native-{279,280,281,282,283,287,288,289}.log` files. These are automated
+physical-input/UIA workflows, not a repeated broad manual gallery walkthrough.
+
+The native checks found and resolved three additional defects: a routed Tab
+could dispose its popup router before traversal; an accepted calendar selection
+could report failure after dismissal; and a removed submenu could be measured
+before the Windows menu chain synchronized. Tab now advances once from the
+captured owner focus, respecting explicit application focus changes. Calendar
+selection acknowledges synchronous acceptance before closing, and stale menu
+levels are excluded from refresh.
+
+Core 500/500 and Windows 127/127 pass, with warning-clean builds and unchanged
+architecture positive/negative checks. Numeric pointer stepping commits exactly
+once and preserves editor focus; dropdown chords, owner Tab traversal, collection
+paging, tooltip/dialog dismissal, live calendar availability, slider cancellation
+and nested menu navigation all pass on the published candidate.

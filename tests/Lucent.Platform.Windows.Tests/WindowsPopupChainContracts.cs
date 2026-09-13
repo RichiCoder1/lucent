@@ -219,6 +219,51 @@ public sealed class WindowsPopupChainContracts
     }
 
     [TestMethod]
+    public void ClosedSubmenuLevelSkipsRefreshUntilTheNativeChainRemovesItsWindow()
+    {
+        using var owner = new Composition(new ReactiveGraph(), "stale-submenu-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Child(owner.Root, "stale-submenu-target");
+        target.Present(theme);
+        using var request = new ContextMenuRequest(
+            owner,
+            new(owner.Epoch, target.Id),
+            new(12, 12, 1, 1),
+            Components.Menu([
+                Components.MenuSubmenu(
+                    "More",
+                    () => Components.Menu([Components.MenuItem("Nested", () => { })])
+                ),
+            ]),
+            theme
+        );
+        using var renderer = new SkiaSceneRenderer();
+        var root = request.CreateComposition();
+        Install(root, renderer);
+        var rootLevel = request.ActiveLevels.Single();
+        Assert.IsTrue(request.FocusFirst(rootLevel));
+        Assert.IsTrue(root.Input.DispatchKey(new(KeyCommandKind.Down, Key.Right)).Handled);
+        var child = request.ActiveLevels[1];
+        Install(child.Composition, renderer);
+        Assert.IsTrue(request.FocusFirst(child));
+        Assert.IsTrue(WindowsPopupHost.CanRefreshMenuLevel(request, child));
+
+        Assert.IsTrue(
+            child.Composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Escape)).Handled
+        );
+
+        Assert.AreEqual(1, request.ActiveLevels.Count);
+        Assert.IsTrue(
+            WindowsPopupHost.CanRefreshMenuLevel(request, rootLevel),
+            "Closing a child incorrectly made the retained root level stale."
+        );
+        Assert.IsFalse(
+            WindowsPopupHost.CanRefreshMenuLevel(request, child),
+            "The removed child remained eligible for native refresh before chain reconciliation."
+        );
+    }
+
+    [TestMethod]
     public void SubmenuPlacementOpensLeftWhenRightSideDoesNotFit()
     {
         var trigger = new PopupScreenRect(900, 120, 940, 160);
@@ -521,6 +566,18 @@ public sealed class WindowsPopupChainContracts
             gate.ShouldDismiss(focusWithinChain: false),
             "External focus loss did not dismiss the chain."
         );
+    }
+
+    private static void Install(Composition composition, SkiaSceneRenderer renderer)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+            if (
+                composition.Input.SetScene(
+                    SceneLayout.Project(composition, new(420, 240, 1), renderer)
+                )
+            )
+                return;
+        throw new InvalidOperationException("The popup-chain fixture did not install a scene.");
     }
 
     private sealed class UnpresentedPopupRequest(Composition owner, Composition popup)

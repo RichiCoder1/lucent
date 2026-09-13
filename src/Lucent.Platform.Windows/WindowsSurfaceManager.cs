@@ -27,6 +27,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
     private bool _ownsReturnFocus;
     private LayoutRect? _hostAnchor;
     private bool _ownerPlacementDirty;
+    private FocusTraversalDirection? _pendingOwnerTraversal;
     internal Action<SKCanvas> OwnerOverlay { get; }
 
     internal WindowsSurfaceManager(
@@ -55,6 +56,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
 
     private void Request(PopupSurfaceRequest request)
     {
+        _pendingOwnerTraversal = null;
         if (request.IsInteractive)
         {
             var focused = _ownerInput.FocusedElement;
@@ -137,7 +139,16 @@ internal sealed class WindowsSurfaceManager : IDisposable
         }
         // Focus transitions are resolved after the SDL batch, when a newly opened child
         // has acquired focus. A transient focus-lost event must not close its parent.
-        return _host.Dispatch(value, dismissOnFocusLoss: false);
+        var host = _host;
+        var request = _request;
+        var dispatched = host.Dispatch(value, dismissOnFocusLoss: false);
+        if (
+            dispatched
+            && request is { IsDismissed: true }
+            && host.TakeUnhandledTraversal() is { } traversal
+        )
+            _pendingOwnerTraversal = traversal;
+        return dispatched;
     }
 
     internal static bool DispatchAndInvalidateOwner(
@@ -237,7 +248,10 @@ internal sealed class WindowsSurfaceManager : IDisposable
             );
         }
         _children?.Synchronize();
-        RestoreFinalFocus();
+        if (_pendingOwnerTraversal is not null)
+            ApplyPendingOwnerTraversal();
+        else
+            RestoreFinalFocus();
         if (_host is null || !_request!.IsInteractive || _request.IsModal)
             return;
         var focus = SDL.GetKeyboardFocus();
@@ -387,7 +401,16 @@ internal sealed class WindowsSurfaceManager : IDisposable
             )
         )
             Capture(errors, InvalidateOwner);
-        Capture(errors, RestoreFinalFocus);
+        Capture(
+            errors,
+            () =>
+            {
+                if (_pendingOwnerTraversal is not null)
+                    ApplyPendingOwnerTraversal();
+                else
+                    RestoreFinalFocus();
+            }
+        );
         Throw(errors);
     }
 
@@ -420,6 +443,55 @@ internal sealed class WindowsSurfaceManager : IDisposable
         _ownsReturnFocus = false;
     }
 
+    private void ApplyPendingOwnerTraversal()
+    {
+        if (
+            _pendingOwnerTraversal is not { } traversal
+            || _host is not null
+            || _pending is { IsDismissed: false }
+        )
+            return;
+        if (_disposed || _owner.IsDisposed)
+        {
+            _pendingOwnerTraversal = null;
+            return;
+        }
+        var captured = _returnFocus;
+        if (!_ownsReturnFocus || captured is null)
+        {
+            _pendingOwnerTraversal = null;
+            return;
+        }
+        var current = _ownerInput.FocusedElement;
+        if (!KeepsCapturedFocusForTraversal(captured, current))
+        {
+            _pendingOwnerTraversal = null;
+            ClearReturnFocus();
+            return;
+        }
+        if (current is null)
+        {
+            RestoreFinalFocus();
+            if (_ownsReturnFocus)
+                return;
+        }
+        else
+            ClearReturnFocus();
+        if (_ownerInput.FocusedElement != captured)
+        {
+            _pendingOwnerTraversal = null;
+            return;
+        }
+        _pendingOwnerTraversal = null;
+        if (_ownerInput.MoveFocus(traversal))
+            InvalidateOwner();
+    }
+
+    internal static bool KeepsCapturedFocusForTraversal(
+        ElementIdentity? captured,
+        ElementIdentity? current
+    ) => captured is not null && (current is null || current == captured);
+
     private void InvalidateOwnerIfChanged(PopupSurfaceRequest request, long before)
     {
         if (
@@ -441,6 +513,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _pendingOwnerTraversal = null;
         var errors = new List<Exception>();
         _ownerInput.SurfaceRequested -= Request;
         Capture(errors, () => _pending?.Dispose());

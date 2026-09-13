@@ -264,13 +264,14 @@ internal sealed class DateEditSession
         return true;
     }
 
-    internal void Select(DateOnly value)
+    internal bool Select(DateOnly value)
     {
         if (!_options.InRange(value))
-            return;
+            return false;
         _draft.Value = _options.Format(value);
         _validation.Value = ValidationState.Valid;
         _request(value);
+        return _applied() == value;
     }
 
     private bool Reject(string message)

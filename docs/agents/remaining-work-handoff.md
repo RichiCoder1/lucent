@@ -21,9 +21,26 @@ existing assertions remain. The prior full-suite observation was 6m33s; these ar
 individual observed runs, not a benchmark guarantee. Logs:
 `artifacts/references276-{red,green,package,full}.log`.
 
-Desktop review #279–283 and interaction enhancements #287–289 are undergoing
-focused verification. Next is the bounded C# authoring feasibility gate #266;
-stock factory migration belongs to #269 and is not part of that gate.
+Desktop review #279–283 and interaction enhancements #287–289 are complete.
+All eight focused published TestHost workflows pass; Core 500/500 and Windows
+127/127 pass. The final NativeAOT executable has SHA-256
+`323284402F27546440E0461B2AD9256714860311539318DDD021D9405E69FB08`;
+its source manifest and per-issue logs are under
+`artifacts/review-closeout-279-289/`. These automated physical-input/UIA results
+supersede the pending-smoke statements in historical checkpoints below.
+The checks additionally fixed popup Tab disposal/owner traversal, calendar
+semantic acceptance after reopening and stale submenu refresh after Escape.
+
+The earlier interaction implementation `a18d662` also has successful
+[CI 34751028190](https://github.com/RichiCoder1/lucent/actions/runs/34751028190)
+and published `0.3.0-dev.68.1`. Publication of the additional native closeout
+fixes must be checked against their own subsequent CI commit.
+
+The bounded C# authoring feasibility gate #266 is being verified in the isolated
+checkout `artifacts/authoring266-worktree`. Core/Compiler/Generator/editor checks
+are green; the fresh package consumer exposed a missing public owned semantic
+binding seam, which is being added before final package/AOT verification.
+Stock factory migration belongs to #269 and is not part of this gate.
 
 ## Completed interaction repairs — September 12, 2026
 

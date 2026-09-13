@@ -21,6 +21,7 @@ internal sealed class WindowsInputAdapter : IDisposable
     private bool _imeCompositionActive;
     private ElementIdentity? _imeCompositionTarget;
     private bool _rejectQueuedTextUntilRefresh;
+    private FocusTraversalDirection? _pendingOwnerTraversal;
     private ElementIdentity? _classifiedTextInputTarget;
     private SDL.TextInputType _classifiedTextInputType;
     private SDL.TextInputType? _startedTextInputType;
@@ -49,6 +50,7 @@ internal sealed class WindowsInputAdapter : IDisposable
     {
         if (_disposed || _composition.IsDisposed)
             return false;
+        _pendingOwnerTraversal = null;
         if (
             (SDL.EventType)@event.Type
             is SDL.EventType.KeyDown
@@ -150,6 +152,13 @@ internal sealed class WindowsInputAdapter : IDisposable
         var requested = _repaintRequested;
         _repaintRequested = false;
         return requested;
+    }
+
+    internal FocusTraversalDirection? TakeUnhandledTraversal()
+    {
+        var traversal = _pendingOwnerTraversal;
+        _pendingOwnerTraversal = null;
+        return traversal;
     }
 
     internal void RefreshTextInput()
@@ -296,7 +305,15 @@ internal sealed class WindowsInputAdapter : IDisposable
             // later commit to be applied twice.
             return true;
         }
-        _ = _router.DispatchKey(command);
+        var result = _router.DispatchKey(command);
+        if (
+            !result.Handled
+            && command is { Kind: KeyCommandKind.Down, Key: Core.Key.Tab, IsRepeat: false }
+            && (command.Modifiers & ~KeyModifiers.Shift) == 0
+        )
+            _pendingOwnerTraversal = command.Modifiers.HasFlag(KeyModifiers.Shift)
+                ? FocusTraversalDirection.Previous
+                : FocusTraversalDirection.Next;
         if (_composition.IsDisposed)
             return true;
         ReconcileImeComposition();

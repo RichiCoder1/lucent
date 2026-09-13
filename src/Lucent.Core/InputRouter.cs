@@ -458,13 +458,25 @@ public sealed partial class InputRouter
                 : RouteKey(command, target, errors);
             if (!result.Handled && command is { Kind: KeyCommandKind.Down, Key: Key.Tab })
             {
-                MoveFocusCore(
-                    command.Modifiers.HasFlag(KeyModifiers.Shift)
-                        ? FocusTraversalDirection.Previous
-                        : FocusTraversalDirection.Next,
-                    errors
-                );
-                result = new(result.Status, result.Rejection, result.Target, result.Route, true);
+                // A routed Tab can synchronously dismiss and dispose an owned surface. Only
+                // traverse the scene when it is still current; otherwise leave the command
+                // unhandled so the host can continue traversal in the owning composition.
+                if (!_disposed && EnsureScene(errors) is null)
+                {
+                    MoveFocusCore(
+                        command.Modifiers.HasFlag(KeyModifiers.Shift)
+                            ? FocusTraversalDirection.Previous
+                            : FocusTraversalDirection.Next,
+                        errors
+                    );
+                    result = new(
+                        result.Status,
+                        result.Rejection,
+                        result.Target,
+                        result.Route,
+                        true
+                    );
+                }
             }
             Throw(errors);
             return result;

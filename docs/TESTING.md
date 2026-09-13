@@ -79,6 +79,18 @@ The published Windows TestHost includes two focused fixtures for the new framewo
 
 Desktop interaction checks require an interactive Windows session. They launch and close their own application processes. Keep desktop checks separate from unrelated work that changes focus or input.
 
+`PublishedInteractionReviewTests` targets the Windows TestHost's
+`--interaction-review-fixture` using `LUCENT_DESKTOP_HOST`. It exercises nested
+tooltip/dialog Escape, pending submission recovery after host dismissal, live
+calendar availability, held-slider cancellation and menu navigation across
+noninteractive rows, plus physical dropdown chords/Tab traversal, measured
+collection paging and focus-preserving numeric stepping. Its compact fixture
+keeps physical-input targets on screen and rejects clicks intercepted by another
+window. Select this class for those input/ownership changes instead
+of repeating the whole gallery walkthrough. The held-input cases require the
+desktop fixture's physical input driver; a screenshot or UIA invocation alone
+does not establish their behavior.
+
 `PublishedFilePickerTests.NativeOpenSaveAndFolderDialogsCancelThroughTheirOwnerStaPump`
 runs the published Windows TestHost against actual COM open, save and folder
 dialogs. It requires `LUCENT_DESKTOP_HOST` and verifies cancellation through the

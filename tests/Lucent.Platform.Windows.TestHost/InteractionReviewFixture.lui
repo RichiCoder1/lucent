@@ -1,0 +1,93 @@
+namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+
+style InteractionReviewShell {
+    Width: 620;
+    Height: 900;
+    Padding: Insets.Uniform(20);
+    Spacing: 6;
+}
+
+style InteractionReviewSlider {
+    Width: 520;
+}
+
+style InteractionReviewPagedList {
+    Width: 320;
+    Height: 125;
+}
+
+style InteractionReviewNumber {
+    Width: 320;
+}
+
+internal component InteractionReviewFixtureView(InteractionReviewModel model) {
+    <Column style={InteractionReviewShell}>
+        <Text style={PresentationStyles.Title}>Interaction review fixture</Text>
+        <ContextMenu menu={model.ReviewMenu}>
+            <Button onInvoke={model.NoOp}>Open review menu</Button>
+        </ContextMenu>
+        <NumberField
+            label="Review number"
+            value={() => model.NumberValue}
+            onValueRequested={model.SetNumberValue}
+            options={model.NumberOptions}
+            style={InteractionReviewNumber}
+        />
+        <Status content={() => model.NumberStatus} />
+        <DatePicker
+            label="Review date"
+            value={() => model.DateValue}
+            onValueRequested={model.SetDateValue}
+            options={model.DateOptions}
+            field={model.DateField}
+        />
+        <Row style={Style.Empty with { Spacing: 8; }}>
+            <Button onInvoke={() => model.SetDateEnabled(false)}>Disable date</Button>
+            <Button onInvoke={() => model.SetDateEnabled(true)}>Enable date</Button>
+        </Row>
+        <Status content={() => model.DateStatus} />
+        <Slider
+            label="Review slider"
+            value={() => model.SliderValue}
+            onValueRequested={model.SetSliderValue}
+            onCommit={model.CommitSlider}
+            options={model.SliderOptions}
+            style={InteractionReviewSlider}
+        />
+        <Status content={() => model.SliderStatus} />
+        <Button onInvoke={model.OpenTooltipDialog}>Open tooltip dialog</Button>
+        <Status content={() => model.TooltipDialogStatus} />
+        <Dialog
+            controller={model.TooltipDialog}
+            title="Tooltip dialog"
+            initialFocus={model.FocusFirst}
+            actions={[Lucent.Core.Components.DialogCancel("Cancel", () => model.TooltipDialog.TryCancel())]}
+        >
+            <Tooltip description="Nested tooltip details">
+                <Button onInvoke={model.NoOp}>Nested tooltip target</Button>
+            </Tooltip>
+        </Dialog>
+        <Button onInvoke={model.OpenPendingDialog} style={Style.Empty.Enabled(() => !model.PendingDialog.IsOpen)}>Open pending dialog</Button>
+        <Button onInvoke={model.FailPendingWrite}>Fail pending write</Button>
+        <Status content={() => model.PendingStatus} />
+        <Status content={() => model.PendingSubmissionStatus} />
+        <Dialog
+            controller={model.PendingDialog}
+            title="Pending acceptance dialog"
+            initialFocus={model.FocusFirst}
+            actions={[Lucent.Core.Components.Button("Start pending acceptance", model.StartPendingAcceptance), Lucent.Core.Components.DialogCancel("Cancel", () => model.PendingDialog.TryCancel())]}
+        >
+            <Text>The application write remains owned by the fixture after native dismissal.</Text>
+        </Dialog>
+        <ListBox
+            label="Review paged choices"
+            items={() => model.PagedItems}
+            readSelectedKey={() => model.PagedSelection}
+            onSelectionRequested={model.SetPagedSelection}
+            selectionMode={ListBoxSelectionMode.ExplicitConfirmation}
+            rowHeight={30}
+            style={InteractionReviewPagedList}
+        />
+        <Status content={() => model.PagingStatus} />
+    </Column>
+}

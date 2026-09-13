@@ -26,6 +26,7 @@ internal static class Program
             ),
             ["--motion-fixture"] => MotionFixture.Run(reducedMotion: false),
             ["--motion-reduced-fixture"] => MotionFixture.Run(reducedMotion: true),
+            ["--interaction-review-fixture"] => InteractionReviewFixture.Run(),
             _ => 2,
         };
 }

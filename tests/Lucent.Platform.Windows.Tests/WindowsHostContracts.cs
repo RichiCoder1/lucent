@@ -9,6 +9,85 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed class WindowsHostContracts
 {
     [TestMethod]
+    public void InputAdapterExposesOnlyUnhandledPlainTabForOwnerTraversal()
+    {
+        var capturedIdentity = new ElementIdentity(1, 2);
+        var otherIdentity = new ElementIdentity(1, 3);
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+            WindowsSurfaceManager.KeepsCapturedFocusForTraversal(capturedIdentity, null)
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+            WindowsSurfaceManager.KeepsCapturedFocusForTraversal(capturedIdentity, capturedIdentity)
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsFalse(
+            WindowsSurfaceManager.KeepsCapturedFocusForTraversal(capturedIdentity, otherIdentity),
+            "An application-selected focus target was replaced by popup Tab traversal."
+        );
+
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+            DispatchClosingTab(SDL.Keymod.None, repeat: false) is { Dispatched: true }
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            FocusTraversalDirection.Next,
+            DispatchClosingTab(SDL.Keymod.None, repeat: false).Traversal
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            FocusTraversalDirection.Previous,
+            DispatchClosingTab(SDL.Keymod.LShift, repeat: false).Traversal
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsNull(
+            DispatchClosingTab(SDL.Keymod.None, repeat: true).Traversal,
+            "A repeated Tab requested owner traversal."
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsNull(
+            DispatchClosingTab(SDL.Keymod.LCtrl, repeat: false).Traversal,
+            "A modified platform Tab requested owner traversal."
+        );
+
+        static (bool Dispatched, FocusTraversalDirection? Traversal) DispatchClosingTab(
+            SDL.Keymod modifiers,
+            bool repeat
+        )
+        {
+            using var composition = new Composition(new ReactiveGraph(), "unhandled-popup-tab");
+            using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            Controls.Panel(composition.Root, theme, "root", Style.Empty.Width(100).Height(40));
+            var target = composition.Child(composition.Root, "target");
+            target.Present(theme, Style.Empty.Width(100).Height(40));
+            target.AttachBehaviors(new DisposeOnTabBehavior(composition));
+            using var renderer = new SkiaSceneRenderer();
+            using var scene = WindowsBootstrap.ProjectAndInstall(
+                composition,
+                new(100, 40, 1),
+                renderer
+            );
+            Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+                composition.Input.MoveFocus(FocusTraversalDirection.Next)
+            );
+            using var adapter = new WindowsInputAdapter(composition);
+            var dispatched = adapter.Dispatch(
+                new SDL.Event
+                {
+                    Key = new()
+                    {
+                        Type = SDL.EventType.KeyDown,
+                        Key = SDL.Keycode.Tab,
+                        Mod = modifiers,
+                        Down = true,
+                        Repeat = repeat,
+                    },
+                }
+            );
+            var traversal = adapter.TakeUnhandledTraversal();
+            Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsNull(
+                adapter.TakeUnhandledTraversal(),
+                "The traversal was transferred twice."
+            );
+            return (dispatched, traversal);
+        }
+    }
+
+    [TestMethod]
     public void InputAdapterAndRoutingContract()
     {
         Assert(
@@ -952,5 +1031,23 @@ sealed class ThrowingCaptureBehavior : Behavior
                 route.Capture();
         });
         context.OnCaptureLost(_ => throw new InvalidOperationException("capture cleanup"));
+    }
+}
+
+sealed class DisposeOnTabBehavior(Composition composition) : Behavior
+{
+    public override string Name => "dispose-on-tab";
+    public override BehaviorOwnership Ownership =>
+        BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
+
+    public override void Attach(BehaviorContext context)
+    {
+        context.SetSemantics(new(SemanticRole.Group, "Dispose on Tab"));
+        context.MakeFocusable();
+        context.OnKey(route =>
+        {
+            if (route.Command is { Kind: KeyCommandKind.Down, Key: Key.Tab })
+                composition.Dispose();
+        });
     }
 }

@@ -6,6 +6,31 @@ namespace Lucent.Core.Tests;
 public sealed class InputSceneDisposalContracts
 {
     [TestMethod]
+    public void TabDismissalCanDisposeItsRouterBeforeOwnerTraversalContinues()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "tab-disposal");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Present(composition.Root, theme, 80, 40);
+        var target = composition.Child(composition.Root, "target");
+        Present(target, theme, 80, 40);
+        target.AttachBehaviors(new DisposingTabProbe(composition));
+
+        var router = composition.Input;
+        using var scene = SceneLayout.Project(composition, new(80, 40, 1), new EmptyShaper());
+        Assert.IsTrue(router.SetScene(scene));
+        Assert.IsTrue(router.MoveFocus(FocusTraversalDirection.Next));
+
+        var result = router.DispatchKey(new(KeyCommandKind.Down, Key.Tab));
+
+        Assert.IsTrue(composition.IsDisposed);
+        Assert.IsFalse(
+            result.Handled,
+            "A disposed popup router must leave Tab available for owner traversal."
+        );
+    }
+
+    [TestMethod]
     public void FailedSceneInstallationDisposesCandidateAndAllowsFreshRecovery()
     {
         var graph = new ReactiveGraph();
@@ -117,6 +142,25 @@ public sealed class InputSceneDisposalContracts
             context.MakeFocusable();
             context.OnFocus(focus ?? (_ => { }));
             context.OnPointer(pointer ?? (_ => { }));
+        }
+    }
+
+    private sealed class DisposingTabProbe(Composition composition) : Behavior
+    {
+        public override string Name => "disposing-tab";
+
+        public override BehaviorOwnership Ownership =>
+            BehaviorOwnership.Focus | BehaviorOwnership.Semantics;
+
+        public override void Attach(BehaviorContext context)
+        {
+            context.SetSemantics(new(SemanticRole.Group, "Disposing Tab target"));
+            context.MakeFocusable();
+            context.OnKey(route =>
+            {
+                if (route.Command is { Kind: KeyCommandKind.Down, Key: Key.Tab })
+                    composition.Dispose();
+            });
         }
     }
 

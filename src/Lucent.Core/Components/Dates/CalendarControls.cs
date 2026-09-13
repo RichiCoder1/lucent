@@ -230,7 +230,8 @@ internal sealed class CalendarDayBehavior(
             var day = Current();
             if (!editable() || !day.IsEnabled || day.Date is not { } date)
                 return false;
-            session.Select(date);
+            if (session.Select(date))
+                context.AcknowledgeSemanticSelectionApplied();
             close();
             return true;
         }

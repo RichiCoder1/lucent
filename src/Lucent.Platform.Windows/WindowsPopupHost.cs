@@ -370,6 +370,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
         return true;
     }
 
+    internal FocusTraversalDirection? TakeUnhandledTraversal() => _input.TakeUnhandledTraversal();
+
     /// <summary>
     /// Reanchors this popup after its owner or display moved. SDL popup positions remain relative
     /// to the parent; refresh the parent first in <see cref="WindowsPopupChain.Reposition"/>
@@ -406,7 +408,11 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private void Refresh(TimeSpan now)
     {
         CheckThread();
-        if (_disposed || !PrepareRefresh(_request, _composition))
+        if (
+            _disposed
+            || !CanRefreshMenuLevel(_request, _level)
+            || !PrepareRefresh(_request, _composition)
+        )
             return;
         if (!ResizeToCurrentContent())
             return;
@@ -553,6 +559,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
         // controlled close and dispose this popup composition, so recheck before projection.
         composition.Flush();
         return !request.IsDismissed && !composition.IsDisposed;
+    }
+
+    internal static bool CanRefreshMenuLevel(PopupSurfaceRequest request, MenuLevelSnapshot? level)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return level is null
+            || request is ContextMenuRequest menu
+                && menu.ActiveLevels.Any(active => ReferenceEquals(active, level));
     }
 
     internal void Dismiss() => _request.Dismiss();
