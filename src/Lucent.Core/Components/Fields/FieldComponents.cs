@@ -52,13 +52,12 @@ public static partial class Components
                     () => Required(content(), nameof(content)),
                     root.Name + ".content"
                 );
-                field.HelpText = value.Value;
                 Controls.FieldHelp(root, context.Theme, value.Value);
                 _ = root.Scope.Effect(
                     () =>
                     {
                         var current = value.Value;
-                        field.HelpText = current;
+                        field.SetHelpText(current);
                         root.UpdateControl(ProjectionProperties.Text, current);
                         root.UpdateControlSemantics(new(SemanticRole.Text, current));
                     },

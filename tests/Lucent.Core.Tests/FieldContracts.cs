@@ -130,6 +130,82 @@ public sealed class FieldContracts
     }
 
     [TestMethod]
+    public void DynamicHelpTextUpdatesRelationshipsWithoutRemountingTheEditor()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "field-help-live");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var help = graph.Signal("Initial help.", "field-help");
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field("Email", field => Components.TextField(field), help: () => help.Value)
+        );
+        graph.Drain();
+
+        var before = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.AreEqual("Initial help.", before.Relationships!.HelpText);
+
+        help.Value = "Updated help.";
+        graph.Drain();
+
+        var after = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.AreEqual(before.Identity.CompositionEpoch, after.Identity.CompositionEpoch);
+        Assert.AreEqual(before.Identity.ElementId, after.Identity.ElementId);
+        Assert.AreEqual("Updated help.", after.Relationships!.HelpText);
+    }
+
+    [TestMethod]
+    public void ReturningToValidRemovesErrorRelationshipsFromTheSameEditor()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "field-errors-live");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var validation = graph.Signal(ValidationState.Valid, "field-validation");
+        FieldContext? field = null;
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "Email",
+                current =>
+                {
+                    field = current;
+                    return Components.TextField(current);
+                },
+                () => validation.Value
+            )
+        );
+        graph.Drain();
+        var initial = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+
+        field!.Blur();
+        graph.Drain();
+        validation.Value = ValidationState.Invalid("Email is required.");
+        graph.Drain();
+
+        var invalid = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.IsTrue(invalid.Relationships!.IsInvalid);
+        Assert.AreEqual(1, invalid.Relationships.Errors.Count);
+        Assert.AreEqual("Email is required.", invalid.Relationships.ErrorText);
+
+        validation.Value = ValidationState.Valid;
+        graph.Drain();
+
+        var valid = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.AreEqual(initial.Identity.CompositionEpoch, valid.Identity.CompositionEpoch);
+        Assert.AreEqual(initial.Identity.ElementId, valid.Identity.ElementId);
+        Assert.IsFalse(valid.Relationships!.IsInvalid);
+        Assert.AreEqual(0, valid.Relationships.Errors.Count);
+        Assert.IsNull(valid.Relationships.ErrorText);
+    }
+
+    [TestMethod]
     public void ValidationMessagesAreImmutableAndOldGenerationsCannotComplete()
     {
         var source = new[] { "First", "Second" };
@@ -238,6 +314,89 @@ public sealed class FieldContracts
         Assert.IsTrue(alwaysResult.InvalidFields.Contains("always"));
         Assert.IsTrue(collapsed!.FocusTarget.IsPending);
         always.Dispose();
+    }
+
+    [TestMethod]
+    public async Task RegistrationOrderSurvivesRemovalAndAppendsNewFields()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "form-registration-order");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var form = new FormSession(composition.Root.Scope);
+        var validationA = graph.Signal(ValidationState.Valid, "validation-a");
+        var validationB = graph.Signal(ValidationState.Valid, "validation-b");
+        var validationC = graph.Signal(ValidationState.Valid, "validation-c");
+        var validationD = graph.Signal(ValidationState.Valid, "validation-d");
+        FieldContext? fieldC = null;
+        FieldContext? fieldD = null;
+
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "A",
+                field => Components.TextField(field),
+                () => validationA.Value,
+                session: form,
+                fieldId: "a"
+            )
+        );
+        var removed = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "B",
+                field => Components.TextField(field),
+                () => validationB.Value,
+                session: form,
+                fieldId: "b"
+            )
+        );
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "C",
+                field =>
+                {
+                    fieldC = field;
+                    return Components.TextField(field);
+                },
+                () => validationC.Value,
+                session: form,
+                fieldId: "c"
+            )
+        );
+        graph.Drain();
+
+        removed.Dispose();
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "D",
+                field =>
+                {
+                    fieldD = field;
+                    return Components.TextField(field);
+                },
+                () => validationD.Value,
+                session: form,
+                fieldId: "d"
+            )
+        );
+        graph.Drain();
+
+        validationC.Value = ValidationState.Invalid("C is invalid.");
+        validationD.Value = ValidationState.Invalid("D is invalid.");
+        graph.Drain();
+        var result = await form.SubmitAsync();
+
+        Assert.AreEqual(FormSubmitStatus.Invalid, result.Status);
+        Assert.AreEqual("c,d", string.Join(",", result.InvalidFields));
+        Assert.AreEqual("c,d", string.Join(",", form.Errors.Select(error => error.FieldId)));
+        Assert.IsTrue(fieldC!.FocusTarget.IsPending);
+        Assert.IsFalse(fieldD!.FocusTarget.IsPending);
     }
 
     [TestMethod]

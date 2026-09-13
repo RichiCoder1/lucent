@@ -5,6 +5,7 @@ public sealed class FieldContext
 {
     private readonly Derived<ValidationState> _validation;
     private readonly Signal<bool> _touched;
+    private readonly Signal<string?> _helpText;
     private readonly Signal<long> _relationshipRevision;
     private ElementIdentity? _label;
     private ElementIdentity? _help;
@@ -30,6 +31,7 @@ public sealed class FieldContext
             id + ".validation"
         );
         _touched = owner.Signal(false, id + ".touched");
+        _helpText = owner.Signal<string?>(null, id + ".help-text");
         _relationshipRevision = owner.Signal(0L, id + ".relationship-revision");
     }
 
@@ -67,14 +69,15 @@ public sealed class FieldContext
                 _label,
                 _help,
                 errors,
-                HelpText,
+                _helpText.Value,
                 show ? ErrorText : null,
                 show && validation.IsInvalid
             );
         }
     }
 
-    internal string? HelpText { get; set; }
+    internal void SetHelpText(string? value) => _helpText.Value = value;
+
     internal string ErrorText => string.Join(Environment.NewLine, Validation.Messages);
 
     internal string ReadErrorText() => ErrorText;

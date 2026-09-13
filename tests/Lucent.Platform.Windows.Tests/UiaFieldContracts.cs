@@ -17,14 +17,19 @@ public sealed unsafe partial class UiaLifecycleContracts
             using var composition = new Composition(new ReactiveGraph(), "uia-field");
             using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
             using var form = new FormSession(composition.Root.Scope, "details");
+            var help = composition.Root.Scope.Signal("Used for recovery.", "help");
+            var validation = composition.Root.Scope.Signal(
+                ValidationState.Invalid("Enter a complete address."),
+                "validation"
+            );
             composition.Mount(
                 composition.Root,
                 theme,
                 Components.Field(
                     "Email",
                     field => Components.TextField(field),
-                    () => ValidationState.Invalid("Enter a complete address."),
-                    () => "Used for recovery.",
+                    () => validation.Value,
+                    () => help.Value,
                     form,
                     "email",
                     required: true,
@@ -104,6 +109,46 @@ public sealed unsafe partial class UiaLifecycleContracts
                     Assert(
                         FieldArrayUpperBound(described.Value, 1, out count) == 0 && count == 1,
                         "DescribedBy must contain help and error providers."
+                    );
+                }
+                finally
+                {
+                    _ = ClearFieldVariant(&described);
+                }
+                help.Value = "Your updated recovery address.";
+                validation.Value = ValidationState.Valid;
+                composition.Flush();
+                using var recovered = WindowsBootstrap.ProjectAndInstall(
+                    composition,
+                    new(320, 200, 1),
+                    renderer,
+                    next
+                );
+                provider.Refresh(recovered);
+                Assert(
+                    ReadFieldString(editor, 30013) == help.Value,
+                    "The retained editor provider did not refresh dynamic HelpText."
+                );
+                Assert(
+                    ReadFieldString(editor, 30159) == help.Value,
+                    "Recovered editor retained its old validation description."
+                );
+                valid = default;
+                Assert(
+                    Simple(editor, 5, 30103, &valid) == 0 && valid.Type == 11 && valid.Value != 0,
+                    "Recovered editor remained invalid."
+                );
+                described = default;
+                Assert(
+                    Simple(editor, 5, 30105, &described) == 0 && described.Type == (0x2000 | 13),
+                    "Recovered editor lost its help relationship."
+                );
+                try
+                {
+                    var count = 0;
+                    Assert(
+                        FieldArrayUpperBound(described.Value, 1, out count) == 0 && count == 0,
+                        "Recovered editor retained an obsolete error provider."
                     );
                 }
                 finally

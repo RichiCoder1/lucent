@@ -39,12 +39,17 @@ public sealed record FormSubmitResult(FormSubmitStatus Status, IReadOnlyList<str
 /// <summary>One current form error and the field identity its summary action focuses.</summary>
 public sealed record FormFieldError(string FieldId, IReadOnlyList<string> Messages);
 
-/// <summary>Scope-owned coordinator for touched state, submit attempts, and focus-first-invalid.</summary>
+/// <summary>
+/// Scope-owned coordinator for touched state, submit attempts, and focus-first-invalid.
+/// Participating fields follow registration order: an unmounted field is removed, and a later
+/// remount is appended after the fields that remained mounted.
+/// </summary>
 public sealed class FormSession : IDisposable
 {
     private readonly ReactiveScope _scope;
     private readonly Signal<long> _submitAttempts;
     private readonly Dictionary<string, Registration> _fields = new(StringComparer.Ordinal);
+    private readonly List<Registration> _registrationOrder = [];
     private readonly HashSet<AwaitedSubmit> _awaited = [];
     private bool _disposed;
 
@@ -184,6 +189,7 @@ public sealed class FormSession : IDisposable
     {
         _disposed = true;
         _fields.Clear();
+        _registrationOrder.Clear();
         foreach (var awaited in _awaited)
             awaited.DisposeSession();
         _awaited.Clear();
@@ -209,12 +215,23 @@ public sealed class FormSession : IDisposable
             );
         var registration = new Registration(id, root, validation, focus, participation);
         _fields.Add(id, registration);
-        root.Scope.OnDispose(() => _fields.Remove(id, out _));
+        _registrationOrder.Add(registration);
+        root.Scope.OnDispose(() => RemoveRegistration(registration));
+    }
+
+    private void RemoveRegistration(Registration registration)
+    {
+        if (
+            _fields.TryGetValue(registration.Id, out var current)
+            && ReferenceEquals(current, registration)
+        )
+            _fields.Remove(registration.Id);
+        _registrationOrder.RemoveAll(item => ReferenceEquals(item, registration));
     }
 
     private Registration[] Participating() =>
-        _fields
-            .Values.Where(field =>
+        _registrationOrder
+            .Where(field =>
                 !field.Root.IsDisposed
                 && (
                     field.Participation == FieldParticipation.Always
