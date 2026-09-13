@@ -139,8 +139,8 @@ Core/Browser adoption and bounded drawing/Gauge follow under #272–275.
 
 The proof starts from delivered component source `a18d662`, after the editor
 reference and desktop interaction implementation, rather than the older design
-worktree. The pinned SDK/compiler,
-results and final signature deviations will be recorded with gate completion.
+worktree. The toolchain, executable results and final signature decisions are
+recorded below.
 
 ### Feasibility evidence
 
@@ -150,6 +150,10 @@ architecture positive/negative checks. The overload matrix executes all five
 supported families as values, lambdas, method groups, tokens and defaults,
 including typed-null rejection. The SDK is 10.0.401; the embedded Roslyn family
 is 5.0.0.
+
+After integration with the desktop closeout, Core **512/512** and Windows
+**127/127** pass with warning-clean builds and the architecture checks retained.
+The combined run is recorded in `artifacts/authoring-integrated-managed.log`.
 
 Core and SDK packages `0.3.0-dev.gate266.2` from candidate `44f2d5d` were restored
 into a fresh cache. A separately packaged proof library and its package-only

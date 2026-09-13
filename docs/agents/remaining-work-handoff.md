@@ -36,11 +36,25 @@ The earlier interaction implementation `a18d662` also has successful
 and published `0.3.0-dev.68.1`. Publication of the additional native closeout
 fixes must be checked against their own subsequent CI commit.
 
-The bounded C# authoring feasibility gate #266 is being verified in the isolated
-checkout `artifacts/authoring266-worktree`. Core/Compiler/Generator/editor checks
-are green; the fresh package consumer exposed a missing public owned semantic
-binding seam, which is being added before final package/AOT verification.
-Stock factory migration belongs to #269 and is not part of this gate.
+The bounded C# authoring feasibility gate #266 is complete and integrated in
+`f7c2712`, `da5d28d` and `ca45fd7`. It supplies the closed capability wrapper,
+real C# 14 overload/conversion proofs, `.lui` source and metadata recognition,
+and the public scope-owned `BehaviorContext.BindSemantics` seam required by
+external components. The embedded Roslyn packages are now 5.0.0 so editor and
+compiler binding understand the SDK's C# 14 extension metadata.
+
+The combined main checkout passes Core **512/512** and Windows **127/127**,
+including warning-clean builds and architecture positive/negative checks.
+The isolated gate also passes Compiler **66/66**, Generator **17/17** and editor
+**27/27**. Its fresh package-only consumer passes both managed and win-x64
+NativeAOT execution, including live semantics and stable element identity.
+See [ADR 0008](../adr/0008-bounded-csharp-authoring.md) for exact package/source
+boundaries, executable hash, concrete signatures and preserved evidence.
+
+Next is #267: the owned C# author context over the existing deferred mount and
+reactive primitives. Stock factory migration remains #269; this gate does not
+claim completion of the full authoring epic #265. Check the final integrated
+commit's CI for public package status; the local gate packages are proof assets.
 
 ## Completed interaction repairs — September 12, 2026
 
