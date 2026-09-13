@@ -36,8 +36,13 @@ value, reader, token, null and default routes with negative capability cases.
 Run `./tools/Test-AuthoringPackages.ps1 -Feed <local-package-directory> -Version
 <exact-prerelease-version>` after packing Core and the SDK to test a fresh,
 package-only proof library and consumer, including console NativeAOT execution.
-This proof takes no desktop focus. Compiler package changes also require the
-editor suite; the authoring gate uses Roslyn 5.0 and a C# 14-capable host.
+The consumer exercises counter and controlled form state, owned async/keyed
+content, partial state generation, and Gauge through both C# and `.lui`. It also
+reports mount allocations for raw deferred recipes, the owned context, and
+generated state; these are characterization results, not machine-dependent gates.
+CI runs this proof before publishing packages. It takes no desktop focus.
+Compiler package changes also require the editor suite; authoring uses Roslyn
+5.0 and a C# 14-capable host.
 
 ## Additional suites
 

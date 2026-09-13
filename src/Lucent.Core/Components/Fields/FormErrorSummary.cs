@@ -4,10 +4,13 @@ public static partial class Components
 {
     /// <summary>Creates a focusable linked summary of current form errors after submission.</summary>
     [LucentComponent]
-    public static ComponentRecipe FormErrorSummary(FormSession session, Style? style = null)
+    public static AuthorRecipe<StyledCapability> FormErrorSummary(
+        FormSession session,
+        Style? style = null
+    )
     {
         ArgumentNullException.ThrowIfNull(session);
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "form-error-summary",
             (context, root) =>
             {

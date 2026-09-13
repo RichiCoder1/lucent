@@ -200,6 +200,12 @@ public sealed class ComponentRecipe
         _authoringTarget?.Apply(context, root, AuthorRecipeValues.From(_authoring));
     }
 
+    internal void ApplyToRoot(CompositionContext context, Element root)
+    {
+        ApplyAuthoring(context, root);
+        Apply(context, root);
+    }
+
     internal void Apply(CompositionContext context, Element root)
     {
         ArgumentNullException.ThrowIfNull(context);

@@ -5,7 +5,7 @@ public static partial class Components
     /// <summary>Creates an accessible hyperlink that invokes only the supplied application action.</summary>
     /// <remarks>Rendering never launches a URI. Use an application-injected IUriLauncher to apply external-handler policy.</remarks>
     [LucentComponent]
-    public static ComponentRecipe Link(
+    public static AuthorRecipe<StyledAccessibleCapability> Link(
         [DefaultContent] string content,
         Action onInvoke,
         Style? style = null
@@ -13,7 +13,7 @@ public static partial class Components
     {
         content = Required(content, nameof(content));
         ArgumentNullException.ThrowIfNull(onInvoke);
-        return LinkContent(content, onInvoke, style);
+        return StockRecipe.Accessible(LinkContent(content, onInvoke, style));
     }
 
     [LucentComponent]

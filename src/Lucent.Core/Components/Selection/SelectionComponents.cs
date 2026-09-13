@@ -4,21 +4,23 @@ public static partial class Components
 {
     /// <summary>Creates a controlled checkbox with distinct Off, On, and Mixed applied states.</summary>
     [LucentComponent]
-    public static ComponentRecipe CheckBox(
+    public static AuthorRecipe<StyledAccessibleCapability> CheckBox(
         string label,
         Func<CheckState> readCheckState,
         Action<CheckState> onCheckRequested,
         CheckStateCycle cycle = CheckStateCycle.Binary,
         Style? style = null
     ) =>
-        ToggleSelectionContent(
-            new(label, SemanticRole.CheckBox, readCheckState, onCheckRequested, cycle),
-            style
+        StockRecipe.Accessible(
+            ToggleSelectionContent(
+                new(label, SemanticRole.CheckBox, readCheckState, onCheckRequested, cycle),
+                style
+            )
         );
 
     /// <summary>Creates a controlled binary switch for an immediate setting.</summary>
     [LucentComponent]
-    public static ComponentRecipe Switch(
+    public static AuthorRecipe<StyledAccessibleCapability> Switch(
         string label,
         Func<bool> readBool,
         Action<bool> onToggleRequested,
@@ -27,21 +29,23 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(readBool);
         ArgumentNullException.ThrowIfNull(onToggleRequested);
-        return ToggleSelectionContent(
-            new(
-                label,
-                SemanticRole.Switch,
-                () => readBool() ? CheckState.On : CheckState.Off,
-                state => onToggleRequested(state == CheckState.On),
-                CheckStateCycle.Binary
-            ),
-            style
+        return StockRecipe.Accessible(
+            ToggleSelectionContent(
+                new(
+                    label,
+                    SemanticRole.Switch,
+                    () => readBool() ? CheckState.On : CheckState.Off,
+                    state => onToggleRequested(state == CheckState.On),
+                    CheckStateCycle.Binary
+                ),
+                style
+            )
         );
     }
 
     /// <summary>Creates a controlled, keyed radio group with one roving tab stop.</summary>
     [LucentComponent]
-    public static ComponentRecipe RadioGroup<TKey>(
+    public static AuthorRecipe<StyledAccessibleCapability> RadioGroup<TKey>(
         string label,
         Func<IEnumerable<RadioOption<TKey>>> items,
         Func<TKey> readSelectedKey,
@@ -52,19 +56,21 @@ public static partial class Components
         where TKey : notnull
     {
         ArgumentNullException.ThrowIfNull(readSelectedKey);
-        return RadioGroup(
-            label,
-            items,
-            () => SelectedKey.Some(readSelectedKey()),
-            onSelectionRequested,
-            requirement,
-            style
+        return StockRecipe.Accessible(
+            RadioGroup(
+                label,
+                items,
+                () => SelectedKey.Some(readSelectedKey()),
+                onSelectionRequested,
+                requirement,
+                style
+            )
         );
     }
 
     /// <summary>Creates a controlled, keyed radio group whose applied state can explicitly be empty.</summary>
     [LucentComponent]
-    public static ComponentRecipe RadioGroup<TKey>(
+    public static AuthorRecipe<StyledAccessibleCapability> RadioGroup<TKey>(
         string label,
         Func<IEnumerable<RadioOption<TKey>>> items,
         Func<SelectedKey<TKey>> readSelectedKey,
@@ -81,7 +87,7 @@ public static partial class Components
         if (!Enum.IsDefined(requirement))
             throw new ArgumentOutOfRangeException(nameof(requirement));
 
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "radio-group",
             (context, root) =>
             {

@@ -813,8 +813,244 @@ public sealed class SkiaSceneRenderer : ITextShaper, IDisposable
             {
                 PaintImage(image, canvas);
             }
+            else if (node is DrawingSceneNode drawing)
+            {
+                PaintDrawing(drawing, canvas);
+            }
         }
     }
+
+    private static void PaintDrawing(DrawingSceneNode node, SKCanvas canvas)
+    {
+        var bounds = Rect(node.Bounds);
+        if (bounds.Width <= 0 || bounds.Height <= 0 || canvas.QuickReject(bounds))
+            return;
+        var depth = 0;
+        canvas.Save();
+        try
+        {
+            canvas.Translate(node.Bounds.X, node.Bounds.Y);
+            canvas.Scale(
+                node.Bounds.Width / node.CoordinateSize.Width,
+                node.Bounds.Height / node.CoordinateSize.Height
+            );
+            foreach (var command in node.Drawing.Commands)
+            {
+                switch (command)
+                {
+                    case DrawingLineCommand line:
+                        using (
+                            var paint = DrawingStroke(
+                                line.Brush,
+                                LineBounds(line.Start, line.End, line.Width),
+                                line.Width,
+                                line.Cap,
+                                DrawingStrokeJoin.Miter
+                            )
+                        )
+                            canvas.DrawLine(
+                                line.Start.X,
+                                line.Start.Y,
+                                line.End.X,
+                                line.End.Y,
+                                paint
+                            );
+                        break;
+                    case DrawingArcCommand arc:
+                        using (var builder = new SKPathBuilder())
+                        using (
+                            var paint = DrawingStroke(
+                                arc.Brush,
+                                arc.Oval,
+                                arc.Width,
+                                arc.Cap,
+                                DrawingStrokeJoin.Miter
+                            )
+                        )
+                        {
+                            builder.AddArc(Rect(arc.Oval), arc.StartDegrees, arc.SweepDegrees);
+                            using var path = builder.Detach();
+                            canvas.DrawPath(path, paint);
+                        }
+                        break;
+                    case DrawingShapeCommand shape:
+                        PaintDrawingShape(shape, canvas);
+                        break;
+                    case DrawingPathCommand path:
+                        PaintDrawingPath(path, canvas);
+                        break;
+                    case DrawingPushClipCommand clip:
+                        canvas.Save();
+                        depth++;
+                        canvas.ClipRect(Rect(clip.Bounds));
+                        break;
+                    case DrawingPushTransformCommand transform:
+                        canvas.Save();
+                        depth++;
+                        canvas.Concat(Matrix(transform.Transform));
+                        break;
+                    case DrawingPopCommand:
+                        if (depth == 0)
+                            throw new InvalidOperationException(
+                                "A frozen drawing contains an unmatched scope pop."
+                            );
+                        canvas.Restore();
+                        depth--;
+                        break;
+                    default:
+                        throw new InvalidOperationException(
+                            $"The Skia renderer does not understand drawing command {command.GetType().FullName}."
+                        );
+                }
+            }
+            if (depth != 0)
+                throw new InvalidOperationException(
+                    "A frozen drawing contains an unterminated clip or transform."
+                );
+        }
+        finally
+        {
+            while (depth-- > 0)
+                canvas.Restore();
+            canvas.Restore();
+        }
+    }
+
+    private static void PaintDrawingShape(DrawingShapeCommand command, SKCanvas canvas)
+    {
+        using var paint = command.Fill
+            ? Paint(command.Brush, command.Bounds, antialias: true)
+            : DrawingStroke(
+                command.Brush,
+                command.Bounds,
+                command.Width,
+                command.Cap,
+                DrawingStrokeJoin.Miter
+            );
+        paint.Style = command.Fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke;
+        var bounds = Rect(command.Bounds);
+        switch (command.Shape)
+        {
+            case DrawingShapeKind.Rectangle:
+                canvas.DrawRect(bounds, paint);
+                break;
+            case DrawingShapeKind.RoundedRectangle:
+                var radius = Radius(command.CornerRadius, command.Bounds);
+                canvas.DrawRoundRect(bounds, radius, radius, paint);
+                break;
+            case DrawingShapeKind.Ellipse:
+                canvas.DrawOval(bounds, paint);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    $"The Skia renderer does not understand drawing shape {command.Shape}."
+                );
+        }
+    }
+
+    private static void PaintDrawingPath(DrawingPathCommand command, SKCanvas canvas)
+    {
+        using var builder = new SKPathBuilder
+        {
+            FillType =
+                command.FillRule == DrawingFillRule.EvenOdd
+                    ? SKPathFillType.EvenOdd
+                    : SKPathFillType.Winding,
+        };
+        foreach (var verb in command.Path.Verbs)
+        {
+            switch (verb.Kind)
+            {
+                case DrawingPathVerbKind.Move:
+                    builder.MoveTo(verb.First.X, verb.First.Y);
+                    break;
+                case DrawingPathVerbKind.Line:
+                    builder.LineTo(verb.First.X, verb.First.Y);
+                    break;
+                case DrawingPathVerbKind.Quadratic:
+                    builder.QuadTo(verb.First.X, verb.First.Y, verb.Second.X, verb.Second.Y);
+                    break;
+                case DrawingPathVerbKind.Cubic:
+                    builder.CubicTo(
+                        verb.First.X,
+                        verb.First.Y,
+                        verb.Second.X,
+                        verb.Second.Y,
+                        verb.Third.X,
+                        verb.Third.Y
+                    );
+                    break;
+                case DrawingPathVerbKind.Close:
+                    builder.Close();
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"The Skia renderer does not understand drawing path verb {verb.Kind}."
+                    );
+            }
+        }
+        using var path = builder.Detach();
+        var pathBounds = path.Bounds;
+        var logicalBounds = new LayoutRect(
+            pathBounds.Left,
+            pathBounds.Top,
+            Math.Max(1, pathBounds.Width),
+            Math.Max(1, pathBounds.Height)
+        );
+        using var paint = command.Fill
+            ? Paint(command.Brush, logicalBounds, antialias: true)
+            : DrawingStroke(command.Brush, logicalBounds, command.Width, command.Cap, command.Join);
+        paint.Style = command.Fill ? SKPaintStyle.Fill : SKPaintStyle.Stroke;
+        canvas.DrawPath(path, paint);
+    }
+
+    private static SKPaint DrawingStroke(
+        Brush brush,
+        LayoutRect bounds,
+        float width,
+        DrawingStrokeCap cap,
+        DrawingStrokeJoin join
+    )
+    {
+        var paint = Paint(brush, bounds, antialias: true);
+        paint.Style = SKPaintStyle.Stroke;
+        paint.StrokeWidth = width;
+        paint.StrokeCap = cap switch
+        {
+            DrawingStrokeCap.Butt => SKStrokeCap.Butt,
+            DrawingStrokeCap.Round => SKStrokeCap.Round,
+            DrawingStrokeCap.Square => SKStrokeCap.Square,
+            _ => throw new InvalidOperationException($"Unsupported drawing stroke cap {cap}."),
+        };
+        paint.StrokeJoin = join switch
+        {
+            DrawingStrokeJoin.Miter => SKStrokeJoin.Miter,
+            DrawingStrokeJoin.Round => SKStrokeJoin.Round,
+            DrawingStrokeJoin.Bevel => SKStrokeJoin.Bevel,
+            _ => throw new InvalidOperationException($"Unsupported drawing stroke join {join}."),
+        };
+        paint.StrokeMiter = 4;
+        return paint;
+    }
+
+    private static LayoutRect LineBounds(
+        System.Numerics.Vector2 start,
+        System.Numerics.Vector2 end,
+        float width
+    )
+    {
+        var left = Math.Min(start.X, end.X) - width / 2;
+        var top = Math.Min(start.Y, end.Y) - width / 2;
+        return new(
+            left,
+            top,
+            Math.Max(width, Math.Abs(end.X - start.X) + width),
+            Math.Max(width, Math.Abs(end.Y - start.Y) + width)
+        );
+    }
+
+    private static SKMatrix Matrix(System.Numerics.Matrix3x2 value) =>
+        new(value.M11, value.M21, value.M31, value.M12, value.M22, value.M32, 0, 0, 1);
 
     private void PaintImage(ImageSceneNode node, SKCanvas canvas)
     {

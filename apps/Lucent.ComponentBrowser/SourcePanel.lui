@@ -24,7 +24,7 @@ public component SourcePanel(ComponentBrowserState browser, ComponentBrowserView
     <Layout style={SourcePanelStyle}>
         <Text style={PresentationStyles.Caption} content={() => "COMPILED SOURCE · " + browser.SelectedItem.SourceFile} />
         if (browser.SelectedItem.DependencyNote is not null) {
-            <Text style={PresentationStyles.Secondary} content={() => browser.SelectedItem.DependencyNote!} />
+            <Text style={PresentationStyles.Secondary with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.DependencyNote!} />
         }
         <ScrollViewport viewport={view.SourceViewport} label="Compiled .lui source" style={SourceViewportStyle}>
             <Text content={() => browser.SelectedSource} style={PresentationStyles.Body.With(SourceCodeStyle)} name="component-browser.source" />

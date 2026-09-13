@@ -19,10 +19,11 @@ public sealed class CompilerTests
 namespace Sample;
 using System;
 using Lucent.Core;
-internal component Stock(ImageSource icon, Func<string> label, Action invoke) {
+internal component Stock(ImageSource icon, Func<string> label, bool comfortable, Action invoke) {
     <Column>
         <Button leadingIcon={icon} onInvoke={invoke}>Refresh</Button>
         <Button leadingIcon={() => icon} onInvoke={invoke}>{label()}</Button>
+        <Button leadingIcon={() => icon} onInvoke={invoke} style={Style.Empty.MaxWidth(240).MainShrink(0)}>{comfortable ? "Density: comfortable" : "Density: compact"}</Button>
         <IconButton source={icon} label="More actions" onInvoke={invoke} />
         <IconButton source={() => icon} label={label} onInvoke={invoke} />
     </Column>

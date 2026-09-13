@@ -4,10 +4,13 @@ public static partial class Components
 {
     /// <summary>Creates a text component that displays the supplied string.</summary>
     [LucentComponent]
-    public static ComponentRecipe Text([DefaultContent] string content, Style? style = null)
+    public static AuthorRecipe<StyledAccessibleCapability> Text(
+        [DefaultContent] string content,
+        Style? style = null
+    )
     {
         content = Required(content, nameof(content));
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "text",
             (context, root) => Controls.Text(root, context.Theme, content, style)
         );
@@ -15,10 +18,13 @@ public static partial class Components
 
     /// <summary>Creates a text component whose displayed string is read again when its value changes.</summary>
     [LucentComponent]
-    public static ComponentRecipe Text([DefaultContent] Func<string> content, Style? style = null)
+    public static AuthorRecipe<StyledAccessibleCapability> Text(
+        [DefaultContent] Func<string> content,
+        Style? style = null
+    )
     {
         ArgumentNullException.ThrowIfNull(content);
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "text",
             (context, root) =>
             {

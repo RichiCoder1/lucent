@@ -165,6 +165,11 @@ public static partial class SceneLayout
                     plan.CornerRadius
                 )
             );
+        var drawingOwnsBorderLayer = plan.OwnNodes.Any(node => node is DrawingSceneNode);
+        if (drawingOwnsBorderLayer)
+            result.AddRange(
+                plan.Decorations.Where(node => node.Identity.Kind == SceneNodeKind.Border)
+            );
         if (plan.Clip)
             result.Add(
                 new ClipSceneNode(
@@ -176,7 +181,11 @@ public static partial class SceneLayout
             );
         else
             result.AddRange(contents);
-        result.AddRange(plan.Decorations);
+        result.AddRange(
+            drawingOwnsBorderLayer
+                ? plan.Decorations.Where(node => node.Identity.Kind != SceneNodeKind.Border)
+                : plan.Decorations
+        );
         return paint.Opacity == 1 || result.Count == 0
             ? result
             :

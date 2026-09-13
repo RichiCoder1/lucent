@@ -15,7 +15,7 @@ public static partial class Components
 {
     /// <summary>Creates a noninteractive theme-backed divider with no semantic or input ownership.</summary>
     [LucentComponent]
-    public static ComponentRecipe Divider(
+    public static AuthorRecipe<StyledCapability> Divider(
         DividerOrientation orientation = DividerOrientation.Horizontal,
         float thickness = 1,
         Style? style = null
@@ -34,7 +34,7 @@ public static partial class Components
                 (float?)thickness
             )
             .Set(VisualProperties.Background, ControlThemes.Divider);
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "divider",
             (context, root) => root.Present(context.Theme, component, style)
         );

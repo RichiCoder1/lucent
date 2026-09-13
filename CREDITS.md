@@ -172,3 +172,11 @@ The #154 JPEG admission refinement consults the pinned SkiaSharp 4.151.1 Skia re
 Consulted September 12, 2026 for tooltip hover stability: Microsoft [WM_NCHITTEST](https://learn.microsoft.com/windows/win32/inputdev/wm-nchittest) defines signed screen coordinates and same-thread `HTTRANSPARENT` forwarding. Lucent uses that contract for tooltip shadow margins while keeping visible descriptions hoverable. SDL [popup flags](https://wiki.libsdl.org/SDL3/SDL_CreatePopupWindow) were compared: fully input-free tooltip windows would lose the existing hoverable-description behavior. No source is copied or dependency added.
 
 Consulted September 13, 2026 for the C# authoring feasibility gate (#266): Microsoft's [C# 14 extension-members specification](https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/proposals/csharp-14.0/extensions) and the .NET language team's [overload-resolution priority specification](https://github.com/dotnet/csharplang/blob/main/proposals/csharp-13.0/overload-resolution-priority.md) inform capability-constrained grouped properties and concrete value/reader overload families. These are language-contract references for the existing compiler toolchain; no source is copied and no runtime dependency is added. Actual pinned-compiler fixtures determine feasibility.
+
+The portable drawing implementation (#273) consults the MIT-licensed SkiaSharp
+[`SKPathBuilder` binding](https://github.com/mono/SkiaSharp/blob/main/binding/SkiaSharp/SKPathBuilder.cs)
+and [4.148 API migration notes](https://github.com/mono/SkiaSharp/blob/main/documentation/docfx/releases/4.148.0/SkiaSharp/SkiaSharp.md)
+for mutable path construction and `Detach` ownership. Lucent retains its pinned
+SkiaSharp 4.151.1 dependency; Core records its own bounded immutable commands and
+the existing Skia adapter performs replay. No upstream implementation is copied,
+and no renderer dependency enters Core.

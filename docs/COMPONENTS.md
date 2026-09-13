@@ -10,6 +10,7 @@ symbols; the files are grouped by the component family that owns each recipe.
 | Commands | `src/Lucent.Core/Components/Commands` | `CommandScope` and application key bindings |
 | Text | `src/Lucent.Core/Components/Text` | Static and live text content |
 | Images | `src/Lucent.Core/Components/Images` | `Image` and `Icon`, shared preparation, image placement and accessible intent |
+| Drawing | `src/Lucent.Core/Components/Drawing` | Bounded immutable drawing commands and owned retained replay |
 | Buttons | `src/Lucent.Core/Components/Buttons` | `Button`, `IconButton`, and `Selectable` recipes and their stateful presentation |
 | Fields | `src/Lucent.Core/Components/Fields` | `.lui` `Field` composition, validation state, and bounded form error coordination |
 | Numeric | `src/Lucent.Core/Components/Numeric` | Decimal `NumberField` draft/commit editing and finite controlled `Slider` ranges |
@@ -23,7 +24,7 @@ symbols; the files are grouped by the component family that owns each recipe.
 | Dates | `src/Lucent.Core/Components/Dates` | Gregorian DatePicker and culture-aware TimePicker |
 | Trees | `src/Lucent.Core/Components/Trees` | Keyed hierarchy, owned lazy children and fixed-height virtualization |
 | Tables | `src/Lucent.Core/Components/Tables` | Read-only virtualized rows, caller-owned sorting and column sizing |
-| Status | `src/Lucent.Core/Components/Status` | Status and progress recipes, plus `.lui` composites such as `ErrorNotice` |
+| Status | `src/Lucent.Core/Components/Status` | Status, progress and read-only Gauge recipes, plus `.lui` composites such as `ErrorNotice` |
 | Menus | `src/Lucent.Core/ContextMenus.cs` | Context-menu recipes and their shared command, focus and session contracts |
 | Split panes | `src/Lucent.Core/SplitPane.cs` | Split-pane recipe and retained resizing/keyboard state |
 | Shared | `src/Lucent.Core/Components/Shared` | Mount configuration, validation and state used by more than one family |
@@ -35,6 +36,11 @@ platform adapters in their own modules even when a component consumes them.
 Family implementation files use the internal partial `Controls` type for
 mounting and projection details; application code should use the public recipe
 or an ordinary `Style` instead of reaching into that helper.
+
+See [C# authoring](CSHARP-AUTHORING.md) for the explicitly opted-in fluent recipe
+capabilities, generated property helpers, owned component context and optional
+partial-state declarations. These use the same stock component implementations
+as `.lui`; they do not add retained wrappers or a second state runtime.
 
 Keep the underlying editing, input, virtualization, resource ownership and
 low-level semantic mechanisms in C#. Prefer `.lui` for composition and

@@ -14,6 +14,7 @@ public enum ScrollBarVisibility
 }
 
 /// <summary>Typed style hooks for the Core-owned vertical scrollbar decoration.</summary>
+[StylePropertyGroup]
 public static class ScrollBarProperties
 {
     /// <summary>Controls whether the viewport reserves a scrollbar gutter.</summary>

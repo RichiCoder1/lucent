@@ -37,7 +37,8 @@ public readonly struct AuthorRecipeValues
         string? name,
         Func<string>? nameReader,
         string? description,
-        Func<string>? descriptionReader
+        Func<string>? descriptionReader,
+        Func<AriaMetadata?>? metadataReader
     )
     {
         Style = style;
@@ -45,6 +46,7 @@ public readonly struct AuthorRecipeValues
         NameReader = nameReader;
         Description = description;
         DescriptionReader = descriptionReader;
+        MetadataReader = metadataReader;
     }
 
     /// <summary>Gets the authored style, when one was supplied.</summary>
@@ -62,14 +64,25 @@ public readonly struct AuthorRecipeValues
     /// <summary>Gets the authored live accessible-description reader, when one was supplied.</summary>
     public Func<string>? DescriptionReader { get; }
 
-    internal static AuthorRecipeValues From(AuthorRecipeContributions? contributions) =>
-        new(
+    /// <summary>Gets the ordered live accessibility metadata reader, when metadata was authored.</summary>
+    /// <remarks>
+    /// The reader resolves fixed, live, and grouped contributions in authoring order. A
+    /// <see langword="null"/> result means no author override is currently active.
+    /// </remarks>
+    public Func<AriaMetadata?>? MetadataReader { get; }
+
+    internal static AuthorRecipeValues From(AuthorRecipeContributions? contributions)
+    {
+        var aria = contributions?.Aria;
+        return new(
             contributions?.Style,
-            contributions?.Aria?.Name,
-            contributions?.Aria?.NameReader,
-            contributions?.Aria?.Description,
-            contributions?.Aria?.DescriptionReader
+            aria?.Name,
+            aria?.NameReader,
+            aria?.Description,
+            aria?.DescriptionReader,
+            aria is null ? null : aria.Read
         );
+    }
 }
 
 /// <summary>Closed base for an explicit retained authoring target mapping.</summary>
@@ -154,6 +167,11 @@ public readonly struct AuthorRecipe<TCapability>
 
     /// <summary>Returns this recipe after a terminal accessibility metadata group.</summary>
     public AuthorRecipe<TCapability> End => this;
+
+    internal void Apply(CompositionContext context, Element root) =>
+        ToComponentRecipe().ApplyToRoot(context, root);
+
+    internal Element Mount(CompositionContext context) => ToComponentRecipe().Mount(context);
 
     /// <summary>Converts this wrapper to the existing one-root recipe contract.</summary>
     public static implicit operator ComponentRecipe(AuthorRecipe<TCapability> recipe) =>
@@ -302,6 +320,18 @@ public readonly struct AuthorAria<TCapability>
         return new(_recipe, AuthorAriaState.WithDescriptionReader(_state, read));
     }
 
+    /// <summary>Adds optional live accessible metadata overrides.</summary>
+    /// <remarks>
+    /// Returning <see langword="null"/> removes this contribution and reveals earlier authored
+    /// values or the behavior's current declaration.
+    /// </remarks>
+    public AuthorAria<TCapability> Metadata(Func<AriaMetadata?> read)
+    {
+        AuthorCapabilityRules.RequireAccessible<TCapability>();
+        ArgumentNullException.ThrowIfNull(read);
+        return new(_recipe, AuthorAriaState.WithMetadataReader(_state, read));
+    }
+
     /// <summary>Returns the original capability-bearing recipe with this immutable metadata group.</summary>
     public AuthorRecipe<TCapability> End =>
         _recipe.WithAria(
@@ -430,17 +460,24 @@ internal sealed class AuthorRecipeContributions
 
 internal sealed class AuthorAriaState
 {
-    private AuthorAriaState(
-        string? name,
-        Func<string>? nameReader,
-        string? description,
-        Func<string>? descriptionReader
-    )
+    private readonly AuthorAriaContribution[] _contributions;
+
+    private AuthorAriaState(AuthorAriaContribution[] contributions)
     {
-        Name = name;
-        NameReader = nameReader;
-        Description = description;
-        DescriptionReader = descriptionReader;
+        _contributions = contributions;
+        foreach (var contribution in contributions)
+        {
+            if (contribution.Kind == AuthorAriaContributionKind.Name)
+            {
+                Name = contribution.Value;
+                NameReader = contribution.TextReader;
+            }
+            else if (contribution.Kind == AuthorAriaContributionKind.Description)
+            {
+                Description = contribution.Value;
+                DescriptionReader = contribution.TextReader;
+            }
+        }
     }
 
     internal string? Name { get; }
@@ -449,50 +486,135 @@ internal sealed class AuthorAriaState
     internal Func<string>? DescriptionReader { get; }
 
     internal static AuthorAriaState WithName(AuthorAriaState? state, string name) =>
-        new(name, null, state?.Description, state?.DescriptionReader);
+        Append(state, AuthorAriaContribution.FixedName(name));
 
     internal static AuthorAriaState WithNameReader(AuthorAriaState? state, Func<string> read) =>
-        new(null, read, state?.Description, state?.DescriptionReader);
+        Append(state, AuthorAriaContribution.LiveName(read));
 
     internal static AuthorAriaState WithDescription(AuthorAriaState? state, string description) =>
-        new(state?.Name, state?.NameReader, description, null);
+        Append(state, AuthorAriaContribution.FixedDescription(description));
 
     internal static AuthorAriaState WithDescriptionReader(
         AuthorAriaState? state,
         Func<string> read
-    ) => new(state?.Name, state?.NameReader, null, read);
+    ) => Append(state, AuthorAriaContribution.LiveDescription(read));
 
-    internal static AuthorAriaState Merge(AuthorAriaState? existing, AuthorAriaState next) =>
-        MergeFields(existing, next);
+    internal static AuthorAriaState WithMetadataReader(
+        AuthorAriaState? state,
+        Func<AriaMetadata?> read
+    ) => Append(state, AuthorAriaContribution.LiveMetadata(read));
 
-    private static AuthorAriaState MergeFields(AuthorAriaState? existing, AuthorAriaState next)
+    internal static AuthorAriaState Merge(AuthorAriaState? existing, AuthorAriaState next)
     {
-        var name = existing?.Name;
-        var nameReader = existing?.NameReader;
-        if (next.Name is not null)
-        {
-            name = next.Name;
-            nameReader = null;
-        }
-        else if (next.NameReader is not null)
-        {
-            name = null;
-            nameReader = next.NameReader;
-        }
-
-        var description = existing?.Description;
-        var descriptionReader = existing?.DescriptionReader;
-        if (next.Description is not null)
-        {
-            description = next.Description;
-            descriptionReader = null;
-        }
-        else if (next.DescriptionReader is not null)
-        {
-            description = null;
-            descriptionReader = next.DescriptionReader;
-        }
-
-        return new(name, nameReader, description, descriptionReader);
+        if (existing is null)
+            return next;
+        var merged = new AuthorAriaContribution[
+            existing._contributions.Length + next._contributions.Length
+        ];
+        existing._contributions.CopyTo(merged, 0);
+        next._contributions.CopyTo(merged, existing._contributions.Length);
+        return new(merged);
     }
+
+    internal AriaMetadata? Read()
+    {
+        string? name = null;
+        string? description = null;
+        var hasName = false;
+        var hasDescription = false;
+        foreach (var contribution in _contributions)
+            contribution.Apply(ref name, ref hasName, ref description, ref hasDescription);
+        return hasName || hasDescription ? new(name, description) : null;
+    }
+
+    private static AuthorAriaState Append(
+        AuthorAriaState? state,
+        AuthorAriaContribution contribution
+    )
+    {
+        var existing = state?._contributions ?? [];
+        var appended = new AuthorAriaContribution[existing.Length + 1];
+        existing.CopyTo(appended, 0);
+        appended[^1] = contribution;
+        return new(appended);
+    }
+}
+
+internal sealed class AuthorAriaContribution
+{
+    private readonly string? _value;
+    private readonly Func<string>? _textReader;
+    private readonly Func<AriaMetadata?>? _metadataReader;
+    private readonly AuthorAriaContributionKind _kind;
+
+    private AuthorAriaContribution(
+        AuthorAriaContributionKind kind,
+        string? value = null,
+        Func<string>? textReader = null,
+        Func<AriaMetadata?>? metadataReader = null
+    )
+    {
+        _kind = kind;
+        _value = value;
+        _textReader = textReader;
+        _metadataReader = metadataReader;
+    }
+
+    internal static AuthorAriaContribution FixedName(string value) =>
+        new(AuthorAriaContributionKind.Name, value: value);
+
+    internal static AuthorAriaContribution LiveName(Func<string> read) =>
+        new(AuthorAriaContributionKind.Name, textReader: read);
+
+    internal static AuthorAriaContribution FixedDescription(string value) =>
+        new(AuthorAriaContributionKind.Description, value: value);
+
+    internal static AuthorAriaContribution LiveDescription(Func<string> read) =>
+        new(AuthorAriaContributionKind.Description, textReader: read);
+
+    internal static AuthorAriaContribution LiveMetadata(Func<AriaMetadata?> read) =>
+        new(AuthorAriaContributionKind.Metadata, metadataReader: read);
+
+    internal AuthorAriaContributionKind Kind => _kind;
+    internal string? Value => _value;
+    internal Func<string>? TextReader => _textReader;
+
+    internal void Apply(
+        ref string? name,
+        ref bool hasName,
+        ref string? description,
+        ref bool hasDescription
+    )
+    {
+        if (_kind == AuthorAriaContributionKind.Name)
+        {
+            name = AuthorText.Required(_textReader?.Invoke() ?? _value!, "name");
+            hasName = true;
+            return;
+        }
+        if (_kind == AuthorAriaContributionKind.Description)
+        {
+            description = AuthorText.Required(_textReader?.Invoke() ?? _value!, "description");
+            hasDescription = true;
+            return;
+        }
+        var metadata = _metadataReader!.Invoke();
+        if (metadata?.Name is not null)
+        {
+            name = metadata.Name;
+            hasName = true;
+        }
+        if (metadata?.Description is not null)
+        {
+            description = metadata.Description;
+            hasDescription = true;
+        }
+    }
+}
+
+internal enum AuthorAriaContributionKind
+{
+    Name,
+    Description,
+    Metadata,
 }

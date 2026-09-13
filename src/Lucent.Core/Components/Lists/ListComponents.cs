@@ -6,7 +6,7 @@ public static partial class Components
 
     /// <summary>Creates a virtualized, controlled, single-selection ListBox.</summary>
     [LucentComponent]
-    public static ComponentRecipe ListBox<TKey>(
+    public static AuthorRecipe<StyledCapability> ListBox<TKey>(
         string label,
         Func<IEnumerable<ChoiceItem<TKey>>> items,
         Func<TKey> readSelectedKey,
@@ -19,22 +19,24 @@ public static partial class Components
         where TKey : notnull
     {
         ArgumentNullException.ThrowIfNull(readSelectedKey);
-        return ListBoxCore(
-            label,
-            items,
-            () => SelectedKey.Some(readSelectedKey()),
-            onSelectionRequested,
-            selectionMode,
-            rowHeight,
-            style,
-            viewport,
-            required: true
+        return StockRecipe.Styled(
+            ListBoxCore(
+                label,
+                items,
+                () => SelectedKey.Some(readSelectedKey()),
+                onSelectionRequested,
+                selectionMode,
+                rowHeight,
+                style,
+                viewport,
+                required: true
+            )
         );
     }
 
     /// <summary>Creates a virtualized ListBox whose applied selection can explicitly be empty.</summary>
     [LucentComponent]
-    public static ComponentRecipe ListBox<TKey>(
+    public static AuthorRecipe<StyledCapability> ListBox<TKey>(
         string label,
         Func<IEnumerable<ChoiceItem<TKey>>> items,
         Func<SelectedKey<TKey>> readSelectedKey,
@@ -46,16 +48,18 @@ public static partial class Components
     )
         where TKey : notnull
     {
-        return ListBoxCore(
-            label,
-            items,
-            readSelectedKey,
-            onSelectionRequested,
-            selectionMode,
-            rowHeight,
-            style,
-            viewport,
-            required: false
+        return StockRecipe.Styled(
+            ListBoxCore(
+                label,
+                items,
+                readSelectedKey,
+                onSelectionRequested,
+                selectionMode,
+                rowHeight,
+                style,
+                viewport,
+                required: false
+            )
         );
     }
 
@@ -119,7 +123,7 @@ public static partial class Components
 
     /// <summary>Creates a noneditable, single-choice Select anchored to an owned popup surface.</summary>
     [LucentComponent]
-    public static ComponentRecipe Select<TKey>(
+    public static AuthorRecipe<StyledAccessibleCapability> Select<TKey>(
         string label,
         Func<IEnumerable<ChoiceItem<TKey>>> items,
         Func<TKey> readSelectedKey,
@@ -131,20 +135,22 @@ public static partial class Components
         where TKey : notnull
     {
         ArgumentNullException.ThrowIfNull(readSelectedKey);
-        return Select(
-            label,
-            items,
-            () => SelectedKey.Some(readSelectedKey()),
-            onSelectionRequested,
-            placeholder,
-            rowHeight,
-            style
+        return StockRecipe.Accessible(
+            Select(
+                label,
+                items,
+                () => SelectedKey.Some(readSelectedKey()),
+                onSelectionRequested,
+                placeholder,
+                rowHeight,
+                style
+            )
         );
     }
 
     /// <summary>Creates a noneditable Select whose applied choice can explicitly be empty.</summary>
     [LucentComponent]
-    public static ComponentRecipe Select<TKey>(
+    public static AuthorRecipe<StyledAccessibleCapability> Select<TKey>(
         string label,
         Func<IEnumerable<ChoiceItem<TKey>>> items,
         Func<SelectedKey<TKey>> readSelectedKey,
@@ -164,7 +170,7 @@ public static partial class Components
             rowHeight
         );
         placeholder = Required(placeholder, nameof(placeholder));
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "select",
             (context, root) =>
             {

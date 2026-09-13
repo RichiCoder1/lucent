@@ -1024,6 +1024,8 @@ public static partial class SceneLayout
             return [];
         var identity = new ElementIdentity(element.Composition.Epoch, element.Id);
         var result = new List<SceneNode>();
+        if (element.Drawing?.Resolve(new(identity, SceneNodeKind.Drawing), inner) is { } drawing)
+            result.Add(drawing);
         if (element.Image is { } image)
             result.Add(
                 new ImageSlotSceneNode(

@@ -6,7 +6,7 @@ public static partial class Components
     /// <remarks>Columns are snapshotted at construction. Only visible rows are formatted. Column widths
     /// are retained for the mounted table lifetime; sorting and filtering never change the caller's selected key.</remarks>
     [LucentComponent]
-    public static ComponentRecipe TableView<TKey, TItem>(
+    public static AuthorRecipe<StyledCapability> TableView<TKey, TItem>(
         string label,
         Func<IEnumerable<TItem>> items,
         Func<TItem, TKey> key,
@@ -46,7 +46,7 @@ public static partial class Components
         options ??= new();
         var rowHeight = options.RowHeight ?? DensityMetrics.Comfortable.RowHeight;
         var headerHeight = options.HeaderHeight ?? DensityMetrics.Comfortable.ControlHeight;
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "table-view",
             (context, root) =>
             {

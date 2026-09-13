@@ -14,7 +14,8 @@ public static class ComponentCatalog
             "Invoke actions, expose icon-only commands, and keep selection visible.",
             "ButtonsExample.lui",
             "Use `Button` for a named action and `IconButton` only when the accessible label explains the command without visible text. Use `Selectable` for a choice that remains selected.",
-            "Every action has a visible label or an explicit accessible label. Selected state and keyboard focus remain separate so a selected item is still understandable when focus moves."
+            "Every action has a visible label or an explicit accessible label. Selected state and keyboard focus remain separate so a selected item is still understandable when focus moves.",
+            "The companion C# file `Examples/ButtonsExample.cs` uses generated component state. Each mounted example owns its activation count; leaving the page disposes that local count. Application-controlled selection remains in the browser model."
         ),
         new(
             "fields",
@@ -58,7 +59,7 @@ public static class ComponentCatalog
             "Status",
             "Communicate progress, loading, and recoverable failure with stock status recipes.",
             "FeedbackExample.lui",
-            "Use `Status` for short noninteractive updates, `ProgressBar` for a bounded value, and `InlineNotice` when the user has a clear recovery action.",
+            "Use `Status` for short noninteractive updates, `ProgressBar` for linear progress, `Gauge` for a compact read-only value and range, and `InlineNotice` when the user has a clear recovery action.",
             "Progress carries an accessible label. Error messages explain the problem and name the retry action without stealing focus from a usable control."
         ),
         new(

@@ -148,6 +148,8 @@ static void VerifyLuiMetadata(
         ["Tabs"] = 2,
         ["Disclosure"] = 1,
         ["ProgressBar"] = 1,
+        ["Gauge"] = 1,
+        ["Drawing"] = 1,
         ["InlineNotice"] = 1,
         ["Link"] = 1,
         ["TextArea"] = 1,
@@ -190,17 +192,60 @@ static void VerifyLuiMetadata(
     foreach (
         var preserved in new[]
         {
-            "System.String;System.Action;Lucent.Core.Style",
-            "System.Func`1|System.String;System.Action;Lucent.Core.Style",
+            "System.String;System.Action;Lucent.Core.Style;System.Func`1|Lucent.Core.AriaMetadata",
+            "System.Func`1|System.String;System.Action;Lucent.Core.Style;System.Func`1|Lucent.Core.AriaMetadata",
         }
     )
         if (!buttonSignatures.Contains(preserved))
-            violations.Add("A pre-icon Button signature was removed: " + preserved);
+            violations.Add(
+                "An explicitly baselined Button/aria signature was removed: " + preserved
+            );
     foreach (var recipe in annotated)
     {
         var signature = recipe.DecodeSignature(provider, null);
+        // Deliberate independent capability baseline, not derived from the production descriptor.
+        var expectedReturn = metadata.GetString(recipe.Name) switch
+        {
+            "Layout"
+            or "Row"
+            or "Column"
+            or "ResponsiveContainer"
+            or "Divider"
+            or "Drawing"
+            or "Slider"
+            or "ListBox"
+            or "VirtualizedList"
+            or "Image"
+            or "Icon"
+            or "Tabs"
+            or "Disclosure"
+            or "InlineNotice"
+            or "ErrorNotice"
+            or "FormErrorSummary"
+            or "TreeView"
+            or "TableView" => "Lucent.Core.AuthorRecipe`1|Lucent.Core.StyledCapability",
+            "Button"
+            or "IconButton"
+            or "Selectable"
+            or "Text"
+            or "Status"
+            or "Progress"
+            or "ProgressBar"
+            or "Gauge"
+            or "TextField"
+            or "TextArea"
+            or "Link"
+            or "CheckBox"
+            or "Switch"
+            or "RadioGroup"
+            or "Select"
+            or "ComboBox"
+            or "ScrollViewport" =>
+                "Lucent.Core.AuthorRecipe`1|Lucent.Core.StyledAccessibleCapability",
+            _ => "Lucent.Core.ComponentRecipe",
+        };
         if (
-            signature.ReturnType != "Lucent.Core.ComponentRecipe"
+            signature.ReturnType != expectedReturn
             || signature.ParameterTypes.Any(type =>
                 type.Contains("Lucent.Core.Element", StringComparison.Ordinal)
                 || type.Contains("ControlState", StringComparison.Ordinal)

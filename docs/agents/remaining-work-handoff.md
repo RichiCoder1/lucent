@@ -36,25 +36,40 @@ The earlier interaction implementation `a18d662` also has successful
 and published `0.3.0-dev.68.1`. Publication of the additional native closeout
 fixes must be checked against their own subsequent CI commit.
 
-The bounded C# authoring feasibility gate #266 is complete and integrated in
-`f7c2712`, `da5d28d` and `ca45fd7`. It supplies the closed capability wrapper,
-real C# 14 overload/conversion proofs, `.lui` source and metadata recognition,
-and the public scope-owned `BehaviorContext.BindSemantics` seam required by
-external components. The embedded Roslyn packages are now 5.0.0 so editor and
-compiler binding understand the SDK's C# 14 extension metadata.
+The bounded C# authoring implementation for #265 is source-complete in the current
+candidate. The historical #266 gate remains integrated in `f7c2712`, `da5d28d`
+and `ca45fd7`; it established the closed capability wrapper, C# 14 overload and
+conversion behavior, `.lui` source/metadata recognition, package-only generation
+and the public scope-owned `BehaviorContext.BindSemantics` seam. The embedded
+Roslyn packages remain aligned at 5.0.0.
 
-The combined main checkout passes Core **512/512** and Windows **127/127**,
-including warning-clean builds and architecture positive/negative checks.
-The isolated gate also passes Compiler **66/66**, Generator **17/17** and editor
-**27/27**. Its fresh package-only consumer passes both managed and win-x64
-NativeAOT execution, including live semantics and stable element identity.
-See [ADR 0008](../adr/0008-bounded-csharp-authoring.md) for exact package/source
-boundaries, executable hash, concrete signatures and preserved evidence.
+The current implementation adds `ComponentContext` over the existing deferred
+mount owner; generated author-property metadata and style fluency;
+capability-bearing stock factories; ordered fixed, live and grouped accessibility
+metadata;
+generated per-mount partial state; shared live-label binding; bounded retained
+Drawing; and a portable Gauge. `.lui` remains the primary stock-control authoring
+direction. C# authoring uses the same retained recipes, owner and transaction and
+does not add a rerender engine or ambient scope. `Slider`, `ListBox` and
+`VirtualizedList` are intentionally style-only because their semantic controls
+are descendants of the authored root.
 
-Next is #267: the owned C# author context over the existing deferred mount and
-reactive primitives. Stock factory migration remains #269; this gate does not
-claim completion of the full authoring epic #265. Check the final integrated
-commit's CI for public package status; the local gate packages are proof assets.
+Generated state is limited to top-level, non-generic, sealed partial classes with
+no authored instance constructor. Explicit partial properties use constants,
+defaults or named static typed initializers, are allocated in deterministic name
+order and then run one synchronous partial initialization hook. Async initialization
+is rejected. Unattached, off-thread and disposed access continues through the
+existing reactive guards, while initialization failures roll back through the
+existing mount transaction.
+
+The latest integrated managed verification passes Core **543/543**, Renderer
+**85/85** with three intentional opt-in skips, and Testing **46/46**. The focused
+component-state generator suite passes **3/3**. These results include the stock
+capability correction and its semantic-target inventory regression. Package-only
+consumption, the current-candidate NativeAOT build and native desktop smoke are
+still pending; do not infer publication, delivery or issue closure from these
+managed results. See [ADR 0008](../adr/0008-bounded-csharp-authoring.md) for the
+concrete contracts and preserved gate evidence.
 
 The first integrated CI run, 34753499084, passed managed and NativeAOT suites
 but stopped before publication at the asset-workspace helper's stale Roslyn
@@ -172,11 +187,16 @@ The current tested browser is `artifacts/component-walkthrough-final/browser/Luc
 
 Computer Use's transient-element cache and arrow/Enter injection were unreliable in some cases; the record does not claim a fresh manual keyboard pass for those paths. This delivery also does not claim broad manual accessibility, real-language IME or fresh physical mixed-DPI certification. Earlier #153 hardware evidence remains valid for its recorded source boundary.
 
-## Next implementation
+## Current completion boundary
 
-[Tooling follow-up #276](https://github.com/RichiCoder1/lucent/issues/276) is Todo in Project 4. Metadata-only Find References shares rename's source-definition requirement and can omit authored uses of stock properties. The existing source-project regression and assertions remain intact; the issue records focused acceptance criteria.
-
-The next approved phase is [C# authoring #265](https://github.com/RichiCoder1/lucent/issues/265), children #266–275, before context/navigation #203/#204. Begin with #266 on the final package baseline above: prove the bounded recipe/capability shape without changing production factory returns. #269 owns the later atomic factory/compiler/metadata/consumer migration. The Design and UI task's plan received Fable High review and needs no further owner decisions. Its local design is `D:/.codex/worktrees/1b0a/lucent/advisor-plans/002-csharp-authoring.md`; preserve independently owned advisor plans when integrating it.
+Tooling follow-up #276 and desktop interaction #279–289 are complete at the
+source and verification boundaries recorded above. The current #265 candidate
+has completed its managed implementation checks. The next required evidence is
+package-only consumption from the integrated candidate, its NativeAOT build and
+the bounded native desktop smoke selected by the implementation issues. Record
+their exact source/package identity before claiming delivery, publication or
+closing #265 and children #266–275. Context/navigation #203/#204 remains a
+separate later phase.
 
 ## Scope and workspace constraints
 

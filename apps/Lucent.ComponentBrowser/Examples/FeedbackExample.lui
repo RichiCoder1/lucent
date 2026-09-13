@@ -17,6 +17,7 @@ public component FeedbackExample(ComponentBrowserState browser) {
     <Layout style={FeedbackExampleStyle}>
         <Status content={() => browser.CurrentExampleState == ExampleState.Busy ? "Loading the next fixture page…" : "Ready to load a deterministic fixture page."} name="component-browser.feedback.status" />
         <ProgressBar label="Fixture page loaded" value={() => browser.ProgressFraction} name="component-browser.feedback.progress" />
+        <Gauge label="Fixture page loaded" value={() => browser.ProgressFraction * 100} options={new GaugeOptions(unit: "%")} name="component-browser.feedback.gauge" />
         <Layout style={FeedbackActionsStyle}>
             <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.RefreshCw} onInvoke={browser.AdvanceProgress} name="component-browser.feedback.advance">Advance progress</Button>
             <Button onInvoke={browser.RetryExample} style={Style.Empty.Enabled(() => browser.CurrentExampleState == ExampleState.Error)} name="component-browser.feedback.retry">Retry</Button>

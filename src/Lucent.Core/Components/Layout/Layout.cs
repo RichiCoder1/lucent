@@ -5,7 +5,7 @@ public static partial class Components
 {
     /// <summary>Creates a neutral retained layout container whose algorithm and arrangement are selected by style.</summary>
     [LucentComponent]
-    public static ComponentRecipe Layout(
+    public static AuthorRecipe<StyledCapability> Layout(
         [DefaultContent] ComponentContent content,
         ResponsiveConstraints? constraints = null,
         Style? style = null,
@@ -13,7 +13,7 @@ public static partial class Components
     )
     {
         content = Content(content);
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "layout",
             (context, root) =>
             {
@@ -39,13 +39,13 @@ public static partial class Components
 
     /// <summary>Creates a horizontal container for the supplied content. Use it to place child components in a row.</summary>
     [LucentComponent]
-    public static ComponentRecipe Row(
+    public static AuthorRecipe<StyledCapability> Row(
         [DefaultContent] ComponentContent content,
         Style? style = null
     )
     {
         content = Content(content);
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "row",
             (context, root) =>
             {
@@ -61,13 +61,13 @@ public static partial class Components
 
     /// <summary>Creates a vertical container for the supplied content. Use it to stack child components in a column.</summary>
     [LucentComponent]
-    public static ComponentRecipe Column(
+    public static AuthorRecipe<StyledCapability> Column(
         [DefaultContent] ComponentContent content,
         Style? style = null
     )
     {
         content = Content(content);
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "column",
             (context, root) =>
             {
@@ -83,7 +83,7 @@ public static partial class Components
 
     /// <summary>Creates a container that publishes its assigned logical content constraints to a hoistable reader.</summary>
     [LucentComponent]
-    public static ComponentRecipe ResponsiveContainer(
+    public static AuthorRecipe<StyledCapability> ResponsiveContainer(
         [DefaultContent] ComponentContent content,
         ResponsiveConstraints constraints,
         Style? style = null
@@ -91,7 +91,7 @@ public static partial class Components
     {
         content = Content(content);
         ArgumentNullException.ThrowIfNull(constraints);
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "responsive-container",
             (context, root) =>
             {

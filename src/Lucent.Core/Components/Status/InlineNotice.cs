@@ -24,7 +24,7 @@ public static partial class Components
     /// <summary>Displays a persistent inline message with a severity icon and optional explicitly named action.</summary>
     /// <remarks>Visibility belongs to application state. The notice never auto-dismisses or creates an assertive announcement loop.</remarks>
     [LucentComponent]
-    public static ComponentRecipe InlineNotice(
+    public static AuthorRecipe<StyledCapability> InlineNotice(
         Func<string> message,
         NoticeSeverity severity = NoticeSeverity.Information,
         Action? onAction = null,
@@ -44,7 +44,9 @@ public static partial class Components
             );
         if (actionLabel is not null)
             _ = Required(actionLabel, nameof(actionLabel));
-        return InlineNoticeContent(message, severity, onAction, actionLabel, style, announcement);
+        return StockRecipe.Styled(
+            InlineNoticeContent(message, severity, onAction, actionLabel, style, announcement)
+        );
     }
 
     internal static string NoticeLabel(NoticeSeverity severity) =>

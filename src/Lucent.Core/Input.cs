@@ -4,6 +4,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>Typed presentation properties that determine whether an element participates in routing and scene input.</summary>
+[StylePropertyGroup]
 public static class InputProperties
 {
     /// <summary>Optional pointer appearance; Auto derives intent from the eligible control.</summary>

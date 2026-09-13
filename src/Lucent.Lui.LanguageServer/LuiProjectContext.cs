@@ -1167,17 +1167,11 @@ internal sealed class LuiProjectContext : IDisposable
                 : await current.GetCompilationAsync(cancellationToken).ConfigureAwait(false);
             if (current is null || compilation is null)
                 return null;
-            compilation = compilation.RemoveSyntaxTrees(
-                compilation.SyntaxTrees.Where(tree =>
-                    (tree.FilePath ?? "").Contains(
-                        "Lucent.Lui.Generator",
-                        StringComparison.OrdinalIgnoreCase
-                    )
-                )
-            );
             var inputs = new List<LuiProjectDocument>();
+            // The editor clone omits .lui AdditionalDocuments so only the manual projections run.
+            // Read logical paths and explicit versions from the evaluated project that owns them.
             foreach (
-                var document in current.AdditionalDocuments.Where(document =>
+                var document in graphProject.AdditionalDocuments.Where(document =>
                     document.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
                 )
             )
@@ -1185,7 +1179,7 @@ internal sealed class LuiProjectContext : IDisposable
                 var source = (
                     await document.GetTextAsync(cancellationToken).ConfigureAwait(false)
                 ).ToString();
-                var logical = LogicalPath(current, document);
+                var logical = LogicalPath(graphProject, document);
                 if (!LuiDocumentIdentity.TryCreate(logical, out var documentIdentity))
                     return null;
                 inputs.Add(
@@ -1193,7 +1187,7 @@ internal sealed class LuiProjectContext : IDisposable
                         document.FilePath!,
                         documentIdentity!.LogicalPath,
                         source,
-                        DocumentVersion(current, document, source)
+                        DocumentVersion(graphProject, document, source)
                     )
                 );
                 sourceByPath[document.FilePath!] = source;
@@ -2463,14 +2457,6 @@ internal sealed class LuiProjectContext : IDisposable
                 .GetCompilationAsync(cancellationToken)
                 .ConfigureAwait(false)
             ?? throw new InvalidOperationException("The evaluated project has no compilation.");
-        compilation = compilation.RemoveSyntaxTrees(
-            compilation.SyntaxTrees.Where(tree =>
-                (tree.FilePath ?? "").Contains(
-                    "Lucent.Lui.Generator",
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
-        );
         var index = LuiProjectComponentIndex.Build(compilation, validDocuments, cancellationToken);
         var evaluation = new ProjectEvaluation(
             captured,
@@ -2495,7 +2481,7 @@ internal sealed class LuiProjectContext : IDisposable
     private Project EditorProject(Project project) =>
         editorProjects.GetValue(
             project,
-            static original => original.WithAnalyzerReferences(EditorAnalyzerReferences(original))
+            static original => EditorSolution(original).GetProject(original.Id)!
         );
 
     private static Solution EditorSolution(Project project)
@@ -2509,17 +2495,19 @@ internal sealed class LuiProjectContext : IDisposable
                 current.Id,
                 EditorAnalyzerReferences(current)
             );
+            foreach (
+                var document in current.AdditionalDocuments.Where(document =>
+                    document.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+                )
+            )
+                solution = solution.RemoveAdditionalDocument(document.Id);
         }
         return solution;
     }
 
     private static IEnumerable<AnalyzerReference> EditorAnalyzerReferences(Project project) =>
         project.AnalyzerReferences.Where(reference =>
-            !String.Equals(
-                Path.GetFileName(reference.FullPath),
-                "Lucent.Lui.Generator.dll",
-                StringComparison.OrdinalIgnoreCase
-            ) && !IsUnavailableLucentBuildToolAnalyzer(reference)
+            !IsUnavailableLucentBuildToolAnalyzer(reference)
         );
 
     private static bool IsUnavailableLucentBuildToolAnalyzer(AnalyzerReference reference)
@@ -3021,9 +3009,15 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static IEnumerable<ISymbol> StyleProperties(SemanticDocument semantic) =>
         LuiPropertyCatalog
-            .ImplicitStylePropertyTypeNames.Select(semantic.Model.Compilation.GetTypeByMetadataName)
-            .Where(type => type is not null)
-            .SelectMany(type => type!.GetMembers())
+            .Discover(semantic.Model.Compilation)
+            .Select(descriptor =>
+                semantic
+                    .Model.Compilation.GetTypeByMetadataName(descriptor.DeclaringTypeName)
+                    ?.GetMembers(descriptor.FieldName)
+                    .FirstOrDefault()
+            )
+            .Where(symbol => symbol is not null)
+            .Cast<ISymbol>()
             .Concat(semantic.Model.LookupSymbols(semantic.Position))
             .Where(symbol =>
                 symbol.IsStatic
@@ -3036,14 +3030,16 @@ internal sealed class LuiProjectContext : IDisposable
             )
             .Where(symbol => IsAccessible(semantic, symbol));
 
-    private static IEnumerable<ISymbol> TransitionProperties(SemanticDocument semantic) =>
-        StyleProperties(semantic)
-            .Where(symbol =>
-                LuiPropertyCatalog.TransitionPropertyIdentities.Contains(
-                    PropertyIdentity(symbol),
-                    StringComparer.Ordinal
-                )
-            );
+    private static IEnumerable<ISymbol> TransitionProperties(SemanticDocument semantic)
+    {
+        var identities = LuiPropertyCatalog
+            .Discover(semantic.Model.Compilation)
+            .Where(descriptor => descriptor.TransitionEligible)
+            .Select(descriptor => descriptor.SymbolIdentity)
+            .ToHashSet(StringComparer.Ordinal);
+        return StyleProperties(semantic)
+            .Where(symbol => identities.Contains(PropertyIdentity(symbol)));
+    }
 
     private static IEnumerable<ISymbol> RootTokens(SemanticDocument semantic)
     {
@@ -3370,14 +3366,42 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static bool IsComponent(IMethodSymbol method) =>
         method.IsStatic
-        && method.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-            == "global::Lucent.Core.ComponentRecipe"
+        && IsComponentReturnType(method.ReturnType)
         && method
             .GetAttributes()
             .Any(attribute =>
                 attribute.AttributeClass?.ToDisplayString()
                 == "Lucent.Core.LucentComponentAttribute"
             );
+
+    private static bool IsComponentReturnType(ITypeSymbol returnType)
+    {
+        if (
+            returnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            == "global::Lucent.Core.ComponentRecipe"
+        )
+            return true;
+        if (
+            returnType is not INamedTypeSymbol named
+            || !named.IsGenericType
+            || named.Name != "AuthorRecipe"
+            || named.Arity != 1
+            || named.ContainingType is not null
+        )
+            return false;
+        if (
+            named.ContainingNamespace.ToDisplayString() != "Lucent.Core"
+            || named.ContainingAssembly.Identity.Name != "Lucent.Core"
+        )
+            return false;
+        var capability = named.TypeArguments[0];
+        return capability.ContainingNamespace.ToDisplayString() == "Lucent.Core"
+            && capability.ContainingAssembly.Identity.Name == "Lucent.Core"
+            && capability.Name
+                is "StyledCapability"
+                    or "AccessibleCapability"
+                    or "StyledAccessibleCapability";
+    }
 
     private static bool IsAccessible(SemanticDocument semantic, ISymbol symbol) =>
         semantic.Model.Compilation.IsSymbolAccessibleWithin(

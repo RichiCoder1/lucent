@@ -33,8 +33,6 @@ public static class LuiCompiler
             _ => operation.ConstantValue,
         };
 
-    private static readonly IReadOnlyList<string> ImplicitStylePropertyTypes =
-        LuiPropertyCatalog.ImplicitStylePropertyTypeNames;
     private static readonly SymbolDisplayFormat FullyQualifiedNullableFormat =
         SymbolDisplayFormat.FullyQualifiedFormat.WithMiscellaneousOptions(
             SymbolDisplayFormat.FullyQualifiedFormat.MiscellaneousOptions
@@ -92,6 +90,11 @@ public static class LuiCompiler
             throw new ArgumentNullException(nameof(mappedPath));
         identity = Snapshot(identity, compilation);
         var rootTokens = RootTokens(compilation, identity.RootNamespace);
+        var authorProperties = LuiPropertyCatalog.Discover(compilation);
+        var implicitStylePropertyTypes = authorProperties
+            .Select(property => property.DeclaringTypeName)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
         var diagnostics = new List<LuiDiagnostic>(document.Diagnostics);
         var writer = new Writer(document, identity, mappedPath, null, []);
         if (document.Component is not null)
@@ -138,7 +141,7 @@ public static class LuiCompiler
             identity,
             mappedPath,
             null,
-            ImplicitStylePropertyTypes
+            implicitStylePropertyTypes
         );
         propertyWriter.Document(diagnostics);
         var propertyTree = CSharpSyntaxTree.ParseText(
@@ -1449,9 +1452,10 @@ public static class LuiCompiler
             var identity = property is null ? null : PropertyIdentity(property);
             if (identity is not null)
                 identities[mapping.Source] = identity;
-            var expected = identity is null
+            var transitionProperty = identity is null
                 ? null
-                : LuiPropertyCatalog.TransitionPropertyValueType(identity);
+                : LuiPropertyCatalog.Find(model.Compilation, identity);
+            var expected = transitionProperty?.TransitionValueType;
             if (expected is null)
             {
                 diagnostics.Add(
@@ -2209,16 +2213,20 @@ public static class LuiCompiler
                 && entry.Source.Length == name.Identifier.Span.Length
             )
             {
-                var candidates = ImplicitStylePropertyTypes
-                    .Select(type => model.Compilation.GetTypeByMetadataName(type))
-                    .Where(type => type is not null)
-                    .SelectMany(type => type!.GetMembers(name.Identifier.ValueText))
-                    .OfType<IFieldSymbol>()
-                    .Where(field =>
-                        field.IsStatic
-                        && field.DeclaredAccessibility == Accessibility.Public
-                        && IsStyleProperty(field.Type)
+                var candidates = LuiPropertyCatalog
+                    .Discover(model.Compilation)
+                    .Where(descriptor =>
+                        descriptor.Names.Contains(name.Identifier.ValueText, StringComparer.Ordinal)
                     )
+                    .Select(descriptor =>
+                        model
+                            .Compilation.GetTypeByMetadataName(descriptor.DeclaringTypeName)
+                            ?.GetMembers(descriptor.FieldName)
+                            .OfType<IFieldSymbol>()
+                            .FirstOrDefault()
+                    )
+                    .Where(field => field is not null)
+                    .Cast<IFieldSymbol>()
                     .ToArray();
                 if (candidates.Length == 1)
                     property = candidates[0];

@@ -4,7 +4,7 @@ public static partial class Components
 {
     /// <summary>Creates a source-colored image with alternative text or explicit decorative intent.</summary>
     [LucentComponent]
-    public static ComponentRecipe Image(
+    public static AuthorRecipe<StyledCapability> Image(
         ImageSource source,
         string? alternativeText = null,
         bool decorative = false,
@@ -13,18 +13,20 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(source);
         ValidateImageLabel(alternativeText, decorative);
-        return ImageRecipe(
-            () => source,
-            alternativeText is null ? null : () => alternativeText,
-            decorative,
-            false,
-            style
+        return StockRecipe.Styled(
+            ImageRecipe(
+                () => source,
+                alternativeText is null ? null : () => alternativeText,
+                decorative,
+                false,
+                style
+            )
         );
     }
 
     /// <summary>Creates an image whose source and accessible name follow typed readers.</summary>
     [LucentComponent]
-    public static ComponentRecipe Image(
+    public static AuthorRecipe<StyledCapability> Image(
         Func<ImageSource> source,
         Func<string>? alternativeText = null,
         bool decorative = false,
@@ -42,12 +44,12 @@ public static partial class Components
                 "A decorative image cannot also have alternative text.",
                 nameof(alternativeText)
             );
-        return ImageRecipe(source, alternativeText, decorative, false, style);
+        return StockRecipe.Styled(ImageRecipe(source, alternativeText, decorative, false, style));
     }
 
     /// <summary>Creates a 16-DIP monochrome icon using inherited TextColor. An optional label makes it meaningful.</summary>
     [LucentComponent]
-    public static ComponentRecipe Icon(
+    public static AuthorRecipe<StyledCapability> Icon(
         ImageSource source,
         string? label = null,
         Style? style = null
@@ -55,25 +57,27 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(source);
         ValidateImageLabel(label, label is null);
-        return ImageRecipe(
-            () => source,
-            label is null ? null : () => label,
-            label is null,
-            true,
-            style
+        return StockRecipe.Styled(
+            ImageRecipe(
+                () => source,
+                label is null ? null : () => label,
+                label is null,
+                true,
+                style
+            )
         );
     }
 
     /// <summary>Creates an icon whose source and optional accessible label follow typed readers.</summary>
     [LucentComponent]
-    public static ComponentRecipe Icon(
+    public static AuthorRecipe<StyledCapability> Icon(
         Func<ImageSource> source,
         Func<string>? label = null,
         Style? style = null
     )
     {
         ArgumentNullException.ThrowIfNull(source);
-        return ImageRecipe(source, label, label is null, true, style);
+        return StockRecipe.Styled(ImageRecipe(source, label, label is null, true, style));
     }
 
     private static ComponentRecipe ImageRecipe(

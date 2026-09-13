@@ -7,7 +7,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>A stable retained structural identity. It intentionally has no visual or platform state.</summary>
-public sealed class Element : IDisposable
+public sealed partial class Element : IDisposable
 {
     private readonly List<Element> _children = [];
     private readonly ReadOnlyCollection<Element> _childrenView;
@@ -16,6 +16,7 @@ public sealed class Element : IDisposable
     private ElementPresentation? _presentation;
     private readonly List<BehaviorMount> _behaviors = [];
     private BehaviorOwnership _behaviorClaims;
+    private SemanticDeclaration? _baseSemantics;
     private SemanticDeclaration? _semantics;
     private string? _supplementalDescription;
     private Func<SemanticCommand, bool>? _semanticCommand;
@@ -71,6 +72,7 @@ public sealed class Element : IDisposable
     internal string? SupplementalDescription => _supplementalDescription;
     internal StandardMenuPart StandardMenuPart { get; set; }
     internal ImageBinding? Image { get; set; }
+    internal DrawingBinding? Drawing { get; set; }
 
     internal T GetOrCreateLayoutAlgorithmState<T>(LayoutAlgorithm algorithm, Func<T> create)
         where T : class
@@ -159,7 +161,7 @@ public sealed class Element : IDisposable
             this,
             theme,
             component ?? Style.Empty,
-            author ?? Style.Empty
+            MergeRecipeStyle(author)
         );
         if (Composition.IsReachable(this))
             Composition.InvalidateInputProjection();
@@ -190,7 +192,7 @@ public sealed class Element : IDisposable
         theme.ValidateLive();
         if (_presentation is not null)
             throw new InvalidOperationException("An element has one presentation model.");
-        ElementPresentation.Validate(component ?? Style.Empty, author ?? Style.Empty);
+        ElementPresentation.Validate(component ?? Style.Empty, MergeRecipeStyle(author));
     }
 
     /// <summary>Updates finite interaction state without creating a second modifier model.</summary>
@@ -671,6 +673,12 @@ public sealed class Element : IDisposable
 
     private void SetSemantics(SemanticDeclaration semantics)
     {
+        _baseSemantics = semantics ?? throw new ArgumentNullException(nameof(semantics));
+        SetEffectiveSemantics(MergeAuthorSemantics(_baseSemantics));
+    }
+
+    private void SetEffectiveSemantics(SemanticDeclaration semantics)
+    {
         _semantics = semantics;
         _effectiveSemanticState = null;
         _semanticGeneration = checked(_semanticGeneration + 1);
@@ -721,7 +729,7 @@ public sealed class Element : IDisposable
         Composition.CheckThread();
         Composition.ThrowIfBehaviorAttachment();
         ThrowIfDisposed();
-        if (_semantics is null)
+        if (_baseSemantics is null)
             throw new InvalidOperationException(
                 "An element needs semantic behavior before control state can update it."
             );

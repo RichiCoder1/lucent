@@ -5,6 +5,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>Layout settings for size, direction, spacing, alignment, padding, clipping, and scrolling.</summary>
+[StylePropertyGroup]
 public static class LayoutProperties
 {
     /// <summary>Chooses whether children flow horizontally or vertically. The default is <see cref="LayoutAxis.Column"/>.</summary>
@@ -115,6 +116,7 @@ public enum ElementParticipation
 }
 
 /// <summary>Visual settings for an element's background, transparency, and participation.</summary>
+[StylePropertyGroup]
 public static class VisualProperties
 {
     /// <summary>Controls subtree layout, painting, input, focus, and accessibility without disposing its state.</summary>
@@ -124,6 +126,7 @@ public static class VisualProperties
     );
 
     /// <summary>Paints the element's background with the supplied brush.</summary>
+    [StyleProperty(TransitionEligible = true)]
     public static readonly Property<Brush> Background = new(
         "visual-background",
         Brush.Solid(default),
@@ -146,6 +149,7 @@ public static class VisualProperties
     public static readonly Property<float> CornerRadius = new("visual-corner-radius", 0);
 
     /// <summary>Sets transparency from 0 (invisible) to 1 (fully opaque).</summary>
+    [StyleProperty(TransitionEligible = true)]
     public static readonly Property<float> Opacity = new(
         "visual-opacity",
         1,
@@ -154,9 +158,11 @@ public static class VisualProperties
 }
 
 /// <summary>Text settings inherited by an element's text and its descendants.</summary>
+[StylePropertyGroup]
 public static class TypographyProperties
 {
     /// <summary>Sets the color used to draw text.</summary>
+    [StyleProperty(TransitionEligible = true)]
     public static readonly Property<Color> TextColor = new(
         "typography-text-color",
         Color.FromRgb(0, 0, 0),
@@ -214,6 +220,7 @@ public static class TypographyProperties
     );
 
     /// <summary>Controls how bounded paragraph overflow is reported and painted.</summary>
+    [StyleProperty(Name = "TextOverflow", Aliases = new[] { "Overflow" })]
     public static readonly Property<TextOverflow> Overflow = new(
         "typography-overflow",
         TextOverflow.Clip,
@@ -1338,6 +1345,9 @@ public enum SceneNodeKind
 
     /// <summary>Paints a prepared image rendition.</summary>
     Image,
+
+    /// <summary>Replays one bounded immutable drawing.</summary>
+    Drawing,
 }
 
 /// <summary>Identity of a renderer operation belonging to a retained element.</summary>
@@ -1470,6 +1480,7 @@ public sealed class ClipSceneNode : SceneNode
             ),
             ImageSceneNode image => image,
             ImageSlotSceneNode slot => slot,
+            DrawingSceneNode drawing => drawing,
             _ => throw new ArgumentException("Unknown scene node."),
         };
 }
@@ -1506,51 +1517,51 @@ public sealed class OpacitySceneNode : SceneNode
     public IReadOnlyList<SceneNode> Children => _children;
 }
 
-/// <summary>A renderer-facing retained snapshot owning leases on its prepared image data.</summary>
+/// <summary>A renderer-facing retained snapshot owning leases on its prepared resources.</summary>
 /// <remarks>Dispose when the frame is no longer retained. Use <see cref="Retain"/> for an independently owned snapshot.</remarks>
 public sealed class RetainedScene : IDisposable
 {
-    private readonly object _imageGate = new();
-    private ImageLease[]? _imageLeases;
+    private readonly object _resourceGate = new();
+    private IRetainedSceneLease[]? _resourceLeases;
     internal SceneLayout.PaintSnapshot? PaintSnapshot { get; set; }
 
     /// <summary>Whether this frame reused the prior scene's geometry, shaping and input snapshot.</summary>
     public bool IsPaintOnly { get; private init; }
 
-    /// <summary>Whether this snapshot has released its image leases.</summary>
+    /// <summary>Whether this snapshot has released its prepared-resource leases.</summary>
     public bool IsDisposed
     {
         get
         {
-            lock (_imageGate)
-                return _imageLeases is null;
+            lock (_resourceGate)
+                return _resourceLeases is null;
         }
     }
 
     /// <summary>Retains the immutable frame independently of its current owner.</summary>
     public RetainedScene Retain()
     {
-        lock (_imageGate)
+        lock (_resourceGate)
         {
-            ObjectDisposedException.ThrowIf(_imageLeases is null, this);
-            return new RetainedScene(this, _imageLeases!);
+            ObjectDisposedException.ThrowIf(_resourceLeases is null, this);
+            return new RetainedScene(this, _resourceLeases!);
         }
     }
 
     /// <summary>Releases this snapshot's prepared resources without invalidating independent snapshots.</summary>
     public void Dispose()
     {
-        ImageLease[]? leases;
-        lock (_imageGate)
+        IRetainedSceneLease[]? leases;
+        lock (_resourceGate)
         {
-            leases = _imageLeases;
-            _imageLeases = null;
+            leases = _resourceLeases;
+            _resourceLeases = null;
         }
         if (leases is not null)
             ReleaseLeases(leases);
     }
 
-    private RetainedScene(RetainedScene scene, ImageLease[] leases)
+    private RetainedScene(RetainedScene scene, IRetainedSceneLease[] leases)
     {
         Generation = scene.Generation;
         Viewport = scene.Viewport;
@@ -1563,15 +1574,15 @@ public sealed class RetainedScene : IDisposable
         InputSignature = scene.InputSignature;
         PaintSnapshot = scene.PaintSnapshot;
         IsPaintOnly = scene.IsPaintOnly;
-        _imageLeases = RetainLeases(leases);
+        _resourceLeases = RetainLeases(leases);
     }
 
     internal RetainedScene WithPaint(long generation, IReadOnlyList<SceneNode> nodes)
     {
-        lock (_imageGate)
+        lock (_resourceGate)
         {
-            ObjectDisposedException.ThrowIf(_imageLeases is null, this);
-            return new RetainedScene(this, generation, nodes, _imageLeases!);
+            ObjectDisposedException.ThrowIf(_resourceLeases is null, this);
+            return new RetainedScene(this, generation, nodes, _resourceLeases!);
         }
     }
 
@@ -1579,7 +1590,7 @@ public sealed class RetainedScene : IDisposable
         RetainedScene scene,
         long generation,
         IReadOnlyList<SceneNode> nodes,
-        ImageLease[] leases
+        IRetainedSceneLease[] leases
     )
     {
         Generation = generation;
@@ -1595,12 +1606,12 @@ public sealed class RetainedScene : IDisposable
         IsPaintOnly = true;
         // Nodes reference immutable prepared resources. Retain the scene's owned
         // leases, rather than a source cache lease which may already be retired.
-        _imageLeases = RetainLeases(leases);
+        _resourceLeases = RetainLeases(leases);
     }
 
-    private static ImageLease[] RetainLeases(IEnumerable<ImageLease> leases)
+    private static IRetainedSceneLease[] RetainLeases(IEnumerable<IRetainedSceneLease> leases)
     {
-        var retained = new List<ImageLease>();
+        var retained = new List<IRetainedSceneLease>();
         try
         {
             foreach (var lease in leases)
@@ -1621,7 +1632,7 @@ public sealed class RetainedScene : IDisposable
         }
     }
 
-    private static void ReleaseLeases(IEnumerable<ImageLease> leases)
+    private static void ReleaseLeases(IEnumerable<IRetainedSceneLease> leases)
     {
         List<Exception>? errors = null;
         foreach (var lease in leases)
@@ -1636,22 +1647,46 @@ public sealed class RetainedScene : IDisposable
             }
         }
         if (errors is not null)
-            throw new AggregateException("Retained scene image cleanup failed.", errors);
+            throw new AggregateException("Retained scene resource cleanup failed.", errors);
     }
 
-    private static IEnumerable<ImageLease> ImageLeases(IEnumerable<SceneNode> nodes)
+    private static IRetainedSceneLease[] AcquireLeases(IEnumerable<SceneNode> nodes)
+    {
+        var leases = new List<IRetainedSceneLease>();
+        try
+        {
+            Acquire(nodes, leases);
+            return [.. leases];
+        }
+        catch (Exception error)
+        {
+            try
+            {
+                ReleaseLeases(leases);
+            }
+            catch (Exception cleanupError)
+            {
+                throw new AggregateException(error, cleanupError);
+            }
+            throw;
+        }
+    }
+
+    private static void Acquire(
+        IEnumerable<SceneNode> nodes,
+        ICollection<IRetainedSceneLease> leases
+    )
     {
         foreach (var node in nodes)
         {
             if (node is ImageSceneNode image)
-                yield return image.SourceLease;
-            var children =
-                node is ClipSceneNode clip ? clip.Children
-                : node is OpacitySceneNode opacity ? opacity.Children
-                : null;
-            if (children is not null)
-                foreach (var lease in ImageLeases(children))
-                    yield return lease;
+                leases.Add(new RetainedImageLease(image.SourceLease.Retain()));
+            else if (node is DrawingSceneNode drawing)
+                leases.Add(new RetainedDrawingLease(drawing.SourceLease.Retain()));
+            if (node is ClipSceneNode clip)
+                Acquire(clip.Children, leases);
+            else if (node is OpacitySceneNode opacity)
+                Acquire(opacity.Children, leases);
         }
     }
 
@@ -1675,7 +1710,26 @@ public sealed class RetainedScene : IDisposable
         InputProjectionRevision = inputProjectionRevision;
         _collapsedElementIds = collapsedElementIds is null ? [] : [.. collapsedElementIds];
         InputSignature = Signature(Input);
-        _imageLeases = RetainLeases(ImageLeases(Nodes));
+        _resourceLeases = AcquireLeases(Nodes);
+    }
+
+    private interface IRetainedSceneLease : IDisposable
+    {
+        IRetainedSceneLease Retain();
+    }
+
+    private sealed class RetainedImageLease(ImageLease lease) : IRetainedSceneLease
+    {
+        public IRetainedSceneLease Retain() => new RetainedImageLease(lease.Retain());
+
+        public void Dispose() => lease.Dispose();
+    }
+
+    private sealed class RetainedDrawingLease(DrawingLease drawing) : IRetainedSceneLease
+    {
+        public IRetainedSceneLease Retain() => new RetainedDrawingLease(drawing.Retain());
+
+        public void Dispose() => drawing.Dispose();
     }
 
     /// <summary>Monotonic composition-local identity; routers reject older snapshots.</summary>
@@ -1858,6 +1912,18 @@ public sealed class RetainedScene : IDisposable
                     .Append(image.ColorMode)
                     .Append(" tint=")
                     .Append(image.Tint);
+            if (node is DrawingSceneNode drawing)
+                output
+                    .Append(" drawing=")
+                    .Append(drawing.Drawing.Commands.Count.ToString(CultureInfo.InvariantCulture))
+                    .Append(" coordinate=")
+                    .Append(
+                        drawing.CoordinateSize.Width.ToString("R", CultureInfo.InvariantCulture)
+                    )
+                    .Append('x')
+                    .Append(
+                        drawing.CoordinateSize.Height.ToString("R", CultureInfo.InvariantCulture)
+                    );
             if (node is OpacitySceneNode opacity)
                 output
                     .Append(" opacity=")

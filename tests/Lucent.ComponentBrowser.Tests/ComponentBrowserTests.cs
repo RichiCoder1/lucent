@@ -176,6 +176,53 @@ public sealed class ComponentBrowserTests
     }
 
     [TestMethod]
+    public void ButtonsExampleKeepsGeneratedActivationStatePerMount()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "component-browser-button-state");
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var browser = new ComponentBrowserState(composition.Root.Scope);
+
+        var first = composition.Mount(composition.Root, theme, Components.ButtonsExample(browser));
+        graph.Drain();
+        Assert.AreEqual(1, composition.Root.Children.Count);
+        Assert.AreSame(first, composition.Root.Children[0]);
+        var apply = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node is { Role: SemanticRole.Button, Name: "Apply change" });
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(
+                apply.Identity,
+                new SemanticCommand(SemanticCommandKind.Invoke)
+            )
+        );
+        graph.Drain();
+        Assert.IsTrue(
+            Flatten(composition.SemanticSnapshot()!).Any(node => node.Name == "Invoked 1 time.")
+        );
+
+        var second = composition.Mount(composition.Root, theme, Components.ButtonsExample(browser));
+        graph.Drain();
+        Assert.AreEqual(2, composition.Root.Children.Count);
+        Assert.AreSame(second, composition.Root.Children[1]);
+        var statusNames = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role == SemanticRole.Status)
+            .Select(node => node.Name)
+            .ToArray();
+        CollectionAssert.Contains(statusNames, "Invoked 1 time.");
+        CollectionAssert.Contains(statusNames, "No action invoked yet.");
+
+        first.Dispose();
+        graph.Drain();
+        Assert.IsTrue(
+            Flatten(composition.SemanticSnapshot()!)
+                .Any(node => node.Name == "No action invoked yet.")
+        );
+        second.Dispose();
+    }
+
+    [TestMethod]
     public void SelectingAnotherExampleResetsRetainedDetailAndSourceScroll()
     {
         var graph = new ReactiveGraph();

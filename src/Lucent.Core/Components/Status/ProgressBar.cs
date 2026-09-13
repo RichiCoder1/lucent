@@ -7,7 +7,7 @@ public static partial class Components
     /// <summary>Displays a normalized progress fraction, or an explicitly indeterminate status when the reader returns null.</summary>
     /// <remarks>The value is read-only, finite and between zero and one. Indeterminate presentation is static and schedules no animation.</remarks>
     [LucentComponent]
-    public static ComponentRecipe ProgressBar(
+    public static AuthorRecipe<StyledAccessibleCapability> ProgressBar(
         string label,
         Func<double?> value,
         Style? style = null
@@ -15,7 +15,7 @@ public static partial class Components
     {
         label = Required(label, nameof(label));
         ArgumentNullException.ThrowIfNull(value);
-        return ProgressBarContent(label, value, style);
+        return StockRecipe.Accessible(ProgressBarContent(label, value, style));
     }
 
     internal static double? ValidateProgressFraction(double? value)

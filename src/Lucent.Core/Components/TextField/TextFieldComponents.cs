@@ -4,7 +4,7 @@ public static partial class Components
 {
     /// <summary>Creates a controlled primary editor whose draft requests remain distinct from the application value.</summary>
     [LucentComponent]
-    public static ComponentRecipe TextField(
+    public static AuthorRecipe<StyledAccessibleCapability> TextField(
         FieldContext field,
         Func<string> value,
         Action<string> onChangeRequested,
@@ -14,14 +14,16 @@ public static partial class Components
         Func<bool>? readOnly = null
     )
     {
-        return TextFieldControlledCore(
-            field,
-            value,
-            onChangeRequested,
-            style,
-            placeholder,
-            enabled,
-            readOnly
+        return StockRecipe.Accessible(
+            TextFieldControlledCore(
+                field,
+                value,
+                onChangeRequested,
+                style,
+                placeholder,
+                enabled,
+                readOnly
+            )
         );
     }
 
@@ -129,7 +131,7 @@ public static partial class Components
 
     /// <summary>Creates the primary single-line editor for a typed field context.</summary>
     [LucentComponent]
-    public static ComponentRecipe TextField(
+    public static AuthorRecipe<StyledAccessibleCapability> TextField(
         FieldContext field,
         string initialValue = "",
         Action<string>? onChange = null,
@@ -141,23 +143,25 @@ public static partial class Components
     )
     {
         ArgumentNullException.ThrowIfNull(field);
-        return TextFieldCore(
-            initialValue,
-            onChange,
-            style,
-            field.AccessibleName,
-            session,
-            field.FocusTarget,
-            placeholder,
-            field,
-            enabled,
-            readOnly
+        return StockRecipe.Accessible(
+            TextFieldCore(
+                initialValue,
+                onChange,
+                style,
+                field.AccessibleName,
+                session,
+                field.FocusTarget,
+                placeholder,
+                field,
+                enabled,
+                readOnly
+            )
         );
     }
 
     /// <summary>Creates a single-line text editor. <paramref name="label"/> is the accessible name; <paramref name="placeholder"/> is the muted empty-field hint, defaults to that label, and may be empty to disable the hint. Supply <paramref name="session"/> to retain its document state across mounts; otherwise <paramref name="initialValue"/> seeds mount-owned state.</summary>
     [LucentComponent]
-    public static ComponentRecipe TextField(
+    public static AuthorRecipe<StyledAccessibleCapability> TextField(
         string initialValue = "",
         Action<string>? onChange = null,
         Style? style = null,
@@ -165,7 +169,10 @@ public static partial class Components
         EditorSession? session = null,
         FocusTarget? focusTarget = null,
         string? placeholder = null
-    ) => TextFieldCore(initialValue, onChange, style, label, session, focusTarget, placeholder);
+    ) =>
+        StockRecipe.Accessible(
+            TextFieldCore(initialValue, onChange, style, label, session, focusTarget, placeholder)
+        );
 
     private static ComponentRecipe TextFieldCore(
         string initialValue,
@@ -230,7 +237,7 @@ public static partial class Components
 
     /// <summary>Creates a multiline text editor. <paramref name="label"/> is the accessible name; <paramref name="placeholder"/> is the muted empty-field hint, defaults to that label, and may be empty to disable the hint. Supply <paramref name="session"/> to retain its document state across mounts.</summary>
     [LucentComponent]
-    public static ComponentRecipe TextArea(
+    public static AuthorRecipe<StyledAccessibleCapability> TextArea(
         string initialValue = "",
         Action<string>? onChange = null,
         Style? style = null,
@@ -247,7 +254,7 @@ public static partial class Components
                 nameof(initialValue)
             );
         label = Required(label, nameof(label));
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "text-area",
             (context, root) =>
             {

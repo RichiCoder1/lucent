@@ -4,7 +4,7 @@ public static partial class Components
 {
     /// <summary>Creates a button with a decorative leading icon and visible text.</summary>
     [LucentComponent]
-    public static ComponentRecipe Button(
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
         [DefaultContent] string content,
         ImageSource leadingIcon,
         Action? onInvoke = null,
@@ -13,12 +13,14 @@ public static partial class Components
     {
         content = Required(content, nameof(content));
         ArgumentNullException.ThrowIfNull(leadingIcon);
-        return ComposedButton(() => content, () => leadingIcon, onInvoke, style);
+        return StockRecipe.Accessible(
+            ComposedButton(() => content, () => leadingIcon, onInvoke, style)
+        );
     }
 
     /// <summary>Creates a button whose visible text and decorative leading icon follow typed readers.</summary>
     [LucentComponent]
-    public static ComponentRecipe Button(
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
         [DefaultContent] Func<string> content,
         Func<ImageSource> leadingIcon,
         Action? onInvoke = null,
@@ -27,12 +29,12 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(leadingIcon);
-        return ComposedButton(content, leadingIcon, onInvoke, style);
+        return StockRecipe.Accessible(ComposedButton(content, leadingIcon, onInvoke, style));
     }
 
     /// <summary>Creates a button whose visible text follows a reader and whose decorative leading icon is fixed.</summary>
     [LucentComponent]
-    public static ComponentRecipe Button(
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
         [DefaultContent] Func<string> content,
         ImageSource leadingIcon,
         Action? onInvoke = null,
@@ -41,12 +43,12 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(leadingIcon);
-        return ComposedButton(content, () => leadingIcon, onInvoke, style);
+        return StockRecipe.Accessible(ComposedButton(content, () => leadingIcon, onInvoke, style));
     }
 
     /// <summary>Creates a button with fixed visible text whose decorative leading icon follows a reader.</summary>
     [LucentComponent]
-    public static ComponentRecipe Button(
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
         [DefaultContent] string content,
         Func<ImageSource> leadingIcon,
         Action? onInvoke = null,
@@ -55,12 +57,12 @@ public static partial class Components
     {
         content = Required(content, nameof(content));
         ArgumentNullException.ThrowIfNull(leadingIcon);
-        return ComposedButton(() => content, leadingIcon, onInvoke, style);
+        return StockRecipe.Accessible(ComposedButton(() => content, leadingIcon, onInvoke, style));
     }
 
     /// <summary>Creates an icon-only button with a required accessible label.</summary>
     [LucentComponent]
-    public static ComponentRecipe IconButton(
+    public static AuthorRecipe<StyledAccessibleCapability> IconButton(
         ImageSource source,
         string label,
         Action? onInvoke = null,
@@ -69,12 +71,12 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(source);
         label = Required(label, nameof(label));
-        return IconButtonRecipe(() => source, () => label, onInvoke, style);
+        return StockRecipe.Accessible(IconButtonRecipe(() => source, () => label, onInvoke, style));
     }
 
     /// <summary>Creates an icon-only button whose source and accessible label follow typed readers.</summary>
     [LucentComponent]
-    public static ComponentRecipe IconButton(
+    public static AuthorRecipe<StyledAccessibleCapability> IconButton(
         Func<ImageSource> source,
         Func<string> label,
         Action? onInvoke = null,
@@ -83,12 +85,12 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(label);
-        return IconButtonRecipe(source, label, onInvoke, style);
+        return StockRecipe.Accessible(IconButtonRecipe(source, label, onInvoke, style));
     }
 
     /// <summary>Creates an icon-only button with a fixed source and a label that follows a reader.</summary>
     [LucentComponent]
-    public static ComponentRecipe IconButton(
+    public static AuthorRecipe<StyledAccessibleCapability> IconButton(
         ImageSource source,
         Func<string> label,
         Action? onInvoke = null,
@@ -97,12 +99,12 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(label);
-        return IconButtonRecipe(() => source, label, onInvoke, style);
+        return StockRecipe.Accessible(IconButtonRecipe(() => source, label, onInvoke, style));
     }
 
     /// <summary>Creates an icon-only button whose source follows a reader and whose label is fixed.</summary>
     [LucentComponent]
-    public static ComponentRecipe IconButton(
+    public static AuthorRecipe<StyledAccessibleCapability> IconButton(
         Func<ImageSource> source,
         string label,
         Action? onInvoke = null,
@@ -111,7 +113,7 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(source);
         label = Required(label, nameof(label));
-        return IconButtonRecipe(source, () => label, onInvoke, style);
+        return StockRecipe.Accessible(IconButtonRecipe(source, () => label, onInvoke, style));
     }
 
     private static ComponentRecipe ComposedButton(

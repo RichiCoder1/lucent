@@ -7,13 +7,13 @@ public static partial class Components
     /// <param name="retry">Optional action shown as a Retry button.</param>
     /// <param name="style">Optional author style appended after the stock notice layout.</param>
     [LucentComponent]
-    public static ComponentRecipe ErrorNotice(
+    public static AuthorRecipe<StyledCapability> ErrorNotice(
         Func<string> message,
         Action? retry = null,
         Style? style = null
     )
     {
         ArgumentNullException.ThrowIfNull(message);
-        return ErrorNoticeContent(message, retry, style);
+        return StockRecipe.Styled(ErrorNoticeContent(message, retry, style));
     }
 }

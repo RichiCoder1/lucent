@@ -289,6 +289,8 @@ public sealed partial class ReactiveScope : IDisposable
         _factoryGuard?.Invoke();
     }
 
+    internal void CheckComponentContextAccess() => CheckActive();
+
     private void CheckActive(bool skipFactoryGuard = false)
     {
         _graph.CheckThread();

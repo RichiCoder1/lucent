@@ -6,7 +6,7 @@ public static partial class Components
 {
     /// <summary>Creates a controlled finite range input with preview requests and explicit gesture completion.</summary>
     [LucentComponent]
-    public static ComponentRecipe Slider(
+    public static AuthorRecipe<StyledCapability> Slider(
         string label,
         Func<double> value,
         Action<double> onValueRequested,
@@ -24,7 +24,7 @@ public static partial class Components
         ArgumentNullException.ThrowIfNull(options);
         formatValue ??= current => current.ToString("G", CultureInfo.CurrentCulture);
         var format = formatValue;
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "slider",
             (context, root) =>
             {

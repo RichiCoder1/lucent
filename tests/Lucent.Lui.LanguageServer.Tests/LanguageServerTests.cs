@@ -3109,14 +3109,14 @@ style MotionStyle {
             );
             var coreComponentsText = await File.ReadAllTextAsync(layoutDeclarationPath);
             var layoutDeclaration = coreComponentsText.IndexOf(
-                "ComponentRecipe Layout(",
+                "AuthorRecipe<StyledCapability> Layout(",
                 StringComparison.Ordinal
             );
             Assert(
                 layoutDeclaration >= 0,
                 "Core Layout.cs no longer contains the public Layout component declaration."
             );
-            layoutDeclaration += "ComponentRecipe ".Length;
+            layoutDeclaration += "AuthorRecipe<StyledCapability> ".Length;
             var layoutReferences = await issueBrowser.ReferencesAsync(
                 issueBrowserRoot,
                 layoutPosition,
@@ -3523,8 +3523,10 @@ style MotionStyle {
             );
             var layoutSourceText = await File.ReadAllTextAsync(layoutSource.LocalPath);
             var layoutSourceOffset =
-                layoutSourceText.IndexOf("ComponentRecipe Layout(", StringComparison.Ordinal)
-                + "ComponentRecipe ".Length;
+                layoutSourceText.IndexOf(
+                    "AuthorRecipe<StyledCapability> Layout(",
+                    StringComparison.Ordinal
+                ) + "AuthorRecipe<StyledCapability> ".Length;
             var insertedLine = "\n" + layoutSourceText;
             await browserLsp.NotifyAsync(
                 "textDocument/didOpen",

@@ -4,7 +4,7 @@ public static partial class Components
 {
     /// <summary>Creates a scrollable viewport that clips its content. Supply <paramref name="viewport"/> to retain its offset across mounts.</summary>
     [LucentComponent]
-    public static ComponentRecipe ScrollViewport(
+    public static AuthorRecipe<StyledAccessibleCapability> ScrollViewport(
         [DefaultContent] ComponentContent content,
         string label = "Scroll viewport",
         Style? style = null,
@@ -13,7 +13,7 @@ public static partial class Components
     {
         content = Content(content);
         label = Required(label, nameof(label));
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "scroll-viewport",
             (context, root) =>
             {
@@ -31,7 +31,7 @@ public static partial class Components
 
     /// <summary>Creates a scrollable list with a fixed row height. Use it for large collections so only rows near the viewport are kept active.</summary>
     [LucentComponent]
-    public static ComponentRecipe VirtualizedList<TKey, TItem>(
+    public static AuthorRecipe<StyledCapability> VirtualizedList<TKey, TItem>(
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
         Func<CurrentItem<TItem>, ComponentRecipe> row,
@@ -47,7 +47,7 @@ public static partial class Components
         ArgumentNullException.ThrowIfNull(row);
         ArgumentNullException.ThrowIfNull(rowHeight);
         label = Required(label, nameof(label));
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "virtualized-list",
             (context, root) =>
             {

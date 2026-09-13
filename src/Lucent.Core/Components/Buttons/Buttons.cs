@@ -4,26 +4,35 @@ public static partial class Components
 {
     /// <summary>Creates a button labeled with the supplied content. Use <paramref name="onInvoke"/> to respond when the user activates it.</summary>
     [LucentComponent]
-    public static ComponentRecipe Button(
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
         [DefaultContent] string content,
         Action? onInvoke = null,
-        Style? style = null
+        Style? style = null,
+        Func<AriaMetadata?>? aria = null
     )
     {
         content = Required(content, nameof(content));
-        return ComponentRecipe.Create(
+        var recipe = StockRecipe.Accessible(
             "button",
             (context, root) => Controls.Button(root, context.Theme, content, onInvoke, style)
         );
+        return aria is null ? recipe : recipe.Aria.Metadata(aria).End;
     }
 
     /// <summary>Creates a button whose label follows the supplied reader. Use <paramref name="onInvoke"/> to respond when the user activates it.</summary>
     [LucentComponent]
-    public static ComponentRecipe Button(
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
         [DefaultContent] Func<string> content,
         Action? onInvoke = null,
-        Style? style = null
-    ) => ButtonCore(content, onInvoke, style, focusOnPointer: true);
+        Style? style = null,
+        Func<AriaMetadata?>? aria = null
+    )
+    {
+        var recipe = StockRecipe.Accessible(
+            ButtonCore(content, onInvoke, style, focusOnPointer: true)
+        );
+        return aria is null ? recipe : recipe.Aria.Metadata(aria).End;
+    }
 
     private static ComponentRecipe ButtonCore(
         Func<string> content,
@@ -36,37 +45,41 @@ public static partial class Components
         return ComponentRecipe.Create(
             "button",
             (context, root) =>
-            {
-                var label = root.Scope.Derived(
-                    () => Required(content(), nameof(content)),
-                    root.Name + ".button-label"
-                );
-                Controls.Button(root, context.Theme, label.Value, onInvoke, style, focusOnPointer);
-                _ = root.Scope.Effect(
-                    () =>
+                ControlLabelBinding.Configure(
+                    root,
+                    content,
+                    nameof(content),
+                    "button",
+                    label =>
+                        Controls.Button(
+                            root,
+                            context.Theme,
+                            label,
+                            onInvoke,
+                            style,
+                            focusOnPointer
+                        ),
+                    label =>
                     {
-                        var nextLabel = label.Value;
-                        root.UpdateControl(ProjectionProperties.Text, nextLabel);
+                        root.UpdateControl(ProjectionProperties.Text, label);
                         root.UpdateControlSemantics(
-                            new(SemanticRole.Button, nextLabel, actions: SemanticAction.Invoke)
+                            new(SemanticRole.Button, label, actions: SemanticAction.Invoke)
                         );
-                    },
-                    root.Name + ".button"
-                );
-            }
+                    }
+                )
         );
     }
 
     /// <summary>Creates a selectable list item with fixed text. Use <paramref name="onSelect"/> to respond when it is selected.</summary>
     [LucentComponent]
-    public static ComponentRecipe Selectable(
+    public static AuthorRecipe<StyledAccessibleCapability> Selectable(
         [DefaultContent] string content,
         Action? onSelect = null,
         Style? style = null
     )
     {
         content = Required(content, nameof(content));
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "selectable",
             (context, root) => Controls.Selectable(root, context.Theme, content, onSelect, style)
         );
@@ -74,7 +87,7 @@ public static partial class Components
 
     /// <summary>Creates a selectable list item whose text and selected state follow the supplied readers.</summary>
     [LucentComponent]
-    public static ComponentRecipe Selectable(
+    public static AuthorRecipe<StyledAccessibleCapability> Selectable(
         [DefaultContent] Func<string> content,
         Func<bool> selected,
         Action? onSelect = null,
@@ -83,7 +96,7 @@ public static partial class Components
     {
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(selected);
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "selectable",
             (context, root) =>
             {
@@ -116,7 +129,7 @@ public static partial class Components
 
     /// <summary>Creates a selectable list item with composed visual content and a live accessible label and selected state.</summary>
     [LucentComponent]
-    public static ComponentRecipe Selectable(
+    public static AuthorRecipe<StyledAccessibleCapability> Selectable(
         [DefaultContent] ComponentContent content,
         Func<string> label,
         Func<bool> selected,
@@ -127,7 +140,7 @@ public static partial class Components
         content = Content(content);
         ArgumentNullException.ThrowIfNull(label);
         ArgumentNullException.ThrowIfNull(selected);
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "selectable",
             (context, root) =>
             {

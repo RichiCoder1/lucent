@@ -4,7 +4,7 @@ public static partial class Components
 {
     /// <summary>Creates an editable ComboBox with generation-safe asynchronous suggestions.</summary>
     [LucentComponent]
-    public static ComponentRecipe ComboBox<TKey>(
+    public static AuthorRecipe<StyledAccessibleCapability> ComboBox<TKey>(
         FieldContext field,
         Func<ComboBoxSelectedItem<TKey>?> readSelectedItem,
         Action<TKey> onSelectionRequested,
@@ -29,7 +29,7 @@ public static partial class Components
                 nameof(onFreeTextRequested)
             );
 
-        return ComponentRecipe.Create(
+        return StockRecipe.Accessible(
             "combo-box",
             (context, root) =>
             {

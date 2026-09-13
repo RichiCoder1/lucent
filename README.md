@@ -39,4 +39,7 @@ Prerelease distribution and independent application setup: [NuGet packages](docs
 
 Typed artwork and binary resources: [packaged assets](docs/ASSETS.md).
 
+Owned setup, generated state, fluent styles and accessibility metadata:
+[C# authoring](docs/CSHARP-AUTHORING.md). `.lui` and C# share the retained runtime.
+
 [Light Notes](https://github.com/RichiCoder1/light-notes) is the first independent package consumer, with a `.lui` inbox/editor, local persistence, autosave, recoverable drafts and collection continuity. Issue Browser remains the maintained stock-theme example and deterministic framework exercise.

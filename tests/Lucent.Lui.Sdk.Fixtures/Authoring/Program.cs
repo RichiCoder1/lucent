@@ -3,6 +3,8 @@ using Lucent.Core;
 
 Verify(AuthoringConsumer.Components.Consumer);
 Verify(ProofLibrary.Generated);
+AuthoringConsumer.Integration.Verify();
+AuthoringConsumer.AuthoringMeasurements.Run();
 Console.WriteLine("Packaged authoring gate: PASS");
 
 static void Verify(Func<Func<string>, ComponentRecipe> build)
@@ -23,6 +25,10 @@ static void Verify(Func<Func<string>, ComponentRecipe> build)
     label.Value = "After";
     graph.Drain();
     var after = Flatten(composition.SemanticSnapshot()!).Single(node => node.Name == "After");
+    Require(
+        after.Description == before.Description && after.Role == before.Role,
+        "A live name update changed the role or description."
+    );
     Require(
         after.Identity.CompositionEpoch == before.Identity.CompositionEpoch
             && after.Identity.ElementId == before.Identity.ElementId,

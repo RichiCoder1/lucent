@@ -4,7 +4,7 @@ public static partial class Components
 {
     /// <summary>Creates controlled keyed tabs with manual activation and retained visited panels.</summary>
     [LucentComponent]
-    public static ComponentRecipe Tabs<TKey>(
+    public static AuthorRecipe<StyledCapability> Tabs<TKey>(
         string label,
         Func<IEnumerable<TabItem<TKey>>> items,
         Func<TKey> readSelectedKey,
@@ -16,20 +16,22 @@ public static partial class Components
         where TKey : notnull
     {
         ArgumentNullException.ThrowIfNull(readSelectedKey);
-        return Tabs(
-            label,
-            items,
-            () => SelectedKey.Some(readSelectedKey()),
-            onSelectionRequested,
-            activation,
-            retention,
-            style
+        return StockRecipe.Styled(
+            Tabs(
+                label,
+                items,
+                () => SelectedKey.Some(readSelectedKey()),
+                onSelectionRequested,
+                activation,
+                retention,
+                style
+            )
         );
     }
 
     /// <summary>Creates controlled keyed tabs whose applied selection can explicitly be empty.</summary>
     [LucentComponent]
-    public static ComponentRecipe Tabs<TKey>(
+    public static AuthorRecipe<StyledCapability> Tabs<TKey>(
         string label,
         Func<IEnumerable<TabItem<TKey>>> items,
         Func<SelectedKey<TKey>> readSelectedKey,
@@ -48,7 +50,7 @@ public static partial class Components
             throw new ArgumentOutOfRangeException(nameof(activation));
         if (!Enum.IsDefined(retention))
             throw new ArgumentOutOfRangeException(nameof(retention));
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "tabs",
             (context, root) =>
             {
@@ -148,7 +150,7 @@ public static partial class Components
 
     /// <summary>Creates a controlled disclosure that retains its lazily mounted content by default.</summary>
     [LucentComponent]
-    public static ComponentRecipe Disclosure(
+    public static AuthorRecipe<StyledCapability> Disclosure(
         [DefaultContent] ComponentContent content,
         string heading,
         Func<bool> readExpanded,
@@ -163,30 +165,32 @@ public static partial class Components
         ArgumentNullException.ThrowIfNull(onExpandedRequested);
         if (!Enum.IsDefined(retention))
             throw new ArgumentOutOfRangeException(nameof(retention));
-        return ComponentRecipe.Defer(
-            "disclosure",
-            scope =>
-            {
-                var binding = new DisclosureBinding(heading, readExpanded, onExpandedRequested);
-                var visited = scope.Signal(readExpanded(), "disclosure.visited");
-                if (retention == TabPanelRetention.RetainVisited)
-                    _ = scope.Effect(
-                        () =>
-                        {
-                            if (readExpanded())
-                                visited.Value = true;
-                        },
-                        "disclosure.visit"
+        return StockRecipe.Styled(
+            Component.Define(
+                "disclosure",
+                component =>
+                {
+                    var binding = new DisclosureBinding(heading, readExpanded, onExpandedRequested);
+                    var visited = component.State(readExpanded(), "disclosure.visited");
+                    if (retention == TabPanelRetention.RetainVisited)
+                        _ = component.Observe(
+                            () =>
+                            {
+                                if (readExpanded())
+                                    visited.Value = true;
+                            },
+                            "disclosure.visit"
+                        );
+                    var panel = ContentRecipe.When(
+                        "disclosure.panel",
+                        retention == TabPanelRetention.RetainVisited
+                            ? () => visited.Value
+                            : readExpanded,
+                        DisclosurePanelHost(binding, content)
                     );
-                var panel = ContentRecipe.When(
-                    "disclosure.panel",
-                    retention == TabPanelRetention.RetainVisited
-                        ? () => visited.Value
-                        : readExpanded,
-                    DisclosurePanelHost(binding, content)
-                );
-                return DisclosureContent(binding, [panel], style);
-            }
+                    return DisclosureContent(binding, [panel], style);
+                }
+            )
         );
     }
 

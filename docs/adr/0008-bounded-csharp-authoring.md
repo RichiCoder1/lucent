@@ -1,10 +1,11 @@
 # Bounded C# authoring over retained recipes
 
-Status: accepted direction for [#265](https://github.com/RichiCoder1/lucent/issues/265),
-September 13, 2026. The executable
-[#266 feasibility gate](https://github.com/RichiCoder1/lucent/issues/266) passes
-with the concrete signatures below. This record does not assert that downstream
-APIs are delivered.
+Status: accepted and implemented direction for
+[#265](https://github.com/RichiCoder1/lucent/issues/265), September 13, 2026. The
+executable [#266 feasibility gate](https://github.com/RichiCoder1/lucent/issues/266)
+is preserved as historical evidence for the concrete signatures below. The
+current source implements the bounded authoring runtime and its first stock
+adoption; package, NativeAOT and native desktop verification remain pending.
 
 `.lui` remains the primary authoring language. Concise C# authoring uses the same
 `ComponentRecipe.Defer(string, Func<ReactiveScope, ComponentRecipe>)` lifetime:
@@ -13,7 +14,7 @@ mount transaction. There is no rerender engine or ambient current owner.
 
 ## Capability and conversion boundary
 
-The gate tests one immutable `AuthorRecipe<TCapabilities>` over the erased
+The implementation uses one immutable `AuthorRecipe<TCapabilities>` over the erased
 `ComponentRecipe`, with a closed set of styled, accessible and combined marker
 types. Contributions do not add generic nesting or mounted elements. A default
 or otherwise invalid wrapper fails before mounting. Factories opt into known
@@ -42,35 +43,39 @@ targets fail inside the existing mount transaction.
 The wrapper provides `Named(string)`, `Kind`, `IsValid`, `Recipe` and direct
 conversions. C# 14 extension members expose `.Style(Style)` only for styled
 markers and `.Aria` only for accessible markers. `AuthorAria<T>` offers
-`Name(string)`, `Name(Func<string>)`, `Description(string)` and
-`Description(Func<string>)`. `.End` returns `AuthorRecipe<T>`. Its terminal
+`Name(string)`, `Name(Func<string>)`, `Description(string)`,
+`Description(Func<string>)` and `Metadata(Func<AriaMetadata?>)`. Grouped metadata
+can override name and description together; returning null removes that grouped
+contribution and reveals the current earlier author or behavior value. `.End`
+returns `AuthorRecipe<T>`. Its terminal
 conversions are direct rather than chained through another user conversion.
-The target receives the last fixed value or live reader for each metadata field;
-replacing one form clears the previous form.
+The retained target receives one ordered metadata reader. Fixed, live and grouped
+contributions retain authoring order, with the last active writer winning each
+field independently.
 
 The package consumer exposed a required public custom-behavior seam:
 `BehaviorContext.BindSemantics(Func<SemanticDeclaration>)`. Like `SetSemantics`,
 it is registered during attachment by the semantic-owning behavior. Its reader
 is reactive and owned by that behavior's scope, so disposal releases it. Raw
-effect registration and semantic mutation remain internal. This exposes the
-existing owned update mechanism; persistent author/base metadata merging still
-belongs to #270.
+effect registration and semantic mutation remain internal. Persistent author/base
+metadata merging is implemented on the declared retained target: behavior updates
+preserve author overrides, and removing an override reveals the latest behavior
+declaration.
 
 The wrapper converts directly to both `ComponentRecipe` and `ContentRecipe`.
 The immutable `.Aria` group also supports both terminal conversions, while
 `.End` returns the original capability-bearing wrapper. Naming and deferred
 forwarding retain contributions. User-defined conversions do not supply delegate
 return covariance: a factory returning the wrapper needs an explicit lambda
-when passed to a `Func<..., ComponentRecipe>`. The gate inventories these sites
-before #269 atomically migrates stock factories and their consumers.
+when passed to a `Func<..., ComponentRecipe>`. The gate inventoried these sites,
+and #269 adapted the stock factories and their consumers atomically.
 
 Style contributions reach the declared target before its first presentation,
 inner contributions before outer ones, preserving existing last-writer and
 control-authority rules. Semantic author metadata merges with the behavior-owned
 base through one path. It cannot replace roles, actions, values, input policies
 or password protection. Live behavior updates preserve author overrides; removing
-an override reveals the latest base declaration. These runtime extensions belong
-to #269 and #270, beyond the gate's proof component.
+an override reveals the latest base declaration.
 
 ## Same-name input families
 
@@ -92,8 +97,9 @@ The executable matrix uses proof overloads backed by real `Style.Set`,
 method-group, token and default inputs, then changes the signal/theme to check
 snapshot, live-reader and token behavior. A separate negative case demonstrates
 that assigning priority to `object` steals a lambda from its reader overload;
-therefore that shape is deliberately excluded. This gate does not add generated
-overloads to the production `StyleFluency` catalog.
+therefore that shape is deliberately excluded. The gate did not add production
+overloads; the integrated generator now emits the supported `StyleFluency`
+catalog from the shared descriptor.
 
 ## Build-time descriptor and initialization
 
@@ -101,9 +107,10 @@ The shared descriptor lives in the existing compiler assembly and is derived
 from actual Roslyn property/component symbols. Its separately named fields are:
 author name, symbol and value type, supported target capabilities, supported
 input forms, aliases, and explicit style/semantic target metadata. Motion
-eligibility and paint invalidation remain separate facts. The gate recognizes
+eligibility and paint invalidation remain separate facts. The compiler recognizes
 the exact wrapper identity and closed marker return types alongside existing
-exact `ComponentRecipe` returns; it does not migrate the stock catalog.
+exact `ComponentRecipe` returns. Generated author-property metadata and the
+migrated stock catalog use the same descriptor boundary.
 
 The generator consumes this descriptor through its current analyzer dependency.
 No compiler, reflection-discovery service, Windows or renderer dependency enters
@@ -119,7 +126,7 @@ runtime Roslyn dependency. This raises the analyzer/compiler host requirement
 to a C# 14-capable host; the repository already pins .NET SDK 10.0.401. Tooling
 tests and a package-only consumer are required alongside the runtime proof.
 
-Later optional state generation implements explicit partial properties; it does
+Component state generation implements explicit partial properties; it does
 not rewrite fields or expressions. A direct generated factory runs inside the
 deferred owner callback, creates cells in ordinal property-name order, attaches
 once, then calls a synchronous typed initialization hook before authored code.
@@ -128,14 +135,30 @@ defaultable values and explicitly named static typed initializers are supported;
 initialization failures use existing reverse-order rollback. Context helpers
 forward to the real owner and its async/resource primitives.
 
-## Delivery boundary
+## Implementation boundary
 
-#266 must preserve a runnable positive/negative proof, concrete signature record,
-package-metadata consumer and NativeAOT evidence before dependent work proceeds.
-It leaves production stock factory returns intact. #267 adds the owned context;
-#268 adds shared metadata/generated styles; #269 performs the atomic factory
-migration; #270 adds persistent grouped semantics; #271 adds partial state.
-Core/Browser adoption and bounded drawing/Gauge follow under #272–275.
+#266 preserves the runnable positive/negative proof, concrete signature record,
+package-metadata consumer and historical NativeAOT evidence. The current source
+also implements the owned `ComponentContext`, generated author-property metadata
+and style fluency, the stock-factory migration, persistent grouped semantics,
+generated partial component state, shared label binding, bounded retained Drawing
+and Gauge adoption.
+
+`.lui` remains the primary stock-control authoring direction. C# authoring adds a
+typed facade over the same retained recipes and does not introduce rerendering,
+ambient owners, reflection discovery or a parallel widget hierarchy. Public stock
+factories advertise author capabilities only when their declared retained root is
+the actual target. `Slider`, `ListBox` and `VirtualizedList` are style-only because
+their control semantics live on descendants; moving those semantics solely to
+offer `.Aria` would change their accessibility geometry and ownership.
+
+Generated component state is limited to top-level, non-generic, sealed partial
+classes without authored instance constructors. Explicit partial properties use
+constant/default values or a named static typed initializer. Cells are created in
+deterministic property-name order on the existing deferred owner, followed by one
+synchronous partial initialization hook. Async initialization is rejected;
+unattached, off-thread and disposed access fails through the existing reactive
+guards, and initialization failure uses the mount transaction rollback.
 
 The proof starts from delivered component source `a18d662`, after the editor
 reference and desktop interaction implementation, rather than the older design
@@ -166,8 +189,10 @@ These local gate package identities are not claims of GitHub package publication
 
 Logs are under `artifacts/authoring266-worktree/artifacts/` in the main checkout:
 `authoring-bind-core-full.log`, `authoring-compiler-generator-full-final.log`,
-`authoring-editor-full.log`, and `authoring-package-verified.log`. The gate leaves
-stock factories unchanged. Next is #267; #268–275 retain their issue boundaries.
+`authoring-editor-full.log`, and `authoring-package-verified.log`. The gate itself
+left stock factories unchanged; the later integrated implementation supersedes
+that historical source boundary. Current verification is recorded in the handoff
+rather than inferred from these gate-only logs.
 
 ### Factory-return migration inventory
 
@@ -183,7 +208,7 @@ with explicit conversion lambdas when migrating capability-bearing factories.
 | `Components/Navigation/NavigationComponents.cs` and `Components/Scrolling/ScrollingComponents.cs` | Keyed/tab/virtual row callbacks retain erased recipes without losing mount identity. |
 | `ContextMenus.cs`, `Behavior.cs`, `InputRouter.Menus.cs` | Popup/menu callbacks remain erased; capability metadata must not alter popup ownership. |
 | `apps/Lucent.ComponentBrowser/ComponentBrowserLifecycle.cs` and application lifecycle tests | `ValueTask<ComponentRecipe>` is invariant. Inferred generic factory results may need an explicit `ComponentRecipe` type argument or cast. |
-| Compiler, generator, SDK and LSP fixtures | Component discovery must recognize wrappers from source and metadata together; generated public factories still return the erased recipe until the atomic migration. |
+| Compiler, generator, SDK and LSP fixtures | The migration made component discovery recognize wrappers from source and metadata together while preserving erased infrastructure boundaries. |
 
 Existing lambda bodies already returning `ComponentRecipe` need no workaround.
 The source inventory is a migration checklist, not evidence that every later

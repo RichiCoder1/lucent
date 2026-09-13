@@ -6,7 +6,7 @@ public static partial class Components
 
     /// <summary>Creates a controlled keyed tree that virtualizes its flattened expanded rows.</summary>
     [LucentComponent]
-    public static ComponentRecipe TreeView<TKey, TItem>(
+    public static AuthorRecipe<StyledCapability> TreeView<TKey, TItem>(
         string label,
         Func<IEnumerable<TItem>> roots,
         TreeDataSource<TKey, TItem> dataSource,
@@ -30,7 +30,7 @@ public static partial class Components
         options ??= new();
         var rowHeight = options.RowHeight ?? DefaultTreeRowHeight;
 
-        return ComponentRecipe.Create(
+        return StockRecipe.Styled(
             "tree-view",
             (context, root) =>
             {

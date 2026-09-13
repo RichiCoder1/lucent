@@ -27,6 +27,7 @@ public enum ImageColorMode
 }
 
 /// <summary>Style-driven image placement and color treatment.</summary>
+[StylePropertyGroup]
 public static class ImageProperties
 {
     /// <summary>Sets how artwork fits its content box; defaults to Contain.</summary>
