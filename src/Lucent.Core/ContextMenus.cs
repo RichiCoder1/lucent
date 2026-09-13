@@ -1056,7 +1056,12 @@ internal sealed class MenuBehavior(ScrollViewportState scroll) : Behavior
                     context.Composition,
                     route.Target
                 );
-                route.FocusTarget();
+                if (
+                    context.Composition.Find(route.Target)
+                        is { DeclaredSemanticRole: SemanticRole.MenuItem } target
+                    && target.InputAvailable()
+                )
+                    route.FocusTarget();
             }
         });
         context.OnKey(route =>

@@ -258,25 +258,24 @@ internal sealed class SliderBehavior(SliderState state, string label, Func<bool>
                 PreviewPointer(context, command);
                 route.Handled = true;
             }
-            else if (
-                _pointer == command.PointerId
-                && command.Kind
-                    is PointerCommandKind.Move
-                        or PointerCommandKind.Up
-                        or PointerCommandKind.Cancel
-            )
+            else if (_pointer == command.PointerId && command.Kind == PointerCommandKind.Move)
             {
-                if (command.Kind == PointerCommandKind.Cancel)
-                    state.Cancel(_initial);
-                else
-                    PreviewPointer(context, command);
-                if (command.Kind is PointerCommandKind.Up or PointerCommandKind.Cancel)
-                {
-                    _pointer = null;
-                    context.SetState(BehaviorState.Pressed, false);
-                    if (command.Kind == PointerCommandKind.Up)
-                        state.Complete();
-                }
+                PreviewPointer(context, command);
+                route.Handled = true;
+            }
+            else if (_pointer == command.PointerId && command.Kind == PointerCommandKind.Cancel)
+            {
+                _pointer = null;
+                context.SetState(BehaviorState.Pressed, false);
+                state.Cancel(_initial);
+                route.Handled = true;
+            }
+            else if (_pointer == command.PointerId && command.Releases(PointerButton.Primary))
+            {
+                PreviewPointer(context, command);
+                _pointer = null;
+                context.SetState(BehaviorState.Pressed, false);
+                state.Complete();
                 route.Handled = true;
             }
         });
@@ -284,11 +283,19 @@ internal sealed class SliderBehavior(SliderState state, string label, Func<bool>
         {
             if (
                 route.Command.Kind != KeyCommandKind.Down
-                || IsReadOnly()
                 || route.Command.Modifiers != KeyModifiers.None
             )
                 return;
-            var initial = state.Begin();
+            if (route.Command.Key == Key.Escape)
+            {
+                if (_pointer is not { } pointer)
+                    return;
+                context.CompositionInput().CancelPointerCapture(pointer);
+                route.Handled = true;
+                return;
+            }
+            if (IsReadOnly())
+                return;
             var delta = route.Command.Key switch
             {
                 Key.Left or Key.Down => -state.Options.Increment,
@@ -303,14 +310,11 @@ internal sealed class SliderBehavior(SliderState state, string label, Func<bool>
                 state.Preview(state.Options.Minimum);
             else if (route.Command.Key == Key.End)
                 state.Preview(state.Options.Maximum);
-            else if (route.Command.Key == Key.Escape)
-                state.Cancel(initial);
             else if (delta != 0)
                 state.Preview(state.Draft + delta);
             else
                 return;
-            if (route.Command.Key != Key.Escape)
-                state.Complete();
+            state.Complete();
             route.Handled = true;
         });
     }
