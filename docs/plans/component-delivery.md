@@ -135,7 +135,46 @@ the chevron toggles without a focus-change race. Recoverable suggestion failures
 offer Retry suggestions and preserve the caller's applied selection.
 
 Integrated Core 459/459, Windows 124/124 and gallery 13/13 pass. Native hit-test
-and focus regressions failed before their fixes. The current Computer Use retest
-is pending permission after interruption; no manual completion is claimed.
+and focus regressions failed before their fixes. Computer Use resumed on the
+NativeAOT candidate at `4705924`. Stationary tooltip hover retained the same
+surface identity across four samples; moving into its visible body kept it open,
+and leaving both body and trigger dismissed it. June and July weekday headers
+visually aligned with their date columns. Select matched its trigger width,
+followed owner scrolling, closed when the trigger was fully clipped, and reopened
+after scrolling back. ComboBox accepted filtered queries, reopened after pointer
+selection, and accepted mouse selection/deletion that refreshed all suggestions.
+
+The retest caught two further defects before closure: the applied ComboBox status
+updated while its editor retained the shorter query, and an open Select became
+offset after restoring a maximized owner. The caption failure was a shared reactive
+graph defect: an effect that wrote and reread a derived input cleared its queued
+retry but retained a potential-change flag, suppressing the next notification.
+Acknowledging the final collected versions now clears that flag. A minimal graph
+regression and the complete pointer-selection/first-edit regression failed before
+the correction; all 461 Core contracts pass after it. The `cc48a77` native build
+passed immediate full captions, first-edit continuity, Beta/Alpha/Gamma selection,
+chevron reopening and mouse selection/deletion with refreshed suggestions.
+
+Owner native transitions request one final placement correction after the owner
+scene is installed. The final `11bd2a8` correction also sets popup size before
+position in both reanchoring and content resize. SDL had constrained the requested
+position using the previous, wider size. A native regression failed with the old
+order (relative X -632 versus expected 284) and passed with size first; the complete
+Windows suite passed 125/125. Core 461/461 and gallery 13/13 results are reused
+because this last change affects only native popup geometry. Final Computer Use
+then verified maximize/open/restore at the correct width and anchor, followed by
+successful pointer selection. The app closed normally and UI testing is paused.
+
+The verified NativeAOT build is
+`artifacts/component-input-278-verified/browser/Lucent.ComponentBrowser.exe`,
+source `11bd2a8c66dd4eae221458b93e40caeccf634a5f`, SHA-256
+`1988530D6D2E63883D1D2B12958FF16E1F74612964A40838D5AA67B685738F46`.
+Its source manifest is beside the browser directory. Native publication,
+architecture and changed-file formatting checks passed.
+
+The generic Error toggle does not currently
+inject a failure into the gallery's ComboBox provider, so suggestion retry remains
+Core contract evidence rather than a fresh manual pass. Arrow injection retains
+the Computer Use limitation recorded above.
 Independent review findings are ordered in #279–286 and the handoff, with source
 inspection distinguished from a reproduced failure.
