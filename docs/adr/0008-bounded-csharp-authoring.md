@@ -47,6 +47,14 @@ conversions are direct rather than chained through another user conversion.
 The target receives the last fixed value or live reader for each metadata field;
 replacing one form clears the previous form.
 
+The package consumer exposed a required public custom-behavior seam:
+`BehaviorContext.BindSemantics(Func<SemanticDeclaration>)`. Like `SetSemantics`,
+it is registered during attachment by the semantic-owning behavior. Its reader
+is reactive and owned by that behavior's scope, so disposal releases it. Raw
+effect registration and semantic mutation remain internal. This exposes the
+existing owned update mechanism; persistent author/base metadata merging still
+belongs to #270.
+
 The wrapper converts directly to both `ComponentRecipe` and `ContentRecipe`.
 The immutable `.Aria` group also supports both terminal conversions, while
 `.End` returns the original capability-bearing wrapper. Naming and deferred

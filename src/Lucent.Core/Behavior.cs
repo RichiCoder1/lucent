@@ -739,6 +739,7 @@ public sealed class BehaviorContext
     private readonly Dictionary<BehaviorState, bool> _state = [];
     private bool _attaching = true;
     private SemanticDeclaration? _semantic;
+    private bool _semanticBinding;
     private Func<SemanticCommand, bool>? _semanticCommand;
     private Action<bool>? _selectionChanged;
     private readonly Action _stateChanged;
@@ -864,7 +865,46 @@ public sealed class BehaviorContext
         CheckAttachment();
         if (!Behavior.Ownership.HasFlag(BehaviorOwnership.Semantics))
             throw new InvalidOperationException("Only semantic ownership can declare semantics.");
+        if (_semanticBinding)
+            throw new InvalidOperationException(
+                "A live semantic binding already owns this behavior's declaration."
+            );
         _semantic = semantics ?? throw new ArgumentNullException(nameof(semantics));
+    }
+
+    /// <summary>Binds the element semantics to one live declaration reader.</summary>
+    /// <remarks>
+    /// The reader establishes the initial declaration synchronously; a behavior-scope-owned
+    /// reactive effect keeps it current. Only a semantic-owning behavior may establish the binding.
+    /// </remarks>
+    public void BindSemantics(Func<SemanticDeclaration> read)
+    {
+        CheckAttachment();
+        if (!Behavior.Ownership.HasFlag(BehaviorOwnership.Semantics))
+            throw new InvalidOperationException("Only semantic ownership can bind semantics.");
+        if (_semantic is not null || _semanticBinding)
+            throw new InvalidOperationException(
+                "A behavior can establish only one semantic declaration or binding."
+            );
+        ArgumentNullException.ThrowIfNull(read);
+
+        SetSemantics(
+            read()
+                ?? throw new InvalidOperationException(
+                    "A semantic binding reader must return a declaration."
+                )
+        );
+        _semanticBinding = true;
+        _ = Effect(
+            () =>
+                UpdateSemantics(
+                    read()
+                        ?? throw new InvalidOperationException(
+                            "A semantic binding reader must return a declaration."
+                        )
+                ),
+            "semantic-binding"
+        );
     }
 
     /// <summary>Registers one portable semantic command handler. Its commands must be declared by this behavior's semantics.</summary>

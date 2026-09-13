@@ -61,11 +61,7 @@ internal static class AuthoringRecipeProof
                     values.NameReader?.Invoke() ?? values.Name ?? "Unnamed proof",
                     description: values.DescriptionReader?.Invoke() ?? values.Description
                 );
-            context.SetSemantics(Declaration());
-            context.Effect(
-                () => context.UpdateSemantics(Declaration()),
-                "authoring-proof-semantics"
-            );
+            context.BindSemantics(Declaration);
         }
     }
 }

@@ -37,11 +37,7 @@ public static partial class Components
                     values.NameReader?.Invoke() ?? values.Name ?? "Unnamed authoring proof",
                     description: values.DescriptionReader?.Invoke() ?? values.Description
                 );
-            context.SetSemantics(Declaration());
-            context.Effect(
-                () => context.UpdateSemantics(Declaration()),
-                "authoring-core-proof-semantics"
-            );
+            context.BindSemantics(Declaration);
         }
     }
 }

@@ -37,8 +37,7 @@ public static class ProofLibrary
                     values.NameReader?.Invoke() ?? values.Name ?? "Default proof",
                     description: values.DescriptionReader?.Invoke() ?? values.Description
                 );
-            context.SetSemantics(Declaration());
-            context.Effect(() => context.UpdateSemantics(Declaration()), "proof-semantics");
+            context.BindSemantics(Declaration);
         }
     }
 }
