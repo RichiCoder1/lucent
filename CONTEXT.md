@@ -61,8 +61,24 @@ The authored structure and ownership of elements and supplied content. Compositi
 _Avoid_: Template expansion, render tree, layout
 
 **Component recipe**:
-A reusable typed C# capability returned by a `[LucentComponent]` method. Each mount creates and owns exactly one stable retained root; the value is not a runtime template instance, virtual node, component object, or rerender function. `.lui` components lower to the same `ComponentRecipe` interface used by handwritten C#.
+A reusable declaration that creates and owns one stable retained root for each mount. Both authoring surfaces share this model; a recipe is distinct from its mounted state.
 _Avoid_: Template, widget class, render function
+
+**Authoring capability**:
+A declared ability to style a recipe's target or supply its accessible metadata. It does not transfer ownership of interaction, state, or content to the authoring chain.
+_Avoid_: Arbitrary restyling, control subclass, behavior capability
+
+**Component context**:
+Access to state and lifetime operations owned by one component mount. It belongs to that mount rather than to an ambient application environment.
+_Avoid_: Current scope, service locator, rendering context
+
+**Author accessibility metadata**:
+An author's accessible name and description contributions, combined with the control's current semantics. The control continues to own its role, operations and applied state.
+_Avoid_: Semantic replacement, accessibility behavior, role override
+
+**Frozen drawing**:
+An immutable recording of portable painting operations. Replaying it consumes captured values rather than reading live application state.
+_Avoid_: Render callback, canvas component, chart engine
 
 **Stateful component**:
 A component that owns local writable application or interaction state for each mount. The reusable recipe is distinct from that mounted state.

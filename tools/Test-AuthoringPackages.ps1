@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $dotnet = Join-Path $root '.dotnet/dotnet.exe'
+if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $feedPath = (Resolve-Path -LiteralPath $Feed).Path
 foreach ($package in @('Lucent.Core', 'Lucent.Lui.Sdk')) {
     if (!(Test-Path -LiteralPath (Join-Path $feedPath "$package.$Version.nupkg"))) {
