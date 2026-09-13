@@ -256,6 +256,55 @@ public sealed class ComponentBrowserTests
     }
 
     [TestMethod]
+    public void DateTimeExampleDisablesEditorsAndDismissesItsOpenCalendar()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "date-time-availability");
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var browser = new ComponentBrowserState(composition.Root.Scope);
+        composition.Mount(
+            composition.Root,
+            theme,
+            Lucent.ComponentBrowser.Components.DateTimeExample(browser)
+        );
+        composition.Flush();
+        using var renderer = new SkiaSceneRenderer();
+        using var scene = SceneLayout.Project(composition, new(1280, 900, 1), renderer);
+        Assert.IsTrue(composition.Input.SetScene(scene));
+        var open = Flatten(composition.SemanticSnapshot()!)
+            .Single(node =>
+                node.Role == SemanticRole.Button
+                && node.Name.StartsWith("Open calendar", StringComparison.Ordinal)
+            );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(open.Identity, new(SemanticCommandKind.Invoke))
+        );
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+
+        browser.SetExampleState(ExampleState.Disabled);
+        composition.Flush();
+        Assert.IsNull(
+            composition.Input.ActiveSurface,
+            "Disabling the example must close its calendar."
+        );
+        var disabled = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role is SemanticRole.Button or SemanticRole.TextField)
+            .ToArray();
+        Assert.IsTrue(disabled.Length >= 5);
+        Assert.IsTrue(disabled.All(node => !node.Enabled));
+
+        browser.SetExampleState(ExampleState.Default);
+        composition.Flush();
+        var enabled = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role is SemanticRole.Button or SemanticRole.TextField)
+            .ToArray();
+        Assert.IsTrue(enabled.All(node => node.Enabled));
+        Assert.AreEqual(new DateOnly(2024, 6, 15), browser.DateValue);
+        Assert.AreEqual(new TimeOnly(9, 30), browser.TimeValue);
+    }
+
+    [TestMethod]
     public void TreeExampleKeepsExpansionAndSelectionControlled()
     {
         var graph = new ReactiveGraph();

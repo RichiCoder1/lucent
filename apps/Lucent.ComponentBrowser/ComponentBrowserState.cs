@@ -125,6 +125,18 @@ public sealed class ComponentBrowserState
         _selectedId = scope.Signal(ComponentCatalog.Items[0].Id, "component-browser.selection");
         _density = scope.Signal(BrowserDensity.Comfortable, "component-browser.density");
         _exampleState = scope.Signal(ExampleState.Default, "component-browser.example-state");
+        DateFieldOptions = new(
+            help: static () => "The example accepts dates from January 2024 through December 2025.",
+            required: true,
+            fieldId: "component-browser-date",
+            enabled: () => CurrentExampleState != ExampleState.Disabled
+        );
+        TimeFieldOptions = new(
+            help: static () => "Use the arrow keys to step by 30 minutes inside the bounded range.",
+            required: true,
+            fieldId: "component-browser-time",
+            enabled: () => CurrentExampleState != ExampleState.Disabled
+        );
         _activationCount = scope.Signal(0, "component-browser.activation-count");
         _selectedOption = scope.Signal(0, "component-browser.option");
         _checkState = scope.Signal(CheckState.Off, "component-browser.check-state");
@@ -242,18 +254,8 @@ public sealed class ComponentBrowserState
             maximum: new TimeOnly(18, 0),
             step: TimeSpan.FromMinutes(30)
         );
-    public DateTimeFieldOptions DateFieldOptions { get; } =
-        new(
-            help: static () => "The example accepts dates from January 2024 through December 2025.",
-            required: true,
-            fieldId: "component-browser-date"
-        );
-    public DateTimeFieldOptions TimeFieldOptions { get; } =
-        new(
-            help: static () => "Use the arrow keys to step by 30 minutes inside the bounded range.",
-            required: true,
-            fieldId: "component-browser-time"
-        );
+    public DateTimeFieldOptions DateFieldOptions { get; }
+    public DateTimeFieldOptions TimeFieldOptions { get; }
     public TreeViewOptions TreeOptions { get; } =
         new(selectionMode: ListBoxSelectionMode.FollowsFocus, rowHeight: 34);
     public TreeDataSource<string, TreeNode> TreeDataSource { get; }

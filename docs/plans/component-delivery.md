@@ -228,3 +228,41 @@ defines modifier and IME precedence, per-family wrapping/clamping, viewport
 paging, compact bound-aware NumberField actions, free-text confirmation and the
 explicit deferral of hold-repeat. Ordered implementation tickets #287–289 are
 linked under #286 in Project 4, with native dependencies between the tickets.
+
+### Bounded Computer Use retry
+
+The user reauthorized desktop interaction while in VR and confirmed no
+interference. The already-open Debug browser and its Core/Windows assemblies
+identified source `1d5bcfa1c8a11ab73a2d191684b6c0da3704d437`. Observed:
+
+- Tab focus displayed the tooltip; Escape dismissed it.
+- The calendar retained centered weekday columns and compact geometry. Pointer
+  selection changed June 15 to June 16; the immediate capture preceded the final
+  owner update, which was confirmed in the next observation.
+- A slider drag changed 64 to 40 and retained the centered thumb.
+- The date/time example still accepted interaction in its Disabled state because
+  the example omitted the availability readers. This is application wiring,
+  separate from the Core live-availability repair in #281.
+
+Menu keyboard routing and slider arrow stepping were inconclusive through the
+helper. The current examples cannot exercise pending dialog failure or a tooltip
+inside a dialog, and the Computer Use API has no held-button/key interleaving for
+slider cancellation. #279–283 retain their focused smoke boundary. The helper
+failed to launch the published candidate with `accessibility window-opened
+handler did not become ready`; this Debug inspection is not NativeAOT evidence.
+The browser closed normally after the bounded pass.
+
+The date/time example now supplies retained availability readers to both field
+options. Its compiled-example regression failed before the fix with the calendar
+still active, then passed dismissal, disabled editor/button semantics and
+value-preserving re-enablement. The complete Component Browser suite passes
+14/14, including 84 stock theme/density captures; the build is warning-clean.
+Logs: `artifacts/review-browser-availability-{red,green}.log`. No fresh published
+UI pass is claimed for this final application-only correction.
+
+The CI NativeAOT test-metadata failure is also repaired: the three slider
+acceptance cases are named tests over one shared helper, with the test-local enum
+removed. Exact Native suite results are Core 486/486, R3 7/7, Skia 80 passed plus
+three opt-in skips, and Windows 125/125. See
+`artifacts/test/native-enum-metadata-fix-final.log`; package publication still
+depends on a fresh successful CI run.

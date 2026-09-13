@@ -8,7 +8,11 @@ Computer Use passed stationary tooltip hover, pointer transit into the descripti
 
 The final NativeAOT browser is `artifacts/component-input-278-verified/browser/Lucent.ComponentBrowser.exe`, built from `11bd2a8c66dd4eae221458b93e40caeccf634a5f`, SHA-256 `1988530D6D2E63883D1D2B12958FF16E1F74612964A40838D5AA67B685738F46`. Its source manifest is `artifacts/component-input-278-verified/source.json`. This supersedes both earlier #278 candidates. It is a local published executable, not a claim of NuGet publication; consult CI for package status.
 
-**UI testing is paused at the user's request.** The test app is closed and the desktop has been returned for gaming. Non-interactive work may continue; ask before taking focus again. If physical Escape interrupts future Computer Use, ask to resume while continuing independent code work rather than treating it as cancellation of the whole task.
+The user subsequently authorized UI testing while in VR and confirmed that the
+foreground Component Browser did not interfere. The bounded retry below is the
+latest evidence; the test app is closed again. If physical Escape interrupts
+future Computer Use, ask to resume while continuing independent code work rather
+than treating it as cancellation of the whole task.
 
 ## Review implementation checkpoint — September 12, 2026
 
@@ -25,6 +29,40 @@ slider Escape/secondary release; and menu separator/disabled-row keyboard
 continuity. No new manual/native-focus pass is claimed. #284 and #285 are
 complete with the time-boundary and retained-field/UIA automated evidence;
 neither needs a broad new walkthrough.
+
+### Computer Use retry and CI repair
+
+Computer Use could attach to the existing Debug browser, whose Browser, Core
+and Windows assemblies identify source `1d5bcfa1c8a11ab73a2d191684b6c0da3704d437`.
+It verified keyboard-focus tooltip appearance and dismissal, calendar weekday
+alignment and June 16 selection, and a slider drag from 64 to 40. Immediate
+captures sometimes preceded settled feedback; a later capture confirmed the
+date change. Menu keyboard input and slider arrow input were inconclusive.
+The existing examples do not expose the nested tooltip/dialog or pending-failure
+scenarios, and Computer Use cannot hold a drag while issuing a separate key or
+secondary release. These observations do not close #279–283.
+
+The published NativeAOT candidate at `artifacts/review-followups/browser/` was
+not launched: the helper reported `accessibility window-opened handler did not
+become ready`. Debug observations are not substituted for published evidence.
+The retry also found that the date/time example's Disabled selector was not
+connected to either field's availability. Both fields now use retained enabled
+readers. A compiled-example regression failed on the open calendar before the
+fix, then verified dismissal, disabled editors and value-preserving recovery.
+Component Browser passes 14/14 including 84 headless theme/density captures;
+the build is warning-clean. Logs:
+`artifacts/review-browser-availability-{red,green}.log`. The final application
+wiring change has headless evidence, not a fresh published UI pass.
+
+[CI 34733774709](https://github.com/RichiCoder1/lucent/actions/runs/34733774709)
+passed managed checks but failed NativeAOT test compilation before package
+verification. MSTest generated unsupported enum reflection for a test-local
+slider enum. The repair preserves the three scenarios as named tests and removes
+that enum from the test assembly; no warning or AOT policy is weakened. The exact
+Native suite now passes: Core 486/486, R3 7/7, Skia 80 passed with three opt-in
+skips, and Windows 125/125. Log:
+`artifacts/test/native-enum-metadata-fix-final.log`. This proves the local repair,
+not a successful rerun or package publication by GitHub Actions.
 
 The independent Fable High review and primary-source control comparison are complete. The review inspected a frozen source snapshot and ran no tests or UI checks. Active-fix overlap is tracked in #278. The implemented follow-ups are:
 
