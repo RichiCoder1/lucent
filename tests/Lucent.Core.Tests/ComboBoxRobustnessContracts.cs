@@ -51,9 +51,10 @@ public sealed class ComboBoxRobustnessContracts
 
         var request = composition.Input.ActiveSurface!;
         var measured = request.Measure(new GeometryShaper(), new(600, 500, 1));
-        Assert.IsTrue(
-            measured.Width >= request.Anchor.Width,
-            $"The {measured.Width}-pixel popup was narrower than its {request.Anchor.Width}-pixel anchor."
+        Assert.AreEqual(
+            request.Anchor.Width,
+            measured.Width,
+            $"The ComboBox popup added width outside its {request.Anchor.Width}-pixel anchor."
         );
         Assert.IsTrue(
             measured.Height <= maximumHeight,

@@ -1,0 +1,13 @@
+namespace Lucent.Core;
+
+style CalendarWeekdayStyle(int column) {
+    Width: 32;
+    Height: 20;
+    GridPlacement: new GridPlacement(0, column);
+    MainAlignment: LayoutAlignment.Center;
+    CrossAlignment: LayoutAlignment.Center;
+}
+
+internal component CalendarWeekdayLabel(string label, int column) {
+    <Text content={label} style={CalendarWeekdayStyle(column)} />
+}

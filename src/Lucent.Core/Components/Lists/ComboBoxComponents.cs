@@ -86,16 +86,16 @@ public static partial class Components
                         RestoreAppliedQuery();
                     open.Value = false;
                 }
-                void Commit()
+                bool Commit()
                 {
                     if (!editorFocused)
-                        return;
+                        return false;
                     if (policy.TryGetRoving(out var key) && IsEnabled(current.Value, key))
                     {
                         onSelectionRequested(key);
                         RestoreAppliedQuery();
                         Close(restore: false);
-                        return;
+                        return true;
                     }
                     if (
                         options.SelectionPolicy == ComboBoxSelectionPolicy.AllowFreeText
@@ -104,7 +104,9 @@ public static partial class Components
                     {
                         onFreeTextRequested!(query.Value);
                         Close(restore: false);
+                        return true;
                     }
+                    return false;
                 }
 
                 var binding = new ComboBoxBinding
@@ -114,6 +116,8 @@ public static partial class Components
                     Expanded = () => open.Value,
                     Open = () => open.Value = true,
                     Close = () => Close(restore: true),
+                    Navigate = policy.Move,
+                    Commit = Commit,
                     FocusTarget = field.FocusTarget,
                 };
                 var editor = TextFieldControlledCore(
@@ -129,7 +133,7 @@ public static partial class Components
                     placeholder: field.AccessibleName,
                     enabled: null,
                     readOnly: null,
-                    committed: Commit,
+                    committed: () => Commit(),
                     cancelled: () => Close(restore: true),
                     focusChanged: focused =>
                     {
@@ -172,11 +176,6 @@ public static partial class Components
                             _ = results.IsPending;
                             if (surface is not null)
                                 return;
-                            var anchorWidth = root
-                                .Composition.Input.SurfaceAnchor(
-                                    new(root.Composition.Epoch, root.Id)
-                                )
-                                ?.Width;
                             var popup = ComboBoxPopup(
                                 field.AccessibleName,
                                 results,
@@ -185,9 +184,7 @@ public static partial class Components
                                 typeAhead,
                                 onSelectionRequested,
                                 () => Close(restore: true),
-                                options.SelectionPolicy
-                                    == ComboBoxSelectionPolicy.SelectionRequired,
-                                Math.Max(160, anchorWidth ?? 0)
+                                options.SelectionPolicy == ComboBoxSelectionPolicy.SelectionRequired
                             );
                             surface = new OwnedSurfaceRequest(
                                 root,
@@ -195,7 +192,10 @@ public static partial class Components
                                 popup,
                                 interactive: true,
                                 consumeOutsideClick: true,
-                                closed: () => Close(restore: true)
+                                closed: () => Close(restore: true),
+                                minimumWidth: 160,
+                                retainOwnerFocus: true,
+                                matchAnchorWidth: true
                             );
                             root.Composition.Input.RequestSurface(surface);
                         }
@@ -231,8 +231,7 @@ public static partial class Components
         TypeAheadController<TKey> typeAhead,
         Action<TKey> request,
         Action dismiss,
-        bool required,
-        float minimumWidth
+        bool required
     )
         where TKey : notnull
     {
@@ -250,8 +249,7 @@ public static partial class Components
                     ListBoxSelectionMode.ExplicitConfirmation,
                     DefaultChoiceRowHeight,
                     Style
-                        .Empty.MinWidth(minimumWidth)
-                        .Bind(
+                        .Empty.Bind(
                             LayoutProperties.Height,
                             () => Math.Min(240, current.Value.Length * DefaultChoiceRowHeight)
                         )
@@ -274,7 +272,10 @@ public static partial class Components
         var failed = ContentRecipe.When(
             "combo-box.failed",
             () => SuggestionState(results) == ComboBoxSuggestionState.Failed,
-            Components.Status(() => results.Value!.Failure!)
+            Components.Column([
+                Components.Status(() => results.Value!.Failure!),
+                Components.Button("Retry suggestions", results.Refresh),
+            ])
         );
         return Components.Column([loading, empty, failed, list]);
     }

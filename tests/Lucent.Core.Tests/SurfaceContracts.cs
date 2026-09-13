@@ -7,6 +7,47 @@ namespace Lucent.Core.Tests;
 public sealed class SurfaceContracts
 {
     [TestMethod]
+    public void SurfaceAnchorRequiresPositiveIntersectionWithEveryAncestorClip()
+    {
+        var anchor = new LayoutRect(20, 120, 80, 32);
+        var viewport = new LayoutRect(0, 0, 200, 100);
+        Assert.IsNull(
+            InputRouter.Intersect(anchor, viewport),
+            "A fully scrolled-out trigger retained a surface anchor."
+        );
+
+        var partiallyVisible = anchor with { Y = 84 };
+        Assert.AreEqual(
+            new LayoutRect(20, 84, 80, 16),
+            InputRouter.Intersect(partiallyVisible, viewport),
+            "A partially visible trigger lost its positive clipped intersection."
+        );
+    }
+
+    [TestMethod]
+    public void DismissalDoesNotCallBackIntoAnUnmountedSurfaceOwner()
+    {
+        using var owner = new Composition(new ReactiveGraph(), "unmounted-surface-owner");
+        using var theme = new ThemeContext(owner.Root.Scope, ControlThemes.Light);
+        var target = owner.Child(owner.Root, "surface-target");
+        target.Present(theme);
+        var callbacks = 0;
+        using var request = new OwnedSurfaceRequest(
+            target,
+            theme,
+            Components.Text("Popup"),
+            interactive: true,
+            consumeOutsideClick: true,
+            closed: () => callbacks++
+        );
+
+        target.Dispose();
+        request.Dismiss();
+
+        Assert.AreEqual(0, callbacks, "Dismissal called a released component owner.");
+    }
+
+    [TestMethod]
     public void ModalQueueSkipsCanceledRequestsAndOwnerDisposalClosesRemainingRequests()
     {
         using var owner = new Composition(new ReactiveGraph(), "modal-queue");

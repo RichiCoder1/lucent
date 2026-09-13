@@ -75,6 +75,32 @@ public sealed class DateTimeEditingContracts
             dayBounds.All(bounds => bounds.Width == 32 && bounds.Height == 32),
             "Calendar days must use uniform compact cells."
         );
+
+        var weekdayNames = Enumerable
+            .Range(0, 7)
+            .Select(index =>
+                CultureInfo.GetCultureInfo("en-US").DateTimeFormat.AbbreviatedDayNames[index]
+            )
+            .ToArray();
+        var weekdayText = SceneNodes(popupScene.Nodes)
+            .OfType<TextSceneNode>()
+            .Where(node =>
+                node.Text.SourceText is { } text
+                && weekdayNames.Contains(text, StringComparer.Ordinal)
+            )
+            .ToDictionary(node => node.Text.SourceText!, StringComparer.Ordinal);
+        Assert.HasCount(7, weekdayText);
+        for (var column = 0; column < 7; column++)
+        {
+            var header = weekdayText[weekdayNames[column]];
+            var day = dayBounds[column];
+            Assert.AreEqual(
+                day.X + day.Width / 2,
+                header.Bounds.X + header.Text.Width / 2,
+                .001f,
+                $"The {weekdayNames[column]} header was not centered over calendar column {column}."
+            );
+        }
     }
 
     [TestMethod]
@@ -467,6 +493,23 @@ public sealed class DateTimeEditingContracts
         foreach (var child in node.Children)
         foreach (var descendant in Nodes(child))
             yield return descendant;
+    }
+
+    private static IEnumerable<SceneNode> SceneNodes(IEnumerable<SceneNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            var children = node switch
+            {
+                ClipSceneNode clip => clip.Children,
+                OpacitySceneNode opacity => opacity.Children,
+                _ => null,
+            };
+            if (children is not null)
+                foreach (var child in SceneNodes(children))
+                    yield return child;
+        }
     }
 
     private sealed class DateShaper : ITextShaper

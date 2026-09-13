@@ -118,3 +118,24 @@ reader, real-language IME or fresh physical mixed-DPI behavior.
 
 See the [handoff](../agents/remaining-work-handoff.md) for the current build and
 follow-up state.
+
+### Additional interaction reports (#278)
+
+The later user recordings exposed paths not caught in that walkthrough. Calendar
+weekday labels now center over the same date grid tracks. Tooltip shadows pass
+through native hit testing without making the visible description unhoverable.
+Select and ComboBox measure the visible popup, including its content padding,
+against the live anchor width; owner scene changes reanchor it and unavailable
+anchors close their live controller state. An intentional 160px minimum and
+intrinsic content can still make a popup wider than a very narrow anchor.
+
+ComboBox suggestions preserve native editor focus, keyboard/text/IME routing and
+pointer selection inside the anchor. Core owns suggestion navigation and commit;
+the chevron toggles without a focus-change race. Recoverable suggestion failures
+offer Retry suggestions and preserve the caller's applied selection.
+
+Integrated Core 459/459, Windows 124/124 and gallery 13/13 pass. Native hit-test
+and focus regressions failed before their fixes. The current Computer Use retest
+is pending permission after interruption; no manual completion is claimed.
+Independent review findings are ordered in #279–286 and the handoff, with source
+inspection distinguished from a reproduced failure.

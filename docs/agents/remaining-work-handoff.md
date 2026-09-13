@@ -1,5 +1,24 @@
 # Current work and follow-ups
 
+## Active interaction repairs — September 12, 2026
+
+[#278](https://github.com/RichiCoder1/lucent/issues/278) follows the user's additional recordings after the earlier walkthrough: calendar weekday centering, tooltip shadow hover interception, popup outer width and scrolling anchors, and ComboBox editing/reopening. Its implementation keeps suggestion-window focus on the editor, preserves clicks within the editor anchor, and separates popup content width from its padding. Core 459/459, Windows 124/124 and Component Browser 13/13 pass, including the gallery's 84 theme/density captures. Architecture and changed-file formatting checks pass. Logs are `artifacts/component-input-*.log`.
+
+The fresh Computer Use recheck is pending after a physical Escape interruption. Ask to resume UI input while continuing independent code work; do not treat an interruption as cancellation of the whole task. Do not close #278 or claim the original hover/scroll/editing recordings fixed by manual observation until that recheck is performed. The earlier walkthrough below is historical evidence, not a pass for these changes.
+
+The independent Fable High review and primary-source control comparison are complete. The review inspected a frozen source snapshot and ran no tests or UI checks. Active-fix overlap is tracked in #278; independent follow-ups are ordered below and require focused reproductions before implementation:
+
+1. [#279](https://github.com/RichiCoder1/lucent/issues/279): closed-tooltip Escape routing.
+2. [#280](https://github.com/RichiCoder1/lucent/issues/280): pending dialog acceptance, host dismissal and recovery.
+3. [#281](https://github.com/RichiCoder1/lucent/issues/281): calendar availability changing while open.
+4. [#282](https://github.com/RichiCoder1/lucent/issues/282): slider cancellation and pointer-button ownership.
+5. [#283](https://github.com/RichiCoder1/lucent/issues/283): menu keyboard navigation after separator hover.
+6. [#284](https://github.com/RichiCoder1/lucent/issues/284): TimePicker stepping at the end of the day.
+7. [#285](https://github.com/RichiCoder1/lucent/issues/285): dynamic field help and first-invalid order.
+8. [#286](https://github.com/RichiCoder1/lucent/issues/286): planned desktop key/paging and numeric-stepper parity; distinguish design decisions from defects.
+
+The local comparison, review and snapshot provenance are under `artifacts/reviews/control-behavior-20260912-194108/`. Public tickets contain bounded reproductions and acceptance criteria, not the full local review snapshot. Resolve the correctness follow-ups before beginning the next authoring phase.
+
 ## Published checkpoint — September 12, 2026
 
 The component program #155–171 is delivered, closed and Done in Project 4. [Final delivery evidence](https://github.com/RichiCoder1/lucent/issues/171#issuecomment-5649183562) records the source boundaries and verification limits.

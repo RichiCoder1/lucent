@@ -45,6 +45,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
     private readonly WindowsInputAdapter _input;
     private readonly WindowsUiaProvider _uiaProvider;
     private readonly WindowsUiaListener _uiaListener;
+    private readonly WindowsPopupInputRegion? _inputRegion;
     private readonly Action _wakePresentation;
     private nint _window;
     private nint _sdlRenderer;
@@ -139,6 +140,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
         WindowsInputAdapter? input = null;
         WindowsUiaProvider? provider = null;
         WindowsUiaListener? listener = null;
+        WindowsPopupInputRegion? inputRegion = null;
         try
         {
             var placement = CalculatePlacement();
@@ -163,7 +165,9 @@ internal sealed partial class WindowsPopupHost : IDisposable
                     placement.OffsetY,
                     width,
                     height,
-                    request.IsInteractive ? PopupFlags : PopupFlags | SDL.WindowFlags.NotFocusable
+                    request.IsInteractive && !request.RetainsOwnerFocus
+                        ? PopupFlags
+                        : PopupFlags | SDL.WindowFlags.NotFocusable
                 );
             if (window == 0)
                 throw new InvalidOperationException($"SDL_CreatePopupWindow: {SDL.GetError()}");
@@ -189,6 +193,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
             if (!SDL.SetRenderVSync(renderer, WindowsPresentationContract.VsyncInterval))
                 throw new InvalidOperationException($"SDL_SetRenderVSync popup: {SDL.GetError()}");
             var hwnd = Hwnd(window);
+            if (!request.IsInteractive)
+                inputRegion = new WindowsPopupInputRegion(hwnd);
             provider = new WindowsUiaProvider(
                 hwnd,
                 _composition,
@@ -204,6 +210,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _input = input;
             _uiaProvider = provider;
             _uiaListener = listener;
+            _inputRegion = inputRegion;
             // UIA virtualization requests are dispatched onto this SDL owner thread. Refresh
             // projects the retained composition before the adapter retries its snapshot lookup.
             _uiaProvider.SetRealizationRefresh(Refresh);
@@ -211,6 +218,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             Refresh();
             if (
                 request.IsInteractive
+                && !request.RetainsOwnerFocus
                 && !request.FocusInitial()
                 && request.AllowInitialFocusFallback
                 && (level is null || level.Depth == 0 || level.FocusFirst)
@@ -237,6 +245,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             if (renderer != 0)
                 Capture(cleanup, () => SDL.DestroyRenderer(renderer));
             Capture(cleanup, () => listener?.Dispose());
+            Capture(cleanup, () => inputRegion?.Dispose());
             Capture(cleanup, () => provider?.SetRealizationRefresh(null));
             Capture(cleanup, () => provider?.Dispose());
             if (window != 0)
@@ -298,6 +307,8 @@ internal sealed partial class WindowsPopupHost : IDisposable
     {
         CheckThread();
         if (_disposed || !TargetsPopup(@event, WindowId, _ownerWindowId))
+            return false;
+        if (_request.RetainsOwnerFocus && EventWindowId(@event) == _ownerWindowId)
             return false;
         var type = (SDL.EventType)@event.Type;
         if (_request is OwnedSurfaceRequest surface && EventWindowId(@event) == WindowId)
@@ -430,6 +441,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _menuBounds = scene.Boxes.Single(box => box.Identity.ElementId == menuRoot.Id).Bounds;
             _cornerRadius = menuRoot.Resolve(VisualProperties.CornerRadius).Value;
             _scale = viewport.Scale;
+            _inputRegion?.Update(_menuBounds, _scale);
             _ = _presenter.Present(
                 scene,
                 viewport,
@@ -445,11 +457,14 @@ internal sealed partial class WindowsPopupHost : IDisposable
             );
             _caretBlink.Presented((long)now.TotalMilliseconds);
             _ = _composition.TryAcknowledgePresentation(scene.Generation);
-            _ = _cursor.Activate(
-                _input.PointerPosition is { } point
-                    ? _composition.Input.CursorAt(point.X, point.Y)
-                    : CursorIntent.Default
-            );
+            // A popup can repaint while the pointer is still over its owner.
+            // Only the window under the mouse may change SDL's shared cursor.
+            if (SDL.GetMouseFocus() == _window)
+                _ = _cursor.Activate(
+                    _input.PointerPosition is { } point
+                        ? _composition.Input.CursorAt(point.X, point.Y)
+                        : CursorIntent.Default
+                );
         }
         catch (Exception error)
         {
@@ -577,6 +592,7 @@ internal sealed partial class WindowsPopupHost : IDisposable
             _sdlRenderer = 0;
         }
         Capture(errors, _uiaListener.Dispose);
+        Capture(errors, () => _inputRegion?.Dispose());
         Capture(errors, () => _uiaProvider.SetRealizationRefresh(null));
         Capture(errors, _uiaProvider.Dispose);
         if (_window != 0)

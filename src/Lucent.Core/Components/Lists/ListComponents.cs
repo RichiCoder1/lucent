@@ -212,11 +212,6 @@ public static partial class Components
                         {
                             if (surface is not null)
                                 return;
-                            var anchorWidth = root
-                                .Composition.Input.SurfaceAnchor(
-                                    new(root.Composition.Epoch, root.Id)
-                                )
-                                ?.Width;
                             var popup = ComponentRecipe.Create(
                                 "select-popup",
                                 (popupContext, popupRoot) =>
@@ -232,8 +227,7 @@ public static partial class Components
                                         ListBoxSelectionMode.ExplicitConfirmation,
                                         rowHeight,
                                         Style
-                                            .Empty.MinWidth(Math.Max(160, anchorWidth ?? 0))
-                                            .Bind(
+                                            .Empty.Bind(
                                                 LayoutProperties.Height,
                                                 () =>
                                                     Math.Min(240, current.Value.Length * rowHeight)
@@ -251,7 +245,9 @@ public static partial class Components
                                 popup,
                                 interactive: true,
                                 consumeOutsideClick: true,
-                                closed: Close
+                                closed: Close,
+                                minimumWidth: 160,
+                                matchAnchorWidth: true
                             );
                             root.Composition.Input.RequestSurface(surface);
                         }

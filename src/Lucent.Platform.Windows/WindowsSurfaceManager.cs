@@ -25,6 +25,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
     private bool _disposed;
     private ElementIdentity? _returnFocus;
     private bool _ownsReturnFocus;
+    private LayoutRect? _hostAnchor;
     internal Action<SKCanvas> OwnerOverlay { get; }
 
     internal WindowsSurfaceManager(
@@ -91,6 +92,15 @@ internal sealed class WindowsSurfaceManager : IDisposable
             {
                 if (_request!.IsModal)
                     return true;
+                var scale = WindowsCoordinateScale.ForWindow(_window);
+                if (
+                    KeepsAnchorInput(
+                        _request,
+                        scale.WindowToLogical(value.Button.X),
+                        scale.WindowToLogical(value.Button.Y)
+                    )
+                )
+                    return false;
                 var consume = _request!.ConsumeOutsideClick;
                 Dismiss();
                 return consume;
@@ -150,6 +160,11 @@ internal sealed class WindowsSurfaceManager : IDisposable
         return handled;
     }
 
+    internal static bool KeepsAnchorInput(PopupSurfaceRequest request, float x, float y) =>
+        request.RetainsOwnerFocus
+        && request.HasAnchor
+        && WindowsPopupHost.ContainsMenuPoint(request.Anchor, x, y);
+
     internal void Synchronize()
     {
         _menu?.ResolveFocus();
@@ -159,13 +174,17 @@ internal sealed class WindowsSurfaceManager : IDisposable
             _menu = null;
         }
         if (_host?.IsDismissed == true)
+        {
+            _request?.Dismiss();
             CloseHost();
+        }
         if (_pending is { } pending)
         {
             if (pending.IsDismissed)
             {
                 var revision = pending.CaptureSharedMutationRevision();
                 _pending = null;
+                pending.Dismiss();
                 pending.Dispose();
                 _ownerInput.CompleteSurface(pending);
                 InvalidateOwnerIfChanged(pending, revision);
@@ -180,6 +199,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
                     if (pending.IsModal)
                         _interactionSuspension = pending.Owner.SuspendInteraction();
                     _host = new(_window, pending, _dispatcher, _clipboard, _cursor, _wake);
+                    _hostAnchor = pending.Anchor;
                     _host.Composition.Input.ContextMenuRequested += RequestMenu;
                     _children = new(
                         _host.Composition,
@@ -253,6 +273,29 @@ internal sealed class WindowsSurfaceManager : IDisposable
         _menu?.Refresh();
     }
 
+    /// <summary>Reanchors retained surfaces after their owner installs a new logical scene.</summary>
+    internal void OwnerProjected()
+    {
+        if (_host is not null && _request is { } request)
+        {
+            if (!request.HasAnchor)
+            {
+                Dismiss();
+                return;
+            }
+            var anchor = request.Anchor;
+            if (AnchorChanged(_hostAnchor, anchor))
+            {
+                _hostAnchor = anchor;
+                _host.Reposition();
+            }
+        }
+        _children?.OwnerProjected();
+    }
+
+    internal static bool AnchorChanged(LayoutRect? previous, LayoutRect current) =>
+        previous is null || previous.Value != current;
+
     internal void Dismiss()
     {
         _pending?.Dismiss();
@@ -290,6 +333,7 @@ internal sealed class WindowsSurfaceManager : IDisposable
         var request = _request;
         var revision = request?.CaptureSharedMutationRevision();
         _request = null;
+        _hostAnchor = null;
         Capture(errors, () => _children?.Dispose());
         _children = null;
         Capture(errors, () => _pendingMenu?.Dispose());

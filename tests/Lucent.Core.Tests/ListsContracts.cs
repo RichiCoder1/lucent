@@ -200,9 +200,10 @@ public sealed class ListsContracts
 
         var request = composition.Input.ActiveSurface!;
         var measured = request.Measure(new MetricShaper(), new(1200, 800, 1));
-        Assert.IsTrue(
-            measured.Width >= request.Anchor.Width,
-            $"The {measured.Width}-pixel Select popup was narrower than its {request.Anchor.Width}-pixel anchor."
+        Assert.AreEqual(
+            request.Anchor.Width,
+            measured.Width,
+            $"The Select popup added width outside its {request.Anchor.Width}-pixel anchor."
         );
         Assert.IsTrue(
             measured.Height <= maximumHeight,
@@ -228,6 +229,107 @@ public sealed class ListsContracts
                 "Short Select choices wrapped or overflowed in an anchor-width popup."
             );
         }
+    }
+
+    [TestMethod]
+    public void DisabledSelectDismissalClearsControlledOpenStateAndCanReopen()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "select-disabled-surface");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var enabled = graph.Signal(true, "select-enabled");
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Select(
+                "Behavior",
+                () => new[] { new ChoiceItem<string>("pointer", "Pointer behavior") },
+                () => SelectedKey.None<string>(),
+                _ => { },
+                style: Style.Empty.Width(320).Bind(InputProperties.Enabled, () => enabled.Value)
+            )
+        );
+        graph.Drain();
+        using var initialScene = Install(composition, graph, 400, 100);
+        var select = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ComboBox);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(select.Identity, new(SemanticCommandKind.Expand))
+        );
+        graph.Drain();
+        var first = composition.Input.ActiveSurface!;
+
+        enabled.Value = false;
+        graph.Drain();
+        using var disabledScene = Install(composition, graph, 400, 100);
+        Assert.IsTrue(first.IsDismissed, "The disabled anchor retained an active surface.");
+        first.Dismiss();
+        graph.Drain();
+        Assert.IsFalse(
+            Nodes(composition.SemanticSnapshot()!)
+                .Single(node => node.Role == SemanticRole.ComboBox)
+                .Expanded,
+            "Host dismissal left the Select controller expanded."
+        );
+
+        enabled.Value = true;
+        graph.Drain();
+        using var enabledScene = Install(composition, graph, 400, 100);
+        select = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ComboBox);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(select.Identity, new(SemanticCommandKind.Expand))
+        );
+        graph.Drain();
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+        Assert.AreNotSame(first, composition.Input.ActiveSurface);
+    }
+
+    [TestMethod]
+    public void OpenSelectPopupTracksLiveAnchorWidthAcrossOwnerResize()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "select-live-anchor-width");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var width = graph.Signal(320f, "select-width");
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Select(
+                "Behavior",
+                () => new[] { new ChoiceItem<string>("pointer", "Pointer behavior") },
+                () => SelectedKey.None<string>(),
+                _ => { },
+                style: Style.Empty.Bind(LayoutProperties.Width, () => width.Value)
+            )
+        );
+        graph.Drain();
+        var scene = Install(composition, graph, 400, 100);
+        var select = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.ComboBox);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(select.Identity, new(SemanticCommandKind.Expand))
+        );
+        graph.Drain();
+        var request = composition.Input.ActiveSurface!;
+        Assert.AreEqual(320f, request.Measure(new MetricShaper(), new(600, 400, 1)).Width);
+
+        width.Value = 240;
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 400, 100);
+        Assert.AreEqual(240f, request.Anchor.Width);
+        Assert.AreEqual(
+            240f,
+            request.Measure(new MetricShaper(), new(600, 400, 1)).Width,
+            "The retained Select popup kept its opening width after the anchor resized."
+        );
+        GC.KeepAlive(scene);
     }
 
     [TestMethod]

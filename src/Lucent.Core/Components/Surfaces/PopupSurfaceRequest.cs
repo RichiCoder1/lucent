@@ -34,6 +34,10 @@ public abstract class PopupSurfaceRequest : IDisposable
     /// <summary>Whether this surface accepts focus and interactive input.</summary>
     public virtual bool IsInteractive => true;
 
+    /// <summary>Whether the owner's current focus remains authoritative while this surface is shown.</summary>
+    /// <remarks>Suggestion hosts keep native focus and keyboard/text input on the owner, skip popup initial focus, and preserve pointer input inside the anchor. The owning control routes suggestion navigation explicitly.</remarks>
+    public virtual bool RetainsOwnerFocus => false;
+
     /// <summary>Whether an outside dismissal gesture is consumed rather than delivered to the owner.</summary>
     public virtual bool ConsumeOutsideClick => true;
 

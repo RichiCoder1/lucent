@@ -23,11 +23,34 @@ public sealed partial class InputRouter
     /// <summary>Raised when a surface becomes active; hosts defer construction until input and reactive work settle.</summary>
     public event Action<PopupSurfaceRequest>? SurfaceRequested;
 
-    internal LayoutRect? SurfaceAnchor(ElementIdentity identity) =>
-        identity.CompositionEpoch == _composition.Epoch
-        && _input.TryGetValue(identity.ElementId, out var input)
-            ? input.Bounds
+    internal LayoutRect? SurfaceAnchor(ElementIdentity identity)
+    {
+        if (
+            identity.CompositionEpoch != _composition.Epoch
+            || !_input.TryGetValue(identity.ElementId, out var input)
+        )
+            return null;
+        var visible = input.Bounds;
+        if (_effectiveClips.TryGetValue(identity.ElementId, out var clips))
+            foreach (var clip in clips)
+            {
+                if (Intersect(visible, clip.Bounds) is not { } intersection)
+                    return null;
+                visible = intersection;
+            }
+        return input.Bounds;
+    }
+
+    internal static LayoutRect? Intersect(LayoutRect first, LayoutRect second)
+    {
+        var left = Math.Max(first.X, second.X);
+        var top = Math.Max(first.Y, second.Y);
+        var right = Math.Min(first.X + first.Width, second.X + second.Width);
+        var bottom = Math.Min(first.Y + first.Height, second.Y + second.Height);
+        return right > left && bottom > top
+            ? new LayoutRect(left, top, right - left, bottom - top)
             : null;
+    }
 
     internal void RequestSurface(PopupSurfaceRequest request)
     {

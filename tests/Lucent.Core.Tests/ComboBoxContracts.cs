@@ -123,6 +123,7 @@ public sealed class ComboBoxContracts
             new(7, "Persisted choice"),
             "selected"
         );
+        var attempts = 0;
         composition.Mount(
             composition.Root,
             theme,
@@ -135,7 +136,13 @@ public sealed class ComboBoxContracts
                         _ => { },
                         (_, _) =>
                             ValueTask.FromResult(
-                                ComboBoxSuggestionResult.Failed<int>("Suggestions unavailable")
+                                ++attempts == 1
+                                    ? ComboBoxSuggestionResult.Failed<int>(
+                                        "Suggestions unavailable"
+                                    )
+                                    : ComboBoxSuggestionResult.Success<int>([
+                                        new(8, "Recovered choice"),
+                                    ])
                             ),
                         new ComboBoxOptions(debounce: TimeSpan.Zero)
                     )
@@ -154,6 +161,25 @@ public sealed class ComboBoxContracts
             Nodes(popup.SemanticSnapshot()!).Count(node => node.Role == SemanticRole.ListItem)
         );
         Assert.AreEqual("Persisted choice", Combo(composition).Value);
+        using var failedScene = Install(popup, graph, 320, 200);
+        var retry = Nodes(popup.SemanticSnapshot()!)
+            .SingleOrDefault(node =>
+                node.Role == SemanticRole.Button && node.Name == "Retry suggestions"
+            );
+        Assert.IsNotNull(retry, "A recoverable suggestion failure provided no retry action.");
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            popup.ExecuteSemanticCommand(retry.Identity, new(SemanticCommandKind.Invoke))
+        );
+        graph.Drain();
+        Assert.AreEqual(2, attempts);
+        using var recoveredScene = Install(popup, graph, 320, 200);
+        Assert.AreEqual("Recovered choice", Option(popup).Name);
+        Assert.AreEqual(
+            "Persisted choice",
+            Combo(composition).Value,
+            "Retry replaced the caller's applied selection."
+        );
         GC.KeepAlive(scene);
     }
 
@@ -213,6 +239,202 @@ public sealed class ComboBoxContracts
         Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Handled);
         Assert.AreEqual("draft候", freeText.Single());
         GC.KeepAlive(scene);
+    }
+
+    [TestMethod]
+    public void ExpandedComboBoxKeepsOwnerEditorFocusedForEditingAndArrowCommit()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "combo-owner-input");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var choices = new[]
+        {
+            new ChoiceItem<string>("alpha", "Alpha"),
+            new ChoiceItem<string>("beta", "Beta"),
+            new ChoiceItem<string>("gamma", "Gamma"),
+        };
+        var selected = graph.Signal<ComboBoxSelectedItem<string>?>(
+            new("beta", "Beta"),
+            "combo.selected"
+        );
+        var queries = new List<string>();
+        var requests = new List<string>();
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "Workspace",
+                field =>
+                    Components.ComboBox(
+                        field,
+                        () => selected.Value,
+                        key =>
+                        {
+                            requests.Add(key);
+                            var choice = choices.Single(item => item.Key == key);
+                            selected.Value = new(choice.Key, choice.Label);
+                        },
+                        (query, _) =>
+                        {
+                            queries.Add(query);
+                            return ValueTask.FromResult(
+                                ComboBoxSuggestionResult.Success<string>(choices)
+                            );
+                        },
+                        new ComboBoxOptions(debounce: TimeSpan.Zero)
+                    )
+            )
+        );
+        graph.Drain();
+        var scene = Install(composition, graph, 320, 120);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 320, 120);
+
+        var editor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        var ownerFocus = composition.Input.FocusedElement;
+        Assert.IsTrue(ownerFocus is { } focus && focus.ElementId == editor.Identity.ElementId);
+        Assert.IsTrue(composition.Input.ActiveSurface is { RetainsOwnerFocus: true });
+
+        var deletion = composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Backspace));
+        Assert.IsTrue(deletion.Handled, "The focused ComboBox editor did not handle deletion.");
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 320, 120);
+        Assert.AreEqual(
+            "Bet",
+            Nodes(composition.SemanticSnapshot()!)
+                .Single(node => node.Role == SemanticRole.TextField)
+                .Value
+        );
+        Assert.IsTrue(queries.Contains("Bet"), "The edited query did not reach suggestions.");
+
+        var down = composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Down));
+        Assert.IsTrue(
+            down.Handled,
+            "Down while the ComboBox is expanded should navigate its suggestions from the owner editor."
+        );
+        Assert.IsTrue(ownerFocus == composition.Input.FocusedElement);
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 320, 120);
+
+        var up = composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Up));
+        Assert.IsTrue(up.Handled);
+        Assert.IsTrue(ownerFocus == composition.Input.FocusedElement);
+        graph.Drain();
+        scene.Dispose();
+        scene = Install(composition, graph, 320, 120);
+
+        var enter = composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Enter));
+        Assert.IsTrue(enter.Handled);
+        graph.Drain();
+        Assert.AreEqual("beta", requests.Last());
+        Assert.AreEqual("Beta", Combo(composition).Value);
+        Assert.IsNull(composition.Input.ActiveSurface);
+        scene.Dispose();
+    }
+
+    [TestMethod]
+    public void ComboBoxChevronTogglesSuggestionsWithoutMovingOwnerEditorFocus()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "combo-chevron");
+        ConfigureImages(composition);
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var selected = graph.Signal<ComboBoxSelectedItem<string>?>(
+            new("beta", "Beta"),
+            "combo.selected"
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Field(
+                "Workspace",
+                field =>
+                    Components.ComboBox(
+                        field,
+                        () => selected.Value,
+                        _ => { },
+                        (_, _) =>
+                            ValueTask.FromResult(
+                                ComboBoxSuggestionResult.Success<string>([
+                                    new ChoiceItem<string>("alpha", "Alpha"),
+                                    new ChoiceItem<string>("beta", "Beta"),
+                                ])
+                            ),
+                        new ComboBoxOptions(debounce: TimeSpan.Zero)
+                    )
+            )
+        );
+        graph.Drain();
+        var scene = Install(composition, graph, 320, 120);
+        var editor = Nodes(composition.SemanticSnapshot()!)
+            .Single(node => node.Role == SemanticRole.TextField);
+        Assert.IsNull(composition.Input.FocusedElement);
+        Assert.IsNull(composition.Input.ActiveSurface);
+
+        bool Click(int pointer)
+        {
+            var combo = Combo(composition);
+            var bounds = scene
+                .Boxes.Single(box => box.Identity.ElementId == combo.Identity.ElementId)
+                .Bounds;
+            var x = bounds.X + bounds.Width - 2;
+            var y = bounds.Y + bounds.Height / 2;
+            var down = composition.Input.DispatchPointer(
+                new(PointerCommandKind.Down, pointer, x, y, PointerButton.Primary)
+            );
+            var up = composition.Input.DispatchPointer(new(PointerCommandKind.Up, pointer, x, y));
+            return down.Handled && up.Handled;
+        }
+
+        Assert.IsTrue(Click(1), "The ComboBox chevron did not complete its opening click.");
+        graph.Drain();
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+        Assert.IsTrue(
+            composition.Input.FocusedElement is { } firstFocus
+                && firstFocus.ElementId == editor.Identity.ElementId
+        );
+
+        scene.Dispose();
+        scene = Install(composition, graph, 320, 120);
+        Assert.IsTrue(Click(2), "The ComboBox chevron did not complete its closing click.");
+        graph.Drain();
+        Assert.IsNull(composition.Input.ActiveSurface);
+        Assert.IsTrue(
+            composition.Input.FocusedElement is { } secondFocus
+                && secondFocus.ElementId == editor.Identity.ElementId
+        );
+
+        scene.Dispose();
+        scene = Install(composition, graph, 320, 120);
+        Assert.IsTrue(Click(3), "The ComboBox chevron did not reopen the suggestions.");
+        graph.Drain();
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+
+        scene.Dispose();
+        scene = Install(composition, graph, 320, 120);
+        var combo = Combo(composition);
+        var bounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == combo.Identity.ElementId)
+            .Bounds;
+        var x = bounds.X + bounds.Width - 2;
+        var y = bounds.Y + bounds.Height / 2;
+        Assert.IsTrue(
+            composition
+                .Input.DispatchPointer(new(PointerCommandKind.Down, 4, x, y, PointerButton.Primary))
+                .Handled
+        );
+        Assert.IsTrue(
+            composition.Input.DispatchPointer(new(PointerCommandKind.Cancel, 4, x, y)).Handled
+        );
+        graph.Drain();
+        Assert.IsNotNull(composition.Input.ActiveSurface);
+        scene.Dispose();
     }
 
     private static void CompleteOnWorker<T>(TaskCompletionSource<T> work, T value) =>

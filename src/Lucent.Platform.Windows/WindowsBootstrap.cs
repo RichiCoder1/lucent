@@ -589,6 +589,7 @@ public static class WindowsBootstrap
                     ReplaceScene(ref lastScene, scene);
                     uiaProvider.Refresh(scene);
                     surfaces.Synchronize();
+                    surfaces.OwnerProjected();
                     input.RefreshTextInput();
                     var hasCaret = composition.Input.TryGetCaretGeometry(out var caretBounds);
                     caretBlink.SetTarget(

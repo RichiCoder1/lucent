@@ -10,6 +10,9 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
     private readonly Action? _closed;
     private readonly Action<bool>? _pointerInsideChanged;
     private readonly LayoutRect? _anchorOverride;
+    private readonly float _minimumWidth;
+    private readonly bool _matchAnchorWidth;
+    private readonly bool _retainsOwnerFocus;
     private Composition? _popup;
     private Element? _root;
     private bool _dismissed;
@@ -23,9 +26,14 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         bool consumeOutsideClick,
         Action? closed,
         Action<bool>? pointerInsideChanged = null,
-        LayoutRect? anchorOverride = null
+        LayoutRect? anchorOverride = null,
+        float minimumWidth = 0,
+        bool retainOwnerFocus = false,
+        bool matchAnchorWidth = false
     )
     {
+        if (!float.IsFinite(minimumWidth) || minimumWidth < 0)
+            throw new ArgumentOutOfRangeException(nameof(minimumWidth));
         Owner = target.Composition;
         _target = new(Owner.Epoch, target.Id);
         _theme = theme;
@@ -33,6 +41,9 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         _closed = closed;
         _pointerInsideChanged = pointerInsideChanged;
         _anchorOverride = anchorOverride;
+        _minimumWidth = minimumWidth;
+        _matchAnchorWidth = matchAnchorWidth;
+        _retainsOwnerFocus = retainOwnerFocus;
         _returnFocus = Owner.Input.FocusedElement;
         IsInteractive = interactive;
         ConsumeOutsideClick = consumeOutsideClick;
@@ -63,6 +74,9 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
 
     /// <inheritdoc />
     public override bool IsInteractive { get; }
+
+    /// <inheritdoc />
+    public override bool RetainsOwnerFocus => _retainsOwnerFocus;
 
     /// <inheritdoc />
     public override bool ConsumeOutsideClick { get; }
@@ -116,7 +130,8 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
                 component: Style.Empty.Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)
             );
             var presentation = Style
-                .Empty.Set(LayoutProperties.Padding, Insets.Uniform(12))
+                .Empty.MinWidth(_minimumWidth)
+                .Set(LayoutProperties.Padding, Insets.Uniform(12))
                 .Set(LayoutProperties.Spacing, 8f)
                 .Set(VisualProperties.CornerRadius, 6f)
                 .Set(VisualProperties.Background, ControlThemes.Surface)
@@ -145,7 +160,11 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
     public override LayoutRect Measure(ITextShaper shaper, LayoutViewport available)
     {
         var popup = CreateComposition();
-        _root!.UpdateControl(LayoutProperties.MaxWidth, available.Width);
+        _root!.UpdateControl(
+            LayoutProperties.MinWidth,
+            Math.Max(_minimumWidth, _matchAnchorWidth && HasAnchor ? Anchor.Width : 0)
+        );
+        _root.UpdateControl(LayoutProperties.MaxWidth, available.Width);
         _root.UpdateControl(LayoutProperties.MaxHeight, available.Height);
         using var scene = SceneLayout.Project(popup, available, shaper);
         var bounds = scene.Boxes.Single(box => box.Identity.ElementId == _root.Id).Bounds;
@@ -167,7 +186,7 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
             return;
         _dismissed = true;
         _pointerInside = false;
-        if (notify && IsValid)
+        if (notify && !Owner.IsDisposed && Owner.Find(_target) is { IsDisposed: false })
             _closed?.Invoke();
     }
 

@@ -106,9 +106,9 @@ public static partial class Components
                 {
                     var day = (DayOfWeek)(((int)firstDay + index) % 7);
                     days.Add(
-                        Text(
+                        CalendarWeekdayLabel(
                             session.Options.Culture.DateTimeFormat.AbbreviatedDayNames[(int)day],
-                            Style.Empty.GridPlacement(new GridPlacement(0, index))
+                            index
                         )
                     );
                 }

@@ -295,6 +295,23 @@ public sealed class WindowsPopupChainContracts
     }
 
     [TestMethod]
+    public void OwnedSurfaceRepositionsOnlyWhenItsProjectedAnchorMoves()
+    {
+        var initial = new LayoutRect(40, 120, 320, 36);
+        var scrolled = initial with { Y = 72 };
+
+        Assert.IsFalse(WindowsSurfaceManager.AnchorChanged(initial, initial));
+        Assert.IsTrue(
+            WindowsSurfaceManager.AnchorChanged(initial, scrolled),
+            "An owner scroll did not request popup reanchoring."
+        );
+        Assert.IsTrue(
+            WindowsSurfaceManager.AnchorChanged(null, initial),
+            "A newly hosted anchor was mistaken for retained geometry."
+        );
+    }
+
+    [TestMethod]
     public void SubmenuPlacementClampsWithinUsableBoundsWhenNeitherSideFits()
     {
         var trigger = new PopupScreenRect(4, 650, 24, 680);

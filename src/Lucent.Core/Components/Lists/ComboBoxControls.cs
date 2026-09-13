@@ -7,6 +7,8 @@ internal sealed class ComboBoxBinding
     internal required Func<bool> Expanded { get; init; }
     internal required Action Open { get; init; }
     internal required Action Close { get; init; }
+    internal required Func<Key, bool> Navigate { get; init; }
+    internal required Func<bool> Commit { get; init; }
     internal required FocusTarget FocusTarget { get; init; }
 }
 
@@ -51,13 +53,18 @@ internal static partial class Controls
             {
                 if (route.Command.Kind != KeyCommandKind.Down || route.Command.IsRepeat)
                     return;
-                if (route.Command.Key == Key.Escape && binding.Expanded())
+                if (route.Command.Key is Key.Down or Key.Up)
+                    route.Handled = binding.Expanded()
+                        ? binding.Navigate(route.Command.Key)
+                        : Open();
+                else if (route.Command.Key == Key.Enter && binding.Expanded())
+                    route.Handled = binding.Commit();
+                else if (route.Command.Key == Key.Escape && binding.Expanded())
                     route.Handled = Close();
                 else if (route.Command.Key == Key.Tab && binding.Expanded())
                     binding.Close();
-                else if (route.Command.Key is Key.Down or Key.Up && !binding.Expanded())
-                    route.Handled = Open();
             });
+            AttachClick(context);
             bool Focus()
             {
                 binding.FocusTarget.Request();
@@ -72,6 +79,60 @@ internal static partial class Controls
             {
                 binding.Close();
                 return true;
+            }
+            void AttachClick(BehaviorContext behaviorContext)
+            {
+                int? armedPointer = null;
+                bool? openOnRelease = null;
+                behaviorContext.OnPointer(route =>
+                {
+                    if (
+                        route.Command is
+                        { Kind: PointerCommandKind.Down, Button: PointerButton.Primary }
+                    )
+                    {
+                        var captured = route.Capture();
+                        armedPointer = captured ? route.Command.PointerId : null;
+                        openOnRelease = captured ? !binding.Expanded() : null;
+                        behaviorContext.SetState(BehaviorState.Pressed, captured);
+                        route.Handled = captured;
+                        return;
+                    }
+                    if (
+                        route.Command.Kind != PointerCommandKind.Cancel
+                        && !route.Command.Releases(PointerButton.Primary)
+                    )
+                        return;
+                    if (armedPointer != route.Command.PointerId)
+                        return;
+                    var active = behaviorContext.State.GetValueOrDefault(BehaviorState.Pressed);
+                    armedPointer = null;
+                    behaviorContext.SetState(BehaviorState.Pressed, false);
+                    if (
+                        active
+                        && route.Command.Kind == PointerCommandKind.Up
+                        && route.IsInsideCurrentTarget
+                    )
+                    {
+                        if (openOnRelease == true)
+                        {
+                            binding.FocusTarget.Request();
+                            _ = Open();
+                        }
+                        else
+                            _ = Close();
+                    }
+                    openOnRelease = null;
+                    route.Handled = active;
+                });
+                behaviorContext.OnCaptureLost(loss =>
+                {
+                    if (armedPointer != loss.PointerId)
+                        return;
+                    armedPointer = null;
+                    openOnRelease = null;
+                    behaviorContext.SetState(BehaviorState.Pressed, false);
+                });
             }
         }
 
