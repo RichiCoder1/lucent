@@ -1,5 +1,30 @@
 # Current work and follow-ups
 
+## September 13 execution checkpoint
+
+The user authorized desktop interaction for the night. The earlier source
+`f6e2bd6083c8b1536a838dde15ab318ced7d705b` now has successful
+[CI 34735408532](https://github.com/RichiCoder1/lucent/actions/runs/34735408532),
+including package verification and publication of `0.3.0-dev.66.1`. This supersedes
+the pending-publication statement in the historical checkpoint below.
+
+Editor follow-up #276 now finds authored `.lui` references to metadata-defined
+properties without inventing external declarations or enabling external rename.
+The regression checks exact spans through both the project API and LSP, with
+`includeDeclaration` on and off. A valid source-only-policy reproduction failed;
+the corrected implementation passes. A separate isolated restore of the actual
+published `0.3.0-dev.60.1` Core package also passes the same regression.
+
+All 27 LSP tests pass in 3m00s. The broad synthetic fixture now uses Core metadata
+and took 10.1s; source-navigation fixtures retain project references and all
+existing assertions remain. The prior full-suite observation was 6m33s; these are
+individual observed runs, not a benchmark guarantee. Logs:
+`artifacts/references276-{red,green,package,full}.log`.
+
+Desktop review #279–283 and interaction enhancements #287–289 are undergoing
+focused verification. Next is the bounded C# authoring feasibility gate #266;
+stock factory migration belongs to #269 and is not part of that gate.
+
 ## Completed interaction repairs — September 12, 2026
 
 [#278](https://github.com/RichiCoder1/lucent/issues/278) repairs the user's additional recordings: calendar weekday centering, tooltip shadow hover interception, popup width/scrolling/restore placement, and ComboBox editing/reopening. Suggestion windows retain editor focus and pointer selection; popup width includes its padding. A shared reactive graph fix preserves later notifications after an effect writes and rereads a derived value. Native popups resize before positioning so the old width cannot constrain their new location. Core 461/461, Windows 125/125 and Component Browser 13/13 pass, including the gallery's 84 theme/density captures. Architecture and changed-file formatting checks pass. Logs are `artifacts/component-input-*.log`; the final Windows resize-order proof is recorded in the execution plan.

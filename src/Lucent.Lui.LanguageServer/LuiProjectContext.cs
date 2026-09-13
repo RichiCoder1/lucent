@@ -951,6 +951,22 @@ internal sealed class LuiProjectContext : IDisposable
             return null;
         var target = await ResolveRenameTargetAsync(snapshot, uri, offset, cancellationToken)
             .ConfigureAwait(false);
+        if (target is { LocalDeclaration: null })
+        {
+            foreach (var symbol in target.Symbols)
+            {
+                if (symbol.Locations.Any(location => location.IsInSource))
+                    continue;
+                var definition = await SymbolFinder
+                    .FindSourceDefinitionAsync(symbol, snapshot.Solution, cancellationToken)
+                    .ConfigureAwait(false);
+                if (
+                    definition is null
+                    || !definition.Locations.Any(location => location.IsInSource)
+                )
+                    return null;
+            }
+        }
         if (target is not null && IsCSharp(uri))
         {
             var occurrences = await RenameOccurrencesAsync(
@@ -1060,7 +1076,8 @@ internal sealed class LuiProjectContext : IDisposable
                 snapshot,
                 target,
                 includeDeclaration,
-                cancellationToken
+                cancellationToken,
+                allowMetadataDefinition: true
             )
             .ConfigureAwait(false);
         if (
@@ -1557,7 +1574,8 @@ internal sealed class LuiProjectContext : IDisposable
         RenameSnapshot snapshot,
         RenameTarget target,
         bool includeDeclaration,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        bool allowMetadataDefinition = false
     )
     {
         var locations = new List<(Location Location, ISymbol Symbol)>();
@@ -1591,7 +1609,11 @@ internal sealed class LuiProjectContext : IDisposable
                     definition is null
                     || !definition.Locations.Any(location => location.IsInSource)
                 )
-                    return null;
+                {
+                    if (!allowMetadataDefinition)
+                        return null;
+                    definition = targetSymbol;
+                }
                 var references = await SymbolFinder
                     .FindReferencesAsync(definition, snapshot.Solution, cancellationToken)
                     .ConfigureAwait(false);

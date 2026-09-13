@@ -20,6 +20,14 @@ The affected-file helper includes relevant downstream suites and falls back to a
 
 Managed runs write per-test results and durations to `artifacts/test/managed/<project>/results.trx`; CI retains these reports for five days, including failed runs. Test execution requires at least one matching test, so an empty filter fails without a separate discovery process.
 
+`MetadataPropertiesReturnAuthoredReferencesWithoutAllowingRename` checks exact
+`.lui` reference spans through the project API and editor protocol, while rejecting
+external-symbol rename. It normally uses Core assembly metadata. To repeat it
+against a real NuGet consumer, set `LUCENT_LSP_PACKAGE_FEED` to a local package
+feed and `LUCENT_LSP_PACKAGE_VERSION` to the exact Core version, then run that
+named test. The fixture restores the package before loading its project. Use an
+isolated `NUGET_PACKAGES` directory when checking a fresh package restore.
+
 ## Additional suites
 
 Presentation motion uses deterministic `MotionContracts`, `StockMotionContracts` and `MotionProjectionContracts` in Core, real-pixel `MotionPaintTests` in Skia, and the headless and Windows scheduling contracts. They cover retargeting, cancellation, retained geometry/shaping, image ownership, reduced motion and accessibility snapshot reuse. The opt-in `MotionPerformanceTests` compares 1, 100 and 1,000 active tracks with `Motion.None`; set `LUCENT_MOTION_CHARACTERIZATION` to an artifact directory to write phase/allocations reports. Issue Browser's `StockRowHoverUsesRetainedPaintAndKeepsSelectionImmediate` adds its 10,000-item virtualized source as a consumer. These measurements characterize the current machine rather than imposing a universal timing threshold.

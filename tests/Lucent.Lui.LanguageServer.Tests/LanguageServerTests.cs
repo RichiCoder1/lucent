@@ -127,6 +127,194 @@ public sealed class LanguageServerTests
     }
 
     [TestMethod]
+    public async Task MetadataPropertiesReturnAuthoredReferencesWithoutAllowingRename()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-metadata-references-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "Consumer.csproj");
+            var reference = CoreMetadataReference;
+            var feed = Environment.GetEnvironmentVariable("LUCENT_LSP_PACKAGE_FEED");
+            var version = Environment.GetEnvironmentVariable("LUCENT_LSP_PACKAGE_VERSION");
+            if (feed is not null || version is not null)
+            {
+                Assert(
+                    !String.IsNullOrWhiteSpace(feed) && !String.IsNullOrWhiteSpace(version),
+                    "Package proof requires both feed and version."
+                );
+                Assert(Directory.Exists(feed), "Package proof feed is missing.");
+                reference =
+                    $"<PackageReference Include=\"Lucent.Core\" Version=\"[{System.Security.SecurityElement.Escape(version)}]\" />";
+                await File.WriteAllTextAsync(
+                    Path.Combine(root, "NuGet.config"),
+                    $"<configuration><packageSources><clear/><add key=\"proof\" value=\"{System.Security.SecurityElement.Escape(Path.GetFullPath(feed!))}\"/></packageSources></configuration>"
+                );
+            }
+            await File.WriteAllTextAsync(
+                project,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>{reference}<AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            var sources = new[]
+            {
+                "namespace MetadataReferences;\nusing Lucent.Core;\nstyle FirstStyle { Background: Brush.Solid(default); }\npublic component First() { <Row style={FirstStyle} /> }",
+                "namespace MetadataReferences;\nusing Lucent.Core;\nstyle SecondStyle { Background: Brush.Solid(default); }\npublic component Second() { <Row style={SecondStyle} /> }",
+            };
+            var paths = new[] { Path.Combine(root, "First.lui"), Path.Combine(root, "Second.lui") };
+            for (var index = 0; index < paths.Length; index++)
+                await File.WriteAllTextAsync(paths[index], sources[index]);
+            var uris = paths.Select(path => new Uri(path)).ToArray();
+            var offsets = sources
+                .Select(source => source.IndexOf("Background", StringComparison.Ordinal))
+                .ToArray();
+            if (feed is not null)
+                await RunDotnetAsync(
+                    ["restore", project, "--configfile", Path.Combine(root, "NuGet.config")],
+                    "Restoring the isolated metadata package consumer"
+                );
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+            foreach (var uri in uris)
+            {
+                var diagnostics = await context.DiagnosticsAsync(uri, CancellationToken.None);
+                Assert(
+                    diagnostics is not null && diagnostics.Count == 0,
+                    "Metadata fixture diagnostics: "
+                        + String.Join(
+                            "; ",
+                            diagnostics?.Select(diagnostic => diagnostic.Message) ?? []
+                        )
+                );
+            }
+            foreach (var includeDeclaration in new[] { false, true })
+            {
+                var result = await context.ReferencesAsync(
+                    uris[0],
+                    offsets[0],
+                    includeDeclaration,
+                    CancellationToken.None
+                );
+                Assert(
+                    result is not null
+                        && result.Locations.Count == 2
+                        && Enumerable
+                            .Range(0, 2)
+                            .All(index =>
+                                result.Locations.Any(location =>
+                                    location.Uri == uris[index]
+                                    && location.Span.Equals(
+                                        new LuiSpan(offsets[index], "Background".Length)
+                                    )
+                                )
+                            ),
+                    "Metadata references must contain exactly both authored spans and no external/generated declaration. Actual: "
+                        + (
+                            result is null
+                                ? "null"
+                                : String.Join(
+                                    "; ",
+                                    result.Locations.Select(location =>
+                                        $"{location.Uri}: {location.Span}"
+                                    )
+                                )
+                        )
+                );
+            }
+            Assert(
+                await context.PrepareRenameAsync(uris[0], offsets[0], CancellationToken.None)
+                    is null,
+                "Metadata declarations must not offer rename."
+            );
+            Assert(
+                await context.RenameAsync(uris[0], offsets[0], "Renamed", CancellationToken.None)
+                    is null,
+                "Read-only reference search must not enable external-symbol rename."
+            );
+            using var lsp = LspClient.Start();
+            using var initialized = await lsp.RequestAsync(
+                "initialize",
+                new { initializationOptions = new { projectUri = new Uri(project).AbsoluteUri } }
+            );
+            Assert(
+                initialized.RootElement.TryGetProperty("result", out _),
+                "Metadata consumer LSP initialization failed."
+            );
+            await lsp.NotifyAsync("initialized", new { });
+            foreach (var includeDeclaration in new[] { false, true })
+            {
+                var position = Position(sources[0], offsets[0]);
+                using var response = await lsp.RequestAsync(
+                    "textDocument/references",
+                    new
+                    {
+                        textDocument = new { uri = uris[0].AbsoluteUri },
+                        position = new { line = position.Line, character = position.Character },
+                        context = new { includeDeclaration },
+                    }
+                );
+                var locations = response
+                    .RootElement.GetProperty("result")
+                    .EnumerateArray()
+                    .ToArray();
+                Assert(
+                    locations.Length == 2
+                        && Enumerable
+                            .Range(0, 2)
+                            .All(index =>
+                            {
+                                var start = Position(sources[index], offsets[index]);
+                                var end = Position(
+                                    sources[index],
+                                    offsets[index] + "Background".Length
+                                );
+                                return locations.Any(location =>
+                                    location.GetProperty("uri").GetString()
+                                        == uris[index].AbsoluteUri
+                                    && location
+                                        .GetProperty("range")
+                                        .GetProperty("start")
+                                        .GetProperty("line")
+                                        .GetInt32() == start.Line
+                                    && location
+                                        .GetProperty("range")
+                                        .GetProperty("start")
+                                        .GetProperty("character")
+                                        .GetInt32() == start.Character
+                                    && location
+                                        .GetProperty("range")
+                                        .GetProperty("end")
+                                        .GetProperty("line")
+                                        .GetInt32() == end.Line
+                                    && location
+                                        .GetProperty("range")
+                                        .GetProperty("end")
+                                        .GetProperty("character")
+                                        .GetInt32() == end.Character
+                                );
+                            }),
+                    "The references protocol must preserve both exact authored ranges for metadata properties."
+                );
+            }
+            await lsp.RequestAsync("shutdown", new { });
+            Assert(await lsp.ExitAsync() == 0, "Metadata consumer LSP did not shut down cleanly.");
+        }
+        finally
+        {
+            var resolvedRoot = Path.GetFullPath(root);
+            Assert(
+                resolvedRoot.StartsWith(
+                    Path.GetFullPath(Path.GetTempPath()),
+                    StringComparison.OrdinalIgnoreCase
+                ),
+                "Fixture cleanup escaped the temporary directory."
+            );
+            Directory.Delete(resolvedRoot, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task StatefulDeclarationsExposeAuthoredEditorInformation()
     {
         var root = Path.Combine(
@@ -448,12 +636,11 @@ public component MenuButton() {
             var sourcePath = Path.Combine(root, "Widget.lui");
             var siblingPath = Path.Combine(root, "Card.lui");
             var helperPath = Path.Combine(root, "Helpers.cs");
-            var core = Path.GetFullPath("src/Lucent.Core/Lucent.Core.csproj");
             await File.WriteAllTextAsync(
                 projectPath,
-                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion><DefineConstants>LSP_PARITY</DefineConstants><LucentLuiProjectEpoch>parity-epoch</LucentLuiProjectEpoch><LucentLuiProjectIdentity>parity-project</LucentLuiProjectIdentity><LucentLuiLangVersion>preview</LucentLuiLangVersion><LucentLuiCompilerOptions>parity-options</LucentLuiCompilerOptions><LucentLuiDefines>LSP_PARITY</LucentLuiDefines></PropertyGroup><ItemGroup><ProjectReference Include=\""
-                    + core
-                    + "\" /><Using Include=\"System.Collections.Generic\" /><AdditionalFiles Include=\"Widget.lui\" LucentLuiLogicalPath=\"nested/screens/Widget.lui\" /><AdditionalFiles Include=\"Card.lui\" LucentLuiLogicalPath=\"nested/components/Card.lui\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiDocumentVersion\" /><CompilerVisibleProperty Include=\"LucentLuiProjectEpoch\" /><CompilerVisibleProperty Include=\"LucentLuiProjectIdentity\" /><CompilerVisibleProperty Include=\"LucentLuiLangVersion\" /><CompilerVisibleProperty Include=\"LucentLuiCompilerOptions\" /><CompilerVisibleProperty Include=\"LucentLuiDefines\" /><CompilerVisibleProperty Include=\"RootNamespace\" /></ItemGroup></Project>"
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><RootNamespace>Sample</RootNamespace><LangVersion>preview</LangVersion><DefineConstants>LSP_PARITY</DefineConstants><LucentLuiProjectEpoch>parity-epoch</LucentLuiProjectEpoch><LucentLuiProjectIdentity>parity-project</LucentLuiProjectIdentity><LucentLuiLangVersion>preview</LucentLuiLangVersion><LucentLuiCompilerOptions>parity-options</LucentLuiCompilerOptions><LucentLuiDefines>LSP_PARITY</LucentLuiDefines></PropertyGroup><ItemGroup>"
+                    + CoreMetadataReference
+                    + "<Using Include=\"System.Collections.Generic\" /><AdditionalFiles Include=\"Widget.lui\" LucentLuiLogicalPath=\"nested/screens/Widget.lui\" /><AdditionalFiles Include=\"Card.lui\" LucentLuiLogicalPath=\"nested/components/Card.lui\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" /><CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiDocumentVersion\" /><CompilerVisibleProperty Include=\"LucentLuiProjectEpoch\" /><CompilerVisibleProperty Include=\"LucentLuiProjectIdentity\" /><CompilerVisibleProperty Include=\"LucentLuiLangVersion\" /><CompilerVisibleProperty Include=\"LucentLuiCompilerOptions\" /><CompilerVisibleProperty Include=\"LucentLuiDefines\" /><CompilerVisibleProperty Include=\"RootNamespace\" /></ItemGroup></Project>"
             );
             await File.WriteAllTextAsync(
                 helperPath,
