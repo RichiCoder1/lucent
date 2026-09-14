@@ -1,0 +1,7 @@
+namespace CompanionFixture;
+using Lucent.Core;
+internal component Failing() {
+    [Once]
+    int NeverInitialized = Harness.RecordValue("unreachable-lui", 1);
+    <Text>failure</Text>
+}

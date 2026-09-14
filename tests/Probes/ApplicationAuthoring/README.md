@@ -41,6 +41,9 @@ The experiment executes these assertions:
    current LUI parsing. Real JSON output and lowered component output compile together.
    This experiment supports types before the component only; general ordering, complete
    declaration source maps and editor integration remain A0/A1 work.
+8. Separate model/context declaration inputs bind to each other and an ordinary C# caller.
+   Removing the model removes its JSON type-info output and produces unresolved-reference
+   errors, rather than leaving the previous generated type in the compilation.
 
 `Application.declarations` and its implementation in the probe stand in for future LUI
 projection; they are deliberately ordinary C# sources. `JsonView.lui` is parsed/lowered by

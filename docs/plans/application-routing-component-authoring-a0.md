@@ -54,6 +54,9 @@ context precede a component in the same input, a bounded Roslyn projection suppl
 ordinary declarations to generation, and current LUI parsing/lowering consumes the masked
 component source and real generated APIs. Final assembly emission succeeds. This proves
 one combined input shape, not general source ordering or complete authored source mapping.
+An additional cross-file driver case passes with separate model/context inputs and an
+ordinary C# caller. Removing the model removes its generated type-info output and reports
+unresolved references. This remains compiler-driver evidence, not cross-language LSP proof.
 
 A prior fixture attempted `var` at component scope and correctly received LUI2023; current
 LUI requires explicit field types. The accepted interoperability test does not require
@@ -68,14 +71,56 @@ process-local JIT/cache effects and are not language-server or keystroke measure
 
 ## Remaining gate evidence
 
+### SDK-host experiment
+
+[SdkHost](../../tests/Probes/ApplicationAuthoring/SdkHost/README.md) now passes a cold
+one-command positive build and execution. Eleven evaluated generators and two AdditionalTexts
+yield six ordinary preparation outputs: five from the real JSON generator and one external
+probe. Normal C# compilation emits the matching six identities/content hashes. There is no
+preliminary assembly build, recursive preparation, or convergence loop.
+
+Changed, missing and extra outputs each fail with `PROBE9001` and exit 1 after otherwise
+valid C# compilation. The failure target removes both intermediate and final assemblies;
+the wrapper verifies their absence. The complete wrapper exits 0. Commands and exits are
+recorded locally in `artifacts/a0-sdk-host/commands-and-exits.txt`.
+
+The experiment exposed and corrected an intermediate-output mismatch: its MSBuildWorkspace
+must receive the outer build's evaluated `BaseIntermediateOutputPath`. It still reports one
+non-fatal workspace warning because `.editorconfig` is both an analyzer config and an
+explicitly transported AdditionalText. That warning is retained in the evidence; this is
+not a warning-free workspace claim. Production diagnostic transport and trust/recovery
+behavior remain unproven. The preparation/output-comparison engine is separate from its
+MSBuild/CLI adapter for the forthcoming editor experiment.
+
+### Named companion experiment
+
+[Companion](../../tests/Probes/ApplicationAuthoring/Companion/README.md) uses one constrained
+incremental emitter, early extended partial recipe factories and one final implementation.
+It dynamically compiles and executes against real Core. Ordinary C# fields initialize
+before companion managed state; instance-based LUI initialization then reads that state,
+followed by one ComponentContext setup bridge. Two mounts have independent state and
+cleanup, cross-file methods/properties work, and initializer failure rolls back cleanup.
+
+Invalid inputs fail with prototype diagnostics for duplicate setup, authored constructors,
+`[ComponentState]` misuse and unsupported inferred-derived/readonly state. Negative tests
+check that invalid final source hints are absent. Writable LUI fields use explicit `[Once]`;
+the prototype does not silently reinterpret derived expressions as writable signals.
+
+The wrapper and focused probe exit 0; dependency builds are warning-clean and all nine C#
+files pass formatting. This is an identity/initialization prototype: its root is a no-op,
+it does not lower markup/requirements/parameters, and it does not implement all existing
+state kinds. Those limits prevent treating it as the full A0 consumer.
+
+### Integrated acceptance still required
+
 | Required contract | Current boundary |
 | --- | --- |
-| Ordinary types colocated with UI and across files | Combined input with preceding types passes; full shared LUI document projection and cross-file tooling remain unproven |
+| Ordinary types colocated with UI and across files | Combined input and cross-file driver binding pass; full shared LUI document projection and cross-file tooling remain unproven |
 | External generated APIs used by LUI | Real JSON initializer/method binding and mounted execution pass; cold SDK/LSP integration remains |
 | Lucent route/state generated APIs | Existing generators have been inspected; the all-LUI routed fixture remains |
-| Named partial identity and companion ownership | Separate prototype in progress; no production named component emitter exists yet |
+| Named partial identity and companion ownership | Constrained writable-state prototype passes; combined language/runtime consumer and remaining state kinds are unproven |
 | Editor parity | In-memory driver replacement/deletion pass; actual cold/unsaved LSP diagnostics, navigation, rename, cancellation and latency remain |
-| Cold SDK and output matching | Separate SDK-host experiment in progress, including changed/missing/extra output negatives |
+| Cold SDK and output matching | Isolated host positive and changed/missing/extra negatives pass; actual Lucent SDK integration remains |
 | Packaged NativeAOT application | Not yet run for this candidate; prior formatter/package results do not satisfy this gate |
 
 The all-LUI application and companion variants remain separate acceptance fixtures.

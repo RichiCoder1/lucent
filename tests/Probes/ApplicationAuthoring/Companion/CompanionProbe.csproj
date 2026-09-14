@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseAppHost>false</UseAppHost>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Reference
+      Include="Microsoft.CodeAnalysis"
+      HintPath="$(MSBuildToolsPath)/Roslyn/bincore/Microsoft.CodeAnalysis.dll"
+    />
+    <Reference
+      Include="Microsoft.CodeAnalysis.CSharp"
+      HintPath="$(MSBuildToolsPath)/Roslyn/bincore/Microsoft.CodeAnalysis.CSharp.dll"
+    />
+    <Reference
+      Include="Lucent.Lui.Compiler"
+      HintPath="$(MSBuildThisFileDirectory)../../../../src/Lucent.Lui.Compiler/bin/Release/netstandard2.0/Lucent.Lui.Compiler.dll"
+    />
+    <Reference
+      Include="Lucent.Core"
+      HintPath="$(MSBuildThisFileDirectory)../../../../src/Lucent.Core/bin/Release/net10.0/Lucent.Core.dll"
+    />
+    <None Include="Inputs/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

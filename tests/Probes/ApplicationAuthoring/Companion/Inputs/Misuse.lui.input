@@ -1,0 +1,7 @@
+namespace CompanionFixture;
+using Lucent.Core;
+internal component Misuse() {
+    [Once]
+    int Count = 1;
+    <Text>misuse</Text>
+}

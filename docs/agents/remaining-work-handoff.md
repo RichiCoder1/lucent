@@ -1,5 +1,25 @@
 # Current work and follow-ups
 
+## Application and component authoring — September 14, 2026
+
+The reviewed design is adopted under [#301](https://github.com/RichiCoder1/lucent/issues/301)
+with [A0 #302](https://github.com/RichiCoder1/lucent/issues/302) active. The
+[execution map](../plans/application-routing-component-authoring-execution.md) records
+A1–A7 and their dependencies. They remain gated; the initial experiments do not pass
+the full authoring acceptance contract.
+
+The [A0 evidence record](../plans/application-routing-component-authoring-a0.md) now covers
+real JSON generation and LUI binding, combined/cross-file declaration projection, a cold
+SDK-host build with changed/missing/extra output failures, and named companion identity
+and initialization. Their focused executable probes pass. Current authored formatting
+checks pass for 551 C# and 104 `.lui` files, including these experiments.
+
+Actual editor integration, complete state semantics and the combined all-LUI routed,
+packaged NativeAOT consumer remain unproven. Work continues in isolated probes before
+production package or compiler changes. Do not reuse earlier package/UI evidence as
+proof of the new architecture, or reopen the accepted product interview without a
+concrete compatibility blocker.
+
 ## Whole-file formatting and linting — September 14, 2026
 
 Lucent `7144a5e` is published as `0.3.0-dev.79.1` after

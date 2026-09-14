@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <ProbeMismatchKind Condition="'$(ProbeMismatchKind)' == ''">none</ProbeMismatchKind>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\final-generated</CompilerGeneratedFilesOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <AdditionalFiles Include="$(ProbeModelPath)" />
+    <CompilerVisibleProperty Include="ProbePreparation" />
+    <CompilerVisibleProperty Include="ProbeMismatchKind" />
+    <Analyzer Include="$(ProbeGeneratorPath)" />
+  </ItemGroup>
+  <Import Project="SdkHost.targets" />
+</Project>

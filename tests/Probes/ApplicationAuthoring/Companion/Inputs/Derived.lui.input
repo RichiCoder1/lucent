@@ -1,0 +1,6 @@
+namespace CompanionFixture;
+using Lucent.Core;
+internal component Derived() {
+    int Value = Harness.RecordValue("derived", 1);
+    <Text>unsupported</Text>
+}

@@ -1,0 +1,14 @@
+namespace CompanionFixture;
+using Lucent.Core;
+public component Counter() {
+    [Once]
+    int LuiCount = Harness.RecordValue("lui-first", CompanionCount - 1);
+    [Once]
+    int LuiSecond = Harness.RecordValue("lui-second", 5);
+
+    public void IncrementFromLui() {
+        CompanionCount += LuiCount;
+    }
+
+    <Text>prototype</Text>
+}

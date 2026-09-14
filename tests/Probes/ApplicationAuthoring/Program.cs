@@ -269,7 +269,13 @@ try
     var combinedLui = LuiCompiler.Compile(
         LuiParser.Parse(combined.Component),
         combinedBinding,
-        identity
+        new LuiFreshnessIdentity(
+            "a0",
+            "a0",
+            new LuiDocumentIdentity("Combined.lui"),
+            "1",
+            "preview"
+        )
     );
     Check(
         combinedLui.Success,
@@ -285,6 +291,64 @@ try
     Check(combinedEmitted.Success, Diagnostics(combinedEmitted.Diagnostics));
     Console.WriteLine(
         "PASS: one combined input contributes ordinary model/context declarations to real JSON generation and component state/methods to current LUI lowering."
+    );
+    var modelInput = new BufferText(
+        "Model.lui",
+        "namespace AcrossFiles; public record Person(string Name);"
+    );
+    var contextInput = new BufferText(
+        "Context.lui",
+        """
+        namespace AcrossFiles;
+        [System.Text.Json.Serialization.JsonSerializable(typeof(Person))]
+        public partial class JsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
+        """
+    );
+    var caller = CSharpSyntaxTree.ParseText(
+        "internal static class Caller { public static string Read() => AcrossFiles.JsonContext.Default.Person.Type.Name; }",
+        options
+    );
+    var crossFileBase = compilation.AddSyntaxTrees(caller);
+    GeneratorDriver crossFile = CSharpGeneratorDriver.Create(
+        [new DeclarationProjection().AsSourceGenerator(), JsonGenerator()],
+        [modelInput, contextInput],
+        options
+    );
+    crossFile = crossFile.RunGeneratorsAndUpdateCompilation(
+        crossFileBase,
+        out var crossFileOutput,
+        out _
+    );
+    Check(
+        !crossFileOutput.GetDiagnostics().Any(d => d.Severity == DiagnosticSeverity.Error),
+        "declarations bind across additional inputs and ordinary C#"
+    );
+    Check(
+        crossFileOutput
+            .GetTypeByMetadataName("AcrossFiles.Person")!
+            .Locations.Single()
+            .GetMappedLineSpan()
+            .Path == "Model.lui",
+        "projected declaration locations map to authored input"
+    );
+    var withoutModel = crossFile
+        .RemoveAdditionalTexts([modelInput])
+        .RunGeneratorsAndUpdateCompilation(crossFileBase, out var withoutModelOutput, out _);
+    Check(
+        withoutModelOutput.GetTypeByMetadataName("AcrossFiles.Person") is null,
+        "removed sibling declaration is absent"
+    );
+    Check(
+        !JsonOutputs(withoutModel.GetRunResult())
+            .Any(source => source.HintName.EndsWith(".Person.g.cs", StringComparison.Ordinal)),
+        "removed model has no stale JSON type-info output"
+    );
+    Check(
+        withoutModelOutput.GetDiagnostics().Any(d => d.Severity == DiagnosticSeverity.Error),
+        "remaining references to deleted sibling report errors"
+    );
+    Console.WriteLine(
+        "PASS: separate declaration inputs bind across files and into ordinary C#; deletion removes model/type-info and reports unresolved references."
     );
 }
 catch (Exception error)
@@ -338,8 +402,19 @@ sealed class DeclarationProjection : IIncrementalGenerator
             context.AdditionalTextsProvider,
             static (production, text) =>
                 production.AddSource(
-                    "AuthoredDeclarations.g.cs",
-                    text.GetText(production.CancellationToken)!
+                    "Authored_"
+                        + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text.Path)))
+                        + ".g.cs",
+                    SourceText.From(
+                        "#line 1 "
+                            + Microsoft.CodeAnalysis.CSharp.SymbolDisplay.FormatLiteral(
+                                text.Path,
+                                true
+                            )
+                            + "\n"
+                            + text.GetText(production.CancellationToken)!.ToString(),
+                        Encoding.UTF8
+                    )
                 )
         );
 #pragma warning restore RSEXPERIMENTAL007

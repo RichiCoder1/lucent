@@ -1,0 +1,8 @@
+namespace CompanionFixture;
+using Lucent.Core;
+internal component DuplicateSetup() {
+    Setup(owner) {
+        owner.OnDispose(() => { });
+    }
+    <Text>duplicate</Text>
+}

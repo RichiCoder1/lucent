@@ -1,0 +1,7 @@
+#nullable enable
+namespace Fixture;
+
+public record Person(string Name);
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(Person))]
+public partial class JsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
