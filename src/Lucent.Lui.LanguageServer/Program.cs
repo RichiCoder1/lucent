@@ -14,6 +14,9 @@ internal static class Program
     {
         LuiProjectContext? project = null;
         var openDocuments = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var formattingDocuments = new Dictionary<string, FormattingDocument>(
+            StringComparer.OrdinalIgnoreCase
+        );
         var initializeReceived = false;
         var initialized = false;
         var shutdown = false;
@@ -99,6 +102,7 @@ internal static class Program
                         project?.Dispose();
                         project = null;
                         openDocuments.Clear();
+                        formattingDocuments.Clear();
                         shutdown = true;
                         WriteResponse(id, null);
                         continue;
@@ -135,7 +139,8 @@ internal static class Program
                                     ? parameters
                                     : default,
                                 project,
-                                openDocuments
+                                openDocuments,
+                                formattingDocuments
                             )
                             .ConfigureAwait(false);
                         if (result.Project is not null)
@@ -145,6 +150,8 @@ internal static class Program
                             initializeReceived = true;
                             openDocuments.Clear();
                         }
+                        if (methodName == "initialize")
+                            initializeReceived = true;
                         diagnosticsPending |= result.DiagnosticsChanged;
                         if (id is not null)
                             WriteResponse(id, result.Value);
@@ -171,30 +178,61 @@ internal static class Program
         string method,
         JsonElement parameters,
         LuiProjectContext? project,
-        Dictionary<string, int> openDocuments
+        Dictionary<string, int> openDocuments,
+        Dictionary<string, FormattingDocument> formattingDocuments
     )
     {
+        if (method is "textDocument/didOpen" or "textDocument/didChange" or "textDocument/didClose")
+        {
+            var changedDocument = parameters.GetProperty("textDocument");
+            var changedUri = new Uri(changedDocument.GetProperty("uri").GetString()!);
+            var key = DocumentKey(changedUri);
+            if (method == "textDocument/didClose")
+                formattingDocuments.Remove(key);
+            else if (
+                changedUri.IsFile
+                && changedUri.LocalPath.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                var version = changedDocument.GetProperty("version").GetInt32();
+                if (
+                    !formattingDocuments.TryGetValue(key, out var previous)
+                    || version > previous.Version
+                )
+                    formattingDocuments[key] = new FormattingDocument(
+                        version,
+                        method == "textDocument/didOpen"
+                            ? changedDocument.GetProperty("text").GetString()!
+                            : parameters
+                                .GetProperty("contentChanges")[0]
+                                .GetProperty("text")
+                                .GetString()!
+                    );
+            }
+        }
         switch (method)
         {
             case "initialize":
             {
-                var projectUri = parameters
-                    .GetProperty("initializationOptions")
-                    .GetProperty("projectUri")
-                    .GetString();
-                if (projectUri is null)
-                    throw new InvalidOperationException(
-                        "initialize requires initializationOptions.projectUri."
-                    );
-                var context = await LuiProjectContext
-                    .LoadAsync(
-                        LuiProjectContext.FilePath(new Uri(projectUri)),
-                        CancellationToken.None
+                var projectUri =
+                    parameters.TryGetProperty(
+                        "initializationOptions",
+                        out var initializationOptions
                     )
-                    .ConfigureAwait(false);
+                    && initializationOptions.TryGetProperty("projectUri", out var configuredProject)
+                        ? configuredProject.GetString()
+                        : null;
+                var context = projectUri is null
+                    ? null
+                    : await LuiProjectContext
+                        .LoadAsync(
+                            LuiProjectContext.FilePath(new Uri(projectUri)),
+                            CancellationToken.None
+                        )
+                        .ConfigureAwait(false);
                 WriteNotification(
                     "lucent/projectGraph",
-                    new { directories = context.ProjectDirectories() }
+                    new { directories = context?.ProjectDirectories() ?? [] }
                 );
                 return new HandlerResult(
                     context,
@@ -230,6 +268,11 @@ internal static class Program
                             referencesProvider = true,
                             documentFormattingProvider = true,
                             documentRangeFormattingProvider = true,
+                            codeActionProvider = new
+                            {
+                                resolveProvider = true,
+                                codeActionKinds = (string[])["quickfix"],
+                            },
                             textDocumentSync = 1,
                         },
                     }
@@ -418,41 +461,81 @@ internal static class Program
                 return new HandlerResult(null, referenceLocations);
             case "textDocument/formatting":
             case "textDocument/rangeFormatting":
-                if (project is null)
-                    return new HandlerResult(null, null);
                 var formatUri = new Uri(
                     parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                 );
+                formattingDocuments.TryGetValue(DocumentKey(formatUri), out var snapshot);
+                var formatText =
+                    snapshot?.Text
+                    ?? (
+                        project is null
+                            ? null
+                            : await project
+                                .GetTextAsync(formatUri, CancellationToken.None)
+                                .ConfigureAwait(false)
+                    );
+                if (formatText is null)
+                    throw new InvalidOperationException(
+                        "Open the LUI document before requesting formatting."
+                    );
+                if (
+                    parameters
+                        .GetProperty("textDocument")
+                        .TryGetProperty("version", out var requestedVersion)
+                    && snapshot?.Version != requestedVersion.GetInt32()
+                )
+                    throw new InvalidOperationException(
+                        "The formatting request refers to an obsolete document version."
+                    );
                 LuiSpan? formatRange = null;
                 if (method == "textDocument/rangeFormatting")
                 {
                     var range = parameters.GetProperty("range");
-                    var start = await OffsetAsync(project, formatUri, range.GetProperty("start"))
-                        .ConfigureAwait(false);
-                    var end = await OffsetAsync(project, formatUri, range.GetProperty("end"))
-                        .ConfigureAwait(false);
+                    var start = FormattingOffset(formatText, range.GetProperty("start"));
+                    var end = FormattingOffset(formatText, range.GetProperty("end"));
                     formatRange = LuiSpan.From(start, end);
                 }
-                var format = await project
-                    .FormatAsync(formatUri, formatRange, CancellationToken.None)
-                    .ConfigureAwait(false);
-                var formatText = await project
-                    .GetTextAsync(formatUri, CancellationToken.None)
-                    .ConfigureAwait(false);
+                var configuration = LuiEditorConfigResolver.Resolve(
+                    LuiProjectContext.FilePath(formatUri)
+                );
+                if (!configuration.IsValid)
+                    throw new InvalidOperationException(
+                        string.Join(
+                            " | ",
+                            configuration.Diagnostics.Select(item => item.Id + ": " + item.Message)
+                        )
+                    );
+                var format = formatRange is { } selectedRange
+                    ? LuiFormatter.FormatSelection(formatText, selectedRange, configuration.Options)
+                    : LuiFormatter.FormatDocument(formatText, configuration.Options);
+                if (format.Status is LuiFormattingStatus.Unavailable or LuiFormattingStatus.Failed)
+                    throw new InvalidOperationException(
+                        string.Join(
+                            " | ",
+                            format.Diagnostics.Select(item => item.Id + ": " + item.Message)
+                        )
+                    );
                 return new HandlerResult(
                     null,
-                    format is null
-                    || formatText is null
-                    || format.Span.Length == 0 && format.NewText.Length == 0
-                        ? Array.Empty<object>()
-                        : new[]
+                    format
+                        .Edits.Select(edit => new
                         {
-                            new
-                            {
-                                range = Range(formatText, format.Span),
-                                newText = format.NewText,
-                            },
-                        }
+                            range = Range(formatText, edit.Span),
+                            newText = edit.NewText,
+                        })
+                        .ToArray()
+                );
+            case "textDocument/codeAction":
+            case "codeAction/resolve":
+                return new HandlerResult(
+                    null,
+                    await CodeActionsAsync(
+                            project,
+                            parameters,
+                            formattingDocuments,
+                            method == "codeAction/resolve"
+                        )
+                        .ConfigureAwait(false)
                 );
             case "textDocument/completion":
                 if (project is null)
@@ -831,19 +914,165 @@ internal static class Program
     {
         if (offset < 0 || offset > text.Length)
             throw new ArgumentOutOfRangeException(nameof(offset));
-        var line = 0;
-        var character = 0;
-        for (var index = 0; index < offset; index++)
+        var position = Microsoft
+            .CodeAnalysis.Text.SourceText.From(text)
+            .Lines.GetLinePosition(offset);
+        return (position.Line, position.Character);
+    }
+
+    private static int FormattingOffset(string text, JsonElement position)
+    {
+        var lines = Microsoft.CodeAnalysis.Text.SourceText.From(text).Lines;
+        var line = position.GetProperty("line").GetInt32();
+        var character = position.GetProperty("character").GetInt32();
+        if (line < 0 || line >= lines.Count || character < 0 || character > lines[line].Span.Length)
+            throw new ArgumentOutOfRangeException(
+                nameof(position),
+                "The formatting position is outside the document."
+            );
+        return lines[line].Start + character;
+    }
+
+    private sealed record FormattingDocument(int Version, string Text);
+
+    private static async Task<object> CodeActionsAsync(
+        LuiProjectContext? project,
+        JsonElement parameters,
+        Dictionary<string, FormattingDocument> documents,
+        bool resolve
+    )
+    {
+        object Unavailable(string reason) =>
+            resolve
+                ? new
+                {
+                    title = parameters.GetProperty("title").GetString(),
+                    kind = "quickfix",
+                    disabled = new { reason },
+                }
+                : Array.Empty<object>();
+        if (project is null)
+            return Unavailable("Select a project to analyze semantic fixes.");
+        var data = parameters.GetProperty(resolve ? "data" : "textDocument");
+        var documentUri = data.GetProperty("uri").GetString()!;
+        var uri = new Uri(documentUri);
+        if (!documents.TryGetValue(DocumentKey(uri), out var document))
+            return Unavailable("The document is no longer open.");
+        if (
+            data.TryGetProperty("version", out var requested)
+            && requested.GetInt32() != document.Version
+        )
+            return Unavailable("The document changed; request a fresh code action.");
+        if (resolve && data.GetProperty("epoch").GetInt64() != project.CompletionEpoch)
+            return Unavailable("The project changed; request a fresh code action.");
+        var configuration = LuiEditorConfigResolver.Resolve(LuiProjectContext.FilePath(uri));
+        if (!configuration.IsValid)
+            return Unavailable("Correct the source configuration before applying fixes.");
+        var lint = await project
+            .LintAsync(
+                uri,
+                new LuiLintOptions(configuration.DeclarationOrder),
+                CancellationToken.None
+            )
+            .ConfigureAwait(false);
+        if (
+            lint is null
+            || lint.Result.Status != LuiLintAnalysisStatus.Complete
+            || lint.Source != document.Text
+        )
+            return Unavailable("A current, complete semantic analysis is required for this fix.");
+        var diagnostics = await project
+            .DiagnosticsAsync(uri, CancellationToken.None)
+            .ConfigureAwait(false);
+        if (diagnostics is null || project.CompletionEpoch != lint.Epoch)
+            return Unavailable("The project changed during analysis.");
+        var range =
+            resolve ? (LuiSpan?)null
+            : parameters.TryGetProperty("range", out var requestedRange)
+                ? LuiSpan.From(
+                    FormattingOffset(document.Text, requestedRange.GetProperty("start")),
+                    FormattingOffset(document.Text, requestedRange.GetProperty("end"))
+                )
+            : null;
+        var actions = new List<object>();
+        foreach (var fix in lint.Result.Fixes)
         {
-            if (text[index] == '\n')
-            {
-                line++;
-                character = 0;
-            }
-            else if (text[index] != '\r')
-                character++;
+            if (
+                resolve
+                && (
+                    data.GetProperty("rule").GetString() != fix.DiagnosticId
+                    || data.GetProperty("offset").GetInt32() != fix.DiagnosticSpan.Start
+                )
+            )
+                continue;
+            if (
+                range is { } selected
+                && (
+                    fix.DiagnosticSpan.End < selected.Start
+                    || fix.DiagnosticSpan.Start > selected.End
+                )
+            )
+                continue;
+            var diagnostic = diagnostics.FirstOrDefault(item =>
+                item.Code == fix.DiagnosticId
+                && item.Span.Start == fix.DiagnosticSpan.Start
+                && item.Span.Length == fix.DiagnosticSpan.Length
+            );
+            if (diagnostic is null)
+                continue;
+            actions.Add(
+                new
+                {
+                    title = fix.Title + " (" + fix.DiagnosticId + ")",
+                    kind = "quickfix",
+                    diagnostics = new[]
+                    {
+                        new
+                        {
+                            range = Range(document.Text, diagnostic.Span),
+                            code = diagnostic.Code,
+                            message = diagnostic.Message,
+                            severity = diagnostic.Severity,
+                            source = "Lucent.Lui",
+                        },
+                    },
+                    data = new
+                    {
+                        uri = documentUri,
+                        version = document.Version,
+                        epoch = lint.Epoch,
+                        rule = fix.DiagnosticId,
+                        offset = fix.DiagnosticSpan.Start,
+                    },
+                    edit = resolve
+                        ? new
+                        {
+                            documentChanges = new[]
+                            {
+                                new
+                                {
+                                    textDocument = new
+                                    {
+                                        uri = documentUri,
+                                        version = document.Version,
+                                    },
+                                    edits = fix
+                                        .Edits.Select(edit => new
+                                        {
+                                            range = Range(document.Text, edit.Span),
+                                            newText = edit.NewText,
+                                        })
+                                        .ToArray(),
+                                },
+                            },
+                        }
+                        : null,
+                }
+            );
         }
-        return (line, character);
+        return resolve
+            ? actions.FirstOrDefault() ?? Unavailable("This fix is no longer applicable.")
+            : actions;
     }
 
     private static Task<JsonDocument?> ReadMessageAsync() =>

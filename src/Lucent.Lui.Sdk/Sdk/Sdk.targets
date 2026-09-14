@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <Import Project="$(MSBuildThisFileDirectory)Assets.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)LuiConfiguration.targets"
+          Condition="'$(LucentLuiConfigurationTargetsImported)' != 'true' and Exists('$(MSBuildThisFileDirectory)LuiConfiguration.targets')" />
+  <Import Project="$(MSBuildThisFileDirectory)..\..\..\eng\LuiConfiguration.targets"
+          Condition="'$(LucentLuiConfigurationTargetsImported)' != 'true' and !Exists('$(MSBuildThisFileDirectory)LuiConfiguration.targets')" />
 
   <Target Name="ValidateLucentLuiLangVersion" BeforeTargets="CoreCompile" Condition="'$(LucentEnableLui)' != 'false'">
     <Error Condition="'$(LucentLuiLangVersion)' != 'preview'" Text="LucentLuiLangVersion must be 'preview' for this SDK proof." />

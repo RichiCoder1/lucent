@@ -31,7 +31,7 @@ public component StorageExample(ComponentBrowserState browser) {
                 Choose folder
             </Button>
         </Layout>
-        <Status content={() => example.Message} name="component-browser.storage.status" />
+        <Status name="component-browser.storage.status">{() => example.Message}</Status>
         <Text
             content={() => example.Location}
             style={PresentationStyles.Secondary with {

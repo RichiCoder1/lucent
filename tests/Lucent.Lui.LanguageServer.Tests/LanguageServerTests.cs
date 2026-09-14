@@ -3788,9 +3788,13 @@ style MotionStyle {
             );
             var detailsText = await File.ReadAllTextAsync(detailsDocument.LocalPath);
             var detailsTokens = await SemanticTokensAsync(browserLsp, detailsDocument, detailsText);
-            foreach (var literal in new[] { "Issues</Text>", "Density: comfortable" })
+            foreach (var literal in new[] { "Issues", "</Text>", "Density: comfortable" })
             {
                 var start = headerText.IndexOf(literal, StringComparison.Ordinal);
+                Assert(
+                    start >= 0,
+                    "Header.lui no longer contains the semantic-token specimen: " + literal
+                );
                 Assert(
                     !headerTokens.Any(token =>
                         token.Start < start + literal.Length && token.Start + token.Length > start
@@ -3916,20 +3920,266 @@ style MotionStyle {
     }
 
     [TestMethod]
-    public async Task FormattingCliRejectsMalformedAndUnsupportedInputWithoutWritingIt()
+    public async Task ProtocolLintActionsRebindAndRejectObsoleteVersions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lucent-lint-actions-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        try
+        {
+            var projectPath = Path.Combine(root, "Actions.csproj");
+            await File.WriteAllTextAsync(
+                projectPath,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "Caption.cs"),
+                "namespace Sample; using Lucent.Core; public static class Custom { [LucentComponent] public static ComponentRecipe Caption([DefaultContent] string label) => null!; }"
+            );
+            const string source =
+                "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Example() { <Caption label=\"Hello\" /> }";
+            var sourcePath = Path.Combine(root, "Example.lui");
+            await File.WriteAllTextAsync(sourcePath, source);
+            using (
+                var context = await LuiProjectContext.LoadAsync(projectPath, CancellationToken.None)
+            )
+            {
+                var lint = await context.LintAsync(
+                    new Uri(sourcePath),
+                    new LuiLintOptions(),
+                    CancellationToken.None
+                );
+                Assert(
+                    lint is not null
+                        && lint.Result.Status == LuiLintAnalysisStatus.Complete
+                        && lint.Result.Fixes.Any(fix =>
+                            fix.DiagnosticId == LuiLintCatalog.DefaultContentPlacement
+                        ),
+                    "Project-backed lint did not expose the proven content fix: "
+                        + String.Join(
+                            " | ",
+                            lint?.Result.Diagnostics.Select(item => item.Id + ": " + item.Message)
+                                ?? []
+                        )
+                );
+            }
+            using var lsp = LspClient.Start();
+            using var initialized = await lsp.RequestAsync(
+                "initialize",
+                new
+                {
+                    initializationOptions = new { projectUri = new Uri(projectPath).AbsoluteUri },
+                }
+            );
+            Assert(
+                initialized.RootElement.TryGetProperty("result", out _),
+                "Lint-action project did not initialize."
+            );
+            await lsp.NotifyAsync("initialized", new { });
+            var uri = VsCodeUri(new Uri(sourcePath));
+            await lsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri,
+                        version = 1,
+                        text = source,
+                    },
+                }
+            );
+            using var actions = await lsp.RequestAsync(
+                "textDocument/codeAction",
+                new
+                {
+                    textDocument = new { uri, version = 1 },
+                    range = new
+                    {
+                        start = new { line = 0, character = 0 },
+                        end = new { line = 0, character = source.Length },
+                    },
+                    context = new { diagnostics = Array.Empty<object>() },
+                }
+            );
+            var action = actions.RootElement.GetProperty("result").EnumerateArray().Single();
+            Assert(
+                action.GetProperty("data").GetProperty("rule").GetString() == "LUI5003",
+                "Content action did not identify its rule."
+            );
+            using var resolved = await lsp.RequestAsync("codeAction/resolve", action);
+            var change = resolved
+                .RootElement.GetProperty("result")
+                .GetProperty("edit")
+                .GetProperty("documentChanges")[0];
+            Assert(
+                change.GetProperty("textDocument").GetProperty("version").GetInt32() == 1,
+                "Resolved edits must be versioned."
+            );
+            using var edits = JsonDocument.Parse(
+                "{\"result\":" + change.GetProperty("edits").GetRawText() + "}"
+            );
+            Assert(
+                ApplyLspEdits(source, edits)
+                    .Contains("<Caption>Hello</Caption>", StringComparison.Ordinal),
+                "Resolved action did not contain the proven content conversion."
+            );
+            await lsp.NotifyAsync(
+                "textDocument/didChange",
+                new
+                {
+                    textDocument = new { uri, version = 2 },
+                    contentChanges = new[]
+                    {
+                        new { text = source.Replace("Hello", "Later", StringComparison.Ordinal) },
+                    },
+                }
+            );
+            using var stale = await lsp.RequestAsync("codeAction/resolve", action);
+            Assert(
+                stale.RootElement.GetProperty("result").TryGetProperty("disabled", out _),
+                "A same-length edit did not invalidate the action."
+            );
+            using var shutdown = await lsp.RequestAsync("shutdown", new { });
+            Assert(await lsp.ExitAsync() == 0, "Lint-action LSP did not shut down cleanly.");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task ProtocolFormatsWithoutProjectAndRejectsUnavailableOrObsoleteSnapshots()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lucent-standalone-format-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        try
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(root, ".editorconfig"),
+                "root = true\n[*.lui]\nindent_size = 2\nend_of_line = crlf\n"
+            );
+            var uri = VsCodeUri(new Uri(Path.Combine(root, "Example.lui")));
+            const string source = "internal component Example() {\r    <Text>{\"💡\"}</Text>\r}";
+            using var lsp = LspClient.Start();
+            using var initialized = await lsp.RequestAsync("initialize", new { });
+            Assert(
+                initialized.RootElement.TryGetProperty("result", out _),
+                "Formatting-only initialization failed."
+            );
+            await lsp.NotifyAsync("initialized", new { });
+            await lsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri,
+                        languageId = "lui",
+                        version = 1,
+                        text = source,
+                    },
+                }
+            );
+            using var formatted = await lsp.RequestAsync(
+                "textDocument/formatting",
+                new { textDocument = new { uri, version = 1 }, options = new { } }
+            );
+            var edit = formatted.RootElement.GetProperty("result")[0];
+            var expected = LuiFormatter
+                .FormatDocument(
+                    source,
+                    new LuiFormattingOptions(indentSize: 2, lineEnding: LuiLineEnding.CrLf)
+                )
+                .Text;
+            Assert(
+                edit.GetProperty("newText").GetString() == expected,
+                "Projectless formatting ignored shared configuration or changed Unicode."
+            );
+            Assert(
+                edit.GetProperty("range").GetProperty("end").GetProperty("line").GetInt32() == 2,
+                "CR-only source positions were not recognized."
+            );
+            await lsp.NotifyAsync(
+                "textDocument/didChange",
+                new
+                {
+                    textDocument = new { uri, version = 2 },
+                    contentChanges = new[] { new { text = expected } },
+                }
+            );
+            using var clean = await lsp.RequestAsync(
+                "textDocument/formatting",
+                new { textDocument = new { uri, version = 2 }, options = new { } }
+            );
+            Assert(
+                clean.RootElement.GetProperty("result").GetArrayLength() == 0,
+                "Clean formatting must return no edits."
+            );
+            using var obsolete = await lsp.RequestAsync(
+                "textDocument/formatting",
+                new { textDocument = new { uri, version = 1 }, options = new { } }
+            );
+            Assert(
+                obsolete.RootElement.TryGetProperty("error", out _),
+                "An obsolete formatting request returned edits."
+            );
+            await File.WriteAllTextAsync(
+                Path.Combine(root, ".editorconfig"),
+                "root = true\n[*.lui]\nindent_size = invalid\n"
+            );
+            using var invalidConfiguration = await lsp.RequestAsync(
+                "textDocument/formatting",
+                new { textDocument = new { uri, version = 2 }, options = new { } }
+            );
+            Assert(
+                invalidConfiguration.RootElement.TryGetProperty("error", out _),
+                "Invalid configuration was reported clean."
+            );
+            await File.WriteAllTextAsync(Path.Combine(root, ".editorconfig"), "root = true\n");
+            await lsp.NotifyAsync(
+                "textDocument/didChange",
+                new
+                {
+                    textDocument = new { uri, version = 3 },
+                    contentChanges = new[]
+                    {
+                        new { text = "internal component Broken() { <Text>" },
+                    },
+                }
+            );
+            using var invalidSource = await lsp.RequestAsync(
+                "textDocument/formatting",
+                new { textDocument = new { uri, version = 3 }, options = new { } }
+            );
+            Assert(
+                invalidSource.RootElement.TryGetProperty("error", out _),
+                "Malformed source was reported clean."
+            );
+            using var shutdown = await lsp.RequestAsync("shutdown", new { });
+            Assert(await lsp.ExitAsync() == 0, "Formatting-only LSP did not shut down cleanly.");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task FormattingCliRejectsMalformedInputAndPreservesParameterComments()
     {
         var root = Path.Combine(Path.GetTempPath(), "lucent-format-status-" + Guid.NewGuid());
         Directory.CreateDirectory(root);
         try
         {
             var malformed = Path.Combine(root, "Malformed.lui");
-            var unsupported = Path.Combine(root, "Unsupported.lui");
+            var commented = Path.Combine(root, "Commented.lui");
             var valid = Path.Combine(root, "Valid.lui");
             const string invalidText = "internal component Broken() { <Text>";
-            const string unsupportedText =
+            const string commentedText =
                 "internal component View(int a, /* keep */ int b) { <Text>Hi</Text> }";
             await File.WriteAllTextAsync(malformed, invalidText);
-            await File.WriteAllTextAsync(unsupported, unsupportedText);
+            await File.WriteAllTextAsync(commented, commentedText);
             await File.WriteAllTextAsync(valid, "internal component View(){<Text>Hi</Text>}");
             foreach (var mode in new[] { "--check", "--write" })
             {
@@ -3938,15 +4188,27 @@ style MotionStyle {
                     "Malformed source was reported clean or writable."
                 );
                 Assert(
-                    await ToolingExitCodeAsync(mode, unsupported) == 2,
-                    "Unsupported preservation was reported clean or writable."
-                );
-                Assert(
-                    await File.ReadAllTextAsync(malformed) == invalidText
-                        && await File.ReadAllTextAsync(unsupported) == unsupportedText,
+                    await File.ReadAllTextAsync(malformed) == invalidText,
                     "Unavailable formatting changed the source."
                 );
             }
+            Assert(
+                await ToolingExitCodeAsync("--check", commented) == 1,
+                "Commented source should be formattable."
+            );
+            Assert(
+                await File.ReadAllTextAsync(commented) == commentedText,
+                "Check mode wrote source."
+            );
+            Assert(
+                await ToolingExitCodeAsync("--write", commented) == 0
+                    && (await File.ReadAllTextAsync(commented)).Contains(
+                        "/* keep */",
+                        StringComparison.Ordinal
+                    )
+                    && await ToolingExitCodeAsync("--check", commented) == 0,
+                "Parameter comments were lost or formatting did not converge."
+            );
             Assert(
                 await ToolingExitCodeAsync("--check", valid, malformed) == 2,
                 "Batch drift hid an unavailable file."
@@ -4268,6 +4530,20 @@ style MotionStyle {
                 ["Widget.lui"],
                 "none"
             ),
+            new DiagnosticCase(
+                "lint-warning",
+                "namespace Sample;\nusing Lucent.Core;\nusing static Lucent.Core.Components;\ninternal component Widget() { <Text content={() => \"Ready\"} /> }",
+                ["Widget.lui"],
+                ["Widget.lui"],
+                "warning"
+            ),
+            new DiagnosticCase(
+                "lint-suppression",
+                "namespace Sample;\nusing Lucent.Core;\nusing static Lucent.Core.Components;\ninternal component Widget() { <Text content={() => \"Ready\"} /> }",
+                ["Widget.lui"],
+                ["Widget.lui"],
+                "none"
+            ),
         };
 
         foreach (var testCase in cases)
@@ -4307,7 +4583,13 @@ style MotionStyle {
                 if (testCase.EditorSeverity is not null)
                     await File.WriteAllTextAsync(
                         Path.Combine(root, ".editorconfig"),
-                        "root = true\n[*.lui]\ndotnet_diagnostic.LUI2001.severity = "
+                        "root = true\n[*.lui]\ndotnet_diagnostic."
+                            + (
+                                testCase.Name.StartsWith("lint-", StringComparison.Ordinal)
+                                    ? "LUI5003"
+                                    : "LUI2001"
+                            )
+                            + ".severity = "
                             + testCase.EditorSeverity
                     );
 
@@ -5183,6 +5465,9 @@ style MotionStyle {
             project.AnalyzerOptions.AnalyzerConfigOptionsProvider
         );
         var diagnostics = driver.RunGenerators(compilation).GetRunResult().Diagnostics;
+        var configuredSeverities = LuiEditorConfigResolver
+            .Resolve(currentPath)
+            .DiagnosticSeverities;
         return diagnostics
             .Where(diagnostic =>
                 diagnostic.Id.StartsWith("LUI", StringComparison.Ordinal)
@@ -5192,13 +5477,27 @@ style MotionStyle {
                     StringComparison.OrdinalIgnoreCase
                 )
             )
+            .Where(diagnostic =>
+                !configuredSeverities.TryGetValue(diagnostic.Id, out var configured)
+                || configured != ReportDiagnostic.Suppress
+            )
             .Select(diagnostic =>
             {
                 var span = diagnostic.Location.GetLineSpan().Span;
+                var severity = configuredSeverities.TryGetValue(diagnostic.Id, out var configured)
+                    ? configured switch
+                    {
+                        ReportDiagnostic.Error => DiagnosticSeverity.Error,
+                        ReportDiagnostic.Warn => DiagnosticSeverity.Warning,
+                        ReportDiagnostic.Info => DiagnosticSeverity.Info,
+                        ReportDiagnostic.Hidden => DiagnosticSeverity.Hidden,
+                        _ => diagnostic.Severity,
+                    }
+                    : diagnostic.Severity;
                 return new DiagnosticValue(
                     diagnostic.Id,
                     diagnostic.GetMessage(CultureInfo.InvariantCulture),
-                    Severity(diagnostic.Severity),
+                    Severity(severity),
                     diagnostic.Descriptor.Category,
                     span.Start.Line,
                     span.Start.Character,

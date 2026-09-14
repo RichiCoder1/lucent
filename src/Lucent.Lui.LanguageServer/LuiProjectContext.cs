@@ -16,7 +16,7 @@ using Microsoft.CodeAnalysis.Text;
 
 namespace Lucent.Lui.LanguageServer;
 
-internal sealed class LuiProjectContext : IDisposable
+internal sealed partial class LuiProjectContext : IDisposable
 {
     internal static readonly string[] SemanticTokenTypes =
     [
@@ -243,11 +243,33 @@ internal sealed class LuiProjectContext : IDisposable
                 : null;
         }
         var result = CompileSnapshot(snapshot, cancellationToken);
-        var diagnostics = result
-            .Diagnostics.Select(diagnostic => EditorDiagnostic(snapshot.Compilation, diagnostic))
+        var configuration = LuiEditorConfigResolver.Resolve(snapshot.Document.Path);
+        var lint = LintSnapshot(
+            snapshot,
+            result,
+            new LuiLintOptions(configuration.DeclarationOrder),
+            cancellationToken
+        );
+        var diagnostics = lint
+            .Diagnostics.Select(diagnostic =>
+                EditorDiagnostic(
+                    snapshot.Compilation,
+                    diagnostic,
+                    configuration.DiagnosticSeverities
+                )
+            )
             .Where(diagnostic => diagnostic is not null)
             .Cast<LuiEditorDiagnostic>()
             .ToList();
+        diagnostics.AddRange(
+            configuration.Diagnostics.Select(diagnostic => new LuiEditorDiagnostic(
+                diagnostic.Id,
+                diagnostic.Message + " (" + diagnostic.FilePath + ":" + diagnostic.Line + ")",
+                new LuiSpan(0, 0),
+                1,
+                "Lucent.Lui"
+            ))
+        );
         foreach (
             var diagnostic in snapshot.Index.Diagnostics.Where(item =>
                 String.Equals(item.Document.Path, snapshot.Document.Path, StringComparison.Ordinal)
@@ -1201,12 +1223,30 @@ internal sealed class LuiProjectContext : IDisposable
         CancellationToken cancellationToken
     )
     {
+        long capturedEpoch;
+        lock (gate)
+            capturedEpoch = epoch;
         var text = await GetTextAsync(uri, cancellationToken).ConfigureAwait(false);
         if (text is null || !Owns(uri))
             return null;
-        var formatted = range is { } selection
-            ? LuiFormatter.FormatRange(text, selection)
-            : LuiFormatter.Format(text);
+        var configuration = LuiEditorConfigResolver.Resolve(FilePath(uri));
+        if (!configuration.IsValid)
+            return null;
+        var result = range is { } selection
+            ? LuiFormatter.FormatSelection(
+                text,
+                selection,
+                configuration.Options,
+                cancellationToken
+            )
+            : LuiFormatter.FormatDocument(text, configuration.Options, cancellationToken);
+        if (result.Status is LuiFormattingStatus.Unavailable or LuiFormattingStatus.Failed)
+            return null;
+        var formatted = result.Text;
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (gate)
+            if (disposed || capturedEpoch != epoch)
+                return null;
         var start = 0;
         while (start < text.Length && start < formatted.Length && text[start] == formatted[start])
             start++;
@@ -2862,14 +2902,19 @@ internal sealed class LuiProjectContext : IDisposable
 
     private static LuiEditorDiagnostic? EditorDiagnostic(
         Compilation compilation,
-        LuiDiagnostic diagnostic
+        LuiDiagnostic diagnostic,
+        IReadOnlyDictionary<string, ReportDiagnostic>? diagnosticSeverities = null
     )
     {
-        var report = compilation.Options.SpecificDiagnosticOptions.TryGetValue(
-            diagnostic.Id,
-            out var configured
-        )
-            ? configured
+        var report =
+            diagnosticSeverities is not null
+            && diagnosticSeverities.TryGetValue(diagnostic.Id, out var configuredSeverity)
+                ? configuredSeverity
+            : compilation.Options.SpecificDiagnosticOptions.TryGetValue(
+                diagnostic.Id,
+                out var configured
+            )
+                ? configured
             : compilation.Options.GeneralDiagnosticOption;
         if (report == ReportDiagnostic.Suppress)
             return null;

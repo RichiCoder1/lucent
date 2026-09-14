@@ -97,7 +97,7 @@ internal sealed class LuiDocumentLayout
                 LuiStyleMemberSyntax value => StyleMember(value),
                 LuiElementSyntax value => Element(value),
                 LuiMemberSyntax value => csharp.Member(value),
-                LuiRequirementSyntax value => D.Text(value.Text),
+                LuiRequirementSyntax value => csharp.Requirement(value),
                 LuiCommentSyntax value => D.Text(value.Text),
                 LuiTextSyntax value => D.Text(value.Text),
                 LuiExpressionBodySyntax value => Island(value.Text),

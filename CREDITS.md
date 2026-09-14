@@ -39,11 +39,11 @@ These sources were consulted on 2026-08-30 for the .lui design. They are concept
 | --- | --- | --- | --- |
 | [Roslyn](https://github.com/dotnet/roslyn/tree/6c4a46a31302167b425d5e0a31ea83c9a9aa1d09) / `Microsoft.CodeAnalysis.CSharp` | commit `6c4a46a31302167b425d5e0a31ea83c9a9aa1d09`; package API `5.0.0` | MIT | Incremental generator, `AdditionalText`, diagnostics, C# expression binding, generated spans |
 | [Roslyn C# features](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp.Features/5.0.0) / `Microsoft.CodeAnalysis.CSharp.Features` | package `5.0.0` | MIT | Official Roslyn `CompletionService` for C# expression-island completion in the separate editor-process-only LSP; it never ships with Lucent applications |
-| [Roslyn MSBuild workspace](https://www.nuget.org/packages/Microsoft.CodeAnalysis.Workspaces.MSBuild/5.0.0) / `Microsoft.CodeAnalysis.Workspaces.MSBuild` | package `5.0.0` | MIT | Evaluated project loading for the separate LSP; it is editor-process-only and never ships with Lucent applications |
-| [Roslyn C# workspace](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp.Workspaces/5.0.0) / `Microsoft.CodeAnalysis.CSharp.Workspaces` | package `5.0.0` | MIT | C# project support for the separate LSP's evaluated MSBuild workspace; it is editor-process-only |
-| [MSBuild Locator](https://www.nuget.org/packages/Microsoft.Build.Locator/1.9.1) / `Microsoft.Build.Locator` | package `1.9.1` | MIT | Registers the installed MSBuild instance for the separate LSP before workspace loading; it is editor-process-only |
-| [MSBuild](https://www.nuget.org/packages/Microsoft.Build.Tasks.Core/17.14.28) / `Microsoft.Build`, `Microsoft.Build.Framework`, `Microsoft.Build.Tasks.Core`, `Microsoft.Build.Utilities.Core` | packages `17.14.28` | MIT | Security-serviced MSBuild workspace transitive dependency set for the separate LSP; it is editor-process-only |
-| [.NET cryptography XML](https://www.nuget.org/packages/System.Security.Cryptography.Xml/10.0.11) / `System.Security.Cryptography.Xml` | package `10.0.11` | MIT | Security-serviced MSBuild workspace transitive dependency for the separate LSP; it is editor-process-only |
+| [Roslyn MSBuild workspace](https://www.nuget.org/packages/Microsoft.CodeAnalysis.Workspaces.MSBuild/5.0.0) / `Microsoft.CodeAnalysis.Workspaces.MSBuild` | package `5.0.0` | MIT | Evaluated project loading for the separate LSP and semantic CLI linting; it ships only with those development hosts, including the SDK's tools folder, and never with Lucent applications |
+| [Roslyn C# workspace](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp.Workspaces/5.0.0) / `Microsoft.CodeAnalysis.CSharp.Workspaces` | package `5.0.0` | MIT | C# project support for the evaluated LSP and semantic CLI workspaces; it ships only with those development hosts |
+| [MSBuild Locator](https://www.nuget.org/packages/Microsoft.Build.Locator/1.9.1) / `Microsoft.Build.Locator` | package `1.9.1` | MIT | Registers the installed MSBuild instance for the separate LSP and semantic CLI before workspace loading; it ships only with those development hosts |
+| [MSBuild](https://www.nuget.org/packages/Microsoft.Build.Tasks.Core/17.14.28) / `Microsoft.Build`, `Microsoft.Build.Framework`, `Microsoft.Build.Tasks.Core`, `Microsoft.Build.Utilities.Core` | packages `17.14.28` | MIT | Security-serviced MSBuild workspace dependency set for the separate LSP and semantic CLI; it ships only with those development hosts |
+| [.NET cryptography XML](https://www.nuget.org/packages/System.Security.Cryptography.Xml/10.0.11) / `System.Security.Cryptography.Xml` | package `10.0.11` | MIT | Security-serviced MSBuild workspace dependency for the separate LSP and semantic CLI; it ships only with those development hosts |
 | [Razor](https://github.com/dotnet/razor/tree/58ec96978ef4e5823b54e960b9fd64cff45d7e68) | commit `58ec96978ef4e5823b54e960b9fd64cff45d7e68`; ASP.NET Core 9/10 docs | MIT | Partial C# components, typed content, generated inspection, cohosted project semantics, source mapping lessons |
 | [Mobile Blazor Bindings](https://github.com/dotnet/MobileBlazorBindings/tree/6b2d767a44fff94eb90489649889c66a399c00ec) | final archived commit `6b2d767a44fff94eb90489649889c66a399c00ec`; package `0.5.50-preview` | MIT; archived experiment | Native component markup and caution against a parallel platform/runtime abstraction |
 | [GPUIX](https://github.com/remorses/gpuix/tree/09e0caeb1812eece10a3a8a7200ef18567610267) | commit `09e0caeb1812eece10a3a8a7200ef18567610267` | Apache-2.0 | JSX-shaped GPUI authoring and compile-time lowering inspiration; no hooks/runtime adoption |
@@ -85,8 +85,14 @@ copied and no new package is adopted. Details and language-specific limits are i
 The formatting implementation uses the existing Roslyn 5.0.0 syntax/trivia APIs
 for C# boundaries and spacing, with Lucent's own grouped layout policy. The
 [Roslyn syntax overview](https://github.com/dotnet/roslyn/blob/main/docs/wiki/Roslyn-Overview.md)
-informs token/trivia preservation. No formatter source is copied and no additional
-Workspaces or CSharpier dependency enters the compiler/generator package closure.
+informs token/trivia preservation. The options resolver also reuses Roslyn's existing
+`AnalyzerConfig` matcher so CLI and build hosts share EditorConfig glob, range and
+escaping semantics. No formatter source is copied and no additional Workspaces or
+CSharpier dependency enters the compiler/generator package closure.
+The standalone CLI reuses the already pinned Roslyn MSBuild workspace and
+Microsoft.Build.Locator packages to evaluate trusted project context for semantic
+linting. These host-only dependencies mirror the LSP and do not enter applications,
+the compiler/generator package closure, or formatting-only execution.
 
 | Tool | Exact identity | License | Use |
 | --- | --- | --- | --- |

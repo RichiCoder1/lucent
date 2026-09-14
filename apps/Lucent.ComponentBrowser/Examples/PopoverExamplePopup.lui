@@ -9,13 +9,13 @@ style PopoverExamplePopupStyle {
 internal component PopoverExamplePopup(Func<bool> readOpen, Action<bool> setOpen) {
     <Layout style={PopoverExamplePopupStyle}>
         <Text>A focused surface can contain ordinary controls.</Text>
-        <Status
-            content={
+        <Status>
+            {
                 () => readOpen()
                     ? "State is retained by the mounted example."
                     : "The popover is closing."
             }
-        />
+        </Status>
         <Button onInvoke={() => setOpen(false)}>Close popover</Button>
     </Layout>
 }

@@ -33,7 +33,7 @@ internal component InteractionReviewFixtureView(InteractionReviewModel model) {
             options={model.NumberOptions}
             style={InteractionReviewNumber}
         />
-        <Status content={() => model.NumberStatus} />
+        <Status>{() => model.NumberStatus}</Status>
         <DatePicker
             label="Review date"
             value={() => model.DateValue}
@@ -45,7 +45,7 @@ internal component InteractionReviewFixtureView(InteractionReviewModel model) {
             <Button onInvoke={() => model.SetDateEnabled(false)}>Disable date</Button>
             <Button onInvoke={() => model.SetDateEnabled(true)}>Enable date</Button>
         </Row>
-        <Status content={() => model.DateStatus} />
+        <Status>{() => model.DateStatus}</Status>
         <Slider
             label="Review slider"
             value={() => model.SliderValue}
@@ -54,9 +54,9 @@ internal component InteractionReviewFixtureView(InteractionReviewModel model) {
             options={model.SliderOptions}
             style={InteractionReviewSlider}
         />
-        <Status content={() => model.SliderStatus} />
+        <Status>{() => model.SliderStatus}</Status>
         <Button onInvoke={model.OpenTooltipDialog}>Open tooltip dialog</Button>
-        <Status content={() => model.TooltipDialogStatus} />
+        <Status>{() => model.TooltipDialogStatus}</Status>
         <Dialog
             controller={model.TooltipDialog}
             title="Tooltip dialog"
@@ -81,8 +81,8 @@ internal component InteractionReviewFixtureView(InteractionReviewModel model) {
             Open pending dialog
         </Button>
         <Button onInvoke={model.FailPendingWrite}>Fail pending write</Button>
-        <Status content={() => model.PendingStatus} />
-        <Status content={() => model.PendingSubmissionStatus} />
+        <Status>{() => model.PendingStatus}</Status>
+        <Status>{() => model.PendingSubmissionStatus}</Status>
         <Dialog
             controller={model.PendingDialog}
             title="Pending acceptance dialog"
@@ -111,6 +111,6 @@ internal component InteractionReviewFixtureView(InteractionReviewModel model) {
             rowHeight={30}
             style={InteractionReviewPagedList}
         />
-        <Status content={() => model.PagingStatus} />
+        <Status>{() => model.PagingStatus}</Status>
     </Column>
 }

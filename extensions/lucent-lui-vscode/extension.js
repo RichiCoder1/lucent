@@ -61,7 +61,14 @@ function csharp(value) {
 function toWorkspaceEdit(result) {
     if (!result) return undefined;
     const edit = new vscode.WorkspaceEdit();
-    for (const [uri, changes] of Object.entries(result.changes)) {
+    const documents = result.documentChanges ?? Object.entries(result.changes ?? {}).map(([uri, edits]) => ({ textDocument: { uri }, edits }));
+    for (const changeSet of documents) {
+        const { uri, version } = changeSet.textDocument;
+        if (version !== undefined && version !== null) {
+            const document = vscode.workspace.textDocuments.find(item => item.uri.toString() === uri);
+            if (!document || document.version !== version) return undefined;
+        }
+        const changes = changeSet.edits;
         for (const change of changes) {
             edit.replace(vscode.Uri.parse(uri), new vscode.Range(
                 change.range.start.line,
@@ -75,7 +82,7 @@ function toWorkspaceEdit(result) {
 }
 
 function toTextEdits(changes) {
-    return changes.map(change => new vscode.TextEdit(
+    return (changes ?? []).map(change => new vscode.TextEdit(
         new vscode.Range(
             change.range.start.line,
             change.range.start.character,
@@ -84,6 +91,18 @@ function toTextEdits(changes) {
         ),
         change.newText
     ));
+}
+
+async function formattingEdits(rpc, document, range, token) {
+    if (token?.isCancellationRequested) return [];
+    const version = document.version;
+    const result = await rpc.request(range ? "textDocument/rangeFormatting" : "textDocument/formatting", {
+        textDocument: { uri: document.uri.toString(), version },
+        ...(range ? { range } : {}),
+        options: {}
+    });
+    if (token?.isCancellationRequested || document.version !== version) return [];
+    return toTextEdits(result);
 }
 
 class Rpc {
@@ -188,9 +207,8 @@ class Rpc {
 
 async function activate(context) {
     const projectSetting = vscode.workspace.getConfiguration("lucentLui").get("projectPath");
-    if (!projectSetting) { vscode.window.showErrorMessage("Set lucentLui.projectPath to the evaluated .csproj."); return; }
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const projectPath = workspaceRoot ? path.resolve(workspaceRoot, projectSetting) : path.resolve(projectSetting);
+    const projectPath = projectSetting ? (workspaceRoot ? path.resolve(workspaceRoot, projectSetting) : path.resolve(projectSetting)) : undefined;
     const configured = vscode.workspace.getConfiguration("lucentLui").get("serverPath");
     if (!configured) {
         vscode.window.showErrorMessage("Set lucentLui.serverPath to Lucent.Lui.LanguageServer.dll.");
@@ -198,7 +216,7 @@ async function activate(context) {
     }
     const log = vscode.window.createOutputChannel("Lucent LUI", { log: true });
     context.subscriptions.push(log);
-    log.info(`Starting language server: ${configured}; project: ${projectPath}`);
+    log.info(`Starting language server: ${configured}; project: ${projectPath ?? "formatting only (set lucentLui.projectPath for semantic tooling)"}`);
     const server = path.resolve(configured);
     const process = childProcess.spawn("dotnet", [server], {
         stdio: ["pipe", "pipe", "pipe"],
@@ -206,6 +224,7 @@ async function activate(context) {
     });
     process.stderr.on("data", chunk => log.error(chunk.toString("utf8").trimEnd()));
     const rpc = new Rpc(process, log);
+    const lintActions = new WeakMap();
     const subscriptions = [];
     let stopped = false;
     const diagnostics = vscode.languages.createDiagnosticCollection("lucent-lui");
@@ -289,8 +308,8 @@ async function activate(context) {
         }
     };
     rpc.onNotification("lucent/projectGraph", message => watchProjectDirectories(message.directories));
-    watchProjectDirectories([path.dirname(path.resolve(projectPath))]);
-    const projectUri = vscode.Uri.file(path.resolve(projectPath)).toString();
+    if (projectPath) watchProjectDirectories([path.dirname(projectPath)]);
+    const projectUri = projectPath ? vscode.Uri.file(projectPath).toString() : undefined;
     try { await rpc.request("initialize", { initializationOptions: { projectUri } }); }
     catch (error) {
         if (!stopped) { stop.dispose(); reportFailure(error); }
@@ -374,18 +393,47 @@ async function activate(context) {
             return edit && vscode.workspace.applyEdit(edit);
         }),
         vscode.languages.registerDocumentFormattingEditProvider("lui", {
-            provideDocumentFormattingEdits: async document => toTextEdits(
-                await rpc.request("textDocument/formatting", {
-                    textDocument: { uri: document.uri.toString() }, options: {}
-                })
-            )
+            provideDocumentFormattingEdits: (document, _options, token) => formattingEdits(rpc, document, undefined, token)
         }),
         vscode.languages.registerDocumentRangeFormattingEditProvider("lui", {
-            provideDocumentRangeFormattingEdits: async (document, range) => toTextEdits(
-                await rpc.request("textDocument/rangeFormatting", {
-                    textDocument: { uri: document.uri.toString() }, range, options: {}
-                })
-            )
+            provideDocumentRangeFormattingEdits: (document, range, _options, token) => formattingEdits(rpc, document, range, token)
+        }),
+        vscode.languages.registerCodeActionsProvider("lui", {
+            provideCodeActions: async (document, range, _context, token) => {
+                if (token?.isCancellationRequested) return [];
+                const version = document.version;
+                const result = await rpc.request("textDocument/codeAction", {
+                    textDocument: { uri: document.uri.toString(), version }, range, context: { diagnostics: [] }
+                });
+                if (token?.isCancellationRequested || document.version !== version) return [];
+                return (result ?? []).map(value => {
+                    const action = new vscode.CodeAction(value.title, vscode.CodeActionKind.QuickFix);
+                    lintActions.set(action, { value, document, version });
+                    return action;
+                });
+            },
+            resolveCodeAction: async (action, token) => {
+                // A previously resolved action may be requested again after an edit.
+                delete action.edit;
+                delete action.disabled;
+                const pending = lintActions.get(action);
+                if (!pending || token?.isCancellationRequested) return action;
+                if (pending.document.version !== pending.version) {
+                    action.disabled = { reason: "The document changed; request a fresh code action." };
+                    return action;
+                }
+                const resolved = await rpc.request("codeAction/resolve", pending.value);
+                if (token?.isCancellationRequested || pending.document.version !== pending.version) {
+                    action.disabled = { reason: "The document changed during analysis." };
+                    return action;
+                }
+                if (resolved?.disabled) action.disabled = resolved.disabled;
+                else {
+                    action.edit = toWorkspaceEdit(resolved?.edit);
+                    if (!action.edit) action.disabled = { reason: "A current source snapshot is required." };
+                }
+                return action;
+            }
         }),
         vscode.languages.registerCompletionItemProvider("lui", {
             provideCompletionItems: async (document, position, token) => {
@@ -479,4 +527,5 @@ exports.toVsCodeSymbolKind = toVsCodeSymbolKind;
 exports.semanticTokensLegend = semanticTokensLegend;
 exports.crossLanguageSelector = crossLanguageSelector;
 exports.toTextEdits = toTextEdits;
+exports.formattingEdits = formattingEdits;
 exports.toWorkspaceEdit = toWorkspaceEdit;

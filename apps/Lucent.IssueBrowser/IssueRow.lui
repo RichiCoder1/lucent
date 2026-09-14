@@ -25,16 +25,12 @@ public component IssueRow(
             onSelect={() => OpenIssue(browser, issue().Number, view)}
             style={IssueRowLayoutStyle(view)}
         >
-            <Text
-                style={PresentationStyles.Typography(TextRole.Body).With(IssueRowTextStyle)}
-                content={() => issue().Title}
-            />
-            <Text
-                style={PresentationStyles.Typography(TextRole.Caption).With(IssueRowTextStyle)}
-                content={
-                    () => "#" + issue().Number + " · " + issue().Status + " · " + issue().Assignee
-                }
-            />
+            <Text style={PresentationStyles.Typography(TextRole.Body).With(IssueRowTextStyle)}>
+                {() => issue().Title}
+            </Text>
+            <Text style={PresentationStyles.Typography(TextRole.Caption).With(IssueRowTextStyle)}>
+                {() => "#" + issue().Number + " · " + issue().Status + " · " + issue().Assignee}
+            </Text>
         </Selectable>
     </ContextMenu>
 }

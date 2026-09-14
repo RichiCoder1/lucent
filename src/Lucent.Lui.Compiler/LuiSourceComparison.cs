@@ -54,7 +54,14 @@ public static class LuiSourceComparison
                     !item.IsKind(SyntaxKind.WhitespaceTrivia)
                     && !item.IsKind(SyntaxKind.EndOfLineTrivia)
                 )
-                    Append(item.RawKind, item.ToFullString());
+                {
+                    var text = item.ToFullString();
+                    // Roslyn includes the terminating line ending inside XML
+                    // documentation trivia. It is layout, unlike literal token text.
+                    if (item.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia))
+                        text = text.Replace("\r\n", "\n").Replace('\r', '\n');
+                    Append(item.RawKind, text);
+                }
         }
         void Collect(IReadOnlyList<LuiBodySyntax> nodes)
         {

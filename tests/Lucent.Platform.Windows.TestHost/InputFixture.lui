@@ -20,7 +20,7 @@ style InputFixtureContent {
 internal component InputFixtureView(InputFixtureModel model) {
     <CommandScope bindings={model.Bindings}>
         <Column name="input.container" style={InputFixtureShell}>
-            <Status content={() => model.Status.Value} />
+            <Status>{() => model.Status.Value}</Status>
             <ScrollViewport
                 label="Wheel target"
                 viewport={model.Viewport}

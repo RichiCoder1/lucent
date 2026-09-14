@@ -9,6 +9,35 @@ namespace Lucent.Lui.Compiler.Tests;
 public sealed class WholeFileFormattingTests
 {
     [TestMethod]
+    public void DocumentationCommentsAllowConfiguredLineEndingsWithoutChangingTheirText()
+    {
+        const string source =
+            "/// <summary>Preserve this description.</summary>\npublic component Example() { <Text>Hi</Text> }\n";
+        var result = LuiFormatter.FormatDocument(
+            source,
+            new LuiFormattingOptions(lineEnding: LuiLineEnding.CrLf)
+        );
+        Assert.AreEqual(
+            LuiFormattingStatus.Changed,
+            result.Status,
+            string.Join(" | ", result.Diagnostics.Select(item => item.Message))
+        );
+        StringAssert.StartsWith(
+            result.Text,
+            "/// <summary>Preserve this description.</summary>\r\n"
+        );
+        Assert.AreEqual(
+            result.Text,
+            LuiFormatter
+                .FormatDocument(
+                    result.Text,
+                    new LuiFormattingOptions(lineEnding: LuiLineEnding.CrLf)
+                )
+                .Text
+        );
+    }
+
+    [TestMethod]
     public void FormattedMemberExecutionPreservesRawVerbatimAndInterpolatedValues()
     {
         const string source = """"
@@ -105,6 +134,17 @@ style Base { Spacing: 4; }
             "internal component Example() {\n    <Text>Hi</Text>\n}\n",
             Format("internal component Example(){<Text>Hi</Text>}")
         );
+        StringAssert.Contains(
+            Format(
+                "internal component Example() { Setup ( owner ) { owner.Own(value); } <Text>Hi</Text> }"
+            ),
+            "Setup(owner) {"
+        );
+        var requirement = Format(
+            "internal component Example() { inject /* borrowed */ IService   service ; <Text>Hi</Text> }"
+        );
+        StringAssert.Contains(requirement, "inject /* borrowed */");
+        StringAssert.Contains(requirement, "IService service;");
     }
 
     [TestMethod]
@@ -167,6 +207,22 @@ literal" + """
             Assert.AreEqual(input, result.Text);
             Assert.IsTrue(result.Diagnostics.Any(item => item.Id == "LUI6003"));
         }
+        var embedded = LuiFormatter.FormatDocument(
+            "internal component Example() { void Run() {\n// lui-format-ignore: misplaced\nCall();\n} <Text>Hi</Text> }"
+        );
+        Assert.AreEqual(LuiFormattingStatus.Unavailable, embedded.Status);
+        Assert.IsTrue(embedded.Diagnostics.Any(item => item.Id == "LUI6003"));
+
+        var expression = LuiFormatter.FormatDocument(
+            "internal component Example(string value) { <Text content={value // lui-format-ignore: misplaced\n} /> }"
+        );
+        Assert.AreEqual(LuiFormattingStatus.Unavailable, expression.Status);
+        Assert.IsTrue(expression.Diagnostics.Any(item => item.Id == "LUI6003"));
+
+        var literal = LuiFormatter.FormatDocument(
+            "internal component Example() { <Text content={\"// lui-format-ignore: literal\"} /> }"
+        );
+        Assert.IsFalse(literal.Diagnostics.Any(item => item.Id == "LUI6003"));
     }
 
     [TestMethod]

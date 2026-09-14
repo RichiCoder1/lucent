@@ -21,13 +21,33 @@ internal sealed class LuiCSharpLayout
 
     internal D Parameters(string source) => Format(SyntaxFactory.ParseParameterList(source));
 
+    internal D Requirement(LuiRequirementSyntax requirement) =>
+        D.Concat(
+            D.Text(requirement.Keyword.Text + " "),
+            Format(
+                SyntaxFactory.ParseStatement(
+                    requirement.Text.Substring(
+                        requirement.Keyword.Span.End - requirement.Span.Start
+                    )
+                )
+            )
+        );
+
     internal D Member(LuiMemberSyntax member)
     {
         if (member.Kind != LuiMemberKind.Setup)
             return Format(SyntaxFactory.ParseMemberDeclaration(member.Text)!);
         var brace = member.Text.IndexOf('{');
+        var header = member.Text.Substring(0, brace).TrimEnd();
+        if (
+            SyntaxFactory
+                .ParseTokens(header)
+                .SelectMany(token => token.LeadingTrivia.Concat(token.TrailingTrivia))
+                .All(IsLayout)
+        )
+            header = "Setup(" + (member.SetupOwner?.Text ?? "") + ")";
         return D.Concat(
-            D.Text(member.Text.Substring(0, brace).TrimEnd()),
+            D.Text(header),
             D.Text(" "),
             Format(SyntaxFactory.ParseStatement(member.Text.Substring(brace)))
         );

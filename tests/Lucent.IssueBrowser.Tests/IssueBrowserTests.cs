@@ -1603,10 +1603,12 @@ public sealed partial class IssueBrowserTests
                             "IssueBrowserFirstPaneStyle",
                             StringComparison.Ordinal
                         )
-                        && authoredLui.Contains(
-                            "<VirtualizedList source={() => browser.VisibleIssues} key={issue => issue.Number} row={issue => IssueRow(browser, () => issue.Value, view).Named(\"issue-browser.issue-row\")}",
-                            StringComparison.Ordinal
-                        )
+                        && Regex
+                            .Replace(authoredLui, @"\s+", string.Empty)
+                            .Contains(
+                                "<VirtualizedListsource={()=>browser.VisibleIssues}key={issue=>issue.Number}row={issue=>IssueRow(browser,()=>issue.Value,view).Named(\"issue-browser.issue-row\")}",
+                                StringComparison.Ordinal
+                            )
                         && authoredLui.Contains(
                             "context RouteContext<IssueRoute> route;",
                             StringComparison.Ordinal

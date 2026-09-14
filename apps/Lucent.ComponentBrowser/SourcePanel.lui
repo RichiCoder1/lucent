@@ -22,17 +22,17 @@ style SourceCodeStyle {
 
 public component SourcePanel(ComponentBrowserState browser, ComponentBrowserViewState view) {
     <Layout style={SourcePanelStyle}>
-        <Text
-            style={PresentationStyles.Caption}
-            content={() => "COMPILED SOURCE · " + browser.SelectedItem.SourceFile}
-        />
+        <Text style={PresentationStyles.Caption}>
+            {() => "COMPILED SOURCE · " + browser.SelectedItem.SourceFile}
+        </Text>
         if (browser.SelectedItem.DependencyNote is not null) {
             <Text
                 style={PresentationStyles.Secondary with {
                     TextWrap: TextWrap.WordWithGraphemeFallback;
                 }}
-                content={() => browser.SelectedItem.DependencyNote!}
-            />
+            >
+                {() => browser.SelectedItem.DependencyNote!}
+            </Text>
         }
         <ScrollViewport
             viewport={view.SourceViewport}

@@ -17,7 +17,19 @@ internal sealed class LuiFormattingDirectives
             parent.Span.Start <= node.Span.Start && parent.Span.End >= node.Span.End
         );
 
-    internal LuiFormattingDirectives(LuiDocumentSyntax document) => Visit(document.TopLevel);
+    internal LuiFormattingDirectives(LuiDocumentSyntax document)
+    {
+        Visit(document.TopLevel);
+        diagnostics.AddRange(
+            LuiDirectiveIslands
+                .Find(document, "// lui-format-")
+                .Select(span => new LuiDiagnostic(
+                    "LUI6003",
+                    "Place the formatter directive before the complete C#-containing construct, not inside its C# syntax.",
+                    span
+                ))
+        );
+    }
 
     private void Visit<T>(IReadOnlyList<T> nodes)
         where T : LuiSyntaxNode
@@ -25,6 +37,8 @@ internal sealed class LuiFormattingDirectives
         for (var index = 0; index < nodes.Count; index++)
         {
             var node = nodes[index];
+            if (IsIgnored(node))
+                continue;
             var comment = Comment(node);
             if (
                 comment is not null

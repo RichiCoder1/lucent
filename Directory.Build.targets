@@ -1,0 +1,4 @@
+<Project>
+  <Import Project="eng/LuiConfiguration.targets"
+          Condition="'$(LucentLuiConfigurationTargetsImported)' != 'true'" />
+</Project>

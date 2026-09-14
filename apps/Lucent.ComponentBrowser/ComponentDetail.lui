@@ -65,23 +65,24 @@ public component ComponentDetail(ComponentBrowserState browser, ComponentBrowser
         >
             <Layout style={ComponentDetailContentStyle}>
                 <Layout style={ComponentDetailHeadingStyle}>
-                    <Text
-                        style={PresentationStyles.Caption}
-                        content={() => browser.SelectedItem.Family.ToUpperInvariant()}
-                    />
+                    <Text style={PresentationStyles.Caption}>
+                        {() => browser.SelectedItem.Family.ToUpperInvariant()}
+                    </Text>
                     <Text
                         style={PresentationStyles.Title with {
                             TextWrap: TextWrap.WordWithGraphemeFallback;
                         }}
-                        content={() => browser.SelectedItem.Title}
                         name="component-browser.detail-title"
-                    />
+                    >
+                        {() => browser.SelectedItem.Title}
+                    </Text>
                     <Text
                         style={PresentationStyles.Body with {
                             TextWrap: TextWrap.WordWithGraphemeFallback;
                         }}
-                        content={() => browser.SelectedItem.Summary}
-                    />
+                    >
+                        {() => browser.SelectedItem.Summary}
+                    </Text>
                 </Layout>
                 <Layout style={ComponentStateRowStyle}>
                     <Text style={PresentationStyles.Caption.With(ComponentStateLabelStyle)}>
@@ -181,17 +182,19 @@ public component ComponentDetail(ComponentBrowserState browser, ComponentBrowser
                     style={PresentationStyles.Body with {
                         TextWrap: TextWrap.WordWithGraphemeFallback;
                     }}
-                    content={() => browser.SelectedItem.Usage}
                     name="component-browser.usage"
-                />
+                >
+                    {() => browser.SelectedItem.Usage}
+                </Text>
                 <Text style={PresentationStyles.Caption}>ACCESSIBILITY</Text>
                 <Text
                     style={PresentationStyles.Body with {
                         TextWrap: TextWrap.WordWithGraphemeFallback;
                     }}
-                    content={() => browser.SelectedItem.Accessibility}
                     name="component-browser.accessibility"
-                />
+                >
+                    {() => browser.SelectedItem.Accessibility}
+                </Text>
             </Layout>
         </ScrollViewport>
     </Layout>

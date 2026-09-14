@@ -113,24 +113,97 @@ public sealed class GeneratorTests
                 && scalarGenerated.Contains("\nvalue\n#line hidden", StringComparison.Ordinal),
             "generator did not publish the scalar body expression through the ordinary component call."
         );
-        var namedScalarExpression = Run(
+        var namedScalarExpression = RunWithSource(
+            """
+namespace Sample;
+using Lucent.Core;
+public static class Custom
+{
+    [LucentComponent]
+    public static ComponentRecipe Caption([DefaultContent] string label) => null!;
+}
+""",
             new TextFile(
                 "C:/consumer/views/Scalar.lui",
-                "namespace Sample; using Lucent.Core; using static Lucent.Core.Components; internal component Scalar(string value) { <Text content={value} /> }",
+                "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component Scalar() { <Caption label=\"Ready\" /> }",
                 "views/Scalar.lui"
             )
         );
         Assert(
-            namedScalarExpression.Diagnostics.Length == 0
+            namedScalarExpression.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI5003")
                 && namedScalarExpression
                     .Results.Single()
                     .GeneratedSources.Single()
                     .SourceText.ToString()
-                    .Contains(
-                        "global::Lucent.Core.Components.Text(content:",
-                        StringComparison.Ordinal
-                    ),
-            "named and body scalar expressions did not select the same generated component parameter."
+                    .Contains("global::Sample.Custom.Caption(label:", StringComparison.Ordinal),
+            "named default content was not diagnosed while retaining generated source: "
+                + String.Join(" | ", namedScalarExpression.Diagnostics)
+        );
+        var suppressedScalarExpression = RunWithSource(
+            """
+namespace Sample;
+using Lucent.Core;
+public static class Custom
+{
+    [LucentComponent]
+    public static ComponentRecipe Caption([DefaultContent] string label) => null!;
+}
+""",
+            new TextFile(
+                "C:/consumer/views/SuppressedScalar.lui",
+                "namespace Sample; using Lucent.Core; using static Sample.Custom; internal component SuppressedScalar() { <Caption label=\"Ready\" /> }",
+                "views/SuppressedScalar.lui"
+            ),
+            new TextFile(
+                "C:/consumer/.editorconfig",
+                "root = true\n[*.lui]\ndotnet_diagnostic.LUI5003.severity = none\n",
+                isEditorConfig: true
+            )
+        );
+        Assert(
+            suppressedScalarExpression.Diagnostics.All(diagnostic => diagnostic.Id != "LUI5003")
+                && suppressedScalarExpression.Results.Single().GeneratedSources.Length == 1,
+            "per-file generator severity did not suppress the lint while retaining generated source: "
+                + String.Join(" | ", suppressedScalarExpression.Diagnostics)
+        );
+        var invalidConfiguration = RunWithSource(
+            "",
+            new TextFile("C:/consumer/views/Main.lui", Valid, "views/Main.lui"),
+            new TextFile(
+                "C:/consumer/.editorconfig",
+                "root = true\n[*.lui]\ndotnet_diagnostic.LUI6102.severity = none\ndotnet_diagnostic.LUI5003.severity = invalid\n",
+                isEditorConfig: true
+            )
+        );
+        Assert(
+            invalidConfiguration.Diagnostics.Any(diagnostic =>
+                diagnostic.Id == "LUI6102" && diagnostic.Severity == DiagnosticSeverity.Error
+            ),
+            "invalid lint configuration was hidden by its own severity setting."
+        );
+        var unrelatedUnreadableConfiguration = RunWithSource(
+            "",
+            new TextFile("C:/consumer/views/Main.lui", Valid, "views/Main.lui"),
+            new TextFile("C:/sibling/.editorconfig", null, isEditorConfig: true)
+        );
+        Assert(
+            unrelatedUnreadableConfiguration.Diagnostics.All(diagnostic =>
+                diagnostic.Id != "LUI6100"
+            ),
+            "an unreadable sibling configuration blocked an unrelated LUI document."
+        );
+        var configuredOrder = Run(
+            new TextFile(
+                "C:/consumer/views/Ordered.lui",
+                "namespace Sample; using Lucent.Core; internal component Ordered() { <Text>Ready</Text> } style Later { Spacing: 1f; }",
+                "views/Ordered.lui",
+                declarationOrder: "styles_first"
+            )
+        );
+        Assert(
+            configuredOrder.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI5004")
+                && configuredOrder.Results.Single().GeneratedSources.Length == 1,
+            "configured declaration order did not report through the build while retaining generated source."
         );
         var malformed = Run(
             new TextFile(
@@ -1461,7 +1534,7 @@ public static class Harness
             + "public component Shell(CommandBindings bindings, ApplicationCommand capture) { "
             + "<CommandScope bindings={bindings}><Column>"
             + "<Button onInvoke={() => capture.TryExecute()} style={Style.Empty.Enabled(() => capture.IsEnabled)}>Capture</Button>"
-            + "<Text content={() => capture.IsBusy ? \"Working\" : capture.Error == null ? \"Ready\" : \"Retry\"} />"
+            + "<Text>{() => capture.IsBusy ? \"Working\" : capture.Error == null ? \"Ready\" : \"Retry\"}</Text>"
             + "</Column></CommandScope> }";
         var result = RunWithSource("", new TextFile("C:/consumer/Shell.lui", source, "Shell.lui"));
         Assert(
@@ -2326,12 +2399,18 @@ style Card(float height) { Height: height; }
         string path,
         string? text,
         string? logicalPath = null,
-        string? documentVersion = null
+        string? documentVersion = null,
+        string? declarationOrder = null,
+        IReadOnlyDictionary<string, string>? diagnosticSeverities = null,
+        bool isEditorConfig = false
     ) : AdditionalText
     {
         public override string Path => path;
         public string? LogicalPath => logicalPath;
         public string? DocumentVersion => documentVersion;
+        public string? DeclarationOrder => declarationOrder;
+        public IReadOnlyDictionary<string, string>? DiagnosticSeverities => diagnosticSeverities;
+        public bool IsEditorConfig => isEditorConfig;
 
         public override SourceText? GetText(CancellationToken cancellationToken = default) =>
             text is null ? null : SourceText.From(text);
@@ -2346,21 +2425,33 @@ style Card(float height) { Height: height; }
             texts.ToDictionary(
                 text => (AdditionalText)text,
                 text =>
-                    (AnalyzerConfigOptions)new Options(text.LogicalPath, text.DocumentVersion, null)
+                    (AnalyzerConfigOptions)
+                        new Options(
+                            text.LogicalPath,
+                            text.DocumentVersion,
+                            text.DeclarationOrder,
+                            text.DiagnosticSeverities,
+                            text.IsEditorConfig
+                        )
             );
-        public override AnalyzerConfigOptions GlobalOptions => new Options(null, null, global);
+        public override AnalyzerConfigOptions GlobalOptions =>
+            new Options(null, null, null, global, false);
 
         public override AnalyzerConfigOptions GetOptions(SyntaxTree tree) =>
-            new Options(null, null, null);
+            new Options(null, null, null, null, false);
 
         public override AnalyzerConfigOptions GetOptions(AdditionalText text) =>
-            options.TryGetValue(text, out var value) ? value : new Options(null, null, null);
+            options.TryGetValue(text, out var value)
+                ? value
+                : new Options(null, null, null, null, false);
     }
 
     sealed class Options(
         string? logicalPath,
         string? documentVersion,
-        IReadOnlyDictionary<string, string>? values
+        string? declarationOrder,
+        IReadOnlyDictionary<string, string>? values,
+        bool isEditorConfig
     ) : AnalyzerConfigOptions
     {
         public override bool TryGetValue(string key, out string value)
@@ -2376,6 +2467,16 @@ style Card(float height) { Height: height; }
             )
             {
                 value = documentVersion;
+                return true;
+            }
+            if (key == "lucent_lui_declaration_order" && declarationOrder != null)
+            {
+                value = declarationOrder;
+                return true;
+            }
+            if (key == "build_metadata.AdditionalFiles.LucentLuiEditorConfig" && isEditorConfig)
+            {
+                value = "true";
                 return true;
             }
             if (values is not null && values.TryGetValue(key, out var configured))

@@ -34,31 +34,31 @@ public component Details(
         viewport={view.DetailViewport}
     >
         <Layout style={DetailsContentStyle}>
-            <Text style={PresentationStyles.Caption} content={() => "ISSUE #" + issue().Number} />
+            <Text style={PresentationStyles.Caption}>{() => "ISSUE #" + issue().Number}</Text>
             <Text
                 style={PresentationStyles.Title with {
                     TextWrap: TextWrap.WordWithGraphemeFallback;
                 }}
-                content={() => issue().Title}
                 name="issue-browser.details-title"
-            />
-            <Status
-                style={PresentationStyles.Secondary}
-                content={
+            >
+                {() => issue().Title}
+            </Text>
+            <Status style={PresentationStyles.Secondary} name="issue-browser.details-status">
+                {
                     () => issue().Status + " · " + issue().Assignee + " · updated "
                         + FormatUpdated(issue())
                         + (browser.MutationMessage(issue().Number) is { } message
                             ? " · " + message
                             : "")
                 }
-                name="issue-browser.details-status"
-            />
+            </Status>
             <Text
                 style={PresentationStyles.Caption with {
                     TextWrap: TextWrap.WordWithGraphemeFallback;
                 }}
-                content={() => issue().Labels}
-            />
+            >
+                {() => issue().Labels}
+            </Text>
             <Divider />
             <ScrollViewport
                 viewport={view.DetailViewport}
@@ -69,9 +69,10 @@ public component Details(
                     style={PresentationStyles.Body with {
                         TextWrap: TextWrap.WordWithGraphemeFallback;
                     }}
-                    content={() => issue().Body}
                     name="issue-browser.details-body"
-                />
+                >
+                    {() => issue().Body}
+                </Text>
             </ScrollViewport>
             <Layout style={DetailsActionsStyle}>
                 <Button

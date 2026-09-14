@@ -45,6 +45,26 @@ test("does not treat component tag delimiters as expression brackets", () => {
     assert.ok(!configuration.brackets.some(pair => pair[0] === "<"));
 });
 
+test("formatting drops cancelled and obsolete edits and sends the captured version", async () => {
+    const document = { uri: { toString: () => "file:///Example.lui" }, version: 2 };
+    let calls = 0;
+    const cancelled = { isCancellationRequested: true };
+    const rpc = { request: async (_method, params) => {
+        calls++;
+        assert.equal(params.textDocument.version, 2);
+        document.version = 3;
+        return [{ newText: "must never be applied" }];
+    } };
+    assert.equal((await loaded.exports.formattingEdits(rpc, document, undefined, cancelled)).length, 0);
+    assert.equal(calls, 0);
+    assert.equal((await loaded.exports.formattingEdits(rpc, document)).length, 0);
+    assert.equal(calls, 1);
+    document.version = 2;
+    cancelled.isCancellationRequested = false;
+    rpc.request = async () => { cancelled.isCancellationRequested = true; return [{ newText: "obsolete" }]; };
+    assert.equal((await loaded.exports.formattingEdits(rpc, document, undefined, cancelled)).length, 0);
+});
+
 test("grammar retains parameterized component and style declaration headers", () => {
     const grammar = JSON.parse(
         fs.readFileSync(path.join(__dirname, "syntaxes", "lui.tmLanguage.json"), "utf8")
@@ -115,6 +135,7 @@ test("activation preserves current diagnostics and clears closed documents", asy
             registerCompletionItemProvider: disposable,
             registerDefinitionProvider: disposable,
             registerDocumentFormattingEditProvider: disposable,
+            registerCodeActionsProvider: disposable,
             registerDocumentRangeFormattingEditProvider: disposable,
             registerDocumentSymbolProvider: disposable,
             registerDocumentSemanticTokensProvider: (_selector, provider, legend) => {
@@ -263,6 +284,7 @@ class MockProcess extends EventEmitter {
 
 function failureHarness(process) {
     let completionProvider;
+    let codeActionsProvider;
     const logs = [];
     const resources = [];
     const messages = [];
@@ -287,7 +309,11 @@ function failureHarness(process) {
     const vscode = {
         workspace,
         window: { createOutputChannel: () => ({ info: text => logs.push(text), warn: text => logs.push(text), error: text => logs.push(text), dispose() {} }), showErrorMessage: message => messages.push(message) },
-        Uri: { file: value => ({ toString: () => value }) },
+        Uri: { file: value => ({ toString: () => value }), parse: value => ({ toString: () => value }) },
+        Range: class { constructor(...values) { this.values = values; } },
+        WorkspaceEdit: class { constructor() { this.changes = []; } replace(uri, range, text) { this.changes.push({ uri, range, text }); } },
+        CodeAction: class { constructor(title, kind) { this.title = title; this.kind = kind; } },
+        CodeActionKind: { QuickFix: "quickfix" },
         RelativePattern: class {},
         SemanticTokensLegend: class {},
         commands: { registerCommand: own },
@@ -296,13 +322,50 @@ function failureHarness(process) {
         MarkdownString: class { appendText(text) { this.value = text; } },
         languages: new Proxy({}, { get: (_target, key) => key === "createDiagnosticCollection"
             ? () => Object.assign(own(), { delete() {} }) : key === "registerCompletionItemProvider"
-                ? (_selector, provider) => { completionProvider = provider; return own(); } : own })
+                ? (_selector, provider) => { completionProvider = provider; return own(); } : key === "registerCodeActionsProvider"
+                    ? (_selector, provider) => { codeActionsProvider = provider; return own(); } : own })
     };
     const context = { subscriptions: [] };
     const extension = loadExtension(vscode, process);
-    return { context, messages, resources, logs, completion: () => completionProvider, activate: () => extension.activate(context),
+    return { context, messages, resources, logs, workspace, codeActions: () => codeActionsProvider, completion: () => completionProvider, activate: () => extension.activate(context),
         request: () => generated.provideTextDocumentContent({ toString: () => "lucent-lui:test" }) };
 }
+
+test("lint actions resolve current edits and discard previously resolved or cancelled edits", async () => {
+    const process = new MockProcess();
+    const uri = "file:///Example.lui";
+    const range = { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } };
+    const action = { title: "Use default content (LUI5003)", kind: "quickfix", data: { uri, version: 2 } };
+    process.responses = {
+        "textDocument/codeAction": [action],
+        "codeAction/resolve": { ...action, edit: { documentChanges: [{ textDocument: { uri, version: 2 }, edits: [{ range, newText: "<Text>Hello</Text>" }] }] } }
+    };
+    const harness = failureHarness(process);
+    await harness.activate();
+    const document = { uri: { toString: () => uri }, version: 2 };
+    harness.workspace.textDocuments.push(document);
+    const provider = harness.codeActions();
+    const [offered] = await provider.provideCodeActions(document, range, {});
+    assert.equal(offered.edit, undefined);
+    assert.equal(process.lastRequest.params.textDocument.version, 2);
+    await provider.resolveCodeAction(offered);
+    assert.equal(offered.edit.changes[0].text, "<Text>Hello</Text>");
+    document.version = 3;
+    await provider.resolveCodeAction(offered);
+    assert.equal(offered.edit, undefined);
+    assert.match(offered.disabled.reason, /document changed/);
+
+    document.version = 2;
+    process.holdRequests = new Set(["codeAction/resolve"]);
+    const cancelled = { isCancellationRequested: false };
+    const pending = provider.resolveCodeAction(offered, cancelled);
+    cancelled.isCancellationRequested = true;
+    process.send({ jsonrpc: "2.0", id: process.lastRequest.id, result: process.responses["codeAction/resolve"] });
+    await pending;
+    assert.equal(offered.edit, undefined);
+    assert.ok(offered.disabled);
+    harness.context.subscriptions.forEach(resource => resource.dispose());
+});
 
 test("missing dotnet rejects activation, reports setup guidance and disposes watchers", async () => {
     const process = new MockProcess();

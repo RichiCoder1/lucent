@@ -5,12 +5,14 @@ internal component Retained(Signal<Item[]> items, Signal<Item?> selected) {
     <Column>
         foreach (var item in items.Value) keyed by item.Id {
             <Column>
+                // lui-lint-disable-next LUI5003: Exercise retained explicit-reader attribute binding in the packaged consumer.
                 <Text content={() => "live:" + item.Title} />
                 <Text content={"implicit-live:" + item.Title} />
                 <SnapshotLabel label={item.Title} />
             </Column>
         }
         if (selected.Value is { } detail) {
+            // lui-lint-disable-next LUI5003: Exercise retained explicit-reader attribute binding after narrowing.
             <Text content={() => "detail:" + detail.Title} />
         }
     </Column>

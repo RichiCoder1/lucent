@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <LucentLuiConfigurationTargetsImported>true</LucentLuiConfigurationTargetsImported>
+  </PropertyGroup>
+  <ItemGroup>
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="LucentLuiEditorConfig" />
+  </ItemGroup>
+
+  <Target Name="PrepareLucentLuiEditorConfigInputs"
+          BeforeTargets="GenerateMSBuildEditorConfigFileShouldRun;GenerateMSBuildEditorConfigFile;CoreCompile"
+          Condition="'$(LucentEnableLui)' != 'false'">
+    <ItemGroup>
+      <_LucentLuiConfigurationSource Include="@(AdditionalFiles)" Condition="'%(Extension)' == '.lui'" />
+      <_LucentLuiConfigurationDirectory Include="@(_LucentLuiConfigurationSource->GetPathsOfAllDirectoriesAbove())" />
+      <_LucentLuiPotentialEditorConfig Include="@(_LucentLuiConfigurationDirectory->'%(FullPath)'->Distinct()->Combine('.editorconfig'))" />
+      <_LucentLuiEditorConfig Include="@(_LucentLuiPotentialEditorConfig->Exists())" />
+      <AdditionalFiles Include="@(_LucentLuiEditorConfig)" LucentLuiEditorConfig="true" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -4,13 +4,21 @@ using System;
 style CalendarGridStyle {
     Mode: LayoutMode.Grid;
     Columns: GridTracks.Create(
-        GridTrack.Fixed(32), GridTrack.Fixed(32), GridTrack.Fixed(32),
-        GridTrack.Fixed(32), GridTrack.Fixed(32), GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
         GridTrack.Fixed(32)
     );
     Rows: GridTracks.Create(
-        GridTrack.Fixed(20), GridTrack.Fixed(32), GridTrack.Fixed(32),
-        GridTrack.Fixed(32), GridTrack.Fixed(32), GridTrack.Fixed(32),
+        GridTrack.Fixed(20),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
+        GridTrack.Fixed(32),
         GridTrack.Fixed(32)
     );
 }
@@ -46,11 +54,21 @@ internal component CalendarSurfaceView(
 ) {
     <CalendarHost calendar={calendar} session={session} close={close} editable={editable}>
         <Layout style={CalendarHeaderStyle}>
-            <IconButton source={DateTimeArtwork.PreviousMonth} label="Previous month" onInvoke={() => calendar.MoveMonth(-1)} style={CalendarNavigationStyle} />
+            <IconButton
+                source={DateTimeArtwork.PreviousMonth}
+                label="Previous month"
+                onInvoke={() => calendar.MoveMonth(-1)}
+                style={CalendarNavigationStyle}
+            />
             <Layout style={CalendarTitleStyle}>
-                <Text content={() => calendar.DisplayedMonth.ToString("Y", session.Options.Culture)} />
+                <Text>{() => calendar.DisplayedMonth.ToString("Y", session.Options.Culture)}</Text>
             </Layout>
-            <IconButton source={DateTimeArtwork.NextMonth} label="Next month" onInvoke={() => calendar.MoveMonth(1)} style={CalendarNavigationStyle} />
+            <IconButton
+                source={DateTimeArtwork.NextMonth}
+                label="Next month"
+                onInvoke={() => calendar.MoveMonth(1)}
+                style={CalendarNavigationStyle}
+            />
         </Layout>
         <Layout content={weekdaysAndDays} style={CalendarGridStyle} />
     </CalendarHost>

@@ -21,14 +21,13 @@ public component FeedbackExample(ComponentBrowserState browser) {
     }
 
     <Layout style={FeedbackExampleStyle}>
-        <Status
-            content={
+        <Status name="component-browser.feedback.status">
+            {
                 () => browser.CurrentExampleState == ExampleState.Busy
                     ? "Loading the next fixture page…"
                     : "Ready to load a deterministic fixture page."
             }
-            name="component-browser.feedback.status"
-        />
+        </Status>
         <ProgressBar
             label="Fixture page loaded"
             value={() => progress}

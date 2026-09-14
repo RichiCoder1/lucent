@@ -30,10 +30,9 @@ public component TreeExample(ComponentBrowserState browser) {
             options={example.Options}
             style={TreeExampleViewStyle}
         />
-        <Status
-            content={() => example.SelectionLabel}
-            name="component-browser.tree.selection-status"
-        />
+        <Status name="component-browser.tree.selection-status">
+            {() => example.SelectionLabel}
+        </Status>
         <Status
             content={() => example.ExpansionSummary}
             style={PresentationStyles.Secondary}

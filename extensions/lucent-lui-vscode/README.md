@@ -8,10 +8,9 @@ language server or the .NET SDK.
 ## Setup
 
 Install the matching `Lucent.Lui.LanguageServer.dll` separately, then set
-`lucentLui.serverPath` to its absolute path. Set `lucentLui.projectPath` when
-the workspace contains more than one project or the evaluated project cannot
-be inferred from the first workspace folder. Reload the VS Code window after
-changing either setting.
+`lucentLui.serverPath` to its absolute path. Set `lucentLui.projectPath` to the
+owning `.csproj` for semantic features. Without a project setting, document/range
+formatting remains available. Reload the VS Code window after changing either setting.
 
 The language server loads the evaluated `.csproj`, including its project
 references and `.lui` additional documents. Use the repository's pinned .NET
@@ -23,6 +22,12 @@ application once in the default Debug configuration before opening its editor
 project so MSBuild can load the generated style/state analyzers. Package consumers
 receive those analyzers during SDK restore. Use workspace-specific settings when
 different applications are pinned to different Lucent versions.
+
+Document/range formatting follows the shared `.editorconfig` policy, including
+embedded C#. Format-on-save follows your VS Code setting. Semantic quick fixes
+identify their lint rule and resolve against the current document/project before
+providing edits. See [formatting and linting](../../docs/LUI-FORMATTING.md) for
+supported configuration, safe content conversions and scoped exceptions.
 
 ## Development
 
