@@ -96,14 +96,12 @@ internal static partial class Controls
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.Table,
-                    binding.Label,
-                    actions: SemanticAction.RealizeItem,
-                    selection: new(false, false),
-                    collection: new(binding.Count(), binding.SelectedIndex()),
-                    grid: new(binding.Count(), binding.ColumnCount, binding.Headers())
-                );
+                SemanticDeclaration
+                    .Create(SemanticRole.Table, binding.Label)
+                    .SelectionContainer(new(false, false))
+                    .Collection(new(binding.Count(), binding.SelectedIndex()), true)
+                    .Grid(new(binding.Count(), binding.ColumnCount, binding.Headers()))
+                    .Build();
             context.SetSemantics(Declaration());
             context.Effect(() => context.UpdateSemantics(Declaration()), "table-metadata");
             context.OnSemanticCommand(command =>
@@ -130,13 +128,17 @@ internal static partial class Controls
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.Text,
-                    string.IsNullOrWhiteSpace(binding.Text()) ? "Empty" : binding.Text(),
-                    gridItem: binding.Table() is { } table && binding.Row() is { } row
-                        ? new(table, row, binding.Column)
-                        : null
-                );
+                SemanticDeclaration
+                    .Create(
+                        SemanticRole.Text,
+                        string.IsNullOrWhiteSpace(binding.Text()) ? "Empty" : binding.Text()
+                    )
+                    .GridItem(
+                        binding.Table() is { } table && binding.Row() is { } row
+                            ? new(table, row, binding.Column)
+                            : null
+                    )
+                    .Build();
             context.SetSemantics(Declaration());
             context.Effect(() => context.UpdateSemantics(Declaration()), "cell-value");
         }
@@ -151,12 +153,11 @@ internal static partial class Controls
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.HeaderItem,
-                    binding.Header,
-                    value: binding.SortLabel(),
-                    actions: binding.CanSort ? SemanticAction.Invoke : SemanticAction.None
-                );
+                SemanticDeclaration
+                    .Create(SemanticRole.HeaderItem, binding.Header)
+                    .Value(binding.SortLabel())
+                    .Invoke(binding.CanSort)
+                    .Build();
             if (binding.CanSort)
                 new ButtonBehavior(Name, Declaration(), binding.Sort).Attach(context);
             else
@@ -177,12 +178,10 @@ internal static partial class Controls
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.Splitter,
-                    binding.Header + " column width",
-                    actions: SemanticAction.SetRangeValue,
-                    range: new(binding.Width(), binding.Minimum, binding.Maximum, 8, 40)
-                );
+                SemanticDeclaration
+                    .Create(SemanticRole.Splitter, binding.Header + " column width")
+                    .Range(new(binding.Width(), binding.Minimum, binding.Maximum, 8, 40), true)
+                    .Build();
             context.MakeFocusable();
             context.SetSemantics(Declaration());
             context.Effect(() => context.UpdateSemantics(Declaration()), "column-width");

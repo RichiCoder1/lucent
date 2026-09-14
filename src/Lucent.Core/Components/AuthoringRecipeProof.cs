@@ -32,11 +32,13 @@ public static partial class Components
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.Group,
-                    values.NameReader?.Invoke() ?? values.Name ?? "Unnamed authoring proof",
-                    description: values.DescriptionReader?.Invoke() ?? values.Description
-                );
+                SemanticDeclaration
+                    .Create(
+                        SemanticRole.Group,
+                        values.NameReader?.Invoke() ?? values.Name ?? "Unnamed authoring proof"
+                    )
+                    .Description(values.DescriptionReader?.Invoke() ?? values.Description)
+                    .Build();
             context.BindSemantics(Declaration);
         }
     }

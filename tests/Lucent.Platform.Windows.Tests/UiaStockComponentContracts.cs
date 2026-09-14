@@ -28,6 +28,8 @@ public sealed unsafe partial class UiaLifecycleContracts
                     value => applied.Value = value,
                     new DatePickerOptions(
                         CultureInfo.GetCultureInfo("en-US"),
+                        minimum: new(2024, 2, 29),
+                        maximum: new(2024, 2, 29),
                         today: static () => new(2024, 2, 15)
                     )
                 )
@@ -89,7 +91,12 @@ public sealed unsafe partial class UiaLifecycleContracts
                 popupProvider.InterfacePointer,
                 "Thursday, February 29, 2024"
             );
+            var disabledDay = FindStockProviderByName(
+                popupProvider.InterfacePointer,
+                "Wednesday, February 28, 2024"
+            );
             nint selectionItem = 0;
+            nint disabledSimple = 0;
             try
             {
                 Assert(
@@ -106,6 +113,12 @@ public sealed unsafe partial class UiaLifecycleContracts
                     selectedDay != 0,
                     "Public DatePicker did not expose the selected day with its full spoken date."
                 );
+                Assert(
+                    disabledDay != 0,
+                    "Public DatePicker did not expose its out-of-range day with its full spoken date."
+                );
+                disabledSimple = Query(disabledDay, UiaWrappers.Simple);
+                AssertCompoundPattern(disabledSimple, 10010, expected: false);
                 selectionItem = Query(selectedDay, UiaWrappers.SelectionItem);
                 var selected = 0;
                 Assert(
@@ -129,8 +142,77 @@ public sealed unsafe partial class UiaLifecycleContracts
             finally
             {
                 Release(selectionItem);
+                Release(disabledSimple);
+                Release(disabledDay);
                 Release(selectedDay);
                 Release(calendarSelection);
+            }
+        }
+        finally
+        {
+            SDL.DestroyWindow(window);
+            SDL.Quit();
+        }
+    }
+
+    [TestMethod]
+    public void PublicListBoxKeepsDisabledSelectionPatternButRejectsSelection()
+    {
+        Assert(SDL.Init(SDL.InitFlags.Video), "SDL_Init(disabled list UIA) failed.");
+        var window = CreateWindow("Lucent disabled list UIA");
+        try
+        {
+            using var composition = new Composition(
+                new ReactiveGraph(),
+                "public-disabled-list-uia"
+            );
+            composition.ConfigureImages(new ImageCache(new ImmediateImagePreparer()));
+            using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            var selected = 1;
+            var requests = 0;
+            var items = new[]
+            {
+                new ChoiceItem<int>(1, "Disabled option", enabled: false),
+                new ChoiceItem<int>(2, "Enabled option"),
+            };
+            composition.Mount(
+                composition.Root,
+                theme,
+                Components.ListBox("Choices", () => items, () => selected, _ => requests++)
+            );
+            composition.Flush();
+
+            using var renderer = new SkiaSceneRenderer();
+            using var scene = SceneLayout.Project(composition, new(360, 280, 1), renderer);
+            Assert(composition.Input.SetScene(scene), "Disabled list scene was rejected.");
+            using var dispatcher = new WindowsUiaDispatcher();
+            using var provider = new WindowsUiaProvider(
+                Hwnd(window),
+                composition,
+                dispatcher,
+                "Public disabled list"
+            );
+            provider.Refresh(scene);
+
+            var item = FindStockProviderByName(provider.InterfacePointer, "Disabled option");
+            nint selection = 0;
+            nint simple = 0;
+            try
+            {
+                Assert(item != 0, "Public ListBox omitted its disabled selected option.");
+                simple = Query(item, UiaWrappers.Simple);
+                AssertCompoundPattern(simple, 10010, expected: true);
+                selection = Query(item, UiaWrappers.SelectionItem);
+                Assert(
+                    Fragment(selection, 3) == WindowsUiaProvider.ElementNotEnabled && requests == 0,
+                    "Disabled public ListBox selection did not fail as ElementNotEnabled."
+                );
+            }
+            finally
+            {
+                Release(selection);
+                Release(simple);
+                Release(item);
             }
         }
         finally

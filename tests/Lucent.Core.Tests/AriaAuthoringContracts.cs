@@ -27,18 +27,20 @@ public sealed class AriaAuthoringContracts
                 root.RegisterRecipeAuthoring(values);
                 root.AttachBehaviors(
                     new BoundSemanticBehavior(() =>
-                        new SemanticDeclaration(
-                            SemanticRole.TextField,
-                            baseName.Value,
-                            enabled: false,
-                            focused: true,
-                            selected: true,
-                            range: new SemanticRangeSnapshot(2, 0, 10, 1, 2, isReadOnly: true),
-                            relationships: relationships,
-                            selection: new SemanticSelectionSnapshot(false, true),
-                            description: "Behavior description",
-                            isPassword: true
-                        )
+                        SemanticDeclaration
+                            .Create(SemanticRole.TextField, baseName.Value)
+                            .Enabled(false)
+                            .Focused(true)
+                            .Relationships(relationships)
+                            .Description("Behavior description")
+                            .ConfidentialEditing(false)
+                            .Range(
+                                new SemanticRangeSnapshot(2, 0, 10, 1, 2, isReadOnly: true),
+                                false
+                            )
+                            .SelectionContainer(new SemanticSelectionSnapshot(false, true))
+                            .SelectionItem(true, false)
+                            .Build()
                     )
                 );
                 root.Present(context.Theme, author: values.Style);

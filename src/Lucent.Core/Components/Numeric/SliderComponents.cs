@@ -150,7 +150,9 @@ public static partial class Components
                     {
                         var current = Required(format(state.Draft), nameof(formatValue));
                         valueElement.UpdateControl(ProjectionProperties.Text, current);
-                        valueElement.UpdateControlSemantics(new(SemanticRole.Text, current));
+                        valueElement.UpdateControlSemantics(
+                            SemanticDeclaration.Create(SemanticRole.Text, current).Build()
+                        );
                     },
                     root.Name + ".value-text"
                 );

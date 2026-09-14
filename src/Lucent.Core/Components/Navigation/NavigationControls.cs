@@ -119,12 +119,11 @@ internal static partial class Controls
         public override void Attach(BehaviorContext context)
         {
             context.SetSemantics(
-                new(
-                    SemanticRole.TabList,
-                    binding.Label,
-                    actions: SemanticAction.Scroll,
-                    selection: new(false, true)
-                )
+                SemanticDeclaration
+                    .Create(SemanticRole.TabList, binding.Label)
+                    .Scroll(true)
+                    .SelectionContainer(new(false, true))
+                    .Build()
             );
             context.MakeFocusable();
             context.RegisterScrollable(state);
@@ -193,13 +192,14 @@ internal static partial class Controls
         }
 
         private SemanticDeclaration Declaration(bool? selected = null) =>
-            new(
-                SemanticRole.Tab,
-                ControlState.Required(binding.Label(), nameof(binding.Label)),
-                enabled: binding.Enabled(),
-                selected: selected ?? binding.Selected(),
-                actions: SemanticAction.Select
-            );
+            SemanticDeclaration
+                .Create(
+                    SemanticRole.Tab,
+                    ControlState.Required(binding.Label(), nameof(binding.Label))
+                )
+                .Enabled(binding.Enabled())
+                .SelectionItem(selected ?? binding.Selected(), true)
+                .Build();
     }
 
     private sealed class DisclosureBehavior(DisclosureBinding binding) : Behavior
@@ -261,12 +261,10 @@ internal static partial class Controls
         }
 
         private SemanticDeclaration Declaration(bool? expanded = null) =>
-            new(
-                SemanticRole.Button,
-                binding.Heading,
-                actions: SemanticAction.ExpandCollapse,
-                expanded: expanded ?? binding.Expanded()
-            );
+            SemanticDeclaration
+                .Create(SemanticRole.Button, binding.Heading)
+                .Expansion(expanded ?? binding.Expanded(), true)
+                .Build();
     }
 
     private static void AttachClick(BehaviorContext context, Func<bool> request)

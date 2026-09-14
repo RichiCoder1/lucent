@@ -13,7 +13,7 @@ internal static partial class Controls
             theme,
             PanelStyle,
             style,
-            new(SemanticRole.Group, Required(name, nameof(name)))
+            SemanticDeclaration.Create(SemanticRole.Group, Required(name, nameof(name))).Build()
         );
 
     public static void Row(Element element, ThemeContext theme, string name, Style? style = null) =>
@@ -22,7 +22,7 @@ internal static partial class Controls
             theme,
             RowStyle,
             style,
-            new(SemanticRole.Group, Required(name, nameof(name)))
+            SemanticDeclaration.Create(SemanticRole.Group, Required(name, nameof(name))).Build()
         );
 
     public static void Column(
@@ -43,6 +43,9 @@ internal static partial class Controls
             theme,
             PanelStyle,
             style,
-            new(SemanticRole.List, Required(name, nameof(name)))
+            SemanticDeclaration
+                .Create(SemanticRole.List, Required(name, nameof(name)))
+                .SelectionContainer(new(false, false))
+                .Build()
         );
 }

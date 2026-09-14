@@ -32,12 +32,12 @@ public sealed partial class Composition
     }
 
     private static SemanticSnapshot DisableInteraction(SemanticSnapshot node) =>
-        node with
-        {
-            Enabled = false,
-            Focused = false,
-            Children = Array.AsReadOnly(node.Children.Select(DisableInteraction).ToArray()),
-        };
+        node.WithStateAndChildren(
+            enabled: false,
+            focused: false,
+            selected: node.Selected,
+            children: node.Children.Select(DisableInteraction).ToArray()
+        );
 
     private sealed class InteractionLease(Composition owner) : IDisposable
     {

@@ -59,7 +59,9 @@ public static partial class Components
                         var current = value.Value;
                         field.SetHelpText(current);
                         root.UpdateControl(ProjectionProperties.Text, current);
-                        root.UpdateControlSemantics(new(SemanticRole.Text, current));
+                        root.UpdateControlSemantics(
+                            SemanticDeclaration.Create(SemanticRole.Text, current).Build()
+                        );
                     },
                     root.Name + ".update"
                 );
@@ -87,7 +89,9 @@ public static partial class Components
                     {
                         var current = value.Value;
                         root.UpdateControl(ProjectionProperties.Text, current);
-                        root.UpdateControlSemantics(new(SemanticRole.Status, current));
+                        root.UpdateControlSemantics(
+                            SemanticDeclaration.Create(SemanticRole.Status, current).Build()
+                        );
                     },
                     root.Name + ".update"
                 );

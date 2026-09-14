@@ -279,18 +279,19 @@ internal static partial class Controls
         private SemanticDeclaration Declaration(CheckState? state = null)
         {
             var applied = state ?? binding.ReadChecked();
-            return new(
-                binding.Role,
-                binding.Name,
-                actions: SemanticAction.Toggle,
-                toggleState: applied switch
-                {
-                    CheckState.Off => SemanticToggleState.Off,
-                    CheckState.On => SemanticToggleState.On,
-                    CheckState.Mixed => SemanticToggleState.Indeterminate,
-                    _ => throw new InvalidOperationException("Toggle state must be finite."),
-                }
-            );
+            return SemanticDeclaration
+                .Create(binding.Role, binding.Name)
+                .Toggle(
+                    applied switch
+                    {
+                        CheckState.Off => SemanticToggleState.Off,
+                        CheckState.On => SemanticToggleState.On,
+                        CheckState.Mixed => SemanticToggleState.Indeterminate,
+                        _ => throw new InvalidOperationException("Toggle state must be finite."),
+                    },
+                    true
+                )
+                .Build();
         }
     }
 
@@ -301,15 +302,16 @@ internal static partial class Controls
 
         public override void Attach(BehaviorContext context) =>
             context.SetSemantics(
-                new(
-                    SemanticRole.RadioGroup,
-                    binding.Label,
-                    selection: new(
-                        CanSelectMultiple: false,
-                        IsSelectionRequired: binding.Requirement
-                            == RadioSelectionRequirement.Required
+                SemanticDeclaration
+                    .Create(SemanticRole.RadioGroup, binding.Label)
+                    .SelectionContainer(
+                        new(
+                            CanSelectMultiple: false,
+                            IsSelectionRequired: binding.Requirement
+                                == RadioSelectionRequirement.Required
+                        )
                     )
-                )
+                    .Build()
             );
     }
 
@@ -409,12 +411,13 @@ internal static partial class Controls
         }
 
         private SemanticDeclaration Declaration(bool? selected = null) =>
-            new(
-                SemanticRole.RadioButton,
-                ControlState.Required(binding.Label(), nameof(binding.Label)),
-                enabled: binding.Enabled(),
-                selected: selected ?? binding.Selected(),
-                actions: SemanticAction.Select
-            );
+            SemanticDeclaration
+                .Create(
+                    SemanticRole.RadioButton,
+                    ControlState.Required(binding.Label(), nameof(binding.Label))
+                )
+                .Enabled(binding.Enabled())
+                .SelectionItem(selected ?? binding.Selected(), true)
+                .Build();
     }
 }

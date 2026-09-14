@@ -116,7 +116,9 @@ public static partial class Components
                         root.UpdateControl(ImageProperties.Source, next);
                         binding.SetSource(next);
                         if (!decorative)
-                            root.UpdateControlSemantics(new(SemanticRole.Image, nextName!));
+                            root.UpdateControlSemantics(
+                                SemanticDeclaration.Create(SemanticRole.Image, nextName!).Build()
+                            );
                     },
                     root.Name + ".image-content"
                 );
@@ -154,6 +156,12 @@ internal static partial class Controls
         if (decorative)
             element.Present(theme, defaults, style);
         else
-            ConfigureSemantic(element, theme, defaults, style, new(SemanticRole.Image, label!));
+            ConfigureSemantic(
+                element,
+                theme,
+                defaults,
+                style,
+                SemanticDeclaration.Create(SemanticRole.Image, label!).Build()
+            );
     }
 }

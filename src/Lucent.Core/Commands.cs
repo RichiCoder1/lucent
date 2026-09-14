@@ -158,7 +158,9 @@ internal sealed class CommandScopeBehavior(CommandBindings bindings) : Behavior
     public override void Attach(BehaviorContext context)
     {
         ArgumentNullException.ThrowIfNull(bindings);
-        context.SetSemantics(new(SemanticRole.Group, "Command scope"));
+        context.SetSemantics(
+            SemanticDeclaration.Create(SemanticRole.Group, "Command scope").Build()
+        );
         context.RegisterCommandScope();
         context.OnKey(route =>
         {

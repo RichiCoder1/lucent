@@ -69,7 +69,7 @@ public sealed class WindowsDpiContracts
             target.AttachBehaviors(
                 new RowActionBehavior(
                     "target-action",
-                    new(SemanticRole.Button, "target", actions: SemanticAction.Invoke),
+                    SemanticDeclaration.Create(SemanticRole.Button, "target").Invoke().Build(),
                     static () => { }
                 )
             );

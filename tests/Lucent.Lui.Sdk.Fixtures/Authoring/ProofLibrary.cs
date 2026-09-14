@@ -32,11 +32,13 @@ public static class ProofLibrary
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.Text,
-                    values.NameReader?.Invoke() ?? values.Name ?? "Default proof",
-                    description: values.DescriptionReader?.Invoke() ?? values.Description
-                );
+                SemanticDeclaration
+                    .Create(
+                        SemanticRole.Text,
+                        values.NameReader?.Invoke() ?? values.Name ?? "Default proof"
+                    )
+                    .Description(values.DescriptionReader?.Invoke() ?? values.Description)
+                    .Build();
             context.BindSemantics(Declaration);
         }
     }

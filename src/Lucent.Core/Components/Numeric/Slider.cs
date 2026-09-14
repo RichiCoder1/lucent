@@ -181,20 +181,21 @@ internal sealed class SliderBehavior(SliderState state, string label, Func<bool>
     {
         bool IsReadOnly() => readOnly?.Invoke() == true;
         SemanticDeclaration Declaration() =>
-            new(
-                SemanticRole.Slider,
-                label,
-                actions: IsReadOnly() ? SemanticAction.None : SemanticAction.SetRangeValue,
-                value: state.Draft.ToString(CultureInfo.CurrentCulture),
-                range: new(
-                    state.Draft,
-                    state.Options.Minimum,
-                    state.Options.Maximum,
-                    state.Options.Increment,
-                    state.Options.PageIncrement,
-                    IsReadOnly()
+            SemanticDeclaration
+                .Create(SemanticRole.Slider, label)
+                .Value(state.Draft.ToString(CultureInfo.CurrentCulture))
+                .Range(
+                    new(
+                        state.Draft,
+                        state.Options.Minimum,
+                        state.Options.Maximum,
+                        state.Options.Increment,
+                        state.Options.PageIncrement,
+                        IsReadOnly()
+                    ),
+                    !IsReadOnly()
                 )
-            );
+                .Build();
 
         context.MakeFocusable();
         context.SetSemantics(Declaration());

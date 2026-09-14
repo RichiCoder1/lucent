@@ -1070,13 +1070,13 @@ public sealed partial class Composition : IDisposable
     )
     {
         if (node.Identity == target)
-            return node with { Description = MergeDescription(node.Description, description) };
+            return node.WithDescription(MergeDescription(node.Description, description));
         if (node.Children.Count == 0)
             return node;
         var children = node
             .Children.Select(child => ApplySupplementalDescription(child, target, description))
             .ToArray();
-        return node with { Children = children };
+        return node.WithChildren(children);
     }
 
     private static SemanticSnapshot? FindDescriptionTarget(IEnumerable<SemanticSnapshot> nodes)

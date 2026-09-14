@@ -465,14 +465,12 @@ public sealed unsafe partial class UiaLifecycleContracts
         public override void Attach(BehaviorContext context)
         {
             context.SetSemantics(
-                new(
-                    SemanticRole.Table,
-                    "Orders",
-                    actions: SemanticAction.RealizeItem,
-                    selection: new(false, false),
-                    collection: new(1),
-                    grid: new(1, 1, headers())
-                )
+                SemanticDeclaration
+                    .Create(SemanticRole.Table, "Orders")
+                    .SelectionContainer(new(false, false))
+                    .Collection(new(1), true)
+                    .Grid(new(1, 1, headers()))
+                    .Build()
             );
             context.OnSemanticCommand(command => command.Kind == SemanticCommandKind.RealizeItem);
         }
@@ -484,7 +482,9 @@ public sealed unsafe partial class UiaLifecycleContracts
         public override BehaviorOwnership Ownership => BehaviorOwnership.Semantics;
 
         public override void Attach(BehaviorContext context) =>
-            context.SetSemantics(new(SemanticRole.HeaderItem, "Order"));
+            context.SetSemantics(
+                SemanticDeclaration.Create(SemanticRole.HeaderItem, "Order").Build()
+            );
     }
 
     private sealed class GridCellProbe(ElementIdentity grid, int row, int column) : Behavior
@@ -494,12 +494,11 @@ public sealed unsafe partial class UiaLifecycleContracts
 
         public override void Attach(BehaviorContext context) =>
             context.SetSemantics(
-                new(
-                    SemanticRole.DataItem,
-                    "Order cell",
-                    collectionIndex: 0,
-                    gridItem: new(grid, row, column)
-                )
+                SemanticDeclaration
+                    .Create(SemanticRole.DataItem, "Order cell")
+                    .CollectionItem(0)
+                    .GridItem(new(grid, row, column))
+                    .Build()
             );
     }
 }

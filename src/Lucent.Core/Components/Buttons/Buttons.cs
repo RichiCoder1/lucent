@@ -63,7 +63,10 @@ public static partial class Components
                     {
                         root.UpdateControl(ProjectionProperties.Text, label);
                         root.UpdateControlSemantics(
-                            new(SemanticRole.Button, label, actions: SemanticAction.Invoke)
+                            SemanticDeclaration
+                                .Create(SemanticRole.Button, label)
+                                .Invoke(true)
+                                .Build()
                         );
                     }
                 )

@@ -8,6 +8,12 @@ Production follows the decisions and contracts validated by the archived Native 
 
 Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acceptance is authoritative. Issue #61 records repository cleanup and testing modernization, while issue #62 tracks pinned independent setup for the first links-and-notes application. This page records the supported boundary, agreed development direction, and deferred work. The next-development section is planning guidance, not a claim of implemented support.
 
+## Current execution
+
+The [semantic capability refactor](plans/semantic-capabilities.md) #291–294 follows C# authoring. Its implementation replaces positional declarations with validated typed capabilities and shares immutable payloads through metadata overlays and snapshots. Windows pattern discovery uses explicit capabilities while preserving existing command gates, confidential editing, and generation behavior. [The baseline comparison](plans/semantic-capabilities-baseline.md) records lower allocations in all five measured scenarios, including 16% for the virtualized-list projection. Final verification and publication are in progress; the last published authoring package remains `0.3.0-dev.73.1`.
+
+After this closeout, the small `.lui` assignment-callback diagnostic follow-up [#290](https://github.com/RichiCoder1/lucent/issues/290) precedes the larger typed composition context/service injection [#203](https://github.com/RichiCoder1/lucent/issues/203) and URI navigation [#204](https://github.com/RichiCoder1/lucent/issues/204) work. Live compilation remains separate.
+
 ## Supported boundary
 
 Review follow-ups #194–196, Light Notes #8 focus continuity, and the accepted [production transition plan](plans/transition-implementation.md) #198–202 are delivered. Lucent publishes that implementation as `0.3.0-dev.55.1`, and Light Notes independently consumes that immutable version. See the [handoff](agents/remaining-work-handoff.md) for source/CI records and the [transition guide](TRANSITIONS.md) for the supported contract and measured limits.

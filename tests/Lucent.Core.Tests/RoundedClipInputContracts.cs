@@ -170,7 +170,9 @@ public sealed class RoundedClipInputContracts
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, "rounded input"));
+            context.SetSemantics(
+                SemanticDeclaration.Create(SemanticRole.Group, "rounded input").Build()
+            );
             context.OnPointer(_ => Calls++);
         }
     }

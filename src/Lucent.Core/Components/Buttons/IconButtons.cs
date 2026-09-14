@@ -136,7 +136,10 @@ public static partial class Components
                 _ = root.Scope.Effect(
                     () =>
                         root.UpdateControlSemantics(
-                            new(SemanticRole.Button, label.Value, actions: SemanticAction.Invoke)
+                            SemanticDeclaration
+                                .Create(SemanticRole.Button, label.Value)
+                                .Invoke(true)
+                                .Build()
                         ),
                     root.Name + ".button"
                 );
@@ -187,11 +190,10 @@ public static partial class Components
                         root.UpdateControl(ImageProperties.Source, nextSource);
                         binding.SetSource(nextSource);
                         root.UpdateControlSemantics(
-                            new(
-                                SemanticRole.Button,
-                                accessibleLabel.Value,
-                                actions: SemanticAction.Invoke
-                            )
+                            SemanticDeclaration
+                                .Create(SemanticRole.Button, accessibleLabel.Value)
+                                .Invoke(true)
+                                .Build()
                         );
                     },
                     root.Name + ".icon-button"

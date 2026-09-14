@@ -353,6 +353,11 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                     textScene?.Clip
                         ?? PointBounds(elementIdentity, bounds.GetValueOrDefault(key), input)
                 );
+            // Preserve the legacy confidential-editor surface: without SetValue it exposed no
+            // ValuePattern, while an explicit read-only nonconfidential value still does.
+            var hasValuePattern =
+                snapshot.Payload.Capabilities.Value is not null
+                && (!snapshot.IsPassword || snapshot.Actions.HasFlag(SemanticAction.SetValue));
             yield return new(
                 key,
                 parent,
@@ -361,6 +366,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 snapshot.Role,
                 snapshot.Name,
                 snapshot.Value,
+                hasValuePattern,
                 snapshot.Enabled,
                 snapshot.Focused,
                 snapshot.Selected,
@@ -501,19 +507,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         var iid = id switch
         {
             10000 when node.Actions.HasFlag(SemanticAction.Invoke) => UiaWrappers.Invoke,
-            10001
-                when node.Role
-                    is SemanticRole.List
-                        or SemanticRole.RadioGroup
-                        or SemanticRole.TabList
-                        or SemanticRole.Tree
-                        or SemanticRole.Calendar
-                        or SemanticRole.Table => UiaWrappers.SelectionPattern,
+            10001 when node.Selection is not null => UiaWrappers.SelectionPattern,
             10015 when node.Actions.HasFlag(SemanticAction.Toggle) => UiaWrappers.TogglePattern,
-            10002
-                when node.Actions.HasFlag(SemanticAction.SetValue)
-                    || node.Text is not null
-                    || node.Role == SemanticRole.ComboBox => UiaWrappers.ValuePattern,
+            10002 when node.HasValuePattern => UiaWrappers.ValuePattern,
             10004 when node.Actions.HasFlag(SemanticAction.Scroll) => UiaWrappers.Scroll,
             10005 when node.Actions.HasFlag(SemanticAction.ExpandCollapse) =>
                 UiaWrappers.ExpandCollapse,
@@ -659,16 +655,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 Bool(value, node.Actions.HasFlag(SemanticAction.Select));
                 break;
             case 30037:
-                Bool(
-                    value,
-                    node.Role
-                        is SemanticRole.List
-                            or SemanticRole.RadioGroup
-                            or SemanticRole.TabList
-                            or SemanticRole.Tree
-                            or SemanticRole.Calendar
-                            or SemanticRole.Table
-                );
+                Bool(value, node.Selection is not null);
                 break;
             case 30040:
                 Bool(
@@ -677,12 +664,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 );
                 break;
             case 30043:
-                Bool(
-                    value,
-                    node.Actions.HasFlag(SemanticAction.SetValue)
-                        || node.Text is not null
-                        || node.Role == SemanticRole.ComboBox
-                );
+                Bool(value, node.HasValuePattern);
                 break;
             case 30119:
                 Bool(
@@ -1161,17 +1143,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         if (node is null)
             return NotAvailable;
         while (node.Parent is { } parent && snapshot.Nodes.TryGetValue(parent, out node))
-            if (
-                (
-                    node.Role
-                    is SemanticRole.List
-                        or SemanticRole.RadioGroup
-                        or SemanticRole.TabList
-                        or SemanticRole.Tree
-                        or SemanticRole.Calendar
-                        or SemanticRole.Table
-                ) || node.Collection is not null
-            )
+            if (node.Selection is not null || node.Collection is not null)
             {
                 var provider = Provider(node);
                 value = provider is null ? 0 : Query(provider._unknown, UiaWrappers.Simple);
@@ -1472,6 +1444,7 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         SemanticRole Role,
         string Name,
         string? Value,
+        bool HasValuePattern,
         bool Enabled,
         bool Focused,
         bool Selected,

@@ -59,30 +59,9 @@ public sealed partial class Element
     {
         if (_recipeAria is null)
             return source;
-        return new SemanticDeclaration(
-            source.Role,
+        return source.WithMetadata(
             _recipeAria.Name ?? source.Name,
-            source.Enabled,
-            source.Focused,
-            source.Selected,
-            source.Actions,
-            source.Value,
-            source.Text,
-            source.Expanded,
-            source.Range,
-            source.Relationships,
-            source.ToggleState,
-            source.Selection,
-            _recipeAria.Description ?? source.Description,
-            source.PositionInSet,
-            source.SizeOfSet,
-            source.IsPassword,
-            source.Collection,
-            source.Level,
-            source.CollectionIndex,
-            source.Grid,
-            source.GridItem,
-            source.Announcement
+            _recipeAria.Description ?? source.Description
         );
     }
 

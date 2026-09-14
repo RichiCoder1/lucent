@@ -133,13 +133,11 @@ internal static partial class Controls
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.List,
-                    binding.Label,
-                    actions: SemanticAction.RealizeItem,
-                    selection: new(false, binding.Required),
-                    collection: new(binding.Count(), binding.SelectedIndex())
-                );
+                SemanticDeclaration
+                    .Create(SemanticRole.List, binding.Label)
+                    .SelectionContainer(new(false, binding.Required))
+                    .Collection(new(binding.Count(), binding.SelectedIndex()), true)
+                    .Build();
             context.SetSemantics(Declaration());
             context.Effect(() => context.UpdateSemantics(Declaration()), "list-collection");
             context.OnSemanticCommand(command =>
@@ -326,16 +324,13 @@ internal static partial class Controls
         }
 
         private SemanticDeclaration Declaration(bool? selected = null) =>
-            new(
-                binding.Role,
-                ControlState.Required(binding.Label(), nameof(binding.Label)),
-                enabled: binding.Enabled(),
-                selected: selected ?? binding.Selected(),
-                actions: SemanticAction.Select,
-                positionInSet: binding.Position(),
-                sizeOfSet: binding.Size(),
-                collectionIndex: binding.CollectionIndex?.Invoke()
-            );
+            SemanticDeclaration
+                .Create(binding.Role, ControlState.Required(binding.Label(), nameof(binding.Label)))
+                .Enabled(binding.Enabled())
+                .SelectionItem(selected ?? binding.Selected(), true)
+                .SetMembership(binding.Position(), binding.Size())
+                .CollectionItem(binding.CollectionIndex?.Invoke())
+                .Build();
     }
 
     private sealed class SelectBehavior(SelectBinding binding) : Behavior
@@ -398,12 +393,11 @@ internal static partial class Controls
         }
 
         private SemanticDeclaration Declaration() =>
-            new(
-                SemanticRole.ComboBox,
-                binding.Label,
-                actions: SemanticAction.ExpandCollapse,
-                value: binding.Value(),
-                expanded: binding.Expanded()
-            );
+            SemanticDeclaration
+                .Create(SemanticRole.ComboBox, binding.Label)
+                .Value(binding.Value())
+                .Expansion(binding.Expanded(), true)
+                .ValuePattern(false)
+                .Build();
     }
 }

@@ -93,13 +93,12 @@ internal sealed class CalendarBehavior(
     public override void Attach(BehaviorContext context)
     {
         SemanticDeclaration Declaration() =>
-            new(
-                SemanticRole.Calendar,
-                "Calendar",
-                description: calendar.Focused.ToString("D", session.Options.Culture),
-                enabled: editable(),
-                selection: new(false, !session.Options.AllowNull)
-            );
+            SemanticDeclaration
+                .Create(SemanticRole.Calendar, "Calendar")
+                .Enabled(editable())
+                .Description(calendar.Focused.ToString("D", session.Options.Culture))
+                .SelectionContainer(new(false, !session.Options.AllowNull))
+                .Build();
         context.SetSemantics(Declaration());
         context.MakeFocusable();
         context.OnSemanticCommand(command =>
@@ -206,15 +205,12 @@ internal sealed class CalendarDayBehavior(
         {
             var day = Current();
             var enabled = day.IsEnabled && editable();
-            return new(
-                SemanticRole.ListItem,
-                day.AccessibleName,
-                enabled: enabled,
-                selected: day.IsSelected,
-                actions: enabled ? SemanticAction.Select : SemanticAction.None,
-                positionInSet: slot + 1,
-                sizeOfSet: 42
-            );
+            return SemanticDeclaration
+                .Create(SemanticRole.ListItem, day.AccessibleName)
+                .Enabled(enabled)
+                .SelectionItem(day.IsSelected, enabled)
+                .SetMembership(slot + 1, 42)
+                .Build();
         }
         context.SetSemantics(Declaration());
         context.Effect(

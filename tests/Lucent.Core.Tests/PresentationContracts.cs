@@ -222,9 +222,14 @@ public sealed class PresentationContracts
                 transition: TransitionKind.Color
             )
         );
-        Expect<ArgumentException>(() => new SemanticDeclaration((SemanticRole)99, "bad"));
         Expect<ArgumentException>(() =>
-            new SemanticDeclaration(SemanticRole.Text, "bad", actions: (SemanticAction)128)
+            SemanticDeclaration.Create((SemanticRole)99, "bad").Build()
+        );
+        Expect<ArgumentException>(() =>
+            SemanticDeclaration
+                .Create(SemanticRole.Text, "bad")
+                .Range(null, canSetValue: true)
+                .Build()
         );
     }
 
@@ -626,7 +631,10 @@ public sealed class PresentationContracts
                 BehaviorOwnership.Action | BehaviorOwnership.Semantics,
                 context =>
                     context.SetSemantics(
-                        new(SemanticRole.Button, "Action", actions: SemanticAction.Invoke)
+                        SemanticDeclaration
+                            .Create(SemanticRole.Button, "Action")
+                            .Invoke(true)
+                            .Build()
                     )
             )
         );
@@ -637,7 +645,10 @@ public sealed class PresentationContracts
                     BehaviorOwnership.Action | BehaviorOwnership.Semantics,
                     context =>
                         context.SetSemantics(
-                            new(SemanticRole.Button, "Second", actions: SemanticAction.Invoke)
+                            SemanticDeclaration
+                                .Create(SemanticRole.Button, "Second")
+                                .Invoke(true)
+                                .Build()
                         )
                 )
             )
@@ -1048,7 +1059,8 @@ public sealed class PresentationContracts
         new(
             id,
             BehaviorOwnership.Semantics,
-            context => context.SetSemantics(new(SemanticRole.Text, name))
+            context =>
+                context.SetSemantics(SemanticDeclaration.Create(SemanticRole.Text, name).Build())
         );
 
     private static void Expect<T>(Action action)

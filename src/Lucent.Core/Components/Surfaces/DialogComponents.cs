@@ -154,7 +154,7 @@ public static partial class Components
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, title));
+            context.SetSemantics(SemanticDeclaration.Create(SemanticRole.Group, title).Build());
             context.OnKey(route =>
             {
                 if (

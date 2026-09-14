@@ -166,6 +166,34 @@ Package consumers receive those analyzer binaries during SDK restore. Editor
 snapshots preserve the C# state/style generators and original document-version
 metadata while generating `.lui` projections separately.
 
+## Custom behavior semantics
+
+Custom behaviors now construct semantics with `SemanticDeclaration.Create` and
+typed capabilities instead of the former positional constructor:
+
+```csharp
+var semantics = SemanticDeclaration.Create(SemanticRole.Button, "Save")
+    .Description("Save the current draft")
+    .Invoke()
+    .Build();
+```
+
+`BehaviorContext.SetSemantics` and `BindSemantics` retain their ownership rules.
+For existing builders, replace `actions: SemanticAction.Select` and `selected:`
+with `.SelectionItem(selected, canSelect: true)`; replace editable text and its
+operation flags with `.Editing(...)`. Password behaviors use
+`.ConfidentialEditing(canSetValue)` and never pass the secret. List, radio, tab,
+tree, calendar and table containers explicitly register `.SelectionContainer(...)`;
+ComboBox explicitly registers value-pattern support. These are construction-time
+source changes for custom behaviors, not changes to stock `.lui` markup or `.Aria`.
+
+`SemanticSnapshot` construction takes identity, a declaration payload, reconciled
+enabled/focused/selected flags and children. Flat read accessors remain; positional
+deconstruction and record `with` mutation are removed. Its public constructor
+defensively freezes children. Build a replacement snapshot with the existing
+payload when changing only reconciled state or children. Duplicate capabilities
+and incoherent operation/state combinations fail with capability-specific errors.
+
 ## Portable drawing and Gauge
 
 `DrawingDescriptor` records a bounded immutable command list in local coordinates.

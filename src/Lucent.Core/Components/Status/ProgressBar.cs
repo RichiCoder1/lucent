@@ -73,14 +73,16 @@ public static partial class Components
     }
 
     private static SemanticDeclaration ProgressBarSemantics(string label, double? value) =>
-        new(
-            SemanticRole.ProgressBar,
-            label,
-            value: value is { } fraction
-                ? fraction.ToString("P0", CultureInfo.CurrentCulture)
-                : null,
-            range: value is { } amount ? new(amount, 0, 1, 0.01, 0.1, isReadOnly: true) : null
-        );
+        SemanticDeclaration
+            .Create(SemanticRole.ProgressBar, label)
+            .Value(
+                value is { } fraction ? fraction.ToString("P0", CultureInfo.CurrentCulture) : null
+            )
+            .Range(
+                value is { } amount ? new(amount, 0, 1, 0.01, 0.1, isReadOnly: true) : null,
+                false
+            )
+            .Build();
 
     private sealed class ProgressBarBehavior(string label, double? value) : Behavior
     {

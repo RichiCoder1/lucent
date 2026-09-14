@@ -19,6 +19,6 @@ internal static partial class Controls
             theme,
             TextStyle.Set(ProjectionProperties.Text, Required(text, nameof(text))),
             style,
-            new(SemanticRole.Text, text)
+            SemanticDeclaration.Create(SemanticRole.Text, text).Build()
         );
 }

@@ -1354,7 +1354,9 @@ public sealed class ControlsContracts
         public override BehaviorOwnership Ownership => BehaviorOwnership.Semantics;
 
         public override void Attach(BehaviorContext context) =>
-            context.SetSemantics(new(SemanticRole.Group, "conflict"));
+            context.SetSemantics(
+                SemanticDeclaration.Create(SemanticRole.Group, "conflict").Build()
+            );
     }
 
     private sealed class EmptyShaper : ITextShaper

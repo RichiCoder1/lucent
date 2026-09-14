@@ -146,7 +146,7 @@ public sealed class WindowsHostContracts
         child.AttachBehaviors(
             new RowActionBehavior(
                 "target-action",
-                new(SemanticRole.Button, "target", actions: SemanticAction.Invoke),
+                SemanticDeclaration.Create(SemanticRole.Button, "target").Invoke().Build(),
                 () => activations++
             )
         );
@@ -1024,7 +1024,9 @@ sealed class ThrowingCaptureBehavior : Behavior
 
     public override void Attach(BehaviorContext context)
     {
-        context.SetSemantics(new(SemanticRole.Button, "throwing", actions: SemanticAction.Invoke));
+        context.SetSemantics(
+            SemanticDeclaration.Create(SemanticRole.Button, "throwing").Invoke().Build()
+        );
         context.OnPointer(route =>
         {
             if (route.Command.Kind == PointerCommandKind.Down)
@@ -1042,7 +1044,9 @@ sealed class DisposeOnTabBehavior(Composition composition) : Behavior
 
     public override void Attach(BehaviorContext context)
     {
-        context.SetSemantics(new(SemanticRole.Group, "Dispose on Tab"));
+        context.SetSemantics(
+            SemanticDeclaration.Create(SemanticRole.Group, "Dispose on Tab").Build()
+        );
         context.MakeFocusable();
         context.OnKey(route =>
         {

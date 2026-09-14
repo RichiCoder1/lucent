@@ -225,12 +225,13 @@ internal sealed class SplitterBehavior(SplitPaneState state, string label) : Beh
         SemanticDeclaration Declaration()
         {
             var range = state.Geometry();
-            return new(
-                SemanticRole.Splitter,
-                label,
-                actions: SemanticAction.SetRangeValue,
-                range: new SemanticRangeSnapshot(range.Value, range.Minimum, range.Maximum, 8, 40)
-            );
+            return SemanticDeclaration
+                .Create(SemanticRole.Splitter, label)
+                .Range(
+                    new SemanticRangeSnapshot(range.Value, range.Minimum, range.Maximum, 8, 40),
+                    true
+                )
+                .Build();
         }
         context.MakeFocusable();
         context.SetSemantics(Declaration());

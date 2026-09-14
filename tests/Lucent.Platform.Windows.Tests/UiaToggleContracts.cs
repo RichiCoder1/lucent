@@ -59,12 +59,10 @@ public sealed unsafe partial class UiaLifecycleContracts
                 );
                 applied = SemanticToggleState.On;
                 element.UpdateControlSemantics(
-                    new(
-                        SemanticRole.CheckBox,
-                        "Choice",
-                        actions: SemanticAction.Toggle,
-                        toggleState: applied
-                    )
+                    SemanticDeclaration
+                        .Create(SemanticRole.CheckBox, "Choice")
+                        .Toggle(applied, true)
+                        .Build()
                 );
                 using var next = SceneLayout.Project(composition, new(160, 80, 1), renderer);
                 provider.Refresh(next);
@@ -73,13 +71,11 @@ public sealed unsafe partial class UiaLifecycleContracts
                     "Applied toggle state was not refreshed."
                 );
                 element.UpdateControlSemantics(
-                    new(
-                        SemanticRole.CheckBox,
-                        "Choice",
-                        enabled: false,
-                        actions: SemanticAction.Toggle,
-                        toggleState: applied
-                    )
+                    SemanticDeclaration
+                        .Create(SemanticRole.CheckBox, "Choice")
+                        .Enabled(false)
+                        .Toggle(applied, true)
+                        .Build()
                 );
                 using var disabled = SceneLayout.Project(composition, new(160, 80, 1), renderer);
                 provider.Refresh(disabled);
@@ -174,12 +170,10 @@ public sealed unsafe partial class UiaLifecycleContracts
         public override void Attach(BehaviorContext context)
         {
             context.SetSemantics(
-                new(
-                    SemanticRole.CheckBox,
-                    "Choice",
-                    actions: SemanticAction.Toggle,
-                    toggleState: SemanticToggleState.Indeterminate
-                )
+                SemanticDeclaration
+                    .Create(SemanticRole.CheckBox, "Choice")
+                    .Toggle(SemanticToggleState.Indeterminate, true)
+                    .Build()
             );
             context.OnSemanticCommand(command =>
             {
@@ -198,7 +192,10 @@ public sealed unsafe partial class UiaLifecycleContracts
 
         public override void Attach(BehaviorContext context) =>
             context.SetSemantics(
-                new(SemanticRole.RadioGroup, "Choices", selection: new(false, true))
+                SemanticDeclaration
+                    .Create(SemanticRole.RadioGroup, "Choices")
+                    .SelectionContainer(new(false, true))
+                    .Build()
             );
     }
 }

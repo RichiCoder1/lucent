@@ -142,7 +142,7 @@ internal static partial class Controls
             style,
             new ButtonBehavior(
                 "button",
-                new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
+                SemanticDeclaration.Create(SemanticRole.Button, label).Invoke(true).Build(),
                 activate,
                 focusOnPointer
             )
@@ -165,7 +165,7 @@ internal static partial class Controls
             style,
             new ButtonBehavior(
                 "button",
-                new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
+                SemanticDeclaration.Create(SemanticRole.Button, label).Invoke(true).Build(),
                 activate
             )
         );
@@ -190,7 +190,7 @@ internal static partial class Controls
             style,
             new ButtonBehavior(
                 "icon-button",
-                new(SemanticRole.Button, label, actions: SemanticAction.Invoke),
+                SemanticDeclaration.Create(SemanticRole.Button, label).Invoke(true).Build(),
                 activate,
                 focusOnPointer
             )
@@ -240,7 +240,10 @@ internal static partial class Controls
         var component = projectLabel ? styleBase.Set(ProjectionProperties.Text, label) : styleBase;
         var behavior = new RowActionBehavior(
             "selectable",
-            new(SemanticRole.ListItem, label, actions: SemanticAction.Select)
+            SemanticDeclaration
+                .Create(SemanticRole.ListItem, label)
+                .SelectionItem(false, true)
+                .Build()
         );
         Preflight(element, theme, component, style, behavior);
         var state = new ControlState(element.Scope, element.Name + ".selectable", label);
@@ -251,7 +254,10 @@ internal static partial class Controls
             style,
             new RowActionBehavior(
                 "selectable",
-                new(SemanticRole.ListItem, label, actions: SemanticAction.Select),
+                SemanticDeclaration
+                    .Create(SemanticRole.ListItem, label)
+                    .SelectionItem(false, true)
+                    .Build(),
                 activate,
                 state,
                 controlled
@@ -265,7 +271,11 @@ internal static partial class Controls
                 if (projectLabel)
                     element.UpdateControl(ProjectionProperties.Text, value.Label);
             },
-            value => new(SemanticRole.ListItem, value.Label, actions: SemanticAction.Select)
+            value =>
+                SemanticDeclaration
+                    .Create(SemanticRole.ListItem, value.Label)
+                    .SelectionItem(false, true)
+                    .Build()
         );
         return state;
     }

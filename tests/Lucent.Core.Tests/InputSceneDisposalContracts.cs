@@ -138,7 +138,7 @@ public sealed class InputSceneDisposalContracts
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, name));
+            context.SetSemantics(SemanticDeclaration.Create(SemanticRole.Group, name).Build());
             context.MakeFocusable();
             context.OnFocus(focus ?? (_ => { }));
             context.OnPointer(pointer ?? (_ => { }));
@@ -154,7 +154,9 @@ public sealed class InputSceneDisposalContracts
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, "Disposing Tab target"));
+            context.SetSemantics(
+                SemanticDeclaration.Create(SemanticRole.Group, "Disposing Tab target").Build()
+            );
             context.MakeFocusable();
             context.OnKey(route =>
             {

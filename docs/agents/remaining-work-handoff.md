@@ -1,5 +1,33 @@
 # Current work and follow-ups
 
+## Semantic capabilities checkpoint — September 13, 2026
+
+The approved [semantic refactor](../plans/semantic-capabilities.md) #291–294 is
+implemented over baseline `910b2dc`. Declarations use validated typed capabilities;
+metadata overlays and immutable snapshots share their payload. Every repository
+producer and Windows UIA mapping has migrated. Custom declaration/snapshot
+construction is a documented prerelease source break; stock `.lui` authoring is
+unchanged. Light Notes has no direct construction sites and remains independently
+pinned to `0.3.0-dev.60.1`.
+
+Local affected suites pass: Core 548, Windows 130, headless Testing 46,
+Component Browser 15, Issue Browser 20 and Compiler 69. The final Windows run
+corrected two new fixture setup errors (COM interface selection and image-cache
+configuration); both stock disabled-selection assertions now pass. Builds have
+zero warnings/errors. Logs are `artifacts/semantic-final-tests.log` and
+`artifacts/semantic-final-windows-tests.log`.
+
+The [before/after measurements](../plans/semantic-capabilities-baseline.md) show
+lower allocations in all five cases, including 2,216 → 2,120 B for caret updates
+and 41,128 → 34,552 B for virtualized-list projection. Generation churn is
+unchanged; equality suppression is deferred. No new broad manual accessibility,
+IME or mixed-DPI claim is made. CI NativeAOT/package verification and publication
+remain pending; the latest published Lucent package is `0.3.0-dev.73.1`.
+
+Next: close this publication, then the bounded `.lui` callback diagnostic #290,
+followed by typed composition context/service injection #203 and URI navigation
+#204. Live compilation remains a separate workstream.
+
 ## September 13 execution checkpoint
 
 The user authorized desktop interaction for the night. The earlier source
@@ -240,14 +268,12 @@ Computer Use's transient-element cache and arrow/Enter injection were unreliable
 
 ## Current completion boundary
 
-Tooling follow-up #276 and desktop interaction #279–289 are complete at the
-source and verification boundaries recorded above. The current #265 candidate
-has completed its managed implementation checks. The next required evidence is
-package-only consumption from the integrated candidate, its NativeAOT build and
-the bounded native desktop smoke selected by the implementation issues. Record
-their exact source/package identity before claiming delivery, publication or
-closing #265 and children #266–275. Context/navigation #203/#204 remains a
-separate later phase.
+Tooling follow-up #276, desktop interaction #279–289, and C# authoring #265–275
+are complete at the source and verification boundaries recorded above. Authoring
+is published as `0.3.0-dev.73.1`; its final focused Computer Use repeat passed and
+was recorded in `910b2dc`. Semantic capabilities #291–294 are the current work;
+their baseline is `910b2dc`. Context/navigation #203/#204 remains a separate later
+phase. Callback diagnostics #290 is a separate small authoring follow-up.
 
 ## Scope and workspace constraints
 

@@ -19,6 +19,7 @@ public sealed partial class Element : IDisposable
     private SemanticDeclaration? _baseSemantics;
     private SemanticDeclaration? _semantics;
     private string? _supplementalDescription;
+    private SemanticDeclaration? _structuralSemantics;
     private Func<SemanticCommand, bool>? _semanticCommand;
     private Action<bool>? _selectionChanged;
     private long _semanticGeneration;
@@ -522,32 +523,19 @@ public sealed partial class Element : IDisposable
         if (_semantics is null)
             return null;
         var state = ReconcileSemanticState();
-        return new(
+        var payload = string.IsNullOrWhiteSpace(_supplementalDescription)
+            ? _semantics
+            : _semantics.WithMetadata(
+                _semantics.Name,
+                MergeDescription(_semantics.Description, _supplementalDescription)
+            );
+        return SemanticSnapshot.CreateOwned(
             new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration),
-            _semantics.Role,
-            _semantics.Name,
-            _semantics.Value,
+            payload,
             state.Enabled,
             state.Focused,
             state.Selected,
-            _semantics.Actions,
-            children,
-            _semantics.Text,
-            _semantics.Expanded,
-            _semantics.Range,
-            _semantics.Relationships,
-            _semantics.ToggleState,
-            _semantics.Selection,
-            MergeDescription(_semantics.Description, _supplementalDescription),
-            _semantics.PositionInSet,
-            _semantics.SizeOfSet,
-            _semantics.IsPassword,
-            _semantics.Collection,
-            _semantics.Level,
-            _semantics.CollectionIndex,
-            _semantics.Grid,
-            _semantics.GridItem,
-            _semantics.Announcement
+            children
         );
     }
 
@@ -593,17 +581,16 @@ public sealed partial class Element : IDisposable
     internal SemanticSnapshot CreateStructuralSemanticSnapshot(
         IReadOnlyList<SemanticSnapshot> children
     ) =>
-        new(
+        SemanticSnapshot.CreateOwned(
             new SemanticIdentity(Composition.Epoch, Id, _semanticGeneration),
-            SemanticRole.Group,
-            Name,
-            null,
+            _structuralSemantics ??= SemanticDeclaration
+                .Create(SemanticRole.Group, Name)
+                .Description(_supplementalDescription)
+                .Build(),
             true,
             false,
             false,
-            SemanticAction.None,
-            children,
-            Description: _supplementalDescription
+            children
         );
 
     internal void SetSupplementalDescription(string description)
@@ -618,6 +605,7 @@ public sealed partial class Element : IDisposable
         if (string.Equals(_supplementalDescription, description, StringComparison.Ordinal))
             return;
         _supplementalDescription = description;
+        _structuralSemantics = null;
         Composition.InvalidateSemantics();
     }
 

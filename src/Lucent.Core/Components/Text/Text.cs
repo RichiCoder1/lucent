@@ -37,7 +37,9 @@ public static partial class Components
                     () =>
                     {
                         root.UpdateControl(ProjectionProperties.Text, value.Value);
-                        root.UpdateControlSemantics(new(SemanticRole.Text, value.Value));
+                        root.UpdateControlSemantics(
+                            SemanticDeclaration.Create(SemanticRole.Text, value.Value).Build()
+                        );
                     },
                     root.Name + ".text"
                 );

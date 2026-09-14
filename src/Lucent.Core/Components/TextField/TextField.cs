@@ -553,27 +553,28 @@ internal sealed class TextFieldBehavior(
     {
         ArgumentNullException.ThrowIfNull(state);
         bool IsReadOnly() => readOnly?.Invoke() == true;
-        SemanticAction Actions()
+        SemanticDeclaration Declaration(
+            bool isReadOnly,
+            SemanticRelationships? currentRelationships
+        )
         {
-            var actions = IsReadOnly() ? SemanticAction.None : SemanticAction.SetValue;
-            if (state.IsMultiline)
-                actions |=
-                    SemanticAction.Scroll
-                    | SemanticAction.SelectText
-                    | SemanticAction.ScrollTextIntoView;
-            return actions;
+            var declaration = SemanticDeclaration
+                .Create(SemanticRole.TextField, name)
+                .Relationships(currentRelationships);
+            if (confidential)
+                return declaration.ConfidentialEditing(!isReadOnly).Build();
+            return declaration
+                .Value(state.Value)
+                .Editing(
+                    state.SemanticTextFor(isReadOnly),
+                    !isReadOnly,
+                    state.IsMultiline,
+                    state.IsMultiline
+                )
+                .Scroll(state.IsMultiline)
+                .Build();
         }
-        context.SetSemantics(
-            new(
-                SemanticRole.TextField,
-                name,
-                actions: Actions(),
-                value: confidential ? null : state.Value,
-                text: confidential ? null : state.SemanticTextFor(IsReadOnly()),
-                relationships: relationships?.Invoke(),
-                isPassword: confidential
-            )
-        );
+        context.SetSemantics(Declaration(IsReadOnly(), relationships?.Invoke()));
         context.MakeFocusable();
         context.RegisterText(state);
         if (state.ScrollState is { } scroll)
@@ -637,17 +638,7 @@ internal sealed class TextFieldBehavior(
                 if (isReadOnly && state.HasPreedit)
                     state.CancelComposition();
                 context.SetState(BehaviorState.Invalid, currentRelationships?.IsInvalid == true);
-                context.UpdateSemantics(
-                    new(
-                        SemanticRole.TextField,
-                        name,
-                        actions: Actions(),
-                        value: confidential ? null : state.Value,
-                        text: confidential ? null : state.SemanticTextFor(isReadOnly),
-                        relationships: currentRelationships,
-                        isPassword: confidential
-                    )
-                );
+                context.UpdateSemantics(Declaration(isReadOnly, currentRelationships));
             },
             name + ".semantics"
         );

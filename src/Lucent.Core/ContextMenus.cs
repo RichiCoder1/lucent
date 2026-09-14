@@ -763,13 +763,11 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
 
         internal void SetExpanded(bool expanded) =>
             Context.UpdateSemantics(
-                new(
-                    SemanticRole.MenuItem,
-                    Context.SemanticName,
-                    enabled: Available,
-                    actions: SemanticAction.ExpandCollapse,
-                    expanded: expanded
-                )
+                SemanticDeclaration
+                    .Create(SemanticRole.MenuItem, Context.SemanticName)
+                    .Enabled(Available)
+                    .Expansion(expanded, true)
+                    .Build()
             );
     }
 }
@@ -904,7 +902,10 @@ public static partial class Components
                 root.AttachBehaviors(
                     new ButtonBehavior(
                         "menu-item",
-                        new(SemanticRole.MenuItem, content, actions: SemanticAction.Invoke),
+                        SemanticDeclaration
+                            .Create(SemanticRole.MenuItem, content)
+                            .Invoke(true)
+                            .Build(),
                         () =>
                         {
                             if (!(enabled?.Invoke() ?? true))
@@ -1038,7 +1039,7 @@ internal sealed class MenuBehavior(ScrollViewportState scroll) : Behavior
     public override void Attach(BehaviorContext context)
     {
         context.SetSemantics(
-            new(SemanticRole.Menu, "Context menu", actions: SemanticAction.Scroll)
+            SemanticDeclaration.Create(SemanticRole.Menu, "Context menu").Scroll(true).Build()
         );
         context.MakeFocusable(tabStop: false);
         context.RegisterScrollable(scroll);
@@ -1127,13 +1128,11 @@ internal sealed class MenuSubmenuBehavior(
     {
         var available = enabled?.Invoke() ?? true;
         context.SetSemantics(
-            new(
-                SemanticRole.MenuItem,
-                label,
-                enabled: available,
-                actions: SemanticAction.ExpandCollapse,
-                expanded: false
-            )
+            SemanticDeclaration
+                .Create(SemanticRole.MenuItem, label)
+                .Enabled(available)
+                .Expansion(false, true)
+                .Build()
         );
         context.MakeFocusable();
         context.RegisterMenuSubmenu(menu, theme, enabled);

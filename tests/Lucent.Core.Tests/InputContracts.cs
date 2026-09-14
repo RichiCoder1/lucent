@@ -601,7 +601,10 @@ public sealed class InputContracts
         child.AttachBehaviors(
             new RowActionBehavior(
                 "row",
-                new(SemanticRole.ListItem, "row", actions: SemanticAction.Select)
+                SemanticDeclaration
+                    .Create(SemanticRole.ListItem, "row")
+                    .SelectionItem(false, true)
+                    .Build()
             )
         );
         var router = composition.Input;
@@ -1006,7 +1009,7 @@ public sealed class InputContracts
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, name));
+            context.SetSemantics(SemanticDeclaration.Create(SemanticRole.Group, name).Build());
             if (ownership.HasFlag(BehaviorOwnership.Focus))
                 context.MakeFocusable();
             if (pointer is not null)
@@ -1028,7 +1031,7 @@ public sealed class InputContracts
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, "failing"));
+            context.SetSemantics(SemanticDeclaration.Create(SemanticRole.Group, "failing").Build());
             context.MakeFocusable();
             throw new InvalidOperationException("attach");
         }

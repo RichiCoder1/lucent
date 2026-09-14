@@ -46,25 +46,66 @@ public sealed unsafe partial class UiaLifecycleContracts
                 AssertCompoundPattern(simple, 10015, expected: false);
                 AssertCompoundPattern(simple, 10003, expected: false);
                 target.UpdateControlSemantics(
-                    new(
-                        SemanticRole.ProgressBar,
-                        "Preparing",
-                        range: new(0.5, 0, 1, 0.1, 0.2, isReadOnly: true)
-                    )
+                    SemanticDeclaration
+                        .Create(SemanticRole.ProgressBar, "Preparing")
+                        .Value("50%")
+                        .Range(new(0.5, 0, 1, 0.1, 0.2, isReadOnly: true), false)
+                        .Build()
                 );
                 using var changed = SceneLayout.Project(composition, new(220, 100, 1), renderer);
                 provider.Refresh(changed);
                 AssertCompoundPattern(simple, 10001, expected: false);
                 AssertCompoundPattern(simple, 10004, expected: false);
                 AssertCompoundPattern(simple, 10003, expected: true);
+                AssertCompoundPattern(simple, 10002, expected: false);
+                AssertCompoundProperty(
+                    simple,
+                    30043,
+                    expected: false,
+                    "Formatted display values must not advertise ValuePattern."
+                );
                 target.UpdateControlSemantics(
-                    new(
-                        SemanticRole.ComboBox,
-                        "Choice",
-                        actions: SemanticAction.ExpandCollapse,
-                        value: "Alpha",
-                        expanded: false
-                    )
+                    SemanticDeclaration.Create(SemanticRole.Group, "Selectionless group").Build()
+                );
+                using var selectionless = SceneLayout.Project(
+                    composition,
+                    new(220, 100, 1),
+                    renderer
+                );
+                provider.Refresh(selectionless);
+                AssertCompoundPattern(simple, 10001, expected: false);
+                AssertCompoundProperty(
+                    simple,
+                    30037,
+                    expected: false,
+                    "A role without a selection capability must not advertise SelectionPattern."
+                );
+                target.UpdateControlSemantics(
+                    SemanticDeclaration
+                        .Create(SemanticRole.Group, "Explicit selection group")
+                        .SelectionContainer(new(false, false))
+                        .Build()
+                );
+                using var explicitSelection = SceneLayout.Project(
+                    composition,
+                    new(220, 100, 1),
+                    renderer
+                );
+                provider.Refresh(explicitSelection);
+                AssertCompoundPattern(simple, 10001, expected: true);
+                AssertCompoundProperty(
+                    simple,
+                    30037,
+                    expected: true,
+                    "An explicit selection capability must advertise SelectionPattern."
+                );
+                target.UpdateControlSemantics(
+                    SemanticDeclaration
+                        .Create(SemanticRole.ComboBox, "Choice")
+                        .Value("Alpha")
+                        .Expansion(false, true)
+                        .ValuePattern(false)
+                        .Build()
                 );
                 using var choice = SceneLayout.Project(composition, new(220, 100, 1), renderer);
                 provider.Refresh(choice);
@@ -98,6 +139,59 @@ public sealed unsafe partial class UiaLifecycleContracts
                 {
                     Release(valuePattern);
                 }
+                target.UpdateControlSemantics(
+                    SemanticDeclaration
+                        .Create(SemanticRole.TextField, "Password")
+                        .ConfidentialEditing(false)
+                        .Build()
+                );
+                using var confidential = SceneLayout.Project(
+                    composition,
+                    new(220, 100, 1),
+                    renderer
+                );
+                provider.Refresh(confidential);
+                AssertCompoundPattern(simple, 10002, expected: false);
+                AssertCompoundProperty(
+                    simple,
+                    30043,
+                    expected: false,
+                    "Read-only confidential editing must not expose ValuePattern."
+                );
+                target.UpdateControlSemantics(
+                    SemanticDeclaration
+                        .Create(SemanticRole.TextField, "Read-only draft")
+                        .Editing(
+                            new SemanticTextSnapshot("draft", 0, 0, isReadOnly: true),
+                            false,
+                            false,
+                            false
+                        )
+                        .Build()
+                );
+                using var readOnlyDraft = SceneLayout.Project(
+                    composition,
+                    new(220, 100, 1),
+                    renderer
+                );
+                provider.Refresh(readOnlyDraft);
+                AssertCompoundPattern(simple, 10002, expected: true);
+                AssertCompoundPattern(simple, 10014, expected: false);
+                AssertCompoundPattern(simple, 10024, expected: false);
+                target.UpdateControlSemantics(
+                    SemanticDeclaration
+                        .Create(SemanticRole.RadioButton, "Disabled choice")
+                        .Enabled(false)
+                        .SelectionItem(true, false)
+                        .Build()
+                );
+                using var disabledItem = SceneLayout.Project(
+                    composition,
+                    new(220, 100, 1),
+                    renderer
+                );
+                provider.Refresh(disabledItem);
+                AssertCompoundPattern(simple, 10010, expected: false);
             }
             finally
             {
@@ -129,6 +223,22 @@ public sealed unsafe partial class UiaLifecycleContracts
         }
     }
 
+    private static void AssertCompoundProperty(
+        nint provider,
+        int property,
+        bool expected,
+        string message
+    )
+    {
+        WindowsUiaProvider.RawVariant value = default;
+        Assert(
+            Simple(provider, 5, property, &value) == 0
+                && value.Type == 11
+                && (value.Value != 0) == expected,
+            message
+        );
+    }
+
     private sealed class CompoundProbe : Behavior
     {
         public override string Name => "compound-pattern";
@@ -138,12 +248,11 @@ public sealed unsafe partial class UiaLifecycleContracts
         public override void Attach(BehaviorContext context)
         {
             context.SetSemantics(
-                new(
-                    SemanticRole.TabList,
-                    "Tabs",
-                    actions: SemanticAction.Scroll,
-                    selection: new(false, true)
-                )
+                SemanticDeclaration
+                    .Create(SemanticRole.TabList, "Tabs")
+                    .Scroll(true)
+                    .SelectionContainer(new(false, true))
+                    .Build()
             );
             context.OnSemanticCommand(_ => false);
         }

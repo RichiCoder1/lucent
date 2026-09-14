@@ -165,7 +165,9 @@ internal static class InputDispatchProbe
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, "dispatch"));
+            context.SetSemantics(
+                SemanticDeclaration.Create(SemanticRole.Group, "dispatch").Build()
+            );
             context.MakeFocusable();
             context.OnPointer(_ => { });
             context.OnKey(_ => { });

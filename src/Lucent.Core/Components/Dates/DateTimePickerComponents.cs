@@ -296,7 +296,8 @@ internal sealed class TimePickerBehavior(TimeEditSession session, string label, 
 
     public override void Attach(BehaviorContext context)
     {
-        SemanticDeclaration Declaration() => new(SemanticRole.Spinner, label, value: session.Draft);
+        SemanticDeclaration Declaration() =>
+            SemanticDeclaration.Create(SemanticRole.Spinner, label).Value(session.Draft).Build();
         context.SetSemantics(Declaration());
         context.Effect(() => context.UpdateSemantics(Declaration()), label + ".time-spinner");
         context.OnKey(route =>

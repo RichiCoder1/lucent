@@ -96,7 +96,7 @@ internal static partial class Controls
             author,
             new ButtonBehavior(
                 "link",
-                new(SemanticRole.Hyperlink, label, actions: SemanticAction.Invoke),
+                SemanticDeclaration.Create(SemanticRole.Hyperlink, label).Invoke(true).Build(),
                 invoke
             )
         );

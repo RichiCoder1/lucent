@@ -18,7 +18,7 @@ public sealed class SemanticBindingContracts
             new BindingBehavior(() =>
             {
                 reads++;
-                return new SemanticDeclaration(SemanticRole.Group, label.Value);
+                return SemanticDeclaration.Create(SemanticRole.Group, label.Value).Build();
             })
         );
 
@@ -55,7 +55,7 @@ public sealed class SemanticBindingContracts
         retained.AttachBehaviors(behavior);
         Assert.ThrowsExactly<InvalidOperationException>(() =>
             behavior.Context!.BindSemantics(() =>
-                new SemanticDeclaration(SemanticRole.Group, "too late")
+                SemanticDeclaration.Create(SemanticRole.Group, "too late").Build()
             )
         );
     }
@@ -100,7 +100,9 @@ public sealed class SemanticBindingContracts
         public override string Name => "non-semantic-binding";
 
         public override void Attach(BehaviorContext context) =>
-            context.BindSemantics(() => new SemanticDeclaration(SemanticRole.Group, "not owned"));
+            context.BindSemantics(() =>
+                SemanticDeclaration.Create(SemanticRole.Group, "not owned").Build()
+            );
     }
 
     private sealed class RetainedContextBehavior : Behavior
@@ -114,7 +116,7 @@ public sealed class SemanticBindingContracts
         public override void Attach(BehaviorContext context)
         {
             Context = context;
-            context.SetSemantics(new(SemanticRole.Group, "initial"));
+            context.SetSemantics(SemanticDeclaration.Create(SemanticRole.Group, "initial").Build());
         }
     }
 }

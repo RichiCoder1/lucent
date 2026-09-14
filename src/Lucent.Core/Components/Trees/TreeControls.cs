@@ -136,13 +136,11 @@ internal static partial class Controls
         public override void Attach(BehaviorContext context)
         {
             SemanticDeclaration Declaration() =>
-                new(
-                    SemanticRole.Tree,
-                    binding.Label,
-                    actions: SemanticAction.RealizeItem,
-                    selection: new(false, false),
-                    collection: new(binding.Count(), binding.SelectedIndex())
-                );
+                SemanticDeclaration
+                    .Create(SemanticRole.Tree, binding.Label)
+                    .SelectionContainer(new(false, false))
+                    .Collection(new(binding.Count(), binding.SelectedIndex()), true)
+                    .Build();
             context.SetSemantics(Declaration());
             context.Effect(() => context.UpdateSemantics(Declaration()), "tree-collection");
             context.OnSemanticCommand(command =>
@@ -227,23 +225,21 @@ internal static partial class Controls
         }
 
         private SemanticDeclaration Declaration(bool? selected = null) =>
-            new(
-                SemanticRole.TreeItem,
-                ControlState.Required(binding.Label(), nameof(binding.Label)),
-                enabled: binding.Enabled(),
-                selected: selected ?? binding.Selected(),
-                actions: SemanticAction.Select
-                    | (
-                        binding.Enabled() && binding.HasChildren()
-                            ? SemanticAction.ExpandCollapse
-                            : SemanticAction.None
-                    ),
-                expanded: binding.Enabled() && binding.HasChildren() ? binding.Expanded() : null,
-                positionInSet: binding.Position(),
-                sizeOfSet: binding.Size(),
-                level: binding.Level(),
-                collectionIndex: binding.CollectionIndex()
-            );
+            SemanticDeclaration
+                .Create(
+                    SemanticRole.TreeItem,
+                    ControlState.Required(binding.Label(), nameof(binding.Label))
+                )
+                .Enabled(binding.Enabled())
+                .SelectionItem(selected ?? binding.Selected(), true)
+                .Expansion(
+                    binding.Enabled() && binding.HasChildren() ? binding.Expanded() : null,
+                    binding.Enabled() && binding.HasChildren()
+                )
+                .SetMembership(binding.Position(), binding.Size())
+                .Hierarchy(binding.Level())
+                .CollectionItem(binding.CollectionIndex())
+                .Build();
 
         private void AttachPointer(BehaviorContext context)
         {

@@ -223,7 +223,9 @@ public sealed class ImeCompositionContracts
 
         public override void Attach(BehaviorContext context)
         {
-            context.SetSemantics(new(SemanticRole.Group, "Editor host"));
+            context.SetSemantics(
+                SemanticDeclaration.Create(SemanticRole.Group, "Editor host").Build()
+            );
             context.OnKey(route =>
             {
                 onKey();

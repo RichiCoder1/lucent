@@ -214,7 +214,9 @@ internal sealed class ScrollViewportBehavior(string name, ScrollViewportState st
 
     public override void Attach(BehaviorContext context)
     {
-        context.SetSemantics(new(SemanticRole.Group, name, actions: SemanticAction.Scroll));
+        context.SetSemantics(
+            SemanticDeclaration.Create(SemanticRole.Group, name).Scroll(true).Build()
+        );
         context.MakeFocusable();
         context.RegisterScrollable(state);
         context.OnSemanticCommand(command =>

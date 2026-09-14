@@ -19,7 +19,12 @@ internal static partial class Controls
             theme,
             component,
             style,
-            new SemanticBehavior(new(SemanticRole.Status, label, announcement: announcement))
+            new SemanticBehavior(
+                SemanticDeclaration
+                    .Create(SemanticRole.Status, label)
+                    .Announcement(announcement)
+                    .Build()
+            )
         );
         var state = new ControlState(element.Scope, element.Name + ".loading", label);
         ConfigureSemantic(
@@ -27,13 +32,20 @@ internal static partial class Controls
             theme,
             component,
             style,
-            new(SemanticRole.Status, label, announcement: announcement)
+            SemanticDeclaration
+                .Create(SemanticRole.Status, label)
+                .Announcement(announcement)
+                .Build()
         );
         Bind(
             element,
             state,
             value => element.UpdateControl(ProjectionProperties.Text, value.Label),
-            value => new(SemanticRole.Status, value.Label, announcement: announcement)
+            value =>
+                SemanticDeclaration
+                    .Create(SemanticRole.Status, value.Label)
+                    .Announcement(announcement)
+                    .Build()
         );
         return state;
     }
@@ -55,7 +67,7 @@ internal static partial class Controls
             theme,
             component,
             style,
-            new SemanticBehavior(new(SemanticRole.Status, label))
+            new SemanticBehavior(SemanticDeclaration.Create(SemanticRole.Status, label).Build())
         );
         var state = new ControlState(
             element.Scope,
@@ -68,7 +80,7 @@ internal static partial class Controls
             theme,
             component,
             style,
-            new(SemanticRole.Status, label, value: Percent(value))
+            SemanticDeclaration.Create(SemanticRole.Status, label).Value(Percent(value)).Build()
         );
         Bind(
             element,
@@ -78,7 +90,11 @@ internal static partial class Controls
                     ProjectionProperties.Text,
                     ProgressText(current.Label, current.Progress)
                 ),
-            current => new(SemanticRole.Status, current.Label, value: Percent(current.Progress))
+            current =>
+                SemanticDeclaration
+                    .Create(SemanticRole.Status, current.Label)
+                    .Value(Percent(current.Progress))
+                    .Build()
         );
         return state;
     }
@@ -97,15 +113,21 @@ internal static partial class Controls
             theme,
             component,
             style,
-            new SemanticBehavior(new(SemanticRole.Status, message))
+            new SemanticBehavior(SemanticDeclaration.Create(SemanticRole.Status, message).Build())
         );
         var state = new ControlState(element.Scope, element.Name + ".error", message);
-        ConfigureSemantic(element, theme, component, style, new(SemanticRole.Status, message));
+        ConfigureSemantic(
+            element,
+            theme,
+            component,
+            style,
+            SemanticDeclaration.Create(SemanticRole.Status, message).Build()
+        );
         Bind(
             element,
             state,
             value => element.UpdateControl(ProjectionProperties.Text, value.Label),
-            value => new(SemanticRole.Status, value.Label)
+            value => SemanticDeclaration.Create(SemanticRole.Status, value.Label).Build()
         );
         return state;
     }

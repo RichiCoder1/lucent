@@ -35,7 +35,7 @@ internal static partial class Controls
                 .Set(TypographyProperties.TextWrap, TextWrap.WordWithGraphemeFallback)
                 .Set(TypographyProperties.TextColor, ControlThemes.SecondaryForeground),
             null,
-            new(SemanticRole.Text, text)
+            SemanticDeclaration.Create(SemanticRole.Text, text).Build()
         );
 
     internal static void FieldError(Element element, ThemeContext theme, string text) =>
@@ -47,7 +47,7 @@ internal static partial class Controls
                 .Set(TypographyProperties.TextWrap, TextWrap.WordWithGraphemeFallback)
                 .Set(TypographyProperties.TextColor, ControlThemes.SecondaryForeground),
             null,
-            new(SemanticRole.Status, text)
+            SemanticDeclaration.Create(SemanticRole.Status, text).Build()
         );
 }
 
@@ -59,7 +59,7 @@ internal sealed class FieldLabelBehavior(string label, FocusTarget target) : Beh
 
     public override void Attach(BehaviorContext context)
     {
-        context.SetSemantics(new(SemanticRole.Text, label));
+        context.SetSemantics(SemanticDeclaration.Create(SemanticRole.Text, label).Build());
         int? armed = null;
         context.OnPointer(route =>
         {

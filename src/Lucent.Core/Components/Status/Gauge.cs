@@ -134,14 +134,16 @@ public static partial class Components
             context.BindSemantics(() =>
             {
                 var snapshot = read();
-                return new(
-                    SemanticRole.ProgressBar,
-                    label,
-                    value: snapshot.Display,
-                    range: snapshot.Value is { } value
-                        ? new(value, options.Minimum, options.Maximum, 1, 1, isReadOnly: true)
-                        : null
-                );
+                return SemanticDeclaration
+                    .Create(SemanticRole.ProgressBar, label)
+                    .Value(snapshot.Display)
+                    .Range(
+                        snapshot.Value is { } value
+                            ? new(value, options.Minimum, options.Maximum, 1, 1, isReadOnly: true)
+                            : null,
+                        false
+                    )
+                    .Build();
             });
     }
 }

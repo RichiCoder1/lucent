@@ -153,12 +153,11 @@ internal static partial class Controls
         }
 
         private SemanticDeclaration Declaration() =>
-            new(
-                SemanticRole.ComboBox,
-                binding.Label,
-                actions: SemanticAction.ExpandCollapse,
-                value: binding.Value(),
-                expanded: binding.Expanded()
-            );
+            SemanticDeclaration
+                .Create(SemanticRole.ComboBox, binding.Label)
+                .Value(binding.Value())
+                .Expansion(binding.Expanded(), true)
+                .ValuePattern(false)
+                .Build();
     }
 }

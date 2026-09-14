@@ -50,6 +50,24 @@ The `Components/Status/ErrorNotice.lui` composite is the reference shape: its
 C# adapter exposes the message reader and retry callback, while the markup owns
 the layout, status content and conditional retry button.
 
+## Semantic capabilities
+
+Stock controls publish one immutable `SemanticDeclaration` built from common
+metadata and typed capabilities. Custom behaviors use
+`SemanticDeclaration.Create(role, name)` and explicitly register operations and
+pattern data before `Build()`. For example, `.ValuePattern(false)` exposes a
+read-only value, whereas `.Value(text)` alone is formatted display metadata.
+Selection containers, collection membership, toggle/expansion, numeric ranges
+and editing retain their distinct contracts; capability presence does not grant
+action ownership.
+
+`.Aria` continues to override only the allowed name/description metadata and
+shares the control's capability data. Password semantics use a confidential
+editing declaration that never receives content. Snapshots share immutable
+payloads while retaining current applied state, visible editor drafts and stale
+identity checks. See [custom behavior migration](CSHARP-AUTHORING.md#custom-behavior-semantics)
+and the [semantic design](plans/semantic-capabilities.md).
+
 ## Fields and validation
 
 `Field` owns the persistent visual label, optional help, inline validation,
