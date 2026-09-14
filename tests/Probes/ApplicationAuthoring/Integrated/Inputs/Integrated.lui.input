@@ -1,0 +1,27 @@
+namespace IntegratedFixture;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Lucent.Core;
+
+public record Person(string Name);
+
+[JsonSerializable(typeof(Person))]
+public partial class AppJsonContext : JsonSerializerContext { }
+
+[LucentRouteModule(RouteFallbackPolicy.Reject)]
+public static partial class AppRoutes { }
+
+[LucentRoute(typeof(AppRoutes), "/home", Id = "home")]
+public readonly record struct HomeRoute();
+
+public component IntegratedView() {
+    [Once]
+    Person person = JsonSerializer.Deserialize("{\"Name\":\"Ada\"}", AppJsonContext.Default.Person)!;
+
+    string Describe() => JsonSerializer.Serialize(person, AppJsonContext.Default.Person) + "|" + AppRoutes.Home().Location.CanonicalText;
+
+    <Column>
+        <Text>{Describe()}</Text>
+        <Text>real markup</Text>
+    </Column>
+}

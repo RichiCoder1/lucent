@@ -148,15 +148,31 @@ state kinds. Those limits prevent treating it as the full A0 consumer.
 
 ### Integrated acceptance still required
 
+[Integrated](../../tests/Probes/ApplicationAuthoring/Integrated/README.md) now combines
+actual LUI state/handler/markup lowering with real JSON output and a call to the existing
+generated route factory. A constrained Roslyn transform promotes the lowerer's state
+class to the named partial class and moves its factory to `Create`; it does not substitute
+an outer state adapter. All-LUI and optional-companion console consumers each publish and
+execute under NativeAOT, mount twice with distinct named state objects, and expose the
+expected JSON and canonical route URI in real Core text semantics. The wrapper exits 0;
+commands/exits are recorded in `artifacts/a0-integrated`.
+
+This is source/project-reference evidence, not packaged SDK evidence or an actual routed
+application: it does not mount a NavigationSession/outlet or prove route/component mapping.
+The companion cross-reference negative exits 1 with the expected `LUI2000` for `Organization`.
+Current member binding targets a private generated helper, so simply promoting that helper
+after lowering cannot make companion instance members available during binding. The next
+compiler experiment must bind and emit the same early named partial identity directly.
+
 | Required contract | Current boundary |
 | --- | --- |
 | Ordinary types colocated with UI and across files | Combined input and cross-file driver binding pass; full shared LUI document projection and cross-file tooling remain unproven |
 | External generated APIs used by LUI | Real JSON initializer/method binding and mounted execution pass; cold SDK/LSP integration remains |
-| Lucent route/state generated APIs | Existing generators have been inspected; the all-LUI routed fixture remains |
-| Named partial identity and companion ownership | Constrained writable-state prototype passes; combined language/runtime consumer and remaining state kinds are unproven |
+| Lucent route/state generated APIs | Generated route factory call and JSON-backed state execute under NativeAOT; actual route/component association and navigation remain |
+| Named partial identity and companion ownership | Companion ownership and transformed real markup/state execute; direct named binding, cross-file member semantics and remaining state kinds remain |
 | Editor parity | MSBuildWorkspace unsaved edits, deletion, renamed origin, cancellation and measured reuse pass; actual LSP diagnostics, navigation, rename and latency remain |
 | Cold SDK and output matching | Isolated host positive and changed/missing/extra negatives pass; actual Lucent SDK integration remains |
-| Packaged NativeAOT application | Not yet run for this candidate; prior formatter/package results do not satisfy this gate |
+| Packaged NativeAOT application | Source/project-reference all-LUI and companion executables pass; packaged SDK routed application remains unproven |
 
 The all-LUI application and companion variants remain separate acceptance fixtures.
 No degraded generated-symbol binding, save-before-bind requirement, repeated-generation

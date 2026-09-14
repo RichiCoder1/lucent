@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsAotCompatible>true</IsAotCompatible>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GeneratedRoot Condition="'$(GeneratedRoot)' == ''"
+      >$(MSBuildThisFileDirectory)generated</GeneratedRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="$(GeneratedRoot)/*.g.cs" />
+    <Reference
+      Include="Lucent.Core"
+      HintPath="../../../../../src/Lucent.Core/bin/Release/net10.0/Lucent.Core.dll"
+    />
+  </ItemGroup>
+</Project>
