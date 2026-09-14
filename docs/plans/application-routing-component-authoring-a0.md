@@ -146,6 +146,28 @@ files pass formatting. This is an identity/initialization prototype: its root is
 it does not lower markup/requirements/parameters, and it does not implement all existing
 state kinds. Those limits prevent treating it as the full A0 consumer.
 
+### Alternative isolated-emitter phase experiment
+
+[IsolatedEmitter](../../tests/Probes/ApplicationAuthoring/IsolatedEmitter/README.md) passes
+a bounded alternative to the SDK probe's AdditionalFile transport. A small precompiled
+analyzer publishes early declarations through pre-compilation output and its final
+implementation through ordinary generator output. External generators receive only the
+original authored AdditionalText. Five real JSON outputs match preparation by identity
+and content; an external generator fingerprinting every AdditionalText also matches.
+
+The negative models the earlier transport: adding those five binding files changes the
+observable inputs from one to six, and the external observer reports `PROBE2001`. The
+wrapper exits 0 with warning-clean builds. Exact command/exit records are under
+`artifacts/a0-isolated-emitter`.
+
+This establishes the phase/input-isolation principle, not a general implementation. The
+emitter currently contains fixed fixture payloads. An SDK host must still produce the
+project-specific emitter from actual declaration/lowering results, use a content-addressed
+assembly path to avoid stale analyzer loads, preserve evaluated inputs, compare all final
+foreign outputs and prove packaged execution. The editor should use the equivalent emitter
+model in memory rather than build an analyzer DLL for each edit. No production pipeline
+is selected solely from this experiment.
+
 ### Integrated acceptance still required
 
 [Integrated](../../tests/Probes/ApplicationAuthoring/Integrated/README.md) now combines

@@ -10,15 +10,29 @@ the full authoring acceptance contract.
 
 The [A0 evidence record](../plans/application-routing-component-authoring-a0.md) now covers
 real JSON generation and LUI binding, combined/cross-file declaration projection, a cold
-SDK-host build with changed/missing/extra output failures, and named companion identity
-and initialization. Their focused executable probes pass. Current authored formatting
-checks pass for 551 C# and 104 `.lui` files, including these experiments.
+SDK-host build with output/failure checks, named companion identity and initialization,
+unsaved workspace edits/cancellation, two NativeAOT consumers using actual markup, and
+an alternative emitter that keeps binding files out of external generator inputs. Their
+focused executable probes pass within the documented bounds. Current authored formatting
+checks pass for 561 C# and 104 `.lui` files, including these experiments.
 
 Actual editor integration, complete state semantics and the combined all-LUI routed,
 packaged NativeAOT consumer remain unproven. Work continues in isolated probes before
 production package or compiler changes. Do not reuse earlier package/UI evidence as
 proof of the new architecture, or reopen the accepted product interview without a
-concrete compatibility blocker.
+concrete compatibility blocker. The next concrete compiler work is to bind against the
+same early named partial type that is emitted, so LUI can access companion members before
+lowering; the current post-lowering promotion deliberately exposes that missing capability.
+The isolated emitter still needs general SDK input handling and content-addressed assembly
+generation before it can replace the original AdditionalFile transport.
+
+Checkpoint `a2b0aa5` passed managed tests, package verification and publication in
+[CI 34907538232](https://github.com/RichiCoder1/lucent/actions/runs/34907538232). Later
+experiment commits have their focused local evidence; do not attribute that CI result to
+a different source commit. A fresh Light Notes formatting check also passes 33 C# and
+16 `.lui` files. Its standalone checker currently requires SDK 10.0.400, which is not
+installed locally; that refresh used the same formatters through Lucent's installed SDK
+10.0.401. Light Notes' SDK pin is unchanged.
 
 ## Whole-file formatting and linting — September 14, 2026
 
