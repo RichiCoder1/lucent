@@ -2,11 +2,67 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Lucent.Lui.Compiler;
+
+if (args is ["format"])
+{
+    var root = FindRepositoryRoot(AppContext.BaseDirectory);
+    var files = new[]
+    {
+        "apps/Lucent.ComponentBrowser/Examples/ButtonsExample.lui",
+        "src/Lucent.Core/Components/Fields/Field.lui",
+        "apps/Lucent.ComponentBrowser/ComponentDetail.lui",
+    };
+    foreach (var file in files)
+    {
+        var source = File.ReadAllText(Path.Combine(root, file));
+        foreach (var mode in new[] { "format", "hoverKey" })
+        {
+            void Run()
+            {
+                if (mode == "format")
+                    _ = LuiFormatter.FormatDocument(source);
+                else
+                    _ = LuiSourceComparison.StructuralKey(source);
+            }
+            var cold = Stopwatch.StartNew();
+            Run();
+            cold.Stop();
+            for (var index = 0; index < 10; index++)
+                Run();
+            var values = new double[100];
+            var allocation = GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < values.Length; index++)
+            {
+                var watch = Stopwatch.StartNew();
+                Run();
+                values[index] = watch.Elapsed.TotalMilliseconds;
+            }
+            var bytes = (GC.GetAllocatedBytesForCurrentThread() - allocation) / values.Length;
+            Array.Sort(values);
+            Console.WriteLine(
+                JsonSerializer.Serialize(
+                    new
+                    {
+                        file,
+                        mode,
+                        sourceLength = source.Length,
+                        coldMs = cold.Elapsed.TotalMilliseconds,
+                        medianMs = values[50],
+                        p95Ms = values[95],
+                        allocatedBytes = bytes,
+                    }
+                )
+            );
+        }
+    }
+    return 0;
+}
 
 if (args is not [var measure])
 {
     Console.Error.WriteLine(
-        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename>"
+        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename|format>"
     );
     return 2;
 }

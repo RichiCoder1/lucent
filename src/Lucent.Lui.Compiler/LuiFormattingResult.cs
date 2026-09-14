@@ -1,0 +1,176 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+
+namespace Lucent.Lui.Compiler;
+
+/// <summary>Outcome of a source-preserving formatting operation.</summary>
+public enum LuiFormattingStatus
+{
+    /// <summary>The operation succeeded and the source already matches its output.</summary>
+    Clean,
+
+    /// <summary>The operation succeeded and has a safe replacement.</summary>
+    Changed,
+
+    /// <summary>Malformed or unsupported source cannot safely be formatted.</summary>
+    Unavailable,
+
+    /// <summary>The formatter could not complete the operation.</summary>
+    Failed,
+}
+
+/// <summary>A replacement in the original UTF-16 source coordinate space.</summary>
+public sealed class LuiSourceEdit
+{
+    /// <summary>Creates an authored source replacement.</summary>
+    public LuiSourceEdit(LuiSpan span, string newText)
+    {
+        Span = span;
+        NewText = newText;
+    }
+
+    /// <summary>Original source span to replace.</summary>
+    public LuiSpan Span { get; }
+
+    /// <summary>Replacement source text.</summary>
+    public string NewText { get; }
+}
+
+/// <summary>Formatting output with honest availability and safe edits.</summary>
+public sealed class LuiFormattingResult
+{
+    internal LuiFormattingResult(
+        LuiFormattingStatus status,
+        string source,
+        string text,
+        IReadOnlyList<LuiDiagnostic> diagnostics
+    )
+    {
+        Status = status;
+        Text = text;
+        Diagnostics = diagnostics;
+        Edits =
+            status == LuiFormattingStatus.Changed
+                ? new[] { new LuiSourceEdit(new LuiSpan(0, source.Length), text) }
+                : Array.Empty<LuiSourceEdit>();
+    }
+
+    /// <summary>Whether formatting succeeded, changed source, or was unavailable/failed.</summary>
+    public LuiFormattingStatus Status { get; }
+
+    /// <summary>Safe output, or the unchanged input when formatting cannot complete.</summary>
+    public string Text { get; }
+
+    /// <summary>Source diagnostics explaining unavailable or failed formatting.</summary>
+    public IReadOnlyList<LuiDiagnostic> Diagnostics { get; }
+
+    /// <summary>Safe original-coordinate edits; empty for every non-changed outcome.</summary>
+    public IReadOnlyList<LuiSourceEdit> Edits { get; }
+}
+
+public static partial class LuiFormatter
+{
+    /// <summary>Formats a document only when syntax, comments, tokens and meaningful text are preserved.</summary>
+    public static LuiFormattingResult FormatDocument(
+        string source,
+        LuiLineEnding lineEnding = LuiLineEnding.Preserve,
+        CancellationToken cancellationToken = default
+    ) => FormatSafely(source, null, lineEnding, cancellationToken);
+
+    /// <summary>Formats a safe complete syntax selection, returning explicit unavailability when none applies.</summary>
+    public static LuiFormattingResult FormatSelection(
+        string source,
+        LuiSpan range,
+        LuiLineEnding lineEnding = LuiLineEnding.Preserve,
+        CancellationToken cancellationToken = default
+    ) => FormatSafely(source, range, lineEnding, cancellationToken);
+
+    private static LuiFormattingResult FormatSafely(
+        string source,
+        LuiSpan? range,
+        LuiLineEnding lineEnding,
+        CancellationToken cancellationToken
+    )
+    {
+        if (source is null)
+            throw new ArgumentNullException(nameof(source));
+        if (
+            range is { } requested
+            && (
+                requested.Start < 0
+                || requested.Length < 0
+                || requested.Start > source.Length - requested.Length
+            )
+        )
+            throw new ArgumentOutOfRangeException(nameof(range));
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var document = LuiParser.Parse(source);
+            if (document.Diagnostics.Count != 0)
+                return new LuiFormattingResult(
+                    LuiFormattingStatus.Unavailable,
+                    source,
+                    source,
+                    document.Diagnostics
+                );
+            if (
+                range is { } selected
+                && !Nodes(document)
+                    .Any(node => node.Span.Start >= selected.Start && node.Span.End <= selected.End)
+            )
+                return Unavailable(
+                    "LUI6002",
+                    "The selected range contains no complete supported formatting boundary."
+                );
+            var formatted = range is { } selection
+                ? FormatRangeCore(source, selection, lineEnding)
+                : FormatCore(source, lineEnding);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (
+                LuiSourceComparison.StructuralKey(source) is not { } before
+                || before != LuiSourceComparison.StructuralKey(formatted)
+            )
+                return Unavailable(
+                    "LUI6001",
+                    "Formatting is unavailable because this source cannot yet be rewritten while preserving its tokens, comments and meaningful text."
+                );
+            return new LuiFormattingResult(
+                formatted == source ? LuiFormattingStatus.Clean : LuiFormattingStatus.Changed,
+                source,
+                formatted,
+                Array.Empty<LuiDiagnostic>()
+            );
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception error)
+        {
+            return new LuiFormattingResult(
+                LuiFormattingStatus.Failed,
+                source,
+                source,
+                new[]
+                {
+                    new LuiDiagnostic(
+                        "LUI6000",
+                        "Formatting failed: " + error.Message,
+                        new LuiSpan(0, 0)
+                    ),
+                }
+            );
+        }
+
+        LuiFormattingResult Unavailable(string id, string message) =>
+            new(
+                LuiFormattingStatus.Unavailable,
+                source,
+                source,
+                new[] { new LuiDiagnostic(id, message, range ?? new LuiSpan(0, source.Length)) }
+            );
+    }
+}

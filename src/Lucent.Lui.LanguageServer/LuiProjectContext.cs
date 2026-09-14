@@ -681,7 +681,9 @@ internal sealed class LuiProjectContext : IDisposable
         var result = await ComputeHoverAsync(uri, offset, cancellationToken).ConfigureAwait(false);
         if (result is null || text is null || anchor < 0)
             return result;
-        var canonical = LuiFormatter.Format(text, LuiLineEnding.Lf);
+        var canonical = LuiSourceComparison.StructuralKey(text);
+        if (canonical is null)
+            return result;
         lock (gate)
         {
             if (disposed || reloadFailed || epoch != captured)
@@ -2226,7 +2228,7 @@ internal sealed class LuiProjectContext : IDisposable
                 && cached
                     .Source.Where(character => !Char.IsWhiteSpace(character))
                     .SequenceEqual(changedText.Where(character => !Char.IsWhiteSpace(character)))
-                && cached.CanonicalSource == LuiFormatter.Format(changedText, LuiLineEnding.Lf)
+                && cached.CanonicalSource == LuiSourceComparison.StructuralKey(changedText)
                     ? cached with
                     {
                         Source = changedText,

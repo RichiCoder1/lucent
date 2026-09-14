@@ -623,6 +623,30 @@ style Panel { Opacity: .5f; }
                 "Ordinary LUI symbol hover unexpectedly compiled the project graph."
             );
 
+            var evaluated = context.EvaluationBuildCount;
+            var spaced = source.Replace("if (visible)", "if ( visible )", StringComparison.Ordinal);
+            context.ReplaceText(uri, spaced);
+            var reused = await context.HoverAsync(
+                uri,
+                spaced.IndexOf("if ( visible )", StringComparison.Ordinal) + "if ( ".Length,
+                CancellationToken.None
+            );
+            Assert(
+                ReferenceEquals(ordinaryHover, reused) && context.EvaluationBuildCount == evaluated,
+                "A layout-whitespace edit recomputed the tooltip instead of reusing its lexical key."
+            );
+            var changed = spaced.Replace("bool visible", "int visible", StringComparison.Ordinal);
+            context.ReplaceText(uri, changed);
+            var newType = await context.HoverAsync(
+                uri,
+                changed.IndexOf("if ( visible )", StringComparison.Ordinal) + "if ( ".Length,
+                CancellationToken.None
+            );
+            Assert(
+                newType?.Value == "int visible" && context.EvaluationBuildCount > evaluated,
+                "An authored type change reused stale hover content."
+            );
+
             await ExpectExceptionAsync<OperationCanceledException>(() =>
                 context.HoverAsync(
                     uri,
@@ -3888,6 +3912,55 @@ style MotionStyle {
                 await browserLsp.ExitAsync() == 0,
                 "browser completion LSP did not shut down cleanly."
             );
+        }
+    }
+
+    [TestMethod]
+    public async Task FormattingCliRejectsMalformedAndUnsupportedInputWithoutWritingIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "lucent-format-status-" + Guid.NewGuid());
+        Directory.CreateDirectory(root);
+        try
+        {
+            var malformed = Path.Combine(root, "Malformed.lui");
+            var unsupported = Path.Combine(root, "Unsupported.lui");
+            var valid = Path.Combine(root, "Valid.lui");
+            const string invalidText = "internal component Broken() { <Text>";
+            const string unsupportedText =
+                "internal component View(int a, /* keep */ int b) { <Text>Hi</Text> }";
+            await File.WriteAllTextAsync(malformed, invalidText);
+            await File.WriteAllTextAsync(unsupported, unsupportedText);
+            await File.WriteAllTextAsync(valid, "internal component View(){<Text>Hi</Text>}");
+            foreach (var mode in new[] { "--check", "--write" })
+            {
+                Assert(
+                    await ToolingExitCodeAsync(mode, malformed) == 2,
+                    "Malformed source was reported clean or writable."
+                );
+                Assert(
+                    await ToolingExitCodeAsync(mode, unsupported) == 2,
+                    "Unsupported preservation was reported clean or writable."
+                );
+                Assert(
+                    await File.ReadAllTextAsync(malformed) == invalidText
+                        && await File.ReadAllTextAsync(unsupported) == unsupportedText,
+                    "Unavailable formatting changed the source."
+                );
+            }
+            Assert(
+                await ToolingExitCodeAsync("--check", valid, malformed) == 2,
+                "Batch drift hid an unavailable file."
+            );
+            Assert(await ToolingExitCodeAsync("--check", valid) == 1, "Drift must retain exit 1.");
+            Assert(
+                await ToolingExitCodeAsync("--write", valid) == 0
+                    && await ToolingExitCodeAsync("--check", valid) == 0,
+                "Valid write/check did not converge."
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
         }
     }
 

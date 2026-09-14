@@ -74,6 +74,20 @@ or create component/route service scopes.
 
 ## Development tooling
 
+Consulted September 14, 2026 for the [.lui source-style design](docs/plans/lui-style-and-tooling.md):
+[Prettier's document model and Vue/HTML/JSX printers](https://github.com/prettier/prettier/tree/884c2d6a7df1e97523f494dd4908f55a23e7df47)
+inform grouped line breaking, attribute layout and comment/whitespace boundaries.
+[Microsoft's XAML syntax guidance](https://learn.microsoft.com/en-us/windows/apps/develop/platform/xaml/xaml-syntax-guide#tips-and-tricks-notes-on-style)
+provides comparative formatting examples. These are design references; no source is
+copied and no new package is adopted. Details and language-specific limits are in
+[the formatting references](docs/plans/lui-formatting-references.md).
+
+The formatting implementation uses the existing Roslyn 5.0.0 syntax/trivia APIs
+for C# boundaries and spacing, with Lucent's own grouped layout policy. The
+[Roslyn syntax overview](https://github.com/dotnet/roslyn/blob/main/docs/wiki/Roslyn-Overview.md)
+informs token/trivia preservation. No formatter source is copied and no additional
+Workspaces or CSharpier dependency enters the compiler/generator package closure.
+
 | Tool | Exact identity | License | Use |
 | --- | --- | --- | --- |
 | [CSharpier](https://github.com/belav/csharpier/tree/1.3.0) | .NET tool `csharpier` `1.3.0` | MIT | Repository-local, build-time-only formatting of authored C# and project files. Generated files remain excluded by the tool's normal generated-code boundary; no CSharpier asset ships with Lucent applications. |

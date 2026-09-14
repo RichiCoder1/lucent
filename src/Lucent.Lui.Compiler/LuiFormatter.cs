@@ -20,13 +20,16 @@ public enum LuiLineEnding
 
 /// <summary>Canonical structural formatter for <c>.lui</c> documents.</summary>
 /// <remarks>C# island text is never reformatted; invalid input and ranges without a complete node are returned unchanged.</remarks>
-public static class LuiFormatter
+public static partial class LuiFormatter
 {
     /// <summary>Formats a structurally valid document, preserving its C# island text and applying the requested line endings.</summary>
     /// <param name="source">Complete <c>.lui</c> source text.</param>
     /// <param name="lineEnding">Line-ending policy for rewritten structure.</param>
     /// <returns>Formatted text, or the original text when parsing reports diagnostics.</returns>
-    public static string Format(string source, LuiLineEnding lineEnding = LuiLineEnding.Preserve)
+    public static string Format(string source, LuiLineEnding lineEnding = LuiLineEnding.Preserve) =>
+        FormatDocument(source, lineEnding).Text;
+
+    private static string FormatCore(string source, LuiLineEnding lineEnding)
     {
         var document = LuiParser.Parse(source);
         if (document.Diagnostics.Count != 0)
@@ -66,7 +69,9 @@ public static class LuiFormatter
         string source,
         LuiSpan range,
         LuiLineEnding lineEnding = LuiLineEnding.Preserve
-    )
+    ) => FormatSelection(source, range, lineEnding).Text;
+
+    private static string FormatRangeCore(string source, LuiSpan range, LuiLineEnding lineEnding)
     {
         if (range.Start < 0 || range.End > source.Length)
             throw new ArgumentOutOfRangeException(nameof(range));
