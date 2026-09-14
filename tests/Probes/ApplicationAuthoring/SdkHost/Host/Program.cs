@@ -9,12 +9,19 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.MSBuild;
 
-return args.FirstOrDefault() switch
+try
 {
-    "prepare" when args.Length == 10 => await PrepareAsync(args.Skip(1).ToArray()),
-    "compare" when args.Length == 3 => Compare(args[1], args[2]),
-    _ => Usage(),
-};
+    return args.FirstOrDefault() switch
+    {
+        "prepare" when args.Length == 10 => await PrepareAsync(args.Skip(1).ToArray()),
+        "compare" when args.Length == 3 => Compare(args[1], args[2]),
+        _ => Usage(),
+    };
+}
+catch (Exception exception)
+{
+    return Fail($"PROBE0008: generator host failed: {exception.Message}");
+}
 
 static async Task<int> PrepareAsync(string[] args)
 {
@@ -63,9 +70,22 @@ static async Task<int> PrepareAsync(string[] args)
     var generators = new List<ISourceGenerator>();
     foreach (var reference in project.AnalyzerReferences)
     {
+        if (reference is UnresolvedAnalyzerReference)
+            return Fail($"PROBE0007: unresolved analyzer reference '{reference.Display}'");
+        var loadFailures = new ConcurrentQueue<string>();
+        void OnLoadFailed(object? sender, AnalyzerLoadFailureEventArgs failure) =>
+            loadFailures.Enqueue(failure.Message);
+        var fileReference = reference as AnalyzerFileReference;
+        if (fileReference is not null)
+            fileReference.AnalyzerLoadFailed += OnLoadFailed;
         try
         {
             var loaded = reference.GetGenerators(LanguageNames.CSharp);
+            if (!loadFailures.IsEmpty)
+                return Fail(
+                    $"PROBE0007: failed to load analyzer reference '{reference.Display}': "
+                        + String.Join("; ", loadFailures)
+                );
             generators.AddRange(loaded);
         }
         catch (Exception exception)
@@ -73,6 +93,11 @@ static async Task<int> PrepareAsync(string[] args)
             return Fail(
                 $"PROBE0007: failed to load analyzer reference '{reference.Display}': {exception.Message}"
             );
+        }
+        finally
+        {
+            if (fileReference is not null)
+                fileReference.AnalyzerLoadFailed -= OnLoadFailed;
         }
     }
     if (generators.Count == 0)
@@ -104,10 +129,7 @@ static async Task<int> PrepareAsync(string[] args)
     foreach (var source in result.Outputs)
     {
         var text = source.Source;
-        if (
-            text.Contains("PROBE_PROJECTION_OUTPUT", StringComparison.Ordinal)
-            || text.Contains("PROBE_BINDING_OUTPUT", StringComparison.Ordinal)
-        )
+        if (IsLucentOwnedOutput(source.Identity))
             continue;
         var bindingPath = Path.Combine(
             bindingDirectory,
@@ -147,17 +169,11 @@ static int Compare(string manifestPath, string generatedDirectory)
         ?? throw new InvalidOperationException("Probe manifest is empty.");
     var actual = Directory
         .EnumerateFiles(generatedDirectory, "*.cs", SearchOption.AllDirectories)
-        .Select(path => new { Path = path, Text = File.ReadAllText(path) })
-        .Where(file =>
-            !file.Text.Contains("PROBE_PROJECTION_OUTPUT", StringComparison.Ordinal)
-            && !file.Text.Contains("PROBE_BINDING_OUTPUT", StringComparison.Ordinal)
-        )
-        .Select(file => new ManifestEntry(
-            ProbeGenerationEngine.NormalizeIdentity(
-                Path.GetRelativePath(generatedDirectory, file.Path)
-            ),
-            ProbeGenerationEngine.Hash(file.Text)
+        .Select(path => new ManifestEntry(
+            ProbeGenerationEngine.NormalizeIdentity(Path.GetRelativePath(generatedDirectory, path)),
+            ProbeGenerationEngine.Hash(File.ReadAllText(path))
         ))
+        .Where(entry => !IsLucentOwnedOutput(entry.Identity))
         .OrderBy(entry => entry.Identity, StringComparer.Ordinal)
         .ToArray();
     var mismatch = ProbeGenerationEngine.Compare(manifest.Outputs, actual);
@@ -171,6 +187,16 @@ static int Compare(string manifestPath, string generatedDirectory)
     Console.WriteLine($"Compared {actual.Length} final outputs by identity and SHA-256: MATCH.");
     return 0;
 }
+
+static bool IsLucentOwnedOutput(string identity) =>
+    identity.StartsWith(
+        "ProbeGenerators/Lucent.ApplicationAuthoring.SdkHost.ProbeProjectionGenerator/",
+        StringComparison.Ordinal
+    )
+    || identity.StartsWith(
+        "ProbeGenerators/Lucent.ApplicationAuthoring.SdkHost.ProbeBindingGenerator/",
+        StringComparison.Ordinal
+    );
 
 static string AnalyzerIdentity(AnalyzerReference reference)
 {

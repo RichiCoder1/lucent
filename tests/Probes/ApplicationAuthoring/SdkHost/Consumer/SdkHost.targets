@@ -4,6 +4,11 @@
     BeforeTargets="CoreCompile"
     Condition="'$(ProbeSkipPrepare)' != 'true'"
   >
+    <Delete Files="$(TargetPath);@(IntermediateAssembly);$(IntermediateOutputPath)ref\$(TargetFileName);$(IntermediateOutputPath)refint\$(TargetFileName)" />
+    <Error
+      Condition="!Exists('$(ProbeDotNetHost)')"
+      Text="Probe dotnet host was not supplied: $(ProbeDotNetHost)"
+    />
     <Error
       Condition="!Exists('$(ProbeHostPath)')"
       Text="Probe host was not built: $(ProbeHostPath)"
@@ -20,7 +25,7 @@
     </PropertyGroup>
     <RemoveDir Directories="$(_ProbePreparationRoot);$(CompilerGeneratedFilesOutputPath)" />
     <MakeDir Directories="$(_ProbePreparationRoot);$(_ProbeBindingRoot);$(CompilerGeneratedFilesOutputPath)" />
-    <Exec Command="dotnet &quot;$(ProbeHostPath)&quot; prepare &quot;$(MSBuildProjectFullPath)&quot; &quot;$(_ProbeManifest)&quot; &quot;$(_ProbeBindingRoot)&quot; &quot;$(Configuration)&quot; &quot;$(TargetFramework)&quot; &quot;$(ProbeMismatchKind)&quot; &quot;$(ProbeGeneratorPath)&quot; &quot;$(ProbeModelPath)&quot; &quot;$(_ProbeBaseIntermediateMarker)&quot;" />
+    <Exec Command="&quot;$(ProbeDotNetHost)&quot; &quot;$(ProbeHostPath)&quot; prepare &quot;$(MSBuildProjectFullPath)&quot; &quot;$(_ProbeManifest)&quot; &quot;$(_ProbeBindingRoot)&quot; &quot;$(Configuration)&quot; &quot;$(TargetFramework)&quot; &quot;$(ProbeMismatchKind)&quot; &quot;$(ProbeGeneratorPath)&quot; &quot;$(ProbeModelPath)&quot; &quot;$(_ProbeBaseIntermediateMarker)&quot;" />
     <ItemGroup>
       <AdditionalFiles Include="$(_ProbeBindingRoot)\*.binding.g.cs" ProbeBinding="true" />
     </ItemGroup>
@@ -31,7 +36,7 @@
     AfterTargets="CoreCompile"
     Condition="'$(ProbeSkipPrepare)' != 'true'"
   >
-    <Exec Command="dotnet &quot;$(ProbeHostPath)&quot; compare &quot;$(_ProbeManifest)&quot; &quot;$(CompilerGeneratedFilesOutputPath)&quot;" />
+    <Exec Command="&quot;$(ProbeDotNetHost)&quot; &quot;$(ProbeHostPath)&quot; compare &quot;$(_ProbeManifest)&quot; &quot;$(CompilerGeneratedFilesOutputPath)&quot;" />
     <OnError ExecuteTargets="RemoveMismatchedProbeAssembly" />
   </Target>
 

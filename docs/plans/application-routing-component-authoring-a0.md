@@ -92,6 +92,41 @@ not a warning-free workspace claim. Production diagnostic transport and trust/re
 behavior remain unproven. The preparation/output-comparison engine is separate from its
 MSBuild/CLI adapter for the forthcoming editor experiment.
 
+Review identified two architectural limits beyond those positive results. The probe
+transports binding trees as AdditionalFiles, so ordinary final generators can observe
+those extra inputs. Matching JSON output proves that fixture, not general input isolation.
+The host also forwards a finite set of outer build properties; it does not yet preserve
+arbitrary global analyzer options, RID/platform, defines or reference selection. The
+manifest records some identities for inspection but does not prove all evaluated-input
+parity. These limits must be resolved or diagnosed within the accepted bounded pipeline
+before production selection; they cannot be hidden behind the successful cold fixture.
+
+The reviewed SDK wrapper subsequently exits 0 after additional negatives: a foreign
+output containing Lucent marker comments is still compared; a broken analyzer alongside
+healthy SDK generators fails with `PROBE0007` and no manifest; and a missing host on a
+warm rebuild removes the previously successful consumer assembly. Subprocesses use the
+same selected dotnet host. Generator execution exceptions are terminal even when Roslyn
+reports them without an error-severity diagnostic. These checks retain the original
+changed/missing/extra output assertions and post-compile cleanup.
+
+### Workspace/editor-host experiment
+
+[Editor](../../tests/Probes/ApplicationAuthoring/Editor/README.md) exercises the shared
+engine from a real MSBuildWorkspace with current in-memory AdditionalDocuments. Real JSON
+output follows an unsaved property edit, disappears after deletion and returns after rename.
+Mapped declaration paths/lines follow the authored file. Canceled and completed-stale runs
+cannot publish over a newer epoch in the probe's publication harness.
+
+The final wrapper exits 0. One process measured 592.85 ms cold, 34.23 ms for unchanged
+driver reuse with ten cached steps, and 10.09 ms for an edit with fifteen modified steps.
+These are isolated host observations, not end-to-end LSP latency. Reuse rejects changed
+generator instances or driver options, updates analyzer options/text/parse options, and
+forwards cancellation. Exact commands and measurements are in `artifacts/a0-editor`.
+
+The real language server, cross-language rename/diagnostics, shared production cache
+identity and uncooperative analyzer isolation remain unproven. The experiment does not
+lower LUI markup or establish SDK input parity.
+
 ### Named companion experiment
 
 [Companion](../../tests/Probes/ApplicationAuthoring/Companion/README.md) uses one constrained
@@ -119,10 +154,39 @@ state kinds. Those limits prevent treating it as the full A0 consumer.
 | External generated APIs used by LUI | Real JSON initializer/method binding and mounted execution pass; cold SDK/LSP integration remains |
 | Lucent route/state generated APIs | Existing generators have been inspected; the all-LUI routed fixture remains |
 | Named partial identity and companion ownership | Constrained writable-state prototype passes; combined language/runtime consumer and remaining state kinds are unproven |
-| Editor parity | In-memory driver replacement/deletion pass; actual cold/unsaved LSP diagnostics, navigation, rename, cancellation and latency remain |
+| Editor parity | MSBuildWorkspace unsaved edits, deletion, renamed origin, cancellation and measured reuse pass; actual LSP diagnostics, navigation, rename and latency remain |
 | Cold SDK and output matching | Isolated host positive and changed/missing/extra negatives pass; actual Lucent SDK integration remains |
 | Packaged NativeAOT application | Not yet run for this candidate; prior formatter/package results do not satisfy this gate |
 
 The all-LUI application and companion variants remain separate acceptance fixtures.
 No degraded generated-symbol binding, save-before-bind requirement, repeated-generation
 convergence, or extra authored C# bridge is accepted as a substitute.
+
+## Production integration boundaries identified by inspection
+
+These are source-confirmed integration requirements, not additional executed passes.
+
+- `LuiProjectContext.EvaluateProjectAsync` reads the current LUI AdditionalDocuments,
+  then obtains its compilation from an editor clone that removes those inputs before
+  building the manual component index. The new declaration preparation must run before
+  that index and preserve current unsaved text. Merely installing an updated generator
+  into the current clone cannot expose declarations that the clone has removed.
+- `RenameSnapshotAsync` independently projects every project in the graph. It must use
+  the same preparation results and authored source maps as ordinary diagnostics. Fixing
+  only the diagnostic path would leave rename inconsistent.
+- Existing project evaluations are published only while their captured epoch is current.
+  Preparation must preserve that rule and propagate cancellation through generator runs.
+  A cache hit needs the same source and AdditionalText identities/content, configuration,
+  parse/compilation options, analyzer options/binary identities, references, and projection
+  version; document text alone cannot establish equivalent generator inputs.
+- Preparation and final comparison must identify owned outputs by generator identity,
+  never by a comment marker inside generated text. All other outputs participate in exact
+  identity/content comparison, including outputs whose comments resemble Lucent's.
+- The existing project tooling trust policy applies: MSBuild evaluation and project
+  analyzers execute trusted project code, as during a normal build. Pure syntax formatting
+  remains independent of that execution. This design does not introduce an analyzer sandbox
+  or change runtime NativeAOT restrictions.
+
+Production Roslyn references remain unchanged. The isolated 5.9 experiment does not itself
+establish compatibility for the shipped compiler, language server, SDK tool closure or
+downstream analyzer hosts.

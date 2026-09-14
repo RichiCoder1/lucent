@@ -1,0 +1,6 @@
+#nullable enable
+using System.Text.Json.Serialization;
+namespace Fixture;
+public sealed record Person(string Name);
+[JsonSerializable(typeof(Person))]
+public partial class JsonContext : JsonSerializerContext { }

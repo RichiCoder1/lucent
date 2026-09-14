@@ -7,25 +7,45 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Lucent.ApplicationAuthoring.SdkHost;
 
-internal static class ProbeGenerationEngine
+public static class ProbeGenerationEngine
 {
-    internal static ProbePreparationResult Prepare(
+    public static ProbePreparationResult Prepare(
         CSharpCompilation compilation,
         IEnumerable<ISourceGenerator> generators,
         ImmutableArray<AdditionalText> additionalTexts,
         CSharpParseOptions parseOptions,
-        AnalyzerConfigOptionsProvider optionsProvider
+        AnalyzerConfigOptionsProvider optionsProvider,
+        GeneratorDriverOptions driverOptions = default,
+        ProbePreparationResult? previousResult = null,
+        CancellationToken cancellationToken = default
     )
     {
         var generatorArray = generators.ToArray();
-        var driver = CSharpGeneratorDriver.Create(
-            generatorArray,
-            additionalTexts,
-            parseOptions,
-            optionsProvider
-        );
-        driver = (CSharpGeneratorDriver)driver.RunGenerators(compilation);
+        var driver = previousResult is null
+            ? CSharpGeneratorDriver.Create(
+                generatorArray,
+                additionalTexts,
+                parseOptions,
+                optionsProvider,
+                driverOptions
+            )
+            : Reuse(previousResult, generatorArray, driverOptions)
+                .WithUpdatedAnalyzerConfigOptions(optionsProvider)
+                .ReplaceAdditionalTexts(additionalTexts)
+                .WithUpdatedParseOptions(parseOptions);
+        driver = driver.RunGenerators(compilation, cancellationToken);
         var run = driver.GetRunResult();
+        var failures = run.Results.Where(result => result.Exception is not null).ToArray();
+        if (failures.Length != 0)
+            throw new InvalidOperationException(
+                "Preparatory generator execution failed: "
+                    + String.Join(
+                        " | ",
+                        failures.Select(result =>
+                            $"{result.Generator.GetType().FullName}: {result.Exception!.Message}"
+                        )
+                    )
+            );
         var outputs = run
             .Results.SelectMany(result => result.GeneratedSources)
             .Select(source =>
@@ -38,7 +58,43 @@ internal static class ProbeGenerationEngine
                 );
             })
             .ToImmutableArray();
-        return new ProbePreparationResult(generatorArray.Length, run.Diagnostics, outputs);
+        return new ProbePreparationResult(
+            generatorArray.Length,
+            run.Diagnostics,
+            outputs,
+            driver,
+            compilation
+        )
+        {
+            Generators = generatorArray.ToImmutableArray(),
+            DriverOptions = driverOptions,
+        };
+    }
+
+    private static GeneratorDriver Reuse(
+        ProbePreparationResult previous,
+        ISourceGenerator[] generators,
+        GeneratorDriverOptions driverOptions
+    )
+    {
+        if (
+            previous.Generators.Length != generators.Length
+            || previous
+                .Generators.Where(
+                    (generator, index) => !ReferenceEquals(generator, generators[index])
+                )
+                .Any()
+        )
+            throw new ArgumentException(
+                "A previous driver can be reused only with the same ordered generator set.",
+                nameof(generators)
+            );
+        if (!previous.DriverOptions.Equals(driverOptions))
+            throw new ArgumentException(
+                "A previous driver can be reused only with the same driver options.",
+                nameof(driverOptions)
+            );
+        return previous.Driver;
     }
 
     internal static ProbeOutputMismatch Compare(
@@ -76,13 +132,20 @@ internal static class ProbeGenerationEngine
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)));
 }
 
-internal sealed record ProbePreparationResult(
+public sealed record ProbePreparationResult(
     int GeneratorCount,
     ImmutableArray<Diagnostic> Diagnostics,
-    ImmutableArray<ProbeGeneratedSource> Outputs
-);
+    ImmutableArray<ProbeGeneratedSource> Outputs,
+    GeneratorDriver Driver,
+    CSharpCompilation InputCompilation
+)
+{
+    internal ImmutableArray<ISourceGenerator> Generators { get; init; }
 
-internal sealed record ProbeGeneratedSource(string Identity, string Source, string Sha256);
+    internal GeneratorDriverOptions DriverOptions { get; init; }
+}
+
+public sealed record ProbeGeneratedSource(string Identity, string Source, string Sha256);
 
 internal sealed record ProbeOutputMismatch(string[] Missing, string[] Extra, string[] Changed)
 {

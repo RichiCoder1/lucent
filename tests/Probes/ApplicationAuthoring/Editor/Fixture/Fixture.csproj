@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <AdditionalFiles Include="$(ProbeModelPath)" />
+  </ItemGroup>
+</Project>
