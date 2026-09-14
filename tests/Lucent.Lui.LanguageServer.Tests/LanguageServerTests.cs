@@ -597,6 +597,28 @@ style Panel { Opacity: .5f; }
                 "The fast structure path removed component or authored-style hover."
             );
             Assert(
+                styleHover?.Value == "style Panel",
+                $"Style hover must display its authored declaration, not lowered storage: {styleHover?.Value}"
+            );
+            var declarationHover = await context.HoverAsync(
+                uri,
+                source.IndexOf("style Panel", StringComparison.Ordinal) + "style ".Length,
+                CancellationToken.None
+            );
+            Assert(
+                declarationHover?.Value == "style Panel",
+                "Style declarations and uses must share an authored hover."
+            );
+            var ordinaryHover = await context.HoverAsync(
+                uri,
+                source.IndexOf("if (visible)", StringComparison.Ordinal) + "if (".Length,
+                CancellationToken.None
+            );
+            Assert(
+                ordinaryHover?.Value == "bool visible",
+                "Authored-style formatting changed an ordinary C# parameter hover."
+            );
+            Assert(
                 context.GraphCompilationCount == 0,
                 "Ordinary LUI symbol hover unexpectedly compiled the project graph."
             );
@@ -2914,6 +2936,19 @@ style Workspace(float width) {
                 CancellationToken.None
             );
             var hover = await context.HoverAsync(uri, styleOffset, CancellationToken.None);
+            Assert(
+                hover?.Value == "style Workspace(float width)",
+                $"Parameterized style hover must preserve the authored signature: {hover?.Value}"
+            );
+            var declarationHover = await context.HoverAsync(
+                uri,
+                source.IndexOf("style Workspace", StringComparison.Ordinal) + "style ".Length,
+                CancellationToken.None
+            );
+            Assert(
+                declarationHover?.Value == hover?.Value,
+                "Parameterized style declarations and uses must share an authored hover."
+            );
             var style = symbols!.Single(symbol => symbol.Name == "Workspace");
             Assert(
                 published is not null
@@ -3853,6 +3888,131 @@ style MotionStyle {
                 await browserLsp.ExitAsync() == 0,
                 "browser completion LSP did not shut down cleanly."
             );
+        }
+    }
+
+    [TestMethod]
+    public async Task ReferencedStockLuiComponentsResolveInBrowserDiagnostics()
+    {
+        using var context = await LuiProjectContext.LoadAsync(
+            Path.GetFullPath("apps/Lucent.ComponentBrowser/Lucent.ComponentBrowser.csproj"),
+            CancellationToken.None
+        );
+        foreach (
+            var example in new[]
+            {
+                "Password",
+                "DateTime",
+                "Numeric",
+                "Fields",
+                "Feedback",
+                "Navigation",
+            }
+        )
+        {
+            var uri = new Uri(
+                Path.GetFullPath($"apps/Lucent.ComponentBrowser/Examples/{example}Example.lui")
+            );
+            var diagnostics = await context.DiagnosticsAsync(uri, CancellationToken.None);
+            Assert(
+                diagnostics is not null && diagnostics.All(item => item.Severity != 1),
+                $"{example} must resolve stock components authored in the referenced Core project: "
+                    + String.Join(" | ", diagnostics?.Select(item => item.Message) ?? [])
+            );
+        }
+    }
+
+    [TestMethod]
+    public async Task ProtocolReportsWrongProjectAndServesOwningProject()
+    {
+        var documentPath = Path.GetFullPath("apps/Lucent.ComponentBrowser/BrowserHeader.lui");
+        var uri = VsCodeUri(new Uri(documentPath));
+        var text = await File.ReadAllTextAsync(documentPath);
+        var hoverPosition = Position(
+            text,
+            text.IndexOf("ComponentBrowserState", StringComparison.Ordinal) + 3
+        );
+        var completionPosition = Position(
+            text,
+            text.IndexOf("browser.SearchEditor", StringComparison.Ordinal) + "browser.".Length
+        );
+        foreach (var projectName in new[] { "Lucent.IssueBrowser", "Lucent.ComponentBrowser" })
+        {
+            using var lsp = LspClient.Start();
+            var projectPath = Path.GetFullPath($"apps/{projectName}/{projectName}.csproj");
+            using var initialized = await lsp.RequestAsync(
+                "initialize",
+                new { initializationOptions = new { projectUri = VsCodeUri(new Uri(projectPath)) } }
+            );
+            Assert(
+                initialized.RootElement.TryGetProperty("result", out _),
+                "Project initialization failed."
+            );
+            await lsp.NotifyAsync("initialized", new { });
+            await lsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri,
+                        languageId = "lui",
+                        version = 1,
+                        text,
+                    },
+                }
+            );
+            foreach (var method in new[] { "textDocument/hover", "textDocument/completion" })
+            {
+                var position = method.EndsWith("hover", StringComparison.Ordinal)
+                    ? hoverPosition
+                    : completionPosition;
+                using var response = await lsp.RequestAsync(
+                    method,
+                    new
+                    {
+                        textDocument = new { uri },
+                        position = new { line = position.Line, character = position.Character },
+                    }
+                );
+                if (projectName == "Lucent.IssueBrowser")
+                {
+                    var message = response
+                        .RootElement.GetProperty("error")
+                        .GetProperty("message")
+                        .GetString()!;
+                    Assert(
+                        message.Contains("BrowserHeader.lui", StringComparison.Ordinal)
+                            && message.Contains(
+                                "Lucent.IssueBrowser.csproj",
+                                StringComparison.Ordinal
+                            )
+                            && message.Contains("lucentLui.projectPath", StringComparison.Ordinal),
+                        $"Wrong-project {method} must name the document, configured project and recovery setting: {message}"
+                    );
+                }
+                else
+                {
+                    var result = response.RootElement.GetProperty("result");
+                    Assert(
+                        result.ValueKind != JsonValueKind.Null,
+                        $"Owning-project {method} returned no result."
+                    );
+                    Assert(
+                        result
+                            .GetRawText()
+                            .Contains(
+                                method.EndsWith("hover", StringComparison.Ordinal)
+                                    ? "ComponentBrowserState"
+                                    : "SearchEditor",
+                                StringComparison.Ordinal
+                            ),
+                        $"Owning-project {method} did not bind the component's actual model."
+                    );
+                }
+            }
+            using var shutdown = await lsp.RequestAsync("shutdown", new { });
+            Assert(await lsp.ExitAsync() == 0, "Project check did not shut down cleanly.");
         }
     }
 

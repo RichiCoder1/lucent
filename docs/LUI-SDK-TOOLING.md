@@ -117,3 +117,13 @@ code --install-extension artifacts/lucent-lui-vscode/lucent-lui-0.3.2.vsix --for
 ```
 
 Set `lucentLui.serverPath` to the absolute path of `artifacts/lui-server/Lucent.Lui.LanguageServer.dll`, or copy the entire publish directory to a stable local tooling location and use that path. A package consumer's project path should identify its own `.csproj`.
+
+The current extension selects one `lucentLui.projectPath` per VS Code window;
+it does not discover a different owning project for each open file. Put this
+setting in the workspace to override an unrelated user-level default. For example,
+editing `apps/Lucent.ComponentBrowser/BrowserHeader.lui` requires
+`apps/Lucent.ComponentBrowser/Lucent.ComponentBrowser.csproj`, not the sibling
+Issue Browser project. The server includes referenced projects, but unrelated
+projects in the same repository are outside that selected graph. Reload the
+window after changing the setting. A wrong-project request reports the document,
+configured project and recovery setting instead of presenting it as stale text.

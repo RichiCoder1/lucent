@@ -675,7 +675,15 @@ internal static class Program
     {
         var text = await project.GetTextAsync(uri, CancellationToken.None).ConfigureAwait(false);
         if (text is null)
+        {
+            if (!project.CanEdit(uri))
+                throw new InvalidOperationException(
+                    $"Document '{uri}' is not included in the configured project '{project.ProjectPath}' or its project references. "
+                        + "Set lucentLui.projectPath to the owning .csproj and reload the VS Code window. "
+                        + "If that project is already selected, check that the file is included in its evaluated inputs."
+                );
             throw new InvalidOperationException("The requested document is not current.");
+        }
         var line = position.GetProperty("line").GetInt32();
         var character = position.GetProperty("character").GetInt32();
         var start = 0;

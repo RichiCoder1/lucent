@@ -97,6 +97,8 @@ internal sealed class LuiProjectContext : IDisposable
 
     internal int GraphCompilationCount => Volatile.Read(ref graphCompilationCount);
 
+    internal string ProjectPath => projectPath;
+
     internal static async Task<LuiProjectContext> LoadAsync(
         string projectPath,
         CancellationToken cancellationToken
@@ -750,6 +752,8 @@ internal sealed class LuiProjectContext : IDisposable
         )
             return await GraphHoverAsync(uri, offset, cancellationToken).ConfigureAwait(false);
         symbol = AuthoredLocalSymbol(semantic!, symbol) ?? symbol;
+        if (AuthoredStyleHover(semantic!, symbol) is { } styleHover)
+            return styleHover;
         if (
             symbol is IPropertySymbol property
             && property.DeclaringSyntaxReferences.Any(reference =>
@@ -773,6 +777,48 @@ internal sealed class LuiProjectContext : IDisposable
                     : "Borrowed from the application's service scope. Resolved once before this component initializes; the application owns disposal."
             );
         return new LuiHover(SymbolText(symbol), Documentation(symbol));
+    }
+
+    private static LuiHover? AuthoredStyleHover(SemanticDocument semantic, ISymbol symbol)
+    {
+        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        {
+            if (reference.SyntaxTree != semantic.Tree)
+                continue;
+            var identifier = reference.GetSyntax() switch
+            {
+                VariableDeclaratorSyntax field when symbol is IFieldSymbol => field.Identifier,
+                MethodDeclarationSyntax method when symbol is IMethodSymbol => method.Identifier,
+                _ => default,
+            };
+            if (identifier.RawKind == 0)
+                continue;
+            foreach (
+                var entry in semantic.Document.Result.Map.FromGenerated(
+                    new LuiSpan(identifier.SpanStart, identifier.Span.Length)
+                )
+            )
+            {
+                if (entry.Hidden || entry.Kind != LuiMapKind.Symbol)
+                    continue;
+                var style = semantic.Document.Syntax.Styles.FirstOrDefault(style =>
+                    style.Name.Span.Equals(entry.Source)
+                );
+                if (style is null)
+                    continue;
+                var parameters =
+                    !style.OpenParameters.IsMissing || style.Parameters.Count != 0
+                        ? "("
+                            + String.Join(
+                                ", ",
+                                style.Parameters.Select(parameter => parameter.DeclarationText)
+                            )
+                            + ")"
+                        : "";
+                return new LuiHover("style " + style.Name.Text + parameters, Documentation(symbol));
+            }
+        }
+        return null;
     }
 
     private static ISymbol? AuthoredLocalSymbol(SemanticDocument semantic, ISymbol symbol)
@@ -2529,10 +2575,11 @@ internal sealed class LuiProjectContext : IDisposable
     private Project EditorProject(Project project) =>
         editorProjects.GetValue(
             project,
-            static original => EditorSolution(original).GetProject(original.Id)!
+            static original =>
+                EditorSolution(original, preserveReferencedLui: true).GetProject(original.Id)!
         );
 
-    private static Solution EditorSolution(Project project)
+    private static Solution EditorSolution(Project project, bool preserveReferencedLui = false)
     {
         // Rename serializes the whole project graph. Normalize referenced projects too;
         // MSBuild can retain missing Debug build-tool paths in a Release-only checkout.
@@ -2543,6 +2590,11 @@ internal sealed class LuiProjectContext : IDisposable
                 current.Id,
                 EditorAnalyzerReferences(current)
             );
+            // Diagnostics manually project only the requested project. Referenced projects
+            // still need their generators to expose components authored in .lui. Rename
+            // supplies projections for the whole graph and therefore omits all LUI inputs.
+            if (preserveReferencedLui && current.Id != project.Id)
+                continue;
             foreach (
                 var document in current.AdditionalDocuments.Where(document =>
                     document.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
