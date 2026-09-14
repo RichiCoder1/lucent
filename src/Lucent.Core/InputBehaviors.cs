@@ -125,7 +125,8 @@ internal sealed class ButtonBehavior(
     string name,
     SemanticDeclaration semantics,
     Action? activate = null,
-    bool focusOnPointer = true
+    bool focusOnPointer = true,
+    FocusTarget? focusTarget = null
 ) : Behavior
 {
     public override string Name => name;
@@ -137,6 +138,8 @@ internal sealed class ButtonBehavior(
         ArgumentNullException.ThrowIfNull(semantics);
         context.SetSemantics(semantics);
         context.MakeFocusable();
+        if (focusTarget is not null)
+            context.RegisterFocusTarget(focusTarget);
         context.OnSemanticCommand(command =>
             command.Kind switch
             {

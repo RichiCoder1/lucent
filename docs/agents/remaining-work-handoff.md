@@ -35,14 +35,17 @@ allowlist and runtime state rules are unchanged. Local logs are
 passed managed, NativeAOT/package-consumer and publication jobs at `52ff6d5`,
 publishing `0.3.0-dev.75.1`. #290 is complete.
 
-The user authorized full execution of typed composition context/service injection
-#203 and URI navigation #204 after this closeout. Start with #206 and #214 under
-the [joint execution plan](../plans/context-navigation-execution.md). The public
-child issue contracts are cached locally in `artifacts/context-navigation-issues.json`;
-original design references are in the Routing worktree at
-`D:/.codex/worktrees/0f91/lucent/docs/design/` and must not be copied wholesale into
-public commits. Current preparation is read-only; no foundation or routing runtime
-implementation is claimed yet. Live compilation remains a separate workstream.
+Typed composition context/service injection #203 and URI navigation #204 are
+implemented and undergoing final integration closeout in the
+[joint execution plan](../plans/context-navigation-execution.md). Core/Compiler/
+Generator/Hosting/Issue Browser checks pass; Light Notes passes its app and storage
+suites with full interaction on candidate `0.3.0-dev.contextnav.20260914.4` and
+publishes as NativeAOT. Real Hosting managed/NativeAOT and generated route package
+proofs pass. Final focus/partial-publication cleanup review regressions, desktop
+checks, official publication and the published Light Notes pin remain pending.
+No implementation commit for these epics has been pushed yet. Original design
+snapshots remain private; public issue contracts and the execution plan govern
+closeout. Live compilation remains separate.
 
 ## September 13 execution checkpoint
 

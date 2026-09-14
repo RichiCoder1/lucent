@@ -38,7 +38,7 @@ internal static class AuthoringRecipeProof
         return (description is null ? aria : aria.Description(description)).End;
     }
 
-    private static void Apply(CompositionContext context, Element root, AuthorRecipeValues values)
+    private static void Apply(MountContext context, Element root, AuthorRecipeValues values)
     {
         var name = values.NameReader?.Invoke() ?? values.Name;
         if (name is null)

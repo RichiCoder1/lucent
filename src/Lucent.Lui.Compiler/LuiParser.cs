@@ -198,7 +198,11 @@ public static class LuiParser
                 .ToArray();
             foreach (var duplicate in setupMembers.Skip(1))
                 Error("LUI1019", "A component may declare only one Setup block.", duplicate.Span);
-            if (body.Count(node => !(node is LuiCommentSyntax || node is LuiMemberSyntax)) != 1)
+            if (
+                body.Count(node =>
+                    node is not (LuiCommentSyntax or LuiMemberSyntax or LuiRequirementSyntax)
+                ) != 1
+            )
                 Error(
                     "LUI1004",
                     "A component body requires exactly one root construct.",
@@ -553,7 +557,11 @@ public static class LuiParser
                 )
                     position = white;
                 var before = position;
-                if (memberPrefix && TryMember(out var member))
+                if (memberPrefix && (PeekWord("context") || PeekWord("inject")))
+                {
+                    result.Add(Requirement());
+                }
+                else if (memberPrefix && TryMember(out var member))
                 {
                     result.Add(member);
                 }
@@ -606,6 +614,99 @@ public static class LuiParser
                 }
             }
             return result;
+        }
+
+        private LuiRequirementSyntax Requirement()
+        {
+            var start = position;
+            var keywordText = PeekWord("context") ? "context" : "inject";
+            var keyword = ExpectWord(keywordText);
+            // Parse only the C# type/name shape. The retained syntax and lowering domain
+            // remain a requirement, never an ordinary reactive field.
+            var parsed =
+                SyntaxFactory.ParseMemberDeclaration(
+                    new string(' ', keywordText.Length) + text.Substring(position),
+                    options: CSharpParseOptions.Default.WithLanguageVersion(
+                        LanguageVersion.Preview
+                    ),
+                    consumeFullText: false
+                ) as FieldDeclarationSyntax;
+            if (parsed is not null && !parsed.ContainsDiagnostics)
+            {
+                position = start + parsed.Span.End;
+                var variable = parsed.Declaration.Variables.FirstOrDefault();
+                if (
+                    parsed.Modifiers.Count != 0
+                    || parsed.AttributeLists.Count != 0
+                    || parsed.Declaration.Variables.Count != 1
+                    || variable?.Initializer is not null
+                )
+                    Error(
+                        "LUI1024",
+                        "A requirement declares one type and name, without modifiers, attributes or an initializer.",
+                        LuiSpan.From(start, position)
+                    );
+                return new LuiRequirementSyntax(
+                    LuiSpan.From(start, position),
+                    text.Substring(start, position - start),
+                    keywordText == "context"
+                        ? LuiRequirementKind.Context
+                        : LuiRequirementKind.Inject,
+                    keyword,
+                    parsed.Declaration.Type,
+                    new LuiSpan(
+                        start + parsed.Declaration.Type.SpanStart,
+                        parsed.Declaration.Type.Span.Length
+                    ),
+                    variable is null
+                        ? Missing("")
+                        : Token(
+                            variable.Identifier.Text,
+                            start + variable.Identifier.SpanStart,
+                            variable.Identifier.Span.Length
+                        ),
+                    Token(
+                        ";",
+                        start + parsed.SemicolonToken.SpanStart,
+                        parsed.SemicolonToken.Span.Length
+                    )
+                );
+            }
+            var braces = 0;
+            while (!End)
+            {
+                if (braces == 0)
+                {
+                    if (Current is ';' or '\r' or '\n' or '<' or '}')
+                        break;
+                    if (
+                        position > start + keywordText.Length
+                        && (PeekWord("context") || PeekWord("inject"))
+                    )
+                        break;
+                }
+                if (Current == '{')
+                    braces++;
+                else if (Current == '}' && braces > 0)
+                    braces--;
+                position++;
+            }
+            var semicolon = Current == ';' ? Token(";", position++, 1) : Missing(";");
+            Error(
+                "LUI1024",
+                "Expected a requirement declaration such as 'context Workspace workspace;' or 'inject IStore store;'.",
+                LuiSpan.From(start, position)
+            );
+            return new LuiRequirementSyntax(
+                LuiSpan.From(start, position),
+                text.Substring(start, position - start),
+                keywordText == "context" ? LuiRequirementKind.Context : LuiRequirementKind.Inject,
+                keyword,
+                SyntaxFactory.IdentifierName("__invalidRequirement"),
+                new LuiSpan(keyword.Span.End, 0),
+                Missing(""),
+                semicolon
+            );
         }
 
         private bool TryMember(out LuiMemberSyntax member)
@@ -1050,6 +1151,28 @@ public static class LuiParser
         }
 
         private LuiElementSyntax Element()
+        {
+            var element = ParseElement();
+            if (element.Name.Text != "Provide")
+                return element;
+            var children = element.Children.Where(child => child is not LuiCommentSyntax).ToArray();
+            if (
+                element.SelfClosing
+                || element.Attributes.Count != 1
+                || element.Attributes[0].Name.Text != "value"
+                || element.Attributes[0].Value is not LuiExpressionSyntax
+                || children.Length != 1
+                || children[0] is not (LuiElementSyntax or LuiExpressionBodySyntax)
+            )
+                Error(
+                    "LUI1025",
+                    "Provide requires one value expression and one retained-root child, with no other attributes.",
+                    element.Span
+                );
+            return new LuiProvideSyntax(element);
+        }
+
+        private LuiElementSyntax ParseElement()
         {
             var start = position;
             var openAngle = Expect('<');

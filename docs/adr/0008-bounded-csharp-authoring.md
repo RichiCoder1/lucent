@@ -32,6 +32,10 @@ AuthorRecipe<T> AuthorRecipe.Defer<T>(string kind, AuthorRecipeTarget<T> target,
     Func<ReactiveScope, AuthorRecipe<T>> build);
 ```
 
+The subsequent [context and navigation decision](0009-context-injection-and-navigation.md)
+renames this gate's `CompositionContext` mounting parameter to `MountContext`.
+The separate scope-owned `ComponentContext` authoring interface keeps its name.
+
 `T` is one of `StyledCapability`, `AccessibleCapability` or
 `StyledAccessibleCapability`. Their `AuthorCapability` base is closed to
 consumer inheritance. Construction with the base marker is rejected. Creation

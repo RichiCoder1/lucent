@@ -1,5 +1,4 @@
 namespace Lucent.IssueBrowser;
-
 style HeaderStyle {
     Axis: LayoutAxis.Column;
     Padding: Insets.Uniform(16);
@@ -22,6 +21,7 @@ public component Header(IssueBrowserState browser, IssueBrowserViewState view) {
     <Layout style={HeaderStyle}>
         <Layout style={HeaderContentStyle}>
             <Text style={PresentationStyles.Title.With(HeaderTitleStyle)} name="issue-browser.title">Issues</Text>
+            <Button onInvoke={view.BackToList} name="issue-browser.collection">All issues</Button>
             <Button leadingIcon={() => Lucent.Icons.Lucide.LucideIcons.ListFilter} onInvoke={browser.ToggleDensity} style={Style.Empty.MaxWidth(240).MainShrink(0)} name="issue-browser.density">{browser.Density == IssueDensity.Comfortable ? "Density: comfortable" : "Density: compact"}</Button>
         </Layout>
         <Text style={PresentationStyles.Secondary}>Lucent reference workspace · local fixtures</Text>

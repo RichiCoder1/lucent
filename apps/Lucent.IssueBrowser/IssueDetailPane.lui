@@ -1,5 +1,4 @@
 namespace Lucent.IssueBrowser;
-
 style DetailPaneStyle {
     Axis: LayoutAxis.Column;
     MainGrow: 1;
@@ -12,32 +11,16 @@ style DetailPaneStyle {
 
 style DetailBackStyle(WindowBreakpoints breakpoints) {
     Participation: ElementParticipation.Collapsed;
-
     when (!breakpoints.IsActive(IssueBrowserBreakpoints.Wide)) {
         Participation: ElementParticipation.Visible;
     }
 }
 
-style DetailEmptyStyle {
-    Axis: LayoutAxis.Column;
-    Spacing: 12;
-}
-
-public component IssueDetailPane(IssueBrowserState browser, IssueBrowserViewState view) {
+public component IssueDetailPane() {
+    context IssueBrowserViewState view;
+    context NavigationSession navigation;
     <Layout style={DetailPaneStyle}>
-        <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.ArrowLeft} onInvoke={view.BackToList} style={DetailBackStyle(view.Breakpoints)} name="issue-browser.back">Back to issues</Button>
-        foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number {
-            <Details browser={browser} issue={() => issue} view={view} name="issue-browser.details" />
-        }
-        if (browser.SelectedIssue is null) {
-            <Layout style={DetailEmptyStyle}>
-                <Text style={PresentationStyles.Title}>Select an issue</Text>
-                <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>Read the details, review its status, and explore the available actions.</Text>
-                <Text style={PresentationStyles.Secondary}>Local fixtures · no GitHub account required</Text>
-            </Layout>
-        }
-        if (browser.SelectedIssue is not null && browser.CanRetrySelected) {
-            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.RefreshCw} onInvoke={browser.RetrySelected} name="issue-browser.details-retry">Retry status change</Button>
-        }
+        <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.ArrowLeft} onInvoke={() => navigation.Back()} style={DetailBackStyle(view.Breakpoints)} name="issue-browser.back">Back</Button>
+        {IssueBrowserRouting.Outlet(view.Interaction)}
     </Layout>
 }

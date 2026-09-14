@@ -3,6 +3,10 @@ using Lucent.Core;
 
 Verify(AuthoringConsumer.Components.Consumer);
 Verify(ProofLibrary.Generated);
+Require(
+    ProofLibrary.ResourcesCreated == 2 && ProofLibrary.ResourcesDisposed == 2,
+    "Generated [Owned] resource did not follow the package consumer mount lifetime."
+);
 AuthoringConsumer.Integration.Verify();
 AuthoringConsumer.AuthoringMeasurements.Run();
 Console.WriteLine("Packaged authoring gate: PASS");

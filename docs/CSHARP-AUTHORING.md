@@ -36,9 +36,12 @@ An explicit diagnostic name is optional for each allocation. Fallback names use
 per-mount ordinal. Nested setup, failure rollback and reverse-order disposal
 follow the existing `ComponentRecipe.Defer` contract.
 
-Future owner-context work (#207) can extend this explicit per-mount facade over
-the same retained owner. This phase adds no service locator, ambient context,
-dependency-injection container or navigation lifetime.
+`MountContext` handles placement and declared dependencies; `ComponentContext`
+remains the per-mount state-authoring facade. C# recipes can declare typed
+requirements through `ComponentRequirements` and `ComponentRecipe.Defer`, using
+the same ancestry and service binding as `.lui`. Neither facade exposes an
+arbitrary service locator or creates a component DI scope. See
+[application ownership](APPLICATIONS.md) and [typed navigation](NAVIGATION.md).
 
 ## Snapshot values, live readers and tokens
 

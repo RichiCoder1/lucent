@@ -2,7 +2,13 @@ namespace AuthoringGate;
 using System;
 using Lucent.Core;
 using static AuthoringGate.ProofLibrary;
-
-internal component GeneratedProbe(Func<string> label) {
-    <Probe label={label} />
+public component GeneratedProbe(Func<string> label) {
+    context ProofLibrary.ProbeContext context;
+    [Owned] readonly ProofLibrary.OwnedProbeResource resource = new();
+    Setup(owner) {
+        if (context.Value != "package-context") throw new InvalidOperationException("Context requirement was not resolved before setup.");
+    }
+    <Provide value={context}>
+        <Probe label={label} />
+    </Provide>
 }

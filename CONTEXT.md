@@ -20,6 +20,26 @@ _Avoid_: Frontend, binding syntax, wrapper
 A complete deterministic snapshot of relevant Lucent state used to explain behavior and make debugging decisions. It is distinct from sampled operational telemetry.
 _Avoid_: Trace, log bundle, telemetry export
 
+**Mount requirement**:
+A component's declared exact-type borrowed value, resolved at its mount position before its own state initializes and cached for that mount.
+_Avoid_: Ambient lookup, injected property, reactive lookup
+
+**Context provider**:
+A transparent recipe contribution that supplies one stable exact-type value to its enclosed content without owning or disposing that value.
+_Avoid_: Visual wrapper, service scope, global context
+
+**Service binding**:
+A lifecycle-owned bridge through which declared component requirements borrow application services. It controls admission and revocation without taking container ownership.
+_Avoid_: Component container, route scope, service locator
+
+**Route location**:
+A bounded canonical root-relative path and ordered query data. Parsing and formatting preserve the same segment boundaries; displaying it is an explicit operation because it may contain user data.
+_Avoid_: Arbitrary URI, route definition, diagnostic identifier
+
+**Route table**:
+The validated immutable authority for matching route locations against definitions and rejecting ambiguous patterns before navigation begins.
+_Avoid_: Routing convention, generated matcher, component registry
+
 **Style**:
 An immutable set of typed assignments that determines an element's arrangement and visual representation. It does not own interaction, semantics, lifecycle, or content structure.
 _Avoid_: CSS rule, property bag, modifier

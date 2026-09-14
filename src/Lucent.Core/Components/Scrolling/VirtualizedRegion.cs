@@ -20,7 +20,7 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
     private readonly Element _viewport;
     private Func<IEnumerable<TItem>>? _source;
     private Func<TItem, TKey>? _key;
-    private Func<CurrentItem<TItem>, CompositionContext, Element>? _content;
+    private Func<CurrentItem<TItem>, MountContext, Element>? _content;
     private readonly ReactiveEffect _effect;
     private TItem[] _items = [];
     private TKey[] _keys = [];
@@ -34,10 +34,11 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content,
+        Func<CurrentItem<TItem>, MountContext, Element> content,
         float rowHeight,
         ThemeContext theme,
-        CompositionContext? factory = null
+        MountContext? factory = null,
+        MountEnvironment? environment = null
     )
     {
         if (!float.IsFinite(rowHeight) || rowHeight <= 0)
@@ -51,6 +52,8 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
         _key = key;
         _content = content;
         Theme = theme ?? throw new ArgumentNullException(nameof(theme));
+        Environment =
+            environment ?? factory?.Environment ?? composition.EnvironmentFor(viewport, theme);
         RowHeight = rowHeight;
         Region.Scope.Own(this);
         _composition.Register(this);
@@ -63,6 +66,7 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
     public IReadOnlyList<Element> Items => Region.Children;
     public bool IsDisposed { get; private set; }
     private ThemeContext Theme { get; }
+    private MountEnvironment Environment { get; }
 
     internal void Configure()
     {
@@ -196,15 +200,16 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
             RetireDisposedEntries();
             var wanted = new HashSet<TKey>(_keys[first..last]);
             var retained = new Dictionary<TKey, Entry>(_entries);
-            var provisional = new Dictionary<TKey, (Entry Entry, CompositionContext Context)>();
+            var provisional = new Dictionary<TKey, (Entry Entry, MountContext Context)>();
             var provisionalOrder =
-                new List<(Entry? Entry, ReactiveScope Scope, CompositionContext Context)>();
+                new List<(Entry? Entry, ReactiveScope Scope, MountContext Context)>();
             try
             {
                 for (var index = first; index < last; index++)
                 {
                     if (retained.ContainsKey(_keys[index]))
                         continue;
+                    Environment.CheckMountAdmission();
                     var itemScope = Region.Scope.CreateChild(
                         Region.Name
                             + ".current-item-"
@@ -214,7 +219,7 @@ internal sealed class VirtualizedRegion<TKey, TItem> : IDisposable, IVirtualized
                         _items[index],
                         itemScope.Name + ".value"
                     );
-                    var context = new CompositionContext(_composition, Region, Theme);
+                    var context = new MountContext(_composition, Region, environment: Environment);
                     provisionalOrder.Add((null, itemScope, context));
                     var root = context.Run(() => _content!(current, context));
                     context.Validate(root);

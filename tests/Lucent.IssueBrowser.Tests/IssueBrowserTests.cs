@@ -147,9 +147,8 @@ public sealed partial class IssueBrowserTests
         var narrow = Install(composition, renderer, new(420, 360, 2));
         var narrowSemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
         Assert(
-            narrowSemantics.Count(node =>
-                node.Role == SemanticRole.Button && node.Name == "Back to issues"
-            ) == 1
+            narrowSemantics.Count(node => node.Role == SemanticRole.Button && node.Name == "Back")
+                == 1
                 && narrowSemantics.All(node => node.Role != SemanticRole.Image)
                 && SceneNodes(narrow.Nodes).OfType<ImageSceneNode>().Count() >= 3,
             "Compact Issue Browser lost its labeled Back action or decorative glyphs."
@@ -395,6 +394,39 @@ public sealed partial class IssueBrowserTests
                 + browser.SelectedIssue?.Number
                 + "."
         );
+
+        var refreshedBounds = scene
+            .Boxes.Single(box => box.Identity.ElementId == refreshedRow.Identity.ElementId)
+            .Bounds;
+        input.DispatchPointer(
+            new(
+                PointerCommandKind.Down,
+                92,
+                refreshedBounds.X + 5,
+                refreshedBounds.Y + 5,
+                PointerButton.Secondary
+            )
+        );
+        input.DispatchPointer(
+            new(PointerCommandKind.Up, 92, refreshedBounds.X + 5, refreshedBounds.Y + 5)
+        );
+        using var openRequest = request!;
+        using var openPopup = openRequest.CreateComposition();
+        openPopup.Flush();
+        var open = openRequest.StandardMenu!.Entries.Single(entry => entry.Label == "Open issue");
+        Assert(
+            openRequest.InvokeStandardCommand(open.Identity!.Value)
+                == SemanticCommandResult.Applied,
+            "The inherited popup navigation context rejected Open issue."
+        );
+        graph.Drain();
+        Install();
+        Assert(
+            browser.SelectedIssue?.Number == secondNumber
+                && Flatten(composition.SemanticSnapshot()!)
+                    .Any(node => node.Name == browser.SelectedIssue.Title),
+            "The popup command did not commit and open its issue through the inherited navigation context."
+        );
     }
 
     [TestMethod]
@@ -421,9 +453,12 @@ public sealed partial class IssueBrowserTests
                 () => values.Value,
                 issue => issue.Number,
                 issue =>
-                    Lucent
-                        .IssueBrowser.Components.IssueRow(browser, () => issue.Value, view)
-                        .Named("issue-browser.issue-row"),
+                    Context.Provide(
+                        view,
+                        Lucent
+                            .IssueBrowser.Components.IssueRow(browser, () => issue.Value, view)
+                            .Named("issue-browser.issue-row")
+                    ),
                 () => view.IssueRowHeight,
                 "Issues",
                 Style.Empty.Width(800f).Height(120f)
@@ -591,15 +626,11 @@ public sealed partial class IssueBrowserTests
         var details = Flatten(composition.SemanticSnapshot()!).ToArray();
         Assert(
             browser.SelectedIssue is not null
-                && details.Any(node =>
-                    node.Role == SemanticRole.Button && node.Name == "Back to issues"
-                )
+                && details.Any(node => node.Role == SemanticRole.Button && node.Name == "Back")
                 && details.Any(node => node.Name == "Close issue" || node.Name == "Reopen issue"),
             "Compact selection did not replace the list with issue details."
         );
-        var back = details.Single(node =>
-            node.Role == SemanticRole.Button && node.Name == "Back to issues"
-        );
+        var back = details.Single(node => node.Role == SemanticRole.Button && node.Name == "Back");
         Assert(
             composition.ExecuteSemanticCommand(back.Identity, new(SemanticCommandKind.Invoke))
                 == SemanticCommandResult.Applied,
@@ -1218,7 +1249,13 @@ public sealed partial class IssueBrowserTests
         using var renderer = new SkiaSceneRenderer();
         var viewport = new LayoutViewport(1120, 760, 1);
         _ = Install(composition, renderer, viewport);
-        browser.Select(10_000);
+        Assert(
+            composition.ExecuteSemanticCommand(
+                IssueRow(composition, 10_000, "mutation").Identity,
+                new(SemanticCommandKind.Select)
+            ) == SemanticCommandResult.Applied,
+            "Opening the issue route failed before testing its status action."
+        );
         graph.Drain();
         _ = Install(composition, renderer, viewport);
         var action = Flatten(composition.SemanticSnapshot()!)
@@ -1462,9 +1499,7 @@ public sealed partial class IssueBrowserTests
         var narrow = Install(composition, renderer, narrowViewport);
         var narrowSemantics = Flatten(composition.SemanticSnapshot()!).ToArray();
         Assert(
-            narrowSemantics.Any(node =>
-                node.Role == SemanticRole.Button && node.Name == "Back to issues"
-            )
+            narrowSemantics.Any(node => node.Role == SemanticRole.Button && node.Name == "Back")
                 && narrowSemantics.All(node => node.Role != SemanticRole.Splitter)
                 && narrow.Boxes.All(box =>
                     box.Bounds.X >= -.01f
@@ -1473,7 +1508,7 @@ public sealed partial class IssueBrowserTests
             "The 420-pixel detail layout lost Back navigation, retained a splitter, or overflowed horizontally."
         );
         var back = narrowSemantics.Single(node =>
-            node.Role == SemanticRole.Button && node.Name == "Back to issues"
+            node.Role == SemanticRole.Button && node.Name == "Back"
         );
         Assert(
             composition.ExecuteSemanticCommand(back.Identity, new(SemanticCommandKind.Invoke))
@@ -1491,7 +1526,7 @@ public sealed partial class IssueBrowserTests
                         node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll)
                     )
                 && !Flatten(composition.SemanticSnapshot()!)
-                    .Any(node => node.Role == SemanticRole.Button && node.Name == "Back to issues"),
+                    .Any(node => node.Role == SemanticRole.Button && node.Name == "Back"),
             "Compact Back navigation did not restore the list while preserving selection."
         );
         Assert(
@@ -1540,7 +1575,7 @@ public sealed partial class IssueBrowserTests
                             StringComparison.Ordinal
                         )
                         && program.Contains(
-                            ".Run(IssueBrowserStructure.Create())",
+                            ".Run(IssueBrowserStructure.CreateHosted())",
                             StringComparison.Ordinal
                         )
                         && !program.Contains("ReactiveGraph", StringComparison.Ordinal)
@@ -1573,10 +1608,10 @@ public sealed partial class IssueBrowserTests
                             StringComparison.Ordinal
                         )
                         && authoredLui.Contains(
-                            "foreach (var issue in browser.SelectedIssue is { } selected ? [selected] : Array.Empty<BrowserIssue>()) keyed by issue.Number",
+                            "context RouteContext<IssueRoute> route;",
                             StringComparison.Ordinal
                         ),
-                    "Production Issue Browser no longer owns its generated virtual row factory and keyed detail region in .lui."
+                    "Production Issue Browser no longer owns its generated virtual row factory and typed route detail in .lui."
                 );
                 return;
             }

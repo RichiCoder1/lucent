@@ -6,7 +6,7 @@ using System.Text;
 namespace Lucent.Core;
 
 /// <summary>The only factory context; it creates unattached content until a region commits it.</summary>
-public sealed class CompositionContext : IDisposable
+public sealed class MountContext : IDisposable
 {
     private readonly Composition _composition;
     private readonly Element _parent;
@@ -17,19 +17,27 @@ public sealed class CompositionContext : IDisposable
     private bool _committed;
     private bool _disposed;
     private List<Action>? _rollback;
+    private MountEnvironment _environment;
 
-    internal CompositionContext(Composition composition, Element parent, ThemeContext? theme = null)
+    internal MountContext(
+        Composition composition,
+        Element parent,
+        ThemeContext? theme = null,
+        MountEnvironment? environment = null
+    )
     {
         _composition = composition;
         _parent = parent;
-        _theme = theme;
+        _environment = environment ?? composition.EnvironmentFor(parent, theme);
+        if (!ReferenceEquals(_environment.Composition, composition))
+            throw new ArgumentException(
+                "The mount environment belongs to another composition.",
+                nameof(environment)
+            );
     }
 
     /// <summary>The root mount's theme. Nested recipes can observe it but cannot replace it.</summary>
-    public ThemeContext Theme =>
-        _theme
-        ?? throw new InvalidOperationException("This composition context has no root mount theme.");
-    private readonly ThemeContext? _theme;
+    public ThemeContext Theme => _environment.Theme;
 
     /// <summary>Creates the one root supplied by this conditional or keyed-item factory.</summary>
     public Element Element(string name)
@@ -59,7 +67,7 @@ public sealed class CompositionContext : IDisposable
     }
 
     /// <summary>Atomically mounts one nested recipe root below a provisional element.</summary>
-    public Element Mount(Element parent, Func<CompositionContext, Element> content)
+    public Element Mount(Element parent, Func<MountContext, Element> content)
     {
         ThrowIfActiveFactory();
         ArgumentNullException.ThrowIfNull(parent);
@@ -69,7 +77,7 @@ public sealed class CompositionContext : IDisposable
                 "A content factory can only mount below its provisional root.",
                 nameof(parent)
             );
-        return _composition.MountCore(parent, Theme, content);
+        return _composition.MountCore(parent, _environment, content);
     }
 
     /// <summary>Mounts one reusable component recipe below a provisional element.</summary>
@@ -99,7 +107,7 @@ public sealed class CompositionContext : IDisposable
         Element parent,
         string name,
         Func<bool> active,
-        Func<CompositionContext, Element> content
+        Func<MountContext, Element> content
     )
     {
         ThrowIfActiveFactory();
@@ -111,7 +119,15 @@ public sealed class CompositionContext : IDisposable
                 "A content factory can only add regions below its provisional root.",
                 nameof(parent)
             );
-        return new ConditionalRegion(_composition, parent, name, active, content, this, Theme);
+        return new ConditionalRegion(
+            _composition,
+            parent,
+            name,
+            active,
+            content,
+            this,
+            environment: _environment
+        );
     }
 
     /// <summary>Creates a retained branch region selected by one reactive evaluation.</summary>
@@ -125,7 +141,14 @@ public sealed class CompositionContext : IDisposable
                 "A content factory can only add regions below its provisional root.",
                 nameof(parent)
             );
-        return new ConditionalRegion(_composition, parent, name, select, this, Theme);
+        return new ConditionalRegion(
+            _composition,
+            parent,
+            name,
+            select,
+            this,
+            environment: _environment
+        );
     }
 
     /// <summary>Creates a retained keyed region below a provisional element.</summary>
@@ -134,7 +157,7 @@ public sealed class CompositionContext : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content
+        Func<CurrentItem<TItem>, MountContext, Element> content
     )
         where TKey : notnull
     {
@@ -156,7 +179,7 @@ public sealed class CompositionContext : IDisposable
             key,
             content,
             this,
-            Theme
+            environment: _environment
         );
     }
 
@@ -165,7 +188,7 @@ public sealed class CompositionContext : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content,
+        Func<CurrentItem<TItem>, MountContext, Element> content,
         float rowHeight
     )
         where TKey : notnull
@@ -189,7 +212,68 @@ public sealed class CompositionContext : IDisposable
             content,
             rowHeight,
             Theme,
-            this
+            this,
+            _environment
+        );
+    }
+
+    internal MountEnvironment Environment => _environment;
+
+    internal MountEnvironment EnterEnvironment(MountEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        if (!ReferenceEquals(environment.Composition, _composition))
+            throw new ArgumentException(
+                "The mount environment belongs to another composition.",
+                nameof(environment)
+            );
+        var prior = _environment;
+        _environment = environment;
+        return prior;
+    }
+
+    internal void RestoreEnvironment(MountEnvironment environment) => _environment = environment;
+
+    internal T RunWithEnvironment<T>(MountEnvironment environment, Func<T> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        var prior = EnterEnvironment(environment);
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            RestoreEnvironment(prior);
+        }
+    }
+
+    internal void MountProvided<T>(
+        Element parent,
+        T value,
+        ContextProviderSource source,
+        ComponentContent content
+    )
+    {
+        ThrowIfActiveFactory();
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(content);
+        if (!Root.IsAncestorOf(parent))
+            throw new ArgumentException(
+                "A content factory can only mount below its provisional root.",
+                nameof(parent)
+            );
+        var provided = _environment.Provide(value, source);
+        RunWithEnvironment(
+            provided,
+            () =>
+            {
+                foreach (var recipe in content)
+                    recipe.Mount(this, parent);
+                return true;
+            }
         );
     }
 
@@ -395,6 +479,6 @@ public sealed class CompositionContext : IDisposable
     private void ThrowIfInactive()
     {
         _composition.CheckThread();
-        ObjectDisposedException.ThrowIf(_disposed, typeof(CompositionContext));
+        ObjectDisposedException.ThrowIf(_disposed, typeof(MountContext));
     }
 }

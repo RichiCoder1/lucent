@@ -52,6 +52,15 @@ For native scheduled pixels, publish the Windows TestHost, set `LUCENT_DESKTOP_H
 
 For reusable component/application tests without visible windows, use [the headless harness](HEADLESS-TESTING.md). `Lucent.Testing.Tests` is part of the default managed suite; `Lucent.Testing.Skia` adds optional real shaping and frame capture. Windows transport checks remain separate.
 
+Typed navigation and context/injection have package-only integration checks:
+`tests/Probes/Navigation/AotHost/Test-Package.ps1` exercises generated codecs and
+closed route providers; `tests/Probes/ContextNavigation/Hosted/Test-Package.ps1`
+exercises generated requirements against real Hosting scopes, retained navigation,
+superseded preparation, accepted writes and asynchronous service disposal. Both
+take `-Feed` and an exact `-Version` and execute win-x64 NativeAOT consumers;
+the Hosting probe also executes its managed build. Both participate in package
+CI. Their console hosts do not take desktop focus.
+
 The style-driven layout slice combines Core contracts for algorithms, conditional style ownership and named window breakpoints with compiled `.lui` and consumer tests. Keep thresholds in the application's named BreakpointSet and test just below, at and above each boundary, including logical-size-preserving DPI changes and wide/narrow/wide identity restoration. Resizing an internal pane must not change a window breakpoint. Custom algorithms need invalid-output, measurement-budget, expired-context and per-container state tests; their virtualized children remain realization boundaries. `Test-HeadlessPackages.ps1` compiles parameterized styles using the packaged SDK and checks breakpoint-selected Grid/Flex geometry plus retained editor values against packaged runtime/testing libraries.
 
 Image loading contracts live in `Lucent.Core.Tests`, with real PNG/JPEG and static SVG decoding and pixel assertions in `Lucent.Renderer.Skia.Tests`. `Lucent.Testing.Tests` checks host setup, popup cache sharing and retained snapshot ownership; the Windows contracts check noninteractive Image accessibility through a hidden window. `Test-HeadlessPackages.ps1` also exercises generated asset accessors, Lucide controls and `.lui` Image/Icon rendering against packed libraries at 150% scale. Dispose retained scenes and headless snapshots when a test releases its frame; disposing the application alone must not invalidate an independently retained snapshot. These checks do not take desktop focus.

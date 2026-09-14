@@ -57,7 +57,15 @@ public sealed partial class InputRouter
     )
     {
         _menus.Add(elementId, new(menu, theme, onOpenChanged));
-        scope.OnDispose(() => _menus.Remove(elementId));
+        scope.OnDispose(() =>
+        {
+            _menus.Remove(elementId);
+            if (_activeMenu?.Target.ElementId == elementId)
+            {
+                _activeMenu.Dispose();
+                _activeMenu = null;
+            }
+        });
     }
 
     private bool HandleContextPointer(PointerCommand command, ElementIdentity hit)

@@ -6,12 +6,12 @@ internal static class StockRecipe
 {
     internal static AuthorRecipe<StyledCapability> Styled(
         string kind,
-        Action<CompositionContext, Element> content
+        Action<MountContext, Element> content
     ) => Styled(ComponentRecipe.Create(kind, content));
 
     internal static AuthorRecipe<StyledAccessibleCapability> Accessible(
         string kind,
-        Action<CompositionContext, Element> content
+        Action<MountContext, Element> content
     ) => Accessible(ComponentRecipe.Create(kind, content));
 
     internal static readonly AuthorRecipeTarget<StyledCapability> StyledTarget =

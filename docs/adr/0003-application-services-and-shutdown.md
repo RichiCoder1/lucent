@@ -36,6 +36,16 @@ Applications may install a structured failure reporter on the application builde
 
 ## Microsoft container boundaries
 
+ADR 0009 extends composition-root-only resolution with explicit component
+requirements. A lifecycle-owned binding borrows from the existing application
+scope, and generated closed requests resolve once before component initialization.
+The binding stops admitting new mounts at terminal shutdown. Cached borrowers can
+complete cleanup before the binding is revoked and the application provider is
+disposed. Components and routes neither own those services nor create DI scopes.
+Popup compositions inherit the origin's context and service binding while keeping
+their own theme and reactive scope. Each popup holds a borrowing lease; revocation
+requires both the main composition and every popup borrower to be released.
+
 Microsoft's DI container owns service disposal. Its asynchronous disposal can continue on a worker thread and stops within a scope if a disposer throws. Therefore UI-affine resources and subscriptions belong to Lucent composition scopes, and DI service disposal must be thread-independent and release its own resources reliably. Perform fallible persistence/service work in preparation or `StopAsync`, not in a destructor-like disposal path. Lucent always attempts its independent composition, application-scope and host cleanup boundaries and preserves their errors; it does not replace the container or claim to resume disposal inside a failed third-party provider.
 
 [Generic Host](https://learn.microsoft.com/dotnet/core/extensions/generic-host), [DI guidelines](https://learn.microsoft.com/dotnet/core/extensions/dependency-injection/guidelines), and the [Microsoft container implementation](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/Microsoft.Extensions.DependencyInjection/src/ServiceLookup/ServiceProviderEngineScope.cs) inform this boundary. The adopted 10.0.11 packages are recorded in `CREDITS.md`. Factory registrations and statically reachable types are preferred for NativeAOT; typed configuration binding should use Microsoft's source generator. Default configuration-file loading, reflection scanning, logging sinks and per-element dependency injection are not implicit framework behavior.

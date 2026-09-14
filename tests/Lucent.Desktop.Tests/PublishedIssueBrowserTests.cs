@@ -315,11 +315,7 @@ public sealed partial class PublishedIssueBrowserTests
                 WaitUntil(
                     process,
                     () =>
-                        (
-                            back = root.FindFirstDescendant(condition =>
-                                condition.ByName("Back to issues")
-                            )
-                        )
+                        (back = root.FindFirstDescendant(condition => condition.ByName("Back")))
                             is not null,
                     "The narrow workspace did not retain the selected issue's detail view."
                 );

@@ -18,6 +18,24 @@ public static partial class Components
         );
     }
 
+    /// <summary>Creates a leading-icon button bound to an explicit application-owned focus target.</summary>
+    [LucentComponent]
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
+        [DefaultContent] string content,
+        ImageSource leadingIcon,
+        FocusTarget focusTarget,
+        Action? onInvoke = null,
+        Style? style = null
+    )
+    {
+        content = Required(content, nameof(content));
+        ArgumentNullException.ThrowIfNull(leadingIcon);
+        ArgumentNullException.ThrowIfNull(focusTarget);
+        return StockRecipe.Accessible(
+            ComposedButton(() => content, () => leadingIcon, onInvoke, style, focusTarget)
+        );
+    }
+
     /// <summary>Creates a button whose visible text and decorative leading icon follow typed readers.</summary>
     [LucentComponent]
     public static AuthorRecipe<StyledAccessibleCapability> Button(
@@ -30,6 +48,24 @@ public static partial class Components
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(leadingIcon);
         return StockRecipe.Accessible(ComposedButton(content, leadingIcon, onInvoke, style));
+    }
+
+    /// <summary>Creates a reader-backed leading-icon button bound to an explicit application-owned focus target.</summary>
+    [LucentComponent]
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
+        [DefaultContent] Func<string> content,
+        Func<ImageSource> leadingIcon,
+        FocusTarget focusTarget,
+        Action? onInvoke = null,
+        Style? style = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(leadingIcon);
+        ArgumentNullException.ThrowIfNull(focusTarget);
+        return StockRecipe.Accessible(
+            ComposedButton(content, leadingIcon, onInvoke, style, focusTarget)
+        );
     }
 
     /// <summary>Creates a button whose visible text follows a reader and whose decorative leading icon is fixed.</summary>
@@ -46,6 +82,24 @@ public static partial class Components
         return StockRecipe.Accessible(ComposedButton(content, () => leadingIcon, onInvoke, style));
     }
 
+    /// <summary>Creates a reader-label leading-icon button bound to an explicit application-owned focus target.</summary>
+    [LucentComponent]
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
+        [DefaultContent] Func<string> content,
+        ImageSource leadingIcon,
+        FocusTarget focusTarget,
+        Action? onInvoke = null,
+        Style? style = null
+    )
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(leadingIcon);
+        ArgumentNullException.ThrowIfNull(focusTarget);
+        return StockRecipe.Accessible(
+            ComposedButton(content, () => leadingIcon, onInvoke, style, focusTarget)
+        );
+    }
+
     /// <summary>Creates a button with fixed visible text whose decorative leading icon follows a reader.</summary>
     [LucentComponent]
     public static AuthorRecipe<StyledAccessibleCapability> Button(
@@ -58,6 +112,24 @@ public static partial class Components
         content = Required(content, nameof(content));
         ArgumentNullException.ThrowIfNull(leadingIcon);
         return StockRecipe.Accessible(ComposedButton(() => content, leadingIcon, onInvoke, style));
+    }
+
+    /// <summary>Creates a reader-icon button bound to an explicit application-owned focus target.</summary>
+    [LucentComponent]
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
+        [DefaultContent] string content,
+        Func<ImageSource> leadingIcon,
+        FocusTarget focusTarget,
+        Action? onInvoke = null,
+        Style? style = null
+    )
+    {
+        content = Required(content, nameof(content));
+        ArgumentNullException.ThrowIfNull(leadingIcon);
+        ArgumentNullException.ThrowIfNull(focusTarget);
+        return StockRecipe.Accessible(
+            ComposedButton(() => content, leadingIcon, onInvoke, style, focusTarget)
+        );
     }
 
     /// <summary>Creates an icon-only button with a required accessible label.</summary>
@@ -120,7 +192,8 @@ public static partial class Components
         Func<string> content,
         Func<ImageSource> leadingIcon,
         Action? onInvoke,
-        Style? style
+        Style? style,
+        FocusTarget? focusTarget = null
     ) =>
         ComponentRecipe.Create(
             "button",
@@ -130,7 +203,14 @@ public static partial class Components
                     () => Required(content(), nameof(content)),
                     root.Name + ".button-label"
                 );
-                Controls.ComposedButton(root, context.Theme, label.Value, onInvoke, style);
+                Controls.ComposedButton(
+                    root,
+                    context.Theme,
+                    label.Value,
+                    onInvoke,
+                    style,
+                    focusTarget
+                );
                 MountDecorativeIcon(context, root, leadingIcon);
                 MountButtonText(context, root, label);
                 _ = root.Scope.Effect(
@@ -202,13 +282,13 @@ public static partial class Components
         );
 
     private static void MountDecorativeIcon(
-        CompositionContext context,
+        MountContext context,
         Element root,
         Func<ImageSource> source
     ) => _ = context.Mount(root, Icon(source));
 
     private static void MountButtonText(
-        CompositionContext context,
+        MountContext context,
         Element root,
         Derived<string> label
     ) =>

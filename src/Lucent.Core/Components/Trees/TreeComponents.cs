@@ -188,7 +188,7 @@ public static partial class Components
 
     private static Element CreateTreeRow<TKey, TItem>(
         CurrentItem<TreeVisibleRow<TKey, TItem>> row,
-        CompositionContext context,
+        MountContext context,
         Derived<TreeVisibleSnapshot<TKey, TItem>> current,
         TreeDataSource<TKey, TItem> dataSource,
         KeyedSelectionPolicy<TKey, TreeVisibleNode<TKey, TItem>> policy,

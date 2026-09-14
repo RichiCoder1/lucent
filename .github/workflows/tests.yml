@@ -80,6 +80,8 @@ jobs:
           ./tools/Test-Repository.ps1 -Suite Native
           ./tools/Pack-Packages.ps1 -Version $version
           ./tools/Test-AuthoringPackages.ps1 -Version $version -Feed "artifacts/packages/$version"
+          ./tests/Probes/Navigation/AotHost/Test-Package.ps1 -Version $version -Feed "artifacts/packages/$version"
+          ./tests/Probes/ContextNavigation/Hosted/Test-Package.ps1 -Version $version -Feed "artifacts/packages/$version"
           ./tools/Verify-LuiAssets.ps1 -Version $version -Feed "artifacts/packages/$version"
           ./tools/Test-HeadlessPackages.ps1 -Version $version -Feed "artifacts/packages/$version"
           ./tools/Test-Packages.ps1 -Version $version -Feed "artifacts/packages/$version"

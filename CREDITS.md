@@ -54,6 +54,24 @@ These sources were consulted on 2026-08-30 for the .lui design. They are concept
 
 The authoring design also revisited the already-recorded GPUI, Avalonia, Compose, Flutter, Slint, StyleX, Panda CSS, shadcn/ui, and DTCG identities above. No source is copied. Exact implementation package versions and NativeAOT/editor-host compatibility must be rechecked before package references are added.
 
+## Typed context and service ownership references
+
+The context/injection design consulted these documentation sources on September 9,
+2026. They are conceptual references; no implementation source is copied and no
+additional UI framework dependency is adopted.
+
+| Source | Consulted identity | Influence and boundary |
+| --- | --- | --- |
+| [React Context](https://react.dev/learn/passing-data-deeply-with-context) and [useContext](https://react.dev/reference/react/useContext) | React documentation | Nearest matching provider and nested shadowing. Lucent resolves declared requirements once per mount; it does not adopt React rendering or context subscription behavior. |
+| [Compose CompositionLocal](https://developer.android.com/develop/ui/compose/compositionlocal) | Android Developers documentation | Explicit subtree dependencies and stable supplied values. Lucent uses exact typed requirements and preserves placement-site ownership. |
+| [SwiftUI Environment](https://developer.apple.com/documentation/swiftui/environment) and [EnvironmentKey](https://developer.apple.com/documentation/swiftui/environmentkey) | Apple Developer documentation | Property-shaped environment requirements and descendant overrides. Lucent has no implicit missing-value fallback. |
+
+Microsoft's [DI ownership guidelines](https://learn.microsoft.com/dotnet/core/extensions/dependency-injection/guidelines),
+rechecked through Context7 on September 13, 2026, inform borrowed service lifetime
+and explicit ownership of caller-created resources. The existing Microsoft
+Extensions dependency remains confined to Hosting; Core does not own a container
+or create component/route service scopes.
+
 ## Development tooling
 
 | Tool | Exact identity | License | Use |

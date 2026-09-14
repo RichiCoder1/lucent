@@ -134,6 +134,21 @@ public sealed class IssueBrowserState
             ? message
             : null;
 
+    public string? MutationMessage(int number) =>
+        _messages.Value.TryGetValue(number, out var message) ? message : null;
+
+    public bool CanRetry(int number)
+    {
+        _ = _messages.Value;
+        return _mutations.TryGetValue(number, out var mutation) && mutation.CanRetry;
+    }
+
+    public void RetryIssue(int number)
+    {
+        if (_mutations.TryGetValue(number, out var mutation) && mutation.Retry())
+            Set(_messages, number, null);
+    }
+
     public IReadOnlyList<ChoiceItem<string>> StatusOptions { get; } =
     [new("all", "All statuses"), new("open", "Open"), new("closed", "Closed")];
 

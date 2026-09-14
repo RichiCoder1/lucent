@@ -3725,7 +3725,7 @@ style MotionStyle {
             var errorTokens = await SemanticTokensAsync(browserLsp, errorDocument, errorText);
             var browserTokens = await SemanticTokensAsync(browserLsp, browserDocument, browserText);
             var detailsDocument = new Uri(
-                Path.GetFullPath("apps/Lucent.IssueBrowser/IssueDetailPane.lui")
+                Path.GetFullPath("apps/Lucent.IssueBrowser/IssueRouteView.lui")
             );
             var detailsText = await File.ReadAllTextAsync(detailsDocument.LocalPath);
             var detailsTokens = await SemanticTokensAsync(browserLsp, detailsDocument, detailsText);
@@ -3804,15 +3804,12 @@ style MotionStyle {
                 new { textDocument = new { uri = VsCodeUri(errorDocument) } }
             );
 
-            AssertSemanticToken(detailsTokens, detailsText, "var", "keyword");
-            var inKeyword = detailsText.IndexOf(" in ", StringComparison.Ordinal) + 1;
-            Assert(
-                detailsTokens.Any(token =>
-                    token.Start == inKeyword && token.Length == 2 && token.Type == "keyword"
-                ),
-                "semantic tokens did not classify the foreach 'in' as keyword."
-            );
-            AssertSemanticToken(detailsTokens, detailsText, "with", "keyword");
+            AssertSemanticToken(detailsTokens, detailsText, "context", "keyword");
+            AssertSemanticToken(detailsTokens, detailsText, "RouteContext", "type");
+            var contentDocument = new Uri(Path.GetFullPath("apps/Lucent.IssueBrowser/Details.lui"));
+            var contentText = await File.ReadAllTextAsync(contentDocument.LocalPath);
+            var contentTokens = await SemanticTokensAsync(browserLsp, contentDocument, contentText);
+            AssertSemanticToken(contentTokens, contentText, "with", "keyword");
             foreach (
                 var (document, text, offset, label) in new[]
                 {
@@ -3848,7 +3845,7 @@ style MotionStyle {
                         .GetProperty("items")
                         .EnumerateArray()
                         .Any(item => item.GetProperty("label").GetString() == label),
-                    "if/keyed-foreach expression completion lost semantic locals or members."
+                    "Conditional or route expression completion lost semantic locals or members."
                 );
             }
             await browserLsp.RequestAsync("shutdown", new { });
@@ -3950,7 +3947,7 @@ style MotionStyle {
         await RunExactFreshnessIdentityRegressionAsync();
     }
 
-    private static string CoreMetadataReference
+    internal static string CoreMetadataReference
     {
         get
         {

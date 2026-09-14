@@ -104,7 +104,7 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
             .Select(document => new Declaration(
                 document,
                 CSharpSyntaxTree.ParseText(
-                    DeclarationSource(document.Syntax),
+                    DeclarationSource(document),
                     parseOptions,
                     document.Path + ".lui.index.g.cs"
                 )
@@ -203,8 +203,9 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
                 )
             ) == true;
 
-    private static string DeclarationSource(LuiDocumentSyntax document)
+    private static string DeclarationSource(LuiProjectDocument input)
     {
+        var document = input.Syntax;
         var text = new System.Text.StringBuilder();
         var namespaceWritten = false;
         foreach (var node in document.TopLevel)
@@ -225,6 +226,20 @@ public sealed class LuiProjectComponentIndex : IEquatable<LuiProjectComponentInd
         );
         foreach (var comment in LuiDocumentation.ForComponent(document, component))
             text.Append(LuiDocumentation.Indent(comment));
+        foreach (
+            var requirement in component
+                .Body.OfType<LuiRequirementSyntax>()
+                .OrderBy(requirement => requirement.Kind)
+        )
+            text.Append(
+                    LuiCompiler.RequirementAttributeText(
+                        requirement,
+                        input.LogicalPath,
+                        input.Source,
+                        requirement.Type.ToString()
+                    )
+                )
+                .Append('\n');
         return text.Append("[global::Lucent.Core.LucentComponentAttribute] ")
             .Append(component.Accessibility.IsMissing ? "internal" : component.Accessibility.Text)
             .Append(" static global::Lucent.Core.ComponentRecipe ")

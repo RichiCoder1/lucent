@@ -10,7 +10,7 @@ public sealed class ConditionalRegion : IDisposable
 {
     private readonly Composition _composition;
     private Func<bool>? _active;
-    private Func<CompositionContext, Element>? _content;
+    private Func<MountContext, Element>? _content;
     private Func<ConditionalChoice>? _select;
     private int _branch = Int32.MinValue;
     private readonly ReactiveEffect _effect;
@@ -24,15 +24,17 @@ public sealed class ConditionalRegion : IDisposable
         Element parent,
         string name,
         Func<bool> active,
-        Func<CompositionContext, Element> content,
-        CompositionContext? factory = null,
-        ThemeContext? theme = null
+        Func<MountContext, Element> content,
+        MountContext? factory = null,
+        ThemeContext? theme = null,
+        MountEnvironment? environment = null
     )
     {
         _composition = composition;
         Region = composition.Create(parent, name, attach: true, factory);
         Region.IsConditionalRegion = true;
-        Theme = theme;
+        Environment =
+            environment ?? factory?.Environment ?? composition.EnvironmentFor(parent, theme);
         _active = active;
         _content = content;
         Region.Scope.Own(this);
@@ -44,8 +46,9 @@ public sealed class ConditionalRegion : IDisposable
         Element parent,
         string name,
         Func<ConditionalChoice> select,
-        CompositionContext? factory = null,
-        ThemeContext? theme = null
+        MountContext? factory = null,
+        ThemeContext? theme = null,
+        MountEnvironment? environment = null
     )
         : this(
             composition,
@@ -54,7 +57,8 @@ public sealed class ConditionalRegion : IDisposable
             static () => false,
             static _ => throw new InvalidOperationException(),
             factory,
-            theme
+            theme,
+            environment
         )
     {
         _select = select;
@@ -68,7 +72,7 @@ public sealed class ConditionalRegion : IDisposable
 
     /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
-    private ThemeContext? Theme { get; }
+    private MountEnvironment Environment { get; }
 
     /// <summary>Re-evaluates the condition. Usual callers let the owned effect invoke this.</summary>
     public void Refresh()
@@ -238,9 +242,10 @@ public sealed class ConditionalRegion : IDisposable
         }
     }
 
-    private Element Create(Func<CompositionContext, Element> content)
+    private Element Create(Func<MountContext, Element> content)
     {
-        var context = new CompositionContext(_composition, Region, Theme);
+        Environment.CheckMountAdmission();
+        var context = new MountContext(_composition, Region, environment: Environment);
         try
         {
             var created = context.Run(() => content(context));

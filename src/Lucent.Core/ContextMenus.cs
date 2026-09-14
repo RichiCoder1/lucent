@@ -129,6 +129,13 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
         _content = content;
         _theme = theme;
         _returnFocus = owner.Input.FocusedElement;
+        (
+            owner.Find(target)
+            ?? throw new ArgumentException(
+                "The context menu target does not belong to its owner composition.",
+                nameof(target)
+            )
+        ).OnDisposed(Dispose);
     }
 
     /// <summary>The composition whose command context opened the menu.</summary>
@@ -216,6 +223,12 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
                 },
                 "popup-theme"
             );
+            var origin =
+                Owner.Find(Target)
+                ?? throw new InvalidOperationException(
+                    "The context menu invocation target is no longer available."
+                );
+            popup.InstallBorrowedMountEnvironment(origin, theme);
             _menuRoot = popup.Mount(popup.Root, theme, _content);
             _popup = popup;
             _levels.Add(
@@ -518,6 +531,12 @@ public sealed class ContextMenuRequest : PopupSurfaceRequest
                 },
                 "submenu-theme"
             );
+            var origin =
+                registration.ContextComposition.Find(registration.Trigger)
+                ?? throw new InvalidOperationException(
+                    "The submenu trigger is no longer available."
+                );
+            popup.InstallBorrowedMountEnvironment(origin, theme);
             var root = popup.Mount(popup.Root, theme, content);
             popup.Flush();
             if (root.StandardMenuPart != StandardMenuPart.Menu)

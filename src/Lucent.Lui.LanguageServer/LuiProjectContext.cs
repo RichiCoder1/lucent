@@ -563,17 +563,37 @@ internal sealed class LuiProjectContext : IDisposable
 
         var element = ElementAt(syntax, offset);
         if (element is not null && Contains(element.Name.Span, offset))
-            return Symbols(ComponentSymbols(semantic));
+            return DistinctCompletions(
+                Symbols(ComponentSymbols(semantic))
+                    .Append(
+                        new LuiCompletionItem(
+                            "Provide",
+                            7,
+                            "Provide value={stableValue}",
+                            "Supplies one borrowed exact-type value to one enclosed component root without adding a visual element."
+                        )
+                    )
+            );
         if (
             element is not null
             && element.OpenAngle.Span.End <= offset
             && offset <= element.OpenCloseAngle.Span.Start
             && !element.Attributes.Any(attribute => Contains(attribute.Value.Span, offset))
         )
-            return DistinctCompletions(
-                Symbols(ComponentParameters(semantic, element))
-                    .Append(new LuiCompletionItem("name", 6, "string name", null))
-            );
+            return element is LuiProvideSyntax
+                ?
+                [
+                    new LuiCompletionItem(
+                        "value",
+                        6,
+                        "stable borrowed value",
+                        "A non-null stable value, typically a prop, context requirement or readonly declaration."
+                    ),
+                ]
+                : DistinctCompletions(
+                    Symbols(ComponentParameters(semantic, element))
+                        .Append(new LuiCompletionItem("name", 6, "string name", null))
+                );
 
         if (StyleTransitionAt(syntax, offset) is { } transition)
         {
@@ -730,6 +750,28 @@ internal sealed class LuiProjectContext : IDisposable
         )
             return await GraphHoverAsync(uri, offset, cancellationToken).ConfigureAwait(false);
         symbol = AuthoredLocalSymbol(semantic!, symbol) ?? symbol;
+        if (
+            symbol is IPropertySymbol property
+            && property.DeclaringSyntaxReferences.Any(reference =>
+                reference.SyntaxTree == semantic!.Tree
+            )
+            && semantic!
+                .Document.Syntax.Component?.Body.OfType<LuiRequirementSyntax>()
+                .FirstOrDefault(requirement =>
+                    requirement.Name.Text.TrimStart('@') == property.Name
+                )
+                is { } requirement
+        )
+            return new LuiHover(
+                requirement.Kind.ToString().ToLowerInvariant()
+                    + " "
+                    + SymbolText(property.Type)
+                    + " "
+                    + requirement.Name.Text,
+                requirement.Kind == LuiRequirementKind.Context
+                    ? "Borrowed from the nearest provider of this exact type. Resolved once before this component initializes; read-only for its mounted lifetime."
+                    : "Borrowed from the application's service scope. Resolved once before this component initializes; the application owns disposal."
+            );
         return new LuiHover(SymbolText(symbol), Documentation(symbol));
     }
 
@@ -1613,7 +1655,13 @@ internal sealed class LuiProjectContext : IDisposable
                     .ConfigureAwait(false);
                 foreach (var reference in references)
                 {
-                    if (includeDeclaration)
+                    // Roslyn includes a property's accessors as related definitions. Their
+                    // get/set keywords are implementation details, not renameable identifiers.
+                    if (
+                        includeDeclaration
+                        && reference.Definition
+                            is not IMethodSymbol { AssociatedSymbol: IPropertySymbol }
+                    )
                         locations.AddRange(
                             reference
                                 .Definition.Locations.Where(location => location.IsInSource)
@@ -2798,6 +2846,16 @@ internal sealed class LuiProjectContext : IDisposable
         node switch
         {
             LuiMemberSyntax member => ComponentMemberSymbols(member),
+            LuiRequirementSyntax requirement =>
+            [
+                new LuiDocumentSymbol(
+                    requirement.Name.Text,
+                    7,
+                    requirement.Span,
+                    requirement.Name.Span,
+                    []
+                ),
+            ],
             LuiElementSyntax element =>
             [
                 new LuiDocumentSymbol(
@@ -3247,6 +3305,16 @@ internal sealed class LuiProjectContext : IDisposable
                     .Select(style => new LuiSemanticSpan(style.WithKeyword.Span, "keyword", 0))
             )
             .Concat(
+                (syntax.Component?.Body.OfType<LuiRequirementSyntax>() ?? []).Select(
+                    requirement => new LuiSemanticSpan(requirement.Keyword.Span, "keyword", 0)
+                )
+            )
+            .Concat(
+                Elements(syntax)
+                    .OfType<LuiProvideSyntax>()
+                    .Select(provider => new LuiSemanticSpan(provider.Name.Span, "keyword", 0))
+            )
+            .Concat(
                 Loops(syntax.Component?.Body ?? [])
                     .SelectMany(loop => new[] { loop.VarKeyword, loop.InKeyword })
                     .Select(token => new LuiSemanticSpan(token.Span, "keyword", 0))
@@ -3481,6 +3549,47 @@ internal sealed class LuiProjectContext : IDisposable
         symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
 
     private static string? Documentation(ISymbol symbol)
+    {
+        var text = XmlDocumentation(symbol);
+        if (symbol is not IMethodSymbol)
+            return text;
+        var requirements = symbol
+            .GetAttributes()
+            .Where(attribute =>
+                attribute.AttributeClass?.ToDisplayString()
+                    == "Lucent.Core.ComponentRequirementAttribute"
+                && attribute.ConstructorArguments.Length == 6
+                && attribute.ConstructorArguments[0].Value is ITypeSymbol
+                && attribute.ConstructorArguments[1].Value is int
+                && attribute.ConstructorArguments[2].Value is string
+            )
+            .ToArray();
+        var sections = new List<string>();
+        if (!String.IsNullOrWhiteSpace(text))
+            sections.Add(text);
+        foreach (var kind in new[] { 0, 1 })
+        {
+            var values = requirements
+                .Where(attribute => (int)attribute.ConstructorArguments[1].Value! == kind)
+                .Select(attribute =>
+                    "- `"
+                    + SymbolText((ITypeSymbol)attribute.ConstructorArguments[0].Value!)
+                    + " "
+                    + (string)attribute.ConstructorArguments[2].Value!
+                    + "`"
+                )
+                .ToArray();
+            if (values.Length != 0)
+                sections.Add(
+                    (kind == 0 ? "Required context (borrowed):" : "Injected services (borrowed):")
+                        + "\n"
+                        + String.Join("\n", values)
+                );
+        }
+        return sections.Count == 0 ? null : String.Join("\n\n", sections);
+    }
+
+    private static string? XmlDocumentation(ISymbol symbol)
     {
         var xml = symbol.GetDocumentationCommentXml(cancellationToken: CancellationToken.None);
         if (String.IsNullOrWhiteSpace(xml))

@@ -8,6 +8,25 @@ namespace Lucent.Hosting.Tests;
 [TestClass]
 public sealed class HostingTests
 {
+    private static readonly string[] MissingRequirementEvents =
+    [
+        "service-start",
+        "bound-service-create",
+        "service-stop",
+        "bound-service-dispose",
+        "service-dispose",
+    ];
+    private static readonly string[] BoundServiceEvents =
+    [
+        "service-start",
+        "bound-service-create",
+        "component-setup",
+        "service-stop",
+        "component-dispose",
+        "bound-service-dispose",
+        "service-dispose",
+    ];
+
     [TestMethod]
     public void OfficialHostCreatesOneScopedModelAndReleasesUiBeforeServices()
     {
@@ -311,8 +330,158 @@ public sealed class HostingTests
         );
     }
 
+    [TestMethod]
+    public void LifecycleBindingBorrowsFromTheExistingApplicationScopeUntilUiCleanup()
+    {
+        var events = new List<string>();
+        var builder = HostedApplication.CreateBuilder();
+        builder.Services.AddSingleton(events);
+        builder.Services.AddSingleton<IHostedService>(_ => new RecordingHostedService(events));
+        builder.Services.AddScoped(_ => new BoundScopedService(events));
+        var resolutions = 0;
+        var lifecycle = new HostedApplication(
+            _ => builder.Build(),
+            (services, _) =>
+            {
+                var expected = services.GetRequiredService<BoundScopedService>();
+                return ComponentRecipe.Defer(
+                    "bound-service-consumer",
+                    ComponentRequirements.Service<BoundScopedService>(
+                        new(
+                            "service",
+                            typeof(BoundScopedService).FullName!,
+                            "HostingTests.lui",
+                            1,
+                            1
+                        )
+                    ),
+                    (owner, service) =>
+                    {
+                        resolutions++;
+                        Assert.AreSame(expected, service);
+                        events.Add("component-setup");
+                        owner.OnDispose(() =>
+                        {
+                            Assert.IsFalse(service.IsDisposed);
+                            events.Add("component-dispose");
+                        });
+                        return EmptyRecipe();
+                    }
+                );
+            }
+        );
+        var app = LucentApplication
+            .CreateBuilder()
+            .UseHost(new PumpingHost(session => session.RequestClose()))
+            .Build();
+
+        Assert.AreEqual(0, app.Run(lifecycle));
+        Assert.AreEqual(1, resolutions);
+        CollectionAssert.AreEqual(BoundServiceEvents, events);
+    }
+
     private static TaskCompletionSource NewGate() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    [TestMethod]
+    public void MissingRequirementDoesNotDisposePreviouslyResolvedServicesDuringRollback()
+    {
+        var events = new List<string>();
+        var builder = HostedApplication.CreateBuilder();
+        builder.Services.AddSingleton<IHostedService>(_ => new RecordingHostedService(events));
+        builder.Services.AddScoped(_ => new BoundScopedService(events));
+        var lifecycle = new HostedApplication(
+            _ => builder.Build(),
+            (_, _) =>
+                ComponentRecipe.Defer(
+                    "requirements-fail",
+                    ComponentRequirements
+                        .Service<BoundScopedService>(
+                            new("first", "BoundScopedService", "Failure.lui", 2, 1)
+                        )
+                        .AndService<UnregisteredService>(
+                            new("missing", "UnregisteredService", "Failure.lui", 3, 1)
+                        ),
+                    (_, _) =>
+                        throw new AssertFailedException(
+                            "State initialized before requirements succeeded."
+                        )
+                )
+        );
+        var app = LucentApplication.CreateBuilder().UseHost(new PumpingHost()).Build();
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() => app.Run(lifecycle));
+        StringAssert.Contains(error.Message, "missing");
+        StringAssert.Contains(error.Message, "Failure.lui:3:1");
+        CollectionAssert.AreEqual(MissingRequirementEvents, events);
+    }
+
+    [TestMethod]
+    public void TerminalStopRejectsNewMountsBeforeTheHostStopsAndLeavesCachedBorrowersAlive()
+    {
+        var builder = HostedApplication.CreateBuilder();
+        var events = new List<string>();
+        ConditionalRegion? late = null;
+        BoundScopedService? borrowed = null;
+        var rejected = false;
+        builder.Services.AddScoped(_ => new BoundScopedService(events));
+        builder.Services.AddSingleton<IHostedService>(_ => new StopCallbackService(() =>
+        {
+            Assert.IsNotNull(late);
+            Assert.IsNotNull(borrowed);
+            Assert.IsFalse(borrowed.IsDisposed);
+            var error = Assert.ThrowsExactly<InvalidOperationException>(() => late.Update(true));
+            StringAssert.Contains(error.Message, "no longer accepting mounts");
+            rejected = true;
+        }));
+        var lifecycle = new HostedApplication(
+            _ => builder.Build(),
+            (_, _) =>
+                ComponentRecipe.Defer(
+                    "stop-consumer",
+                    ComponentRequirements.Service<BoundScopedService>(
+                        new("service", "BoundScopedService", "Stop.lui", 1, 1)
+                    ),
+                    (owner, service) =>
+                    {
+                        borrowed = service;
+                        owner.OnDispose(() => Assert.IsFalse(service.IsDisposed));
+                        return ComponentRecipe.Create(
+                            "stop-root",
+                            (context, element) =>
+                            {
+                                late = context.When(
+                                    element,
+                                    "late",
+                                    static () => false,
+                                    mounted => mounted.Element("late-child")
+                                );
+                            }
+                        );
+                    }
+                )
+        );
+        var app = LucentApplication
+            .CreateBuilder()
+            .UseHost(new PumpingHost(session => session.RequestClose()))
+            .Build();
+        Assert.AreEqual(0, app.Run(lifecycle));
+        Assert.IsTrue(rejected);
+        Assert.IsNotNull(borrowed);
+        Assert.IsTrue(borrowed.IsDisposed);
+    }
+
+    private sealed class UnregisteredService;
+
+    private sealed class StopCallbackService(Action stop) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            stop();
+            return Task.CompletedTask;
+        }
+    }
 
     private static ComponentRecipe EmptyRecipe() => ComponentRecipe.Create("empty", (_, _) => { });
 
@@ -464,6 +633,25 @@ public sealed class HostingTests
             else
                 inner.Dispose();
             throw new InvalidOperationException("host dispose failed");
+        }
+    }
+
+    private sealed class BoundScopedService : IDisposable
+    {
+        private readonly List<string> _events;
+
+        public BoundScopedService(List<string> events)
+        {
+            _events = events;
+            events.Add("bound-service-create");
+        }
+
+        internal bool IsDisposed { get; private set; }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+            _events.Add("bound-service-dispose");
         }
     }
 }

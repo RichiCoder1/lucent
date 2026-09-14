@@ -18,7 +18,7 @@ The Issue Browser uses `.lui` for its component tree, including its Filter Bar, 
 
 A `ComponentRecipe` converts safely to one `ContentRecipe`. Retained `When` and `ForEach` helpers return `ContentRecipe`, so ordinary components and structural regions compose in one `ComponentContent`. These values are not component instances, virtual nodes, serializable templates, or rerender objects. Each mount owns independent retained structure and scope resources.
 
-The framework allocates every recipe root. Advanced control authors use `ComponentRecipe.Create(kind, (context, root) => ...)`; they cannot omit the root, create two roots, attach to a foreign parent, or bypass rollback. Lucent's built-ins use the same public operation. Ordinary component authors compose existing recipes and do not handle `CompositionContext`, `Element`, or mounted state handles.
+The framework allocates every recipe root. Advanced control authors use `ComponentRecipe.Create(kind, (context, root) => ...)`; they cannot omit the root, create two roots, attach to a foreign parent, or bypass rollback. Lucent's built-ins use the same public operation. Ordinary component authors compose existing recipes and do not handle `MountContext`, `Element`, or mounted state handles.
 
 ```csharp
 using static Lucent.Core.Components;
@@ -129,6 +129,7 @@ Before its one markup root, a component can declare typed initialized fields, or
 | `string label = Format(count);` | Other unmarked expressions are read-only derived values, evaluated through tracked reads. |
 | `[Once] string draft = model.Title;` | Writable state initialized once for each mount. |
 | `readonly string initial = model.Title;` | A read-only initial snapshot; `readonly` does not make a referenced object deeply immutable. |
+| `[Owned] readonly Subscription subscription = source.Subscribe(OnChanged);` | One caller-created synchronous disposable, initialized once and released with this mount. |
 
 An unmarked nonconstant initializer with no direct component-state reads is still a derived value. That static result does not prove that it is constant: runtime reads, including reads made by helper methods called by the initializer, determine whether it updates after mount. Hover text calls out that no direct reads were identified; literal and `readonly` inference rules remain unchanged.
 
@@ -139,6 +140,81 @@ The compiler uses `ComponentRecipe.Defer` and generated private implementation c
 Local state survives collapse and retained same-key updates. Removal disposes it; longer-lived drafts and accepted writes must remain above replaceable views. Lucent resources use owner-aware APIs, including `owner` for declaration initializers. An authored parameter or member named `owner` takes precedence over that implicit mount-owner name; `Setup(scope)` can give the mount owner an explicit local name. External subscriptions use explicit ownership such as `owner.Own(source.Subscribe(OnChanged))`; passing an existing session does not transfer its ownership.
 
 A stateless component has no local writable application/interaction state, but may still observe changing inputs or contain stateful children. Both forms return the same reusable recipe type. Stateful root switching, automatic state retention, parallel mounting, and implicit asynchronous components are not added by this extension.
+
+`[Owned]` requires one `readonly` declaration with a non-null `IDisposable`
+initializer. Creation transfers the resource immediately to the component's
+existing reactive scope. Later initializer, setup, or child-mount failures release
+registered resources in reverse order, preserving cleanup errors alongside the
+original failure. A successful mount releases its resources on removal.
+
+Use `[Owned]` for a new caller-owned factory result. A plain `readonly` declaration
+borrows an existing value; it does not transfer ownership. Container services and
+context values must remain borrowed. APIs such as `owner.Signal`, `owner.Async`,
+and `owner.Own` already register ownership and must not also use `[Owned]`.
+`LUI2029` identifies invalid resource declarations and `LUI2030` identifies known
+double ownership. These checks recognize bound framework factories and direct
+owned aliases; they do not prove ownership through arbitrary helper bodies or
+alias chains. Async-only resources belong to an explicit application lifecycle.
+`[Owned]` cannot be combined with `[Once]` or other declaration attributes.
+
+## Context and injected services
+
+Components declare their ambient requirements explicitly:
+
+```lui
+public component NoteDetails() {
+    context NoteWorkspace workspace;
+    inject INoteRepository repository;
+    readonly string initialTitle = workspace.Title;
+
+    <Column><Text>{initialTitle}</Text></Column>
+}
+```
+
+`context T name;` borrows the nearest ancestor provider for the exact declared
+type. `inject T name;` borrows a service from the application's attached service
+binding. Both are read-only per-mount values. All context requirements resolve
+first, then injected services in declaration order, before any field initializer
+or `Setup`. Reads, layout, and reactive updates do not resolve them again.
+An independently mounted instance resolves its own requirements.
+
+Each declaration requires one closed non-null type and identifier. Do not add
+`readonly`, `[Owned]`, an initializer, or a second declaration for the same exact
+type. Injection accepts ordinary reference services; service locators, framework
+context values, optional, keyed, collection, lazy, factory and asynchronous
+request shapes are outside this slice. Inject an application service with an
+explicit factory method when it should create caller-owned resources.
+
+Use the structural `Provide` intrinsic to make a stable value available below it:
+
+```lui
+public component WorkspaceRoot(NoteWorkspace workspace) {
+    <Provide value={workspace}>
+        <NoteDetails />
+    </Provide>
+}
+```
+
+`Provide` contributes its child's single retained root and adds no visual wrapper.
+Its value's static type is the provider key: an implementation does not implicitly
+provide its interfaces. A nested provider of the same exact type shadows its
+ancestor. Keep a stable model in a parameter, `readonly` declaration, or borrowed
+requirement; that model may expose changing signals. Writable and derived provider
+expressions are rejected, including reference-valued expressions. An expression
+child must produce a `ComponentRecipe` (or its typed authoring wrapper), not an
+arbitrary content collection. Put multiple children inside a layout element.
+
+Providers and requirements borrow values; they never dispose a shared service.
+Create a new synchronous disposable in `[Owned] readonly` before providing it.
+The compiler rejects inline disposable construction, including conditional and
+coalescing branches. A missing requirement fails at its authored declaration and
+prevents field initialization and setup; rollback releases component-owned work
+while the container retains ownership of services it already created.
+
+Invocation hover lists required contexts and injected services separately.
+Requirement metadata includes normalized project-relative declaration locations
+and participates in the component signature index. Editor analysis uses static
+symbols and never executes service factories or starts an application host.
 
 ## Elements, parameters, and content
 
@@ -578,7 +654,7 @@ TextField and TextArea provide undo, redo, cut, copy, paste and select-all menus
 
 `<LucentLuiLangVersion>` defaults to `preview` from the installed SDK. Unknown/newer versions fail clearly. Numeric versions begin only when Lucent intentionally retains an older syntax contract.
 
-Deferred work includes explicit async-resource sugar, record declarations in `.lui`, broader C# islands, two-way binding shorthand, textual color sugar, `public style`, named slots, generic declarations, general element references, reactive component-root switching, implicit/unkeyed dynamic loops, spread/directive syntax, service injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
+Deferred work includes explicit async-resource sugar, record declarations in `.lui`, broader C# islands, two-way binding shorthand, textual color sugar, `public style`, named slots, generic declarations, general element references, reactive component-root switching, implicit/unkeyed dynamic loops, spread/directive syntax, optional/keyed injection, hot reload, visual designer, shared-component copy tooling, token declarations/import, keyframes, and rich paint/layout primitives beyond the accepted contracts.
 
 Control-owned values outrank every component/author style candidate, including a binding. This preserves existing control-state authority for text, scroll, selection, and similar properties; dumps retain the overridden binding candidate and provenance.
 

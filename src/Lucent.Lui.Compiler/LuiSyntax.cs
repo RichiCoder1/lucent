@@ -353,6 +353,63 @@ public sealed class LuiMemberSyntax : LuiBodySyntax
     public LuiToken? SetupOwner { get; }
 }
 
+/// <summary>The source of a required borrowed component value.</summary>
+public enum LuiRequirementKind
+{
+    /// <summary>The nearest provider at the component mount position.</summary>
+    Context,
+
+    /// <summary>The lifecycle-owned application service source.</summary>
+    Inject,
+}
+
+/// <summary>A declared borrowed requirement, distinct from reactive component fields.</summary>
+public sealed class LuiRequirementSyntax : LuiBodySyntax
+{
+    /// <summary>Creates one requirement with authored tokens and its parsed C# type.</summary>
+    public LuiRequirementSyntax(
+        LuiSpan span,
+        string text,
+        LuiRequirementKind kind,
+        LuiToken keyword,
+        TypeSyntax type,
+        LuiSpan typeSpan,
+        LuiToken name,
+        LuiToken semicolon
+    )
+        : base(span)
+    {
+        Text = text;
+        Kind = kind;
+        Keyword = keyword;
+        Type = type;
+        TypeSpan = typeSpan;
+        Name = name;
+        Semicolon = semicolon;
+    }
+
+    /// <summary>The exact authored declaration.</summary>
+    public string Text { get; }
+
+    /// <summary>The requirement's resolution domain.</summary>
+    public LuiRequirementKind Kind { get; }
+
+    /// <summary>The contextual declaration keyword.</summary>
+    public LuiToken Keyword { get; }
+
+    /// <summary>The ordinary C# type syntax.</summary>
+    public TypeSyntax Type { get; }
+
+    /// <summary>The authored range of the type.</summary>
+    public LuiSpan TypeSpan { get; }
+
+    /// <summary>The read-only member name.</summary>
+    public LuiToken Name { get; }
+
+    /// <summary>The terminating semicolon.</summary>
+    public LuiToken Semicolon { get; }
+}
+
 /// <summary>Literal text child preserved verbatim from the authored body.</summary>
 public sealed class LuiTextSyntax : LuiBodySyntax
 {
@@ -428,7 +485,7 @@ public sealed class LuiTopLevelCommentSyntax : LuiSyntaxNode
 }
 
 /// <summary>Markup element with attributes, children, and optional closing-element tokens.</summary>
-public sealed class LuiElementSyntax : LuiBodySyntax
+public class LuiElementSyntax : LuiBodySyntax
 {
     /// <summary>Creates an immutable element, preserving all delimiters for formatting and recovery.</summary>
     public LuiElementSyntax(
@@ -487,6 +544,26 @@ public sealed class LuiElementSyntax : LuiBodySyntax
 
     /// <summary>Whether this element ends with <c>/&gt;</c> instead of a child body and closing tag.</summary>
     public bool SelfClosing { get; }
+}
+
+/// <summary>The transparent provider intrinsic with ordinary enclosing markup tokens.</summary>
+public sealed class LuiProvideSyntax : LuiElementSyntax
+{
+    /// <summary>Preserves a parsed provider's delimiters, value and retained-root body.</summary>
+    public LuiProvideSyntax(LuiElementSyntax element)
+        : base(
+            element.Span,
+            element.OpenAngle,
+            element.Name,
+            element.Attributes,
+            element.OpenCloseAngle,
+            element.SelfClosingSlash,
+            element.Children,
+            element.CloseOpenAngle,
+            element.CloseName,
+            element.CloseAngle,
+            element.SelfClosing
+        ) { }
 }
 
 /// <summary>Named element attribute and its scalar, expression, or style value.</summary>

@@ -518,7 +518,7 @@ public sealed class PresentationContracts
             "Failed behavior attachment changed presentation/theme state or graph."
         );
         var active = composition.Root.Scope.Signal(false, "captured-region-active");
-        CompositionContext? captured = null;
+        MountContext? captured = null;
         Element? capturedRoot = null;
         var conditional = composition.WhenStructure(
             composition.Root,

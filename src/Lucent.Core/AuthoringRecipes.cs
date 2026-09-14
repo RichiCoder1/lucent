@@ -90,11 +90,7 @@ public abstract class AuthorRecipeTarget
 {
     private protected AuthorRecipeTarget() { }
 
-    internal abstract void Apply(
-        CompositionContext context,
-        Element root,
-        AuthorRecipeValues values
-    );
+    internal abstract void Apply(MountContext context, Element root, AuthorRecipeValues values);
 }
 
 /// <summary>Explicit mapping from one author capability to one retained presentation target.</summary>
@@ -107,19 +103,16 @@ public abstract class AuthorRecipeTarget
 public sealed class AuthorRecipeTarget<TCapability> : AuthorRecipeTarget
     where TCapability : AuthorCapability
 {
-    private readonly Action<CompositionContext, Element, AuthorRecipeValues> _apply;
+    private readonly Action<MountContext, Element, AuthorRecipeValues> _apply;
 
-    internal AuthorRecipeTarget(Action<CompositionContext, Element, AuthorRecipeValues> apply)
+    internal AuthorRecipeTarget(Action<MountContext, Element, AuthorRecipeValues> apply)
     {
         AuthorCapabilityRules.Validate<TCapability>();
         _apply = apply ?? throw new ArgumentNullException(nameof(apply));
     }
 
-    internal override void Apply(
-        CompositionContext context,
-        Element root,
-        AuthorRecipeValues values
-    ) => _apply(context, root, values);
+    internal override void Apply(MountContext context, Element root, AuthorRecipeValues values) =>
+        _apply(context, root, values);
 }
 
 /// <summary>A single immutable capability-bearing view over one retained component recipe.</summary>
@@ -168,10 +161,10 @@ public readonly struct AuthorRecipe<TCapability>
     /// <summary>Returns this recipe after a terminal accessibility metadata group.</summary>
     public AuthorRecipe<TCapability> End => this;
 
-    internal void Apply(CompositionContext context, Element root) =>
+    internal void Apply(MountContext context, Element root) =>
         ToComponentRecipe().ApplyToRoot(context, root);
 
-    internal Element Mount(CompositionContext context) => ToComponentRecipe().Mount(context);
+    internal Element Mount(MountContext context) => ToComponentRecipe().Mount(context);
 
     /// <summary>Converts this wrapper to the existing one-root recipe contract.</summary>
     public static implicit operator ComponentRecipe(AuthorRecipe<TCapability> recipe) =>
@@ -229,7 +222,7 @@ public static class AuthorRecipe
 {
     /// <summary>Creates an explicit mapping from a capability to one retained root target.</summary>
     public static AuthorRecipeTarget<TCapability> Target<TCapability>(
-        Action<CompositionContext, Element, AuthorRecipeValues> apply
+        Action<MountContext, Element, AuthorRecipeValues> apply
     )
         where TCapability : AuthorCapability => new(apply);
 

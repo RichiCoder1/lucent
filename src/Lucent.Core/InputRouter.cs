@@ -978,6 +978,24 @@ public sealed partial class InputRouter
     internal void RegisterFocusTarget(long elementId, ReactiveScope scope, FocusTarget target) =>
         RegisterFocusTarget(elementId, scope, target, null);
 
+    internal ElementIdentity? FocusTargetIdentity(FocusTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        Check();
+        if (!ReferenceEquals(target.Graph, _composition.Graph))
+            throw new ArgumentException(
+                "A focus target must belong to the composition's reactive graph.",
+                nameof(target)
+            );
+        if (
+            !_focusTargets.TryGetValue(target, out var registration)
+            || _composition.Find(new ElementIdentity(_composition.Epoch, registration.ElementId))
+                is null
+        )
+            return null;
+        return new ElementIdentity(_composition.Epoch, registration.ElementId);
+    }
+
     private void RegisterFocusTarget(
         long elementId,
         ReactiveScope scope,

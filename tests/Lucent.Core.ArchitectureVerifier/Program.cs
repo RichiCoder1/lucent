@@ -123,7 +123,7 @@ static void VerifyLuiMetadata(
         ["Text"] = 2,
         ["Image"] = 2,
         ["Icon"] = 2,
-        ["Button"] = 6,
+        ["Button"] = 12,
         ["IconButton"] = 4,
         ["TextField"] = 3,
         ["Field"] = 1,
@@ -165,6 +165,8 @@ static void VerifyLuiMetadata(
         ["MenuItem"] = 2,
         ["MenuSubmenu"] = 1,
         ["MenuSeparator"] = 1,
+        ["NavigationBoundary"] = 1,
+        ["NavigationTarget"] = 1,
     };
     var actual = annotated
         .GroupBy(method => metadata.GetString(method.Name))

@@ -15,7 +15,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
     private readonly Composition _composition;
     private Func<IEnumerable<TItem>>? _source;
     private Func<TItem, TKey>? _key;
-    private Func<CurrentItem<TItem>, CompositionContext, Element>? _content;
+    private Func<CurrentItem<TItem>, MountContext, Element>? _content;
     private readonly ReactiveEffect _effect;
     private Dictionary<TKey, Entry> _entries = [];
     private long _nextEntryId;
@@ -27,14 +27,16 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content,
-        CompositionContext? factory = null,
-        ThemeContext? theme = null
+        Func<CurrentItem<TItem>, MountContext, Element> content,
+        MountContext? factory = null,
+        ThemeContext? theme = null,
+        MountEnvironment? environment = null
     )
     {
         _composition = composition;
         Region = composition.Create(parent, name, attach: true, factory);
-        Theme = theme;
+        Environment =
+            environment ?? factory?.Environment ?? composition.EnvironmentFor(parent, theme);
         _source = source;
         _key = key;
         _content = content;
@@ -50,7 +52,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
 
     /// <summary>Gets whether this retained owner has released its children and reactive resources.</summary>
     public bool IsDisposed { get; private set; }
-    private ThemeContext? Theme { get; }
+    private MountEnvironment Environment { get; }
 
     /// <summary>Re-evaluates the source. Usual callers let the owned effect invoke this.</summary>
     public void Refresh()
@@ -88,9 +90,9 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
 
             RetireDisposedEntries();
             var retained = new Dictionary<TKey, Entry>(_entries);
-            var provisional = new Dictionary<TKey, (Entry Entry, CompositionContext Context)>();
+            var provisional = new Dictionary<TKey, (Entry Entry, MountContext Context)>();
             var provisionalOrder =
-                new List<(Entry? Entry, ReactiveScope Scope, CompositionContext Context)>();
+                new List<(Entry? Entry, ReactiveScope Scope, MountContext Context)>();
             Entry[] ordered = null!;
             Dictionary<TKey, Entry> nextEntries = null!;
             Entry[] departed = null!;
@@ -101,6 +103,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
                 {
                     if (retained.ContainsKey(keys[index]))
                         continue;
+                    Environment.CheckMountAdmission();
                     var itemScope = Region.Scope.CreateChild(
                         Region.Name
                             + ".current-item-"
@@ -110,7 +113,7 @@ public sealed class KeyedRegion<TKey, TItem> : IDisposable
                         next[index],
                         itemScope.Name + ".value"
                     );
-                    var context = new CompositionContext(_composition, Region, Theme);
+                    var context = new MountContext(_composition, Region, environment: Environment);
                     provisionalOrder.Add((null, itemScope, context));
                     var created = context.Run(() => _content!(current, context));
                     ObjectDisposedException.ThrowIf(

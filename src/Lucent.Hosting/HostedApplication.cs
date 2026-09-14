@@ -6,8 +6,8 @@ using Microsoft.Extensions.Hosting;
 namespace Lucent.Hosting;
 
 /// <summary>Adapts the Microsoft Generic Host to one Lucent application session.</summary>
-/// <remarks>Factories execute on the UI owner. Resolve models only in the root factory; pass typed
-/// models to .lui components. One async DI scope owns application models, independent of elements.
+/// <remarks>Factories execute on the UI owner. Explicit component service requirements borrow from
+/// the same async DI scope as the root factory, independently of element lifetimes.
 /// Close preparation must stop accepting new writes and drain already accepted writes before returning true.
 /// A false result leaves the session available for retry; an escaping exception is terminal. Hosted-service stop is terminal.</remarks>
 public sealed class HostedApplication : IApplicationLifecycle
@@ -17,6 +17,7 @@ public sealed class HostedApplication : IApplicationLifecycle
     private readonly Func<IServiceProvider, CancellationToken, ValueTask<bool>>? _prepareClose;
     private IHost? _host;
     private AsyncServiceScope? _scope;
+    private ComponentServiceBinding? _binding;
     private CancellationTokenRegistration _stopping;
     private int _started;
     private bool _disposed;
@@ -65,8 +66,12 @@ public sealed class HostedApplication : IApplicationLifecycle
             .ApplicationStopping.Register(session.RequestClose);
         await _host.StartAsync(CancellationToken.None);
         _scope = _host.Services.CreateAsyncScope();
-        return _createRoot(_scope.Value.ServiceProvider, session)
+        var services = _scope.Value.ServiceProvider;
+        _binding = session.CreateServiceBinding(new ApplicationServiceSource(services));
+        var root =
+            _createRoot(services, session)
             ?? throw new InvalidOperationException("The application root factory returned null.");
+        return _binding.Attach(root);
     }
 
     /// <inheritdoc />
@@ -84,6 +89,7 @@ public sealed class HostedApplication : IApplicationLifecycle
     /// <inheritdoc />
     public async ValueTask StopAsync()
     {
+        _binding?.StopAccepting();
         if (_host is not null)
             await _host.StopAsync(CancellationToken.None);
     }
@@ -95,6 +101,15 @@ public sealed class HostedApplication : IApplicationLifecycle
             return;
         _disposed = true;
         var errors = new List<Exception>();
+        try
+        {
+            _binding?.Revoke();
+            _binding = null;
+        }
+        catch (Exception error)
+        {
+            errors.Add(error);
+        }
         try
         {
             _stopping.Dispose();
@@ -134,6 +149,13 @@ public sealed class HostedApplication : IApplicationLifecycle
             ExceptionDispatchInfo.Capture(errors[0]).Throw();
         if (errors.Count > 1)
             throw new AggregateException("Application service cleanup failed.", errors);
+    }
+
+    private sealed class ApplicationServiceSource(IServiceProvider services)
+        : IComponentServiceSource
+    {
+        public T Resolve<T>()
+            where T : class => services.GetRequiredService<T>();
     }
 
     private sealed class DesktopLifetime : IHostLifetime

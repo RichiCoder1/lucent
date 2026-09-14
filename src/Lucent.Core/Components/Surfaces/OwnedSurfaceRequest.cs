@@ -47,6 +47,7 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
         _returnFocus = Owner.Input.FocusedElement;
         IsInteractive = interactive;
         ConsumeOutsideClick = consumeOutsideClick;
+        target.OnDisposed(Dispose);
     }
 
     /// <inheritdoc />
@@ -125,6 +126,12 @@ public sealed class OwnedSurfaceRequest : PopupSurfaceRequest
                 },
                 "surface-theme"
             );
+            var origin =
+                Owner.Find(_target)
+                ?? throw new InvalidOperationException(
+                    "The surface target is no longer available."
+                );
+            popup.InstallBorrowedMountEnvironment(origin, theme);
             popup.Root.Present(
                 theme,
                 component: Style.Empty.Set(LayoutProperties.CrossAlignment, LayoutAlignment.Start)

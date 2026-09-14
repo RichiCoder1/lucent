@@ -1,0 +1,17 @@
+namespace HostedContextNavigation;
+using System;
+using Lucent.Core;
+
+public component HostedShell() {
+    context RouteContext<ShellRoute> route;
+    inject ProbeWorkspace workspace;
+    inject SharedScoped shared;
+    inject GenericTransient<string> transient;
+    [Owned] readonly OwnedProbe owned = new(workspace.Events, "root");
+    Setup(owner) {
+        workspace.RecordRoot(route, shared, transient);
+    }
+    <Layout name="hosted-probe.shell">
+        {ProbeRouting.Child()}
+    </Layout>
+}

@@ -48,6 +48,12 @@
     "declarations": {
       "patterns": [
         {
+          "begin": "(?<!\\.)\\b(context|inject)(?=\\s+[A-Za-z_@])",
+          "beginCaptures": { "1": { "name": "storage.type.lui" } },
+          "end": ";|(?=})|$",
+          "patterns": [{ "include": "source.cs" }]
+        },
+        {
           "match": "\\b(namespace|using)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
           "captures": {
             "1": { "name": "keyword.control.import.lui" },
@@ -81,7 +87,7 @@
           }
         },
         {
-          "match": "(\\[)(Once)(\\])",
+          "match": "(\\[)(Once|Owned)(\\])",
           "captures": {
             "1": { "name": "punctuation.definition.annotation.begin.lui" },
             "2": { "name": "entity.name.type.attribute.lui" },

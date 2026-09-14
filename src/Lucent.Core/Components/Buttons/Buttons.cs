@@ -9,12 +9,38 @@ public static partial class Components
         Action? onInvoke = null,
         Style? style = null,
         Func<AriaMetadata?>? aria = null
+    ) => FixedButton(content, null, onInvoke, style, aria);
+
+    /// <summary>Creates a button bound to an explicit application-owned focus target.</summary>
+    [LucentComponent]
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
+        [DefaultContent] string content,
+        FocusTarget focusTarget,
+        Action? onInvoke = null,
+        Style? style = null,
+        Func<AriaMetadata?>? aria = null
+    ) => FixedButton(content, focusTarget, onInvoke, style, aria);
+
+    private static AuthorRecipe<StyledAccessibleCapability> FixedButton(
+        string content,
+        FocusTarget? focusTarget,
+        Action? onInvoke,
+        Style? style,
+        Func<AriaMetadata?>? aria
     )
     {
         content = Required(content, nameof(content));
         var recipe = StockRecipe.Accessible(
             "button",
-            (context, root) => Controls.Button(root, context.Theme, content, onInvoke, style)
+            (context, root) =>
+                Controls.Button(
+                    root,
+                    context.Theme,
+                    content,
+                    onInvoke,
+                    style,
+                    focusTarget: focusTarget
+                )
         );
         return aria is null ? recipe : recipe.Aria.Metadata(aria).End;
     }
@@ -26,10 +52,28 @@ public static partial class Components
         Action? onInvoke = null,
         Style? style = null,
         Func<AriaMetadata?>? aria = null
+    ) => ReaderButton(content, null, onInvoke, style, aria);
+
+    /// <summary>Creates a reader-backed button bound to an explicit application-owned focus target.</summary>
+    [LucentComponent]
+    public static AuthorRecipe<StyledAccessibleCapability> Button(
+        [DefaultContent] Func<string> content,
+        FocusTarget focusTarget,
+        Action? onInvoke = null,
+        Style? style = null,
+        Func<AriaMetadata?>? aria = null
+    ) => ReaderButton(content, focusTarget, onInvoke, style, aria);
+
+    private static AuthorRecipe<StyledAccessibleCapability> ReaderButton(
+        Func<string> content,
+        FocusTarget? focusTarget,
+        Action? onInvoke,
+        Style? style,
+        Func<AriaMetadata?>? aria
     )
     {
         var recipe = StockRecipe.Accessible(
-            ButtonCore(content, onInvoke, style, focusOnPointer: true)
+            ButtonCore(content, onInvoke, style, focusOnPointer: true, focusTarget: focusTarget)
         );
         return aria is null ? recipe : recipe.Aria.Metadata(aria).End;
     }
@@ -38,7 +82,8 @@ public static partial class Components
         Func<string> content,
         Action? onInvoke,
         Style? style,
-        bool focusOnPointer
+        bool focusOnPointer,
+        FocusTarget? focusTarget = null
     )
     {
         ArgumentNullException.ThrowIfNull(content);
@@ -57,7 +102,8 @@ public static partial class Components
                             label,
                             onInvoke,
                             style,
-                            focusOnPointer
+                            focusOnPointer,
+                            focusTarget
                         ),
                     label =>
                     {

@@ -38,7 +38,7 @@ internal static partial class Controls
         string label,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> row,
+        Func<CurrentItem<TItem>, MountContext, Element> row,
         float rowHeight
     )
         where TKey : notnull

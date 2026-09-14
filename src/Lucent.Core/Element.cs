@@ -29,6 +29,9 @@ public sealed partial class Element : IDisposable
     private long _nextRecipeOrdinal;
     private Dictionary<LayoutAlgorithm, Dictionary<object, object>>? _layoutAlgorithmStates;
     private LayoutAlgorithm? _activeLayoutAlgorithm;
+    private ContextProviderDiagnostic[] _contextProviders = [];
+    private ContextRequirementDiagnostic[] _contextRequirements = [];
+    private MountEnvironment? _mountEnvironment;
 
     internal Element(
         Composition composition,
@@ -47,6 +50,7 @@ public sealed partial class Element : IDisposable
         Scope.SetFactoryRollback(composition.RegisterFactoryRollback);
         Id = id;
         Name = name;
+        _mountEnvironment = parent?._mountEnvironment;
         Scope.OnElementDispose(Dispose);
     }
 
@@ -74,6 +78,27 @@ public sealed partial class Element : IDisposable
     internal StandardMenuPart StandardMenuPart { get; set; }
     internal ImageBinding? Image { get; set; }
     internal DrawingBinding? Drawing { get; set; }
+    internal IReadOnlyList<ContextProviderDiagnostic> ContextProviders => _contextProviders;
+    internal IReadOnlyList<ContextRequirementDiagnostic> ContextRequirements =>
+        _contextRequirements;
+    internal MountEnvironment? MountEnvironment => _mountEnvironment;
+
+    internal void SetMountEnvironment(
+        MountEnvironment environment,
+        ContextRequirementDiagnostic[] requirements
+    )
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(requirements);
+        if (!ReferenceEquals(environment.Composition, Composition))
+            throw new ArgumentException(
+                "The mount environment belongs to another composition.",
+                nameof(environment)
+            );
+        _mountEnvironment = environment;
+        _contextProviders = environment.DescribeProviders();
+        _contextRequirements = requirements;
+    }
 
     internal T GetOrCreateLayoutAlgorithmState<T>(LayoutAlgorithm algorithm, Func<T> create)
         where T : class
@@ -849,6 +874,9 @@ public sealed partial class Element : IDisposable
             return;
         var reachable = Composition.IsReachable(this);
         IsDisposed = true;
+        _contextProviders = [];
+        _contextRequirements = [];
+        _mountEnvironment = null;
         Composition.UnregisterSubtree(this);
         if (reachable)
             Composition.InvalidateInputProjection();

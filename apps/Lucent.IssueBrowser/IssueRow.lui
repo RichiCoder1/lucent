@@ -1,5 +1,4 @@
 namespace Lucent.IssueBrowser;
-
 style IssueRowTextStyle {
     TextWrap: TextWrap.WordWithGraphemeFallback;
     MaxLines: 1;
@@ -14,7 +13,7 @@ style IssueRowLayoutStyle(IssueBrowserViewState view) {
 }
 
 public component IssueRow(IssueBrowserState browser, Func<BrowserIssue> issue, IssueBrowserViewState view) {
-    <ContextMenu menu={() => IssueRowMenu(browser, issue, view)} name="issue-browser.issue-row-menu">
+    <ContextMenu menu={() => IssueRowMenu(browser, issue)} name="issue-browser.issue-row-menu">
         <Selectable label={() => Label(issue())} selected={() => browser.IsSelected(issue().Number)} onSelect={() => OpenIssue(browser, issue().Number, view)} style={IssueRowLayoutStyle(view)}>
             <Text style={PresentationStyles.Typography(TextRole.Body).With(IssueRowTextStyle)} content={() => issue().Title} />
             <Text style={PresentationStyles.Typography(TextRole.Caption).With(IssueRowTextStyle)} content={() => "#" + issue().Number + " · " + issue().Status + " · " + issue().Assignee} />

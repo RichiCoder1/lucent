@@ -2,7 +2,8 @@ namespace AuthoringConsumer;
 using System;
 using Lucent.Core;
 using static AuthoringGate.ProofLibrary;
-
 internal component Consumer(Func<string> label) {
-    <Probe label={label} />
+    <Provide value={new AuthoringGate.ProofLibrary.ProbeContext("package-context")}>
+        <AuthoringGate.Components.GeneratedProbe label={label} />
+    </Provide>
 }

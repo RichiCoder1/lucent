@@ -148,6 +148,8 @@ public static class LuiFormatter
                 output.Append(text.Text).Append(nl);
             else if (node is LuiMemberSyntax member)
                 output.Append(member.Text).Append(nl);
+            else if (node is LuiRequirementSyntax requirement)
+                output.Append(requirement.Text).Append(nl);
             else if (node is LuiExpressionBodySyntax expression)
                 output.Append('{').Append(expression.Text).Append('}').Append(nl);
             else if (node is LuiCommentSyntax comment)

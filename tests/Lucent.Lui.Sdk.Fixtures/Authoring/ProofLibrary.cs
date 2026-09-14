@@ -4,6 +4,18 @@ namespace AuthoringGate;
 
 public static class ProofLibrary
 {
+    public sealed record ProbeContext(string Value);
+
+    public static int ResourcesCreated { get; private set; }
+    public static int ResourcesDisposed { get; private set; }
+
+    public sealed class OwnedProbeResource : IDisposable
+    {
+        public OwnedProbeResource() => ResourcesCreated++;
+
+        public void Dispose() => ResourcesDisposed++;
+    }
+
     private static readonly AuthorRecipeTarget<StyledAccessibleCapability> Target =
         AuthorRecipe.Target<StyledAccessibleCapability>(
             (context, root, values) =>
@@ -22,7 +34,8 @@ public static class ProofLibrary
             .Description("Explicit packaged target")
             .End.Named("proof");
 
-    public static ComponentRecipe Generated(Func<string> label) => Components.GeneratedProbe(label);
+    public static ComponentRecipe Generated(Func<string> label) =>
+        Context.Provide(new ProbeContext("package-context"), Components.GeneratedProbe(label));
 
     private sealed class ProofSemantics(AuthorRecipeValues values) : Behavior
     {

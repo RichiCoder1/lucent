@@ -1,0 +1,16 @@
+namespace HostedContextNavigation;
+using System;
+using Lucent.Core;
+
+public component HostedLeaf() {
+    context RouteContext<ShellRoute> shell;
+    context RouteContext<ItemRoute> route;
+    inject ProbeWorkspace workspace;
+    inject SharedScoped shared;
+    inject GenericTransient<string> transient;
+    [Owned] readonly OwnedProbe owned = new(workspace.Events, "leaf");
+    Setup(owner) {
+        workspace.RecordLeaf(shell, route, shared, transient);
+    }
+    <Layout name="hosted-probe.leaf" />
+}

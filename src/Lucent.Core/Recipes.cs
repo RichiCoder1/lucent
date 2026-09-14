@@ -7,17 +7,23 @@ namespace Lucent.Core;
 /// <remarks>Each mount owns exactly one stable root. A recipe is neither a runtime template instance nor a rerender function; use <see cref="ContentRecipe"/> when contributing below an existing root.</remarks>
 public sealed class ComponentRecipe
 {
-    private readonly Action<CompositionContext, Element> _content;
-    private readonly Func<ReactiveScope, ComponentRecipe>? _deferred;
+    private readonly Action<MountContext, Element> _content;
+    private readonly DeferredRecipe? _deferred;
+    private readonly ContextProvider? _provider;
+    private readonly ComponentServiceBinding? _serviceBinding;
+    private readonly ComponentRecipe? _wrapped;
     private readonly string? _name;
     private readonly AuthorRecipeContributions? _authoring;
     private readonly AuthorRecipeTarget? _authoringTarget;
 
     private ComponentRecipe(
         string kind,
-        Action<CompositionContext, Element> content,
+        Action<MountContext, Element> content,
         string? name = null,
-        Func<ReactiveScope, ComponentRecipe>? deferred = null,
+        DeferredRecipe? deferred = null,
+        ContextProvider? provider = null,
+        ComponentServiceBinding? serviceBinding = null,
+        ComponentRecipe? wrapped = null,
         AuthorRecipeContributions? authoring = null,
         AuthorRecipeTarget? authoringTarget = null
     )
@@ -26,18 +32,24 @@ public sealed class ComponentRecipe
         _content = content;
         _name = name;
         _deferred = deferred;
+        _provider = provider;
+        _serviceBinding = serviceBinding;
+        _wrapped = wrapped;
         _authoring = authoring;
         _authoringTarget = authoringTarget;
     }
 
     private ComponentRecipe(string kind, Func<ReactiveScope, ComponentRecipe> deferred)
+        : this(kind, static (_, _) => { }, deferred: new PlainDeferredRecipe(deferred)) { }
+
+    private ComponentRecipe(string kind, DeferredRecipe deferred)
         : this(kind, static (_, _) => { }, deferred: deferred) { }
 
     /// <summary>The diagnostic kind used by unnamed mounts.</summary>
     public string Kind { get; }
 
     /// <summary>Creates a recipe whose root is allocated by the framework.</summary>
-    public static ComponentRecipe Create(string kind, Action<CompositionContext, Element> content)
+    public static ComponentRecipe Create(string kind, Action<MountContext, Element> content)
     {
         ReactiveGraph.ValidateName(kind, nameof(kind));
         ArgumentNullException.ThrowIfNull(content);
@@ -53,11 +65,24 @@ public sealed class ComponentRecipe
         return new ComponentRecipe(kind, build);
     }
 
+    /// <summary>Creates a recipe whose declared values resolve at each mount before setup begins.</summary>
+    public static ComponentRecipe Defer<TValues>(
+        string kind,
+        ComponentRequirementPlan<TValues> requirements,
+        Func<ReactiveScope, TValues, ComponentRecipe> build
+    )
+    {
+        ReactiveGraph.ValidateName(kind, nameof(kind));
+        ArgumentNullException.ThrowIfNull(requirements);
+        ArgumentNullException.ThrowIfNull(build);
+        return new ComponentRecipe(kind, new RequiredDeferredRecipe<TValues>(requirements, build));
+    }
+
     /// <summary>Returns this recipe with an explicit local diagnostic name.</summary>
     public ComponentRecipe Named(string name)
     {
         ReactiveGraph.ValidateName(name, nameof(name));
-        return new ComponentRecipe(Kind, _content, name, _deferred, _authoring, _authoringTarget);
+        return Copy(name: name, replaceName: true);
     }
 
     /// <summary>Converts one root recipe into one content contribution.</summary>
@@ -74,7 +99,7 @@ public sealed class ComponentRecipe
         ArgumentNullException.ThrowIfNull(authoring);
         if (ReferenceEquals(authoring, _authoring))
             return this;
-        return new ComponentRecipe(Kind, _content, _name, _deferred, authoring, _authoringTarget);
+        return Copy(authoring: authoring, replaceAuthoring: true);
     }
 
     internal ComponentRecipe WithAuthoringTarget(AuthorRecipeTarget target)
@@ -86,70 +111,89 @@ public sealed class ComponentRecipe
             );
         if (ReferenceEquals(target, _authoringTarget))
             return this;
-        return new ComponentRecipe(Kind, _content, _name, _deferred, _authoring, target);
+        return Copy(authoringTarget: target, replaceAuthoringTarget: true);
     }
 
-    internal Element Mount(CompositionContext context)
+    internal ComponentRecipe WithContextProvider<T>(T value, ContextProviderSource source) =>
+        new(
+            Kind,
+            static (_, _) => { },
+            provider: new ContextProvider<T>(value, source),
+            wrapped: this
+        );
+
+    internal ComponentRecipe WithServiceBinding(ComponentServiceBinding binding)
+    {
+        ArgumentNullException.ThrowIfNull(binding);
+        return new ComponentRecipe(
+            Kind,
+            static (_, _) => { },
+            serviceBinding: binding,
+            wrapped: this
+        );
+    }
+
+    internal Element Mount(MountContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (_deferred is not null)
+        context.Environment.CheckMountAdmission();
+        if (_deferred is null && _provider is null && _serviceBinding is null)
         {
-            var owner = context.BeginDeferredScope(Kind, _name);
-            var recipe = ResolveDeferred(context, owner, this, out var preferredName);
-            var authoring = MergeAuthoring(recipe._authoring, _authoring);
-            if (authoring is not null && !ReferenceEquals(authoring, recipe._authoring))
-                recipe = recipe.WithAuthoring(authoring);
-            var target = MergeAuthoringTargets(recipe._authoringTarget, _authoringTarget);
-            if (target is not null && !ReferenceEquals(target, recipe._authoringTarget))
-                recipe = recipe.WithAuthoringTarget(target);
-            var deferredRoot = context.RecipeElement(
-                recipe.Kind,
-                preferredName ?? recipe._name,
-                owner
-            );
-            recipe.ApplyAuthoring(context, deferredRoot);
-            recipe.Apply(context, deferredRoot);
-            return deferredRoot;
+            var directRoot = context.RecipeElement(Kind, _name);
+            directRoot.SetMountEnvironment(context.Environment, []);
+            ApplyAuthoring(context, directRoot);
+            _content(context, directRoot);
+            return directRoot;
         }
-        var root = context.RecipeElement(Kind, _name);
-        _authoringTarget?.Apply(context, root, AuthorRecipeValues.From(_authoring));
-        _content(context, root);
-        return root;
-    }
-
-    private static ComponentRecipe ResolveDeferred(
-        CompositionContext context,
-        ReactiveScope owner,
-        ComponentRecipe recipe,
-        out string? preferredName
-    )
-    {
-        preferredName = recipe._name;
+        var environment = context.Environment;
+        ReactiveScope? owner = null;
+        string? preferredName = null;
         var seen = new HashSet<ComponentRecipe>();
         var layers = new List<ComponentRecipe>();
-        var current = recipe;
+        List<ContextRequirementDiagnostic>? requirements = null;
+        var current = this;
         while (true)
         {
             if (!seen.Add(current))
                 throw new InvalidOperationException(
-                    "A deferred recipe factory returned a recursive recipe."
+                    "A deferred or transparent recipe returned a recursive recipe."
                 );
             layers.Add(current);
-            if (current._deferred is null)
-                break;
-            var next = context.RunDeferred(owner, () => current._deferred(owner));
-            ArgumentNullException.ThrowIfNull(next);
-            preferredName ??= next._name;
-            current = next;
+            preferredName ??= current._name;
+            if (current._serviceBinding is not null)
+            {
+                environment = environment.Attach(current._serviceBinding, context.Parent);
+                current = current._wrapped!;
+                continue;
+            }
+            if (current._provider is not null)
+            {
+                environment = current._provider.Apply(environment);
+                current = current._wrapped!;
+                continue;
+            }
+            if (current._deferred is not null)
+            {
+                var described = current._deferred.DescribeRequirements();
+                if (described.Length != 0)
+                    (requirements ??= []).AddRange(described);
+                current = current._deferred.Build(
+                    context,
+                    environment,
+                    current.Kind,
+                    current._name,
+                    ref owner
+                );
+                ArgumentNullException.ThrowIfNull(current);
+                continue;
+            }
+            break;
         }
 
-        // The outer layer is merged by Mount after resolution. Fold every inner layer from the
-        // leaf toward that outer boundary so intermediate authored values survive each deferred
-        // hop without applying the target more than once.
-        var resolved = layers[^1];
+        var resolved = current;
         var authoring = resolved._authoring;
         var target = resolved._authoringTarget;
-        for (var index = layers.Count - 2; index > 0; index--)
+        for (var index = layers.Count - 2; index >= 0; index--)
         {
             var layer = layers[index];
             authoring = MergeAuthoring(authoring, layer._authoring);
@@ -159,7 +203,19 @@ public sealed class ComponentRecipe
             resolved = resolved.WithAuthoring(authoring);
         if (target is not null && !ReferenceEquals(target, resolved._authoringTarget))
             resolved = resolved.WithAuthoringTarget(target);
-        return resolved;
+        var priorEnvironment = context.EnterEnvironment(environment);
+        try
+        {
+            var root = context.RecipeElement(resolved.Kind, preferredName ?? resolved._name, owner);
+            root.SetMountEnvironment(environment, requirements is null ? [] : [.. requirements]);
+            resolved.ApplyAuthoring(context, root);
+            resolved.Apply(context, root);
+            return root;
+        }
+        finally
+        {
+            context.RestoreEnvironment(priorEnvironment);
+        }
     }
 
     private static AuthorRecipeContributions? MergeAuthoring(
@@ -195,26 +251,115 @@ public sealed class ComponentRecipe
         );
     }
 
-    private void ApplyAuthoring(CompositionContext context, Element root)
+    private ComponentRecipe Copy(
+        string? name = null,
+        bool replaceName = false,
+        AuthorRecipeContributions? authoring = null,
+        bool replaceAuthoring = false,
+        AuthorRecipeTarget? authoringTarget = null,
+        bool replaceAuthoringTarget = false
+    ) =>
+        new(
+            Kind,
+            _content,
+            replaceName ? name : _name,
+            _deferred,
+            _provider,
+            _serviceBinding,
+            _wrapped,
+            replaceAuthoring ? authoring : _authoring,
+            replaceAuthoringTarget ? authoringTarget : _authoringTarget
+        );
+
+    private void ApplyAuthoring(MountContext context, Element root)
     {
         _authoringTarget?.Apply(context, root, AuthorRecipeValues.From(_authoring));
     }
 
-    internal void ApplyToRoot(CompositionContext context, Element root)
+    internal void ApplyToRoot(MountContext context, Element root)
     {
         ApplyAuthoring(context, root);
         Apply(context, root);
     }
 
-    internal void Apply(CompositionContext context, Element root)
+    internal void Apply(MountContext context, Element root)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(root);
-        if (_deferred is not null)
+        if (_deferred is not null || _provider is not null || _serviceBinding is not null)
             throw new InvalidOperationException(
-                "Deferred recipes must be resolved before mounting."
+                "Deferred and transparent recipes must be resolved before mounting."
             );
         _content(context, root);
+    }
+
+    private abstract class DeferredRecipe
+    {
+        internal virtual ContextRequirementDiagnostic[] DescribeRequirements() => [];
+
+        internal abstract ComponentRecipe Build(
+            MountContext context,
+            MountEnvironment environment,
+            string kind,
+            string? name,
+            ref ReactiveScope? owner
+        );
+
+        protected static ReactiveScope Owner(
+            MountContext context,
+            string kind,
+            string? name,
+            ref ReactiveScope? owner
+        ) => owner ??= context.BeginDeferredScope(kind, name);
+    }
+
+    private sealed class PlainDeferredRecipe(Func<ReactiveScope, ComponentRecipe> build)
+        : DeferredRecipe
+    {
+        internal override ComponentRecipe Build(
+            MountContext context,
+            MountEnvironment environment,
+            string kind,
+            string? name,
+            ref ReactiveScope? owner
+        )
+        {
+            var mountOwner = Owner(context, kind, name, ref owner);
+            return context.RunDeferred(mountOwner, () => build(mountOwner));
+        }
+    }
+
+    private sealed class RequiredDeferredRecipe<TValues>(
+        ComponentRequirementPlan<TValues> requirements,
+        Func<ReactiveScope, TValues, ComponentRecipe> build
+    ) : DeferredRecipe
+    {
+        internal override ContextRequirementDiagnostic[] DescribeRequirements() =>
+            requirements.Describe();
+
+        internal override ComponentRecipe Build(
+            MountContext context,
+            MountEnvironment environment,
+            string kind,
+            string? name,
+            ref ReactiveScope? owner
+        )
+        {
+            var values = requirements.Resolve(environment, context.Parent);
+            var mountOwner = Owner(context, kind, name, ref owner);
+            return context.RunDeferred(mountOwner, () => build(mountOwner, values));
+        }
+    }
+
+    private abstract class ContextProvider
+    {
+        internal abstract MountEnvironment Apply(MountEnvironment environment);
+    }
+
+    private sealed class ContextProvider<T>(T value, ContextProviderSource source) : ContextProvider
+    {
+        internal override MountEnvironment Apply(MountEnvironment environment) =>
+            environment.Provide(value, source);
     }
 }
 
@@ -222,9 +367,9 @@ public sealed class ComponentRecipe
 /// <remarks>Content recipes are immutable. A <see cref="ComponentContent"/> group commits them in declaration order without adding a wrapper element.</remarks>
 public sealed class ContentRecipe
 {
-    private readonly Action<CompositionContext, Element> _mount;
+    private readonly Action<MountContext, Element> _mount;
 
-    internal ContentRecipe(Action<CompositionContext, Element> mount) => _mount = mount;
+    internal ContentRecipe(Action<MountContext, Element> mount) => _mount = mount;
 
     /// <summary>Creates a retained conditional contribution.</summary>
     public static ContentRecipe When(string name, Func<bool> active, ComponentRecipe content)
@@ -275,7 +420,7 @@ public sealed class ContentRecipe
         );
     }
 
-    internal void Mount(CompositionContext context, Element parent) => _mount(context, parent);
+    internal void Mount(MountContext context, Element parent) => _mount(context, parent);
 }
 
 /// <summary>The selected retained conditional branch and its recipe.</summary>

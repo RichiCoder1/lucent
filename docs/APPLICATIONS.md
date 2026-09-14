@@ -37,7 +37,7 @@ static int Main()
 }
 ```
 
-`InboxModel` and `SaveService` above are application-owned types, not built-in persistence APIs. Register services with constructors or explicit factories; the host validates scope usage. A singleton service owns application-wide work. One application DI scope owns scoped models, and transient dependencies follow normal Microsoft DI ownership. The factory resolves the model once and passes it into `.lui`; child components receive typed parameters instead of looking up services.
+`InboxModel` and `SaveService` above are application-owned types, not built-in persistence APIs. Register services with constructors or explicit factories; the host validates scope usage. A singleton service owns application-wide work. One application DI scope owns scoped models, and transient dependencies follow normal Microsoft DI ownership. The explicit-parameter example remains useful for invocation-specific models. A feature component can instead declare `inject InboxModel model;` to borrow from that same application scope; `HostedApplication` installs the binding automatically. Use `context` for ancestry-scoped capabilities such as a navigation session, and ordinary parameters for values specific to a particular invocation.
 
 ```lui
 namespace Notes;
@@ -54,6 +54,16 @@ internal component Inbox(InboxModel model, ApplicationSession session) {
 The example illustrates the authoring boundary, not the planned application's final visual design. The executable [lifecycle fixture](../tests/Lucent.Platform.Windows.TestHost/Lifecycle.lui) exercises the same public path.
 
 ## Closing without losing accepted work
+
+Component requirements resolve once per mount before initializers or setup. Their
+cached references remain borrowed: unmount, failed activation and route retirement
+do not dispose shared-container services. UI-affine resources belong to component
+scopes, using owner-aware APIs or `[Owned] readonly` for new synchronous disposables.
+At terminal shutdown the service binding rejects new mounts and resolutions,
+allows existing borrowers to clean up, and revokes access before provider disposal.
+Popup compositions borrow the origin's context and services with a tracked lease;
+their own theme and reactive scope remain independent, and they must close before
+the provider can be released.
 
 `PrepareCloseAsync` must prevent new accepted writes, await existing accepted saves and return true only when closing is safe. For an expected validation or save failure, publish recoverable application state and return false; services and UI remain alive, and the next `session.RequestClose()` retries preparation. An exception escaping preparation is unexpected and terminates the session. `session.Status` is reactive and can drive progress and disabled editing, while the application model owns recoverable error details. Requests during startup are remembered; repeated requests during preparation do not run duplicate saves.
 

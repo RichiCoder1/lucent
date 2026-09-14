@@ -320,7 +320,7 @@ public static partial class Components
         );
 
     private static void MountListBox<TKey>(
-        CompositionContext context,
+        MountContext context,
         Element root,
         string label,
         Derived<ChoiceItem<TKey>[]> current,

@@ -31,7 +31,7 @@ internal static class Program
                 )
                 .SetTitle("Lucent Issue Browser")
                 .Build()
-                .Run(IssueBrowserStructure.Create());
+                .Run(IssueBrowserStructure.CreateHosted());
         }
         catch (Exception exception)
         {

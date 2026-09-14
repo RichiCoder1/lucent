@@ -13,6 +13,60 @@ namespace Lucent.Desktop.Tests;
 public sealed partial class PublishedIssueBrowserTests
 {
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void FlaUiPopupOpensTypedRouteThroughOriginContext(bool native)
+    {
+        using var process = StartApplication(native ? "--native-menus" : null);
+        try
+        {
+            var owner = WaitForWindow(process);
+            using var automation = new UIA3Automation();
+            var root = automation.FromHandle(owner);
+            ActivateOwnedWindow(process, root, owner);
+            var list = root.FindFirstDescendant(c =>
+                c.ByControlType(ControlType.List).And(c.ByName("Issues"))
+            )!;
+            WaitUntil(
+                process,
+                () => FindIssueRow(list, 9998) is not null,
+                "The navigation fixture rows did not appear."
+            );
+            FindIssueRow(list, 10000)!.Patterns.SelectionItem.Pattern.Select();
+            Mouse.RightClick(Center(FindIssueRow(list, 9998)!.BoundingRectangle));
+            UiElement? open = null;
+            WaitUntil(
+                process,
+                () => (open = FindPopupItem(automation, process, owner, "Open issue")) is not null,
+                "The popup did not expose its context-backed navigation command."
+            );
+            Assert.IsTrue(
+                FindIssueRow(list, 10000)!.Patterns.SelectionItem.Pattern.IsSelected.Value,
+                "Opening a menu changed selection before navigation."
+            );
+            open!.Patterns.Invoke.Pattern.Invoke();
+            WaitUntil(
+                process,
+                () => FindPopupItem(automation, process, owner, "Open issue") is null,
+                "Committed navigation did not dismiss its popup."
+            );
+            WaitUntil(
+                process,
+                () => root.FindFirstDescendant(c => c.ByName("ISSUE #9998")) is not null,
+                "The popup did not open the requested typed route."
+            );
+            Assert.IsTrue(
+                FindIssueRow(list, 9998)!.Patterns.SelectionItem.Pattern.IsSelected.Value,
+                "Committed route and application selection diverged."
+            );
+        }
+        finally
+        {
+            StopApplication(process);
+        }
+    }
+
+    [TestMethod]
     public void FlaUiSplitPaneResizesAndRestoresAcrossNarrowNavigation()
     {
         using var process = StartApplication();
@@ -106,8 +160,7 @@ public sealed partial class PublishedIssueBrowserTests
             UiElement? back = null;
             WaitUntil(
                 process,
-                () =>
-                    (back = root.FindFirstDescendant(c => c.ByName("Back to issues"))) is not null,
+                () => (back = root.FindFirstDescendant(c => c.ByName("Back"))) is not null,
                 "Selecting a narrow issue did not open detail navigation."
             );
             CaptureWorkspace(root, "stock-narrow-detail");
@@ -122,6 +175,39 @@ public sealed partial class PublishedIssueBrowserTests
                 "Back did not restore the issue list."
             );
             CaptureWorkspace(root, "stock-narrow-list");
+            list = root.FindFirstDescendant(c =>
+                c.ByControlType(ControlType.List).And(c.ByName("Issues"))
+            )!;
+            row = FindIssueRow(list, 10000)!;
+            Assert.IsTrue(
+                row.Patterns.SelectionItem.Pattern.IsSelected.Value,
+                "Returning through history lost collection selection."
+            );
+            Mouse.LeftClick(Center(row.BoundingRectangle));
+            WaitUntil(
+                process,
+                () => (back = root.FindFirstDescendant(c => c.ByName("Back"))) is not null,
+                "Reopening the issue did not restore its route."
+            );
+            back!.Focus();
+            Keyboard.Press(VirtualKeyShort.LMENU);
+            try
+            {
+                TypeNavigation(VirtualKeyShort.LEFT);
+            }
+            finally
+            {
+                Keyboard.Release(VirtualKeyShort.LMENU);
+            }
+            WaitUntil(
+                process,
+                () =>
+                    root.FindFirstDescendant(c =>
+                        c.ByControlType(ControlType.List).And(c.ByName("Issues"))
+                    )
+                        is not null,
+                "Native Alt+Left did not traverse the same guarded history as the Back button."
+            );
             Assert.IsTrue(SetWindowPos(owner, 0, 0, 0, 1120, 760, SwpNoMove));
             WaitUntil(
                 process,

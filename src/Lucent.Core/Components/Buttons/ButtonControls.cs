@@ -131,7 +131,8 @@ internal static partial class Controls
         string label,
         Action? activate = null,
         Style? style = null,
-        bool focusOnPointer = true
+        bool focusOnPointer = true,
+        FocusTarget? focusTarget = null
     )
     {
         label = Required(label, nameof(label));
@@ -144,7 +145,8 @@ internal static partial class Controls
                 "button",
                 SemanticDeclaration.Create(SemanticRole.Button, label).Invoke(true).Build(),
                 activate,
-                focusOnPointer
+                focusOnPointer,
+                focusTarget
             )
         );
     }
@@ -154,7 +156,8 @@ internal static partial class Controls
         ThemeContext theme,
         string label,
         Action? activate = null,
-        Style? style = null
+        Style? style = null,
+        FocusTarget? focusTarget = null
     )
     {
         label = Required(label, nameof(label));
@@ -166,7 +169,8 @@ internal static partial class Controls
             new ButtonBehavior(
                 "button",
                 SemanticDeclaration.Create(SemanticRole.Button, label).Invoke(true).Build(),
-                activate
+                activate,
+                focusTarget: focusTarget
             )
         );
     }

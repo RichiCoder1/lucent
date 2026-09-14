@@ -64,6 +64,7 @@ public sealed class ApplicationSession
     private int _closePreparationGeneration;
     private CancellationTokenSource? _closePreparationCancellation;
     private Task<bool>? _closePreparationTask;
+    private ComponentServiceBinding? _componentServices;
 
     internal ApplicationSession(
         string title,
@@ -102,6 +103,22 @@ public sealed class ApplicationSession
 
     /// <summary>The root lifetime scope for application UI resources.</summary>
     public ReactiveScope Scope => Composition.Root.Scope;
+
+    /// <summary>Creates this session's single lifecycle-owned component service binding.</summary>
+    public ComponentServiceBinding CreateServiceBinding(IComponentServiceSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        CheckOwner();
+        if (_finishing || _completed)
+            throw new InvalidOperationException(
+                "Application services cannot be attached during terminal cleanup."
+            );
+        if (_componentServices is not null)
+            throw new InvalidOperationException(
+                "An application session can create only one component service binding."
+            );
+        return _componentServices = new ComponentServiceBinding(this, source);
+    }
 
     /// <summary>The reactively tracked lifecycle phase and latest actionable or terminal error.</summary>
     public ApplicationStatus Status
@@ -280,6 +297,8 @@ public sealed class ApplicationSession
         if (Status.Phase == ApplicationPhase.Running)
             _ = PrepareCloseCoreAsync();
     }
+
+    internal void CheckOwnerForServices() => CheckOwner();
 
     private async Task PrepareCloseCoreAsync()
     {

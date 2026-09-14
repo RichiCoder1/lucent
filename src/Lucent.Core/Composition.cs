@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Text;
 
@@ -17,15 +18,19 @@ public sealed partial class Composition : IDisposable
     private readonly HashSet<SemanticIdentity> _emittedSemantics = [];
     private readonly MotionTimeline _motion;
     private long _nextElementId;
-    private CompositionContext? _factory;
+    private MountContext? _factory;
     private int _behaviorDepth;
     private InputRouter? _input;
     private readonly List<IVirtualizedRegion> _virtualized = [];
     private long _nextSceneGeneration;
     private long _interactionVisualGeneration;
     private long _semanticRevision;
+    private long _nextContextProviderId;
     private readonly List<Element> _ownedCleanup = [];
     private int _factoryRollbackDepth;
+    private readonly ConditionalWeakTable<ThemeContext, MountEnvironment> _mountEnvironments =
+        new();
+    private MountEnvironment? _themeIndependentEnvironment;
 
     /// <summary>Initializes a composition with a stable root on the graph UI thread.</summary>
     public Composition(ReactiveGraph graph, string name)
@@ -158,9 +163,11 @@ public sealed partial class Composition : IDisposable
     }
     internal ReactiveGraph Graph => _graph;
     internal ContextMenuRequest? MenuSession { get; set; }
-    internal CompositionContext? Factory => _factory;
+    internal MountContext? Factory => _factory;
     internal long Epoch => _epoch;
     internal InputRouter? InputIfCreated => _input;
+
+    internal long NextContextProviderId() => checked(++_nextContextProviderId);
 
     internal long NextSceneGeneration()
     {
@@ -283,11 +290,7 @@ public sealed partial class Composition : IDisposable
     }
 
     /// <summary>Atomically mounts one recipe root below <paramref name="parent"/> using the supplied theme.</summary>
-    public Element Mount(
-        Element parent,
-        ThemeContext theme,
-        Func<CompositionContext, Element> content
-    )
+    public Element Mount(Element parent, ThemeContext theme, Func<MountContext, Element> content)
     {
         ThrowIfFactoryCreation();
         ThrowIfDisposed();
@@ -326,7 +329,7 @@ public sealed partial class Composition : IDisposable
         Element parent,
         string name,
         Func<bool> active,
-        Func<CompositionContext, Element> content
+        Func<MountContext, Element> content
     )
     {
         var theme = RequirePresentedRegionTheme(parent, nameof(When));
@@ -339,7 +342,7 @@ public sealed partial class Composition : IDisposable
         ThemeContext theme,
         string name,
         Func<bool> active,
-        Func<CompositionContext, Element> content
+        Func<MountContext, Element> content
     )
     {
         ThrowIfFactoryCreation();
@@ -355,7 +358,7 @@ public sealed partial class Composition : IDisposable
         Element parent,
         string name,
         Func<bool> active,
-        Func<CompositionContext, Element> content
+        Func<MountContext, Element> content
     )
     {
         ThrowIfFactoryCreation();
@@ -411,7 +414,7 @@ public sealed partial class Composition : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content
+        Func<CurrentItem<TItem>, MountContext, Element> content
     )
         where TKey : notnull
     {
@@ -426,7 +429,7 @@ public sealed partial class Composition : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content
+        Func<CurrentItem<TItem>, MountContext, Element> content
     )
         where TKey : notnull
     {
@@ -445,7 +448,7 @@ public sealed partial class Composition : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content
+        Func<CurrentItem<TItem>, MountContext, Element> content
     )
         where TKey : notnull
     {
@@ -511,7 +514,7 @@ public sealed partial class Composition : IDisposable
         string name,
         Func<IEnumerable<TItem>> source,
         Func<TItem, TKey> key,
-        Func<CurrentItem<TItem>, CompositionContext, Element> content,
+        Func<CurrentItem<TItem>, MountContext, Element> content,
         float rowHeight,
         ThemeContext theme
     )
@@ -541,6 +544,16 @@ public sealed partial class Composition : IDisposable
         ThrowIfDisposed();
         var dump = new StringBuilder("composition\n");
         Append(Root, null, dump);
+        return dump.ToString();
+    }
+
+    /// <summary>Returns deterministic context placement diagnostics without serializing provider values.</summary>
+    public string ContextDump()
+    {
+        _graph.CheckThread();
+        ThrowIfDisposed();
+        var dump = new StringBuilder("context\n");
+        AppendContext(Root, dump, []);
         return dump.ToString();
     }
 
@@ -667,7 +680,7 @@ public sealed partial class Composition : IDisposable
         Element parent,
         string name,
         bool attach,
-        CompositionContext? factory = null,
+        MountContext? factory = null,
         ReactiveScope? scope = null
     )
     {
@@ -710,7 +723,7 @@ public sealed partial class Composition : IDisposable
         return element;
     }
 
-    internal T RunFactory<T>(CompositionContext context, Func<T> factory)
+    internal T RunFactory<T>(MountContext context, Func<T> factory)
     {
         _graph.CheckThread();
         ArgumentNullException.ThrowIfNull(factory);
@@ -733,10 +746,23 @@ public sealed partial class Composition : IDisposable
     internal Element MountCore(
         Element parent,
         ThemeContext theme,
-        Func<CompositionContext, Element> content
+        Func<MountContext, Element> content
+    ) => MountCore(parent, EnvironmentFor(parent, theme), content);
+
+    internal Element MountCore(
+        Element parent,
+        MountEnvironment environment,
+        Func<MountContext, Element> content
     )
     {
-        var context = new CompositionContext(this, parent, theme);
+        ArgumentNullException.ThrowIfNull(environment);
+        if (!ReferenceEquals(environment.Composition, this))
+            throw new ArgumentException(
+                "The mount environment belongs to another composition.",
+                nameof(environment)
+            );
+        environment.CheckMountAdmission();
+        var context = new MountContext(this, parent, environment: environment);
         try
         {
             var created = context.Run(() => content(context));
@@ -781,6 +807,53 @@ public sealed partial class Composition : IDisposable
         {
             _behaviorDepth--;
         }
+    }
+
+    internal MountEnvironment EnvironmentFor(ThemeContext? theme)
+    {
+        _graph.CheckThread();
+        ThrowIfDisposed();
+        if (theme is null)
+            return _themeIndependentEnvironment ??= MountEnvironment.CreateRoot(this, null);
+        if (_mountEnvironments.TryGetValue(theme, out var environment))
+            return environment;
+        environment = MountEnvironment.CreateRoot(this, theme);
+        _mountEnvironments.Add(theme, environment);
+        return environment;
+    }
+
+    internal MountEnvironment EnvironmentFor(Element parent, ThemeContext? theme)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        if (!ReferenceEquals(parent.Composition, this))
+            throw new ArgumentException(
+                "The parent belongs to another composition.",
+                nameof(parent)
+            );
+        return parent.MountEnvironment is { } inherited
+            ? inherited.WithTheme(theme)
+            : EnvironmentFor(theme);
+    }
+
+    internal void InstallBorrowedMountEnvironment(Element origin, ThemeContext theme)
+    {
+        _graph.CheckThread();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(origin);
+        ArgumentNullException.ThrowIfNull(theme);
+        origin.ThrowIfDisposed();
+        if (!ReferenceEquals(origin.Composition.Graph, _graph))
+            throw new ArgumentException(
+                "A popup origin must share the popup composition's reactive graph.",
+                nameof(origin)
+            );
+        if (Root.MountEnvironment is not null)
+            throw new InvalidOperationException(
+                "A popup composition can install its borrowed mount environment only once."
+            );
+
+        var source = origin.MountEnvironment ?? origin.Composition.EnvironmentFor(origin, theme);
+        Root.SetMountEnvironment(source.BorrowForPopup(this, theme), []);
     }
 
     internal void RunBehaviorCleanup(Action cleanup)
@@ -993,6 +1066,8 @@ public sealed partial class Composition : IDisposable
             return;
         List<Exception>? errors = null;
         IsDisposed = true;
+        _mountEnvironments.Clear();
+        _themeIndependentEnvironment = null;
         _motion.Clear();
         RunOwnedCleanup(
             Root,
@@ -1037,6 +1112,41 @@ public sealed partial class Composition : IDisposable
         element.AppendPresentationDump(dump);
         foreach (var child in element.Children)
             Append(child, element, dump);
+    }
+
+    private static void AppendContext(
+        Element element,
+        StringBuilder dump,
+        HashSet<long> emittedProviders
+    )
+    {
+        if (element.IsDisposed)
+            return;
+        foreach (var provider in element.ContextProviders)
+            if (emittedProviders.Add(provider.OwnerId))
+                dump.Append("provider owner=")
+                    .Append(provider.OwnerId.ToString(CultureInfo.InvariantCulture))
+                    .Append(" type=")
+                    .Append(Quote(provider.TypeName))
+                    .Append(" source=")
+                    .Append(Quote(provider.SourceLocation))
+                    .Append(" shadowed=")
+                    .Append(provider.ShadowedOwnerId?.ToString(CultureInfo.InvariantCulture) ?? "-")
+                    .Append('\n');
+        foreach (var requirement in element.ContextRequirements)
+            dump.Append("consumer mount=")
+                .Append(element.Id.ToString(CultureInfo.InvariantCulture))
+                .Append(" kind=")
+                .Append(requirement.Kind == ComponentRequirementKind.Context ? "context" : "inject")
+                .Append(" member=")
+                .Append(Quote(requirement.Member))
+                .Append(" type=")
+                .Append(Quote(requirement.TypeName))
+                .Append(" source=")
+                .Append(Quote(requirement.SourceLocation))
+                .Append('\n');
+        foreach (var child in element.Children)
+            AppendContext(child, dump, emittedProviders);
     }
 
     private static List<SemanticSnapshot> BuildSemantic(Element element)

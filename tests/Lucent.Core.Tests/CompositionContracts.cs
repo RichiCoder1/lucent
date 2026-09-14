@@ -2136,7 +2136,7 @@ public sealed class CompositionContracts
         using var composition = new Composition(graph, "factory-guard-root-" + api + keyed);
         var cleanup = 0;
         Element region;
-        Func<CompositionContext, Element> content = context =>
+        Func<MountContext, Element> content = context =>
         {
             var root = context.Element("factory-guard-child-" + api + keyed);
             root.Scope.OnDispose(() => cleanup++);

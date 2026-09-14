@@ -1,0 +1,22 @@
+namespace Lucent.IssueBrowser;
+style RouteDetailStyle {
+    Axis: LayoutAxis.Column;
+    MainGrow: 1;
+    MinHeight: 0;
+    Clip: true;
+}
+
+public component IssueRouteView() {
+    context RouteContext<IssueRoute> route;
+    context IssueBrowserState browser;
+    context IssueBrowserViewState view;
+    BrowserIssue? opened = browser.Issues.FirstOrDefault(issue => issue.Number == route.Parameters.Number);
+    <Layout style={RouteDetailStyle}>
+        if (opened is not null) {
+            <Details browser={browser} issue={() => opened!} view={view} name="issue-browser.details" />
+        }
+        if (opened is null) {
+            <Text style={PresentationStyles.Title}>This issue is not available</Text>
+        }
+    </Layout>
+}

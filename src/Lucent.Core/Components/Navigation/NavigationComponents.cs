@@ -311,7 +311,7 @@ public static partial class Components
     private static ComponentRecipe Host(
         string kind,
         ComponentContent content,
-        Action<CompositionContext, Element> configure
+        Action<MountContext, Element> configure
     )
     {
         content = Content(content);

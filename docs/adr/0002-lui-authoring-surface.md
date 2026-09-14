@@ -39,6 +39,12 @@ The same compiler and project-context model serves build and editor tooling. The
 
 ## Consequences
 
+ADR 0009 extends this decision with dedicated borrowed `context`/`inject`
+declarations, the structural `Provide` intrinsic, and `[Owned] readonly`
+declarations. They lower to the same retained recipe and scope model; they do not
+introduce component rerendering or an ambient service locator. The mount proof is
+accepted; full language/editor and consumer integration remains tracked by #203.
+
 - `.lui` cannot require reflection, runtime parsing, stale generated files, a compatibility reader, or a parallel runtime.
 - Invalid components do not emit; parser recovery continues diagnostics for later independent constructs.
 - Application logic and state remain C# models or adjacent partial static helpers initially. Local state sugar, broader C# islands, service injection, relaxed live-reader syntax, literal color sugar, `public style`, named slots, reactive component-root switching, generic component declarations, hot reload, keyframes, and shared source-component tooling are follow-ups over proven contracts.

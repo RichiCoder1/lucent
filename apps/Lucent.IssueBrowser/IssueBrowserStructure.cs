@@ -1,10 +1,32 @@
 using System.Net;
 using System.Text;
+using Lucent.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Lucent.IssueBrowser;
 
 public static class IssueBrowserStructure
 {
+    /// <summary>Creates the offline reference application with lifecycle-owned feature services.</summary>
+    public static HostedApplication CreateHosted() =>
+        new(
+            _ =>
+            {
+                IssueFixture.AssertIntegrity();
+                var builder = HostedApplication.CreateBuilder();
+                builder.Services.AddScoped(_ => new HttpClient(new FixtureHttpHandler())
+                {
+                    BaseAddress = new Uri("https://api.github.local/"),
+                });
+                builder.Services.AddScoped(services => new GitHubIssueSource(
+                    services.GetRequiredService<HttpClient>()
+                ));
+                builder.Services.AddScoped<IIssueStatusSource>(_ => new FixtureIssueStatusSource());
+                return builder.Build();
+            },
+            (_, _) => Components.HostedIssueBrowser()
+        );
+
     public static ComponentRecipe Create() =>
         Create(scope =>
         {
