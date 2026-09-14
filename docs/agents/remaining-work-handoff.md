@@ -21,12 +21,18 @@ The [before/after measurements](../plans/semantic-capabilities-baseline.md) show
 lower allocations in all five cases, including 2,216 → 2,120 B for caret updates
 and 41,128 → 34,552 B for virtualized-list projection. Generation churn is
 unchanged; equality suppression is deferred. No new broad manual accessibility,
-IME or mixed-DPI claim is made. CI NativeAOT/package verification and publication
-remain pending; the latest published Lucent package is `0.3.0-dev.73.1`.
+IME or mixed-DPI claim is made. Source `d44f265` passed
+[CI 34805441710](https://github.com/RichiCoder1/lucent/actions/runs/34805441710),
+including NativeAOT/package-consumer verification, and is published as
+`0.3.0-dev.74.1`. Architecture positive/negative and formatting checks also pass.
 
-Next: close this publication, then the bounded `.lui` callback diagnostic #290,
-followed by typed composition context/service injection #203 and URI navigation
-#204. Live compilation remains a separate workstream.
+The bounded `.lui` callback diagnostic #290 is implemented in `5ebb236`. All 72
+compiler and 28 language-server tests pass; the new tests pin exact authored
+assignment spans and named-method recovery for both C# and `.lui` state. The
+allowlist and runtime state rules are unchanged. Local logs are
+`artifacts/callback290-{red,green,suites}.log`. Publication is pending. Next are
+typed composition context/service injection #203 and URI navigation #204. Live
+compilation remains a separate workstream.
 
 ## September 13 execution checkpoint
 
@@ -271,9 +277,10 @@ Computer Use's transient-element cache and arrow/Enter injection were unreliable
 Tooling follow-up #276, desktop interaction #279–289, and C# authoring #265–275
 are complete at the source and verification boundaries recorded above. Authoring
 is published as `0.3.0-dev.73.1`; its final focused Computer Use repeat passed and
-was recorded in `910b2dc`. Semantic capabilities #291–294 are the current work;
-their baseline is `910b2dc`. Context/navigation #203/#204 remains a separate later
-phase. Callback diagnostics #290 is a separate small authoring follow-up.
+was recorded in `910b2dc`. Semantic capabilities #291–294 are delivered in
+`d44f265`/`0.3.0-dev.74.1`; their baseline is `910b2dc`. Callback diagnostics #290
+are implemented in `5ebb236`, with publication pending. Context/navigation
+#203/#204 is next.
 
 ## Scope and workspace constraints
 
