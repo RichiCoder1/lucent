@@ -98,14 +98,19 @@ space; sources, logs, package identity and published executable remain.
 Computer Use verified the local C# counter, reset on remount, and Gauge updates
 in dark, light and high contrast. The refreshed NativeAOT Component Browser
 SHA-256 is `6AF6F18A2A224361DEC566B6BE21D51D5F848D1F117C38BFE5C6CA247D7FB157`.
-The optional final repeat for its wrapped source note and constrained Gauge remains
-unverified. After earlier Escape reports, the user authorized finalization on
-2026-09-13. A fresh Computer Use session successfully listed desktop windows, but
-both launch attempts returned `accessibility window-opened handler did not become ready`;
-the intervening window list contained no Component Browser. The executable hash
-above was rechecked. No fresh manual pass is claimed for that executable, and no
-permission question remains pending. Current CI pixel and native Windows contracts
-pass; the optional visual repeat can resume when the Computer Use helper works.
+The final focused Computer Use repeat passed on 2026-09-13 against that rechecked
+executable hash: the companion C# source note wraps without clipping, Apply change
+increments the local counter, returning to Buttons resets it on remount, and the
+Gauge label stays centered and contained while its arc and value advance from 38%
+to 54%. Dark, light and high-contrast Gauge presentation remained legible. The app
+closed normally, confirmed by a subsequent window list. This was the final focused
+authoring check, not another full component-catalog walkthrough.
+
+Earlier launch attempts returned `accessibility window-opened handler did not become ready`.
+The successful repeat used a newly started native Computer Use helper; no Lucent
+code or executable changed. This supports stale helper state as the explanation,
+but the underlying accessibility-listener failure was not established. No visual
+repeat or permission question remains pending for this authoring closeout.
 
 The matching language server is installed and configured only for the local
 Lucent VS Code workspace; a window reload activates it. Other workspaces keep
