@@ -16,17 +16,33 @@ public static class LuiSourceComparison
         if (source is null)
             throw new ArgumentNullException(nameof(source));
         var document = LuiParser.Parse(source);
+        return StructuralKey(document);
+    }
+
+    internal static string? StructuralKey(LuiDocumentSyntax document)
+    {
         if (document.Diagnostics.Count != 0)
             return null;
+        var source = document.Source;
         var key = new StringBuilder();
-        foreach (var token in SyntaxFactory.ParseTokens(source))
+        // Scalar body text follows LUI rules, not C# lexing (for example https://).
+        // Mask it before lexing structural/island tokens, then compare its exact value.
+        var textNodes = new List<LuiTextSyntax>();
+        if (document.Component is { } component)
+            Collect(component.Body);
+        var lexical = new StringBuilder(source);
+        for (var index = textNodes.Count - 1; index >= 0; index--)
+            lexical
+                .Remove(textNodes[index].Span.Start, textNodes[index].Span.Length)
+                .Insert(textNodes[index].Span.Start, " __luiText" + index + " ");
+        foreach (var token in SyntaxFactory.ParseTokens(lexical.ToString()))
         {
             Trivia(token.LeadingTrivia);
             Append(token.RawKind, token.Text);
             Trivia(token.TrailingTrivia);
         }
-        if (document.Component is { } component)
-            Body(component.Body);
+        foreach (var text in textNodes)
+            Append(-1, text.Text);
         return key.ToString();
 
         void Append(int kind, string text) =>
@@ -40,23 +56,23 @@ public static class LuiSourceComparison
                 )
                     Append(item.RawKind, item.ToFullString());
         }
-        void Body(IReadOnlyList<LuiBodySyntax> nodes)
+        void Collect(IReadOnlyList<LuiBodySyntax> nodes)
         {
             foreach (var node in nodes)
                 switch (node)
                 {
                     case LuiTextSyntax text:
-                        Append(-1, text.Text);
+                        textNodes.Add(text);
                         break;
                     case LuiElementSyntax element:
-                        Body(element.Children);
+                        Collect(element.Children);
                         break;
                     case LuiIfSyntax conditional:
-                        Body(conditional.ThenBody);
-                        Body(conditional.ElseBody);
+                        Collect(conditional.ThenBody);
+                        Collect(conditional.ElseBody);
                         break;
                     case LuiForEachSyntax loop:
-                        Body(loop.Body);
+                        Collect(loop.Body);
                         break;
                 }
         }

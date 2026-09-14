@@ -371,14 +371,8 @@ internal component Example() { <Text style={Scrolling}>Scrollbar theme</Text> }
         Assert(
             structuralOperatorFormatted
                 == LuiFormatter.Format(structuralOperatorFormatted, LuiLineEnding.Lf)
-                && structuralOperatorFormatted.Contains(
-                    "if ((count < 2 && Check<int>()) || (count <= limit && (limit > 0)))",
-                    StringComparison.Ordinal
-                )
-                && structuralOperatorFormatted.Contains(
-                    "keyed by Key<int>(item <= count ? item : count)",
-                    StringComparison.Ordinal
-                ),
+                && LuiSourceComparison.StructuralKey(structuralOperatorFormatted)
+                    == LuiSourceComparison.StructuralKey(structuralOperatorSource),
             "structural expression formatting changed comparison or generic token text."
         );
         var missingLoopClose = LuiParser.Parse(
@@ -732,9 +726,8 @@ internal component Example() { <Text style={Scrolling}>Scrollbar theme</Text> }
                     "when Selected | FocusVisible { P: count",
                     StringComparison.Ordinal
                 ) == false
-                && formatterSemantic.Contains(
-                    "when Selected | FocusVisible { Q: label; R: count; }"
-                )
+                && LuiSourceComparison.StructuralKey(formatterSemantic)
+                    == LuiSourceComparison.StructuralKey(formatterSemanticSource)
                 && (
                     (LuiStyleWithSyntax)
                         ((LuiElementSyntax)formatterSemanticDocument.Component!.Body.Single())

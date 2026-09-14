@@ -57,6 +57,9 @@ internal sealed class LuiLayoutDocument
     internal static LuiLayoutDocument HardLine { get; } =
         new(Kind.Line, "", [], true, int.MaxValue);
 
+    internal static LuiLayoutDocument BreakParent { get; } =
+        new(Kind.Text, "", [], false, int.MaxValue);
+
     internal static LuiLayoutDocument Concat(params LuiLayoutDocument[] items) =>
         new(
             Kind.Concat,
@@ -92,18 +95,29 @@ internal sealed class LuiLayoutDocument
         string indent = "    ",
         string newline = "\n",
         int tabWidth = 4
-    )
+    ) => Render(width, level => string.Concat(Enumerable.Repeat(indent, level)), newline, tabWidth);
+
+    internal string Render(LuiFormattingOptions options, string newline) =>
+        Render(options.LineWidth, options.Padding, newline, options.TabWidth);
+
+    private string Render(int width, Func<int, string> padding, string newline, int tabWidth)
     {
         var result = new StringBuilder();
         var pending = new Stack<(LuiLayoutDocument Document, int Indent, bool Flat)>();
         pending.Push((this, 0, false));
         var column = 0;
+        string? pendingPadding = null;
         while (pending.Count != 0)
         {
             var (document, level, flat) = pending.Pop();
             switch (document.kind)
             {
                 case Kind.Text:
+                    if (document.text.Length != 0 && pendingPadding is not null)
+                    {
+                        result.Append(pendingPadding);
+                        pendingPadding = null;
+                    }
                     result.Append(document.text);
                     foreach (var character in document.text)
                         column =
@@ -120,9 +134,14 @@ internal sealed class LuiLayoutDocument
                     else
                     {
                         result.Append(newline);
-                        for (var index = 0; index < level; index++)
-                            result.Append(indent);
-                        column = level * (indent == "\t" ? tabWidth : indent.Length);
+                        var prefix = padding(level);
+                        pendingPadding = prefix;
+                        column = 0;
+                        foreach (var character in prefix)
+                            column =
+                                character == '\t'
+                                    ? column + tabWidth - column % tabWidth
+                                    : column + 1;
                     }
                     break;
                 case Kind.Concat:

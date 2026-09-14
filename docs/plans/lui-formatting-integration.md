@@ -112,3 +112,26 @@ parsing; F05 must remeasure these specimens. ComponentDetail is the largest trac
 repository `.lui` file at this checkpoint. Preserve the editor's existing
 no-whole-graph-hover contract, and investigate warm key regressions beyond the
 observed approximately 2 ms p95 for Buttons and 6 ms for ComponentDetail before adoption.
+
+## F02 layout delivery
+
+The grouped printer replaces the old structure-only printer, including C# members,
+parameter/argument lists, expression wrapping and structural conditions. It shares
+indentation, soft width and EOL settings, inserts the mandatory declaration/recipe
+separator, preserves grouping and expands multi-assignment inline styles. Complete
+adjacent range boundaries include named-style members; surrounding text stays exact.
+Reasoned `lui-format-ignore` markers retain their next node's authored slice, including
+nested selections. Invalid, unreasoned and dangling markers report `LUI6003`.
+
+Roslyn normalization needed two corrections established by regression tests: spacing
+before an invocation's `is` pattern, and wrapping indentation inside method blocks.
+Literal tokens and interpolated strings retain their authored contents. Structural
+EOL overrides do not rewrite multiline string contents. A maintained test compiles
+and executes actual formatter output and compares raw/verbatim/interpolated results.
+The preservation key now reuses the input parse and handles LUI text independently
+of C# lexing, including URLs. Hover continues to use this key rather than the printer.
+
+The complete compiler suite passed 116 tests with the F02 implementation and the
+in-progress configuration/lint contracts. The earlier read-only source/app corpus
+accepted all 69 files; final full-repository migration and post-migration performance
+measurement remain F05/F06 work. No broad source-format migration is included here.

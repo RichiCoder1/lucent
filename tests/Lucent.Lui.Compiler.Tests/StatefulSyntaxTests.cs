@@ -164,14 +164,20 @@ internal component Disclosure(string value) {
     }
 
     [TestMethod]
-    public void FormatterPreservesMemberTextAndIsIdempotent()
+    public void FormatterFormatsMemberSyntaxAndIsIdempotent()
     {
         const string source =
             "internal component X(){bool expanded=false;void Toggle(){ expanded = !expanded; }Setup(owner){ owner.Own(value); }<Text>{expanded}</Text>}";
         var formatted = LuiFormatter.Format(source, LuiLineEnding.Lf);
-        StringAssert.Contains(formatted, "    bool expanded=false;\n");
-        StringAssert.Contains(formatted, "    void Toggle(){ expanded = !expanded; }\n");
-        StringAssert.Contains(formatted, "    Setup(owner){ owner.Own(value); }\n");
+        StringAssert.Contains(formatted, "    bool expanded = false;\n");
+        StringAssert.Contains(
+            formatted,
+            "    void Toggle() {\n        expanded = !expanded;\n    }\n"
+        );
+        StringAssert.Contains(
+            formatted,
+            "    Setup(owner) {\n        owner.Own(value);\n    }\n\n    <Text>"
+        );
         Assert.AreEqual(formatted, LuiFormatter.Format(formatted, LuiLineEnding.Lf));
     }
 

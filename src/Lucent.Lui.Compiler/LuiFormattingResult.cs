@@ -77,7 +77,20 @@ public static partial class LuiFormatter
         string source,
         LuiLineEnding lineEnding = LuiLineEnding.Preserve,
         CancellationToken cancellationToken = default
-    ) => FormatSafely(source, null, lineEnding, cancellationToken);
+    ) =>
+        FormatSafely(
+            source,
+            null,
+            new LuiFormattingOptions(lineEnding: lineEnding),
+            cancellationToken
+        );
+
+    /// <summary>Formats with the shared project's indentation, width and line-ending policy.</summary>
+    public static LuiFormattingResult FormatDocument(
+        string source,
+        LuiFormattingOptions options,
+        CancellationToken cancellationToken = default
+    ) => FormatSafely(source, null, options, cancellationToken);
 
     /// <summary>Formats a safe complete syntax selection, returning explicit unavailability when none applies.</summary>
     public static LuiFormattingResult FormatSelection(
@@ -85,17 +98,33 @@ public static partial class LuiFormatter
         LuiSpan range,
         LuiLineEnding lineEnding = LuiLineEnding.Preserve,
         CancellationToken cancellationToken = default
-    ) => FormatSafely(source, range, lineEnding, cancellationToken);
+    ) =>
+        FormatSafely(
+            source,
+            range,
+            new LuiFormattingOptions(lineEnding: lineEnding),
+            cancellationToken
+        );
+
+    /// <summary>Formats complete selected boundaries with the shared project policy.</summary>
+    public static LuiFormattingResult FormatSelection(
+        string source,
+        LuiSpan range,
+        LuiFormattingOptions options,
+        CancellationToken cancellationToken = default
+    ) => FormatSafely(source, range, options, cancellationToken);
 
     private static LuiFormattingResult FormatSafely(
         string source,
         LuiSpan? range,
-        LuiLineEnding lineEnding,
+        LuiFormattingOptions options,
         CancellationToken cancellationToken
     )
     {
         if (source is null)
             throw new ArgumentNullException(nameof(source));
+        if (options is null)
+            throw new ArgumentNullException(nameof(options));
         if (
             range is { } requested
             && (
@@ -125,12 +154,21 @@ public static partial class LuiFormatter
                     "LUI6002",
                     "The selected range contains no complete supported formatting boundary."
                 );
+            var directives = new LuiFormattingDirectives(document);
+            if (directives.Diagnostics.Count != 0)
+                return new LuiFormattingResult(
+                    LuiFormattingStatus.Unavailable,
+                    source,
+                    source,
+                    directives.Diagnostics
+                );
+            var layout = new LuiDocumentLayout(document, options, directives);
             var formatted = range is { } selection
-                ? FormatRangeCore(source, selection, lineEnding)
-                : FormatCore(source, lineEnding);
+                ? FormatSelectedBoundaries(source, document, selection, layout, options)
+                : layout.Format();
             cancellationToken.ThrowIfCancellationRequested();
             if (
-                LuiSourceComparison.StructuralKey(source) is not { } before
+                LuiSourceComparison.StructuralKey(document) is not { } before
                 || before != LuiSourceComparison.StructuralKey(formatted)
             )
                 return Unavailable(
@@ -172,5 +210,46 @@ public static partial class LuiFormatter
                 source,
                 new[] { new LuiDiagnostic(id, message, range ?? new LuiSpan(0, source.Length)) }
             );
+    }
+
+    private static string FormatSelectedBoundaries(
+        string source,
+        LuiDocumentSyntax document,
+        LuiSpan selection,
+        LuiDocumentLayout layout,
+        LuiFormattingOptions options
+    )
+    {
+        var selected = new List<LuiSyntaxNode>();
+        foreach (
+            var node in Nodes(document)
+                .Where(node => node.Span.Start >= selection.Start && node.Span.End <= selection.End)
+                .OrderBy(node => node.Span.Start)
+                .ThenByDescending(node => node.Span.Length)
+        )
+            if (
+                !selected.Any(parent =>
+                    parent.Span.Start <= node.Span.Start && parent.Span.End >= node.Span.End
+                )
+            )
+                selected.Add(node);
+        var output = source;
+        foreach (var node in selected.AsEnumerable().Reverse())
+        {
+            var start = node.Span.Start;
+            while (start > 0 && source[start - 1] is not '\n' and not '\r')
+                start--;
+            var column = 0;
+            for (var index = start; index < node.Span.Start; index++)
+                column =
+                    source[index] == '\t' ? column + options.TabWidth - column % options.TabWidth
+                    : source[index] == ' ' ? column + 1
+                    : 0;
+            output =
+                output.Substring(0, node.Span.Start)
+                + layout.FormatNode(node, column / options.IndentSize)
+                + output.Substring(node.Span.End);
+        }
+        return output;
     }
 }

@@ -129,7 +129,7 @@ spacing";
     }
 
     [TestMethod]
-    public void ResultsDistinguishCleanChangedMalformedAndUnsupportedPreservation()
+    public void ResultsDistinguishCleanChangedMalformedAndPreserveParameterComments()
     {
         const string source = "internal component View(){<Text>Hi</Text>}";
         var changed = LuiFormatter.FormatDocument(source);
@@ -146,15 +146,16 @@ spacing";
         Assert.AreEqual(0, invalid.Edits.Count);
         Assert.IsTrue(invalid.Diagnostics.Count > 0);
 
-        // The initial printer loses separator trivia. Until that printer is replaced,
-        // valid input must be reported unavailable instead of silently deleting comments.
+        // The original printer lost separator trivia. The grouped printer keeps it.
         const string comments =
             "internal component View(int a, /* keep */ int b) { <Text>Hi</Text> }";
-        var unavailable = LuiFormatter.FormatDocument(comments);
-        Assert.AreEqual(LuiFormattingStatus.Unavailable, unavailable.Status);
-        Assert.AreEqual("LUI6001", unavailable.Diagnostics.Single().Id);
-        Assert.AreEqual(comments, unavailable.Text);
-        Assert.AreEqual(0, unavailable.Edits.Count);
+        var preserved = LuiFormatter.FormatDocument(comments);
+        Assert.AreEqual(LuiFormattingStatus.Changed, preserved.Status);
+        StringAssert.Contains(preserved.Text, "/* keep */");
+        Assert.AreEqual(
+            LuiFormattingStatus.Clean,
+            LuiFormatter.FormatDocument(preserved.Text).Status
+        );
     }
 
     [TestMethod]
