@@ -3,7 +3,10 @@
 Status: accepted design direction, 2026-09-14. The [source-style guide](../LUI-SOURCE-STYLE.md)
 records the settled rules; the [implementation plan](../plans/lui-formatting-and-linting.md)
 has owner-confirmed shared understanding and is approved for handoff to Implementation.
-Runtime implementation has not begun in this design task.
+Implementation follows in #295–300. The [formatting guide](../LUI-FORMATTING.md)
+documents the shared compiler, CLI, editor and build contract; the
+[integration record](../plans/lui-formatting-integration.md) preserves the
+original gate and subsequent executable evidence.
 
 Lucent will define one canonical source layout with few configuration options, covering
 .lui structure and embedded C# declarations, statements and expressions. Consistent

@@ -20,6 +20,13 @@ The affected-file helper includes relevant downstream suites and falls back to a
 
 Managed runs write per-test results and durations to `artifacts/test/managed/<project>/results.trx`; CI retains these reports for five days, including failed runs. Test execution requires at least one matching test, so an empty filter fails without a separate discovery process.
 
+`./tools/Verify-Formatting.ps1` checks all authored C# with the pinned CSharpier
+tool and all `.lui` files with Lucent's shared formatter. It builds the tooling
+when run on its own; the managed suite reuses its solution build with `-NoBuild`.
+Both tracked files and new, non-ignored source files participate. A malformed or
+unavailable `.lui` file fails the check instead of being silently skipped. See
+[LUI formatting and linting](LUI-FORMATTING.md) for configuration and explicit fixes.
+
 `MetadataPropertiesReturnAuthoredReferencesWithoutAllowingRename` checks exact
 `.lui` reference spans through the project API and editor protocol, while rejecting
 external-symbol rename. It normally uses Core assembly metadata. To repeat it
@@ -36,6 +43,11 @@ value, reader, token, null and default routes with negative capability cases.
 Run `./tools/Test-AuthoringPackages.ps1 -Feed <local-package-directory> -Version
 <exact-prerelease-version>` after packing Core and the SDK to test a fresh,
 package-only proof library and consumer, including console NativeAOT execution.
+The same package check exercises build and CLI lint severity with an `.editorconfig`
+in a directory containing only `.lui` source, then changes configuration without
+editing that source. It verifies generated symbols remain available when a lint
+is promoted to an error or suppressed. This focused proof runs in package CI and
+is shared with the SDK matrix; it does not require a second package build.
 The consumer exercises counter and controlled form state, owned async/keyed
 content, partial state generation, and Gauge through both C# and `.lui`. It also
 reports mount allocations for raw deferred recipes, the owned context, and

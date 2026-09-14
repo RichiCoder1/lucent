@@ -1,10 +1,10 @@
 # .lui formatting and linting implementation plan
 
-Status: approved for implementation, 2026-09-14. The owner confirmed shared understanding
-and requested handoff to Implementation. Source-style decisions, including content-placement
-semantic exceptions, are settled. Technical API/command spellings remain subject to the
-first integration gate. F01's result/preservation repair is implemented; the complete
-formatting and linting rollout remains in progress.
+Status: implemented, 2026-09-14. The owner-approved source policy includes
+content-placement semantic exceptions. The whole-file formatter, shared semantic
+lint policy, configuration resolver, CLI, editor actions and repository checks are
+implemented and verified locally. F05/F06 tickets record CI publication and the
+independent Light Notes package adoption.
 
 Execution checkout: `d53b8726080160e973d6d6f4247a556c6f282fc6`. Execution tickets
 are [F01 #295](https://github.com/RichiCoder1/lucent/issues/295),
@@ -17,7 +17,8 @@ The owner's subsequent scope extension includes all authored Lucent source and
 in-tree apps plus Light Notes in F06, under both the existing C# policy and the new
 `.lui` policy. Generated/vendor sources and unrelated work remain outside migration.
 The [integration gate](lui-formatting-integration.md) records executable findings
-and the selected technical contracts; later delivery remains pending.
+and the selected technical contracts. The [formatting guide](../LUI-FORMATTING.md)
+describes the implemented authoring and automation surface.
 
 ## Outcome and scope
 

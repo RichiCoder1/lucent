@@ -1,10 +1,11 @@
-# Formatting integration gate
+# Formatting implementation and evidence
 
-Execution baseline: `d53b872`, September 14, 2026. This is F01/#295 of the
-[approved plan](lui-formatting-and-linting.md). It does not claim whole-file layout,
-lint actions or repository adoption are complete.
+Execution baseline: `d53b872`, September 14, 2026. This record starts with the
+historical F01/#295 integration gate and appends subsequent implementation and
+verification evidence for the [approved plan](lui-formatting-and-linting.md).
+The [formatting guide](../LUI-FORMATTING.md) is the current usage reference.
 
-## Findings and selected integration
+## F01 findings and selected integration (historical)
 
 The original CLI returned 0 for `internal component Broken() { <Text>` in check
 mode. The original printer also removed a comment following a parameter comma
@@ -44,7 +45,7 @@ temporary safety boundary, not permission to skip such input during migration.
 F02 must resolve the source/trivia gaps and validate actual lowered/runtime values
 as well as this lexical comparison.
 
-## Configuration and marker contracts for subsequent implementation
+## F01 configuration and marker contracts (implemented in F02–F04)
 
 One file-path-based `.editorconfig` resolver walks ancestors until `root = true`,
 then applies matching sections in outer-to-inner/source order. `unset` removes
@@ -135,3 +136,82 @@ The complete compiler suite passed 116 tests with the F02 implementation and the
 in-progress configuration/lint contracts. The earlier read-only source/app corpus
 accepted all 69 files; final full-repository migration and post-migration performance
 measurement remain F05/F06 work. No broad source-format migration is included here.
+
+## F05 corpus and performance characterization
+
+The expanded read-only corpus contains 103 tracked `.lui` files, including in-tree
+apps, Core, SDK fixtures and headless/native test fixtures. The first configured
+CRLF pass identified six XML-documentation cases where Roslyn includes the line
+terminator inside documentation trivia. A failing regression established that
+case; the comparison now admits documentation EOL normalization while retaining
+comment text and exact literal token contents. All 103 files subsequently passed
+the preservation guard, and the post-migration second check was clean.
+
+The same three original LF specimens from `c465350` were retained under an artifact
+source root for comparison. `Lucent.Lui.Tooling.Benchmarks format <source-root>`
+accepts this optional root so migration does not silently change benchmark inputs.
+The measurements below use 100 iterations after ten warmups, on this machine:
+
+| Source | Operation | First call ms | Median ms | p95 ms | Bytes/operation |
+| --- | --- | ---: | ---: | ---: | ---: |
+| ButtonsExample, 2,462 characters | Whole-file format | 155.88 | 10.15 | 18.39 | 4,230,281 |
+| ButtonsExample | Hover key | 1.48 | 1.33 | 3.21 | 969,131 |
+| Field, 1,005 characters | Whole-file format | 18.37 | 2.81 | 5.44 | 1,190,446 |
+| Field | Hover key | 0.20 | 0.16 | 0.19 | 209,332 |
+| ComponentDetail, 4,922 characters | Whole-file format | 25.86 | 13.09 | 17.82 | 13,504,641 |
+| ComponentDetail | Hover key | 3.34 | 3.72 | 5.40 | 4,119,664 |
+
+Whole-file formatting now performs C# normalization and width layout that F01 did
+not perform; this is not a formatter speedup claim. Hover remains independent of
+the printer. Its added source/text masking costs roughly 9 KB per Buttons key and
+20 KB per ComponentDetail key, under 1% of their earlier allocations. Buttons p95
+rose from 2.17 to 3.21 ms in this characterization; ComponentDetail stayed below
+the prior 6 ms investigation point. These local timings include GC/JIT variation
+and are observations, not universal latency promises. Preserve the editor's
+existing whitespace-hover cache and no-whole-graph-hover regression contracts.
+
+## F03–F06 integration and adoption
+
+The shared linter binds default-content candidates to actual component metadata,
+checks the replacement's binding and conversions, and offers only explicit fixes.
+CLI and editor resolve the same configuration and severity policy; versioned
+editor actions and byte-checked atomic CLI writes reject stale input. The generator
+still emits valid source when a lint is promoted to an error, avoiding secondary
+missing-symbol diagnostics. Invalid configuration remains an error.
+
+The actual SDK test exposed a distinction that synthetic generator options could
+not prove: reserved diagnostic severity settings were unavailable through normal
+AdditionalFiles options. The SDK now supplies marked configuration snapshots as
+incremental inputs. A second failing package probe established that transport must
+run before `GenerateMSBuildEditorConfigFileShouldRun`, ahead of Roslyn's metadata
+snapshot. Moving the target earlier made the same consumer pass. The maintained
+package test isolates repository targets, places configuration in a LUI-only
+subdirectory, and checks build/CLI error-to-none changes without editing source.
+Package CI reuses this focused test inside its existing authoring consumer check.
+
+The compiler/generator keep the existing Roslyn syntax dependency boundary. Only
+the development-host CLI adopts the LSP's existing MSBuild workspace stack for
+semantic linting; its licenses and third-party notices ship with the SDK tools.
+
+Source normalization is isolated in `66ebfe8`. Subsequent content-placement fixes
+are separate, symbol-proven changes. The repository formatting wrapper checks all
+authored C# and `.lui` files, including in-tree applications and test fixtures, and
+runs inside managed CI after the normal solution build. Light Notes uses the same
+source policy, with its pure formatting changes isolated in `5964730`; its build
+enables the packaged formatter check. Publication and consumer validation records
+belong to [F05 #299](https://github.com/RichiCoder1/lucent/issues/299) and
+[F06 #300](https://github.com/RichiCoder1/lucent/issues/300).
+
+Focused final runs pass 119 compiler, 35 generator, 35 language-server and eight
+CLI tests. The extension contract passes all 15 tests. Combined with earlier
+managed verification after migration, 1,161 managed tests pass, with three
+intentional Skia skips. The final formatting check covers 103 `.lui` files and
+538 authored C# files; the generated icon file is excluded by CSharpier's policy.
+
+The SDK matrix passes its package/configuration cases. Its NativeAOT tail exposed
+two intentional retained-reader attribute tests; scoped, reasoned suppressions
+preserve those test routes. The tail then passes transition, menu, content,
+retained-payload, stateful and async runtime contracts with the exact permitted
+runtime inventory. All SDK notice entries and the configuration target are
+present in the inspected package. These source/tooling changes require no new
+focus-taking UI walkthrough.

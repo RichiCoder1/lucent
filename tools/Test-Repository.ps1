@@ -23,6 +23,7 @@ $managedProjects = @(
     'tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj',
     'tests/Lucent.ComponentBrowser.Tests/Lucent.ComponentBrowser.Tests.csproj',
     'tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj',
+    'tests/Lucent.Lui.Tooling.Tests/Lucent.Lui.Tooling.Tests.csproj',
     'tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj',
     'tests/Lucent.Lui.LanguageServer.Tests/Lucent.Lui.LanguageServer.Tests.csproj'
 )
@@ -51,10 +52,10 @@ function Invoke-Managed {
     $runCoreArchitecture = $Project.Count -eq 0 -or $selected -contains 'tests/Lucent.Core.Tests/Lucent.Core.Tests.csproj'
     if ($Project.Count -eq 0) {
         & (Join-Path $PSScriptRoot 'Test-PackageSet.ps1')
-        & (Join-Path $PSScriptRoot 'Verify-Formatting.ps1')
-        if ($LASTEXITCODE) { throw 'Formatting check failed.' }
         Invoke-Dotnet @('restore', 'Lucent.slnx', '--locked-mode')
         Invoke-Dotnet @('build', 'Lucent.slnx', '--no-restore', '-c', $configuration)
+        & (Join-Path $PSScriptRoot 'Verify-Formatting.ps1') -NoBuild
+        if ($LASTEXITCODE) { throw "Formatting check failed ($LASTEXITCODE)." }
     }
     else {
         foreach ($testProject in $selected) {

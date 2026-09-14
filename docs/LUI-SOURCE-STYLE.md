@@ -4,7 +4,9 @@ Status: approved for implementation, 2026-09-14. The owner confirmed shared unde
 after the [design interview](plans/lui-style-and-tooling.md), including content-placement
 semantic exceptions, and requested handoff to Implementation.
 The [implementation plan](plans/lui-formatting-and-linting.md) defines the delivery work.
-Existing tooling does not yet enforce this entire guide.
+The shared formatter, linter and editor implement this policy. See the
+[formatting guide](LUI-FORMATTING.md) for commands, configuration, semantic
+exceptions and explicit fixes; ordinary formatting never applies lint fixes.
 
 Source style concerns how .lui code is written. Lucent Style declarations continue to
 mean typed visual/layout assignments.

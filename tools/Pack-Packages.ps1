@@ -55,7 +55,7 @@ foreach ($name in $names) {
         }
         if ($name -eq 'Lucent.Platform.Windows' -and (-not $zip.GetEntry('runtimes/win-x64/native/vcruntime140.dll') -or -not $zip.GetEntry('buildTransitive/notices/SDL3-CS/LICENSE'))) { throw 'Windows package omitted native runtime or notices.' }
         if ($name -eq 'Lucent.Lui.Sdk') {
-            foreach ($required in @('Sdk/Sdk.props', 'Sdk/Sdk.targets', 'analyzers/dotnet/cs/Lucent.Lui.Generator.dll', 'analyzers/dotnet/cs/Lucent.Lui.Compiler.dll', 'tools/net10.0/Lucent.Lui.Tooling.dll', 'tools/net10.0/Lucent.Lui.Tooling.runtimeconfig.json')) {
+            foreach ($required in @('Sdk/Sdk.props', 'Sdk/Sdk.targets', 'Sdk/LuiConfiguration.targets', 'analyzers/dotnet/cs/Lucent.Lui.Generator.dll', 'analyzers/dotnet/cs/Lucent.Lui.Compiler.dll', 'tools/net10.0/Lucent.Lui.Tooling.dll', 'tools/net10.0/Lucent.Lui.Tooling.runtimeconfig.json')) {
                 if (-not $zip.GetEntry($required)) { throw "SDK package omitted build-time asset/compiler tooling: $required" }
             }
             if ($spec.SelectNodes('//*[local-name()="dependencies"]//*[local-name()="dependency"]').Count -ne 0) {

@@ -75,6 +75,8 @@ try {
     if ($LASTEXITCODE) { throw 'Packaged authoring managed execution failed.' }
     $managedOutput | Write-Output
     Assert-AuthoringOutput $managedOutput 'Managed'
+    $packedTool = Join-Path $env:NUGET_PACKAGES "lucent.lui.sdk/$Version/tools/net10.0/Lucent.Lui.Tooling.dll"
+    & (Join-Path $PSScriptRoot 'Verify-LuiLintPolicy.ps1') -Project (Join-Path $consumer 'Consumer.csproj') -Tooling $packedTool -Dotnet $dotnet
     $publish = Join-Path $proof 'publish'
     & $dotnet publish (Join-Path $consumer 'Consumer.csproj') -c Release -r win-x64 --self-contained true -p:PublishAot=true --configfile $config -o $publish -warnaserror
     if ($LASTEXITCODE) { throw 'Packaged authoring NativeAOT publication failed.' }

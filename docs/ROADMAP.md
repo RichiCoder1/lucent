@@ -10,6 +10,15 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 
 ## Current execution
 
+Whole-file `.lui` formatting and linting [#295–300](plans/lui-formatting-and-linting.md)
+implement the accepted source policy across the compiler, CLI, editor and SDK.
+The [formatting guide](LUI-FORMATTING.md) documents configuration, scoped exceptions,
+explicit semantic fixes and failure behavior. Repository adoption covers authored
+C# and `.lui` in Lucent, every in-tree application and Light Notes; ordinary builds
+never rewrite files. The [integration record](plans/lui-formatting-integration.md)
+records preservation, performance and package findings. Tickets #299/#300 carry
+the final publication and independent-consumer validation records.
+
 The [semantic capability refactor](plans/semantic-capabilities.md) #291–294 is delivered in `d44f265` and published as `0.3.0-dev.74.1`. Its implementation replaces positional declarations with validated typed capabilities and shares immutable payloads through metadata overlays and snapshots. Windows pattern discovery uses explicit capabilities while preserving existing command gates, confidential editing, and generation behavior. [The baseline comparison](plans/semantic-capabilities-baseline.md) records lower allocations in all five measured scenarios, including 16% for the virtualized-list projection. Local affected suites passed 828 tests; [CI 34805441710](https://github.com/RichiCoder1/lucent/actions/runs/34805441710) passed managed and NativeAOT/package-consumer verification before publishing the nine-package set.
 
 The `.lui` assignment-callback diagnostic follow-up [#290](https://github.com/RichiCoder1/lucent/issues/290) is delivered in `5ebb236` and published as `0.3.0-dev.75.1` after [CI 34806634193](https://github.com/RichiCoder1/lucent/actions/runs/34806634193) passed managed, NativeAOT/package-consumer and publication jobs. All 72 compiler and 28 language-server local tests pass. It keeps the expression allowlist unchanged, highlights the assignment itself, and recommends a named method; [the language guide](LUI-LANGUAGE.md#c-expressions-and-reactivity) documents the boundary and workaround.

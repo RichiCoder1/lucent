@@ -22,6 +22,7 @@ The compiler and generator target `netstandard2.0`, the documented analyzer-comp
 
 - an opt-out project-relative `**/*.lui` item excluding `bin`, `obj`, hidden/generated output, and removed files;
 - Roslyn `AdditionalFiles` metadata and the generator analyzer asset;
+- applicable `.editorconfig` snapshots, including LUI-only directories, supplied as tracked generator inputs;
 - `<LucentLuiLangVersion>` with SDK default `preview`;
 - evaluated C# `$(RootNamespace)` as style-token binding and freshness authority;
 - default-enabled, opt-out ordinary C# `Lucent.Core` namespace using only; built-in components, properties, and variants remain tag/LHS/`when` scoped;
@@ -34,9 +35,9 @@ Asset accessors are ordinary generated `Compile` inputs under `obj`, available b
 
 ## Compiler and generator
 
-The compiler has three bounded layers: immutable recoverable syntax nodes with exact spans; a Roslyn-bound semantic model containing resolved symbols/types; and direct C# lowering with map entries. Lowering targets `[LucentComponent]` methods returning `ComponentRecipe`, immutable `ComponentContent`, retained `ContentRecipe` helpers, and typed style fluency. It never creates elements, factory contexts, mounted state handles, or a parallel component runtime directly. It has no generalized runtime UI IR, serializer, plugin pipeline, optimizer framework, or filesystem discovery.
+The compiler has three bounded layers: immutable recoverable syntax nodes with exact spans; a Roslyn-bound semantic model containing resolved symbols/types; and direct C# lowering with map entries. Lowering targets `[LucentComponent]` methods returning `ComponentRecipe`, immutable `ComponentContent`, retained `ContentRecipe` helpers, and typed style fluency. It never creates elements, factory contexts, mounted state handles, or a parallel component runtime directly. It has no generalized runtime UI IR, serializer, plugin pipeline or optimizer framework. Semantic compilation receives its inputs explicitly. The shared EditorConfig helper supports host-side file discovery and a filesystem-free snapshot overload for the generator.
 
-The generator filters `AdditionalTextsProvider` before parsing, parses documents independently, carries cancellation, and projects small immutable/equatable results. Whole-set collection exists only for the cross-document component index. Build/editor adapters map inputs into one shared immutable project-context model; neither parses project files independently.
+The generator filters `AdditionalTextsProvider` before parsing, parses documents independently, carries cancellation, and projects small immutable/equatable results. It collects the cross-document component index and the small configuration snapshot set; configuration changes participate in incremental invalidation. Build/editor adapters map inputs into one shared immutable project-context model; neither parses project files independently.
 
 The generator emits only through `AddSource`. Removed or invalid `.lui` input cannot leave a persistent source. Optional inspection uses `EmitCompilerGeneratedFiles` under `obj`; clean owns that output. No target writes generated C# into source or glob-deletes user files.
 
@@ -82,7 +83,7 @@ XML documentation authored for a component is written immediately before its dec
 
 One formatter implementation serves editor document/range formatting, a repository CLI, and optional check-only CI/MSBuild integration. Builds never rewrite source. Hot reload, markup stepping, and a visual designer are follow-ups; initial DevX requires correct incremental build and fast restart.
 
-The first formatter preserves Roslyn expression-island token text rather than independently formatting C#. Document, range, CLI, and check surfaces share that policy and cover malformed trees, comments at recovery boundaries, significant text, CRLF/LF, and source-map stability.
+The shared formatter formats embedded C# and `.lui` structure under the [source-style policy](LUI-SOURCE-STYLE.md). Document, range, CLI and check surfaces share explicit clean/changed/unavailable/failed results. [Formatting and linting](LUI-FORMATTING.md) documents commands, EditorConfig precedence, scoped exceptions, safe fixes and exit codes. Literal contents and meaningful text remain unchanged; malformed or unsupported input cannot pass a formatting check.
 
 ## Evidence and budgets
 

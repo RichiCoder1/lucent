@@ -135,6 +135,15 @@ try {
     Expected-Failure @('build', (Join-Path $invalid 'Invalid.csproj'), '--no-restore') 'LUI1003' | Out-Null
     if (Get-ChildItem (Join-Path $invalid 'obj') -Recurse -Filter 'Lucent.Lui.*.g.cs' -ErrorAction Ignore) { throw 'Invalid input produced generated source.' }
 
+    # Exercise real compiler-host AdditionalFiles configuration and the packaged
+    # MSBuildWorkspace payload, rather than only a synthetic analyzer-options provider.
+    $lint = Join-Path $artifacts 'lint'
+    Write-Project $lint 'Lint' '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.2.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles></PropertyGroup></Project>'
+    $lintProject = Join-Path $lint 'Lint.csproj'
+    Invoke-Dotnet @('restore', $lintProject, '--configfile', (Join-Path $lint 'NuGet.config'))
+    $packedTool = Join-Path $env:NUGET_PACKAGES 'lucent.lui.sdk/0.2.0/tools/net10.0/Lucent.Lui.Tooling.dll'
+    & (Join-Path $PSScriptRoot 'Verify-LuiLintPolicy.ps1') -Project $lintProject -Tooling $packedTool -Dotnet $dotnet
+
     $duplicate = Join-Path $artifacts 'duplicate'
     Write-Project $duplicate 'Duplicate' '<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/0.2.0"><PropertyGroup><TargetFramework>net10.0</TargetFramework><EnableDefaultLuiItems>false</EnableDefaultLuiItems><EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles></PropertyGroup><ItemGroup><AdditionalFiles Include="One.lui" LucentLuiLogicalPath="same/Main.lui" /><AdditionalFiles Include="Two.lui" LucentLuiLogicalPath="same/Main.lui" /></ItemGroup></Project>'
     Set-Content (Join-Path $duplicate 'One.lui') 'internal component One() { <Row /> }'; Set-Content (Join-Path $duplicate 'Two.lui') 'internal component Two() { <Row /> }'

@@ -4,9 +4,10 @@ using System.Text;
 using System.Text.Json;
 using Lucent.Lui.Compiler;
 
-if (args is ["format"])
+if (args is ["format"] or ["format", _])
 {
-    var root = FindRepositoryRoot(AppContext.BaseDirectory);
+    var root =
+        args.Length == 2 ? Path.GetFullPath(args[1]) : FindRepositoryRoot(AppContext.BaseDirectory);
     var files = new[]
     {
         "apps/Lucent.ComponentBrowser/Examples/ButtonsExample.lui",
@@ -62,7 +63,7 @@ if (args is ["format"])
 if (args is not [var measure])
 {
     Console.Error.WriteLine(
-        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename|format>"
+        "Usage: Lucent.Lui.Tooling.Benchmarks <warmCompletion|editToDiagnostic|rename>\n       Lucent.Lui.Tooling.Benchmarks format [source-root]"
     );
     return 2;
 }
