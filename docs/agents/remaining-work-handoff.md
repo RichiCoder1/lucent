@@ -30,9 +30,19 @@ The bounded `.lui` callback diagnostic #290 is implemented in `5ebb236`. All 72
 compiler and 28 language-server tests pass; the new tests pin exact authored
 assignment spans and named-method recovery for both C# and `.lui` state. The
 allowlist and runtime state rules are unchanged. Local logs are
-`artifacts/callback290-{red,green,suites}.log`. Publication is pending. Next are
-typed composition context/service injection #203 and URI navigation #204. Live
-compilation remains a separate workstream.
+`artifacts/callback290-{red,green,suites}.log`.
+[CI 34806634193](https://github.com/RichiCoder1/lucent/actions/runs/34806634193)
+passed managed, NativeAOT/package-consumer and publication jobs at `52ff6d5`,
+publishing `0.3.0-dev.75.1`. #290 is complete.
+
+The user authorized full execution of typed composition context/service injection
+#203 and URI navigation #204 after this closeout. Start with #206 and #214 under
+the [joint execution plan](../plans/context-navigation-execution.md). The public
+child issue contracts are cached locally in `artifacts/context-navigation-issues.json`;
+original design references are in the Routing worktree at
+`D:/.codex/worktrees/0f91/lucent/docs/design/` and must not be copied wholesale into
+public commits. Current preparation is read-only; no foundation or routing runtime
+implementation is claimed yet. Live compilation remains a separate workstream.
 
 ## September 13 execution checkpoint
 
@@ -279,8 +289,8 @@ are complete at the source and verification boundaries recorded above. Authoring
 is published as `0.3.0-dev.73.1`; its final focused Computer Use repeat passed and
 was recorded in `910b2dc`. Semantic capabilities #291–294 are delivered in
 `d44f265`/`0.3.0-dev.74.1`; their baseline is `910b2dc`. Callback diagnostics #290
-are implemented in `5ebb236`, with publication pending. Context/navigation
-#203/#204 is next.
+are delivered in `5ebb236`/`0.3.0-dev.75.1`. Context/navigation #203/#204 is now
+authorized; see the joint execution plan for child sequencing and current scope.
 
 ## Scope and workspace constraints
 
