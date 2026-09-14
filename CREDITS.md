@@ -159,6 +159,18 @@ Consulted September 6, 2026: [Avalonia TextPresenter](https://github.com/Avaloni
 
 Consulted September 7, 2026 for live sizing and popup hosting: [SDL3 AppFreezeDuringDrag](https://wiki.libsdl.org/SDL3/AppFreezeDuringDrag) and [SDL_CreatePopupWindow](https://wiki.libsdl.org/SDL3/SDL_CreatePopupWindow) (SDL zlib documentation) define the supported exposed-event redraw path and parent-owned popup-menu lifetime used by the existing SDL3 dependency. Microsoft's [server-side UIA provider guidance](https://learn.microsoft.com/windows/win32/winauto/uiauto-serversideprovider) and [UiaDisconnectProvider](https://learn.microsoft.com/windows/win32/api/uiautomationcoreapi/nf-uiautomationcoreapi-uiadisconnectprovider) define destroy-then-disconnect cleanup and the re-entrant WM_GETOBJECT constraint. [Avalonia Popup](https://github.com/AvaloniaUI/avalonia-docs/blob/main/controls/feedback/popup.md) and [Win32 WindowImpl](https://github.com/AvaloniaUI/Avalonia/blob/0442ba19098e6642185431c41c23f7138a270e0c/src/Windows/Avalonia.Win32/WindowImpl.cs) (MIT), [SkiaSharp SKCanvasView API](https://github.com/mono/SkiaSharp-API-docs/blob/main/SkiaSharpAPI/SkiaSharp.Views.Maui.Controls/SKCanvasView.xml) (MIT), and [Uno Skia Desktop](https://github.com/unoplatform/uno/blob/master/doc/articles/features/using-skia-desktop.md) (Apache-2.0) were compared conceptually for popup, resize and host ownership. No source is copied and no new dependency is introduced; the detailed comparison is in [desktop-host-research.md](docs/plans/desktop-host-research.md).
 
+## Application and LUI authoring research
+
+For the September 14, 2026 [application and LUI authoring proposal](docs/plans/application-routing-component-authoring.md),
+the MIT-licensed Roslyn project's [pre-compilation source-output design](https://github.com/dotnet/roslyn/blob/main/docs/features/pre-compilation-source-outputs.md)
+and [API proposal](https://github.com/dotnet/roslyn/issues/83089) inform early visibility of
+authored declarations to source generators. The API is experimental; Lucent's generator,
+editor and build-host compatibility still require an explicit feasibility proof. This is
+research for an existing compiler dependency, with no copied source or production package
+upgrade. Isolated A0 probes exercise SDK Roslyn 5.9 and aligned compiler/workspace packages;
+their host/version and interoperability evidence is recorded in the
+[A0 report](docs/plans/application-routing-component-authoring-a0.md).
+
 ## Text rasterization references
 
 Consulted September 7, 2026 for #101: Microsoft [TrackPopupMenuEx](https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-trackpopupmenuex) and [UIA menu support](https://learn.microsoft.com/windows/win32/winauto/uiauto-supportmenucontroltype) inform the opt-in standard Windows menu adapter. SDL's [transparent window properties](https://wiki.libsdl.org/SDL3/SDL_CreateWindowWithProperties) and [Windows transparency notes](https://wiki.libsdl.org/SDL3/README-windows), with [SkiaSharp mask filters](https://github.com/mono/SkiaSharp/blob/main/documentation/docfx/guides/effects/mask-filters.md), inform alpha-composited Lucent popup shadows. These use existing SDL (zlib) and SkiaSharp (MIT) dependencies; no reference implementation is copied. Presentation stays local to each popup; no shared window class or system-wide appearance settings are changed.

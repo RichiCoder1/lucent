@@ -21,4 +21,4 @@ Infer the repository from `git remote -v`. GitHub shares one number space across
 
 - “Publish to the issue tracker” means create a GitHub issue and add execution work to Project 4.
 - “Fetch the relevant ticket” means run `gh issue view <number> --comments`.
-- Use GitHub sub-issues and native issue dependencies when available. A dependency uses the blocker's numeric database ID, not its issue number or node ID.
+- Use GitHub sub-issues and native issue dependencies when available. REST relationship endpoints use the issue's numeric database ID. GraphQL mutations such as `addBlockedBy` use global issue node IDs; do not pass an issue number or a numeric database ID to those fields.

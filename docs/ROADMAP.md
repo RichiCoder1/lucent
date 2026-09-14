@@ -10,6 +10,13 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 
 ## Current execution
 
+The approved [application roots, routing and component authoring design](plans/application-routing-component-authoring.md)
+is tracked by [#301](https://github.com/RichiCoder1/lucent/issues/301). A0 #302 is active:
+prove first-class external generation, named partial identity, unsaved editor behavior and
+the packaged NativeAOT path before the dependent implementation slices proceed. The
+[execution map](plans/application-routing-component-authoring-execution.md) records #302–309
+and their prerequisites. This follows completed formatting/linting; it is not yet delivered support.
+
 Whole-file `.lui` formatting and linting [#295–300](plans/lui-formatting-and-linting.md)
 implement the accepted source policy across the compiler, CLI, editor and SDK.
 The [formatting guide](LUI-FORMATTING.md) documents configuration, scoped exceptions,

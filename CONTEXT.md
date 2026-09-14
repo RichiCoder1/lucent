@@ -84,6 +84,14 @@ _Avoid_: Template expansion, render tree, layout
 A reusable declaration that creates and owns one stable retained root for each mount. Both authoring surfaces share this model; a recipe is distinct from its mounted state.
 _Avoid_: Template, widget class, render function
 
+**Component declaration**:
+A named definition of a component's state, behavior and UI recipe. Its optional C# companion contributes to that same definition; each mount still has independent state.
+_Avoid_: Singleton component, view-model pair, mounted recipe
+
+**Component companion**:
+An optional C# portion of the same partial component declaration. It shares that component's mounted state and does not introduce another state owner or lifecycle.
+_Avoid_: Separate view model, second component instance
+
 **Authoring capability**:
 A declared ability to style a recipe's target or supply its accessible metadata. It does not transfer ownership of interaction, state, or content to the authoring chain.
 _Avoid_: Arbitrary restyling, control subclass, behavior capability
@@ -115,6 +123,14 @@ _Avoid_: Fragment element, child template, virtual children
 **Application session**:
 The one-run owner of an application's startup, visible composition, close negotiation and final cleanup.
 _Avoid_: Window scope, global service locator
+
+**Router**:
+The owner or borrower that establishes a shared navigation session for a subtree. It owns a session it creates and borrows a session supplied by its caller.
+_Avoid_: Route registry, outlet-owned history, global navigator
+
+**Route outlet**:
+The placement of the active destination within a router's subtree. It consumes the shared navigation session and retains matching route levels without owning that session.
+_Avoid_: Independent navigator, route service scope
 
 **Close preparation**:
 The retryable decision to stop accepting work and finish accepted operations before terminal application shutdown. A declined or failed preparation leaves the application available for recovery.
