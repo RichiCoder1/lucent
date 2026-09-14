@@ -1615,13 +1615,26 @@ public static class LuiParser
             var trimmed = value.Trim();
             span = new LuiSpan(span.Start + leading, trimmed.Length);
             var expression = SyntaxFactory.ParseExpression(trimmed);
-            if (
-                trimmed.Length == 0
-                || expression.ContainsDiagnostics
-                || expression.IsMissing
-                || !Allowed(expression)
-            )
+            if (trimmed.Length == 0 || expression.ContainsDiagnostics || expression.IsMissing)
                 Error("LUI1012", "Expression island is not an allowed C# expression.", span);
+            else if (!Allowed(expression))
+            {
+                var assignment = expression
+                    .DescendantNodesAndSelf()
+                    .OfType<AssignmentExpressionSyntax>()
+                    .FirstOrDefault(node =>
+                        node.Parent is not InitializerExpressionSyntax
+                        || node.Left is not IdentifierNameSyntax
+                    );
+                if (assignment is not null)
+                    Error(
+                        "LUI1012",
+                        "Assignment expressions are not supported in expression islands. For a callback, move the assignment into a named component or C# method and pass the method group.",
+                        new LuiSpan(span.Start + assignment.Span.Start, assignment.Span.Length)
+                    );
+                else
+                    Error("LUI1012", "Expression island is not an allowed C# expression.", span);
+            }
             return openBrace == null
                 ? new LuiExpressionSyntax(span, trimmed, expression)
                 : new LuiExpressionSyntax(span, trimmed, expression, openBrace, closeBrace!);

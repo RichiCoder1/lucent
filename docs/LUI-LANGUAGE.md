@@ -201,6 +201,28 @@ Forwarding evaluates recipe values when the containing recipe is constructed. Th
 
 Roslyn parses expression islands. The initial allowlist includes literals, member access, calls to resolved methods, simple operators, object/collection construction needed by target APIs, method groups, and short target-typed lambdas. Statements, declarations, awaiting bodies, local functions, arbitrary blocks, reflection evaluation, and runtime compilation are excluded. Complex logic moves to a named C# helper.
 
+Assignment expressions (`=`, `+=`, `??=`, and the other assignment operators) are
+excluded from expression islands, including short lambda bodies. For a controlled
+editor, use `state.SetDraft` instead of `value => state.Draft = value`. A component
+can colocate its writable draft and named callback:
+
+```lui
+internal component DraftEditor() {
+    string draft = "";
+    void SetDraft(string value) { draft = value; }
+
+    <Field label="Draft" editor={field => Lucent.Core.Components.TextField(field, () => draft, SetDraft)} />
+}
+```
+
+The method body uses ordinary C# assignment under the existing writable-state
+rules; derived and `readonly` values remain unwritable. `LUI1012` highlights the
+unsupported assignment and suggests this named-method form. Object and `with`
+initializer members such as `new Options { Label = "Draft" }` remain supported;
+they initialize a value rather than assign existing component state. This
+diagnostic refinement does not expand the expression allowlist, admit async or
+block lambda bodies, or change style-reader semantics.
+
 Expressions use ordinary C# conversions. Text body literals are the sole markup-specific primitive convenience. Future color/string, live-reader, spread, or directive sugar must lower at compile time to the same typed APIs and diagnostics; there is no implicit runtime string conversion.
 
 Reactive expressions read existing `Signal`, `Derived`, `Effect`, and `AsyncValue` values under Lucent's runtime tracking. A component recipe establishes retained structure once. Inline style expressions lower through the same public typed `Style.Bind`/fluent-lambda operation used by C# and therefore track automatically. Ordinary component parameters remain construction-time unless their C# type is explicitly live. Each binding becomes an element-scope effect and retains that style candidate's component/author source, variant condition, and ordinal. It commits on the UI thread, participates in ordinary precedence/provenance, triggers current scene reprojection, and cannot commit after disposal. Live variants therefore need no control-channel override or compiler-only setter.

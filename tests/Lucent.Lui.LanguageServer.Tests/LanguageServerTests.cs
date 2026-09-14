@@ -127,6 +127,76 @@ public sealed class LanguageServerTests
     }
 
     [TestMethod]
+    public async Task AssignmentCallbackDiagnosticsKeepAuthoredSpansAndClearAfterNamedMethodEdit()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-callback-diagnostics-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "Consumer.csproj");
+            await File.WriteAllTextAsync(
+                project,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"*.lui\" /></ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "Model.cs"),
+                "namespace Sample; public sealed class Model { public string Draft { get; set; } = \"\"; public void SetDraft(string value) { Draft = value; } }"
+            );
+            var sources = new[]
+            {
+                "namespace Sample;\nusing Lucent.Core;\npublic component ModelEditor(Model state) {\n    <Field label=\"Draft\" editor={field => Lucent.Core.Components.TextField(field, () => state.Draft, value => state.Draft = value)} />\n}",
+                "namespace Sample;\nusing Lucent.Core;\npublic component LocalEditor() {\n    string draft = \"\";\n    void SetDraft(string value) { draft = value; }\n    <Field label=\"Draft\" editor={field => Lucent.Core.Components.TextField(field, () => draft, value => draft = value)} />\n}",
+            };
+            var paths = new[]
+            {
+                Path.Combine(root, "ModelEditor.lui"),
+                Path.Combine(root, "LocalEditor.lui"),
+            };
+            for (var index = 0; index < paths.Length; index++)
+                await File.WriteAllTextAsync(paths[index], sources[index]);
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+            for (var index = 0; index < paths.Length; index++)
+            {
+                var uri = new Uri(paths[index]);
+                var source = sources[index];
+                var assignment = index == 0 ? "state.Draft = value" : "draft = value";
+                var diagnostics = await context.DiagnosticsAsync(uri, CancellationToken.None);
+                Assert(diagnostics is not null, "Callback diagnostics were not returned.");
+                var diagnostic = diagnostics!.Single(item => item.Code == "LUI1012");
+                Assert(
+                    diagnostic.Span.Equals(
+                        new LuiSpan(
+                            source.LastIndexOf(assignment, StringComparison.Ordinal),
+                            assignment.Length
+                        )
+                    ),
+                    "The callback diagnostic lost its authored assignment span."
+                );
+                StringAssert.Contains(diagnostic.Message, "named component or C# method");
+                var fixedSource = source.Replace(
+                    "value => " + assignment,
+                    index == 0 ? "state.SetDraft" : "SetDraft",
+                    StringComparison.Ordinal
+                );
+                context.ReplaceText(uri, fixedSource);
+                var fixedDiagnostics = await context.DiagnosticsAsync(uri, CancellationToken.None);
+                Assert(
+                    fixedDiagnostics is { Count: 0 },
+                    "Named callback edit did not clear diagnostics: "
+                        + string.Join(" | ", fixedDiagnostics?.Select(item => item.Message) ?? [])
+                );
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task MetadataPropertiesReturnAuthoredReferencesWithoutAllowingRename()
     {
         var root = Path.Combine(
