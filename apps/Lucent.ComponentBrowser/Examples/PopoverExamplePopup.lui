@@ -1,15 +1,14 @@
 namespace Lucent.ComponentBrowser;
-
 style PopoverExamplePopupStyle {
     Axis: LayoutAxis.Column;
     Spacing: 10;
     MinWidth: 240;
 }
 
-component PopoverExamplePopup(ComponentBrowserState browser) {
+internal component PopoverExamplePopup(Func<bool> readOpen, Action<bool> setOpen) {
     <Layout style={PopoverExamplePopupStyle}>
         <Text>A focused surface can contain ordinary controls.</Text>
-        <Status content={() => "State is retained by the browser model."} />
-        <Button onInvoke={() => browser.SetPopoverOpen(false)}>Close popover</Button>
+        <Status content={() => readOpen() ? "State is retained by the mounted example." : "The popover is closing."} />
+        <Button onInvoke={() => setOpen(false)}>Close popover</Button>
     </Layout>
 }

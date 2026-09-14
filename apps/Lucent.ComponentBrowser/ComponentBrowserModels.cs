@@ -20,6 +20,7 @@ public sealed record ComponentCatalogItem(
     string Family,
     string Summary,
     string SourceFile,
+    Func<ComponentBrowserState, ComponentRecipe> CreateExample,
     string Usage,
     string Accessibility,
     string? DependencyNote = null

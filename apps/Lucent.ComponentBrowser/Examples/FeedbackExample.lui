@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style FeedbackExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -14,16 +13,21 @@ style FeedbackActionsStyle {
 }
 
 public component FeedbackExample(ComponentBrowserState browser) {
+    float progress = 0.38f;
+    void AdvanceProgress() {
+        var next = progress + 0.16f;
+        progress = next > 1f ? 0.08f : next;
+    }
     <Layout style={FeedbackExampleStyle}>
         <Status content={() => browser.CurrentExampleState == ExampleState.Busy ? "Loading the next fixture page…" : "Ready to load a deterministic fixture page."} name="component-browser.feedback.status" />
-        <ProgressBar label="Fixture page loaded" value={() => browser.ProgressFraction} name="component-browser.feedback.progress" />
-        <Gauge label="Fixture page loaded" value={() => browser.ProgressFraction * 100} options={new GaugeOptions(unit: "%")} name="component-browser.feedback.gauge" />
+        <ProgressBar label="Fixture page loaded" value={() => progress} name="component-browser.feedback.progress" />
+        <Gauge label="Fixture page loaded" value={() => progress * 100} options={new GaugeOptions(unit: "%")} name="component-browser.feedback.gauge" />
         <Layout style={FeedbackActionsStyle}>
-            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.RefreshCw} onInvoke={browser.AdvanceProgress} name="component-browser.feedback.advance">Advance progress</Button>
-            <Button onInvoke={browser.RetryExample} style={Style.Empty.Enabled(() => browser.CurrentExampleState == ExampleState.Error)} name="component-browser.feedback.retry">Retry</Button>
+            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.RefreshCw} onInvoke={AdvanceProgress} name="component-browser.feedback.advance">Advance progress</Button>
+            <Button onInvoke={() => browser.SetExampleState(ExampleState.Default)} style={Style.Empty.Enabled(() => browser.CurrentExampleState == ExampleState.Error)} name="component-browser.feedback.retry">Retry</Button>
         </Layout>
         if (browser.CurrentExampleState == ExampleState.Error) {
-            <InlineNotice message={() => "The fixture page failed to load. Retry keeps the current gallery context."} severity={NoticeSeverity.Error} onAction={browser.RetryExample} actionLabel="Retry" name="component-browser.feedback.error" />
+            <InlineNotice message={() => "The fixture page failed to load. Retry keeps the current gallery context."} severity={NoticeSeverity.Error} onAction={() => browser.SetExampleState(ExampleState.Default)} actionLabel="Retry" name="component-browser.feedback.error" />
         }
         if (browser.CurrentExampleState != ExampleState.Error) {
             <InlineNotice message={() => "The progress value is determinate and owned by application state."} severity={NoticeSeverity.Information} name="component-browser.feedback.notice" />

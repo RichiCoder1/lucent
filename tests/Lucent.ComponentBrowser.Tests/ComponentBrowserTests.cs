@@ -16,14 +16,42 @@ public sealed class ComponentBrowserTests
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("launcher-example");
         var launcher = new RecordingLauncher();
-        var browser = new ComponentBrowserState(scope, uriLauncher: launcher);
-        browser.Select("navigation");
+        var example = new NavigationExampleModel(scope, launcher);
         Assert.IsNull(launcher.Requested);
-        browser.OpenDocumentation();
+        example.OpenDocumentation();
         graph.Drain();
         Assert.AreEqual("https", launcher.Requested?.Scheme);
         Assert.AreEqual("github.com", launcher.Requested?.Host);
-        StringAssert.Contains(browser.LinkMessage, "denied");
+        StringAssert.Contains(example.LinkMessage, "denied");
+    }
+
+    [TestMethod]
+    public void DocumentationLaunchReportsFailuresAndCancelsWithItsOwner()
+    {
+        var graph = new ReactiveGraph();
+        using (var active = graph.CreateScope("launcher-failure"))
+        {
+            var example = new NavigationExampleModel(active, new ThrowingLauncher());
+            example.OpenDocumentation();
+            graph.Drain();
+            Assert.AreEqual("The system could not open documentation.", example.LinkMessage);
+        }
+
+        var owner = graph.CreateScope("launcher-cancellation");
+        var launcher = new DeferredLauncher();
+        var canceled = new NavigationExampleModel(owner, launcher);
+        canceled.OpenDocumentation();
+        Assert.IsTrue(launcher.Cancellation.CanBeCanceled);
+        Assert.IsFalse(launcher.Cancellation.IsCancellationRequested);
+
+        owner.Dispose();
+        Assert.IsTrue(launcher.Cancellation.IsCancellationRequested);
+        launcher.Complete(new UriLaunchResult(UriLaunchStatus.Launched));
+        graph.Drain();
+
+        using var replacementOwner = graph.CreateScope("launcher-replacement");
+        var replacement = new NavigationExampleModel(replacementOwner, new RecordingLauncher());
+        Assert.AreEqual("No reference link invoked yet.", replacement.LinkMessage);
     }
 
     private sealed class RecordingLauncher : IUriLauncher
@@ -38,6 +66,87 @@ public sealed class ComponentBrowserTests
             Requested = uri;
             return ValueTask.FromResult(new UriLaunchResult(UriLaunchStatus.Denied));
         }
+    }
+
+    private sealed class ThrowingLauncher : IUriLauncher
+    {
+        public ValueTask<UriLaunchResult> LaunchAsync(
+            Uri uri,
+            CancellationToken cancellationToken = default
+        ) => ValueTask.FromException<UriLaunchResult>(new InvalidOperationException("private"));
+    }
+
+    private sealed class DeferredLauncher : IUriLauncher
+    {
+        private readonly TaskCompletionSource<UriLaunchResult> _completion = new();
+
+        internal CancellationToken Cancellation { get; private set; }
+
+        public ValueTask<UriLaunchResult> LaunchAsync(
+            Uri uri,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Cancellation = cancellationToken;
+            return new(_completion.Task);
+        }
+
+        internal void Complete(UriLaunchResult result) => _completion.SetResult(result);
+    }
+
+    [TestMethod]
+    public void StoragePickerCompletionCannotOutliveItsExampleOwner()
+    {
+        var graph = new ReactiveGraph();
+        var owner = graph.CreateScope("picker-cancellation");
+        var picker = new DeferredPicker();
+        var example = new StorageExampleModel(owner, picker);
+        example.OpenFiles();
+        Assert.IsTrue(picker.Cancellation.CanBeCanceled);
+        Assert.IsFalse(picker.Cancellation.IsCancellationRequested);
+
+        owner.Dispose();
+        Assert.IsTrue(picker.Cancellation.IsCancellationRequested);
+        picker.Complete(
+            new FilePickerResult(
+                FilePickerStatus.Selected,
+                [new FilePickerItem(new Uri("file:///C:/example.lui"), "example.lui")]
+            )
+        );
+        graph.Drain();
+
+        using var replacementOwner = graph.CreateScope("picker-replacement");
+        var replacement = new StorageExampleModel(replacementOwner, new DeferredPicker());
+        Assert.AreEqual("No native picker request yet.", replacement.Message);
+        Assert.AreEqual("A selected name and location will appear here.", replacement.Location);
+    }
+
+    private sealed class DeferredPicker : IFilePicker
+    {
+        private readonly TaskCompletionSource<FilePickerResult> _completion = new();
+
+        internal CancellationToken Cancellation { get; private set; }
+
+        public ValueTask<FilePickerResult> OpenFilesAsync(
+            OpenFileOptions? options = null,
+            CancellationToken cancellationToken = default
+        )
+        {
+            Cancellation = cancellationToken;
+            return new(_completion.Task);
+        }
+
+        public ValueTask<FilePickerResult> SaveFileAsync(
+            SaveFileOptions? options = null,
+            CancellationToken cancellationToken = default
+        ) => ValueTask.FromResult(new FilePickerResult(FilePickerStatus.Unsupported));
+
+        public ValueTask<FilePickerResult> PickFolderAsync(
+            PickFolderOptions? options = null,
+            CancellationToken cancellationToken = default
+        ) => ValueTask.FromResult(new FilePickerResult(FilePickerStatus.Unsupported));
+
+        internal void Complete(FilePickerResult result) => _completion.SetResult(result);
     }
 
     [TestMethod]
@@ -146,7 +255,7 @@ public sealed class ComponentBrowserTests
     }
 
     [TestMethod]
-    public void BrowserStateKeepsSearchSelectionDensityAndExampleStateInApplicationModel()
+    public void BrowserStateKeepsOnlySharedSearchSelectionDensityAndExampleState()
     {
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("component-browser-test");
@@ -157,22 +266,12 @@ public sealed class ComponentBrowserTests
         Assert.AreEqual("selection", browser.VisibleItems.Single().Id);
 
         browser.Select("selection");
+        graph.Drain();
         Assert.AreEqual("selection", browser.SelectedId);
         browser.ToggleDensity();
         Assert.AreEqual(BrowserDensity.Compact, browser.Density);
         browser.SetExampleState(ExampleState.Busy);
         Assert.AreEqual(ExampleState.Busy, browser.CurrentExampleState);
-        browser.SetPopoverOpen(true);
-        Assert.IsTrue(browser.PopoverOpen);
-        browser.SetPopoverOpen(false);
-        Assert.IsFalse(browser.PopoverOpen);
-
-        browser.SetCheckState(CheckState.Mixed);
-        browser.SetSwitchEnabled(false);
-        browser.SetRadioSelection("portable");
-        Assert.AreEqual(CheckState.Mixed, browser.CheckState);
-        Assert.IsFalse(browser.SwitchEnabled);
-        Assert.AreEqual("portable", browser.RadioSelection);
     }
 
     [TestMethod]
@@ -223,6 +322,71 @@ public sealed class ComponentBrowserTests
     }
 
     [TestMethod]
+    public void SelectionExampleKeepsToggleStatePerMount()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "component-browser-selection-state");
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var browser = new ComponentBrowserState(composition.Root.Scope);
+
+        var first = composition.Mount(
+            composition.Root,
+            theme,
+            Components.SelectionExample(browser)
+        );
+        graph.Drain();
+        var checkbox = Flatten(composition.SemanticSnapshot()!)
+            .Single(node =>
+                node is { Role: SemanticRole.CheckBox, Name: "Include internal components" }
+            );
+        Assert.AreEqual(SemanticToggleState.Off, checkbox.ToggleState);
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(
+                checkbox.Identity,
+                new SemanticCommand(SemanticCommandKind.Toggle)
+            )
+        );
+        graph.Drain();
+        Assert.AreEqual(
+            SemanticToggleState.On,
+            Flatten(composition.SemanticSnapshot()!)
+                .Single(node =>
+                    node is { Role: SemanticRole.CheckBox, Name: "Include internal components" }
+                )
+                .ToggleState
+        );
+
+        var second = composition.Mount(
+            composition.Root,
+            theme,
+            Components.SelectionExample(browser)
+        );
+        graph.Drain();
+        var states = Flatten(composition.SemanticSnapshot()!)
+            .Where(node =>
+                node is { Role: SemanticRole.CheckBox, Name: "Include internal components" }
+            )
+            .Select(node => node.ToggleState)
+            .ToArray();
+        CollectionAssert.Contains(states, SemanticToggleState.On);
+        CollectionAssert.Contains(states, SemanticToggleState.Off);
+
+        first.Dispose();
+        graph.Drain();
+        Assert.AreEqual(
+            SemanticToggleState.Off,
+            Flatten(composition.SemanticSnapshot()!)
+                .Single(node =>
+                    node is { Role: SemanticRole.CheckBox, Name: "Include internal components" }
+                )
+                .ToggleState
+        );
+        second.Dispose();
+    }
+
+    [TestMethod]
     public void SelectingAnotherExampleResetsRetainedDetailAndSourceScroll()
     {
         var graph = new ReactiveGraph();
@@ -246,15 +410,15 @@ public sealed class ComponentBrowserTests
     {
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("component-browser-dialog-test");
-        var browser = new ComponentBrowserState(scope);
+        var example = new NavigationExampleModel(scope, uriLauncher: null);
 
-        browser.OpenDialog();
-        browser.SubmitDialog();
+        example.OpenDialog();
+        example.SubmitDialog();
         graph.Drain();
 
         Assert.AreEqual(
             "The application action completed and the dialog closed.",
-            browser.DialogMessage
+            example.DialogMessage
         );
     }
 
@@ -263,43 +427,87 @@ public sealed class ComponentBrowserTests
     {
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("component-browser-table-test");
-        var browser = new ComponentBrowserState(scope);
+        var model = new TableExampleModel(scope);
 
-        Assert.AreEqual(12, browser.TableRows.Count);
-        Assert.AreEqual("row-00006", browser.TableSelection.Value);
-        browser.SetTableSelection("row-00002");
-        Assert.AreEqual("row-00002", browser.TableSelection.Value);
+        Assert.AreEqual(12, model.Rows.Count);
+        Assert.AreEqual("row-00006", model.Selection.Value);
+        model.SetSelection("row-00002");
+        Assert.AreEqual("row-00002", model.Selection.Value);
 
-        browser.SetTableSort(new TableSort("issues", TableSortDirection.Descending));
-        Assert.AreEqual("row-00008", browser.TableRows[0].Id);
-        Assert.AreEqual("issues", browser.TableSort!.ColumnKey);
+        model.SetSort(new TableSort("issues", TableSortDirection.Descending));
+        Assert.AreEqual("row-00008", model.Rows[0].Id);
+        Assert.AreEqual("issues", model.Sort!.ColumnKey);
 
-        browser.ToggleTableFixture();
-        Assert.AreEqual(10_000, browser.TableRows.Count);
-        Assert.IsTrue(browser.TableRows.Any(row => row.Id == "row-00002"));
-        Assert.AreEqual("row-00002", browser.TableSelection.Value);
-        Assert.AreEqual("10,000 generated rows", browser.TableFixtureLabel);
+        model.SetFixture(true);
+        Assert.AreEqual(10_000, model.Rows.Count);
+        Assert.IsTrue(model.Rows.Any(row => row.Id == "row-00002"));
+        Assert.AreEqual("row-00002", model.Selection.Value);
+        Assert.AreEqual("10,000 generated rows", model.FixtureLabel);
     }
 
     [TestMethod]
-    public void DateTimeExampleKeepsAppliedValuesInsidePublishedBounds()
+    public void DateTimeExampleKeepsAppliedValuesInsideEachMount()
     {
         var graph = new ReactiveGraph();
-        using var scope = graph.CreateScope("component-browser-date-time-test");
-        var browser = new ComponentBrowserState(scope);
+        using var composition = new Composition(graph, "component-browser-date-time-state");
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var browser = new ComponentBrowserState(composition.Root.Scope);
+        var first = composition.Mount(composition.Root, theme, Components.DateTimeExample(browser));
+        composition.Flush();
+        using var renderer = new SkiaSceneRenderer();
+        using var scene = SceneLayout.Project(composition, new(1280, 900, 1), renderer);
+        Assert.IsTrue(composition.Input.SetScene(scene));
 
-        Assert.AreEqual(new DateOnly(2024, 6, 15), browser.DateValue);
-        Assert.AreEqual(new TimeOnly(9, 30), browser.TimeValue);
+        var open = Flatten(composition.SemanticSnapshot()!)
+            .Single(node =>
+                node.Role == SemanticRole.Button
+                && node.Name.StartsWith("Open calendar", StringComparison.Ordinal)
+            );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            composition.ExecuteSemanticCommand(open.Identity, new(SemanticCommandKind.Invoke))
+        );
+        graph.Drain();
+        var request = composition.Input.ActiveSurface!;
+        var popup = request.CreateComposition();
+        popup.Flush();
+        var nextDay = Flatten(popup.SemanticSnapshot()!)
+            .Single(node =>
+                node.Role == SemanticRole.ListItem
+                && node.Name.Contains("June 16, 2024", StringComparison.Ordinal)
+            );
+        Assert.AreEqual(
+            SemanticCommandResult.Applied,
+            popup.ExecuteSemanticCommand(nextDay.Identity, new(SemanticCommandKind.Select))
+        );
+        Assert.IsTrue(request.IsDismissed);
+        graph.Drain();
+        Assert.IsTrue(
+            Flatten(composition.SemanticSnapshot()!)
+                .Any(node => node.Name == "Due Sunday, June 16, 2024 at 9:30 AM.")
+        );
 
-        browser.SetDateValue(new DateOnly(2023, 12, 31));
-        browser.SetTimeValue(new TimeOnly(19, 0));
-        Assert.AreEqual(new DateOnly(2024, 6, 15), browser.DateValue);
-        Assert.AreEqual(new TimeOnly(9, 30), browser.TimeValue);
+        var second = composition.Mount(
+            composition.Root,
+            theme,
+            Components.DateTimeExample(browser)
+        );
+        graph.Drain();
+        var statuses = Flatten(composition.SemanticSnapshot()!)
+            .Where(node => node.Role == SemanticRole.Status)
+            .Select(node => node.Name)
+            .ToArray();
+        CollectionAssert.Contains(statuses, "Due Sunday, June 16, 2024 at 9:30 AM.");
+        CollectionAssert.Contains(statuses, "Due Saturday, June 15, 2024 at 9:30 AM.");
 
-        browser.SetDateValue(new DateOnly(2025, 12, 31));
-        browser.SetTimeValue(new TimeOnly(17, 30));
-        Assert.AreEqual(new DateOnly(2025, 12, 31), browser.DateValue);
-        Assert.AreEqual(new TimeOnly(17, 30), browser.TimeValue);
+        first.Dispose();
+        graph.Drain();
+        Assert.IsTrue(
+            Flatten(composition.SemanticSnapshot()!)
+                .Any(node => node.Name == "Due Saturday, June 15, 2024 at 9:30 AM.")
+        );
+        second.Dispose();
     }
 
     [TestMethod]
@@ -347,8 +555,10 @@ public sealed class ComponentBrowserTests
             .Where(node => node.Role is SemanticRole.Button or SemanticRole.TextField)
             .ToArray();
         Assert.IsTrue(enabled.All(node => node.Enabled));
-        Assert.AreEqual(new DateOnly(2024, 6, 15), browser.DateValue);
-        Assert.AreEqual(new TimeOnly(9, 30), browser.TimeValue);
+        Assert.IsTrue(
+            Flatten(composition.SemanticSnapshot()!)
+                .Any(node => node.Name == "Due Saturday, June 15, 2024 at 9:30 AM.")
+        );
     }
 
     [TestMethod]
@@ -356,20 +566,20 @@ public sealed class ComponentBrowserTests
     {
         var graph = new ReactiveGraph();
         using var scope = graph.CreateScope("component-browser-tree-test");
-        var browser = new ComponentBrowserState(scope);
+        var model = new TreeExampleModel(scope);
 
-        Assert.AreEqual("src", browser.TreeSelection.Value);
-        Assert.IsTrue(browser.IsTreeExpanded("src"));
-        Assert.IsTrue(browser.TreeRoots.Count >= 3);
+        Assert.AreEqual("src", model.Selection.Value);
+        Assert.IsTrue(model.IsExpanded("src"));
+        Assert.IsTrue(model.Roots.Count >= 3);
 
-        browser.SetTreeSelection("fields");
-        Assert.AreEqual("fields", browser.TreeSelection.Value);
-        browser.SetTreeExpanded("components", true);
-        Assert.IsTrue(browser.IsTreeExpanded("components"));
-        browser.SetTreeExpanded("components", false);
-        Assert.IsFalse(browser.IsTreeExpanded("components"));
-        Assert.AreEqual("Selected Fields.", browser.TreeSelectionLabel);
-        StringAssert.Contains(browser.TreeExpansionSummary, "2 branches");
+        model.SetSelection("fields");
+        Assert.AreEqual("fields", model.Selection.Value);
+        model.SetExpanded("components", true);
+        Assert.IsTrue(model.IsExpanded("components"));
+        model.SetExpanded("components", false);
+        Assert.IsFalse(model.IsExpanded("components"));
+        Assert.AreEqual("Selected Fields.", model.SelectionLabel);
+        StringAssert.Contains(model.ExpansionSummary, "2 branches");
     }
 
     [TestMethod]

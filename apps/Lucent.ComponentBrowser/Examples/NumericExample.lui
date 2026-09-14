@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style NumericExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -13,27 +12,20 @@ style NumericExampleFieldStyle {
 }
 
 public component NumericExample(ComponentBrowserState browser) {
+    decimal numberValue = 12.5m;
+    double sliderValue = 64d;
+    readonly NumericEditOptions numberOptions = new(increment: 0.5m, minimum: 0m, maximum: 100m, pageIncrement: 10m, format: "0.0");
+    readonly SliderOptions sliderOptions = new(minimum: 0, maximum: 100, increment: 5, pageIncrement: 20, wheelEnabled: true);
+    void SetNumberValue(decimal? value) {
+        numberValue = value ?? 0m;
+    }
+    void SetSliderValue(double value) {
+        sliderValue = value;
+    }
     <Layout style={NumericExampleStyle}>
         <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These controls expose bounded numeric state without hiding the draft or commit policy. Type a decimal value, adjust the slider with the keyboard, and inspect the range semantics.</Text>
-        <NumberField
-            label="Preview scale"
-            value={() => browser.NumberValue}
-            onValueRequested={browser.SetNumberValue}
-            options={browser.NumberOptions}
-            help={() => "Values are accepted from 0.0 through 100.0 in half-point steps."}
-            enabled={() => browser.CurrentExampleState != ExampleState.Disabled}
-            style={NumericExampleFieldStyle}
-            name="component-browser.numeric.number-field"
-        />
-        <Slider
-            label="Preview intensity"
-            value={() => browser.SliderValue}
-            onValueRequested={browser.SetSliderValue}
-            onCommit={browser.CommitSlider}
-            options={browser.SliderOptions}
-            enabled={() => browser.CurrentExampleState != ExampleState.Disabled}
-            name="component-browser.numeric.slider"
-        />
-        <Status content={() => "Number: " + browser.NumberValue.ToString("0.0") + " · slider: " + browser.SliderValue.ToString("0")} style={PresentationStyles.Secondary} name="component-browser.numeric.status" />
+        <NumberField label="Preview scale" value={() => numberValue} onValueRequested={SetNumberValue} options={numberOptions} help={() => "Values are accepted from 0.0 through 100.0 in half-point steps."} enabled={() => browser.CurrentExampleState != ExampleState.Disabled} style={NumericExampleFieldStyle} name="component-browser.numeric.number-field" />
+        <Slider label="Preview intensity" value={() => sliderValue} onValueRequested={SetSliderValue} onCommit={SetSliderValue} options={sliderOptions} enabled={() => browser.CurrentExampleState != ExampleState.Disabled} name="component-browser.numeric.slider" />
+        <Status content={() => "Number: " + numberValue.ToString("0.0") + " · slider: " + sliderValue.ToString("0")} style={PresentationStyles.Secondary} name="component-browser.numeric.status" />
     </Layout>
 }

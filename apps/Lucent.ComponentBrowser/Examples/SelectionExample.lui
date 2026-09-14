@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style SelectionExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 8;
@@ -12,17 +11,40 @@ style SelectionExampleRowStyle(ComponentBrowserState browser) {
 }
 
 public component SelectionExample(ComponentBrowserState browser) {
+    CheckState checkState = CheckState.Off;
+    bool switchEnabled = true;
+    string radioSelection = "native";
+    string selectedOption = "native";
+    readonly IReadOnlyList<RadioOption<string>> radioOptions = [
+        new("native", "Native rendering"),
+        new("portable", "Portable semantics"),
+        new("a11y", "Accessible by default"),
+    ];
+    void SetCheckState(CheckState value) {
+        checkState = value;
+    }
+    void SetSwitchEnabled(bool value) {
+        switchEnabled = value;
+    }
+    void SetRadioSelection(string key) {
+        if (radioOptions.Any(option => option.Key == key))
+            radioSelection = key;
+    }
+    void SelectOption(string key) {
+        if (radioOptions.Any(option => option.Key == key))
+            selectedOption = key;
+    }
     <Layout style={SelectionExampleStyle}>
         <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These controls keep selection in application state. Use the checkbox and switch, then move through the radio options with the keyboard.</Text>
-        <CheckBox label="Include internal components" readCheckState={() => browser.CheckState} onCheckRequested={browser.SetCheckState} cycle={CheckStateCycle.TriState} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.selection.checkbox" />
-        <Switch label="Use reduced motion in this preview" readBool={() => browser.SwitchEnabled} onToggleRequested={browser.SetSwitchEnabled} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.selection.switch" />
-        <RadioGroup label="Rendering surface" items={() => browser.RadioOptions} readSelectedKey={() => browser.RadioSelection} onSelectionRequested={browser.SetRadioSelection} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.selection.radio" />
-        foreach (var option in browser.Options) keyed by option.Id {
-            <Selectable content={() => option.Label} selected={() => browser.IsOptionSelected(option.Id)} onSelect={() => browser.SelectOption(option.Id)} style={SelectionExampleRowStyle(browser)} name={"component-browser.selection.selectable." + option.Id} />
+        <CheckBox label="Include internal components" readCheckState={() => checkState} onCheckRequested={SetCheckState} cycle={CheckStateCycle.TriState} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.selection.checkbox" />
+        <Switch label="Use reduced motion in this preview" readBool={() => switchEnabled} onToggleRequested={SetSwitchEnabled} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.selection.switch" />
+        <RadioGroup label="Rendering surface" items={() => radioOptions} readSelectedKey={() => radioSelection} onSelectionRequested={SetRadioSelection} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.selection.radio" />
+        foreach (var option in radioOptions) keyed by option.Key {
+            <Selectable content={() => option.Label} selected={() => selectedOption == option.Key} onSelect={() => SelectOption(option.Key)} style={SelectionExampleRowStyle(browser)} name={"component-browser.selection.selectable." + option.Key} />
         }
         if (browser.CurrentExampleState == ExampleState.Disabled) {
             <Status content={() => "Disabled is represented by the surrounding state contract; selection remains visible for inspection."} style={PresentationStyles.Secondary} />
         }
-        <Status content={() => "Radio: " + browser.RadioSelection + " · selectable: " + browser.Options.First(option => browser.IsOptionSelected(option.Id)).Label} style={PresentationStyles.Secondary} name="component-browser.selection.status" />
+        <Status content={() => "Radio: " + radioSelection + " · selectable: " + radioOptions.First(option => option.Key == selectedOption).Label} style={PresentationStyles.Secondary} name="component-browser.selection.status" />
     </Layout>
 }

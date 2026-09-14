@@ -13,6 +13,43 @@ namespace Lucent.Desktop.Tests;
 public sealed class PublishedComponentBrowserTests
 {
     [TestMethod]
+    public void FlaUiTypedHistoryRetainsSearchAndRemountsLocalExampleState()
+    {
+        using var fixture = new BrowserFixture();
+        fixture.Find("Apply change").Patterns.Invoke.Pattern.Invoke();
+        fixture.Find("Invoked 1 time.");
+        fixture.SelectExample("Text fields", "Editing");
+        var field = fixture.Find("Workspace name", editorOnly: true);
+        field.Patterns.Value.Pattern.SetValue("Only this mounted example");
+        // Editors retain their caret chords; exercise history from the navigation control.
+        fixture.Find("Back").Focus();
+        Keyboard.Press(VirtualKeyShort.LMENU);
+        try
+        {
+            PublishedIssueBrowserTests.TypeNavigation(VirtualKeyShort.LEFT);
+        }
+        finally
+        {
+            Keyboard.Release(VirtualKeyShort.LMENU);
+        }
+        fixture.Find("No action invoked yet.");
+        Assert.AreEqual(
+            "Text fields",
+            fixture.Find("Search components").Patterns.Value.Pattern.Value.Value
+        );
+        fixture.Find("Forward").Patterns.Invoke.Pattern.Invoke();
+        fixture.Wait(
+            () =>
+                fixture
+                    .FindOptional("Workspace name", editorOnly: true)
+                    ?.Patterns.Value.Pattern.Value.Value == "Lucent",
+            "fresh field after Forward"
+        );
+        fixture.Find("Back").Patterns.Invoke.Pattern.Invoke();
+        fixture.Find("No action invoked yet.");
+    }
+
+    [TestMethod]
     public void FlaUiSubmenuContentAlignsWithItsTriggerRow()
     {
         using var fixture = new BrowserFixture();

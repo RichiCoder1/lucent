@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style TableExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -20,26 +19,15 @@ style TableExampleActionsStyle {
 }
 
 public component TableExample(ComponentBrowserState browser) {
+    readonly TableExampleModel example = new(owner);
     <Layout style={TableExampleStyle}>
-        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>This table keeps rows, sorting, and selection in application state. Sort a heading, move through the rows with the keyboard, and switch between a small fixture and 10,000 generated rows to inspect bounded realization.</Text>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>This mounted table example owns its rows, sorting, and selection. Sort a heading, move through the rows with the keyboard, and switch between a small fixture and 10,000 generated rows to inspect bounded realization.</Text>
         <Layout style={TableExampleActionsStyle}>
-            <Switch label="Use 10,000 row fixture" readBool={() => browser.TableLargeFixture} onToggleRequested={browser.SetTableFixture} style={Style.Empty.MinWidth(280)} name="component-browser.table.large-fixture" />
-            <Status content={() => browser.TableFixtureLabel} style={PresentationStyles.Secondary} name="component-browser.table.fixture-status" />
+            <Switch label="Use 10,000 row fixture" readBool={() => example.LargeFixture} onToggleRequested={example.SetFixture} style={Style.Empty.MinWidth(280)} name="component-browser.table.large-fixture" />
+            <Status content={() => example.FixtureLabel} style={PresentationStyles.Secondary} name="component-browser.table.fixture-status" />
         </Layout>
-        <TableView
-            label="Workspace records"
-            items={() => browser.TableRows}
-            key={row => row.Id}
-            columns={browser.TableColumns}
-            readSelectedKey={() => browser.TableSelection}
-            onSelectionRequested={browser.SetTableSelection}
-            readSort={() => browser.TableSort}
-            onSortRequested={browser.SetTableSort}
-            options={browser.TableOptions}
-            style={TableExampleTableStyle}
-            name="component-browser.table.view"
-        />
-        <Status content={() => browser.TableSelectionLabel} style={PresentationStyles.Secondary} name="component-browser.table.selection-status" />
-        <Status content={() => browser.TableMessage} style={PresentationStyles.Secondary} name="component-browser.table.message" />
+        <TableView label="Workspace records" items={() => example.Rows} key={row => row.Id} columns={example.Columns} readSelectedKey={() => example.Selection} onSelectionRequested={example.SetSelection} readSort={() => example.Sort} onSortRequested={example.SetSort} options={browser.Density == BrowserDensity.Compact ? example.CompactOptions : example.ComfortableOptions} style={TableExampleTableStyle} name="component-browser.table.view" />
+        <Status content={() => example.SelectionLabel} style={PresentationStyles.Secondary} name="component-browser.table.selection-status" />
+        <Status content={() => example.Message} style={PresentationStyles.Secondary} name="component-browser.table.message" />
     </Layout>
 }

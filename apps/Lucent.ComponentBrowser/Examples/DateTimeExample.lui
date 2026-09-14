@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style DateTimeExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -7,24 +6,62 @@ style DateTimeExampleStyle {
 }
 
 public component DateTimeExample(ComponentBrowserState browser) {
+    [Once] DateOnly? dateValue = new DateOnly(2024, 6, 15);
+    [Once] TimeOnly? timeValue = new TimeOnly(9, 30);
+    readonly DatePickerOptions datePickerOptions = new(
+        System.Globalization.CultureInfo.GetCultureInfo("en-US"),
+        minimum: new DateOnly(2024, 1, 1),
+        maximum: new DateOnly(2025, 12, 31),
+        today: static () => new DateOnly(2024, 6, 15)
+    );
+    readonly TimePickerOptions timePickerOptions = new(
+        System.Globalization.CultureInfo.GetCultureInfo("en-US"),
+        minimum: new TimeOnly(8, 0),
+        maximum: new TimeOnly(18, 0),
+        step: TimeSpan.FromMinutes(30)
+    );
+    readonly DateTimeFieldOptions dateFieldOptions = new(
+        help: static () => "The example accepts dates from January 2024 through December 2025.",
+        required: true,
+        fieldId: "component-browser-date",
+        enabled: () => browser.CurrentExampleState != ExampleState.Disabled
+    );
+    readonly DateTimeFieldOptions timeFieldOptions = new(
+        help: static () => "Use the arrow keys to step by 30 minutes inside the bounded range.",
+        required: true,
+        fieldId: "component-browser-time",
+        enabled: () => browser.CurrentExampleState != ExampleState.Disabled
+    );
+    void SetDateValue(DateOnly? value) {
+        if (value is not { } date) {
+            dateValue = null;
+            return;
+        }
+        if (datePickerOptions.Minimum is { } minimum && date < minimum)
+            return;
+        if (datePickerOptions.Maximum is { } maximum && date > maximum)
+            return;
+        dateValue = date;
+    }
+    void SetTimeValue(TimeOnly? value) {
+        if (value is not { } time) {
+            timeValue = null;
+            return;
+        }
+        if (timePickerOptions.Minimum is { } minimum && time < minimum)
+            return;
+        if (timePickerOptions.Maximum is { } maximum && time > maximum)
+            return;
+        timeValue = time;
+    }
+    string DateTimeSummary() {
+        return "Due " + (dateValue?.ToString("D", datePickerOptions.Culture) ?? "not set")
+            + " at " + (timeValue?.ToString("t", timePickerOptions.Culture) ?? "not set") + ".";
+    }
     <Layout style={DateTimeExampleStyle}>
-        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These fields keep date and time drafts in the stock editor sessions while the applied values remain controlled by the browser state. Open the calendar, type a value, or step the time with the keyboard.</Text>
-        <DatePicker
-            label="Due date"
-            value={() => browser.DateValue}
-            onValueRequested={browser.SetDateValue}
-            options={browser.DatePickerOptions}
-            field={browser.DateFieldOptions}
-            name="component-browser.date-time.date"
-        />
-        <TimePicker
-            label="Start time"
-            value={() => browser.TimeValue}
-            onValueRequested={browser.SetTimeValue}
-            options={browser.TimePickerOptions}
-            field={browser.TimeFieldOptions}
-            name="component-browser.date-time.time"
-        />
-        <Status content={() => browser.DateTimeSummary} style={PresentationStyles.Secondary} name="component-browser.date-time.status" />
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These fields keep date and time drafts in the stock editor sessions while the applied values remain controlled by this mounted example. Open the calendar, type a value, or step the time with the keyboard.</Text>
+        <DatePicker label="Due date" value={() => dateValue} onValueRequested={SetDateValue} options={datePickerOptions} field={dateFieldOptions} name="component-browser.date-time.date" />
+        <TimePicker label="Start time" value={() => timeValue} onValueRequested={SetTimeValue} options={timePickerOptions} field={timeFieldOptions} name="component-browser.date-time.time" />
+        <Status content={DateTimeSummary} style={PresentationStyles.Secondary} name="component-browser.date-time.status" />
     </Layout>
 }

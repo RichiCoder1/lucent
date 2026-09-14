@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style ComponentDetailStyle {
     MainGrow: 1;
     MainShrink: 1;
@@ -74,14 +73,14 @@ public component ComponentDetail(ComponentBrowserState browser, ComponentBrowser
                     <Status content={() => browser.ExampleStateLabel} style={PresentationStyles.Secondary} name="component-browser.state-status" />
                 </Layout>
                 <Layout style={ComponentDetailActionStyle}>
+                    <Button onInvoke={browser.Back} style={Style.Empty.Enabled(() => browser.Navigation.CanGoBack)} name="component-browser.back">Back</Button>
+                    <Button onInvoke={browser.Forward} style={Style.Empty.Enabled(() => browser.Navigation.CanGoForward)} name="component-browser.forward">Forward</Button>
                     <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.FileText} onInvoke={browser.CopySource} name="component-browser.copy-source">Copy compiled .lui</Button>
                     <Status content={() => browser.CopyMessage} style={PresentationStyles.Secondary} name="component-browser.copy-status" />
                 </Layout>
                 <Divider />
                 <Text style={PresentationStyles.Caption}>INTERACTIVE EXAMPLE</Text>
-                <Layout style={ComponentExampleStyle}>
-                    <ComponentExample browser={browser} name="component-browser.example" />
-                </Layout>
+                <Layout style={ComponentExampleStyle}>{ComponentBrowserRouting.Outlet(browser.Interaction).Named("component-browser.example")}</Layout>
                 <SourcePanel browser={browser} view={view} name="component-browser.source-panel" />
                 <Divider />
                 <Text style={PresentationStyles.Caption}>USAGE</Text>

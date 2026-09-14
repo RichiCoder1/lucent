@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style BrowserHeaderStyle {
     Axis: LayoutAxis.Column;
     Padding: Insets.Symmetric(24, 18);
@@ -61,7 +60,7 @@ public component BrowserHeader(ComponentBrowserState browser, ThemeContext theme
                 <Text style={PresentationStyles.Caption}>Find a component</Text>
                 <TextField session={browser.SearchEditor} onChange={browser.SetSearch} label="Search components" placeholder="Search by name, family, or purpose" name="component-browser.search" />
             </Layout>
-            <Status content={() => browser.VisibleItems.Count + " of " + ComponentCatalog.Items.Count + " recipes"} style={PresentationStyles.Secondary} name="component-browser.result-count" />
+            <Status style={PresentationStyles.Secondary} name="component-browser.result-count">{() => browser.VisibleItems.Count + " of " + ComponentCatalog.Items.Count + " recipes"}</Status>
         </Layout>
     </Layout>
 }

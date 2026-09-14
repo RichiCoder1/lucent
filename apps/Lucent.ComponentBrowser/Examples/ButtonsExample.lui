@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style ButtonsExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -13,20 +12,28 @@ style ButtonsRowStyle {
     Wrap: true;
 }
 
-component ButtonsExampleContent(ComponentBrowserState browser, ButtonsExampleState state) {
+public component ButtonsExample(ComponentBrowserState browser) {
+    int activationCount = 0;
+    string selectedOption = "native";
+    void Activate() {
+        activationCount += 1;
+    }
+    void SelectOption(string id) {
+        selectedOption = id;
+    }
     <Layout style={ButtonsExampleStyle}>
         <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These are live stock recipes. Invoke an action, move focus with Tab, and switch the state above to inspect selected, disabled, busy, and error behavior.</Text>
         <Layout style={ButtonsRowStyle}>
-            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.CircleCheck} onInvoke={() => state.ActivationCount++} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.primary">Apply change</Button>
-            <IconButton source={Lucent.Icons.Lucide.LucideIcons.RefreshCw} label="Refresh example" onInvoke={() => state.ActivationCount++} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.refresh" />
-            <Selectable content={() => browser.IsOptionSelected("native") ? "Native rendering · selected" : "Native rendering"} selected={() => browser.IsOptionSelected("native")} onSelect={() => browser.SelectOption("native")} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.selectable" />
+            <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.CircleCheck} onInvoke={Activate} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.primary">Apply change</Button>
+            <IconButton source={Lucent.Icons.Lucide.LucideIcons.RefreshCw} label="Refresh example" onInvoke={Activate} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.refresh" />
+            <Selectable content={() => selectedOption == "native" ? "Native rendering · selected" : "Native rendering"} selected={() => selectedOption == "native"} onSelect={() => SelectOption("native")} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.buttons.selectable" />
         </Layout>
         if (browser.CurrentExampleState == ExampleState.Busy) {
             <Progress label="Applying example change" value={() => 0.62f} name="component-browser.buttons.progress" />
         }
         if (browser.CurrentExampleState == ExampleState.Error) {
-            <ErrorNotice message={() => "The fixture rejected this action. Retry to return to the ordinary path."} retry={browser.RetryExample} name="component-browser.buttons.error" />
+            <ErrorNotice message={() => "The fixture rejected this action. Retry to return to the ordinary path."} retry={() => browser.SetExampleState(ExampleState.Default)} name="component-browser.buttons.error" />
         }
-        <Status content={() => state.ActivationCount == 0 ? "No action invoked yet." : "Invoked " + state.ActivationCount + " time" + (state.ActivationCount == 1 ? "" : "s") + "."} style={PresentationStyles.Secondary} name="component-browser.buttons.status" />
+        <Status content={() => activationCount == 0 ? "No action invoked yet." : "Invoked " + activationCount + " time" + (activationCount == 1 ? "" : "s") + "."} style={PresentationStyles.Secondary} name="component-browser.buttons.status" />
     </Layout>
 }

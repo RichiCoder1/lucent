@@ -18,15 +18,38 @@
     <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
     <ProjectReference Include="../../src/Lucent.Icons.Lucide/Lucent.Icons.Lucide.csproj" />
     <ProjectReference Include="../../src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
-    <ProjectReference Include="../../src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
-    <ProjectReference Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
-    <ProjectReference Include="../../src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" ReferenceOutputAssembly="false" Private="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained" />
+    <ProjectReference
+      Include="../../src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+      GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
+    <ProjectReference
+      Include="../../src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+      GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
+    <ProjectReference
+      Include="../../src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      PrivateAssets="all"
+      SkipGetTargetFrameworkProperties="true"
+      GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
   </ItemGroup>
   <ItemGroup>
     <!-- The compiler consumes these files as AdditionalFiles; embedding the same bytes gives the browser an honest source view. -->
-    <EmbeddedResource Include="Examples\*.lui" LogicalName="Lucent.ComponentBrowser.Examples.%(Filename)%(Extension)" />
+    <EmbeddedResource
+      Include="Examples\*.lui"
+      LogicalName="Lucent.ComponentBrowser.Examples.%(Filename)%(Extension)"
+    />
     <AdditionalFiles Include="*.lui" LucentLuiLogicalPath="%(Filename)%(Extension)" />
-    <AdditionalFiles Include="Examples\*.lui" LucentLuiLogicalPath="Examples/%(Filename)%(Extension)" />
+    <AdditionalFiles
+      Include="Examples\*.lui"
+      LucentLuiLogicalPath="Examples/%(Filename)%(Extension)"
+    />
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="LucentLuiLogicalPath" />
     <CompilerVisibleProperty Include="LucentLuiProjectIdentity" />
     <CompilerVisibleProperty Include="LucentLuiProjectEpoch" />

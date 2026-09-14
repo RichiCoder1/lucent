@@ -13,6 +13,9 @@ Lucent authors need a quick way to find a stock recipe, try it with ordinary poi
 ## Capabilities and constraints
 
 - Searchable component navigation with family, usage, and accessibility notes.
+- Typed `/examples/{id}` routes with Back/Forward history and keyboard Back.
+  The browser shell retains search, density, theme and split-pane state. Leaving
+  an example disposes its local state; returning mounts a fresh example.
 - Interactive examples built from real existing Lucent controls. Examples preserve ordinary hover, pressed, selected, disabled, loading, and error states.
 - Numeric, date/time, password, asynchronous combo box, navigation, list, select, tree, link, dialog, table, and native storage selection examples are added as each public contract lands.
 - Theme switches for the stock light, dark, and high-contrast themes; a comfortable/compact density switch; and example state switches for default, disabled, busy, and error scenarios.
@@ -20,6 +23,28 @@ Lucent authors need a quick way to find a stock recipe, try it with ordinary poi
 - Start with the current stock controls and add family examples as those controls land. Live compilation and an editor workflow belong to a future epic.
 - Use `ControlThemes`, `PresentationStyles`, and stock component recipes. Application styles provide layout, spacing, clipping, and typography composition only; they do not replace theme tokens or control-state decoration.
 - Keep portable component concepts in Core and Windows-specific clipboard/presentation integration in the application or host boundary.
+
+## Authoring and ownership
+
+`ComponentBrowserApplication.lui` owns the browser model and mounts the `.lui`
+shell. `ComponentBrowserStructure.cs` is a host adapter: it receives the mount's
+framework-controlled theme and passes native picker/launcher capabilities into
+that root. It does not allocate example state or choose the active example.
+
+`ComponentBrowserState` holds only browser-wide preferences, search, copy feedback,
+native capabilities and navigation authority. The catalog associates each source
+file with its compiled recipe. `ComponentExample.lui` consumes the typed route
+context and mounts that recipe through a real `RouteOutlet`; example selection
+does not use a chain of conditional branches.
+
+Simple example state lives in `.lui` declarations and setup. Involved fixture data,
+sorting, asynchronous native services and dialog coordination live in adjacent
+per-example C# helpers created by their `.lui` owner. Popup bodies share that
+example's state. Pending native operations are canceled when their example retires,
+and scope-owned dispatch prevents late completion from updating a retired example.
+These helpers are part of each example's implementation, not state retained by
+the browser. Hoist state explicitly only when a product needs it to survive leaving
+a route; this gallery deliberately demonstrates the default mounted lifetime.
 
 ## Product principles
 

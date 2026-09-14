@@ -658,6 +658,10 @@ public static partial class Components
                     author: Style
                         .Empty.Set(LayoutProperties.Axis, LayoutAxis.Column)
                         .Set(LayoutProperties.MainGrow, 1f)
+                        .Set(LayoutProperties.MainShrink, 1f)
+                        .Set(LayoutProperties.MainBasis, 0f)
+                        .Set(LayoutProperties.MinWidth, 0f)
+                        .Set(LayoutProperties.MinHeight, 0f)
                 );
                 root.AttachBehaviors(new NavigationBoundaryBehavior(interaction, label));
                 context.Mount(

@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style ComponentNavStyle {
     Axis: LayoutAxis.Column;
     MainGrow: 1;

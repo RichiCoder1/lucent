@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style SourcePanelStyle {
     Axis: LayoutAxis.Column;
     Spacing: 10;

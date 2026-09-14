@@ -1,5 +1,4 @@
 namespace Lucent.ComponentBrowser;
-
 style StorageExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -14,14 +13,15 @@ style StorageExampleActionsStyle {
 }
 
 public component StorageExample(ComponentBrowserState browser) {
+    readonly StorageExampleModel example = new(owner, browser.FilePicker);
     <Layout style={StorageExampleStyle}>
         <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These actions open the injected native picker and return a typed selection outcome. Choosing a save destination only selects a location; the browser never writes a file.</Text>
         <Layout style={StorageExampleActionsStyle}>
-            <Button onInvoke={browser.OpenFiles} name="component-browser.storage.open">Open files</Button>
-            <Button onInvoke={browser.SaveDestination} name="component-browser.storage.save">Save destination</Button>
-            <Button onInvoke={browser.ChooseFolder} name="component-browser.storage.folder">Choose folder</Button>
+            <Button onInvoke={example.OpenFiles} name="component-browser.storage.open">Open files</Button>
+            <Button onInvoke={example.SaveDestination} name="component-browser.storage.save">Save destination</Button>
+            <Button onInvoke={example.ChooseFolder} name="component-browser.storage.folder">Choose folder</Button>
         </Layout>
-        <Status content={() => browser.StorageMessage} name="component-browser.storage.status" />
-        <Text content={() => browser.StorageLocation} style={PresentationStyles.Secondary with { TextWrap: TextWrap.WordWithGraphemeFallback; }} name="component-browser.storage.location" />
+        <Status content={() => example.Message} name="component-browser.storage.status" />
+        <Text content={() => example.Location} style={PresentationStyles.Secondary with { TextWrap: TextWrap.WordWithGraphemeFallback; }} name="component-browser.storage.location" />
     </Layout>
 }
