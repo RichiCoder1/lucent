@@ -1,0 +1,17 @@
+namespace Fixture;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Lucent.Core;
+
+public record Person(string Name);
+
+[JsonSerializable(typeof(Person))]
+public partial class JsonContext : JsonSerializerContext { }
+
+public component JsonView() {
+    [Once] Person person = JsonSerializer.Deserialize("{\"Name\":\"Ada\"}", JsonContext.Default.Person)!;
+
+    string Serialize() => JsonSerializer.Serialize(person, JsonContext.Default.Person);
+
+    <Text>{Serialize()}</Text>
+}
