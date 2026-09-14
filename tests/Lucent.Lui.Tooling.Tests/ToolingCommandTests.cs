@@ -1,5 +1,7 @@
+using System.Reflection;
 using System.Text;
 using Lucent.Lui.Tooling;
+using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lucent.Lui.Tooling.Tests;
@@ -145,7 +147,27 @@ public sealed class ToolingCommandTests
     }
 
     [TestMethod]
+    [DoNotParallelize]
     public void SemanticLintUsesWarningsAsErrorsAndPerFileSeverity()
+    {
+        var configuration =
+            typeof(ToolingCommandTests)
+                .Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()
+                ?.Configuration
+            ?? throw new InvalidOperationException("Missing build configuration.");
+        var previousConfiguration = Environment.GetEnvironmentVariable("Configuration");
+        try
+        {
+            Environment.SetEnvironmentVariable("Configuration", configuration);
+            VerifySemanticLint(configuration);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Configuration", previousConfiguration);
+        }
+    }
+
+    private static void VerifySemanticLint(string configuration)
     {
         using var files = new ToolingFixture();
         var coreProject = System.IO.Path.Combine(
@@ -160,12 +182,14 @@ public sealed class ToolingCommandTests
             <Project Sdk="Microsoft.NET.Sdk">
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
+                <Configuration>{configuration}</Configuration>
                 <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
               </PropertyGroup>
               <ItemGroup>
                 <Using Include="Lucent.Core" />
-                <ProjectReference Include="{coreProject}" />
+                <ProjectReference Include="{coreProject}" AdditionalProperties="Configuration={configuration}" />
                 <AdditionalFiles Include="*.lui" />
+                <CompilerVisibleProperty Include="Configuration" />
               </ItemGroup>
             </Project>
             """
@@ -209,6 +233,45 @@ public sealed class ToolingCommandTests
         Assert.IsFalse(
             overrides.Error.Contains("Suppressed.lui", StringComparison.Ordinal),
             overrides.Error
+        );
+
+        using var workspace = MSBuildWorkspace.Create();
+        var evaluated = workspace
+            .OpenProjectAsync(files.Path("Lint.csproj"))
+            .GetAwaiter()
+            .GetResult();
+        Assert.IsTrue(
+            evaluated.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions.TryGetValue(
+                "build_property.Configuration",
+                out var evaluatedConfiguration
+            )
+        );
+        Assert.AreEqual(configuration, evaluatedConfiguration);
+        var referencedCore = evaluated.Solution.GetProject(
+            evaluated.ProjectReferences.Single().ProjectId
+        )!;
+        var analyzerPaths = referencedCore
+            .AnalyzerReferences.Where(reference =>
+                reference.FullPath?.EndsWith(
+                    "Lucent.Lui.Compiler.dll",
+                    StringComparison.OrdinalIgnoreCase
+                ) == true
+                || reference.FullPath?.EndsWith(
+                    "Lucent.Lui.Generator.dll",
+                    StringComparison.OrdinalIgnoreCase
+                ) == true
+            )
+            .Select(reference => reference.FullPath ?? "")
+            .ToArray();
+        Assert.AreEqual(2, analyzerPaths.Length, String.Join(Environment.NewLine, analyzerPaths));
+        Assert.IsTrue(
+            analyzerPaths.All(path =>
+                path.Contains(
+                    $"{System.IO.Path.DirectorySeparatorChar}bin{System.IO.Path.DirectorySeparatorChar}{configuration}{System.IO.Path.DirectorySeparatorChar}",
+                    StringComparison.OrdinalIgnoreCase
+                ) && File.Exists(path)
+            ),
+            String.Join(Environment.NewLine, analyzerPaths)
         );
     }
 

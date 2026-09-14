@@ -24,6 +24,11 @@ when walking upward from each file finds an unambiguous owning project. Project
 evaluation is required for semantic lints, but not for formatting. Evaluate only
 projects you trust, using the same trust boundary as a normal build.
 
+Source projects that reference locally built generators need those generator
+outputs in the configuration selected by project evaluation. Build the dependencies
+first; outputs from another configuration do not satisfy those analyzer references.
+SDK package consumers receive their analyzer binaries through restore.
+
 | Operation | Exit 0 | Exit 1 | Exit 2 |
 | --- | --- | --- | --- |
 | Formatting check | All files clean | Formatting drift | Invalid source/configuration, unavailable preservation, or operation failure |
