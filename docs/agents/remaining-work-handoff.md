@@ -22,11 +22,11 @@ managed/NativeAOT with real provider ownership and disposal evidence.
 
 [CI 34822437908](https://github.com/RichiCoder1/lucent/actions/runs/34822437908)
 passed managed, package-verification and publication jobs for all nine
-`0.3.0-dev.76.1` packages. Light Notes is pushed to `codex/context-navigation`;
+`0.3.0-dev.76.1` packages. Light Notes is pushed to `main`;
 its [CI 34824660762](https://github.com/RichiCoder1/light-notes/actions/runs/34824660762)
 passed storage/workspace tests, desktop-test compilation, locked restore and
-NativeAOT publication. Its direct main push awaits the exact-target
-authorization requested after automatic approval review rejected that action.
+NativeAOT publication. The same verified commit was promoted to `main` after
+explicit user authorization; no delivery work remains for #203/#204.
 [The joint plan](../plans/context-navigation-execution.md) maps evidence to the
 acceptance cases; [the navigation guide](../NAVIGATION.md) documents current APIs.
 

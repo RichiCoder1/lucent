@@ -59,10 +59,10 @@ route. Typed collection/note suffixes mount route anchors, and committed navigat
 updates workspace selection. This preserves existing editor sessions, drafts and
 accepted writes; it does not claim the visible panes remount through leaf outlets.
 Light Notes commit `9b8cb1b06bb70ed9f1cb478d31e3ee788041bcc4` records the integration.
-It is pushed to `codex/context-navigation` with successful
+It is pushed to `main` with successful pre-promotion
 [CI 34824660762](https://github.com/RichiCoder1/light-notes/actions/runs/34824660762).
-Promotion to Light Notes' main branch awaits the separately requested exact-target
-authorization; its implementation and verification are complete.
+The same verified commit was promoted after explicit user authorization;
+implementation, verification and delivery are complete.
 Its [validation matrix](https://github.com/RichiCoder1/light-notes/blob/9b8cb1b06bb70ed9f1cb478d31e3ee788041bcc4/docs/CONTEXT-NAVIGATION-VALIDATION.md)
 records that boundary and the official package evidence.
 
