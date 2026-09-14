@@ -1,5 +1,31 @@
 # Current work and follow-ups
 
+## Whole-file formatting and linting — September 14, 2026
+
+Lucent `7144a5e` is published as `0.3.0-dev.79.1` after
+[CI 79](https://github.com/RichiCoder1/lucent/actions/runs/34892962935) passed
+managed, package-only NativeAOT and publication jobs. The compiler, generator,
+CLI and editor share formatting/configuration/lint policy. Authored source and
+all in-tree apps pass C# and `.lui` formatting, enforced in maintained CI.
+The [guide](../LUI-FORMATTING.md) documents commands, explicit fixes and exceptions;
+the [integration record](../plans/lui-formatting-integration.md) records preservation,
+performance, packaging and verification evidence.
+
+Light Notes `8ac1175` consumes the published version and enables SDK formatting
+checks in its build/publish workflow. Pure formatting is isolated in Lucent
+`66ebfe8` and Light Notes `5964730`. Locally, Light Notes passes all 33 authored
+C# and 16 `.lui` checks, builds without warnings, and passes 22 storage and 44
+workspace tests with one intentional opt-in skip. Desktop tests and the review
+tool compile; no new focus-taking UI walkthrough was needed for source formatting.
+[Light Notes CI](https://github.com/RichiCoder1/light-notes/actions/runs/34895395190)
+passes formatting, tests, desktop-test compilation and NativeAOT publication at
+`8ac1175`. F01–F06 (#295–300) are complete; no formatter delivery work remains.
+
+VS Code extension `0.3.3` and its matching server are installed. Current user and
+Lucent workspace settings point to
+`C:/Users/richa/.lucent/lui/formatting-20260914/server/`; Reload Window activates
+them. Installation paths in older entries below are historical.
+
 ## Context, injection and navigation — September 14, 2026
 
 Implementation source `b3f3d59c91352b89761b9aefde42ef1c149b6e77` is pushed for

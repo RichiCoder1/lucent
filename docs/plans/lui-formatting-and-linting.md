@@ -3,8 +3,9 @@
 Status: implemented, 2026-09-14. The owner-approved source policy includes
 content-placement semantic exceptions. The whole-file formatter, shared semantic
 lint policy, configuration resolver, CLI, editor actions and repository checks are
-implemented and verified locally. F05/F06 tickets record CI publication and the
-independent Light Notes package adoption.
+implemented and published as `0.3.0-dev.79.1` after managed and package-only
+NativeAOT CI passed. F05/F06 tickets record publication and the independent
+Light Notes package adoption.
 
 Execution checkout: `d53b8726080160e973d6d6f4247a556c6f282fc6`. Execution tickets
 are [F01 #295](https://github.com/RichiCoder1/lucent/issues/295),
