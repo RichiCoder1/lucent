@@ -1,5 +1,43 @@
 # Current work and follow-ups
 
+## Context, injection and navigation — September 14, 2026
+
+Implementation source `b3f3d59c91352b89761b9aefde42ef1c149b6e77` is pushed for
+#203/#204. It adds typed mount requirements and providers, owned declarations,
+Hosting service borrowing, popup environment continuity, generated routes,
+bounded navigation transactions, retained outlets and focus/viewport/command
+integration. Issue Browser uses the new authoring and routing; Light Notes
+commit `9b8cb1b06bb70ed9f1cb478d31e3ee788041bcc4` consumes the official
+`0.3.0-dev.76.1` package set.
+
+Local verification passes Core 645, Compiler 92, Generator 35, Hosting eight,
+Issue Browser 22 and all thirty editor tests across the full run plus one stale
+fixture correction. The full solution and NativeAOT Issue Browser build without
+warnings. Architecture positive/negative, formatting and extension checks pass.
+Four published Issue Browser tests cover responsive Back/Alt+Left, route commands
+through Lucent and Windows menus, and Axe with zero rule errors. Four Light Notes
+desktop workflows pass the official package; its app and storage suites pass 44 and 22,
+with one intentional app projection skip. The joint package probes execute
+managed/NativeAOT with real provider ownership and disposal evidence.
+
+[CI 34822437908](https://github.com/RichiCoder1/lucent/actions/runs/34822437908)
+passed managed, package-verification and publication jobs for all nine
+`0.3.0-dev.76.1` packages. Light Notes is pushed to `codex/context-navigation`;
+its [CI 34824660762](https://github.com/RichiCoder1/light-notes/actions/runs/34824660762)
+passed storage/workspace tests, desktop-test compilation, locked restore and
+NativeAOT publication. Its direct main push awaits the exact-target
+authorization requested after automatic approval review rejected that action.
+[The joint plan](../plans/context-navigation-execution.md) maps evidence to the
+acceptance cases; [the navigation guide](../NAVIGATION.md) documents current APIs.
+
+The local editor server is installed under `C:/Users/richa/.lucent/lui/b3f3d59/`
+and the updated syntax extension is installed. Existing server settings point to
+that version; reload VS Code to activate it. Route
+restoration and Windows activation remain follow-up work under #205. Optional
+container features, multiple windows, navigation animation and live compilation
+remain outside this delivery.
+
+
 ## Semantic capabilities checkpoint — September 13, 2026
 
 The approved [semantic refactor](../plans/semantic-capabilities.md) #291–294 is
@@ -34,18 +72,6 @@ allowlist and runtime state rules are unchanged. Local logs are
 [CI 34806634193](https://github.com/RichiCoder1/lucent/actions/runs/34806634193)
 passed managed, NativeAOT/package-consumer and publication jobs at `52ff6d5`,
 publishing `0.3.0-dev.75.1`. #290 is complete.
-
-Typed composition context/service injection #203 and URI navigation #204 are
-implemented and undergoing final integration closeout in the
-[joint execution plan](../plans/context-navigation-execution.md). Core/Compiler/
-Generator/Hosting/Issue Browser checks pass; Light Notes passes its app and storage
-suites with full interaction on candidate `0.3.0-dev.contextnav.20260914.4` and
-publishes as NativeAOT. Real Hosting managed/NativeAOT and generated route package
-proofs pass. Final focus/partial-publication cleanup review regressions, desktop
-checks, official publication and the published Light Notes pin remain pending.
-No implementation commit for these epics has been pushed yet. Original design
-snapshots remain private; public issue contracts and the execution plan govern
-closeout. Live compilation remains separate.
 
 ## September 13 execution checkpoint
 

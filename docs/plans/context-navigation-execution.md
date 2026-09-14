@@ -1,9 +1,9 @@
 # Context, injection and retained navigation execution
 
-Status: authorized after semantic capabilities #291–294 and callback diagnostics
-#290. Preparation uses the current C# authoring and semantic-capability runtime;
-the older design sketches are not implementation evidence. Implementation is in
-progress; local implementation and application verification are complete; official publication is pending.
+Status: delivered in `b3f3d59` and published as `0.3.0-dev.76.1` after
+semantic capabilities #291–294 and callback diagnostics #290. Both proving
+applications pass focused managed and desktop verification. The older design
+sketches are not implementation evidence.
 
 The public execution contracts are [#203](https://github.com/RichiCoder1/lucent/issues/203)
 and [#204](https://github.com/RichiCoder1/lucent/issues/204), their native child
@@ -32,19 +32,19 @@ local; this document records implementation order and integration constraints.
 
 Context and injection are one delivery unit. The kernel can develop alongside
 the foundation spike; the outlet joins them after their interfaces are proven.
-Both parent issues remain open until #213 and their children are complete.
+Joint verification #213 combines the child contracts and both proving applications.
 
 ## Current execution
 
 The context, service binding, compiler, editor and typed navigation implementation
-is integrated in both proving applications. The local nine-package candidate
-`0.3.0-dev.contextnav.20260914.4` passes package inventory validation, generated
-route NativeAOT execution and the real Hosting managed/NativeAOT integration
-probe. The cross-library authoring consumer passed managed and NativeAOT execution
-on candidate `.3`; subsequent changes concern navigation runtime edge cases.
+is integrated in both proving applications. [CI 34822437908](https://github.com/RichiCoder1/lucent/actions/runs/34822437908)
+passed managed verification and the package-only authoring, generated-route and
+real Hosting managed/NativeAOT probes, then published all nine packages as
+`0.3.0-dev.76.1`. Implementation source is
+`b3f3d59c91352b89761b9aefde42ef1c149b6e77`.
 
 Affected managed checks pass Core 645, Compiler 92, Generator 35, Hosting eight,
-and Issue Browser 22. Light Notes consumes candidate `.4` with full navigation
+and Issue Browser 22. Light Notes consumes published `0.3.0-dev.76.1` with full navigation
 interaction enabled: app 44 pass plus one explicit opt-in skip, storage 22 pass,
 and its actual Windows NativeAOT publish succeeds. All thirty editor tests pass across the full run and the focused correction of a stale real-app markup assertion.
 
@@ -52,7 +52,19 @@ Final review regressions pass for retained live target replacement, persistent
 shell focus and partial-publication cleanup. The ten interaction contracts and
 all 645 Core contracts pass. Light Notes also passes four focused desktop workflows:
 responsive navigation, autosave/reopen, recovery/discard and long-note archiving.
-The final NativeAOT Issue Browser passes four desktop cases: adaptive Back/Alt+Left navigation, popup-origin route activation in Lucent and Windows-native menus, and Axe accessibility scanning with zero rule errors. Screenshots confirm the wide collection and compact detail layouts. Official publication and the published Light Notes pin remain pending; local candidates are not official releases.
+The final NativeAOT Issue Browser passes four desktop cases: adaptive Back/Alt+Left navigation, popup-origin route activation in Lucent and Windows-native menus, and Axe accessibility scanning with zero rule errors. Screenshots confirm the wide collection and compact detail layouts.
+
+Light Notes retains its visible list/editor controls under the stable workspace
+route. Typed collection/note suffixes mount route anchors, and committed navigation
+updates workspace selection. This preserves existing editor sessions, drafts and
+accepted writes; it does not claim the visible panes remount through leaf outlets.
+Light Notes commit `9b8cb1b06bb70ed9f1cb478d31e3ee788041bcc4` records the integration.
+It is pushed to `codex/context-navigation` with successful
+[CI 34824660762](https://github.com/RichiCoder1/light-notes/actions/runs/34824660762).
+Promotion to Light Notes' main branch awaits the separately requested exact-target
+authorization; its implementation and verification are complete.
+Its [validation matrix](https://github.com/RichiCoder1/light-notes/blob/9b8cb1b06bb70ed9f1cb478d31e3ee788041bcc4/docs/CONTEXT-NAVIGATION-VALIDATION.md)
+records that boundary and the official package evidence.
 
 ## Joint evidence map
 
@@ -67,7 +79,7 @@ The final NativeAOT Issue Browser passes four desktop cases: adaptive Back/Alt+L
 | Responsive editor/draft continuity | Light Notes app/storage and published desktop suites; its `docs/CONTEXT-NAVIGATION-VALIDATION.md` maps each acceptance case |
 
 The real-provider package probe characterizes sixteen warmed changed-leaf mounts
-while retaining the route root. Candidate `.4` measured 22,807 B/remount managed
+while retaining the route root. Official CI measured 22,807 B/remount managed
 and 22,575 B/remount NativeAOT, creating exactly sixteen transient services. These
 are machine-specific observations, not timing/allocation thresholds or claims of
 improvement. The probe also checks zero repeated resolution during stable

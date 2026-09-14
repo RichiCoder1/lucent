@@ -113,7 +113,7 @@ Build the language server with the repository's pinned SDK and install its publi
 ```powershell
 dotnet publish src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj -c Release -o artifacts/lui-server
 ./tools/Pack-LuiExtension.ps1
-code --install-extension artifacts/lucent-lui-vscode/lucent-lui-0.3.1.vsix --force
+code --install-extension artifacts/lucent-lui-vscode/lucent-lui-0.3.2.vsix --force
 ```
 
 Set `lucentLui.serverPath` to the absolute path of `artifacts/lui-server/Lucent.Lui.LanguageServer.dll`, or copy the entire publish directory to a stable local tooling location and use that path. A package consumer's project path should identify its own `.csproj`.
