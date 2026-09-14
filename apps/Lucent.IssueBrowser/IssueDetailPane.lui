@@ -1,4 +1,5 @@
 namespace Lucent.IssueBrowser;
+
 style DetailPaneStyle {
     Axis: LayoutAxis.Column;
     MainGrow: 1;
@@ -19,8 +20,16 @@ style DetailBackStyle(WindowBreakpoints breakpoints) {
 public component IssueDetailPane() {
     context IssueBrowserViewState view;
     context NavigationSession navigation;
+
     <Layout style={DetailPaneStyle}>
-        <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.ArrowLeft} onInvoke={() => navigation.Back()} style={DetailBackStyle(view.Breakpoints)} name="issue-browser.back">Back</Button>
+        <Button
+            leadingIcon={Lucent.Icons.Lucide.LucideIcons.ArrowLeft}
+            onInvoke={() => navigation.Back()}
+            style={DetailBackStyle(view.Breakpoints)}
+            name="issue-browser.back"
+        >
+            Back
+        </Button>
         {IssueBrowserRouting.Outlet(view.Interaction)}
     </Layout>
 }

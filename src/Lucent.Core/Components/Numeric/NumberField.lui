@@ -16,7 +16,14 @@ public component NumberField(
     Func<bool>? readOnly = null,
     Style? style = null
 ) {
-    readonly NumericEditSession numeric = new(owner, value, onValueRequested, options, fieldId ?? label);
+    readonly NumericEditSession numeric = new(
+        owner,
+        value,
+        onValueRequested,
+        options,
+        fieldId ?? label
+    );
+
     <Field
         label={label}
         editor={field => NumberFieldEditor(field, numeric, enabled, readOnly)}

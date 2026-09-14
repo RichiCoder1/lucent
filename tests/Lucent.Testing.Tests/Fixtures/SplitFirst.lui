@@ -1,2 +1,5 @@
 namespace HeadlessFixtures;
-component SplitFirst() { <Text>First pane</Text> }
+
+component SplitFirst() {
+    <Text>First pane</Text>
+}

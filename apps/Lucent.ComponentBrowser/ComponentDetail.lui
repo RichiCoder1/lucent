@@ -1,4 +1,5 @@
 namespace Lucent.ComponentBrowser;
+
 style ComponentDetailStyle {
     MainGrow: 1;
     MainShrink: 1;
@@ -57,36 +58,140 @@ style ComponentExampleStyle {
 
 public component ComponentDetail(ComponentBrowserState browser, ComponentBrowserViewState view) {
     <Layout style={ComponentDetailStyle}>
-        <ScrollViewport viewport={view.DetailViewport} label="Component details" style={ComponentDetailViewportStyle}>
+        <ScrollViewport
+            viewport={view.DetailViewport}
+            label="Component details"
+            style={ComponentDetailViewportStyle}
+        >
             <Layout style={ComponentDetailContentStyle}>
                 <Layout style={ComponentDetailHeadingStyle}>
-                    <Text style={PresentationStyles.Caption} content={() => browser.SelectedItem.Family.ToUpperInvariant()} />
-                    <Text style={PresentationStyles.Title with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Title} name="component-browser.detail-title" />
-                    <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Summary} />
+                    <Text
+                        style={PresentationStyles.Caption}
+                        content={() => browser.SelectedItem.Family.ToUpperInvariant()}
+                    />
+                    <Text
+                        style={PresentationStyles.Title with {
+                            TextWrap: TextWrap.WordWithGraphemeFallback;
+                        }}
+                        content={() => browser.SelectedItem.Title}
+                        name="component-browser.detail-title"
+                    />
+                    <Text
+                        style={PresentationStyles.Body with {
+                            TextWrap: TextWrap.WordWithGraphemeFallback;
+                        }}
+                        content={() => browser.SelectedItem.Summary}
+                    />
                 </Layout>
                 <Layout style={ComponentStateRowStyle}>
-                    <Text style={PresentationStyles.Caption.With(ComponentStateLabelStyle)}>EXAMPLE STATE</Text>
-                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Default)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Default)} name="component-browser.state-default">Default</Button>
-                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Disabled)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)} name="component-browser.state-disabled">Disabled</Button>
-                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Busy)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Busy)} name="component-browser.state-busy">Busy</Button>
-                    <Button onInvoke={() => browser.SetExampleState(ExampleState.Error)} style={Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Error)} name="component-browser.state-error">Error</Button>
-                    <Status content={() => browser.ExampleStateLabel} style={PresentationStyles.Secondary} name="component-browser.state-status" />
+                    <Text style={PresentationStyles.Caption.With(ComponentStateLabelStyle)}>
+                        EXAMPLE STATE
+                    </Text>
+                    <Button
+                        onInvoke={() => browser.SetExampleState(ExampleState.Default)}
+                        style={
+                            Style.Empty.Enabled(
+                                () => browser.CurrentExampleState != ExampleState.Default
+                            )
+                        }
+                        name="component-browser.state-default"
+                    >
+                        Default
+                    </Button>
+                    <Button
+                        onInvoke={() => browser.SetExampleState(ExampleState.Disabled)}
+                        style={
+                            Style.Empty.Enabled(
+                                () => browser.CurrentExampleState != ExampleState.Disabled
+                            )
+                        }
+                        name="component-browser.state-disabled"
+                    >
+                        Disabled
+                    </Button>
+                    <Button
+                        onInvoke={() => browser.SetExampleState(ExampleState.Busy)}
+                        style={
+                            Style.Empty.Enabled(
+                                () => browser.CurrentExampleState != ExampleState.Busy
+                            )
+                        }
+                        name="component-browser.state-busy"
+                    >
+                        Busy
+                    </Button>
+                    <Button
+                        onInvoke={() => browser.SetExampleState(ExampleState.Error)}
+                        style={
+                            Style.Empty.Enabled(
+                                () => browser.CurrentExampleState != ExampleState.Error
+                            )
+                        }
+                        name="component-browser.state-error"
+                    >
+                        Error
+                    </Button>
+                    <Status
+                        content={() => browser.ExampleStateLabel}
+                        style={PresentationStyles.Secondary}
+                        name="component-browser.state-status"
+                    />
                 </Layout>
                 <Layout style={ComponentDetailActionStyle}>
-                    <Button onInvoke={browser.Back} style={Style.Empty.Enabled(() => browser.Navigation.CanGoBack)} name="component-browser.back">Back</Button>
-                    <Button onInvoke={browser.Forward} style={Style.Empty.Enabled(() => browser.Navigation.CanGoForward)} name="component-browser.forward">Forward</Button>
-                    <Button leadingIcon={Lucent.Icons.Lucide.LucideIcons.FileText} onInvoke={browser.CopySource} name="component-browser.copy-source">Copy compiled .lui</Button>
-                    <Status content={() => browser.CopyMessage} style={PresentationStyles.Secondary} name="component-browser.copy-status" />
+                    <Button
+                        onInvoke={browser.Back}
+                        style={Style.Empty.Enabled(() => browser.Navigation.CanGoBack)}
+                        name="component-browser.back"
+                    >
+                        Back
+                    </Button>
+                    <Button
+                        onInvoke={browser.Forward}
+                        style={Style.Empty.Enabled(() => browser.Navigation.CanGoForward)}
+                        name="component-browser.forward"
+                    >
+                        Forward
+                    </Button>
+                    <Button
+                        leadingIcon={Lucent.Icons.Lucide.LucideIcons.FileText}
+                        onInvoke={browser.CopySource}
+                        name="component-browser.copy-source"
+                    >
+                        Copy compiled .lui
+                    </Button>
+                    <Status
+                        content={() => browser.CopyMessage}
+                        style={PresentationStyles.Secondary}
+                        name="component-browser.copy-status"
+                    />
                 </Layout>
                 <Divider />
                 <Text style={PresentationStyles.Caption}>INTERACTIVE EXAMPLE</Text>
-                <Layout style={ComponentExampleStyle}>{ComponentBrowserRouting.Outlet(browser.Interaction).Named("component-browser.example")}</Layout>
+                <Layout style={ComponentExampleStyle}>
+                    {
+                        ComponentBrowserRouting.Outlet(browser.Interaction).Named(
+                            "component-browser.example"
+                        )
+                    }
+                </Layout>
                 <SourcePanel browser={browser} view={view} name="component-browser.source-panel" />
                 <Divider />
                 <Text style={PresentationStyles.Caption}>USAGE</Text>
-                <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Usage} name="component-browser.usage" />
+                <Text
+                    style={PresentationStyles.Body with {
+                        TextWrap: TextWrap.WordWithGraphemeFallback;
+                    }}
+                    content={() => browser.SelectedItem.Usage}
+                    name="component-browser.usage"
+                />
                 <Text style={PresentationStyles.Caption}>ACCESSIBILITY</Text>
-                <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.Accessibility} name="component-browser.accessibility" />
+                <Text
+                    style={PresentationStyles.Body with {
+                        TextWrap: TextWrap.WordWithGraphemeFallback;
+                    }}
+                    content={() => browser.SelectedItem.Accessibility}
+                    name="component-browser.accessibility"
+                />
             </Layout>
         </ScrollViewport>
     </Layout>

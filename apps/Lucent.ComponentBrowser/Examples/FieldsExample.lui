@@ -1,4 +1,5 @@
 namespace Lucent.ComponentBrowser;
+
 style FieldsExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -17,16 +18,20 @@ style FieldsExampleAreaStyle {
 }
 
 public component FieldsExample(ComponentBrowserState browser) {
-    [Owned] readonly EditorSession exampleField = new(owner, "example-field", "Lucent");
-    [Owned] readonly EditorSession exampleNotes = new(
+    [Owned]
+    readonly EditorSession exampleField = new(owner, "example-field", "Lucent");
+    [Owned]
+    readonly EditorSession exampleNotes = new(
         owner,
         "example-notes",
         "Keep the session in application state when a draft must survive a remount.",
         multiline: true
     );
-    [Owned] readonly FormSession form = new(owner, "component-browser-form");
+    [Owned]
+    readonly FormSession form = new(owner, "component-browser-form");
     ValidationState NameValidation() {
-        return browser.CurrentExampleState == ExampleState.Error || string.IsNullOrWhiteSpace(exampleField.Text)
+        return browser.CurrentExampleState == ExampleState.Error
+            || string.IsNullOrWhiteSpace(exampleField.Text)
             ? ValidationState.Invalid("A workspace name is required.")
             : ValidationState.Valid;
     }
@@ -40,13 +45,55 @@ public component FieldsExample(ComponentBrowserState browser) {
             ? "The multiline session is empty."
             : exampleNotes.Text.Length + " characters retained in the session.";
     }
+
     <Layout style={FieldsExampleStyle}>
-        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>The field controls retain their editor sessions while this example is mounted. Type, select text, and use the native clipboard or IME path as usual.</Text>
-        <Field label="Workspace name" required={true} session={form} validation={NameValidation} help={() => "The label, editor, help, and validation message share one field relationship."} editor={field => Lucent.Core.Components.TextField(field, session: exampleField, placeholder: "Name this workspace", style: FieldsExampleFieldStyle.With(Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)))} name="component-browser.fields.name" />
-        <TextArea session={exampleNotes} label="Notes" placeholder="Add a short implementation note" style={FieldsExampleAreaStyle.With(Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled))} name="component-browser.fields.notes" />
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>
+            The field controls retain their editor sessions while this example is mounted. Type, select text, and use the native clipboard or IME path as usual.
+        </Text>
+        <Field
+            label="Workspace name"
+            required={true}
+            session={form}
+            validation={NameValidation}
+            help={
+                () => "The label, editor, help, and validation message share one field relationship."
+            }
+            editor={
+                field => Lucent.Core.Components.TextField(
+                    field,
+                    session: exampleField,
+                    placeholder: "Name this workspace",
+                    style: FieldsExampleFieldStyle.With(
+                        Style.Empty.Enabled(
+                            () => browser.CurrentExampleState != ExampleState.Disabled
+                        )
+                    )
+                )
+            }
+            name="component-browser.fields.name"
+        />
+        <TextArea
+            session={exampleNotes}
+            label="Notes"
+            placeholder="Add a short implementation note"
+            style={
+                FieldsExampleAreaStyle.With(
+                    Style.Empty.Enabled(() => browser.CurrentExampleState != ExampleState.Disabled)
+                )
+            }
+            name="component-browser.fields.notes"
+        />
         if (browser.CurrentExampleState == ExampleState.Error) {
-            <ErrorNotice message={() => "The example is showing a recoverable validation state."} retry={() => browser.SetExampleState(ExampleState.Default)} name="component-browser.fields.error" />
+            <ErrorNotice
+                message={() => "The example is showing a recoverable validation state."}
+                retry={() => browser.SetExampleState(ExampleState.Default)}
+                name="component-browser.fields.error"
+            />
         }
-        <Status content={() => FieldSummary() + " " + NotesSummary()} style={PresentationStyles.Secondary} name="component-browser.fields.status" />
+        <Status
+            content={() => FieldSummary() + " " + NotesSummary()}
+            style={PresentationStyles.Secondary}
+            name="component-browser.fields.status"
+        />
     </Layout>
 }

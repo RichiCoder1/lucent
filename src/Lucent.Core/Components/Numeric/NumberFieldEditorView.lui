@@ -11,9 +11,29 @@ internal component NumberFieldEditorView(
     Style decreaseStyle,
     Style increaseStyle
 ) {
-    <NumberFieldHost session={session} label={field.AccessibleName} enabled={enabled} readOnly={readOnly}>
-        <NumberFieldTextField field={field} session={session} enabled={enabled} readOnly={readOnly} />
-        <NumberFieldStep source={DateTimeArtwork.Decrease} label={"Decrease " + field.AccessibleName} onInvoke={decrease} style={decreaseStyle} />
-        <NumberFieldStep source={DateTimeArtwork.Increase} label={"Increase " + field.AccessibleName} onInvoke={increase} style={increaseStyle} />
+    <NumberFieldHost
+        session={session}
+        label={field.AccessibleName}
+        enabled={enabled}
+        readOnly={readOnly}
+    >
+        <NumberFieldTextField
+            field={field}
+            session={session}
+            enabled={enabled}
+            readOnly={readOnly}
+        />
+        <NumberFieldStep
+            source={DateTimeArtwork.Decrease}
+            label={"Decrease " + field.AccessibleName}
+            onInvoke={decrease}
+            style={decreaseStyle}
+        />
+        <NumberFieldStep
+            source={DateTimeArtwork.Increase}
+            label={"Increase " + field.AccessibleName}
+            onInvoke={increase}
+            style={increaseStyle}
+        />
     </NumberFieldHost>
 }

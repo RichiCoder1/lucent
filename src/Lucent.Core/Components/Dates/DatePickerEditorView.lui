@@ -18,8 +18,18 @@ internal component DatePickerEditorView(
     Func<bool> dropdownClose,
     Style actionStyle
 ) {
-    <DatePickerEditorHost expanded={expanded} open={dropdownOpen} close={dropdownClose} style={DatePickerEditorStyle}>
+    <DatePickerEditorHost
+        expanded={expanded}
+        open={dropdownOpen}
+        close={dropdownClose}
+        style={DatePickerEditorStyle}
+    >
         <DateTimeTextField field={field} session={session} enabled={enabled} readOnly={readOnly} />
-        <IconButton source={DateTimeArtwork.Calendar} label={"Open calendar for " + field.AccessibleName} onInvoke={open} style={actionStyle} />
+        <IconButton
+            source={DateTimeArtwork.Calendar}
+            label={"Open calendar for " + field.AccessibleName}
+            onInvoke={open}
+            style={actionStyle}
+        />
     </DatePickerEditorHost>
 }

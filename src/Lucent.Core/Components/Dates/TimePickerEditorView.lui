@@ -10,9 +10,24 @@ internal component TimePickerEditorView(
     Action increase,
     Style actionStyle
 ) {
-    <TimePickerHost session={session} label={field.AccessibleName} enabled={enabled} readOnly={readOnly}>
+    <TimePickerHost
+        session={session}
+        label={field.AccessibleName}
+        enabled={enabled}
+        readOnly={readOnly}
+    >
         <DateTimeTextField field={field} session={session} enabled={enabled} readOnly={readOnly} />
-        <IconButton source={DateTimeArtwork.Decrease} label={"Decrease " + field.AccessibleName} onInvoke={decrease} style={actionStyle} />
-        <IconButton source={DateTimeArtwork.Increase} label={"Increase " + field.AccessibleName} onInvoke={increase} style={actionStyle} />
+        <IconButton
+            source={DateTimeArtwork.Decrease}
+            label={"Decrease " + field.AccessibleName}
+            onInvoke={decrease}
+            style={actionStyle}
+        />
+        <IconButton
+            source={DateTimeArtwork.Increase}
+            label={"Increase " + field.AccessibleName}
+            onInvoke={increase}
+            style={actionStyle}
+        />
     </TimePickerHost>
 }

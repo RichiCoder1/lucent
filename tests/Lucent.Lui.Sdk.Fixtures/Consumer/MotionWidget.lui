@@ -1,6 +1,7 @@
 namespace Consumer;
 using Lucent.Core;
 using static Lucent.Core.Components;
+
 style MotionWidgetStyle(Func<float> opacity) {
     Background: Brush.Solid(Color.FromRgb(0x33, 0x66, 0x99));
     Opacity: opacity();

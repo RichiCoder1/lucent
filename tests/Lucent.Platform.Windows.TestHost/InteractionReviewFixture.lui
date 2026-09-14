@@ -61,13 +61,25 @@ internal component InteractionReviewFixtureView(InteractionReviewModel model) {
             controller={model.TooltipDialog}
             title="Tooltip dialog"
             initialFocus={model.FocusFirst}
-            actions={[Lucent.Core.Components.DialogCancel("Cancel", () => model.TooltipDialog.TryCancel())]}
+            actions={
+                [
+                    Lucent.Core.Components.DialogCancel(
+                        "Cancel",
+                        () => model.TooltipDialog.TryCancel()
+                    )
+                ]
+            }
         >
             <Tooltip description="Nested tooltip details">
                 <Button onInvoke={model.NoOp}>Nested tooltip target</Button>
             </Tooltip>
         </Dialog>
-        <Button onInvoke={model.OpenPendingDialog} style={Style.Empty.Enabled(() => !model.PendingDialog.IsOpen)}>Open pending dialog</Button>
+        <Button
+            onInvoke={model.OpenPendingDialog}
+            style={Style.Empty.Enabled(() => !model.PendingDialog.IsOpen)}
+        >
+            Open pending dialog
+        </Button>
         <Button onInvoke={model.FailPendingWrite}>Fail pending write</Button>
         <Status content={() => model.PendingStatus} />
         <Status content={() => model.PendingSubmissionStatus} />
@@ -75,7 +87,18 @@ internal component InteractionReviewFixtureView(InteractionReviewModel model) {
             controller={model.PendingDialog}
             title="Pending acceptance dialog"
             initialFocus={model.FocusFirst}
-            actions={[Lucent.Core.Components.Button("Start pending acceptance", model.StartPendingAcceptance), Lucent.Core.Components.DialogCancel("Cancel", () => model.PendingDialog.TryCancel())]}
+            actions={
+                [
+                    Lucent.Core.Components.Button(
+                        "Start pending acceptance",
+                        model.StartPendingAcceptance
+                    ),
+                    Lucent.Core.Components.DialogCancel(
+                        "Cancel",
+                        () => model.PendingDialog.TryCancel()
+                    )
+                ]
+            }
         >
             <Text>The application write remains owned by the fixture after native dismissal.</Text>
         </Dialog>

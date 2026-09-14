@@ -1,4 +1,5 @@
 namespace Lucent.ComponentBrowser;
+
 style ComboBoxExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -13,16 +14,31 @@ style ComboBoxExampleFieldStyle {
 
 public component ComboBoxExample(ComponentBrowserState browser) {
     readonly ComboBoxExampleModel example = new(owner);
+
     <Layout style={ComboBoxExampleStyle}>
-        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>Type a workspace name to open the suggestion surface. The mounted example controls the selected key while asynchronous results remain generation-safe.</Text>
-        <Field label="Workspace" fieldId="component-browser-combo" editor={field => Lucent.Core.Components.ComboBox(
-                field,
-                () => example.Selection,
-                example.SetSelection,
-                example.Suggest,
-                example.Options,
-                style: ComboBoxExampleFieldStyle
-            )} help={() => "Only an enabled suggestion can be committed in this example."} name="component-browser.combo.field" />
-        <Status content={() => example.Message} style={PresentationStyles.Secondary} name="component-browser.combo.status" />
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>
+            Type a workspace name to open the suggestion surface. The mounted example controls the selected key while asynchronous results remain generation-safe.
+        </Text>
+        <Field
+            label="Workspace"
+            fieldId="component-browser-combo"
+            editor={
+                field => Lucent.Core.Components.ComboBox(
+                    field,
+                    () => example.Selection,
+                    example.SetSelection,
+                    example.Suggest,
+                    example.Options,
+                    style: ComboBoxExampleFieldStyle
+                )
+            }
+            help={() => "Only an enabled suggestion can be committed in this example."}
+            name="component-browser.combo.field"
+        />
+        <Status
+            content={() => example.Message}
+            style={PresentationStyles.Secondary}
+            name="component-browser.combo.status"
+        />
     </Layout>
 }

@@ -1,5 +1,11 @@
 namespace Lucent.ComponentBrowser;
-public component ComponentBrowserApplication(ThemeContext theme, IFilePicker? filePicker, IUriLauncher? uriLauncher) {
+
+public component ComponentBrowserApplication(
+    ThemeContext theme,
+    IFilePicker? filePicker,
+    IUriLauncher? uriLauncher
+) {
     readonly ComponentBrowserState browser = new(owner, filePicker, uriLauncher);
+
     <ComponentBrowser browser={browser} theme={theme} name="Component Browser" />
 }

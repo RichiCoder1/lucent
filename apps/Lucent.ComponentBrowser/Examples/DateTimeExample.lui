@@ -1,4 +1,5 @@
 namespace Lucent.ComponentBrowser;
+
 style DateTimeExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -6,8 +7,10 @@ style DateTimeExampleStyle {
 }
 
 public component DateTimeExample(ComponentBrowserState browser) {
-    [Once] DateOnly? dateValue = new DateOnly(2024, 6, 15);
-    [Once] TimeOnly? timeValue = new TimeOnly(9, 30);
+    [Once]
+    DateOnly? dateValue = new DateOnly(2024, 6, 15);
+    [Once]
+    TimeOnly? timeValue = new TimeOnly(9, 30);
     readonly DatePickerOptions datePickerOptions = new(
         System.Globalization.CultureInfo.GetCultureInfo("en-US"),
         minimum: new DateOnly(2024, 1, 1),
@@ -37,6 +40,7 @@ public component DateTimeExample(ComponentBrowserState browser) {
             dateValue = null;
             return;
         }
+
         if (datePickerOptions.Minimum is { } minimum && date < minimum)
             return;
         if (datePickerOptions.Maximum is { } maximum && date > maximum)
@@ -48,6 +52,7 @@ public component DateTimeExample(ComponentBrowserState browser) {
             timeValue = null;
             return;
         }
+
         if (timePickerOptions.Minimum is { } minimum && time < minimum)
             return;
         if (timePickerOptions.Maximum is { } maximum && time > maximum)
@@ -55,13 +60,35 @@ public component DateTimeExample(ComponentBrowserState browser) {
         timeValue = time;
     }
     string DateTimeSummary() {
-        return "Due " + (dateValue?.ToString("D", datePickerOptions.Culture) ?? "not set")
-            + " at " + (timeValue?.ToString("t", timePickerOptions.Culture) ?? "not set") + ".";
+        return "Due " + (dateValue?.ToString("D", datePickerOptions.Culture) ?? "not set") + " at "
+            + (timeValue?.ToString("t", timePickerOptions.Culture) ?? "not set")
+            + ".";
     }
+
     <Layout style={DateTimeExampleStyle}>
-        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>These fields keep date and time drafts in the stock editor sessions while the applied values remain controlled by this mounted example. Open the calendar, type a value, or step the time with the keyboard.</Text>
-        <DatePicker label="Due date" value={() => dateValue} onValueRequested={SetDateValue} options={datePickerOptions} field={dateFieldOptions} name="component-browser.date-time.date" />
-        <TimePicker label="Start time" value={() => timeValue} onValueRequested={SetTimeValue} options={timePickerOptions} field={timeFieldOptions} name="component-browser.date-time.time" />
-        <Status content={DateTimeSummary} style={PresentationStyles.Secondary} name="component-browser.date-time.status" />
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>
+            These fields keep date and time drafts in the stock editor sessions while the applied values remain controlled by this mounted example. Open the calendar, type a value, or step the time with the keyboard.
+        </Text>
+        <DatePicker
+            label="Due date"
+            value={() => dateValue}
+            onValueRequested={SetDateValue}
+            options={datePickerOptions}
+            field={dateFieldOptions}
+            name="component-browser.date-time.date"
+        />
+        <TimePicker
+            label="Start time"
+            value={() => timeValue}
+            onValueRequested={SetTimeValue}
+            options={timePickerOptions}
+            field={timeFieldOptions}
+            name="component-browser.date-time.time"
+        />
+        <Status
+            content={DateTimeSummary}
+            style={PresentationStyles.Secondary}
+            name="component-browser.date-time.status"
+        />
     </Layout>
 }

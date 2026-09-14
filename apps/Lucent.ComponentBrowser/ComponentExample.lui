@@ -1,7 +1,9 @@
 namespace Lucent.ComponentBrowser;
+
 public component ComponentExample() {
     context RouteContext<ExampleRoute> route;
     context ComponentBrowserState browser;
     readonly ComponentCatalogItem example = ComponentCatalog.Find(route.Parameters.Id);
+
     <Layout>{example.CreateExample(browser)}</Layout>
 }

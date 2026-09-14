@@ -1,4 +1,5 @@
 namespace Lucent.ComponentBrowser;
+
 style SourcePanelStyle {
     Axis: LayoutAxis.Column;
     Spacing: 10;
@@ -21,12 +22,28 @@ style SourceCodeStyle {
 
 public component SourcePanel(ComponentBrowserState browser, ComponentBrowserViewState view) {
     <Layout style={SourcePanelStyle}>
-        <Text style={PresentationStyles.Caption} content={() => "COMPILED SOURCE · " + browser.SelectedItem.SourceFile} />
+        <Text
+            style={PresentationStyles.Caption}
+            content={() => "COMPILED SOURCE · " + browser.SelectedItem.SourceFile}
+        />
         if (browser.SelectedItem.DependencyNote is not null) {
-            <Text style={PresentationStyles.Secondary with { TextWrap: TextWrap.WordWithGraphemeFallback; }} content={() => browser.SelectedItem.DependencyNote!} />
+            <Text
+                style={PresentationStyles.Secondary with {
+                    TextWrap: TextWrap.WordWithGraphemeFallback;
+                }}
+                content={() => browser.SelectedItem.DependencyNote!}
+            />
         }
-        <ScrollViewport viewport={view.SourceViewport} label="Compiled .lui source" style={SourceViewportStyle}>
-            <Text content={() => browser.SelectedSource} style={PresentationStyles.Body.With(SourceCodeStyle)} name="component-browser.source" />
+        <ScrollViewport
+            viewport={view.SourceViewport}
+            label="Compiled .lui source"
+            style={SourceViewportStyle}
+        >
+            <Text
+                content={() => browser.SelectedSource}
+                style={PresentationStyles.Body.With(SourceCodeStyle)}
+                name="component-browser.source"
+            />
         </ScrollViewport>
     </Layout>
 }

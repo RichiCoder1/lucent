@@ -1,4 +1,5 @@
 namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+
 style Fixture {
     Width: 360;
     Height: 120;

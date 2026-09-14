@@ -17,7 +17,14 @@ style InlineNoticeMessageStyle {
     TextWrap: TextWrap.WordWithGraphemeFallback;
 }
 
-internal component InlineNoticeContent(Func<string> message, NoticeSeverity severity, Action? onAction, string? actionLabel, Style? style, SemanticAnnouncement announcement) {
+internal component InlineNoticeContent(
+    Func<string> message,
+    NoticeSeverity severity,
+    Action? onAction,
+    string? actionLabel,
+    Style? style,
+    SemanticAnnouncement announcement
+) {
     <InlineNoticeFrame style={InlineNoticeStyle.With(style)}>
         <Layout style={InlineNoticeHeadingStyle}>
             <Icon source={Components.NoticeIcon(severity)} />

@@ -11,9 +11,7 @@ style ComboBoxChevronStyle {
 
 internal component ComboBoxContent(ComboBoxBinding binding, ComponentRecipe editor, Style? style) {
     <ComboBoxHost binding={binding} style={style}>
-        <Layout style={ComboBoxEditorStyle}>
-            {editor}
-        </Layout>
+        <Layout style={ComboBoxEditorStyle}>{editor}</Layout>
         <Icon source={() => NavigationArtwork.Expanded} style={ComboBoxChevronStyle} />
     </ComboBoxHost>
 }

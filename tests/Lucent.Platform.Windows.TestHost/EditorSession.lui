@@ -1,4 +1,5 @@
 namespace Lucent.Platform.Windows.TestHost.LuiFixtures;
+
 style EditorFieldStyle {
     Width: 220;
     Height: 28;
@@ -11,7 +12,15 @@ style EditorAreaStyle {
 
 internal component EditorSessionView(EditorSessionFixtureModel model) {
     <Column>
-        <Column style={Style.Empty.Height(32).Participation(() => model.Compact.Value ? ElementParticipation.Collapsed : ElementParticipation.Visible)}>
+        <Column
+            style={
+                Style.Empty.Height(32).Participation(
+                    () => model.Compact.Value
+                        ? ElementParticipation.Collapsed
+                        : ElementParticipation.Visible
+                )
+            }
+        >
             <Text>Wide navigation</Text>
         </Column>
         if (model.Compact.Value) {

@@ -15,7 +15,10 @@ style RadioOptionLabelStyle {
 
 internal component RadioOptionContent(RadioOptionBinding binding) {
     <RadioOptionHost binding={binding}>
-        <Icon source={() => binding.Selected() ? SelectionArtwork.RadioOn : SelectionArtwork.RadioOff} style={RadioOptionIndicatorStyle} />
+        <Icon
+            source={() => binding.Selected() ? SelectionArtwork.RadioOn : SelectionArtwork.RadioOff}
+            style={RadioOptionIndicatorStyle}
+        />
         <SelectionDecoration content={binding.Label} style={RadioOptionLabelStyle} />
     </RadioOptionHost>
 }

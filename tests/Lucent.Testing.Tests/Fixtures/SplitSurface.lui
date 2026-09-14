@@ -3,5 +3,10 @@ namespace HeadlessFixtures;
 using Lucent.Core;
 
 public component SplitSurface(SplitPaneState state) {
-    <SplitPane state={state} first={[SplitFirst()]} second={[SplitSecond()]} label="Resize primary pane" />
+    <SplitPane
+        state={state}
+        first={[SplitFirst()]}
+        second={[SplitSecond()]}
+        label="Resize primary pane"
+    />
 }

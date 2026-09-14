@@ -1,4 +1,5 @@
 namespace Lucent.ComponentBrowser;
+
 style TreeExampleStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -13,10 +14,30 @@ style TreeExampleViewStyle {
 
 public component TreeExample(ComponentBrowserState browser) {
     readonly TreeExampleModel example = new(owner);
+
     <Layout style={TreeExampleStyle}>
-        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>TreeView keeps hierarchy, expansion, focus, and applied selection under the mounted example's control. Expand a branch or move through the visible rows to inspect the retained relationships.</Text>
-        <TreeView label="Project structure" roots={() => example.Roots} dataSource={example.DataSource} readSelectedKey={() => example.Selection} onSelectionRequested={example.SetSelection} readExpanded={example.IsExpanded} onExpansionRequested={example.SetExpanded} options={example.Options} style={TreeExampleViewStyle} />
-        <Status content={() => example.SelectionLabel} name="component-browser.tree.selection-status" />
-        <Status content={() => example.ExpansionSummary} style={PresentationStyles.Secondary} name="component-browser.tree.expansion-status" />
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>
+            TreeView keeps hierarchy, expansion, focus, and applied selection under the mounted example's control. Expand a branch or move through the visible rows to inspect the retained relationships.
+        </Text>
+        <TreeView
+            label="Project structure"
+            roots={() => example.Roots}
+            dataSource={example.DataSource}
+            readSelectedKey={() => example.Selection}
+            onSelectionRequested={example.SetSelection}
+            readExpanded={example.IsExpanded}
+            onExpansionRequested={example.SetExpanded}
+            options={example.Options}
+            style={TreeExampleViewStyle}
+        />
+        <Status
+            content={() => example.SelectionLabel}
+            name="component-browser.tree.selection-status"
+        />
+        <Status
+            content={() => example.ExpansionSummary}
+            style={PresentationStyles.Secondary}
+            name="component-browser.tree.expansion-status"
+        />
     </Layout>
 }

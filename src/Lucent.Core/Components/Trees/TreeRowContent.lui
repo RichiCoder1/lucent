@@ -15,8 +15,6 @@ style TreeRowContentStyle {
 internal component TreeRowContent(TreeRowBinding binding, ComponentRecipe content, Style? style) {
     <TreeRowHost binding={binding} style={style}>
         <TreeChevronHost binding={binding} style={TreeChevronStyle} />
-        <Layout style={TreeRowContentStyle}>
-            {content}
-        </Layout>
+        <Layout style={TreeRowContentStyle}>{content}</Layout>
     </TreeRowHost>
 }

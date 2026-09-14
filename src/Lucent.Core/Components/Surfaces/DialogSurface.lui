@@ -39,17 +39,13 @@ internal component DialogSurfaceContent(
         style={style}
     >
         <Text style={DialogTitleStyle}>{title}</Text>
-        <ScrollViewport label="Dialog content" style={DialogBodyStyle}>
-            {body}
-        </ScrollViewport>
+        <ScrollViewport label="Dialog content" style={DialogBodyStyle}>{body}</ScrollViewport>
         if (controller.FailureMessage is not null) {
             <InlineNotice
                 message={() => controller.FailureMessage!}
                 severity={NoticeSeverity.Error}
             />
         }
-        <Layout style={DialogActionsStyle}>
-            {actions}
-        </Layout>
+        <Layout style={DialogActionsStyle}>{actions}</Layout>
     </DialogFrame>
 }

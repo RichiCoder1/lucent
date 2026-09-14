@@ -1,5 +1,6 @@
 namespace Consumer;
 using static Consumer.RetainedConsumer;
+
 internal component Retained(Signal<Item[]> items, Signal<Item?> selected) {
     <Column>
         foreach (var item in items.Value) keyed by item.Id {

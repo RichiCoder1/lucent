@@ -1,7 +1,9 @@
 namespace Lucent.IssueBrowser;
+
 public component HostedIssueBrowser() {
     inject GitHubIssueSource source;
     inject IIssueStatusSource statuses;
     readonly IssueBrowserState browser = new(owner, source, statuses);
+
     <IssueBrowser browser={browser} />
 }

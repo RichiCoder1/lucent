@@ -1,5 +1,10 @@
 namespace Consumer;
-internal component ContentProof(ComponentRecipe component, ContentRecipe contribution, [DefaultContent] ComponentContent children) {
+
+internal component ContentProof(
+    ComponentRecipe component,
+    ContentRecipe contribution,
+    [DefaultContent] ComponentContent children
+) {
     <Column>
         <Header />
         {component}

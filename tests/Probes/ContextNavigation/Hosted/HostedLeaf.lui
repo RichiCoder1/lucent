@@ -8,9 +8,11 @@ public component HostedLeaf() {
     inject ProbeWorkspace workspace;
     inject SharedScoped shared;
     inject GenericTransient<string> transient;
-    [Owned] readonly OwnedProbe owned = new(workspace.Events, "leaf");
+    [Owned]
+    readonly OwnedProbe owned = new(workspace.Events, "leaf");
     Setup(owner) {
         workspace.RecordLeaf(shell, route, shared, transient);
     }
+
     <Layout name="hosted-probe.leaf" />
 }

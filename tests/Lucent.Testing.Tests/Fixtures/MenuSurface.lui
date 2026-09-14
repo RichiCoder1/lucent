@@ -18,7 +18,10 @@ public component MenuSurface(
     Action onSelect,
     Action<bool> onOpenChanged
 ) {
-    <ContextMenu menu={() => MenuContent(onRun, onOther, enabled, disabled)} onOpenChanged={onOpenChanged}>
+    <ContextMenu
+        menu={() => MenuContent(onRun, onOther, enabled, disabled)}
+        onOpenChanged={onOpenChanged}
+    >
         <Selectable selected={selected} onSelect={onSelect} style={MenuTargetStyle}>
             Target
         </Selectable>

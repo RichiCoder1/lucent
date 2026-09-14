@@ -53,11 +53,20 @@ style FilterSecondaryStyle(WindowBreakpoints breakpoints) {
     }
 }
 
-public component FilterBar(IssueBrowserState browser, IssueBrowserViewState view, Style? style = null) {
+public component FilterBar(
+    IssueBrowserState browser,
+    IssueBrowserViewState view,
+    Style? style = null
+) {
     <Layout style={FilterBarStyle(view.Breakpoints).With(style)}>
         <Layout style={FilterSearchColumnStyle(view.Breakpoints)}>
             <Text style={PresentationStyles.Caption}>Search issues</Text>
-            <TextField session={view.SearchEditor} name="issue-browser.search" onChange={browser.SetSearch} label="Search issues" />
+            <TextField
+                session={view.SearchEditor}
+                name="issue-browser.search"
+                onChange={browser.SetSearch}
+                label="Search issues"
+            />
         </Layout>
         <Layout style={FilterSecondaryStyle(view.Breakpoints)}>
             <Layout style={FilterStatusColumnStyle(view.Breakpoints)}>

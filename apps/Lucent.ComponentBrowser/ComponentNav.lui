@@ -1,4 +1,5 @@
 namespace Lucent.ComponentBrowser;
+
 style ComponentNavStyle {
     Axis: LayoutAxis.Column;
     MainGrow: 1;
@@ -66,19 +67,35 @@ public component ComponentNav(ComponentBrowserState browser, ComponentBrowserVie
             <Text style={PresentationStyles.Caption}>COMPONENTS</Text>
             <Text style={PresentationStyles.Secondary}>Browse the stock surface</Text>
         </Layout>
-        <ScrollViewport viewport={view.NavigationViewport} label="Component navigation" style={ComponentNavViewportStyle}>
+        <ScrollViewport
+            viewport={view.NavigationViewport}
+            label="Component navigation"
+            style={ComponentNavViewportStyle}
+        >
             <Layout style={ComponentNavListStyle}>
                 if (browser.VisibleItems.Count == 0) {
                     <Layout style={ComponentNavEmptyStyle}>
                         <Text style={PresentationStyles.Body}>No components found</Text>
-                        <Text style={PresentationStyles.Secondary}>Try a family or control name.</Text>
+                        <Text style={PresentationStyles.Secondary}>
+                            Try a family or control name.
+                        </Text>
                     </Layout>
                 }
                 foreach (var item in browser.VisibleItems) keyed by item.Id {
-                    <Selectable label={() => item.Title + " · " + item.Family} selected={() => browser.IsSelected(item.Id)} onSelect={() => browser.Select(item.Id)} style={ComponentNavItemStyle(browser)} name={"component-browser.nav." + item.Id}>
+                    <Selectable
+                        label={() => item.Title + " · " + item.Family}
+                        selected={() => browser.IsSelected(item.Id)}
+                        onSelect={() => browser.Select(item.Id)}
+                        style={ComponentNavItemStyle(browser)}
+                        name={"component-browser.nav." + item.Id}
+                    >
                         <Layout style={ComponentNavItemContentStyle}>
                             <Text style={ComponentNavItemTextStyle}>{item.Title}</Text>
-                            <Text style={PresentationStyles.Caption.With(ComponentNavItemTextStyle)}>{item.Family}</Text>
+                            <Text
+                                style={PresentationStyles.Caption.With(ComponentNavItemTextStyle)}
+                            >
+                                {item.Family}
+                            </Text>
                         </Layout>
                     </Selectable>
                 }

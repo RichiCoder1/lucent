@@ -10,11 +10,13 @@ style RadioGroupOptionsStyle {
     Spacing: 2;
 }
 
-internal component RadioGroupContent(RadioGroupBinding binding, [DefaultContent] ComponentContent options, Style? style) {
+internal component RadioGroupContent(
+    RadioGroupBinding binding,
+    [DefaultContent] ComponentContent options,
+    Style? style
+) {
     <RadioGroupHost binding={binding} style={style}>
         <SelectionDecoration content={() => binding.Label} style={RadioGroupLabelStyle} />
-        <Layout style={RadioGroupOptionsStyle}>
-            {options}
-        </Layout>
+        <Layout style={RadioGroupOptionsStyle}>{options}</Layout>
     </RadioGroupHost>
 }

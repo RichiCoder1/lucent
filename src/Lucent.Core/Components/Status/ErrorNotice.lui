@@ -17,7 +17,11 @@ style ErrorNoticeActionsStyle {
 
 internal component ErrorNoticeContent(Func<string> message, Action? retry, Style? style) {
     <Layout style={ErrorNoticeRootStyle.With(style)}>
-        <Status content={message} style={PresentationStyles.Secondary.With(ErrorNoticeMessageStyle)} name="error-notice.message" />
+        <Status
+            content={message}
+            style={PresentationStyles.Secondary.With(ErrorNoticeMessageStyle)}
+            name="error-notice.message"
+        />
         if (retry is not null) {
             <Layout style={ErrorNoticeActionsStyle}>
                 <Button onInvoke={retry} name="error-notice.retry">Retry</Button>

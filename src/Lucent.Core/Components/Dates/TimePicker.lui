@@ -11,10 +11,19 @@ public component TimePicker(
 ) {
     readonly TimePickerOptions policy = TimePolicy(options);
     readonly DateTimeFieldOptions fieldPolicy = DateTimeFieldPolicy(field);
-    readonly TimeEditSession time = new(owner, value, onValueRequested, policy, fieldPolicy.FieldId ?? label);
+    readonly TimeEditSession time = new(
+        owner,
+        value,
+        onValueRequested,
+        policy,
+        fieldPolicy.FieldId ?? label
+    );
+
     <Field
         label={label}
-        editor={context => TimePickerEditor(context, time, fieldPolicy.Enabled, fieldPolicy.ReadOnly)}
+        editor={
+            context => TimePickerEditor(context, time, fieldPolicy.Enabled, fieldPolicy.ReadOnly)
+        }
         validation={() => CombinedValidation(time.Validation, fieldPolicy.Validation)}
         help={fieldPolicy.Help}
         session={fieldPolicy.Form}

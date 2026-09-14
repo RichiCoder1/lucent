@@ -13,9 +13,10 @@ style ChoiceContentStyle {
 
 internal component ChoiceRowContent(ChoiceRowBinding binding, ComponentRecipe content) {
     <ChoiceRowHost binding={binding}>
-        <Icon source={() => binding.Selected() ? SelectionArtwork.CheckOn : SelectionArtwork.CheckOff} style={ChoiceIndicatorStyle} />
-        <Layout style={ChoiceContentStyle}>
-            {content}
-        </Layout>
+        <Icon
+            source={() => binding.Selected() ? SelectionArtwork.CheckOn : SelectionArtwork.CheckOff}
+            style={ChoiceIndicatorStyle}
+        />
+        <Layout style={ChoiceContentStyle}>{content}</Layout>
     </ChoiceRowHost>
 }

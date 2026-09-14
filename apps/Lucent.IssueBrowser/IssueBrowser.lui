@@ -1,4 +1,5 @@
 namespace Lucent.IssueBrowser;
+
 style IssueBrowserStyle {
     Axis: LayoutAxis.Column;
     MainGrow: 1;
@@ -53,20 +54,37 @@ style IssueBrowserSplitterStyle(WindowBreakpoints breakpoints) {
 
 public component IssueBrowser(IssueBrowserState browser) {
     readonly IssueBrowserViewState view = new(owner, browser);
+
     <Provide value={view.Navigation}>
         <Provide value={view}>
             <Provide value={browser}>
                 <NavigationBoundary interaction={view.Interaction} label="Issue navigation">
-                    <Layout breakpoints={view.Breakpoints} style={PresentationStyles.Surface.With(IssueBrowserStyle)}>
+                    <Layout
+                        breakpoints={view.Breakpoints}
+                        style={PresentationStyles.Surface.With(IssueBrowserStyle)}
+                    >
                         <Header browser={browser} view={view} name="issue-browser.header" />
                         if (browser.IsLoading) {
                             <Loading browser={browser} name="issue-browser.loading" />
                         }
                         if (browser.Error is not null) {
-                            <ErrorNotice message={() => browser.Error ?? ""} retry={browser.Retry} name="issue-browser.error" />
+                            <ErrorNotice
+                                message={() => browser.Error ?? ""}
+                                retry={browser.Retry}
+                                name="issue-browser.error"
+                            />
                         }
                         <Divider />
-                        <SplitPane first={[IssueList(browser, view)]} second={[IssueDetailPane()]} state={view.Split} label="Resize issue list" style={WorkspaceStyle} splitterStyle={IssueBrowserSplitterStyle(view.Breakpoints)} firstStyle={IssueBrowserFirstPaneStyle(view.Breakpoints, view)} secondStyle={IssueBrowserSecondPaneStyle(view.Breakpoints, view)} />
+                        <SplitPane
+                            first={[IssueList(browser, view)]}
+                            second={[IssueDetailPane()]}
+                            state={view.Split}
+                            label="Resize issue list"
+                            style={WorkspaceStyle}
+                            splitterStyle={IssueBrowserSplitterStyle(view.Breakpoints)}
+                            firstStyle={IssueBrowserFirstPaneStyle(view.Breakpoints, view)}
+                            secondStyle={IssueBrowserSecondPaneStyle(view.Breakpoints, view)}
+                        />
                     </Layout>
                 </NavigationBoundary>
             </Provide>

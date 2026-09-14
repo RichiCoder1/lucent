@@ -11,10 +11,19 @@ public component DatePicker(
 ) {
     readonly DatePickerOptions policy = DatePolicy(options);
     readonly DateTimeFieldOptions fieldPolicy = DateTimeFieldPolicy(field);
-    readonly DateEditSession date = new(owner, value, onValueRequested, policy, fieldPolicy.FieldId ?? label);
+    readonly DateEditSession date = new(
+        owner,
+        value,
+        onValueRequested,
+        policy,
+        fieldPolicy.FieldId ?? label
+    );
+
     <Field
         label={label}
-        editor={context => DatePickerEditor(context, date, fieldPolicy.Enabled, fieldPolicy.ReadOnly)}
+        editor={
+            context => DatePickerEditor(context, date, fieldPolicy.Enabled, fieldPolicy.ReadOnly)
+        }
         validation={() => CombinedValidation(date.Validation, fieldPolicy.Validation)}
         help={fieldPolicy.Help}
         session={fieldPolicy.Form}

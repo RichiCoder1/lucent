@@ -1,4 +1,5 @@
 namespace Lucent.IssueBrowser;
+
 style DetailEmptyStyle {
     Axis: LayoutAxis.Column;
     Spacing: 12;
@@ -6,9 +7,14 @@ style DetailEmptyStyle {
 
 public component IssuesRouteView() {
     context RouteContext<IssuesRoute> route;
+
     <Layout style={DetailEmptyStyle}>
         <Text style={PresentationStyles.Title}>Open an issue</Text>
-        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>Choose an issue to read its details and explore the available actions.</Text>
-        <Text style={PresentationStyles.Secondary}>Local fixtures · no GitHub account required</Text>
+        <Text style={PresentationStyles.Body with { TextWrap: TextWrap.WordWithGraphemeFallback; }}>
+            Choose an issue to read its details and explore the available actions.
+        </Text>
+        <Text style={PresentationStyles.Secondary}>
+            Local fixtures · no GitHub account required
+        </Text>
     </Layout>
 }
