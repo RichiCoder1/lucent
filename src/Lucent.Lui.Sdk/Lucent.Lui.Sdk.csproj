@@ -25,8 +25,12 @@
       ReferenceOutputAssembly="false"
       PrivateAssets="all"
     />
+    <ProjectReference Include="../Lucent.Lui.Preparation/Lucent.Lui.Preparation.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="../Lucent.Lui.Sdk.PreparationHost/Lucent.Lui.Sdk.PreparationHost.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="../Lucent.Lui.Sdk.PreparationTasks/Lucent.Lui.Sdk.PreparationTasks.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" SkipGetTargetFrameworkProperties="true" />
     <None Include="Sdk/Sdk.props" Pack="true" PackagePath="Sdk/Sdk.props" />
     <None Include="Sdk/Sdk.targets" Pack="true" PackagePath="Sdk/Sdk.targets" />
+    <None Include="Sdk/Preparation.targets" Pack="true" PackagePath="Sdk/Preparation.targets" />
     <None Include="Sdk/Assets.targets" Pack="true" PackagePath="Sdk/Assets.targets" />
     <None Include="../../eng/LuiConfiguration.targets" Pack="true" PackagePath="Sdk/LuiConfiguration.targets" />
     <None
@@ -35,12 +39,12 @@
       PackagePath="notices/Roslyn-LICENSE.txt"
     />
     <None
-      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.common/5.0.0/ThirdPartyNotices.rtf"
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.common/5.9.0/ThirdPartyNotices.rtf"
       Pack="true"
       PackagePath="notices/Roslyn-Common-NOTICES.rtf"
     />
     <None
-      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp/5.0.0/ThirdPartyNotices.rtf"
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp/5.9.0/ThirdPartyNotices.rtf"
       Pack="true"
       PackagePath="notices/Roslyn-CSharp-NOTICES.rtf"
     />
@@ -68,6 +72,27 @@
         Include="../Lucent.Lui.Tooling/bin/$(Configuration)/net10.0/**"
         Pack="true"
         PackagePath="tools/net10.0"
+        Visible="false"
+      />
+    </ItemGroup>
+  </Target>
+  <Target Name="BuildLucentLuiPreparation" BeforeTargets="_GetPackageFiles">
+    <MSBuild
+      Projects="../Lucent.Lui.Sdk.PreparationHost/Lucent.Lui.Sdk.PreparationHost.csproj;../Lucent.Lui.Sdk.PreparationTasks/Lucent.Lui.Sdk.PreparationTasks.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)"
+    />
+    <ItemGroup>
+      <None
+        Include="../Lucent.Lui.Sdk.PreparationHost/bin/$(Configuration)/net10.0/**"
+        Pack="true"
+        PackagePath="tools/preparation/net10.0"
+        Visible="false"
+      />
+      <None
+        Include="../Lucent.Lui.Sdk.PreparationTasks/bin/$(Configuration)/net10.0/Lucent.Lui.Sdk.PreparationTasks.dll"
+        Pack="true"
+        PackagePath="tools/preparation/net10.0"
         Visible="false"
       />
     </ItemGroup>

@@ -220,6 +220,45 @@ using Lucent.Core;
         CollectionAssert.AreEqual(first, second);
     }
 
+    [TestMethod]
+    public void RejectsStandaloneStateGenerationForNamedLuiIdentity()
+    {
+        const string source = """
+            using Lucent.Core;
+            [ComponentState]
+            public sealed partial class View {
+                [State] public partial int Count { get; set; }
+                [LucentComponent]
+                public static partial ComponentRecipe Create();
+            }
+            """;
+
+        var (run, _) = Generate(source);
+
+        Assert.IsTrue(run.Diagnostics.Any(static diagnostic => diagnostic.Id == "LUI4108"));
+        Assert.AreEqual(0, run.Results.Single().GeneratedSources.Length);
+    }
+
+    [TestMethod]
+    public void StandaloneStateMayExposeAnImplementedLucentComponentFactory()
+    {
+        const string source = """
+            using Lucent.Core;
+            [ComponentState]
+            public sealed partial class View {
+                [State] public partial int Count { get; set; }
+                [LucentComponent]
+                public static ComponentRecipe Create() => Component.Define<View>("view", static (_, _) => ComponentRecipe.Create("content", static (_, _) => { }));
+            }
+            """;
+
+        var (run, compilation) = Generate(source);
+
+        Assert.IsFalse(run.Diagnostics.Any(static diagnostic => diagnostic.Id == "LUI4108"));
+        AssertNoErrors(run, compilation);
+        Assert.AreEqual(1, run.Results.Single().GeneratedSources.Length);
+    }
+
     private static (GeneratorDriverRunResult Run, Compilation Compilation) Generate(string source)
     {
         var compilation = CSharpCompilation.Create(

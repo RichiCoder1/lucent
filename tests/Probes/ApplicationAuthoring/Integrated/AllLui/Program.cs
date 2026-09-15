@@ -8,7 +8,7 @@ using var first = composition.Mount(composition.Root, theme, rootFactory());
 using var second = composition.Mount(composition.Root, theme, rootFactory());
 var names = Flatten(composition.SemanticSnapshot()!).Select(static node => node.Name).ToArray();
 if (
-    AllLuiApp.DistinctMounts != 2
+    MountRegistry.Distinct != 2
     || names.Count(static name => name == "{\"Name\":\"Ada\"}|/home") != 2
     || names.Count(static name => name == "real markup") != 2
 )

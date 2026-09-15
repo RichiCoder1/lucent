@@ -1,0 +1,15 @@
+#nullable enable
+#line 10 "Application.lui"
+namespace Fixture;
+public static class Application
+{
+    public static string Create()
+    {
+        var value = System.Text.Json.JsonSerializer.Deserialize(
+            "{\"Name\":\"Ada\"}",
+            JsonContext.Default.Person
+        )!;
+        return System.Text.Json.JsonSerializer.Serialize(value, JsonContext.Default.Person);
+    }
+}
+#line default

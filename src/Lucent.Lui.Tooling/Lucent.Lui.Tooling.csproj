@@ -20,17 +20,17 @@
       CopyToOutputDirectory="PreserveNewest"
     />
     <None
-      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp.workspaces/5.0.0/ThirdPartyNotices.rtf"
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp.workspaces/5.9.0/ThirdPartyNotices.rtf"
       Link="notices/Roslyn-CSharp-Workspaces-NOTICES.rtf"
       CopyToOutputDirectory="PreserveNewest"
     />
     <None
-      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.workspaces.common/5.0.0/ThirdPartyNotices.rtf"
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.workspaces.common/5.9.0/ThirdPartyNotices.rtf"
       Link="notices/Roslyn-Workspaces-Common-NOTICES.rtf"
       CopyToOutputDirectory="PreserveNewest"
     />
     <None
-      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.workspaces.msbuild/5.0.0/ThirdPartyNotices.rtf"
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.workspaces.msbuild/5.9.0/ThirdPartyNotices.rtf"
       Link="notices/Roslyn-Workspaces-MSBuild-NOTICES.rtf"
       CopyToOutputDirectory="PreserveNewest"
     />

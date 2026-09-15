@@ -55,6 +55,11 @@ public sealed class RouteGenerator : IIncrementalGenerator
         "Ambiguous route shape",
         "Routes '{0}' and '{1}' have overlapping path shapes without a precedence winner"
     );
+    private static readonly DiagnosticDescriptor InvalidComponent = Error(
+        "LUI4208",
+        "Invalid route component",
+        "Route '{0}' component must expose exactly one accessible, non-generic static Create method callable without arguments and returning ComponentRecipe"
+    );
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -98,7 +103,7 @@ public sealed class RouteGenerator : IIncrementalGenerator
             && attribute.ConstructorArguments.Length == 1
             && attribute.ConstructorArguments[0].Value is int value
             && value == 0;
-        var span = syntax.Identifier.GetLocation().GetLineSpan();
+        var span = syntax.Identifier.GetLocation().GetMappedLineSpan();
         return new ModuleModel(
             type,
             syntax.Identifier.GetLocation(),
@@ -126,6 +131,34 @@ public sealed class RouteGenerator : IIncrementalGenerator
                 : null;
         var id = NamedString(attribute, "Id") ?? DefaultName(type.Name);
         var parent = NamedType(attribute, "Parent");
+        var component = NamedType(attribute, "Component");
+        var hasComponent = attribute.NamedArguments.Any(argument => argument.Key == "Component");
+        var factories =
+            component is null || module is null
+                ? []
+                : component
+                    .GetMembers("Create")
+                    .OfType<IMethodSymbol>()
+                    .Where(method =>
+                        method.IsStatic
+                        && !method.IsGenericMethod
+                        && method.Parameters.All(parameter =>
+                            parameter.IsOptional || parameter.IsParams
+                        )
+                        && input.SemanticModel.Compilation.IsSymbolAccessibleWithin(method, module)
+                    )
+                    .ToArray();
+        var componentValid =
+            !hasComponent
+            || (
+                component is not null
+                && component.TypeKind != TypeKind.Error
+                && !component.IsUnboundGenericType
+                && module is not null
+                && input.SemanticModel.Compilation.IsSymbolAccessibleWithin(component, module)
+                && factories.Length == 1
+                && factories[0].ReturnType.ToDisplayString() == "Lucent.Core.ComponentRecipe"
+            );
         var parameters = ImmutableArray.CreateBuilder<ParameterModel>();
         var valid =
             type.ContainingType is null
@@ -149,11 +182,13 @@ public sealed class RouteGenerator : IIncrementalGenerator
                 parameters.Add(Parameter(symbol, parameterSyntax));
             }
         }
-        var span = syntax.Identifier.GetLocation().GetLineSpan();
+        var span = syntax.Identifier.GetLocation().GetMappedLineSpan();
         return new RouteModel(
             type,
             module,
             parent,
+            component,
+            componentValid,
             template ?? "",
             id,
             DefaultName(type.Name),
@@ -318,6 +353,10 @@ public sealed class RouteGenerator : IIncrementalGenerator
             output.ReportDiagnostic(
                 Diagnostic.Create(InvalidRoute, route.Location, route.Type.Name)
             );
+        foreach (var route in routes.Where(item => !item.ComponentValid))
+            output.ReportDiagnostic(
+                Diagnostic.Create(InvalidComponent, route.Location, route.Type.Name)
+            );
         foreach (
             var parameter in routes
                 .SelectMany(item => item.Parameters)
@@ -387,6 +426,7 @@ public sealed class RouteGenerator : IIncrementalGenerator
             if (
                 owned.Any(route =>
                     !parsed.ContainsKey(route)
+                    || !route.ComponentValid
                     || route.Parameters.Any(parameter =>
                         parameter.Kind == ParameterKind.Unsupported
                     )
@@ -715,6 +755,35 @@ public sealed class RouteGenerator : IIncrementalGenerator
         foreach (var route in routes)
             source.Append("            ").Append(DefinitionProperty(route)).AppendLine(",");
         source.AppendLine("        });");
+        if (routes.Any(route => route.Component is not null))
+        {
+            source.AppendLine(
+                "    public static global::Lucent.Core.ComponentRecipe CreateComponent(global::Lucent.Core.RouteLevelDescriptor level)"
+            );
+            source.AppendLine("    {");
+            foreach (var route in routes)
+            {
+                var chain = Ancestors(route, routes).Reverse().Concat(new[] { route }).ToArray();
+                for (var index = 0; index < chain.Length; index++)
+                {
+                    if (chain[index].Component is not { } component)
+                        continue;
+                    source
+                        .Append("        if (global::System.Object.ReferenceEquals(level, ")
+                        .Append(DefinitionProperty(route))
+                        .Append(".Branch[")
+                        .Append(index)
+                        .AppendLine("]))")
+                        .Append("            return ")
+                        .Append(component.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
+                        .AppendLine(".Create();");
+                }
+            }
+            source.AppendLine(
+                "        throw new global::System.ArgumentException(\"The route level has no component mapping in this module.\", nameof(level));"
+            );
+            source.AppendLine("    }");
+        }
         source.AppendLine("}");
         output.AddSource(
             "Lucent.Routes." + Hash(module.Type.ToDisplayString()) + ".g.cs",
@@ -1063,6 +1132,8 @@ public sealed class RouteGenerator : IIncrementalGenerator
             INamedTypeSymbol type,
             INamedTypeSymbol? module,
             INamedTypeSymbol? parent,
+            INamedTypeSymbol? component,
+            bool componentValid,
             string template,
             string id,
             string factoryName,
@@ -1075,6 +1146,8 @@ public sealed class RouteGenerator : IIncrementalGenerator
             Type = type;
             Module = module;
             Parent = parent;
+            Component = component;
+            ComponentValid = componentValid;
             Template = template;
             Id = id;
             FactoryName = factoryName;
@@ -1087,6 +1160,8 @@ public sealed class RouteGenerator : IIncrementalGenerator
         internal INamedTypeSymbol Type { get; }
         internal INamedTypeSymbol? Module { get; }
         internal INamedTypeSymbol? Parent { get; }
+        internal INamedTypeSymbol? Component { get; }
+        internal bool ComponentValid { get; }
         internal string Template { get; }
         internal string Id { get; }
         internal string FactoryName { get; }

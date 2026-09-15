@@ -14,7 +14,7 @@ Lucent.Lui.Sdk        additive MSBuild SDK props/targets and package metadata
 
 Lucent.Lui.LanguageServer and a thin VS Code extension provide the editor surface over the compiler and shared project model. All experimental packages version together. The app/runtime has no dependency on Roslyn, the SDK, language server, JSON-RPC, or editor assets.
 
-The compiler and generator target `netstandard2.0`, the documented analyzer-compatible boundary. The LSP targets .NET 10. Generated applications remain .NET 10 NativeAOT; any .NET 10 generator experiment is informational and cannot delay the supported path.
+The compiler and generator target `netstandard2.0`, the documented analyzer-compatible boundary. Their Roslyn package family is 5.9, aligned with the editor and the repository's SDK 10.0.401 compiler host. The LSP targets .NET 10. Generated applications remain .NET 10 NativeAOT. Named component preparation uses the experimental `RegisterPreCompilationSourceOutput` API. Opt in with `LucentLuiNamedComponents=true`; the SDK derives `LucentLuiPreparedAuthoring` and runs its packaged .NET 10 preparation host. One evaluated foreign-generator pass supplies binding APIs, and final generation must exactly match its outputs. The editor shares the preparation engine and current unsaved text. The [authoring acceptance record](plans/application-routing-component-authoring-a0.md) records the supported compiler host, package evidence and remaining product scope.
 
 ## MSBuild SDK
 

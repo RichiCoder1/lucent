@@ -5,7 +5,7 @@ $root = Split-Path $PSScriptRoot -Parent
 $dotnet = Join-Path $root '.dotnet/dotnet.exe'
 if (-not (Test-Path $dotnet)) { $dotnet = 'dotnet' }
 $forbidden = 'SDL3|SkiaSharp|Windows\.Win32|Microsoft\.Windows\.CsWin32|Lucent\.Platform\.Windows'
-$forbiddenRuntimeTooling = 'Lucent\.Lui\.(Compiler|Generator)|Microsoft\.CodeAnalysis'
+$forbiddenRuntimeTooling = 'Lucent\.Lui\.(Compiler|Generator|Preparation|Sdk\.PreparationHost|Sdk\.PreparationTasks)|Microsoft\.CodeAnalysis'
 $allowedBuildTools = @(
     (Join-Path $root 'src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj'),
     (Join-Path $root 'src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj')

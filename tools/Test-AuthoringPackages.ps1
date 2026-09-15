@@ -93,3 +93,11 @@ try {
 finally {
     $env:NUGET_PACKAGES = $previousPackages
 }
+
+foreach ($acceptance in @(
+    'tests/Probes/ApplicationAuthoring/RoutedPackage/Test-Package.ps1',
+    'tests/Probes/ApplicationAuthoring/PreparedSdk/Run-ProductionSdkNegatives.ps1'
+)) {
+    & (Join-Path $PSHOME 'pwsh.exe') -NoProfile -File (Join-Path $root $acceptance) -Feed $feedPath -Version $Version
+    if ($LASTEXITCODE -ne 0) { throw "Named authoring package acceptance failed: $acceptance" }
+}

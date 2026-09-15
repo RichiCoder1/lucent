@@ -52,6 +52,11 @@ public sealed class ComponentStateGenerator : IIncrementalGenerator
         "Component state initialization must be synchronous",
         "Initialize hook for component state '{0}' cannot be async"
     );
+    private static readonly DiagnosticDescriptor NamedComponentState = Descriptor(
+        "LUI4108",
+        "Named LUI component owns its state",
+        "Named LUI component '{0}' cannot also use [ComponentState]"
+    );
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -81,6 +86,28 @@ public sealed class ComponentStateGenerator : IIncrementalGenerator
                     or Microsoft.CodeAnalysis.Accessibility.Internal
             && declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
             && !type.InstanceConstructors.Any(constructor => !constructor.IsImplicitlyDeclared);
+        var namedComponent = type.GetMembers("Create")
+            .OfType<IMethodSymbol>()
+            .Any(static method =>
+                method.IsPartialDefinition
+                && method
+                    .GetAttributes()
+                    .Any(attribute =>
+                        attribute.AttributeClass?.ToDisplayString()
+                        == "Lucent.Core.LucentComponentAttribute"
+                    )
+            );
+        if (namedComponent)
+        {
+            diagnostics.Add(
+                Diagnostic.Create(
+                    NamedComponentState,
+                    declaration.Identifier.GetLocation(),
+                    type.Name
+                )
+            );
+            validType = false;
+        }
         if (!validType)
             diagnostics.Add(
                 Diagnostic.Create(InvalidType, declaration.Identifier.GetLocation(), type.Name)

@@ -365,12 +365,12 @@ internal static class Program
                 var textDocument = parameters.GetProperty("textDocument");
                 var uri = new Uri(textDocument.GetProperty("uri").GetString()!);
                 var position = parameters.GetProperty("position");
+                var definitionOffset = await OffsetAsync(project, uri, position)
+                    .ConfigureAwait(false);
+                if (definitionOffset is null)
+                    return new HandlerResult(null, null);
                 var target = await project
-                    .DefinitionAsync(
-                        uri,
-                        await OffsetAsync(project, uri, position).ConfigureAwait(false),
-                        CancellationToken.None
-                    )
+                    .DefinitionAsync(uri, definitionOffset.Value, CancellationToken.None)
                     .ConfigureAwait(false);
                 return new HandlerResult(null, target is null ? null : Location(target));
             case "textDocument/prepareRename":
@@ -379,13 +379,16 @@ internal static class Program
                 var prepareUri = new Uri(
                     parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                 );
-                var prepared = await project
-                    .PrepareRenameAsync(
+                var prepareOffset = await OffsetAsync(
+                        project,
                         prepareUri,
-                        await OffsetAsync(project, prepareUri, parameters.GetProperty("position"))
-                            .ConfigureAwait(false),
-                        CancellationToken.None
+                        parameters.GetProperty("position")
                     )
+                    .ConfigureAwait(false);
+                if (prepareOffset is null)
+                    return new HandlerResult(null, null);
+                var prepared = await project
+                    .PrepareRenameAsync(prepareUri, prepareOffset.Value, CancellationToken.None)
                     .ConfigureAwait(false);
                 var prepareText = await project
                     .GetTextAsync(prepareUri, CancellationToken.None)
@@ -409,11 +412,18 @@ internal static class Program
                 var renameUri = new Uri(
                     parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                 );
+                var renameOffset = await OffsetAsync(
+                        project,
+                        renameUri,
+                        parameters.GetProperty("position")
+                    )
+                    .ConfigureAwait(false);
+                if (renameOffset is null)
+                    return new HandlerResult(null, null);
                 var renamed = await project
                     .RenameAsync(
                         renameUri,
-                        await OffsetAsync(project, renameUri, parameters.GetProperty("position"))
-                            .ConfigureAwait(false),
+                        renameOffset.Value,
                         parameters.GetProperty("newName").GetString() ?? "",
                         CancellationToken.None
                     )
@@ -428,15 +438,18 @@ internal static class Program
                 var referencesUri = new Uri(
                     parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                 );
+                var referencesOffset = await OffsetAsync(
+                        project,
+                        referencesUri,
+                        parameters.GetProperty("position")
+                    )
+                    .ConfigureAwait(false);
+                if (referencesOffset is null)
+                    return new HandlerResult(null, null);
                 var references = await project
                     .ReferencesAsync(
                         referencesUri,
-                        await OffsetAsync(
-                                project,
-                                referencesUri,
-                                parameters.GetProperty("position")
-                            )
-                            .ConfigureAwait(false),
+                        referencesOffset.Value,
                         parameters
                             .GetProperty("context")
                             .GetProperty("includeDeclaration")
@@ -549,11 +562,13 @@ internal static class Program
                         parameters.GetProperty("position")
                     )
                     .ConfigureAwait(false);
+                if (completionOffset is null)
+                    return new HandlerResult(null, null);
                 var completionEpoch = project.CompletionEpoch;
                 var completion = await project
                     .CompletionsAsync(
                         completionUri,
-                        completionOffset,
+                        completionOffset.Value,
                         CancellationToken.None,
                         deferDocumentation: true
                     )
@@ -571,7 +586,7 @@ internal static class Program
                             data = new
                             {
                                 uri = completionUri.AbsoluteUri,
-                                offset = completionOffset,
+                                offset = completionOffset.Value,
                                 epoch = completionEpoch,
                             },
                             documentation = item.Documentation is null
@@ -619,13 +634,16 @@ internal static class Program
                 var hoverUri = new Uri(
                     parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                 );
-                var hover = await project
-                    .HoverAsync(
+                var hoverOffset = await OffsetAsync(
+                        project,
                         hoverUri,
-                        await OffsetAsync(project, hoverUri, parameters.GetProperty("position"))
-                            .ConfigureAwait(false),
-                        CancellationToken.None
+                        parameters.GetProperty("position")
                     )
+                    .ConfigureAwait(false);
+                if (hoverOffset is null)
+                    return new HandlerResult(null, null);
+                var hover = await project
+                    .HoverAsync(hoverUri, hoverOffset.Value, CancellationToken.None)
                     .ConfigureAwait(false);
                 return new HandlerResult(
                     null,
@@ -648,13 +666,16 @@ internal static class Program
                 var signatureUri = new Uri(
                     parameters.GetProperty("textDocument").GetProperty("uri").GetString()!
                 );
-                var signature = await project
-                    .SignatureHelpAsync(
+                var signatureOffset = await OffsetAsync(
+                        project,
                         signatureUri,
-                        await OffsetAsync(project, signatureUri, parameters.GetProperty("position"))
-                            .ConfigureAwait(false),
-                        CancellationToken.None
+                        parameters.GetProperty("position")
                     )
+                    .ConfigureAwait(false);
+                if (signatureOffset is null)
+                    return new HandlerResult(null, null);
+                var signature = await project
+                    .SignatureHelpAsync(signatureUri, signatureOffset.Value, CancellationToken.None)
                     .ConfigureAwait(false);
                 return new HandlerResult(
                     null,
@@ -750,7 +771,7 @@ internal static class Program
 
     private static string DocumentKey(Uri uri) => uri.AbsoluteUri;
 
-    private static async Task<int> OffsetAsync(
+    private static async Task<int?> OffsetAsync(
         LuiProjectContext project,
         Uri uri,
         JsonElement position
@@ -767,6 +788,8 @@ internal static class Program
                 );
             throw new InvalidOperationException("The requested document is not current.");
         }
+        if (text.Length == 0)
+            return null;
         var line = position.GetProperty("line").GetInt32();
         var character = position.GetProperty("character").GetInt32();
         var start = 0;

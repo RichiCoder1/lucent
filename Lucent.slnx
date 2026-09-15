@@ -9,9 +9,12 @@
   <Project Path="src/Lucent.Hosting/Lucent.Hosting.csproj" />
   <Project Path="tests/Lucent.Hosting.Tests/Lucent.Hosting.Tests.csproj" />
   <Project Path="src/Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" />
+  <Project Path="src/Lucent.Lui.Preparation/Lucent.Lui.Preparation.csproj" />
   <Project Path="src/Lucent.Lui.Generator/Lucent.Lui.Generator.csproj" />
   <Project Path="src/Lucent.Lui.LanguageServer/Lucent.Lui.LanguageServer.csproj" />
   <Project Path="src/Lucent.Lui.Sdk/Lucent.Lui.Sdk.csproj" />
+  <Project Path="src/Lucent.Lui.Sdk.PreparationHost/Lucent.Lui.Sdk.PreparationHost.csproj" />
+  <Project Path="src/Lucent.Lui.Sdk.PreparationTasks/Lucent.Lui.Sdk.PreparationTasks.csproj" />
   <Project Path="src/Lucent.Lui.Tooling/Lucent.Lui.Tooling.csproj" />
   <Project Path="tools/Lucent.Lui.Tooling.Benchmarks/Lucent.Lui.Tooling.Benchmarks.csproj" />
   <Project Path="src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />

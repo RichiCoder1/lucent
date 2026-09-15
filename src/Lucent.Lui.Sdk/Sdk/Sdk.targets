@@ -1,5 +1,9 @@
 <Project>
   <PropertyGroup>
+    <LucentLuiPreparedAuthoring Condition="'$(LucentLuiPreparedAuthoring)' == '' and '$(LucentLuiNamedComponents)' == 'true'">true</LucentLuiPreparedAuthoring>
+    <LucentLuiPreparedAuthoring Condition="'$(LucentLuiPreparedAuthoring)' == ''">false</LucentLuiPreparedAuthoring>
+    <EmitCompilerGeneratedFiles Condition="'$(LucentLuiPreparedAuthoring)' == 'true'">true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath Condition="'$(LucentLuiPreparedAuthoring)' == 'true' and '$(CompilerGeneratedFilesOutputPath)' == '' and '$(IntermediateOutputPath)' != ''">$(IntermediateOutputPath)generated</CompilerGeneratedFilesOutputPath>
     <LucentLuiProjectEpoch Condition="'$(LucentLuiProjectEpoch)' == ''">$(MSBuildProjectFullPath)|$(TargetFramework)|$(Configuration)</LucentLuiProjectEpoch>
     <LucentLuiCompilerOptions Condition="'$(LucentLuiCompilerOptions)' == ''">LangVersion=$(LangVersion)|Nullable=$(Nullable)|ImplicitUsings=$(ImplicitUsings)|Optimize=$(Optimize)|WarningLevel=$(WarningLevel)|TreatWarningsAsErrors=$(TreatWarningsAsErrors)</LucentLuiCompilerOptions>
     <LucentLuiDefines Condition="'$(LucentLuiDefines)' == ''">$(DefineConstants)</LucentLuiDefines>
@@ -30,6 +34,7 @@
     <CompilerVisibleProperty Include="LucentLuiCompilerOptions" />
     <CompilerVisibleProperty Include="LucentLuiDefines" />
     <CompilerVisibleProperty Include="RootNamespace" />
+    <CompilerVisibleProperty Include="LucentLuiPreparedAuthoring" />
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Compiler.dll" />
     <Analyzer Include="$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Lucent.Lui.Generator.dll" />
   </ItemGroup>
@@ -46,4 +51,5 @@
   <Target Name="ResetLucentLuiGeneratedFiles" BeforeTargets="PrepareForBuild" Condition="'$(EmitCompilerGeneratedFiles)' == 'true'">
     <RemoveDir Directories="$(CompilerGeneratedFilesOutputPath)\Lucent.Lui.Generator" />
   </Target>
+  <Import Project="$(MSBuildThisFileDirectory)Preparation.targets" Condition="Exists('$(MSBuildThisFileDirectory)Preparation.targets')" />
 </Project>

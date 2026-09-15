@@ -2,37 +2,29 @@
 
 ## Application and component authoring — September 14, 2026
 
-The reviewed design is adopted under [#301](https://github.com/RichiCoder1/lucent/issues/301)
-with [A0 #302](https://github.com/RichiCoder1/lucent/issues/302) active. The
-[execution map](../plans/application-routing-component-authoring-execution.md) records
-A1–A7 and their dependencies. They remain gated; the initial experiments do not pass
-the full authoring acceptance contract.
+[A0 #302](https://github.com/RichiCoder1/lucent/issues/302) is complete under
+[parent #301](https://github.com/RichiCoder1/lucent/issues/301). **Pause here at the owner's
+request; do not start A1–A7 until resumed.** Their dependencies and remaining product scope
+are in the [execution map](../plans/application-routing-component-authoring-execution.md).
 
-The [A0 evidence record](../plans/application-routing-component-authoring-a0.md) now covers
-real JSON generation and LUI binding, combined/cross-file declaration projection, a cold
-SDK-host build with output/failure checks, named companion identity and initialization,
-unsaved workspace edits/cancellation, two NativeAOT consumers using actual markup, and
-an alternative emitter that keeps binding files out of external generator inputs. Their
-focused executable probes pass within the documented bounds. Current authored formatting
-checks pass for 561 C# and 104 `.lui` files, including these experiments.
+The [A0 record](../plans/application-routing-component-authoring-a0.md) selects Roslyn 5.9.0
+with SDK 10.0.401, shared authored/early-member projection, one evaluated foreign-generator
+preparation pass, semantic signature refinement and a content-addressed emitter whose final
+foreign outputs must match exactly. Named components are opt-in. The same preparation engine
+serves the SDK and actual language server, including unsaved text and companion members.
 
-Actual editor integration, complete state semantics and the combined all-LUI routed,
-packaged NativeAOT consumer remain unproven. Work continues in isolated probes before
-production package or compiler changes. Do not reuse earlier package/UI evidence as
-proof of the new architecture, or reopen the accepted product interview without a
-concrete compatibility blocker. The next concrete compiler work is to bind against the
-same early named partial type that is emitted, so LUI can access companion members before
-lowering; the current post-lowering promotion deliberately exposes that missing capability.
-The isolated emitter still needs general SDK input handling and content-addressed assembly
-generation before it can replace the original AdditionalFile transport.
+Compiler 132, Generator 45, LSP 37 and Tooling eight tests pass. The official authoring-package
+entry point passes candidate `0.3.0-dev.a0.20260914.5`, including the cold bootstrap-only routed
+NativeAOT consumer and production missing-host/nondeterministic-output negatives. Formatting
+passes 584 enumerated C# paths and 108 LUI files; compiled Core architecture checks pass.
+Exact commands, observations, hashes and historical failed runs are linked in the A0 record.
+Do not attribute earlier CI results to this integration candidate.
 
-Checkpoint `a2b0aa5` passed managed tests, package verification and publication in
-[CI 34907538232](https://github.com/RichiCoder1/lucent/actions/runs/34907538232). Later
-experiment commits have their focused local evidence; do not attribute that CI result to
-a different source commit. A fresh Light Notes formatting check also passes 33 C# and
-16 `.lui` files. Its standalone checker currently requires SDK 10.0.400, which is not
-installed locally; that refresh used the same formatters through Lucent's installed SDK
-10.0.401. Light Notes' SDK pin is unchanged.
+Light Notes remains unchanged and freshly passes 33 C# and 16 LUI formatting checks through
+Lucent's SDK 10.0.401. Its standalone SDK pin remains 10.0.400. No app migration or
+focus-taking walkthrough was required for A0. A1–A7 still cover the broader authoring,
+lifecycle, router, tooling and consumer migration contracts; the bounded proof does not
+close those tickets or automatically migrate existing consumers.
 
 ## Whole-file formatting and linting — September 14, 2026
 

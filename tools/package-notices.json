@@ -31,5 +31,11 @@
   { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/SkiaSharp-LICENSE.txt" },
   { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/SkiaSharp-NOTICES.txt" },
   { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/HarfBuzzSharp-LICENSE.txt" },
-  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/HarfBuzzSharp-NOTICES.txt" }
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/net10.0/notices/HarfBuzzSharp-NOTICES.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/dotnet-LICENSE.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/Roslyn-CSharp-Workspaces-NOTICES.rtf" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/Roslyn-Workspaces-Common-NOTICES.rtf" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/Roslyn-Workspaces-MSBuild-NOTICES.rtf" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/MSBuild-NOTICES.txt" },
+  { "package": "Lucent.Lui.Sdk", "entry": "tools/preparation/net10.0/notices/dotnet-Cryptography-NOTICES.txt" }
 ]

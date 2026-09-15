@@ -330,7 +330,8 @@ public sealed class LuiCompilationResult
         string? source,
         LuiSourceMap map,
         IReadOnlyList<LuiDiagnostic> diagnostics,
-        string? projectionSource = null
+        string? projectionSource = null,
+        string? preparedComponentDeclaration = null
     )
     {
         Identity = identity;
@@ -338,6 +339,7 @@ public sealed class LuiCompilationResult
         Map = map;
         Diagnostics = diagnostics;
         ProjectionSource = projectionSource ?? source;
+        PreparedComponentDeclaration = preparedComponentDeclaration;
     }
 
     /// <summary>Freshness snapshot used to reject obsolete output.</summary>
@@ -348,6 +350,9 @@ public sealed class LuiCompilationResult
 
     /// <summary>Recovered generated C# used only by editor semantic projection; it is never publishable output.</summary>
     public string? ProjectionSource { get; }
+
+    /// <summary>The exact named component declaration paired with <see cref="Source"/> after semantic state classification.</summary>
+    public string? PreparedComponentDeclaration { get; }
 
     /// <summary>Bidirectional map between the document's authored spans and generated C# spans.</summary>
     public LuiSourceMap Map { get; }

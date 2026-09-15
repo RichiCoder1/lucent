@@ -36,21 +36,14 @@ try {
     Invoke-Checked @("restore", $hostProject, "-p:RestorePackagesWithLockFile=false")
     Invoke-Checked @("build", $hostProject, "-c", "Release", "--no-restore")
     $hostPath = Join-Path $probeRoot "Host/bin/Release/net10.0/IntegratedHost.dll"
-    $input = Join-Path $probeRoot "Inputs/Integrated.lui.input"
+    $allInput = Join-Path $probeRoot "Inputs/Integrated.lui.input"
+    $companionInput = Join-Path $probeRoot "Inputs/CompanionReference.lui.input"
     $companion = Join-Path $probeRoot "Companion/CompanionApp.lui.cs"
     $allGenerated = Join-Path $resolvedArtifacts "all-lui/generated"
     $companionGenerated = Join-Path $resolvedArtifacts "companion/generated"
 
-    Invoke-Checked @($hostPath, $input, $allGenerated, "AllLuiApp", $JsonGeneratorPath)
-    Invoke-Checked @($hostPath, $input, $companionGenerated, "CompanionApp", $JsonGeneratorPath, $companion)
-
-    $blockerLog = Join-Path $resolvedArtifacts "companion-cross-reference.log"
-    & $dotnet $hostPath (Join-Path $probeRoot "Inputs/CompanionReference.lui.input") (Join-Path $resolvedArtifacts "blocker") "CompanionApp" $JsonGeneratorPath $companion 2>&1 | Tee-Object -FilePath $blockerLog | ForEach-Object { Write-Host $_ }
-    $blockerExit = $LASTEXITCODE
-    $commands.Add("dotnet IntegratedHost CompanionReference.lui.input => exit $blockerExit (expected 1)")
-    if ($blockerExit -eq 0 -or -not (Select-String -LiteralPath $blockerLog -SimpleMatch "LUI2000: The name 'Organization' does not exist")) {
-        throw "The companion cross-file binding check did not expose the expected current-lowerer blocker."
-    }
+    Invoke-Checked @($hostPath, $allInput, $allGenerated, "AllLuiApp", $JsonGeneratorPath)
+    Invoke-Checked @($hostPath, $companionInput, $companionGenerated, "CompanionApp", $JsonGeneratorPath, $companion)
 
     foreach ($consumer in @(
         @{ Name = "all-lui"; Project = (Join-Path $probeRoot "AllLui/AllLui.csproj"); Generated = $allGenerated; Exe = "AllLui.exe" },
@@ -72,4 +65,4 @@ finally {
     $commands | Set-Content -LiteralPath (Join-Path $resolvedArtifacts "commands-and-exits.txt")
 }
 
-Write-Output "PASS: all-LUI and companion NativeAOT consumers use named lowered state identity, real markup, real JSON APIs, and existing generated route APIs; expected companion cross-reference blocker retained."
+Write-Output "PASS: all-LUI and companion NativeAOT consumers use compiler-owned named state identity, real markup, real JSON APIs, existing generated route APIs, and companion cross-file binding."

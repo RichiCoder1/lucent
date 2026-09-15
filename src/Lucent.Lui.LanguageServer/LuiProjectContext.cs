@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
 using Lucent.Lui.Compiler;
+using Lucent.Lui.Preparation;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Classification;
@@ -37,6 +38,7 @@ internal sealed partial class LuiProjectContext : IDisposable
     private readonly object gate = new();
     private readonly Dictionary<Uri, LuiCompilationResult> compiledDocuments = [];
     private readonly Dictionary<ProjectId, ProjectEvaluation> evaluations = [];
+    private readonly Dictionary<ProjectId, LuiPreparationDriverState> preparationDrivers = [];
     private HashSet<string> resolvedReferencePaths = new(StringComparer.OrdinalIgnoreCase);
     private long compilationEpoch = -1;
     private int evaluationBuildCount;
@@ -190,7 +192,7 @@ internal sealed partial class LuiProjectContext : IDisposable
         var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
         if (snapshot.MetadataDiagnostic is not null)
             return null;
-        if (!snapshot.Index.TryGet(snapshot.Document.Path, out _))
+        if (!snapshot.NamedComponents && !snapshot.Index.TryGet(snapshot.Document.Path, out _))
             return null;
         var result = CompileSnapshot(snapshot, cancellationToken);
         Track(result, snapshot);
@@ -209,8 +211,10 @@ internal sealed partial class LuiProjectContext : IDisposable
             snapshot.Index,
             snapshot.Compilation,
             snapshot.Epoch,
-            snapshot.Document.Syntax,
-            snapshot.Freshness
+            snapshot.Syntax,
+            snapshot.Freshness,
+            snapshot.NamedComponents,
+            snapshot.AuthoredSources
         );
         if (!await IsCurrentAsync(result, cancellationToken).ConfigureAwait(false))
             return null;
@@ -261,6 +265,35 @@ internal sealed partial class LuiProjectContext : IDisposable
             .Where(diagnostic => diagnostic is not null)
             .Cast<LuiEditorDiagnostic>()
             .ToList();
+        foreach (
+            var diagnostic in snapshot.PreparationDiagnostics.Where(item =>
+                String.Equals(
+                    Path.GetFullPath(item.PhysicalPath),
+                    Path.GetFullPath(snapshot.Document.Path),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+        {
+            var editor = EditorDiagnostic(snapshot.Compilation, diagnostic.Diagnostic);
+            if (editor is not null)
+                diagnostics.Add(editor);
+        }
+        foreach (
+            var diagnostic in snapshot.GeneratorDiagnostics.Where(item =>
+                item.Location != Location.None
+                && String.Equals(
+                    Path.GetFullPath(item.Location.GetLineSpan().Path),
+                    Path.GetFullPath(snapshot.Document.Path),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+        {
+            var editor = EditorDiagnostic(diagnostic, snapshot.Document.Path);
+            if (editor is not null)
+                diagnostics.Add(editor);
+        }
         diagnostics.AddRange(
             configuration.Diagnostics.Select(diagnostic => new LuiEditorDiagnostic(
                 diagnostic.Id,
@@ -392,7 +425,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                 cancellationToken
             )
             .ConfigureAwait(false);
-        var spans = SyntaxSemanticSpans(snapshot.Document.Syntax)
+        var spans = SyntaxSemanticSpans(snapshot.Syntax)
             .Concat(
                 ProjectClassifications(
                     result.Map,
@@ -1091,9 +1124,10 @@ internal sealed partial class LuiProjectContext : IDisposable
             if (occurrences is null || !occurrences.Any(occurrence => IsLui(occurrence.Uri)))
                 return null;
         }
-        return
-            target is null
-            || !await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
+        var canPublish =
+            target is not null
+            && await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false);
+        return target is null || !canPublish
             ? null
             : new LuiRenameResult(target.Uri, target.Span, []);
     }
@@ -1286,6 +1320,218 @@ internal sealed partial class LuiProjectContext : IDisposable
             )
                 return null;
         }
+        if (!ProjectGraph(project).Any(NamedComponentsEnabled))
+            return await RenameSnapshotLegacyAsync(
+                    project,
+                    captured,
+                    requested,
+                    transformGenerated,
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+        var sourceByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var generatedDocuments = new List<(DocumentId Id, RenameGeneratedDocument Document)>();
+        var generatedPreparationPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var trees = new Dictionary<SyntaxTree, ProjectId>();
+        var renameSolution = EditorSolution(project);
+        foreach (var graphProject in ProjectGraph(project))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var evaluation = await EvaluateProjectAsync(graphProject, captured, cancellationToken)
+                .ConfigureAwait(false);
+            if (evaluation.Index.Diagnostics.Count != 0)
+                return null;
+            var current = renameSolution.GetProject(graphProject.Id);
+            if (current is null)
+                return null;
+            var authoredCSharpPaths = current
+                .Documents.Where(document => document.FilePath is not null)
+                .Select(document => Path.GetFullPath(document.FilePath!))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var tree in evaluation.Compilation.SyntaxTrees)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (String.IsNullOrWhiteSpace(tree.FilePath))
+                    continue;
+                var path = Path.GetFullPath(tree.FilePath);
+                if (authoredCSharpPaths.Contains(path))
+                    continue;
+                var hintName = Path.GetFileName(tree.FilePath);
+                var documentId = DocumentId.CreateNewId(
+                    current.Id,
+                    String.IsNullOrWhiteSpace(hintName) ? "lui-prepared.g.cs" : hintName
+                );
+                renameSolution = renameSolution.AddDocument(
+                    documentId,
+                    String.IsNullOrWhiteSpace(hintName) ? "lui-prepared.g.cs" : hintName,
+                    await tree.GetTextAsync(cancellationToken).ConfigureAwait(false),
+                    filePath: tree.FilePath
+                );
+                generatedPreparationPaths.Add(path);
+                trees[tree] = current.Id;
+            }
+            var namedComponents = evaluation.NamedComponents;
+            foreach (var document in evaluation.Documents)
+            {
+                if (!LuiDocumentIdentity.TryCreate(document.LogicalPath, out _))
+                    return null;
+                sourceByPath[Path.GetFullPath(document.Path)] = document.Source;
+                var namedDocument = evaluation.NamedDocuments.TryGetValue(
+                    Path.GetFullPath(document.Path),
+                    out var projected
+                )
+                    ? projected
+                    : null;
+                if (
+                    namedComponents
+                    && (
+                        namedDocument is null || namedDocument.Projection.Document.Component is null
+                    )
+                )
+                    continue;
+                var syntax = namedDocument?.Projection.Document ?? document.Syntax;
+                var compilation = namedComponents
+                    ? evaluation.Compilation
+                    : evaluation.Index.Augment(evaluation.Compilation, document.Path);
+                var prepared = namedComponents
+                    ? evaluation
+                        .Preparation?.Documents.FirstOrDefault(item =>
+                            String.Equals(
+                                Path.GetFullPath(item.Document.PhysicalPath),
+                                Path.GetFullPath(document.Path),
+                                StringComparison.OrdinalIgnoreCase
+                            )
+                        )
+                        ?.Compilation
+                    : null;
+                var identity = LuiCompiler.Snapshot(
+                    new LuiFreshnessIdentity(
+                        ProjectValue(graphProject, "LucentLuiProjectEpoch"),
+                        ProjectValue(
+                            graphProject,
+                            "LucentLuiProjectIdentity",
+                            graphProject.FilePath ?? graphProject.Name
+                        ),
+                        new LuiDocumentIdentity(document.LogicalPath),
+                        document.Version,
+                        "",
+                        evaluation.Generation,
+                        (
+                            graphProject.ParseOptions as CSharpParseOptions
+                            ?? CSharpParseOptions.Default
+                        ).LanguageVersion.ToString(),
+                        "",
+                        "",
+                        "",
+                        ProjectValue(graphProject, "LucentLuiCompilerOptions"),
+                        ProjectValue(graphProject, "LucentLuiDefines"),
+                        graphProject.DefaultNamespace ?? ""
+                    ),
+                    compilation
+                );
+                Interlocked.Increment(ref graphCompilationCount);
+                var result =
+                    namedComponents && prepared is not null
+                        ? RebindCompilationResult(prepared, identity)
+                    : namedComponents
+                        ? LuiCompiler.CompileNamedComponent(
+                            syntax,
+                            compilation,
+                            identity,
+                            document.Path
+                        )
+                    : LuiCompiler.Compile(syntax, compilation, identity, document.Path);
+                if (transformGenerated is not null)
+                    result = transformGenerated(result);
+                if (!result.Success || result.ProjectionSource is null)
+                    return null;
+                var generatedUri = new Uri(
+                    "lucent-lui://generated/"
+                        + result.Identity.MapIdentity
+                        + "/"
+                        + result.Identity.HintName
+                );
+                var documentId = DocumentId.CreateNewId(current.Id, result.Identity.HintName);
+                renameSolution = renameSolution.AddDocument(
+                    documentId,
+                    result.Identity.HintName,
+                    SourceText.From(result.ProjectionSource),
+                    filePath: generatedUri.AbsoluteUri
+                );
+                generatedDocuments.Add(
+                    (
+                        documentId,
+                        new RenameGeneratedDocument(
+                            current.Id,
+                            new Uri(document.Path),
+                            document.Source,
+                            syntax,
+                            result.Map,
+                            result.Identity
+                        )
+                    )
+                );
+            }
+        }
+        var generated = new Dictionary<SyntaxTree, RenameGeneratedDocument>();
+        foreach (var item in generatedDocuments)
+        {
+            var document = renameSolution.GetDocument(item.Id);
+            var tree = document is null
+                ? null
+                : await document.GetSyntaxTreeAsync(cancellationToken).ConfigureAwait(false);
+            if (document is null || tree is null)
+                return null;
+            generated[tree] = item.Document;
+            trees[tree] = document.Project.Id;
+        }
+        var csharp = new Dictionary<SyntaxTree, Uri>();
+        foreach (var graphProject in ProjectGraph(project))
+        {
+            var current = renameSolution.GetProject(graphProject.Id);
+            if (current is null)
+                return null;
+            foreach (
+                var document in current.Documents.Where(document => document.FilePath is not null)
+            )
+            {
+                if (
+                    generatedPreparationPaths.Contains(Path.GetFullPath(document.FilePath!))
+                    || document.FilePath!.StartsWith(
+                        "lucent-lui://generated/",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                    continue;
+                var tree = await document
+                    .GetSyntaxTreeAsync(cancellationToken)
+                    .ConfigureAwait(false);
+                if (tree is null)
+                    return null;
+                csharp[tree] = new Uri(document.FilePath!);
+                trees[tree] = current.Id;
+            }
+        }
+        return new RenameSnapshot(
+            captured,
+            renameSolution,
+            project.Id,
+            generated,
+            csharp,
+            sourceByPath,
+            trees,
+            generated.Values.Select(document => document.Freshness).ToArray()
+        );
+    }
+
+    private async Task<RenameSnapshot?> RenameSnapshotLegacyAsync(
+        Project project,
+        long captured,
+        Uri requested,
+        Func<LuiCompilationResult, LuiCompilationResult>? transformGenerated,
+        CancellationToken cancellationToken
+    )
+    {
         var sourceByPath = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var generatedDocuments = new List<(DocumentId Id, RenameGeneratedDocument Document)>();
         var renameSolution = EditorSolution(project);
@@ -1298,8 +1544,6 @@ internal sealed partial class LuiProjectContext : IDisposable
             if (current is null || compilation is null)
                 return null;
             var inputs = new List<LuiProjectDocument>();
-            // The editor clone omits .lui AdditionalDocuments so only the manual projections run.
-            // Read logical paths and explicit versions from the evaluated project that owns them.
             foreach (
                 var document in graphProject.AdditionalDocuments.Where(document =>
                     document.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
@@ -2180,6 +2424,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                 reloadFailed = false;
                 epoch++;
                 evaluations.Clear();
+                preparationDrivers.Clear();
                 compiledDocuments.Clear();
                 generated.Clear();
                 previous.Dispose();
@@ -2196,6 +2441,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                     reloadFailed = true;
                     epoch++;
                     evaluations.Clear();
+                    preparationDrivers.Clear();
                     compiledDocuments.Clear();
                     generated.Clear();
                 }
@@ -2436,12 +2682,22 @@ internal sealed partial class LuiProjectContext : IDisposable
             )
                 return cached;
         }
-        var result = LuiCompiler.Compile(
-            snapshot.Document.Syntax,
-            snapshot.Compilation,
-            snapshot.Identity,
-            snapshot.Document.Path
-        );
+        var result =
+            snapshot.NamedComponents && snapshot.PreparedCompilation is { } prepared
+                ? RebindCompilationResult(prepared, snapshot.Identity)
+            : snapshot.NamedComponents
+                ? LuiCompiler.CompileNamedComponent(
+                    snapshot.Syntax,
+                    snapshot.Compilation,
+                    snapshot.Identity,
+                    snapshot.Document.Path
+                )
+            : LuiCompiler.Compile(
+                snapshot.Syntax,
+                snapshot.Compilation,
+                snapshot.Identity,
+                snapshot.Document.Path
+            );
         cancellationToken.ThrowIfCancellationRequested();
         lock (gate)
         {
@@ -2450,6 +2706,18 @@ internal sealed partial class LuiProjectContext : IDisposable
         }
         return result;
     }
+
+    private static LuiCompilationResult RebindCompilationResult(
+        LuiCompilationResult prepared,
+        LuiFreshnessIdentity identity
+    ) =>
+        new(
+            identity,
+            prepared.Source,
+            new LuiSourceMap(identity, prepared.Map.Entries),
+            prepared.Diagnostics,
+            prepared.ProjectionSource
+        );
 
     private Task<Snapshot> SnapshotAsync(Uri uri, CancellationToken cancellationToken) =>
         SnapshotAsync(null, uri, cancellationToken);
@@ -2501,7 +2769,24 @@ internal sealed partial class LuiProjectContext : IDisposable
         )
             ? inputDiagnostic
             : null;
-        var compilation = evaluation.Index.Augment(evaluation.Compilation, current.FilePath!);
+        var namedDocument = evaluation.NamedDocuments.TryGetValue(
+            Path.GetFullPath(input.Path),
+            out var projected
+        )
+            ? projected
+            : null;
+        var preparedCompilation = evaluation
+            .Preparation?.Documents.FirstOrDefault(item =>
+                String.Equals(
+                    Path.GetFullPath(item.Document.PhysicalPath),
+                    Path.GetFullPath(input.Path),
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+            ?.Compilation;
+        var compilation = evaluation.NamedComponents
+            ? evaluation.Compilation
+            : evaluation.Index.Augment(evaluation.Compilation, current.FilePath!);
         var globals = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
         globals.TryGetValue("build_property.LucentLuiProjectEpoch", out var projectEpoch);
         globals.TryGetValue("build_property.LucentLuiProjectIdentity", out var projectIdentity);
@@ -2515,7 +2800,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                 new LuiDocumentIdentity(input.LogicalPath),
                 input.Version,
                 "",
-                evaluation.Index.Generation,
+                evaluation.Generation,
                 parse.LanguageVersion.ToString(),
                 "",
                 "",
@@ -2535,7 +2820,13 @@ internal sealed partial class LuiProjectContext : IDisposable
             uri,
             evaluation.Index,
             metadataDiagnostic,
-            new LuiFreshnessTarget(project.Id, uri, identity)
+            new LuiFreshnessTarget(project.Id, uri, identity),
+            evaluation.NamedComponents,
+            namedDocument?.Projection.Document ?? input.Syntax,
+            evaluation.Preparation?.LuiDiagnostics ?? [],
+            evaluation.Preparation?.GeneratorDiagnostics ?? [],
+            preparedCompilation,
+            evaluation.AuthoredSources
         );
     }
 
@@ -2586,20 +2877,70 @@ internal sealed partial class LuiProjectContext : IDisposable
                     LuiDiagnosticProjection.InvalidLogicalPath(document.FilePath!, logicalPath);
         }
 
-        // The editor builds its own LUI projection below. Running the build-time LUI
-        // generator first duplicates that work; keep all other project generators.
+        var namedComponents = NamedComponentsEnabled(project);
+        LuiProjectDocument[] namedInputs = namedComponents ? validDocuments.ToArray() : [];
+        LuiNamedDocument[] namedDocuments = [];
+
+        // The legacy editor builds its own LUI projection below. Running the build-time LUI
+        // generator first duplicates that work; keep all other project generators. Named
+        // components use the shared bounded preparation pass instead.
         var compilation =
-            await EditorProject(project)
+            await EditorProject(project, namedComponents)
                 .GetCompilationAsync(cancellationToken)
                 .ConfigureAwait(false)
             ?? throw new InvalidOperationException("The evaluated project has no compilation.");
-        var index = LuiProjectComponentIndex.Build(compilation, validDocuments, cancellationToken);
+        LuiPreparationResult? preparation = null;
+        if (namedComponents)
+        {
+            if (compilation is not Microsoft.CodeAnalysis.CSharp.CSharpCompilation csharp)
+                throw new InvalidOperationException(
+                    "The named-component editor project did not produce a C# compilation."
+                );
+            preparation = PrepareNamedProject(
+                project,
+                csharp,
+                namedInputs,
+                captured,
+                cancellationToken
+            );
+            compilation = preparation.BindingCompilation;
+            var projections = preparation.Documents.ToDictionary(
+                item => Path.GetFullPath(item.Document.PhysicalPath),
+                item => item.Projection,
+                StringComparer.OrdinalIgnoreCase
+            );
+            namedDocuments = namedInputs
+                .Select(input =>
+                {
+                    if (!projections.TryGetValue(Path.GetFullPath(input.Path), out var projection))
+                        throw new InvalidOperationException(
+                            "Named preparation returned no projection for '" + input.Path + "'."
+                        );
+                    return LuiNamedDocument.Create(input, projection);
+                })
+                .ToArray();
+        }
+        var index = LuiProjectComponentIndex.Build(
+            compilation,
+            namedComponents ? Array.Empty<LuiProjectDocument>() : validDocuments,
+            cancellationToken
+        );
+        var generation = namedComponents
+            ? NamedPreparationGeneration(preparation!, allDocuments)
+            : index.Generation;
         var evaluation = new ProjectEvaluation(
             captured,
             compilation,
             allDocuments,
             index,
-            metadataDiagnostics
+            metadataDiagnostics,
+            namedComponents,
+            namedDocuments.ToDictionary(
+                item => Path.GetFullPath(item.Authored.Path),
+                StringComparer.OrdinalIgnoreCase
+            ),
+            preparation,
+            generation
         );
         lock (gate)
         {
@@ -2614,14 +2955,66 @@ internal sealed partial class LuiProjectContext : IDisposable
         return evaluation;
     }
 
-    private Project EditorProject(Project project) =>
-        editorProjects.GetValue(
-            project,
-            static original =>
-                EditorSolution(original, preserveReferencedLui: true).GetProject(original.Id)!
+    private static bool NamedComponentsEnabled(Project project)
+    {
+        var globals = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
+        return (
+                globals.TryGetValue("build_property.LucentLuiNamedComponents", out var named)
+                && Boolean.TryParse(named, out var namedEnabled)
+                && namedEnabled
+            )
+            || (
+                globals.TryGetValue("build_property.LucentLuiPreparedAuthoring", out var prepared)
+                && Boolean.TryParse(prepared, out var preparedEnabled)
+                && preparedEnabled
+            );
+    }
+
+    private static string ProjectValue(Project project, string name, string fallback = "") =>
+        project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions.TryGetValue(
+            "build_property." + name,
+            out var value
+        )
+            ? value
+            : fallback;
+
+    private static string NamedPreparationGeneration(
+        LuiPreparationResult preparation,
+        IReadOnlyList<LuiProjectDocument> documents
+    ) =>
+        LuiDocumentIdentity.Hash(
+            String.Join(
+                "\n",
+                documents
+                    .OrderBy(item => item.LogicalPath, StringComparer.Ordinal)
+                    .Select(item => item.LogicalPath + "\0" + item.Version)
+                    .Concat(
+                        preparation.Payload.EarlyDeclarations.Select(item =>
+                            item.HintName + "\0" + item.Source
+                        )
+                    )
+                    .Concat(
+                        preparation.ForeignOutputs.Select(item =>
+                            item.GeneratorIdentity + "\0" + item.HintIdentity + "\0" + item.Sha256
+                        )
+                    )
+            )
         );
 
-    private static Solution EditorSolution(Project project, bool preserveReferencedLui = false)
+    private Project EditorProject(Project project, bool namedComponents = false) =>
+        namedComponents
+            ? EditorSolution(project, namedComponents: true).GetProject(project.Id)!
+            : editorProjects.GetValue(
+                project,
+                static original =>
+                    EditorSolution(original, preserveReferencedLui: true).GetProject(original.Id)!
+            );
+
+    private static Solution EditorSolution(
+        Project project,
+        bool preserveReferencedLui = false,
+        bool namedComponents = false
+    )
     {
         // Rename serializes the whole project graph. Normalize referenced projects too;
         // MSBuild can retain missing Debug build-tool paths in a Release-only checkout.
@@ -2630,12 +3023,12 @@ internal sealed partial class LuiProjectContext : IDisposable
         {
             solution = solution.WithProjectAnalyzerReferences(
                 current.Id,
-                EditorAnalyzerReferences(current)
+                EditorAnalyzerReferences(current, namedComponents)
             );
             // Diagnostics manually project only the requested project. Referenced projects
             // still need their generators to expose components authored in .lui. Rename
             // supplies projections for the whole graph and therefore omits all LUI inputs.
-            if (preserveReferencedLui && current.Id != project.Id)
+            if (preserveReferencedLui && !namedComponents && current.Id != project.Id)
                 continue;
             foreach (
                 var document in current.AdditionalDocuments.Where(document =>
@@ -2647,9 +3040,13 @@ internal sealed partial class LuiProjectContext : IDisposable
         return solution;
     }
 
-    private static IEnumerable<AnalyzerReference> EditorAnalyzerReferences(Project project) =>
+    private static IEnumerable<AnalyzerReference> EditorAnalyzerReferences(
+        Project project,
+        bool namedComponents = false
+    ) =>
         project.AnalyzerReferences.Where(reference =>
             !IsUnavailableLucentBuildToolAnalyzer(reference)
+            && (!namedComponents || !IsLucentBuildToolAnalyzer(reference))
         );
 
     private static bool IsUnavailableLucentBuildToolAnalyzer(AnalyzerReference reference)
@@ -2741,6 +3138,12 @@ internal sealed partial class LuiProjectContext : IDisposable
         LuiMapEntry entry
     )
     {
+        if (document.NamedComponents)
+            return new LuiNavigationTarget(
+                document.SourceUri,
+                entry.Source,
+                AuthoredSource(document, document.SourceUri.LocalPath)
+            );
         var options =
             document
                 .Compilation.SyntaxTrees.Select(tree => tree.Options)
@@ -2771,7 +3174,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             return new LuiNavigationTarget(
                 new Uri(declaration.Document.Path),
                 declaration.Document.Syntax.Component!.Name.Span,
-                declaration.Document.Source
+                AuthoredSource(document, declaration.Document.Path, declaration.Document.Source)
             );
         }
         return null;
@@ -2814,8 +3217,10 @@ internal sealed partial class LuiProjectContext : IDisposable
             snapshot.Index,
             snapshot.Compilation,
             snapshot.Epoch,
-            snapshot.Document.Syntax,
-            snapshot.Freshness
+            snapshot.Syntax,
+            snapshot.Freshness,
+            snapshot.NamedComponents,
+            snapshot.AuthoredSources
         );
         if (result.Success)
         {
@@ -2938,6 +3343,35 @@ internal sealed partial class LuiProjectContext : IDisposable
                 _ => 4,
             },
             diagnostic.Source
+        );
+    }
+
+    private static LuiEditorDiagnostic? EditorDiagnostic(Diagnostic diagnostic, string sourcePath)
+    {
+        if (
+            diagnostic.Location == Location.None
+            || !String.Equals(
+                Path.GetFullPath(diagnostic.Location.GetLineSpan().Path),
+                Path.GetFullPath(sourcePath),
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+            return null;
+        return new LuiEditorDiagnostic(
+            diagnostic.Id,
+            diagnostic.GetMessage(System.Globalization.CultureInfo.InvariantCulture),
+            new LuiSpan(
+                diagnostic.Location.SourceSpan.Start,
+                diagnostic.Location.SourceSpan.Length
+            ),
+            diagnostic.Severity switch
+            {
+                DiagnosticSeverity.Error => 1,
+                DiagnosticSeverity.Warning => 2,
+                DiagnosticSeverity.Info => 3,
+                _ => 4,
+            },
+            diagnostic.Descriptor.Category
         );
     }
 
@@ -3790,14 +4224,16 @@ internal sealed partial class LuiProjectContext : IDisposable
                 method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
                 + "."
                 + method.MetadataName;
-            var declaration = document.Index.Declarations.SingleOrDefault(candidate =>
-                StringComparer.Ordinal.Equals(candidate.Identity, identity)
-            );
+            var declaration = document.NamedComponents
+                ? null
+                : document.Index.Declarations.SingleOrDefault(candidate =>
+                    StringComparer.Ordinal.Equals(candidate.Identity, identity)
+                );
             if (declaration is not null)
                 return new LuiNavigationTarget(
                     new Uri(declaration.Document.Path),
                     declaration.Document.Syntax.Component!.Name.Span,
-                    declaration.Document.Source
+                    AuthoredSource(document, declaration.Document.Path, declaration.Document.Source)
                 );
         }
         var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
@@ -3830,6 +4266,15 @@ internal sealed partial class LuiProjectContext : IDisposable
         );
     }
 
+    private static string AuthoredSource(
+        PublishedDocument document,
+        string path,
+        string? fallback = null
+    ) =>
+        document.AuthoredSources.TryGetValue(Path.GetFullPath(path), out var source)
+            ? source
+            : fallback ?? document.SourceText.ToString();
+
     internal static string FilePath(Uri uri)
     {
         if (!uri.IsFile)
@@ -3858,6 +4303,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             evaluations.Clear();
             generated.Clear();
             compiledDocuments.Clear();
+            preparationDrivers.Clear();
             cachedHover = null;
             workspace.Dispose();
         }
@@ -3868,7 +4314,11 @@ internal sealed partial class LuiProjectContext : IDisposable
         Compilation compilation,
         IReadOnlyList<LuiProjectDocument> documents,
         LuiProjectComponentIndex index,
-        IReadOnlyDictionary<string, LuiDiagnostic> metadataDiagnostics
+        IReadOnlyDictionary<string, LuiDiagnostic> metadataDiagnostics,
+        bool namedComponents,
+        IReadOnlyDictionary<string, LuiNamedDocument> namedDocuments,
+        LuiPreparationResult? preparation,
+        string generation
     )
     {
         internal long Epoch { get; } = epoch;
@@ -3877,6 +4327,17 @@ internal sealed partial class LuiProjectContext : IDisposable
         internal LuiProjectComponentIndex Index { get; } = index;
         internal IReadOnlyDictionary<string, LuiDiagnostic> MetadataDiagnostics { get; } =
             metadataDiagnostics;
+        internal bool NamedComponents { get; } = namedComponents;
+        internal IReadOnlyDictionary<string, LuiNamedDocument> NamedDocuments { get; } =
+            namedDocuments;
+        internal LuiPreparationResult? Preparation { get; } = preparation;
+        internal string Generation { get; } = generation;
+        internal IReadOnlyDictionary<string, string> AuthoredSources { get; } =
+            documents.ToDictionary(
+                item => Path.GetFullPath(item.Path),
+                item => item.Source,
+                StringComparer.OrdinalIgnoreCase
+            );
     }
 
     private sealed class Snapshot(
@@ -3888,7 +4349,13 @@ internal sealed partial class LuiProjectContext : IDisposable
         Uri uri,
         LuiProjectComponentIndex index,
         LuiDiagnostic? metadataDiagnostic,
-        LuiFreshnessTarget freshness
+        LuiFreshnessTarget freshness,
+        bool namedComponents,
+        LuiDocumentSyntax syntax,
+        IReadOnlyList<LuiPreparationDiagnostic> preparationDiagnostics,
+        IReadOnlyList<Diagnostic> generatorDiagnostics,
+        LuiCompilationResult? preparedCompilation,
+        IReadOnlyDictionary<string, string> authoredSources
     )
     {
         internal long Epoch { get; } = epoch;
@@ -3900,6 +4367,13 @@ internal sealed partial class LuiProjectContext : IDisposable
         internal LuiProjectComponentIndex Index { get; } = index;
         internal LuiDiagnostic? MetadataDiagnostic { get; } = metadataDiagnostic;
         internal LuiFreshnessTarget Freshness { get; } = freshness;
+        internal bool NamedComponents { get; } = namedComponents;
+        internal LuiDocumentSyntax Syntax { get; } = syntax;
+        internal IReadOnlyList<LuiPreparationDiagnostic> PreparationDiagnostics { get; } =
+            preparationDiagnostics;
+        internal IReadOnlyList<Diagnostic> GeneratorDiagnostics { get; } = generatorDiagnostics;
+        internal LuiCompilationResult? PreparedCompilation { get; } = preparedCompilation;
+        internal IReadOnlyDictionary<string, string> AuthoredSources { get; } = authoredSources;
     }
 
     internal sealed class PublishedDocument(
@@ -3911,7 +4385,9 @@ internal sealed partial class LuiProjectContext : IDisposable
         Compilation compilation,
         long epoch,
         LuiDocumentSyntax syntax,
-        LuiFreshnessTarget freshness
+        LuiFreshnessTarget freshness,
+        bool namedComponents,
+        IReadOnlyDictionary<string, string> authoredSources
     )
     {
         internal LuiCompilationResult Result { get; } = result;
@@ -3924,6 +4400,8 @@ internal sealed partial class LuiProjectContext : IDisposable
         internal long Epoch { get; } = epoch;
         internal LuiDocumentSyntax Syntax { get; } = syntax;
         internal LuiFreshnessTarget Freshness { get; } = freshness;
+        internal bool NamedComponents { get; } = namedComponents;
+        internal IReadOnlyDictionary<string, string> AuthoredSources { get; } = authoredSources;
     }
 
     private sealed class GeneratedDocument

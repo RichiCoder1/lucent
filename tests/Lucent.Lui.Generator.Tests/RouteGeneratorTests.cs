@@ -53,6 +53,94 @@ public sealed class RouteGeneratorTests
     }
 
     [TestMethod]
+    public void ProjectedRoutesRetainAuthoredOriginAcrossGeneratorHosts()
+    {
+        var source = "#line 1 \"routes/AppRoutes.lui\"\n" + ValidSource;
+        var preparation = Generate(source, "preparation/Declarations.g.cs");
+        var final = Generate(source, "final/ContentAddressedEmitter/Declarations.g.cs");
+        AssertNoErrors(preparation);
+        AssertNoErrors(final);
+        var preparedText = preparation
+            .Run.Results.Single()
+            .GeneratedSources.Single()
+            .SourceText.ToString();
+        var finalText = final.Run.Results.Single().GeneratedSources.Single().SourceText.ToString();
+        Assert.AreEqual(preparedText, finalText);
+        StringAssert.Contains(finalText, "RouteDeclarationSource(\"routes/AppRoutes.lui\"");
+        Assert.IsFalse(finalText.Contains("Declarations.g.cs", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void ComponentMappingInvokesStaticFactoryAndRejectsForeignLevels()
+    {
+        var generated = Generate(
+            """
+            using System;
+            using Lucent.Core;
+            namespace Sample;
+            [LucentRouteModule(RouteFallbackPolicy.Reject)]
+            public static partial class Routes { }
+            [LucentRoute(typeof(Routes), "/", Id = "shell", Component = typeof(Page))]
+            public readonly record struct ShellRoute();
+            [LucentRoute(typeof(Routes), "/items/{id}", Parent = typeof(ShellRoute), Component = typeof(Page))]
+            public readonly record struct ItemRoute(int Id);
+            public sealed partial class Page {
+                public static int Creations;
+                public static ComponentRecipe Create() {
+                    Creations++;
+                    return ComponentRecipe.Create("mapped-page", static (_, _) => { });
+                }
+            }
+            public static class Verify {
+                public static void Run() {
+                    _ = Routes.CreateComponent(Routes.ShellDefinition.Branch[0]);
+                    _ = Routes.CreateComponent(Routes.ItemDefinition.Branch[0]);
+                    _ = Routes.CreateComponent(Routes.ItemDefinition.Branch[1]);
+                    if (Page.Creations != 3) throw new Exception("Factory was not called directly.");
+                    try { _ = Routes.CreateComponent(null!); }
+                    catch (ArgumentException) { return; }
+                    throw new Exception("Unmapped level was accepted.");
+                }
+            }
+            """
+        );
+        AssertNoErrors(generated);
+        using var stream = new MemoryStream();
+        var emit = generated.Compilation.Emit(stream);
+        Assert.IsTrue(emit.Success, String.Join(" | ", emit.Diagnostics));
+        Assembly
+            .Load(stream.ToArray())
+            .GetType("Sample.Verify")!
+            .GetMethod("Run")!
+            .Invoke(null, null);
+    }
+
+    [TestMethod]
+    [DataRow("private static ComponentRecipe Create() => null!;")]
+    [DataRow("public static ComponentRecipe Create(int required) => null!;")]
+    [DataRow("public ComponentRecipe Create() => null!;")]
+    [DataRow("public static string Create() => \"wrong\";")]
+    [DataRow("public static ComponentRecipe Create<T>() => null!;")]
+    [DataRow(
+        "public static ComponentRecipe Create(int a = 0) => null!; public static string Create(string b = \"\") => \"wrong\";"
+    )]
+    public void InvalidComponentMappingIsAnAuthoredDiagnostic(string declaration)
+    {
+        var result = Generate(
+            """
+            using Lucent.Core;
+            [LucentRouteModule(RouteFallbackPolicy.Reject)] public static partial class Routes { }
+            [LucentRoute(typeof(Routes), "/", Component = typeof(Page))] public readonly record struct HomeRoute();
+            public class Page {
+            """
+                + declaration
+                + "}"
+        );
+        Assert.AreEqual(1, result.Run.Diagnostics.Count(diagnostic => diagnostic.Id == "LUI4208"));
+        Assert.AreEqual(0, result.Run.Results.Single().GeneratedSources.Length);
+    }
+
+    [TestMethod]
     public void GeneratedAssemblyRoundTripsAndProvidesExactTypedContexts()
     {
         var generated = Generate(ValidSource, "routes/AppRoutes.cs");

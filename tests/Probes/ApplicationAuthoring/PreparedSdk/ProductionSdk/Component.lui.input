@@ -1,0 +1,10 @@
+namespace Fixture;
+using Lucent.Core;
+
+public record Person(string Name);
+public sealed class SupportMarker {
+}
+
+public component Greeting() {
+    <Text>first</Text>
+}

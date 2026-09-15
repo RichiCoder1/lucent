@@ -54,7 +54,7 @@ internal sealed partial class LuiProjectContext
                 return cached;
         }
         var result = LuiLintAnalyzer.AnalyzeCompiled(
-            snapshot.Document.Syntax,
+            snapshot.Syntax,
             snapshot.Compilation,
             snapshot.Identity,
             compiled,

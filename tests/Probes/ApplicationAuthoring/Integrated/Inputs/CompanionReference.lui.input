@@ -1,6 +1,7 @@
 namespace IntegratedFixture;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Collections.Generic;
 using Lucent.Core;
 
 public record Person(string Name);
@@ -14,11 +15,27 @@ public static partial class AppRoutes { }
 [LucentRoute(typeof(AppRoutes), "/home", Id = "home")]
 public readonly record struct HomeRoute();
 
-public component IntegratedView() {
+public static class MountRegistry {
+    private static readonly HashSet<object> identities = new();
+    public static int Distinct => identities.Count;
+    public static object? Last { get; private set; }
+    public static int Record(object identity) {
+        identities.Add(identity);
+        Last = identity;
+        return identities.Count;
+    }
+}
+
+public component CompanionApp() {
+    [Once]
+    int mountIdentity = MountRegistry.Record(this) + CompanionCount;
     [Once]
     Person person = JsonSerializer.Deserialize("{\"Name\":\"Ada\"}", AppJsonContext.Default.Person)!;
 
-    string Describe() => Organization + "|" + JsonSerializer.Serialize(person, AppJsonContext.Default.Person) + "|" + AppRoutes.Home().Location.CanonicalText;
+    string Describe() => Organization + "|" + CompanionCount + "|" + JsonSerializer.Serialize(person, AppJsonContext.Default.Person) + "|" + AppRoutes.Home().Location.CanonicalText;
 
-    <Text>{Describe()}</Text>
+    <Column>
+        <Text>{Describe()}</Text>
+        <Text>real markup</Text>
+    </Column>
 }

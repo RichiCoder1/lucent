@@ -1,12 +1,89 @@
 # A0 compiler and ownership feasibility
 
-Status: in progress, September 14, 2026. [A0 #302](https://github.com/RichiCoder1/lucent/issues/302)
-has initial executed generator-phase evidence. It has **not passed** the integrated
-language, editor, identity, routing and packaged NativeAOT gate. A1–A7 remain gated.
+Status: passed, September 14, 2026. [A0 #302](https://github.com/RichiCoder1/lucent/issues/302)
+selects the bounded compiler/SDK/editor architecture below. Work pauses here at the owner's
+request; A1–A7 have not started and retain their individual acceptance contracts.
 
-## Candidate architecture
+## Production integration evidence
 
-The promising candidate combines pre-compilation projection with one host-owned
+The compiler/workspace package family is Roslyn 5.9.0 (NuGet source commit
+`35d9211b841e7613c1d2f8f5af6d628ace696c4c`), aligned with SDK 10.0.401.
+Version observations in the historical experiments below describe those experiments' inputs.
+
+`CompileNamedComponent` emits the same named partial type directly, without a post-lowering
+promotion transform. The shared projection supports ordinary declarations and support-only
+files. Provisional factory, method, prop and state signatures expose named identity to one
+foreign-generator preparatory pass. Semantic binding then refines those signatures and state
+classification before final emission. Generated JSON APIs and companion members participate
+without requiring new annotations or another foreign-generator pass. The Compiler suite
+passes 132 tests and the Generator suite passes 45, including 20 route-generator tests.
+Runtime cases cover distinct mounts, requirements before managed initialization, companion
+cells before LUI fields, setup once and cleanup after failure.
+
+The opt-in packaged pipeline uses `LucentLuiNamedComponents=true`. Its shared preparation
+engine captures evaluated source, additional text, configuration, references, analyzer binary
+identities and outer global properties. An immutable content-addressed emitter supplies early
+and final Lucent output. The final compiler independently runs the foreign generators; their
+identities, hint names and exact output content must match. Input changes during compilation
+or unsupported generator graphs fail closed; there is no convergence loop or preliminary
+consumer assembly build. Cleanup removes only owned generated files and consumer assemblies.
+
+The [PreparedSdk experiment](../../tests/Probes/ApplicationAuthoring/PreparedSdk/) passes
+arbitrary global-property forwarding, stable emitter identity and changed/missing/extra
+output and analyzer negatives. The production wrapper passes against candidate
+`0.3.0-dev.a0.20260914.5`: cold success, same-project edit with two immutable cached emitters
+but only the current emitter loaded, missing-host failure and nondeterministic-output
+failure. The consumer exits are `0, 0, 1, 1`; the wrapper exits 0. Evidence is in
+`artifacts/a0-production-sdk-negatives/commands.log`. Shared engine checks also verify driver
+reuse across fresh analyzer wrappers, changed input visibility, hash/ordinal invalidation
+and authored Windows source paths under `artifacts/a0-preparation-reuse`.
+
+The [RoutedPackage fixture](../../tests/Probes/ApplicationAuthoring/RoutedPackage/README.md)
+passes with candidate `0.3.0-dev.a0.20260914.5`. Its first consumer invocation publishes
+NativeAOT against a fresh package cache, with bootstrap-only C#. Twelve evaluated generators
+produce six exactly matching foreign outputs (JSON and routes). The native executable checks
+two named root mounts, typed route contexts, retained shell identity, replaced children,
+reactive JSON edits, stale-command rejection and disposal. Both publish and execution exit 0.
+Evidence is in `artifacts/a0-routed-package/b0595f640386467a8cfbfcd81c14b5c6`:
+
+- Executable SHA-256: `7E2D5568EB24339C36EF7810091028124D4B67F27A24E70C074FFE0ACDA6BA4B`.
+- Core package SHA-256: `65E3C03414AAED55212EED0A525744A2D991CCE1C186CB7E60CDD9D0BD5142D8`.
+- SDK package SHA-256: `5F1BF49FF9783EE525D3767704BBC387C85E30B3424238BA6512C33081E5810B`.
+
+The official `tools/Test-AuthoringPackages.ps1` now includes both fixtures and passes against
+that candidate, alongside its existing managed and NativeAOT consumers. The eight CLI tooling
+tests pass. The SDK contains its 22 required notices, and the compiled Core architecture
+check rejects preparation tooling as a runtime dependency. Cold fixture caches are cleaned
+by their owning wrappers while command logs, source fixtures and executable evidence remain.
+
+The successful candidate supersedes the initial cold failures. Those runs exposed setup
+provenance, partial parameter naming and route-origin differences between generator hosts;
+focused regressions cover the corrections.
+
+## Editor and final verification
+
+The actual language-server protocol fixture starts from a cold workspace with no generated
+disk artifacts. Unsaved JSON declarations bind in both directions; diagnostics, hover,
+definition and cross-language rename map to authored sources. Removing and restoring the
+JSON declaration removes and restores its generated API. A deleted file returns an empty
+result, while a file belonging to another project retains its actionable project error.
+Named preparation observes cancellation before evaluation; existing graph/freshness tests
+continue to reject stale publications, including diamond and referenced-project cases.
+
+The full Release LSP suite passes 37/37. One process reported: Named LSP timings: cold=3400.4ms unchanged=23.3ms edit=192.2ms.
+These are fixture request observations, not a general latency guarantee. Both server and
+test builds have zero warnings/errors. The final TRX is under `artifacts/a0-lsp-final`;
+earlier regression failures and the installed-server file-lock failure remain separate logs.
+
+The final working-tree formatter passes 584 enumerated C# paths (583 checked by CSharpier)
+and 108 LUI files. Light Notes independently passes 33 C# and 16 LUI files. Compiler 132,
+Generator 45 and Tooling eight tests pass. Package verification, production SDK negatives,
+routed NativeAOT execution and compiled Core architecture checks pass as recorded above.
+These are local candidate results; later CI runs identify their own committed source.
+
+## Selected architecture
+
+The selected architecture combines pre-compilation projection with one host-owned
 preparatory generator-driver pass. Early authored types and component identity
 declarations are visible to external generators. Their ordinary outputs are added only
 to Lucent's binding compilation. Normal final compilation emits each source once.
@@ -18,8 +95,8 @@ declarations, but a sibling generator's `CompilationProvider` cannot see its ord
 generated APIs. No reflection-based component activation or preliminary assembly build
 is required for the bounded driver experiment.
 
-Production selection remains conditional on cold SDK evaluation, compiler-host compatibility,
-diagnostics, input identity, cancellation, editor cost and packaged execution. The SDK
+The selected pipeline is bounded by the verified SDK/compiler host, evaluated input identity,
+exact output matching, cancellation and editor freshness rules. The SDK
 must not obtain generator inputs by recursively invoking itself; captured trees must never
 be added as final `Compile` inputs. An SDK upgrade and a runtime-target upgrade are separate.
 
@@ -69,7 +146,7 @@ One successful wrapper run measured about 250 ms for the initial generator phase
 285 ms for bounded preparation/final generation plus emission/execution. These include
 process-local JIT/cache effects and are not language-server or keystroke measurements.
 
-## Remaining gate evidence
+## Historical experiments leading to the selected pipeline
 
 ### SDK-host experiment
 
@@ -123,7 +200,7 @@ These are isolated host observations, not end-to-end LSP latency. Reuse rejects 
 generator instances or driver options, updates analyzer options/text/parse options, and
 forwards cancellation. Exact commands and measurements are in `artifacts/a0-editor`.
 
-The real language server, cross-language rename/diagnostics, shared production cache
+At this experimental checkpoint, the real language server, cross-language rename/diagnostics, shared production cache
 identity and uncooperative analyzer isolation remain unproven. The experiment does not
 lower LUI markup or establish SDK input parity.
 
@@ -168,33 +245,30 @@ foreign outputs and prove packaged execution. The editor should use the equivale
 model in memory rather than build an analyzer DLL for each edit. No production pipeline
 is selected solely from this experiment.
 
-### Integrated acceptance still required
+### Source-reference integrated experiment
 
 [Integrated](../../tests/Probes/ApplicationAuthoring/Integrated/README.md) now combines
 actual LUI state/handler/markup lowering with real JSON output and a call to the existing
-generated route factory. A constrained Roslyn transform promotes the lowerer's state
-class to the named partial class and moves its factory to `Create`; it does not substitute
-an outer state adapter. All-LUI and optional-companion console consumers each publish and
+generated route factory. It now uses direct named-component binding and emission; the
+earlier post-lowering type-promotion transform has been removed. All-LUI and optional-companion console consumers each publish and
 execute under NativeAOT, mount twice with distinct named state objects, and expose the
 expected JSON and canonical route URI in real Core text semantics. The wrapper exits 0;
 commands/exits are recorded in `artifacts/a0-integrated`.
 
 This is source/project-reference evidence, not packaged SDK evidence or an actual routed
 application: it does not mount a NavigationSession/outlet or prove route/component mapping.
-The companion cross-reference negative exits 1 with the expected `LUI2000` for `Organization`.
-Current member binding targets a private generated helper, so simply promoting that helper
-after lowering cannot make companion instance members available during binding. The next
-compiler experiment must bind and emit the same early named partial identity directly.
+The companion's private `Organization` member now binds through the same named partial type.
+The earlier cross-reference failure motivated that compiler integration; it is no longer the
+expected result for the corrected companion fixture.
 
-| Required contract | Current boundary |
+| Required contract | Executed evidence |
 | --- | --- |
-| Ordinary types colocated with UI and across files | Combined input and cross-file driver binding pass; full shared LUI document projection and cross-file tooling remain unproven |
-| External generated APIs used by LUI | Real JSON initializer/method binding and mounted execution pass; cold SDK/LSP integration remains |
-| Lucent route/state generated APIs | Generated route factory call and JSON-backed state execute under NativeAOT; actual route/component association and navigation remain |
-| Named partial identity and companion ownership | Companion ownership and transformed real markup/state execute; direct named binding, cross-file member semantics and remaining state kinds remain |
-| Editor parity | MSBuildWorkspace unsaved edits, deletion, renamed origin, cancellation and measured reuse pass; actual LSP diagnostics, navigation, rename and latency remain |
-| Cold SDK and output matching | Isolated host positive and changed/missing/extra negatives pass; actual Lucent SDK integration remains |
-| Packaged NativeAOT application | Source/project-reference all-LUI and companion executables pass; packaged SDK routed application remains unproven |
+| Ordinary declarations and external generated APIs | Compiler, shared preparation, unsaved real LSP and package fixtures bind ordinary/support-only declarations and real JSON output |
+| Named partial identity and companion ownership | Direct named binding, inferred state and cross-file companion members; independent mounts, setup and failure cleanup |
+| Route/component association | Direct static factory mapping; native routed consumer retains shell state and replaces child routes |
+| Editor parity | Actual protocol diagnostics, hover, definition and cross-language rename; unsaved declaration removal/restoration and deleted-file requests; named cancellation |
+| Cold SDK and output matching | Packaged cold success, emitter replacement, missing-host cleanup and nondeterministic-output rejection |
+| Packaged NativeAOT application | Candidate 0.3.0-dev.a0.20260914.5 publishes and executes; official package verification entry point passes |
 
 The all-LUI application and companion variants remain separate acceptance fixtures.
 No degraded generated-symbol binding, save-before-bind requirement, repeated-generation
@@ -202,7 +276,7 @@ convergence, or extra authored C# bridge is accepted as a substitute.
 
 ## Production integration boundaries identified by inspection
 
-These are source-confirmed integration requirements, not additional executed passes.
+The production implementation preserves these integration requirements. Earlier experiments above are historical evidence, not substitutes for the production acceptance checks.
 
 - `LuiProjectContext.EvaluateProjectAsync` reads the current LUI AdditionalDocuments,
   then obtains its compilation from an editor clone that removes those inputs before
@@ -225,6 +299,6 @@ These are source-confirmed integration requirements, not additional executed pas
   remains independent of that execution. This design does not introduce an analyzer sandbox
   or change runtime NativeAOT restrictions.
 
-Production Roslyn references remain unchanged. The isolated 5.9 experiment does not itself
-establish compatibility for the shipped compiler, language server, SDK tool closure or
-downstream analyzer hosts.
+Production compiler/workspace references now align on Roslyn 5.9.0. The selected SDK and
+package probes establish the bounded host contract; arbitrary older analyzer hosts are not
+implied to support the experimental pre-compilation API.

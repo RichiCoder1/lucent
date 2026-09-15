@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <DefineConstants>$(DefineConstants);PREPARED_FIXTURE</DefineConstants>
+    <PreparedFlavor>outer-evaluated</PreparedFlavor>
+    <PreparedEarlyPayloadPath Condition="'$(PreparedEarlyPayloadPath)' == ''"
+      >$(MSBuildProjectDirectory)\EarlyDeclarations.input</PreparedEarlyPayloadPath>
+    <PreparedFinalPayloadPath Condition="'$(PreparedFinalPayloadPath)' == ''"
+      >$(MSBuildProjectDirectory)\FinalApplication.input</PreparedFinalPayloadPath>
+    <PreparedMismatchKind Condition="'$(PreparedMismatchKind)' == ''">none</PreparedMismatchKind>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)$(Configuration)\$(TargetFramework)\prepared-final</CompilerGeneratedFilesOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Support/Support.csproj" />
+    <PreparedEarlyPayload Include="$(PreparedEarlyPayloadPath)" />
+    <PreparedFinalPayload Include="$(PreparedFinalPayloadPath)" />
+    <AdditionalFiles Include="Observed.input" />
+    <CompilerVisibleProperty Include="PreparedFlavor" />
+    <CompilerVisibleProperty Include="RuntimeIdentifier" />
+    <CompilerVisibleProperty Include="PreparedArbitrary" />
+    <CompilerVisibleProperty Include="PreparedNondeterministic" />
+    <Analyzer Include="$(PreparedForeignGeneratorPath)" />
+    <Analyzer Include="$(PreparedJsonGeneratorPath)" />
+  </ItemGroup>
+  <Import Project="PreparedSdk.targets" />
+</Project>

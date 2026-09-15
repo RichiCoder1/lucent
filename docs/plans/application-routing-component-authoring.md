@@ -1,11 +1,13 @@
 # Application roots, routing and component companions
 
 Status: owner-approved and refined after Claude Code Fable High adversarial review,
-2026-09-14. Ready for A0 feasibility implementation; A1-A7 remain gated by its evidence.
+2026-09-14. A0 passed; execution is paused at the owner's request before A1–A7.
 The [review and dispositions](application-routing-component-authoring-fable-review.md)
-record what changed during design. Implementation has begun the
-[A0 experiments](application-routing-component-authoring-a0.md); the review itself remains
-source-only evidence and no dependent runtime migration has started.
+record what changed during design. The [A0 acceptance record](application-routing-component-authoring-a0.md)
+now supplies executed compiler, editor and package evidence. No dependent runtime migration
+has started. The selected pipeline combines early authored projection, one foreign-generator
+preparation pass and semantic signature refinement with exact final-output comparison on
+Roslyn 5.9.0 and SDK 10.0.401. Unsupported generator graphs fail without convergence.
 
 ## Intended outcome
 
@@ -656,11 +658,11 @@ unblocks the existing sequence without another broad design interview.
 ## Proposed work sequence
 
 The authorized handoff slices are now tracked by [parent #301](https://github.com/RichiCoder1/lucent/issues/301)
-and [A0–A7 #302–309](application-routing-component-authoring-execution.md). A0 is active;
+and [A0–A7 #302–309](application-routing-component-authoring-execution.md). A0 is complete and execution is paused;
 downstream slices retain their native prerequisites. The
 [handoff](../../advisor-plans/application-routing-component-authoring-handoff.md) records the
-approved scope and review dispositions. Initial isolated generator-phase evidence is in
-[the A0 probe](../../tests/Probes/ApplicationAuthoring/README.md); it does not pass the full gate.
+approved scope and review dispositions. The [A0 record](application-routing-component-authoring-a0.md)
+links final executed evidence and the historical experiments that informed selection.
 
 | Slice | Deliverable and decisive evidence | Depends on |
 | --- | --- | --- |

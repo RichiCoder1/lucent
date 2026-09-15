@@ -47,14 +47,18 @@ public static class ProbeGenerationEngine
                     )
             );
         var outputs = run
-            .Results.SelectMany(result => result.GeneratedSources)
-            .Select(source =>
+            .Results.SelectMany(
+                (result, generatorOrdinal) =>
+                    result.GeneratedSources.Select(source => (generatorOrdinal, source))
+            )
+            .Select(item =>
             {
-                var text = source.SourceText.ToString();
+                var text = item.source.SourceText.ToString();
                 return new ProbeGeneratedSource(
-                    NormalizeIdentity(source.SyntaxTree.FilePath),
+                    NormalizeIdentity(item.source.SyntaxTree.FilePath),
                     text,
-                    Hash(text)
+                    Hash(text),
+                    item.generatorOrdinal
                 );
             })
             .ToImmutableArray();
@@ -145,7 +149,12 @@ public sealed record ProbePreparationResult(
     internal GeneratorDriverOptions DriverOptions { get; init; }
 }
 
-public sealed record ProbeGeneratedSource(string Identity, string Source, string Sha256);
+public sealed record ProbeGeneratedSource(
+    string Identity,
+    string Source,
+    string Sha256,
+    int GeneratorOrdinal = -1
+);
 
 internal sealed record ProbeOutputMismatch(string[] Missing, string[] Extra, string[] Changed)
 {

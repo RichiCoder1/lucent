@@ -48,4 +48,8 @@ public sealed class LucentRouteAttribute : Attribute
 
     /// <summary>Gets or sets the optional parent route type.</summary>
     public Type? Parent { get; set; }
+
+    /// <summary>Gets or sets the component whose static Create factory renders this route.</summary>
+    /// <remarks>The generator binds the factory directly; this type is never activated by reflection.</remarks>
+    public Type? Component { get; set; }
 }

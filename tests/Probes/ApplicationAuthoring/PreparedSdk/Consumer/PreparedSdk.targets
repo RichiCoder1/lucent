@@ -1,0 +1,56 @@
+<Project>
+  <UsingTask
+    TaskName="Lucent.ApplicationAuthoring.PreparedSdk.CaptureGlobalProperties"
+    AssemblyFile="$(PreparedTasksPath)"
+  />
+  <Target
+    Name="PrepareProjectSpecificEmitter"
+    BeforeTargets="CoreCompile"
+    Condition="'$(PreparedSkipPrepare)' != 'true'"
+  >
+    <Delete Files="$(TargetPath);@(IntermediateAssembly);$(IntermediateOutputPath)ref\$(TargetFileName);$(IntermediateOutputPath)refint\$(TargetFileName)" />
+    <Error
+      Condition="!Exists('$(PreparedDotNetHost)')"
+      Text="Prepared SDK dotnet host was not supplied: $(PreparedDotNetHost)"
+    />
+    <Error
+      Condition="!Exists('$(PreparedHostPath)')"
+      Text="Prepared SDK host was not built: $(PreparedHostPath)"
+    />
+    <PropertyGroup>
+      <_PreparedRoot>$(IntermediateOutputPath)prepared-sdk</_PreparedRoot>
+      <_PreparedManifest>$(_PreparedRoot)\manifest.json</_PreparedManifest>
+      <_PreparedEmitterPath>$(_PreparedRoot)\emitter-path.txt</_PreparedEmitterPath>
+      <_PreparedGlobals>$(_PreparedRoot)\global-properties.json</_PreparedGlobals>
+      <_PreparedEmitterRoot>$(BaseIntermediateOutputPath)prepared-sdk-cache\emitter</_PreparedEmitterRoot>
+      <_PreparedWorkspaceIntermediate>$(BaseIntermediateOutputPath)prepared-workspace</_PreparedWorkspaceIntermediate>
+    </PropertyGroup>
+    <RemoveDir Directories="$(_PreparedRoot);$(CompilerGeneratedFilesOutputPath)" />
+    <MakeDir Directories="$(_PreparedEmitterRoot);$(CompilerGeneratedFilesOutputPath)" />
+    <CaptureGlobalProperties OutputPath="$(_PreparedGlobals)" />
+    <Exec Command="&quot;$(PreparedDotNetHost)&quot; &quot;$(PreparedHostPath)&quot; prepare &quot;$(MSBuildProjectFullPath)&quot; &quot;$(_PreparedManifest)&quot; &quot;$(_PreparedEmitterRoot)&quot; &quot;$(Configuration)&quot; &quot;$(TargetFramework)&quot; &quot;$(RuntimeIdentifier)&quot; &quot;@(PreparedEarlyPayload->'%(FullPath)', '|')&quot; &quot;@(PreparedFinalPayload->'%(FullPath)', '|')&quot; &quot;$(PreparedForeignGeneratorPath)&quot; &quot;$(PreparedJsonGeneratorPath)&quot; &quot;$(PreparedFlavor)&quot; &quot;$(_PreparedWorkspaceIntermediate)&quot; &quot;$(_PreparedWorkspaceIntermediate)&quot; &quot;$(ProjectAssetsFile)&quot; &quot;$(_PreparedGlobals)&quot;" />
+    <ReadLinesFromFile File="$(_PreparedEmitterPath)">
+      <Output TaskParameter="Lines" ItemName="_PreparedEmitter" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <Analyzer Include="@(_PreparedEmitter)" />
+    </ItemGroup>
+    <Error
+      Condition="'@(_PreparedEmitter)' == ''"
+      Text="Preparation did not create a project emitter."
+    />
+  </Target>
+
+  <Target
+    Name="ComparePreparedForeignOutputs"
+    AfterTargets="CoreCompile"
+    Condition="'$(PreparedSkipPrepare)' != 'true'"
+  >
+    <Exec Command="&quot;$(PreparedDotNetHost)&quot; &quot;$(PreparedHostPath)&quot; compare &quot;$(_PreparedManifest)&quot; &quot;$(CompilerGeneratedFilesOutputPath)&quot; &quot;@(_PreparedEmitter->'%(Filename)')&quot; &quot;$(PreparedMismatchKind)&quot; &quot;$(TargetPath)&quot; &quot;@(IntermediateAssembly)&quot; &quot;$(IntermediateOutputPath)ref\$(TargetFileName)&quot; &quot;$(IntermediateOutputPath)refint\$(TargetFileName)&quot;" />
+    <OnError ExecuteTargets="RemoveMismatchedPreparedAssembly" />
+  </Target>
+
+  <Target Name="RemoveMismatchedPreparedAssembly">
+    <Delete Files="$(TargetPath);@(IntermediateAssembly);$(IntermediateOutputPath)ref\$(TargetFileName);$(IntermediateOutputPath)refint\$(TargetFileName)" />
+  </Target>
+</Project>

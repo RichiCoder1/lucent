@@ -105,6 +105,16 @@ public sealed class LuiGenerator : IIncrementalGenerator
                         cancellationToken
                     )
             )
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Where(static input =>
+                !(
+                    input.Right.GlobalOptions.TryGetValue(
+                        "build_property.LucentLuiPreparedAuthoring",
+                        out var value
+                    ) && String.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+                )
+            )
+            .Select(static (input, _) => input.Left)
             .WithTrackingName("LuiParse");
         var project = context
             .AnalyzerConfigOptionsProvider.Select(

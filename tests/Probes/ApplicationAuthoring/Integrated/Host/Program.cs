@@ -7,7 +7,6 @@ using Lucent.Lui.Compiler;
 using Lucent.Lui.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
 try
@@ -23,7 +22,16 @@ try
     foreach (var stale in Directory.EnumerateFiles(outputPath, "*.g.cs"))
         File.Delete(stale);
 
-    var projection = PrototypeProjection.Parse(File.ReadAllText(inputPath));
+    var projection = LuiAuthoredSourceProjection.Project(File.ReadAllText(inputPath));
+    if (!projection.Success || projection.EarlyComponentDeclaration is null)
+        throw new InvalidOperationException(
+            String.Join(
+                Environment.NewLine,
+                projection.Diagnostics.Select(static diagnostic =>
+                    diagnostic.Id + ": " + diagnostic.Message
+                )
+            )
+        );
     var parseOptions = new CSharpParseOptions(LanguageVersion.Preview);
     var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
         .Split(Path.PathSeparator)
@@ -31,11 +39,18 @@ try
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .Select(static path => MetadataReference.CreateFromFile(path));
     var declarationsTree = CSharpSyntaxTree.ParseText(
-        projection.Declarations,
+        projection.DeclarationsSource,
         parseOptions,
         inputPath + ".declarations.cs"
     );
     var syntaxTrees = new List<SyntaxTree> { declarationsTree };
+    syntaxTrees.Add(
+        CSharpSyntaxTree.ParseText(
+            projection.EarlyComponentDeclaration,
+            parseOptions,
+            inputPath + ".component.early.g.cs"
+        )
+    );
     if (args.Length == 5)
         syntaxTrees.Add(
             CSharpSyntaxTree.ParseText(
@@ -75,15 +90,20 @@ try
         out var generatorDiagnostics
     );
     CheckNoErrors(generatorDiagnostics);
-    CheckNoErrors(generatedCompilation.GetDiagnostics());
+    CheckPreparationErrors(generatedCompilation.GetDiagnostics());
     var run = driver.GetRunResult();
     var generated = run.Results.SelectMany(static result => result.GeneratedSources).ToArray();
     var routeOutputs = run.Results[1].GeneratedSources;
     if (generated.Length < 2)
         throw new InvalidOperationException("Expected both JSON and route generated outputs.");
 
-    var lui = LuiCompiler.Compile(
-        LuiParser.Parse(projection.Component),
+    var parsed = projection.Document;
+    if (parsed.Component?.Name.Text != identityName)
+        throw new InvalidOperationException(
+            $"Component '{parsed.Component?.Name.Text}' does not match requested identity '{identityName}'."
+        );
+    var lui = LuiCompiler.CompileNamedComponent(
+        parsed,
         generatedCompilation,
         new LuiFreshnessIdentity(
             identityName,
@@ -106,7 +126,12 @@ try
 
     File.WriteAllText(
         Path.Combine(outputPath, "000.declarations.g.cs"),
-        projection.Declarations,
+        "#nullable enable\n" + projection.DeclarationsSource,
+        new UTF8Encoding(false)
+    );
+    File.WriteAllText(
+        Path.Combine(outputPath, "001.component.early.g.cs"),
+        "#nullable enable\n" + projection.EarlyComponentDeclaration,
         new UTF8Encoding(false)
     );
     for (var index = 0; index < routeOutputs.Length; index++)
@@ -117,7 +142,7 @@ try
         );
     File.WriteAllText(
         Path.Combine(outputPath, "900.named-lui.g.cs"),
-        TransformIdentity(lui.Source!, identityName),
+        lui.Source!,
         new UTF8Encoding(false)
     );
     Console.WriteLine(
@@ -130,71 +155,6 @@ catch (Exception error)
     Environment.ExitCode = 1;
 }
 
-static string TransformIdentity(string source, string identityName)
-{
-    var tree = CSharpSyntaxTree.ParseText(source, new CSharpParseOptions(LanguageVersion.Preview));
-    var unit = tree.GetCompilationUnitRoot();
-    var container = unit.DescendantNodes()
-        .OfType<ClassDeclarationSyntax>()
-        .Single(static candidate => candidate.Identifier.ValueText == "Components");
-    var factory = container
-        .Members.OfType<MethodDeclarationSyntax>()
-        .Single(static candidate => candidate.Identifier.ValueText == "IntegratedView");
-    var state = container
-        .Members.OfType<ClassDeclarationSyntax>()
-        .Single(static candidate =>
-            candidate.Identifier.ValueText.StartsWith("__luiState_", StringComparison.Ordinal)
-        );
-    if (container.Members.Count != 2)
-        throw new InvalidOperationException(
-            "The constrained named-state transform expected one factory and one generated state class."
-        );
-
-    var rename = new IdentityRename(state.Identifier.ValueText, identityName);
-    factory = (MethodDeclarationSyntax)rename.Visit(factory)!;
-    factory = factory.WithIdentifier(SyntaxFactory.Identifier("Create"));
-    var members = state
-        .Members.Select(member => (MemberDeclarationSyntax)rename.Visit(member)!)
-        .ToList();
-    var identities = SyntaxFactory.ParseMemberDeclaration(
-        $"private static readonly global::System.Collections.Generic.HashSet<{identityName}> __probeIdentities = new();"
-    )!;
-    var count = SyntaxFactory.ParseMemberDeclaration(
-        "public static int DistinctMounts => __probeIdentities.Count;"
-    )!;
-    var last = SyntaxFactory.ParseMemberDeclaration(
-        "public static object? LastMount { get; private set; }"
-    )!;
-    var constructorIndex = members.FindIndex(static member =>
-        member is ConstructorDeclarationSyntax
-    );
-    if (constructorIndex < 0)
-        throw new InvalidOperationException("Generated state constructor was not found.");
-    var constructor = (ConstructorDeclarationSyntax)members[constructorIndex];
-    constructor = constructor.WithBody(
-        constructor.Body!.WithStatements(
-            constructor.Body.Statements.Insert(
-                0,
-                SyntaxFactory.ParseStatement("__probeIdentities.Add(this); LastMount = this;")
-            )
-        )
-    );
-    members[constructorIndex] = constructor;
-    var named = state
-        .WithIdentifier(SyntaxFactory.Identifier(identityName))
-        .WithModifiers(
-            SyntaxFactory.TokenList(
-                SyntaxFactory.Token(SyntaxKind.PublicKeyword),
-                SyntaxFactory.Token(SyntaxKind.SealedKeyword),
-                SyntaxFactory.Token(SyntaxKind.PartialKeyword)
-            )
-        )
-        .WithMembers(SyntaxFactory.List(new[] { identities, count, last, factory }.Concat(members)))
-        .WithLeadingTrivia(container.GetLeadingTrivia())
-        .WithTrailingTrivia(container.GetTrailingTrivia());
-    return unit.ReplaceNode(container, named).NormalizeWhitespace().ToFullString();
-}
-
 static void CheckNoErrors(IEnumerable<Diagnostic> diagnostics)
 {
     var errors = diagnostics
@@ -204,6 +164,22 @@ static void CheckNoErrors(IEnumerable<Diagnostic> diagnostics)
         throw new InvalidOperationException(
             String.Join(Environment.NewLine, errors.AsEnumerable())
         );
+}
+
+static void CheckPreparationErrors(IEnumerable<Diagnostic> diagnostics)
+{
+    CheckNoErrors(
+        diagnostics.Where(static diagnostic =>
+            !(
+                diagnostic.Id == "CS8795"
+                && diagnostic.Location.SourceTree?.FilePath.EndsWith(
+                    ".component.early.g.cs",
+                    StringComparison.Ordinal
+                ) == true
+            )
+            && diagnostic.Id != "CS9248"
+        )
+    );
 }
 
 sealed class ProbeOptionsProvider(string projectDirectory) : AnalyzerConfigOptionsProvider
@@ -240,19 +216,4 @@ sealed class EmptyOptions : AnalyzerConfigOptions
         value = String.Empty;
         return false;
     }
-}
-
-sealed class IdentityRename(string generatedStateName, string identityName) : CSharpSyntaxRewriter
-{
-    public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node) =>
-        node.Identifier.ValueText == generatedStateName
-            ? node.WithIdentifier(SyntaxFactory.Identifier(identityName))
-            : base.VisitIdentifierName(node);
-
-    public override SyntaxNode? VisitConstructorDeclaration(ConstructorDeclarationSyntax node) =>
-        base.VisitConstructorDeclaration(
-            node.Identifier.ValueText == generatedStateName
-                ? node.WithIdentifier(SyntaxFactory.Identifier(identityName))
-                : node
-        );
 }

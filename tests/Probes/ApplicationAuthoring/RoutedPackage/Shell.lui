@@ -1,0 +1,17 @@
+namespace RoutedPackageFixture;
+using Lucent.Core;
+
+public component Shell() {
+    context RouteContext<ShellRoute> route;
+
+    Setup(owner) {
+        Acceptance.Require(route.Definition.Id.Value == "shell", "Shell context was not supplied.");
+        Acceptance.ShellMounts++;
+        owner.OnDispose(() => Acceptance.ShellDisposals++);
+    }
+
+    <Column>
+        <Text>routed shell</Text>
+        {Routing.Child()}
+    </Column>
+}

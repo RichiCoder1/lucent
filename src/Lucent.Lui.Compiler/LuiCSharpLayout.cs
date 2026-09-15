@@ -21,6 +21,13 @@ internal sealed class LuiCSharpLayout
 
     internal D Parameters(string source) => Format(SyntaxFactory.ParseParameterList(source));
 
+    internal D Declarations(string source) =>
+        Format(
+            CSharpSyntaxTree
+                .ParseText(source, new CSharpParseOptions(LanguageVersion.Preview))
+                .GetRoot()
+        );
+
     internal D Requirement(LuiRequirementSyntax requirement) =>
         D.Concat(
             D.Text(requirement.Keyword.Text + " "),

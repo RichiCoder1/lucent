@@ -54,7 +54,16 @@ reports mount allocations for raw deferred recipes, the owned context, and
 generated state; these are characterization results, not machine-dependent gates.
 CI runs this proof before publishing packages. It takes no desktop focus.
 Compiler package changes also require the editor suite; authoring uses Roslyn
-5.0 and a C# 14-capable host.
+5.9 and the repository's SDK 10.0.401 host.
+
+The same package check runs the named-component routed NativeAOT consumer and the
+production SDK preparation negatives. The routed consumer uses bootstrap-only C#,
+LUI-authored JSON and route declarations, direct named factories, retained routing,
+reactive state and teardown. SDK negatives cover a same-project edit with persistent
+emitter caching, a missing host on a warm build, and mismatched foreign-generator
+output. They invoke the actual packaged host and targets. Logs and candidate hashes
+are retained under `artifacts/a0-routed-package` and
+`artifacts/a0-production-sdk-negatives`; neither check takes desktop focus.
 
 ## Additional suites
 

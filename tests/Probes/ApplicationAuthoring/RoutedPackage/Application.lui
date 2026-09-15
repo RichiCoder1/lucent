@@ -1,0 +1,15 @@
+namespace RoutedPackageFixture;
+using System;
+using Lucent.Core;
+
+public component Application() {
+    [Owned]
+    readonly RouteOutletHandle outlet = new();
+
+    Setup(owner) {
+        Acceptance.Outlet = outlet;
+        Acceptance.Roots.Add(this);
+    }
+
+    <Column>{Routing.Root(outlet)}</Column>
+}

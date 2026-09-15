@@ -1,0 +1,162 @@
+namespace RoutedPackageFixture;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json.Serialization;
+using Lucent.Core;
+
+public record Person(string Name);
+
+[JsonSerializable(typeof(Person))]
+public partial class AppJsonContext : JsonSerializerContext {
+}
+
+[LucentRouteModule(RouteFallbackPolicy.Reject)]
+public static partial class Routes {
+}
+
+[LucentRoute(typeof(Routes), "/", Id = "shell", Component = typeof(Shell))]
+public readonly record struct ShellRoute();
+
+[LucentRoute(typeof(Routes), "/items/{id}", Id = "item", Parent = typeof(ShellRoute), Component = typeof(Item))]
+public readonly record struct ItemRoute(int Id);
+
+public static class Routing {
+    public static RouteTable Table { get; } = RouteTable.Create(Routes.Module.Patterns);
+    public static RouteDescriptorSet Descriptors { get; } = RouteDescriptorSet.Create(
+        Table,
+        [Routes.Module]
+    );
+
+    public static ComponentRecipe Root(RouteOutletHandle handle) => ComponentRecipe.Defer(
+        "router",
+        scope => {
+            var navigation = new NavigationSession(scope, Table, Routes.Shell().Location);
+            Acceptance.Navigation = navigation;
+            return Context.Provide(
+                navigation,
+                RouteOutlet.Create(Descriptors, Routes.CreateComponent, handle)
+            );
+        }
+    );
+
+    public static ComponentRecipe Child() => RouteOutlet.CreateChild(
+        Descriptors,
+        Routes.CreateComponent
+    );
+}
+
+public static class Acceptance {
+    public static NavigationSession Navigation { get; set; } = null!;
+    public static RouteOutletHandle Outlet { get; set; } = null!;
+    public static HashSet<object> Roots { get; } = new();
+    public static int ShellMounts { get; set; }
+    public static int ShellDisposals { get; set; }
+    public static int ItemMounts { get; set; }
+    public static int ItemDisposals { get; set; }
+
+    public static int Run(Func<ComponentRecipe> rootFactory) {
+        try {
+            for (var mount = 0; mount < 2; mount++) {
+                using var composition = new Composition(new ReactiveGraph(), "routed-package");
+                using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+                using (composition.Mount(composition.Root, theme, rootFactory())) {
+                    Require(Outlet.Snapshot.Levels.Count == 1, "Initial shell was not mounted.");
+                    var shellId = Outlet.Snapshot.Levels[0].ElementId;
+                    Navigate(Routes.Item(1));
+                    Require(Outlet.Snapshot.Levels.Count == 2, "Child route was not mounted.");
+                    var firstItem = Outlet.Snapshot.Levels[1].ElementId;
+                    Require(
+                        Names(composition).Contains("{\"Name\":\"Ada\"}|1"),
+                        "Generated JSON and first route markup were not rendered."
+                    );
+                    var rename = Flatten(composition.SemanticSnapshot()!).Single(
+                        node => node.Name == "Rename" && node.Actions.HasFlag(SemanticAction.Invoke)
+                    );
+                    Require(
+                        composition.ExecuteSemanticCommand(
+                            rename.Identity,
+                            new(SemanticCommandKind.Invoke)
+                        )
+                            == SemanticCommandResult.Applied,
+                        "The authored JSON handler could not be invoked."
+                    );
+                    Require(
+                        Names(composition).Contains("{\"Name\":\"Grace\"}|1"),
+                        "Generated JSON state did not reactively update after invocation."
+                    );
+                    Navigate(Routes.Item(2));
+                    Require(
+                        Outlet.Snapshot.Levels[0].ElementId == shellId,
+                        "Navigation remounted the shell."
+                    );
+                    Require(
+                        Outlet.Snapshot.Levels[1].ElementId != firstItem,
+                        "Changed child route reused its old identity."
+                    );
+                    Require(
+                        composition.ExecuteSemanticCommand(
+                            rename.Identity,
+                            new(SemanticCommandKind.Invoke)
+                        )
+                            == SemanticCommandResult.Stale,
+                        "Retired child still accepted commands."
+                    );
+                    var names = Names(composition);
+                    Require(
+                        names.Contains("{\"Name\":\"Ada\"}|2")
+                            && !names.Contains("{\"Name\":\"Ada\"}|1"),
+                        "Child markup did not follow committed navigation."
+                    );
+                    Navigate(Routes.Shell());
+                    Require(
+                        Outlet.Snapshot.Levels.Count == 1
+                            && Outlet.Snapshot.Levels[0].ElementId == shellId,
+                        "Returning to shell lost retained route state."
+                    );
+                    Require(ItemMounts == ItemDisposals, "Child teardown did not run.");
+                }
+
+                Require(ShellMounts == ShellDisposals, "Root teardown did not retire the shell.");
+            }
+
+            Require(
+                Roots.Count == 2 && ShellMounts == 2 && ItemMounts == 4,
+                "Named root or route mount counts were incorrect."
+            );
+            Console.WriteLine(
+                "ROUTED PACKAGE PASS: bootstrap-only C#, support-only LUI, generated JSON and routes, typed contexts, retained shell, replacement and disposal."
+            );
+            return 0;
+        } catch (Exception error) {
+            Console.Error.WriteLine(error);
+            return 1;
+        }
+    }
+
+    private static void Navigate(RouteReference reference) {
+        var operation = Navigation.Navigate(reference);
+        Require(
+            operation.Completion.IsCompleted,
+            "Synchronous navigation unexpectedly remained pending."
+        );
+        Require(
+            operation.Completion.Result.Kind == NavigationOutcomeKind.Committed,
+            "Navigation did not commit."
+        );
+    }
+
+    private static string[] Names(Composition composition) {
+        composition.Flush();
+        return Flatten(composition.SemanticSnapshot()!).Select(static node => node.Name).ToArray();
+    }
+
+    private static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot node) => new[]
+    {
+        node
+    }.Concat(node.Children.SelectMany(Flatten));
+    public static void Require(bool condition, string message) {
+        if (!condition)
+            throw new InvalidOperationException(message);
+    }
+}

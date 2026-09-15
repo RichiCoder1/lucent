@@ -100,7 +100,7 @@ static AuthorRecipe<StyledCapability> Styled() => AuthorRecipe.Create("styled", 
 static AuthorRecipe<AccessibleCapability> Accessible() => AuthorRecipe.Create("accessible", AuthorRecipe.Target<AccessibleCapability>((_, _, _) => { }));
 static AuthorRecipe<StyledAccessibleCapability> Both() => AuthorRecipe.Create("both", AuthorRecipe.Target<StyledAccessibleCapability>((_, _, _) => { }));
 """;
-        AssertRejected(declarations + "_ = Styled().Aria;", "CS9286");
+        AssertRejected(declarations + "_ = Styled().Aria;", "CS9286", "CS1929");
         AssertRejected(declarations + "_ = Accessible().Style(Style.Empty);", "CS1929", "CS1061");
         AssertRejected(declarations + "Func<ComponentRecipe> erased = Both;", "CS0407");
         AssertRejected(

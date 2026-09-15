@@ -1,0 +1,27 @@
+namespace RoutedPackageFixture;
+using System.Text.Json;
+using Lucent.Core;
+
+public component Item() {
+    context RouteContext<ItemRoute> route;
+    [Once]
+    Person person = JsonSerializer.Deserialize("{\"Name\":\"Ada\"}", AppJsonContext.Default.Person)!;
+
+    Setup(owner) {
+        Acceptance.Require(route.Parameters.Id > 0, "Typed route parameters were not bound.");
+        Acceptance.ItemMounts++;
+        owner.OnDispose(() => Acceptance.ItemDisposals++);
+    }
+
+    string Describe() => JsonSerializer.Serialize(person, AppJsonContext.Default.Person) + "|"
+        + route.Parameters.Id;
+
+    void Rename() {
+        person = JsonSerializer.Deserialize("{\"Name\":\"Grace\"}", AppJsonContext.Default.Person)!;
+    }
+
+    <Column>
+        <Text>{Describe()}</Text>
+        <Button onInvoke={Rename}>Rename</Button>
+    </Column>
+}

@@ -1,0 +1,54 @@
+<Project>
+  <PropertyGroup Condition="'$(LucentLuiPreparedAuthoring)' == 'true'">
+    <_LucentPreparationTools>$(MSBuildThisFileDirectory)..\tools\preparation\net10.0</_LucentPreparationTools>
+    <_LucentPreparationHost>$(_LucentPreparationTools)\Lucent.Lui.Sdk.PreparationHost.dll</_LucentPreparationHost>
+    <_LucentPreparationTasks>$(_LucentPreparationTools)\Lucent.Lui.Sdk.PreparationTasks.dll</_LucentPreparationTasks>
+    <_LucentPreparationDotNet>$(MSBuildToolsPath)\..\..\dotnet.exe</_LucentPreparationDotNet>
+    <_LucentPreparationRoot>$(IntermediateOutputPath)lucent-preparation</_LucentPreparationRoot>
+    <_LucentPreparationManifest>$(_LucentPreparationRoot)\manifest.json</_LucentPreparationManifest>
+    <_LucentPreparationEmitterPath>$(_LucentPreparationRoot)\emitter-path.txt</_LucentPreparationEmitterPath>
+    <_LucentPreparationGlobals>$(_LucentPreparationRoot)\global-properties.json</_LucentPreparationGlobals>
+    <_LucentPreparationEmitterRoot>$(BaseIntermediateOutputPath)lucent-preparation-cache\emitter</_LucentPreparationEmitterRoot>
+  </PropertyGroup>
+
+  <UsingTask
+    TaskName="Lucent.Lui.Sdk.PreparationTasks.CaptureLucentGlobalProperties"
+    AssemblyFile="$(_LucentPreparationTasks)"
+    Condition="'$(LucentLuiPreparedAuthoring)' == 'true'"
+  />
+
+  <Target
+    Name="PrepareLucentLuiProjectEmitter"
+    BeforeTargets="CoreCompile"
+    Condition="'$(LucentLuiPreparedAuthoring)' == 'true' and '$(LucentLuiSkipPreparation)' != 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(TargetFramework)' != ''"
+  >
+    <Delete Files="$(TargetPath);@(IntermediateAssembly);$(IntermediateOutputPath)ref\$(TargetFileName);$(IntermediateOutputPath)refint\$(TargetFileName)" />
+    <Error Condition="!Exists('$(_LucentPreparationDotNet)')" Text="Lucent preparation dotnet host was not found: $(_LucentPreparationDotNet)" />
+    <Error Condition="!Exists('$(_LucentPreparationHost)')" Text="Lucent preparation host was not found: $(_LucentPreparationHost)" />
+    <Error Condition="!Exists('$(_LucentPreparationTasks)')" Text="Lucent preparation task assembly was not found: $(_LucentPreparationTasks)" />
+    <Delete Files="$(_LucentPreparationGlobals);$(_LucentPreparationEmitterPath)" />
+    <MakeDir Directories="$(_LucentPreparationRoot);$(_LucentPreparationEmitterRoot);$(CompilerGeneratedFilesOutputPath)" />
+    <CaptureLucentGlobalProperties OutputPath="$(_LucentPreparationGlobals)" />
+    <Exec Command="&quot;$(_LucentPreparationDotNet)&quot; &quot;$(_LucentPreparationHost)&quot; prepare &quot;$(MSBuildProjectFullPath)&quot; &quot;$(_LucentPreparationManifest)&quot; &quot;$(_LucentPreparationEmitterRoot)&quot; &quot;$(Configuration)&quot; &quot;$(TargetFramework)&quot; &quot;$(RuntimeIdentifier)&quot; &quot;$(_LucentPreparationGlobals)&quot; &quot;$(CompilerGeneratedFilesOutputPath)&quot;" />
+    <ReadLinesFromFile File="$(_LucentPreparationEmitterPath)">
+      <Output TaskParameter="Lines" ItemName="_LucentPreparedEmitter" />
+    </ReadLinesFromFile>
+    <ItemGroup>
+      <Analyzer Include="@(_LucentPreparedEmitter)" />
+    </ItemGroup>
+    <Error Condition="'@(_LucentPreparedEmitter)' == ''" Text="Lucent preparation did not create a project emitter." />
+  </Target>
+
+  <Target
+    Name="CompareLucentLuiPreparedOutputs"
+    AfterTargets="CoreCompile"
+    Condition="'$(LucentLuiPreparedAuthoring)' == 'true' and '$(LucentLuiSkipPreparation)' != 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(TargetFramework)' != ''"
+  >
+    <Exec Command="&quot;$(_LucentPreparationDotNet)&quot; &quot;$(_LucentPreparationHost)&quot; compare &quot;$(_LucentPreparationManifest)&quot; &quot;$(CompilerGeneratedFilesOutputPath)&quot; &quot;@(_LucentPreparedEmitter->'%(Filename)')&quot; &quot;none&quot; &quot;$(TargetPath)&quot; &quot;@(IntermediateAssembly)&quot; &quot;$(IntermediateOutputPath)ref\$(TargetFileName)&quot; &quot;$(IntermediateOutputPath)refint\$(TargetFileName)&quot;" />
+    <OnError ExecuteTargets="RemoveMismatchedLucentPreparedAssembly" />
+  </Target>
+
+  <Target Name="RemoveMismatchedLucentPreparedAssembly">
+    <Delete Files="$(TargetPath);@(IntermediateAssembly);$(IntermediateOutputPath)ref\$(TargetFileName);$(IntermediateOutputPath)refint\$(TargetFileName)" />
+  </Target>
+</Project>

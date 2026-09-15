@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Lucent.Lui.Compiler/Lucent.Lui.Compiler.csproj" />
+    <ProjectReference Include="../Lucent.Lui.Preparation/Lucent.Lui.Preparation.csproj" />
     <PackageReference Include="Microsoft.Build" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.Build.Locator" />

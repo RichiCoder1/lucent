@@ -159,7 +159,7 @@ the factory change. `.lui` component discovery recognizes the exact closed Core
 capability markers from source and referenced package metadata; a similarly named
 consumer type is not a component capability. Core has no runtime compiler or
 renderer dependency. The generator and editor require the repository's C# 14
-toolchain (SDK 10.0.401 and Roslyn 5.0).
+toolchain (SDK 10.0.401 and Roslyn 5.9).
 
 Keep the language server and Core/SDK authoring version aligned: property
 discovery reads the attributed metadata introduced in this phase. When working

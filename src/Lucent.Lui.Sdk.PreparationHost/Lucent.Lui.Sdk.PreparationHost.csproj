@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Framework" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Locator" />
+    <PackageReference Include="Microsoft.Build.Tasks.Core" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" />
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+    <ProjectReference Include="../Lucent.Lui.Preparation/Lucent.Lui.Preparation.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None
+      Include="$(MSBuildToolsPath)/../../LICENSE.txt"
+      Link="notices/dotnet-LICENSE.txt"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+    <None
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.csharp.workspaces/5.9.0/ThirdPartyNotices.rtf"
+      Link="notices/Roslyn-CSharp-Workspaces-NOTICES.rtf"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+    <None
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.workspaces.common/5.9.0/ThirdPartyNotices.rtf"
+      Link="notices/Roslyn-Workspaces-Common-NOTICES.rtf"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+    <None
+      Include="$(NuGetPackageRoot)/microsoft.codeanalysis.workspaces.msbuild/5.9.0/ThirdPartyNotices.rtf"
+      Link="notices/Roslyn-Workspaces-MSBuild-NOTICES.rtf"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+    <None
+      Include="$(NuGetPackageRoot)/microsoft.build/17.14.28/notices/THIRDPARTYNOTICES.txt"
+      Link="notices/MSBuild-NOTICES.txt"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+    <None
+      Include="$(NuGetPackageRoot)/system.security.cryptography.xml/10.0.11/THIRD-PARTY-NOTICES.TXT"
+      Link="notices/dotnet-Cryptography-NOTICES.txt"
+      CopyToOutputDirectory="PreserveNewest"
+    />
+  </ItemGroup>
+</Project>

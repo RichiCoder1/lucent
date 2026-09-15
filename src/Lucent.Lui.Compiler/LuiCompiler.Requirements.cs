@@ -428,6 +428,23 @@ public static partial class LuiCompiler
         {
             foreach (var requirement in requirements)
             {
+                if (namedComponent)
+                {
+                    Hidden("        private ");
+                    Mapped(
+                        document.Source.Substring(
+                            requirement.TypeSpan.Start,
+                            requirement.TypeSpan.Length
+                        ),
+                        requirement.TypeSpan,
+                        LuiMapKind.Symbol
+                    );
+                    Hidden(
+                        " __luiRequirement_"
+                            + requirement.Name.Text.TrimStart('@')
+                            + " = default!;\n"
+                    );
+                }
                 Hidden("        private ");
                 var start = text.Length;
                 Mapped(
@@ -441,7 +458,11 @@ public static partial class LuiCompiler
                 RequirementMappings.Add((requirement, new TextSpan(start, text.Length - start)));
                 Hidden(" ");
                 Mapped(requirement.Name.Text, requirement.Name.Span, LuiMapKind.Symbol);
-                Hidden(" { get; }\n");
+                Hidden(
+                    namedComponent
+                        ? " => __luiRequirement_" + requirement.Name.Text.TrimStart('@') + ";\n"
+                        : " { get; }\n"
+                );
                 requirementArguments.Add(UniqueGeneratedName("__luiRequirement"));
                 Mark(requirement.Keyword.Span, LuiMapKind.Structure);
                 Mark(requirement.Semicolon.Span, LuiMapKind.Structure);

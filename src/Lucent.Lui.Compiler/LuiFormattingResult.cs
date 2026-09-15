@@ -139,12 +139,17 @@ public static partial class LuiFormatter
         {
             var document = LuiParser.Parse(source);
             if (document.Diagnostics.Count != 0)
+            {
+                var projection = LuiAuthoredSourceProjection.Project(source);
+                if (projection.Success)
+                    return FormatProjected(source, projection, range, options, cancellationToken);
                 return new LuiFormattingResult(
                     LuiFormattingStatus.Unavailable,
                     source,
                     source,
                     document.Diagnostics
                 );
+            }
             if (
                 range is { } selected
                 && !Nodes(document)
@@ -210,6 +215,146 @@ public static partial class LuiFormatter
                 source,
                 new[] { new LuiDiagnostic(id, message, range ?? new LuiSpan(0, source.Length)) }
             );
+    }
+
+    private static LuiFormattingResult FormatProjected(
+        string source,
+        LuiAuthoredSourceProjection projection,
+        LuiSpan? range,
+        LuiFormattingOptions options,
+        CancellationToken cancellationToken
+    )
+    {
+        var prefix = projection.DeclarationsSource;
+        var unsupportedDirective = Microsoft
+            .CodeAnalysis.CSharp.SyntaxFactory.ParseTokens(prefix)
+            .SelectMany(token => token.LeadingTrivia.Concat(token.TrailingTrivia))
+            .FirstOrDefault(trivia =>
+                trivia.ToString().StartsWith("// lui-format-", StringComparison.Ordinal)
+            );
+        if (unsupportedDirective.RawKind != 0)
+            return new LuiFormattingResult(
+                LuiFormattingStatus.Unavailable,
+                source,
+                source,
+                new[]
+                {
+                    new LuiDiagnostic(
+                        "LUI6003",
+                        "Formatter directives on ordinary support declarations are not supported yet; source has been preserved.",
+                        new LuiSpan(
+                            unsupportedDirective.Span.Start,
+                            unsupportedDirective.Span.Length
+                        )
+                    ),
+                }
+            );
+        var componentSource = source.Substring(prefix.Length);
+        string formatted;
+        if (range is { } selected)
+        {
+            if (selected.Start < prefix.Length)
+                return new LuiFormattingResult(
+                    LuiFormattingStatus.Unavailable,
+                    source,
+                    source,
+                    new[]
+                    {
+                        new LuiDiagnostic(
+                            "LUI6002",
+                            "Select a complete component boundary, or format the whole file to include ordinary declarations.",
+                            selected
+                        ),
+                    }
+                );
+            var component = FormatSafely(
+                componentSource,
+                new LuiSpan(selected.Start - prefix.Length, selected.Length),
+                options,
+                cancellationToken
+            );
+            if (component.Status is LuiFormattingStatus.Failed or LuiFormattingStatus.Unavailable)
+                return new LuiFormattingResult(
+                    component.Status,
+                    source,
+                    source,
+                    component
+                        .Diagnostics.Select(diagnostic => new LuiDiagnostic(
+                            diagnostic.Id,
+                            diagnostic.Message,
+                            new LuiSpan(
+                                diagnostic.Span.Start + prefix.Length,
+                                diagnostic.Span.Length
+                            ),
+                            diagnostic.Severity
+                        ))
+                        .ToArray()
+                );
+            formatted = prefix + component.Text;
+        }
+        else
+        {
+            var declarations = new LuiCSharpLayout(options)
+                .Declarations(prefix)
+                .Render(options, options.Newline(source))
+                .TrimEnd();
+            if (projection.Document.Component is null)
+                formatted = declarations + options.Newline(source);
+            else
+            {
+                var component = FormatSafely(componentSource, null, options, cancellationToken);
+                if (
+                    component.Status
+                    is LuiFormattingStatus.Failed
+                        or LuiFormattingStatus.Unavailable
+                )
+                    return new LuiFormattingResult(
+                        component.Status,
+                        source,
+                        source,
+                        component
+                            .Diagnostics.Select(diagnostic => new LuiDiagnostic(
+                                diagnostic.Id,
+                                diagnostic.Message,
+                                new LuiSpan(
+                                    diagnostic.Span.Start + prefix.Length,
+                                    diagnostic.Span.Length
+                                ),
+                                diagnostic.Severity
+                            ))
+                            .ToArray()
+                    );
+                formatted =
+                    declarations
+                    + options.Newline(source)
+                    + options.Newline(source)
+                    + component.Text;
+            }
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (
+            LuiSourceComparison.StructuralKey(source) is not { } before
+            || before != LuiSourceComparison.StructuralKey(formatted)
+        )
+            return new LuiFormattingResult(
+                LuiFormattingStatus.Unavailable,
+                source,
+                source,
+                new[]
+                {
+                    new LuiDiagnostic(
+                        "LUI6001",
+                        "Formatting ordinary declarations could not preserve every token, comment and meaningful text value.",
+                        new LuiSpan(0, source.Length)
+                    ),
+                }
+            );
+        return new LuiFormattingResult(
+            formatted == source ? LuiFormattingStatus.Clean : LuiFormattingStatus.Changed,
+            source,
+            formatted,
+            Array.Empty<LuiDiagnostic>()
+        );
     }
 
     private static string FormatSelectedBoundaries(
