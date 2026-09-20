@@ -301,6 +301,422 @@ public sealed class RouteOutletContracts
         );
     }
 
+    [TestMethod]
+    public void RouterProvidesBorrowedSessionAndReactiveSelectionRetainsOrReplacesByTypeAndKey()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "router-reactive-selection");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        composition.Root.Present(
+            theme,
+            author: Style.Empty.Axis(LayoutAxis.Column).Width(160).Height(80)
+        );
+        using var sessionOwner = graph.CreateScope("borrowed-session");
+        var (bundle, _) = CreateAuthoringBundle();
+        using var session = new NavigationSession(sessionOwner, bundle.Table);
+        using var handle = new RouteOutletHandle();
+        var alternate = graph.Signal(false, "alternate-destination");
+        var refresh = graph.Signal(0, "destination-refresh");
+        var mounts = 0;
+        var disposals = 0;
+        var resolves = 0;
+        var advanceDuringResolve = false;
+        NavigationSession? shellSession = null;
+        var navigationSource = new ComponentRequirementSource(
+            "NavigationSession",
+            typeof(NavigationSession).FullName!,
+            "tests/router.lui",
+            1,
+            1
+        );
+        var shell = ComponentRecipe.Defer(
+            "shell-navigation",
+            ComponentRequirements.Context<NavigationSession>(navigationSource),
+            (_, value) =>
+            {
+                shellSession = value;
+                return ComponentRecipe.Create(
+                    "shell",
+                    static (context, root) =>
+                        root.Present(context.Theme, author: Style.Empty.Height(200))
+                );
+            }
+        );
+        ComponentRecipe Destination(string name) =>
+            ComponentRecipe.Create(
+                name,
+                (_, root) =>
+                {
+                    mounts++;
+                    root.Scope.OnDispose(() => disposals++);
+                }
+            );
+        var options = new RouteOutletOptions(resolve: request =>
+        {
+            resolves++;
+            _ = refresh.Value;
+            Assert.AreEqual(1, request.GetContext<ItemRoute>().Parameters.Id);
+            var selected = alternate.Value;
+            if (advanceDuringResolve && !selected)
+                alternate.Value = true;
+            return selected
+                ? new RouteDestination(typeof(AlternatePage), Destination("alternate"), 7)
+                : new RouteDestination(typeof(DefaultPage), Destination("default"), 7);
+        });
+        var router = Components.Router(
+            [shell, Components.RouterOutlet(options, handle)],
+            bundle,
+            session: session
+        );
+
+        var routerRoot = composition.Mount(composition.Root, theme, router);
+        Assert.AreSame(session, shellSession);
+        using (var scene = SceneLayout.Project(composition, new(160, 80, 1), new EmptyShaper()))
+        {
+            var routerBounds = scene
+                .Boxes.Single(box =>
+                    box.Identity == new ElementIdentity(composition.Epoch, routerRoot.Id)
+                )
+                .Bounds;
+            Assert.AreEqual(80, routerBounds.Height, 0.001);
+        }
+        Assert.AreEqual(
+            NavigationOutcomeKind.Committed,
+            Completed(session.Navigate(Location("/items/1"))).Kind
+        );
+        graph.Drain();
+        var initialRoot = handle.Snapshot.Levels.Single().ElementId;
+        var initialJournal = session.Journal.Entries.Count;
+        Assert.AreEqual(1, mounts);
+
+        refresh.Value++;
+        graph.Drain();
+        Assert.AreEqual(initialRoot, handle.Snapshot.Levels.Single().ElementId);
+        Assert.AreEqual(1, mounts, "A new recipe with the same type/key must retain the mount.");
+
+        advanceDuringResolve = true;
+        refresh.Value++;
+        graph.Drain();
+        Assert.AreNotEqual(initialRoot, handle.Snapshot.Levels.Single().ElementId);
+        Assert.AreEqual(2, mounts);
+        Assert.AreEqual(1, disposals);
+        Assert.AreEqual(initialJournal, session.Journal.Entries.Count);
+        Assert.IsTrue(resolves >= 4);
+        routerRoot.Dispose();
+        Assert.IsFalse(session.IsDisposed, "A supplied navigation session remains borrowed.");
+    }
+
+    [TestMethod]
+    public void ResolverFailureRollsBackAndIdleAfterVetoUsesLatestSelection()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "router-resolver-rollback");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var (bundle, _) = CreateAuthoringBundle();
+        using var sessionOwner = graph.CreateScope("resolver-session");
+        using var session = new NavigationSession(sessionOwner, bundle.Table, Location("/items/1"));
+        var failMount = graph.Signal(false, "fail-route-mount");
+        var nullDestination = graph.Signal(false, "null-route-destination");
+        var alternate = graph.Signal(false, "alternate-after-veto");
+        var veto = false;
+        TaskCompletionSource<NavigationPreparationResult>? gate = null;
+        using var handle = new RouteOutletHandle();
+        var options = new RouteOutletOptions(
+            prepare: (_, request, _) =>
+            {
+                if (gate is not null)
+                    return new ValueTask<NavigationPreparationResult>(gate.Task);
+                if (veto && request.Phase == NavigationPreparationPhase.Leave)
+                {
+                    alternate.Value = true;
+                    return ValueTask.FromResult(NavigationPreparationResult.Stay);
+                }
+                return ValueTask.FromResult(NavigationPreparationResult.Allow);
+            },
+            resolve: _ =>
+            {
+                if (nullDestination.Value)
+                    return null!;
+                if (failMount.Value)
+                    return new RouteDestination(
+                        typeof(AlternatePage),
+                        ComponentRecipe.Create(
+                            "failing-destination",
+                            static (_, _) => throw new InvalidOperationException("mount failed")
+                        )
+                    );
+                return alternate.Value
+                    ? new RouteDestination(
+                        typeof(AlternatePage),
+                        ComponentRecipe.Create("alternate", static (_, _) => { })
+                    )
+                    : new RouteDestination(
+                        typeof(DefaultPage),
+                        ComponentRecipe.Create("default", static (_, _) => { })
+                    );
+            }
+        );
+        var router = Components.Router(
+            [Components.RouterOutlet(options, handle)],
+            bundle,
+            session: session
+        );
+        _ = composition.Mount(composition.Root, theme, router);
+        graph.Drain();
+        var original = handle.Snapshot.Levels.Single().ElementId;
+
+        failMount.Value = true;
+        var failure = Assert.ThrowsExactly<AggregateException>(graph.Drain);
+        StringAssert.Contains(failure.ToString(), "mount failed");
+        Assert.AreEqual(original, handle.Snapshot.Levels.Single().ElementId);
+
+        failMount.Value = false;
+        graph.Drain();
+        nullDestination.Value = true;
+        var nullFailure = Assert.ThrowsExactly<AggregateException>(graph.Drain);
+        StringAssert.Contains(nullFailure.ToString(), "returned null");
+        Assert.AreEqual(original, handle.Snapshot.Levels.Single().ElementId);
+        nullDestination.Value = false;
+        graph.Drain();
+        veto = true;
+        var stayed = session.Navigate(Location("/items/2"));
+        Assert.AreEqual(NavigationOutcomeKind.Stayed, Completed(stayed).Kind);
+        graph.Drain();
+        var afterVeto = handle.Snapshot.Levels.Single().ElementId;
+        Assert.AreNotEqual(original, afterVeto);
+
+        veto = false;
+        gate = new TaskCompletionSource<NavigationPreparationResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously
+        );
+        var canceled = session.Navigate(Location("/items/2"));
+        alternate.Value = false;
+        canceled.Cancel();
+        Assert.AreEqual(NavigationOutcomeKind.Superseded, Completed(canceled).Kind);
+        graph.Drain();
+        Assert.AreNotEqual(afterVeto, handle.Snapshot.Levels.Single().ElementId);
+        gate.SetResult(NavigationPreparationResult.Allow);
+        graph.Drain();
+        Assert.AreEqual(1, session.Current!.Match.GetValue(0).Signed32);
+    }
+
+    [TestMethod]
+    public void ReactiveParentReplacementRetiresNestedSubtreeAndChildFailureRollsBack()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "router-nested-replacement");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var disposed = 0;
+        var rolledBack = 0;
+        var bundle = CreateNestedAuthoringBundle(() => disposed++);
+        var alternateParent = graph.Signal(false, "alternate-parent");
+        var failChild = graph.Signal(false, "failing-child");
+        using var sessionOwner = graph.CreateScope("nested-session");
+        using var session = new NavigationSession(
+            sessionOwner,
+            bundle.Table,
+            Location("/projects/1/issues/2")
+        );
+        using var handle = new RouteOutletHandle();
+        ComponentRecipe Parent(string name) =>
+            ComponentRecipe.Create(
+                name,
+                (context, root) =>
+                {
+                    root.Scope.OnDispose(() => disposed++);
+                    context.Mount(root, Components.RouterOutlet());
+                }
+            );
+        var options = new RouteOutletOptions(resolve: request =>
+        {
+            if (request.Level.Id.Value == "project")
+                return alternateParent.Value
+                    ? new RouteDestination(typeof(AlternatePage), Parent("alternate-parent"))
+                    : request.Default;
+            if (failChild.Value)
+                return new RouteDestination(
+                    typeof(AlternatePage),
+                    ComponentRecipe.Create(
+                        "failing-child",
+                        (_, root) =>
+                        {
+                            root.Scope.OnDispose(() => rolledBack++);
+                            throw new InvalidOperationException("child staging failed");
+                        }
+                    )
+                );
+            return request.Default;
+        });
+        _ = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Router([Components.RouterOutlet(options, handle)], bundle, session: session)
+        );
+        graph.Drain();
+        var initial = handle.Snapshot.Levels.Select(level => level.ElementId).ToArray();
+        Assert.AreEqual(2, initial.Length);
+
+        alternateParent.Value = true;
+        graph.Drain();
+        var replaced = handle.Snapshot.Levels.Select(level => level.ElementId).ToArray();
+        Assert.AreEqual(2, replaced.Length);
+        Assert.AreNotEqual(initial[0], replaced[0]);
+        Assert.AreNotEqual(initial[1], replaced[1]);
+        Assert.AreEqual(2, disposed);
+
+        failChild.Value = true;
+        var failure = Assert.ThrowsExactly<AggregateException>(graph.Drain);
+        StringAssert.Contains(failure.ToString(), "child staging failed");
+        CollectionAssert.AreEqual(
+            replaced,
+            handle.Snapshot.Levels.Select(level => level.ElementId).ToArray()
+        );
+        Assert.AreEqual(1, rolledBack);
+    }
+
+    [TestMethod]
+    public void NestedRouterOutletRejectsASecondOptionsOwner()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "router-nested-options");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var bundle = CreateNestedAuthoringBundle(
+            static () => { },
+            new RouteOutletOptions(resolve: request => request.Default)
+        );
+
+        var error = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            composition.Mount(
+                composition.Root,
+                theme,
+                Components.Router(
+                    [Components.RouterOutlet()],
+                    bundle,
+                    initial: "/projects/1/issues/2"
+                )
+            )
+        );
+        StringAssert.Contains(error.Message, "Configure options on the root RouterOutlet");
+    }
+
+    private static (RouteBundle Bundle, RouteLevelDescriptor Level) CreateAuthoringBundle()
+    {
+        var pattern = RoutePattern.Create(
+            new RouteDefinitionId("item"),
+            [
+                RouteSegmentPattern.LiteralSegment("items"),
+                RouteSegmentPattern.Parameter("id", 0, RouteValueShape.Signed32),
+            ]
+        );
+        var source = new RouteDeclarationSource("tests/router.lui", 1, 1);
+        var level = new RouteLevelDescriptor(
+            pattern.Id,
+            [0],
+            source,
+            static (definition, match, live) =>
+                new RouteContext<ItemRoute>(
+                    definition,
+                    new ItemRoute(match.GetValue(0).Signed32),
+                    live
+                ),
+            static (context, content) => Context.Provide((RouteContext<ItemRoute>)context, content)
+        );
+        var definition = new RouteDefinitionDescriptor(pattern, [level]);
+        var module = new RouteModuleDescriptor(
+            "tests.authoring",
+            RouteFallbackPolicy.Reject,
+            source,
+            [definition]
+        );
+        return (
+            RouteBundle.Create(
+                [module],
+                _ => new RouteDestination(
+                    typeof(DefaultPage),
+                    ComponentRecipe.Create("default", static (_, _) => { })
+                )
+            ),
+            level
+        );
+    }
+
+    private static RouteBundle CreateNestedAuthoringBundle(
+        Action disposed,
+        RouteOutletOptions? nestedOptions = null
+    )
+    {
+        var projectPattern = RoutePattern.Create(
+            new RouteDefinitionId("project"),
+            [
+                RouteSegmentPattern.LiteralSegment("projects"),
+                RouteSegmentPattern.Parameter("project", 0, RouteValueShape.Signed32),
+            ]
+        );
+        var issuePattern = RoutePattern.Create(
+            new RouteDefinitionId("issue"),
+            [
+                RouteSegmentPattern.LiteralSegment("projects"),
+                RouteSegmentPattern.Parameter("project", 0, RouteValueShape.Signed32),
+                RouteSegmentPattern.LiteralSegment("issues"),
+                RouteSegmentPattern.Parameter("issue", 1, RouteValueShape.Signed32),
+            ]
+        );
+        var source = new RouteDeclarationSource("tests/nested-router.lui", 1, 1);
+        var projectLevel = new RouteLevelDescriptor(
+            projectPattern.Id,
+            [0],
+            source,
+            static (definition, match, live) =>
+                new RouteContext<ProjectRoute>(
+                    definition,
+                    new ProjectRoute(match.GetValue(0).Signed32),
+                    live
+                ),
+            static (context, content) =>
+                Context.Provide((RouteContext<ProjectRoute>)context, content)
+        );
+        var issueLevel = new RouteLevelDescriptor(
+            issuePattern.Id,
+            [1],
+            source,
+            static (definition, match, live) =>
+                new RouteContext<IssueRoute>(
+                    definition,
+                    new IssueRoute(match.GetValue(0).Signed32, match.GetValue(1).Signed32),
+                    live
+                ),
+            static (context, content) => Context.Provide((RouteContext<IssueRoute>)context, content)
+        );
+        var project = new RouteDefinitionDescriptor(projectPattern, [projectLevel]);
+        var issue = new RouteDefinitionDescriptor(issuePattern, [projectLevel, issueLevel]);
+        var module = new RouteModuleDescriptor(
+            "tests.nested-authoring",
+            RouteFallbackPolicy.Reject,
+            source,
+            [project, issue]
+        );
+        return RouteBundle.Create(
+            [module],
+            level =>
+                level.Id.Value == "project"
+                    ? new RouteDestination(
+                        typeof(DefaultPage),
+                        ComponentRecipe.Create(
+                            "project",
+                            (context, root) =>
+                            {
+                                root.Scope.OnDispose(disposed);
+                                context.Mount(root, Components.RouterOutlet(nestedOptions));
+                            }
+                        )
+                    )
+                    : new RouteDestination(
+                        typeof(DefaultPage),
+                        ComponentRecipe.Create("issue", (_, root) => root.Scope.OnDispose(disposed))
+                    )
+        );
+    }
+
     private static ComponentRecipe BuildLevel(RouteLevelDescriptor level, Fixture fixture) =>
         level.Id.Value switch
         {
@@ -492,6 +908,12 @@ public sealed class RouteOutletContracts
     private sealed record ProjectRoute(int Project);
 
     private sealed record IssueRoute(int Project, int Issue);
+
+    private sealed record ItemRoute(int Id);
+
+    private sealed class DefaultPage;
+
+    private sealed class AlternatePage;
 
     private sealed class EmptyShaper : ITextShaper
     {

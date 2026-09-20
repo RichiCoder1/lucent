@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory)] [string] $Feed,
-    [Parameter(Mandatory)] [ValidatePattern('^0\.3\.0-[0-9A-Za-z.-]+$')] [string] $Version
+    [Parameter(Mandatory)] [ValidatePattern('^0\.3\.0-[0-9A-Za-z.-]+$')] [string] $Version,
+    [switch] $KeepPackageCache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -139,6 +140,14 @@ try {
 }
 finally {
     $env:NUGET_PACKAGES = $priorPackages
+    if (-not $KeepPackageCache -and (Test-Path -LiteralPath $packages)) {
+        $resolvedRoot = (Resolve-Path -LiteralPath $artifactRoot).Path
+        $resolvedPackages = (Resolve-Path -LiteralPath $packages).Path
+        if (-not $resolvedPackages.StartsWith($resolvedRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($resolvedPackages) -ne 'packages') {
+            throw "Unexpected SDK probe cache cleanup target: $resolvedPackages"
+        }
+        Remove-Item -LiteralPath $resolvedPackages -Recurse -Force
+    }
 }
 
 $commands | Set-Content -LiteralPath (Join-Path $artifactRoot 'commands.log') -Encoding utf8

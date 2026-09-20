@@ -160,6 +160,34 @@ public sealed class MountRequirementContracts
     }
 
     [TestMethod]
+    public void FrameworkThemeResolvesAsAnExactContextAtRootAndBelowProviders()
+    {
+        using var composition = new Composition(new ReactiveGraph(), "theme-context-requirement");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        using var alternate = new ThemeContext(
+            composition.Root.Scope,
+            new Theme("alternate-context-theme")
+        );
+        var seen = new List<ThemeContext>();
+        var requirement = ComponentRequirements.Context<ThemeContext>(Source("theme"));
+        ComponentRecipe RequiredTheme() =>
+            ComponentRecipe.Defer(
+                "theme-reader",
+                requirement,
+                (_, value) => ComponentRecipe.Create("theme-leaf", (_, _) => seen.Add(value))
+            );
+
+        _ = composition.Mount(composition.Root, theme, RequiredTheme());
+        _ = composition.Mount(
+            composition.Root,
+            alternate,
+            Context.Provide(new Capability("nested"), RequiredTheme())
+        );
+
+        CollectionAssert.AreEqual(new[] { theme, alternate }, seen);
+    }
+
+    [TestMethod]
     public void PublicMountAndRegionAdaptersPreserveParentPlacementEnvironment()
     {
         var graph = new ReactiveGraph();
@@ -540,6 +568,119 @@ public sealed class MountRequirementContracts
             composition.Mount(composition.Root, theme, contextual)
         );
         Assert.AreEqual(0, source.Resolutions);
+    }
+
+    [TestMethod]
+    public void OptionalServiceRequirementsDistinguishAbsenceFromProviderFailure()
+    {
+        static ComponentRecipe OptionalRecipe(Action<ServiceA?> observe) =>
+            ComponentRecipe.Defer(
+                "optional-service",
+                ComponentRequirements.OptionalService<ServiceA>(Source("optional")),
+                (_, value) =>
+                {
+                    observe(value);
+                    return ComponentRecipe.Create("optional-leaf", static (_, _) => { });
+                }
+            );
+
+        using (var composition = new Composition(new ReactiveGraph(), "optional-no-binding"))
+        using (var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light))
+        {
+            ServiceA? seen = new();
+            composition.Mount(composition.Root, theme, OptionalRecipe(value => seen = value));
+            Assert.IsNull(seen);
+        }
+
+        static (Composition Composition, ThemeContext Theme, ComponentServiceBinding Binding) Host(
+            IComponentServiceSource source,
+            ComponentRecipe recipe
+        )
+        {
+            var composition = new Composition(new ReactiveGraph(), "optional-binding");
+            var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            var session = new ApplicationSession(
+                "Optional service test",
+                composition,
+                theme,
+                new EmptyLifecycle()
+            );
+            var binding = session.CreateServiceBinding(source);
+            composition.Mount(composition.Root, theme, binding.Attach(recipe));
+            return (composition, theme, binding);
+        }
+
+        var missingSource = new OptionalExactServiceSource(null);
+        ServiceA? missingValue = new();
+        var missing = Host(missingSource, OptionalRecipe(value => missingValue = value));
+        Assert.IsNull(missingValue);
+        Assert.AreEqual(1, missingSource.Attempts);
+        missing.Binding.StopAccepting();
+        missing.Composition.Dispose();
+        missing.Binding.Revoke();
+        missing.Theme.Dispose();
+
+        using var service = new ServiceA();
+        var foundSource = new OptionalExactServiceSource(service);
+        ServiceA? foundValue = null;
+        var found = Host(foundSource, OptionalRecipe(value => foundValue = value));
+        Assert.AreSame(service, foundValue);
+        found.Binding.StopAccepting();
+        found.Composition.Dispose();
+        found.Binding.Revoke();
+        found.Theme.Dispose();
+
+        var unsupportedComposition = new Composition(new ReactiveGraph(), "optional-unsupported");
+        var unsupportedTheme = new ThemeContext(
+            unsupportedComposition.Root.Scope,
+            ControlThemes.Light
+        );
+        var unsupportedSession = new ApplicationSession(
+            "Optional unsupported test",
+            unsupportedComposition,
+            unsupportedTheme,
+            new EmptyLifecycle()
+        );
+        var unsupportedBinding = unsupportedSession.CreateServiceBinding(
+            new ExactServiceSource(service)
+        );
+        var unsupported = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            unsupportedComposition.Mount(
+                unsupportedComposition.Root,
+                unsupportedTheme,
+                unsupportedBinding.Attach(OptionalRecipe(_ => { }))
+            )
+        );
+        StringAssert.Contains(unsupported.Message, "does not support optional resolution");
+        unsupportedBinding.StopAccepting();
+        unsupportedComposition.Dispose();
+        unsupportedBinding.Revoke();
+        unsupportedTheme.Dispose();
+
+        var failingComposition = new Composition(new ReactiveGraph(), "optional-failure");
+        var failingTheme = new ThemeContext(failingComposition.Root.Scope, ControlThemes.Light);
+        var failingSession = new ApplicationSession(
+            "Optional failure test",
+            failingComposition,
+            failingTheme,
+            new EmptyLifecycle()
+        );
+        var failingBinding = failingSession.CreateServiceBinding(
+            new OptionalExactServiceSource(null, fail: true)
+        );
+        var failure = Assert.ThrowsExactly<InvalidOperationException>(() =>
+            failingComposition.Mount(
+                failingComposition.Root,
+                failingTheme,
+                failingBinding.Attach(OptionalRecipe(_ => { }))
+            )
+        );
+        StringAssert.Contains(failure.Message, "Optional application service requirement");
+        StringAssert.Contains(failure.ToString(), "optional-provider-failed");
+        failingBinding.StopAccepting();
+        failingComposition.Dispose();
+        failingBinding.Revoke();
+        failingTheme.Dispose();
     }
 
     [TestMethod]
@@ -1056,6 +1197,28 @@ public sealed class MountRequirementContracts
             if (typeof(T) == typeof(ServiceB) && failServiceB)
                 throw new InvalidOperationException("service-b-failed");
             throw new InvalidOperationException("No exact service: " + typeof(T).FullName);
+        }
+    }
+
+    private sealed class OptionalExactServiceSource(ServiceA? service, bool fail = false)
+        : IOptionalComponentServiceSource
+    {
+        public int Attempts { get; private set; }
+
+        public T Resolve<T>()
+            where T : class =>
+            typeof(T) == typeof(ServiceA) && service is not null
+                ? (T)(object)service
+                : throw new InvalidOperationException("No exact service: " + typeof(T).FullName);
+
+        public bool TryResolve<T>(out T? value)
+            where T : class
+        {
+            Attempts++;
+            if (fail)
+                throw new InvalidOperationException("optional-provider-failed");
+            value = typeof(T) == typeof(ServiceA) ? (T?)(object?)service : null;
+            return value is not null;
         }
     }
 

@@ -13,7 +13,8 @@ style StorageExampleActionsStyle {
     Wrap: true;
 }
 
-public component StorageExample(ComponentBrowserState browser) {
+public component StorageExample() {
+    context ComponentBrowserState browser;
     readonly StorageExampleModel example = new(owner, browser.FilePicker);
 
     <Layout style={StorageExampleStyle}>

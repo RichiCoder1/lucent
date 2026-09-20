@@ -27,8 +27,33 @@ internal static class Program
                     }
                 )
                 .SetTitle("Lucent Component Browser")
-                .Build()
-                .Run(new ComponentBrowserLifecycle());
+                .OnStart(start =>
+                {
+                    start
+                        .ProvideRootContext<IFilePicker>(
+                            new WindowsFilePicker(start.Session.Composition)
+                        )
+                        .ProvideRootContext<IUriLauncher>(
+                            new WindowsUriLauncher(new UriLaunchPolicy(["https"]))
+                        );
+                    return ValueTask.CompletedTask;
+                })
+                .ConfigureRoot(
+                    static (_, recipe) =>
+                        ComponentRecipe.Create(
+                            "component-browser-application",
+                            (context, root) =>
+                            {
+                                root.Present(
+                                    context.Theme,
+                                    author: PresentationStyles.Surface.MainGrow(1).MainBasis(0)
+                                );
+                                context.Mount(root, recipe);
+                            }
+                        )
+                )
+                .Build(ComponentBrowserApplication.Create)
+                .Run();
         }
         catch (Exception exception)
         {

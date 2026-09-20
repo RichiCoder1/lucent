@@ -283,7 +283,11 @@ public sealed class ComponentBrowserTests
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var browser = new ComponentBrowserState(composition.Root.Scope);
 
-        var first = composition.Mount(composition.Root, theme, Components.ButtonsExample(browser));
+        var first = composition.Mount(
+            composition.Root,
+            theme,
+            Context.Provide(browser, ButtonsExample.Create())
+        );
         graph.Drain();
         Assert.AreEqual(1, composition.Root.Children.Count);
         Assert.AreSame(first, composition.Root.Children[0]);
@@ -301,7 +305,11 @@ public sealed class ComponentBrowserTests
             Flatten(composition.SemanticSnapshot()!).Any(node => node.Name == "Invoked 1 time.")
         );
 
-        var second = composition.Mount(composition.Root, theme, Components.ButtonsExample(browser));
+        var second = composition.Mount(
+            composition.Root,
+            theme,
+            Context.Provide(browser, ButtonsExample.Create())
+        );
         graph.Drain();
         Assert.AreEqual(2, composition.Root.Children.Count);
         Assert.AreSame(second, composition.Root.Children[1]);
@@ -333,7 +341,7 @@ public sealed class ComponentBrowserTests
         var first = composition.Mount(
             composition.Root,
             theme,
-            Components.SelectionExample(browser)
+            Context.Provide(browser, SelectionExample.Create())
         );
         graph.Drain();
         var checkbox = Flatten(composition.SemanticSnapshot()!)
@@ -361,7 +369,7 @@ public sealed class ComponentBrowserTests
         var second = composition.Mount(
             composition.Root,
             theme,
-            Components.SelectionExample(browser)
+            Context.Provide(browser, SelectionExample.Create())
         );
         graph.Drain();
         var states = Flatten(composition.SemanticSnapshot()!)
@@ -453,7 +461,11 @@ public sealed class ComponentBrowserTests
         composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var browser = new ComponentBrowserState(composition.Root.Scope);
-        var first = composition.Mount(composition.Root, theme, Components.DateTimeExample(browser));
+        var first = composition.Mount(
+            composition.Root,
+            theme,
+            Context.Provide(browser, DateTimeExample.Create())
+        );
         composition.Flush();
         using var renderer = new SkiaSceneRenderer();
         using var scene = SceneLayout.Project(composition, new(1280, 900, 1), renderer);
@@ -491,7 +503,7 @@ public sealed class ComponentBrowserTests
         var second = composition.Mount(
             composition.Root,
             theme,
-            Components.DateTimeExample(browser)
+            Context.Provide(browser, DateTimeExample.Create())
         );
         graph.Drain();
         var statuses = Flatten(composition.SemanticSnapshot()!)
@@ -520,7 +532,7 @@ public sealed class ComponentBrowserTests
         composition.Mount(
             composition.Root,
             theme,
-            Lucent.ComponentBrowser.Components.DateTimeExample(browser)
+            Context.Provide(browser, DateTimeExample.Create())
         );
         composition.Flush();
         using var renderer = new SkiaSceneRenderer();
@@ -603,7 +615,7 @@ public sealed class ComponentBrowserTests
         using var composition = new Composition(new ReactiveGraph(), "component-browser-render");
         composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        _ = composition.Mount(composition.Root, theme, ComponentBrowserStructure.Create());
+        _ = composition.Mount(composition.Root, theme, BrowserApplication(theme));
         composition.Flush();
 
         var semantic = composition.SemanticSnapshot();
@@ -632,7 +644,7 @@ public sealed class ComponentBrowserTests
         );
         composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        _ = composition.Mount(composition.Root, theme, ComponentBrowserStructure.Create());
+        _ = composition.Mount(composition.Root, theme, BrowserApplication(theme));
         composition.Flush();
 
         var semantic = composition.SemanticSnapshot();
@@ -698,7 +710,7 @@ public sealed class ComponentBrowserTests
                 StockTheme(appearance),
                 appearance: appearance
             );
-            _ = composition.Mount(composition.Root, theme, ComponentBrowserStructure.Create());
+            _ = composition.Mount(composition.Root, theme, BrowserApplication(theme));
             composition.Flush();
             using var renderer = new SkiaSceneRenderer();
 
@@ -920,6 +932,28 @@ public sealed class ComponentBrowserTests
         appearance.Contrast == ThemeContrast.High ? ControlThemes.HighContrast
         : appearance.ColorScheme == ThemeColorScheme.Dark ? ControlThemes.Dark
         : ControlThemes.Light;
+
+    private static ComponentRecipe BrowserApplication(ThemeContext theme) =>
+        ComponentRecipe.Create(
+            "component-browser-application",
+            (context, root) =>
+            {
+                root.Present(
+                    context.Theme,
+                    author: PresentationStyles.Surface.MainGrow(1).MainBasis(0)
+                );
+                context.Mount(
+                    root,
+                    Context.Provide<IFilePicker>(
+                        new DeferredPicker(),
+                        Context.Provide<IUriLauncher>(
+                            new RecordingLauncher(),
+                            ComponentBrowserApplication.Create()
+                        )
+                    )
+                );
+            }
+        );
 
     private static string FindRepositoryRoot()
     {

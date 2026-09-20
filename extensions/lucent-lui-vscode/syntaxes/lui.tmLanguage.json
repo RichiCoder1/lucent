@@ -48,6 +48,13 @@
     "declarations": {
       "patterns": [
         {
+          "match": "\\b(class|record(?:\\s+(?:class|struct))?|struct|interface|enum)\\s+(@?[A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.cs" },
+            "2": { "name": "entity.name.type.cs" }
+          }
+        },
+        {
           "begin": "(?<!\\.)\\b(context|inject)(?=\\s+[A-Za-z_@])",
           "beginCaptures": { "1": { "name": "storage.type.lui" } },
           "end": ";|(?=})|$",
@@ -96,7 +103,7 @@
         },
         {
           "name": "storage.modifier.lui",
-          "match": "\\breadonly\\b"
+          "match": "\\b(readonly|partial|sealed|static|abstract|virtual|override|required|init|async|const|protected|private)\\b"
         },
         {
           "name": "storage.type.cs",

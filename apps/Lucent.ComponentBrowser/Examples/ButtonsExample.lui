@@ -13,7 +13,8 @@ style ButtonsRowStyle {
     Wrap: true;
 }
 
-public component ButtonsExample(ComponentBrowserState browser) {
+public component ButtonsExample() {
+    context ComponentBrowserState browser;
     int activationCount = 0;
     string selectedOption = "native";
     void Activate() {

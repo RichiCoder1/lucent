@@ -4,6 +4,11 @@ Navigation owns the opened route and its bounded history. Application services
 still own loading, accepted writes and persistent editor sessions. A selected
 list item, keyboard focus and the opened route can differ.
 
+For the `.lui`-first application path, use generated `AppRoutes.Bundle`, `<Router>` and
+`<RouterOutlet>`. The [application authoring guide](APPLICATION-AUTHORING.md#declarative-routing)
+covers default component mappings, shared shell navigation and reactive destination
+selection. The APIs below also support applications that compose navigation explicitly.
+
 ## Declare routes
 
 Route declarations are generator input. They produce typed references, codecs

@@ -1,0 +1,44 @@
+<Project>
+  <PropertyGroup>
+    <LucentLuiNamedComponents>true</LucentLuiNamedComponents>
+    <LucentLuiPreparedAuthoring>true</LucentLuiPreparedAuthoring>
+    <EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+    <LucentLuiPreparationHost>$(MSBuildThisFileDirectory)..\src\Lucent.Lui.Sdk.PreparationHost\bin\$(Configuration)\net10.0\Lucent.Lui.Sdk.PreparationHost.dll</LucentLuiPreparationHost>
+    <LucentLuiPreparationTasks>$(MSBuildThisFileDirectory)..\src\Lucent.Lui.Sdk.PreparationTasks\bin\$(Configuration)\net10.0\Lucent.Lui.Sdk.PreparationTasks.dll</LucentLuiPreparationTasks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference
+      Include="$(MSBuildThisFileDirectory)..\src\Lucent.Lui.Sdk.PreparationHost\Lucent.Lui.Sdk.PreparationHost.csproj"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all"
+      SkipGetTargetFrameworkProperties="true"
+      GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
+    <ProjectReference
+      Include="$(MSBuildThisFileDirectory)..\src\Lucent.Lui.Sdk.PreparationTasks\Lucent.Lui.Sdk.PreparationTasks.csproj"
+      ReferenceOutputAssembly="false"
+      PrivateAssets="all"
+      SkipGetTargetFrameworkProperties="true"
+      GlobalPropertiesToRemove="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
+  </ItemGroup>
+
+  <Target
+    Name="BuildLucentLuiSourcePreparationTools"
+    BeforeTargets="PrepareLucentLuiProjectEmitter"
+    Condition="'$(LucentLuiSkipPreparation)' != 'true'"
+  >
+    <PropertyGroup>
+      <CompilerGeneratedFilesOutputPath Condition="'$(CompilerGeneratedFilesOutputPath)' == ''">$(IntermediateOutputPath)generated</CompilerGeneratedFilesOutputPath>
+    </PropertyGroup>
+    <MSBuild
+      Projects="$(MSBuildThisFileDirectory)..\src\Lucent.Lui.Sdk.PreparationHost\Lucent.Lui.Sdk.PreparationHost.csproj;$(MSBuildThisFileDirectory)..\src\Lucent.Lui.Sdk.PreparationTasks\Lucent.Lui.Sdk.PreparationTasks.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)"
+      RemoveProperties="PublishAot;PublishTrimmed;RuntimeIdentifier;SelfContained"
+    />
+  </Target>
+
+  <Import Project="$(MSBuildThisFileDirectory)..\src\Lucent.Lui.Sdk\Sdk\Preparation.targets" />
+</Project>

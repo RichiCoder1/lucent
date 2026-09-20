@@ -151,13 +151,6 @@ public sealed class HostedApplication : IApplicationLifecycle
             throw new AggregateException("Application service cleanup failed.", errors);
     }
 
-    private sealed class ApplicationServiceSource(IServiceProvider services)
-        : IComponentServiceSource
-    {
-        public T Resolve<T>()
-            where T : class => services.GetRequiredService<T>();
-    }
-
     private sealed class DesktopLifetime : IHostLifetime
     {
         public Task WaitForStartAsync(CancellationToken cancellationToken) => Task.CompletedTask;

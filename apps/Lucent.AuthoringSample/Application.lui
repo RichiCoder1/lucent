@@ -1,0 +1,7 @@
+namespace Lucent.AuthoringSample;
+
+public component Application() {
+    <Router routes={AuthoringRoutes.Bundle} initial="/counter/7">
+        <RouterOutlet />
+    </Router>
+}

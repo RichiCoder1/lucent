@@ -1,11 +1,11 @@
 # Application roots, routing and component companions
 
 Status: owner-approved and refined after Claude Code Fable High adversarial review,
-2026-09-14. A0 passed; execution is paused at the owner's request before A1–A7.
+2026-09-14. A0 passed; the owner resumed A1–A7 implementation on 2026-09-20.
 The [review and dispositions](application-routing-component-authoring-fable-review.md)
 record what changed during design. The [A0 acceptance record](application-routing-component-authoring-a0.md)
-now supplies executed compiler, editor and package evidence. No dependent runtime migration
-has started. The selected pipeline combines early authored projection, one foreign-generator
+now supplies executed compiler, editor and package evidence. Dependent runtime and consumer
+migrations are underway. The selected pipeline combines early authored projection, one foreign-generator
 preparation pass and semantic signature refinement with exact final-output comparison on
 Roslyn 5.9.0 and SDK 10.0.401. Unsupported generator graphs fail without convergence.
 
@@ -29,12 +29,12 @@ unbound identifiers and attribute punctuation are not design decisions. In parti
 the owner has clarified that a recipe/factory root is acceptable and suggested
 `.Run(ComponentBrowserApp.Create)` rather than requiring runtime type activation.
 
-## Current evidence
+## Design baseline evidence
 
-Read-only inspection of main at `f3e4b784661ae96f04c0f9a48ab5b367a94681be` supplies the
-baseline. The runtime in this design worktree is older. No builds, runtime experiments
-or source migrations have been performed for this interview. Paths and line numbers in
-this section refer to that main checkout; refresh them before implementation.
+Read-only inspection of main at `f3e4b784661ae96f04c0f9a48ab5b367a94681be` supplied the
+September 14 design baseline below. These observations describe that historical checkout,
+including adapters subsequently removed during implementation. Current progress and
+verification belong in the [execution record](application-routing-component-authoring-execution.md).
 
 ### Application root and lifecycle
 
@@ -658,7 +658,7 @@ unblocks the existing sequence without another broad design interview.
 ## Proposed work sequence
 
 The authorized handoff slices are now tracked by [parent #301](https://github.com/RichiCoder1/lucent/issues/301)
-and [A0–A7 #302–309](application-routing-component-authoring-execution.md). A0 is complete and execution is paused;
+and [A0–A7 #302–309](application-routing-component-authoring-execution.md). A0 is complete and A1–A7 execution resumed on 2026-09-20;
 downstream slices retain their native prerequisites. The
 [handoff](../../advisor-plans/application-routing-component-authoring-handoff.md) records the
 approved scope and review dispositions. The [A0 record](application-routing-component-authoring-a0.md)

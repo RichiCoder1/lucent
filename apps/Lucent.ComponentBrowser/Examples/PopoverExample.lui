@@ -6,7 +6,8 @@ style PopoverExampleStyle {
     MinWidth: 0;
 }
 
-public component PopoverExample(ComponentBrowserState browser) {
+public component PopoverExample() {
+    context ComponentBrowserState browser;
     bool popoverOpen = false;
     void SetPopoverOpen(bool open) {
         popoverOpen = open;
@@ -26,7 +27,7 @@ public component PopoverExample(ComponentBrowserState browser) {
         <Popover
             open={() => popoverOpen}
             onOpenRequested={SetPopoverOpen}
-            popup={PopoverExamplePopup(() => popoverOpen, SetPopoverOpen)}
+            popup={PopoverExamplePopup.Create(() => popoverOpen, SetPopoverOpen)}
             name="component-browser.popover"
         >
             <Button onInvoke={() => SetPopoverOpen(true)} name="component-browser.popover.open">

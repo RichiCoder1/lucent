@@ -12,7 +12,8 @@ style ComboBoxExampleFieldStyle {
     MinWidth: 280;
 }
 
-public component ComboBoxExample(ComponentBrowserState browser) {
+public component ComboBoxExample() {
+    context ComponentBrowserState browser;
     readonly ComboBoxExampleModel example = new(owner);
 
     <Layout style={ComboBoxExampleStyle}>

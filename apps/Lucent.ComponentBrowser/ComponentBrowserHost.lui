@@ -1,0 +1,10 @@
+namespace Lucent.ComponentBrowser;
+
+public component ComponentBrowserHost(ThemeContext theme) {
+    context NavigationSession navigation;
+    context IFilePicker filePicker;
+    context IUriLauncher uriLauncher;
+    readonly ComponentBrowserState browser = new(owner, navigation, filePicker, uriLauncher);
+
+    <ComponentBrowser browser={browser} theme={theme} />
+}

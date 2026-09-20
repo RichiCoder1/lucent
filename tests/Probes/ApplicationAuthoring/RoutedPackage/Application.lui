@@ -11,5 +11,7 @@ public component Application() {
         Acceptance.Roots.Add(this);
     }
 
-    <Column>{Routing.Root(outlet)}</Column>
+    <Router routes={Routes.Bundle} initial="/">
+        <RouterOutlet handle={outlet} />
+    </Router>
 }

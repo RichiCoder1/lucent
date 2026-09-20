@@ -8,6 +8,18 @@ public interface IComponentServiceSource
         where T : class;
 }
 
+/// <summary>Optionally resolves declared closed reference-type services without treating absence as failure.</summary>
+/// <remarks>
+/// Implementations must return <see langword="false"/> only when the exact service is absent.
+/// Provider activation and ownership failures must escape from <see cref="TryResolve{T}"/>.
+/// </remarks>
+public interface IOptionalComponentServiceSource : IComponentServiceSource
+{
+    /// <summary>Attempts to resolve one exact declared service type synchronously.</summary>
+    bool TryResolve<T>(out T? value)
+        where T : class;
+}
+
 /// <summary>Controls one lifecycle-owned service source attached to one application root mount.</summary>
 public sealed class ComponentServiceBinding
 {
@@ -122,6 +134,50 @@ public sealed class ComponentServiceBinding
             );
         }
         return value ?? throw requirement.NullResult("application service source");
+    }
+
+    internal T? ResolveOptional<T>(ComponentRequirementSource requirement, string mountPath)
+        where T : class
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(mountPath);
+        _owner.CheckOwnerForServices();
+        if (_state == BindingState.Stopped)
+            throw new InvalidOperationException(
+                $"Application services stopped before optional requirement '{requirement.Member}' could resolve."
+            );
+        if (_state == BindingState.Revoked)
+            throw new InvalidOperationException(
+                $"Application services were revoked before optional requirement '{requirement.Member}' could resolve."
+            );
+        if (_state != BindingState.Mounted)
+            throw new InvalidOperationException(
+                "Application services are available only while the attached root is mounting."
+            );
+        var source =
+            _source ?? throw new InvalidOperationException("The service source was revoked.");
+        if (source is not IOptionalComponentServiceSource optional)
+            throw new InvalidOperationException(
+                $"Application service requirement '{requirement.Member}' for exact type '{requirement.TypeName}' cannot determine absence because its source does not support optional resolution."
+            );
+        try
+        {
+            if (!optional.TryResolve<T>(out var value))
+            {
+                if (value is not null)
+                    throw new InvalidOperationException(
+                        "An optional application service source returned a value while reporting the service absent."
+                    );
+                return null;
+            }
+            return value ?? throw requirement.NullResult("optional application service source");
+        }
+        catch (Exception error)
+        {
+            throw new InvalidOperationException(
+                $"Optional application service requirement '{requirement.Member}' for exact type '{requirement.TypeName}' failed at {requirement.FilePath}:{requirement.Line}:{requirement.Column} while mounting {mountPath}.",
+                error
+            );
+        }
     }
 
     internal void CheckMountAdmission()

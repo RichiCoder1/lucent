@@ -21,17 +21,23 @@ public delegate ValueTask<NavigationPreparationResult> RouteOutletPreparationHan
     CancellationToken cancellationToken
 );
 
-/// <summary>Options for root-outlet preparation policy.</summary>
+/// <summary>Options for the single root outlet's preparation and render policy.</summary>
+/// <remarks>
+/// Configure these options on the root <c>RouterOutlet</c>. Nested outlets participate in the
+/// same transaction and inherit that policy; supplying a second options owner fails closed.
+/// </remarks>
 public sealed class RouteOutletOptions
 {
     /// <summary>Creates options with preparation and optional publication interaction hooks.</summary>
     public RouteOutletOptions(
         RouteOutletPreparationHandler? prepare = null,
-        NavigationInteraction? interaction = null
+        NavigationInteraction? interaction = null,
+        RouteDestinationResolver? resolve = null
     )
     {
         Prepare = prepare;
         Interaction = interaction;
+        Resolve = resolve;
     }
 
     /// <summary>Gets the callback invoked in route-level transaction order.</summary>
@@ -39,6 +45,9 @@ public sealed class RouteOutletOptions
 
     /// <summary>Gets the optional focus, viewport, and announcement interaction owner.</summary>
     public NavigationInteraction? Interaction { get; }
+
+    /// <summary>Gets synchronous typed destination selection, independent of preparation.</summary>
+    public RouteDestinationResolver? Resolve { get; }
 }
 
 /// <summary>A redacted view of one retained route-level mount.</summary>

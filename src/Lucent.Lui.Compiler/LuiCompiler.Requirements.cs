@@ -16,7 +16,8 @@ public static partial class LuiCompiler
         LuiRequirementSyntax requirement,
         string logicalPath,
         string source,
-        string typeName
+        string typeName,
+        bool optional = false
     )
     {
         var line = SourceText.From(source).Lines.GetLinePosition(requirement.Name.Span.Start);
@@ -32,17 +33,19 @@ public static partial class LuiCompiler
             + (line.Line + 1).ToString(CultureInfo.InvariantCulture)
             + ", "
             + (line.Character + 1).ToString(CultureInfo.InvariantCulture)
+            + ", "
+            + (optional ? "true" : "false")
             + ")]";
     }
 
-    private static Dictionary<int, string> RequirementPlans(
+    private static Dictionary<int, RequirementPlan> RequirementPlans(
         SemanticModel model,
         SyntaxTree tree,
         Writer writer,
         List<LuiDiagnostic> diagnostics
     )
     {
-        var types = new Dictionary<int, string>();
+        var types = new Dictionary<int, RequirementPlan>();
         var seen = new Dictionary<ITypeSymbol, LuiRequirementSyntax>(
             SymbolEqualityComparer.Default
         );
@@ -55,9 +58,13 @@ public static partial class LuiCompiler
             var type = property is null ? null : model.GetDeclaredSymbol(property)?.Type;
             if (type is null || type.TypeKind == TypeKind.Error)
                 continue;
+            var optional =
+                syntax.Kind == LuiRequirementKind.Inject
+                && type.IsReferenceType
+                && type.NullableAnnotation == NullableAnnotation.Annotated;
             if (
                 !ClosedRequirementType(type)
-                || type.NullableAnnotation == NullableAnnotation.Annotated
+                || type.NullableAnnotation == NullableAnnotation.Annotated && !optional
                 || (
                     type is INamedTypeSymbol nullable
                     && nullable.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T
@@ -67,7 +74,7 @@ public static partial class LuiCompiler
                 diagnostics.Add(
                     new LuiDiagnostic(
                         "LUI2031",
-                        "A context or inject declaration requires one closed, non-null, non-dynamic type that can be retained in a component.",
+                        "A context declaration requires one closed, non-null, non-dynamic type. An inject declaration may use a nullable closed reference type for optional lookup.",
                         syntax.TypeSpan
                     )
                 );
@@ -81,7 +88,7 @@ public static partial class LuiCompiler
                 diagnostics.Add(
                     new LuiDiagnostic(
                         "LUI2032",
-                        "Inject requires an ordinary closed reference service. Service locators, framework context values, and optional, collection, factory, lazy or async request shapes are not supported; declare context values with context and inject an explicit application service instead.",
+                        "Inject requires an ordinary closed reference service. Service locators, framework context values, collection, factory, lazy or async request shapes are not supported; declare context values with context and inject an explicit application service instead.",
                         syntax.TypeSpan
                     )
                 );
@@ -99,8 +106,11 @@ public static partial class LuiCompiler
                 );
             else
                 seen.Add(type, syntax);
-            types[syntax.Span.Start] = type.ToDisplayString(
-                SymbolDisplayFormat.FullyQualifiedFormat
+            types[syntax.Span.Start] = new RequirementPlan(
+                type.ToDisplayString(FullyQualifiedNullableFormat),
+                type.WithNullableAnnotation(NullableAnnotation.NotAnnotated)
+                    .ToDisplayString(FullyQualifiedNullableFormat),
+                optional
             );
         }
         return types;
@@ -334,7 +344,8 @@ public static partial class LuiCompiler
                             requirement,
                             identity.Document.LogicalPath,
                             document.Source,
-                            RequirementType(requirement)
+                            RequirementMetadataType(requirement),
+                            RequirementIsOptional(requirement)
                         )
                         + "\n"
                 );
@@ -373,8 +384,19 @@ public static partial class LuiCompiler
         private string RequirementType(LuiRequirementSyntax requirement) =>
             plans is not null
             && plans.RequirementTypes.TryGetValue(requirement.Span.Start, out var resolved)
-                ? resolved
+                ? resolved.Type
                 : requirement.Type.ToString();
+
+        private string RequirementMetadataType(LuiRequirementSyntax requirement) =>
+            plans is not null
+            && plans.RequirementTypes.TryGetValue(requirement.Span.Start, out var resolved)
+                ? resolved.MetadataType
+                : requirement.Type.ToString().TrimEnd('?');
+
+        private bool RequirementIsOptional(LuiRequirementSyntax requirement) =>
+            plans is not null
+            && plans.RequirementTypes.TryGetValue(requirement.Span.Start, out var resolved)
+            && resolved.Optional;
 
         private void RequirementPlan(IReadOnlyList<LuiRequirementSyntax> requirements, string name)
         {
@@ -393,10 +415,17 @@ public static partial class LuiCompiler
             {
                 var requirement = requirements[i];
                 Hidden(i == 0 ? "" : ".And");
-                Hidden(requirement.Kind == LuiRequirementKind.Context ? "Context<" : "Service<");
                 Hidden(
-                    RequirementType(requirement)
-                        + ">(new global::Lucent.Core.ComponentRequirementSource("
+                    requirement.Kind == LuiRequirementKind.Context ? "Context<"
+                    : RequirementIsOptional(requirement) ? "OptionalService<"
+                    : "Service<"
+                );
+                Hidden(
+                    (
+                        RequirementIsOptional(requirement)
+                            ? RequirementMetadataType(requirement)
+                            : RequirementType(requirement)
+                    ) + ">(new global::Lucent.Core.ComponentRequirementSource("
                 );
                 var line = SourceText
                     .From(document.Source)

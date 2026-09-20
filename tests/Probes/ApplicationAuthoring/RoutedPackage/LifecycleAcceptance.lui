@@ -1,0 +1,106 @@
+namespace RoutedPackageFixture;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+using Lucent.Core;
+
+public static class LifecycleAcceptance {
+    public static void Run() {
+        Check(false);
+        Check(true);
+    }
+
+    private static void Check(bool failFactory) {
+        var events = new List<string>();
+        ApplicationStartupOutcome? outcome = null;
+        var application = LucentApplication.CreateBuilder().UseHost(new AcceptanceHost()).OnStart(
+            start => {
+                events.Add("start");
+                start.OnDispose(
+                    () => {
+                        events.Add("resource-dispose");
+                        return ValueTask.CompletedTask;
+                    }
+                );
+                return ValueTask.CompletedTask;
+            }
+        ).OnMounted(
+            session => {
+                events.Add("mounted");
+                session.RequestClose();
+                return ValueTask.CompletedTask;
+            }
+        ).OnStop(
+            cleanup => {
+                events.Add("stop");
+                outcome = cleanup.Startup;
+                return ValueTask.CompletedTask;
+            }
+        ).OnDispose(
+            _ => {
+                events.Add("dispose");
+                return ValueTask.CompletedTask;
+            }
+        ).Build(
+            () => {
+                events.Add("factory");
+                if (failFactory)
+                    throw new InvalidOperationException("expected factory failure");
+                return Application.Create();
+            }
+        );
+        try {
+            Acceptance.Require(application.Run() == 0, "The application host returned failure.");
+            Acceptance.Require(!failFactory, "The failing factory was not invoked.");
+        } catch (InvalidOperationException error)when (failFactory
+            && error.Message == "expected factory failure") {
+        }
+
+        var expected = failFactory
+            ? new[]
+            {
+                "start",
+                "factory",
+                "stop",
+                "resource-dispose",
+                "dispose"
+            }
+            : new[]
+            {
+                "start",
+                "factory",
+                "mounted",
+                "stop",
+                "resource-dispose",
+                "dispose"
+            };
+        Acceptance.Require(events.SequenceEqual(expected), "Packaged lifecycle ordering changed.");
+        Acceptance.Require(
+            outcome is { ServicesReady: true, RootFactoryInvoked: true }
+                && outcome.RootCreated == !failFactory
+                && outcome.RootMounted == !failFactory
+                && (outcome.Error is not null) == failFactory,
+            "Packaged lifecycle cleanup lost its startup outcome."
+        );
+    }
+
+    private sealed class AcceptanceHost : IApplicationHost {
+        public int Run(ApplicationSession session) {
+            session.Start();
+            var timer = Stopwatch.StartNew();
+            while (!session.IsCompleted) {
+                if (timer.Elapsed > TimeSpan.FromSeconds(5))
+                    throw new InvalidOperationException(
+                        "The application lifecycle did not complete."
+                    );
+                session.ProcessEvents();
+                if (!session.Composition.IsDisposed)
+                    session.Composition.Flush();
+            }
+
+            return 0;
+        }
+    }
+}

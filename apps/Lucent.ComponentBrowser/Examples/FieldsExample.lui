@@ -17,7 +17,8 @@ style FieldsExampleAreaStyle {
     MinHeight: 108;
 }
 
-public component FieldsExample(ComponentBrowserState browser) {
+public component FieldsExample() {
+    context ComponentBrowserState browser;
     [Owned]
     readonly EditorSession exampleField = new(owner, "example-field", "Lucent");
     [Owned]

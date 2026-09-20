@@ -41,9 +41,10 @@ public sealed class RouteGeneratorTests
             "RouteReference Issue(global::System.Guid projectId, int issueId, global::Sample.ProjectTab tab = global::Sample.ProjectTab.Summary)"
         );
         StringAssert.Contains(source, "RouteContext<global::Sample.ProjectRoute>");
-        StringAssert.Contains(source, "static (definition, match, content, live)");
+        StringAssert.Contains(source, "static (definition, match, live)");
+        StringAssert.Contains(source, "static (context, content)");
         StringAssert.Contains(source, "RouteContext<global::Sample.ProjectRoute>(definition");
-        StringAssert.Contains(source, "), live), content))");
+        StringAssert.Contains(source, ">)context, content))");
         StringAssert.Contains(source, "new int[] { 0, 2 }");
         StringAssert.Contains(source, "new int[] { 1 }");
         StringAssert.Contains(
@@ -105,6 +106,9 @@ public sealed class RouteGeneratorTests
             """
         );
         AssertNoErrors(generated);
+        var source = generated.Run.Results.Single().GeneratedSources.Single().SourceText.ToString();
+        StringAssert.Contains(source, "RouteBundle Bundle");
+        Assert.IsFalse(source.Contains("RouteBundle Routes", StringComparison.Ordinal));
         using var stream = new MemoryStream();
         var emit = generated.Compilation.Emit(stream);
         Assert.IsTrue(emit.Success, String.Join(" | ", emit.Diagnostics));
@@ -137,6 +141,52 @@ public sealed class RouteGeneratorTests
                 + "}"
         );
         Assert.AreEqual(1, result.Run.Diagnostics.Count(diagnostic => diagnostic.Id == "LUI4208"));
+        Assert.AreEqual(0, result.Run.Results.Single().GeneratedSources.Length);
+    }
+
+    [TestMethod]
+    public void PartiallyMappedModuleReportsMissingComponentAndEmitsNoBundle()
+    {
+        var result = Generate(
+            """
+            using Lucent.Core;
+            [LucentRouteModule(RouteFallbackPolicy.Reject)] public static partial class AppRoutes { }
+            [LucentRoute(typeof(AppRoutes), "/", Component = typeof(Home))] public readonly record struct HomeRoute();
+            [LucentRoute(typeof(AppRoutes), "/about")] public readonly record struct AboutRoute();
+            public static class Home { public static ComponentRecipe Create() => ComponentRecipe.Create("home", static (_, _) => { }); }
+            """
+        );
+
+        Assert.IsTrue(
+            result.Run.Diagnostics.Any(item => item.Id == "LUI4209"),
+            string.Join(Environment.NewLine, result.Run.Diagnostics)
+        );
+        Assert.AreEqual(0, result.Run.Results.Single().GeneratedSources.Length);
+    }
+
+    [TestMethod]
+    [DataRow("public static object Module => null!;")]
+    [DataRow("public static object Bundle => null!;")]
+    [DataRow("private static void CreateDestination() { }")]
+    [DataRow("public static object HomeDefinition => null!;")]
+    public void AuthoredGeneratedMemberCollisionIsDiagnosedBeforeEmission(string member)
+    {
+        var result = Generate(
+            """
+            using Lucent.Core;
+            [LucentRouteModule(RouteFallbackPolicy.Reject)]
+            public static partial class AppRoutes {
+            """
+                + member
+                + """
+                }
+                [LucentRoute(typeof(AppRoutes), "/", Component = typeof(Home))]
+                public readonly record struct HomeRoute();
+                public static class Home { public static ComponentRecipe Create() => ComponentRecipe.Create("home", static (_, _) => { }); }
+                """
+        );
+
+        Assert.AreEqual(1, result.Run.Diagnostics.Count(item => item.Id == "LUI4210"));
         Assert.AreEqual(0, result.Run.Results.Single().GeneratedSources.Length);
     }
 

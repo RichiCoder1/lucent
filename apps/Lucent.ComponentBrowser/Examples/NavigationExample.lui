@@ -17,7 +17,8 @@ style NavigationExampleDialogBodyStyle {
     Spacing: 8;
 }
 
-public component NavigationExample(ComponentBrowserState browser) {
+public component NavigationExample() {
+    context ComponentBrowserState browser;
     readonly NavigationExampleModel example = new(owner, browser.UriLauncher);
 
     <Layout style={NavigationExampleStyle}>

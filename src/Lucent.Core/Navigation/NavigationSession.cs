@@ -24,6 +24,7 @@ public sealed class NavigationSession : IDisposable
     private readonly RouteTable _routeTable;
     private readonly NavigationJournal _journal;
     private readonly List<CommittedRegistration> _committedObservers = [];
+    private readonly List<IdleRegistration> _idleObservers = [];
     private readonly Signal<NavigationSnapshot?> _currentSignal;
     private readonly Signal<NavigationPending?> _pendingSignal;
     private readonly Signal<NavigationJournalSnapshot> _journalSignal;
@@ -129,6 +130,31 @@ public sealed class NavigationSession : IDisposable
         catch
         {
             registration.Dispose();
+            throw;
+        }
+        return registration;
+    }
+
+    internal IDisposable RegisterIdle(ReactiveScope owner, Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(callback);
+        CheckOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!ReferenceEquals(owner.Graph, _graph))
+            throw new ArgumentException(
+                "An idle observer must belong to the session's reactive graph.",
+                nameof(owner)
+            );
+        var registration = new IdleRegistration(this, callback);
+        _idleObservers.Add(registration);
+        try
+        {
+            owner.OnDispose(registration.Dispose);
+        }
+        catch
+        {
+            _idleObservers.Remove(registration);
             throw;
         }
         return registration;
@@ -529,6 +555,7 @@ public sealed class NavigationSession : IDisposable
             _phase = NavigationPhase.Idle;
             _pending = null;
             _pendingSignal.Value = null;
+            PublishIdle();
         }
     }
 
@@ -953,6 +980,7 @@ public sealed class NavigationSession : IDisposable
         attempt.Operation.TryComplete(
             new NavigationOutcome(attempt.Operation.Id, NavigationOutcomeKind.Committed)
         );
+        PublishIdle();
     }
 
     private void HandlePreparationException(NavigationAttempt attempt, Exception exception)
@@ -979,6 +1007,7 @@ public sealed class NavigationSession : IDisposable
         attempt.Operation.TryComplete(
             new NavigationOutcome(attempt.Operation.Id, kind, failureKind)
         );
+        PublishIdle();
     }
 
     private static void Complete(
@@ -1025,6 +1054,7 @@ public sealed class NavigationSession : IDisposable
                 _phase = NavigationPhase.Idle;
                 _pending = null;
                 _pendingSignal.Value = null;
+                PublishIdle();
             }
             return;
         }
@@ -1172,6 +1202,14 @@ public sealed class NavigationSession : IDisposable
             observer.Callback(commit);
     }
 
+    private void PublishIdle()
+    {
+        if (_phase != NavigationPhase.Idle || _disposed || _terminated)
+            return;
+        foreach (var observer in _idleObservers.ToArray())
+            observer.Callback();
+    }
+
     private sealed class NavigationAttempt
     {
         internal NavigationAttempt(
@@ -1236,6 +1274,20 @@ public sealed class NavigationSession : IDisposable
             var session = Interlocked.Exchange(ref _owner, null);
             if (session is not null)
                 session._committedObservers.Remove(this);
+        }
+    }
+
+    private sealed class IdleRegistration(NavigationSession owner, Action callback) : IDisposable
+    {
+        private NavigationSession? _owner = owner;
+
+        internal Action Callback { get; } = callback;
+
+        public void Dispose()
+        {
+            var session = Interlocked.Exchange(ref _owner, null);
+            if (session is not null)
+                session._idleObservers.Remove(this);
         }
     }
 

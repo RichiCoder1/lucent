@@ -53,6 +53,29 @@ public static partial class LuiCompiler
                     )
             )
             .ToArray();
+        var preparationTrees = new HashSet<SyntaxTree>(
+            preparedFactories
+                .SelectMany(static method => method.DeclaringSyntaxReferences)
+                .Select(static reference => reference.SyntaxTree)
+        );
+        var companionDeclarations = type
+            .DeclaringSyntaxReferences.Select(static reference => reference.GetSyntax())
+            .OfType<TypeDeclarationSyntax>()
+            .Where(declaration => !preparationTrees.Contains(declaration.SyntaxTree))
+            .ToArray();
+        if (
+            companionDeclarations.Any(static declaration =>
+                declaration is not ClassDeclarationSyntax
+                || !declaration.Modifiers.Any(SyntaxKind.PartialKeyword)
+            )
+        )
+            diagnostics.Add(
+                new LuiDiagnostic(
+                    "LUI2060",
+                    "A named LUI component companion must be declared as a partial class.",
+                    component.Name.Span
+                )
+            );
         if (preparedFactories.Length == 0)
             diagnostics.Add(
                 new LuiDiagnostic(
@@ -87,11 +110,6 @@ public static partial class LuiCompiler
 
         var luiSetup = component.Body.Any(static member =>
             member is LuiMemberSyntax { Kind: LuiMemberKind.Setup }
-        );
-        var preparationTrees = new HashSet<SyntaxTree>(
-            preparedFactories
-                .SelectMany(static method => method.DeclaringSyntaxReferences)
-                .Select(static reference => reference.SyntaxTree)
         );
         var authoredSetups = compilation
             .SyntaxTrees.SelectMany(static tree => tree.GetRoot().DescendantNodes())
@@ -149,6 +167,23 @@ public static partial class LuiCompiler
             );
 
         var states = new List<NamedCompanionState>();
+        var luiOwnedNames = new HashSet<string>(
+            component.Parameters.Select(static parameter => parameter.Name.Text.TrimStart('@')),
+            StringComparer.Ordinal
+        );
+        foreach (var member in component.Body.OfType<LuiMemberSyntax>())
+            switch (member.Declaration)
+            {
+                case FieldDeclarationSyntax field:
+                    foreach (var variable in field.Declaration.Variables)
+                        luiOwnedNames.Add(variable.Identifier.ValueText);
+                    break;
+                case MethodDeclarationSyntax method:
+                    luiOwnedNames.Add(method.Identifier.ValueText);
+                    break;
+            }
+        foreach (var requirement in component.Body.OfType<LuiRequirementSyntax>())
+            luiOwnedNames.Add(requirement.Name.Text.TrimStart('@'));
         foreach (
             var property in type.GetMembers()
                 .OfType<IPropertySymbol>()
@@ -162,6 +197,19 @@ public static partial class LuiCompiler
                 .OrderBy(static property => property.Name, StringComparer.Ordinal)
         )
         {
+            if (luiOwnedNames.Contains(property.Name))
+            {
+                diagnostics.Add(
+                    new LuiDiagnostic(
+                        "LUI2061",
+                        "Companion [State] property '"
+                            + property.Name
+                            + "' conflicts with a member owned by the LUI component.",
+                        component.Name.Span
+                    )
+                );
+                continue;
+            }
             var syntax =
                 property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax()
                 as PropertyDeclarationSyntax;

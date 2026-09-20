@@ -20,6 +20,22 @@ public sealed class ComponentContext
         _component = component;
     }
 
+    /// <summary>Gets the borrowed mount owner used by generated compatibility code.</summary>
+    /// <remarks>
+    /// This is a compiler bridge for the established LUI <c>owner</c> alias. The returned
+    /// scope remains owned by the component mount and must not be disposed independently.
+    /// Application setup code should prefer this facade's state and lifetime operations.
+    /// </remarks>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public ReactiveScope MountOwner
+    {
+        get
+        {
+            _owner.CheckComponentContextAccess();
+            return _owner;
+        }
+    }
+
     /// <summary>Creates writable state owned by this component mount.</summary>
     public Signal<T> State<T>(T value, string? name = null) =>
         _owner.Signal(value, AllocationName("state", name));

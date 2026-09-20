@@ -66,7 +66,11 @@ Root mount receives `ThemeContext` explicitly. Creation, child content, retained
 
 ## Documents and components
 
-A document uses standard C# namespace and using syntax and initially declares exactly one explicit component. Multiple declarations are reserved for a later real compositional-family use case.
+A document uses standard C# namespace and using syntax and declares one explicit component.
+With `LucentLuiNamedComponents=true`, it can also contain ordinary supporting C# types
+before that component, or contain only supporting declarations. There is still at most one
+component per file. See [application authoring](APPLICATION-AUTHORING.md) for named factories,
+companions, lifecycle setup, and declarative routing.
 
 ```lui
 namespace Lucent.IssueBrowser;
@@ -84,7 +88,14 @@ public component FilterBar(Query query, Action clear, Style? style = null) {
 }
 ```
 
-A component lowers to a `[LucentComponent]` method returning `ComponentRecipe` in the namespace's partial static `Components` class. Default accessibility is `internal`; `public` is explicit. An adjacent C# partial may provide normal helpers. Component-level state declarations, ordinary methods, and synchronous `Setup` are supported by the language extension below. Generic `.lui` declarations and a general embedded `code` block remain deferred; generated implementation objects are not public mounted-component handles.
+By default a component lowers to a `[LucentComponent]` method returning `ComponentRecipe`
+in the namespace's partial static `Components` class. Named-component projects instead emit
+a sealed partial type with a typed `Create` factory and one independent instance per mount.
+Default accessibility is `internal`; `public` is explicit. A matching C# partial can share
+that instance in named mode. Component-local state, ordinary methods, and synchronous
+`Setup` are supported below. Generic supporting types are supported in named mode;
+generic component declarations and a general embedded `code` block remain deferred.
+Generated implementation objects are not public mounted-component handles.
 
 Public component documentation uses ordinary contiguous C# XML documentation comments immediately before the declaration:
 

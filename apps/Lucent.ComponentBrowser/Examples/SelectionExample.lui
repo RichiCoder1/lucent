@@ -11,7 +11,8 @@ style SelectionExampleRowStyle(ComponentBrowserState browser) {
     Height: browser.Density == BrowserDensity.Compact ? 34 : 42;
 }
 
-public component SelectionExample(ComponentBrowserState browser) {
+public component SelectionExample() {
+    context ComponentBrowserState browser;
     CheckState checkState = CheckState.Off;
     bool switchEnabled = true;
     string radioSelection = "native";

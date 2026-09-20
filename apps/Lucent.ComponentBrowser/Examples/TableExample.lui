@@ -19,7 +19,8 @@ style TableExampleActionsStyle {
     Wrap: true;
 }
 
-public component TableExample(ComponentBrowserState browser) {
+public component TableExample() {
+    context ComponentBrowserState browser;
     readonly TableExampleModel example = new(owner);
 
     <Layout style={TableExampleStyle}>

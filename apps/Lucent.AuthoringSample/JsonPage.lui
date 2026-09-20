@@ -1,0 +1,44 @@
+namespace Lucent.AuthoringSample;
+using System.Text.Json;
+using Lucent.Core;
+
+style JsonPageLayout {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+style JsonActions {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+style JsonText {
+    TextWrap: TextWrap.WordWithGraphemeFallback;
+}
+
+public component JsonPage() {
+    context RouteContext<JsonRoute> route;
+    [Once]
+    SamplePayload payload = new(route.Parameters.Id, "Ada");
+
+    string PayloadJson() => "Generated JSON: "
+        + JsonSerializer.Serialize(payload, AppJsonContext.Default.SamplePayload);
+
+    void Rename() {
+        payload = payload with
+        {
+            Name = payload.Name == "Ada" ? "Grace" : "Ada"    };
+    }
+
+    <Layout style={JsonPageLayout}>
+        <Text>Generated JSON</Text>
+        <Text content={() => "JSON route: " + route.Parameters.Id} />
+        <Status content={PayloadJson} style={JsonText} />
+        <Layout style={JsonActions}>
+            <Button onInvoke={Rename} name="authoring.json.rename">Rename generated data</Button>
+        </Layout>
+    </Layout>
+}

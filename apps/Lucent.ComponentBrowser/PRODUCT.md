@@ -26,16 +26,16 @@ Lucent authors need a quick way to find a stock recipe, try it with ordinary poi
 
 ## Authoring and ownership
 
-`ComponentBrowserApplication.lui` owns the browser model and mounts the `.lui`
-shell. `ComponentBrowserStructure.cs` is a host adapter: it receives the mount's
-framework-controlled theme and passes native picker/launcher capabilities into
-that root. It does not allocate example state or choose the active example.
+`ComponentBrowserApplication.lui` is the generated application root. Its `Router`
+owns the navigation session and provides it to the shell. The startup callback in
+`Program.cs` contributes the framework-controlled theme and borrowed native
+picker/launcher capabilities before that root mounts.
 
 `ComponentBrowserState` holds only browser-wide preferences, search, copy feedback,
 native capabilities and navigation authority. The catalog associates each source
-file with its compiled recipe. `ComponentExample.lui` consumes the typed route
-context and mounts that recipe through a real `RouteOutlet`; example selection
-does not use a chain of conditional branches.
+file with its generated typed route reference. `RouterOutlet` mounts the component
+type associated with the matched generated route; example selection does not use
+a manual route/recipe registry or a chain of conditional branches.
 
 Simple example state lives in `.lui` declarations and setup. Involved fixture data,
 sorting, asynchronous native services and dialog coordination live in adjacent

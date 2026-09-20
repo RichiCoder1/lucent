@@ -49,7 +49,8 @@ public sealed class LuiAuthoredSourceProjection
 
         var tokens = SyntaxFactory.ParseTokens(source).ToArray();
         var depth = 0;
-        var componentStart = -1;
+        var componentStarts = new List<int>();
+        var firstStyleStart = -1;
         for (var index = 0; index + 2 < tokens.Length; index++)
         {
             var token = tokens[index];
@@ -57,6 +58,13 @@ public sealed class LuiAuthoredSourceProjection
                 depth++;
             else if (token.IsKind(SyntaxKind.CloseBraceToken))
                 depth--;
+            if (
+                depth == 0
+                && firstStyleStart < 0
+                && token.ValueText == "style"
+                && tokens[index + 1].IsKind(SyntaxKind.IdentifierToken)
+            )
+                firstStyleStart = token.SpanStart;
             if (
                 depth != 0
                 || token.ValueText != "component"
@@ -69,15 +77,27 @@ public sealed class LuiAuthoredSourceProjection
                 && tokens[index - 1].Kind()
                     is SyntaxKind.PublicKeyword
                         or SyntaxKind.InternalKeyword;
-            componentStart = hasAccessibility ? tokens[index - 1].SpanStart : token.SpanStart;
-            break;
+            componentStarts.Add(hasAccessibility ? tokens[index - 1].SpanStart : token.SpanStart);
         }
 
-        var supportOnly = componentStart < 0;
-        if (supportOnly)
-            componentStart = source.Length;
+        if (componentStarts.Count > 1)
+            return Failed(
+                source,
+                "LUI1029",
+                "A LUI file may contain at most one component.",
+                componentStarts[1],
+                "component".Length
+            );
 
-        var declarations = source.Substring(0, componentStart);
+        var componentStart = componentStarts.Count == 0 ? -1 : componentStarts[0];
+        var supportOnly = componentStart < 0;
+        var declarationsEnd = source.Length;
+        if (firstStyleStart >= 0)
+            declarationsEnd = firstStyleStart;
+        if (componentStart >= 0)
+            declarationsEnd = Math.Min(declarationsEnd, componentStart);
+
+        var declarations = source.Substring(0, declarationsEnd);
         var tree = CSharpSyntaxTree.ParseText(
             declarations,
             new CSharpParseOptions(LanguageVersion.Preview)
@@ -216,7 +236,11 @@ public sealed class LuiAuthoredSourceProjection
                 continue;
             builder
                 .Append("    private partial ")
-                .Append(hasRefinedSignature ? refined.Type : field.Declaration.Type.ToString())
+                .Append(
+                    hasRefinedSignature && IsVar(field.Declaration.Type)
+                        ? refined.Type
+                        : field.Declaration.Type.ToString()
+                )
                 .Append(' ')
                 .Append(variable.Identifier.Text)
                 .Append(" { get;");
@@ -251,6 +275,8 @@ public sealed class LuiAuthoredSourceProjection
                     attribute.Name.ToString() == "Once" && attribute.ArgumentList is null
                 )
             || variable.Initializer?.Value is { } value && DefinitelyConstant(value)
+            || variable.Initializer?.Value is MemberAccessExpressionSyntax member
+                && member.Expression.ToString() == field.Declaration.Type.ToString()
         );
 
     private static bool DefinitelyConstant(ExpressionSyntax expression) =>

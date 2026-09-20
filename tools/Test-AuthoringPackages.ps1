@@ -92,6 +92,15 @@ try {
 }
 finally {
     $env:NUGET_PACKAGES = $previousPackages
+    $cache = Join-Path $proof 'cache'
+    if (Test-Path -LiteralPath $cache) {
+        $resolvedProof = (Resolve-Path -LiteralPath $proof).Path
+        $resolvedCache = (Resolve-Path -LiteralPath $cache).Path
+        if (-not $resolvedCache.StartsWith($resolvedProof + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($resolvedCache) -ne 'cache') {
+            throw "Unexpected authoring cache cleanup target: $resolvedCache"
+        }
+        Remove-Item -LiteralPath $resolvedCache -Recurse -Force
+    }
 }
 
 foreach ($acceptance in @(

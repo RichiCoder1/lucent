@@ -12,7 +12,8 @@ style TreeExampleViewStyle {
     MainShrink: 1;
 }
 
-public component TreeExample(ComponentBrowserState browser) {
+public component TreeExample() {
+    context ComponentBrowserState browser;
     readonly TreeExampleModel example = new(owner);
 
     <Layout style={TreeExampleStyle}>

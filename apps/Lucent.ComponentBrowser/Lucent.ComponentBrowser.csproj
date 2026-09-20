@@ -9,9 +9,12 @@
     <AllowedReferenceRelatedFileExtensions>.pdb</AllowedReferenceRelatedFileExtensions>
     <RootNamespace>Lucent.ComponentBrowser</RootNamespace>
     <LucentLuiLangVersion>preview</LucentLuiLangVersion>
+    <LucentLuiNamedComponents>true</LucentLuiNamedComponents>
+    <LucentLuiPreparedAuthoring>true</LucentLuiPreparedAuthoring>
     <LucentLuiProjectIdentity>$(MSBuildProjectFullPath)</LucentLuiProjectIdentity>
     <LucentLuiProjectEpoch>$(MSBuildProjectFullPath)|$(TargetFramework)|$(Configuration)|$(MSBuildProjectExtensionsPath)|$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiProjectEpoch>
     <LucentLuiCompilerOptions>$(LangVersion)|$(Nullable)|$(DefineConstants)|@(ReferencePath)|@(Using)</LucentLuiCompilerOptions>
+    <DefaultItemExcludes>$(DefaultItemExcludes);$(MSBuildProjectDirectory)\generated\**;$(MSBuildProjectDirectory)\lucent-preparation\**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <Using Include="Lucent.Core" />
@@ -55,6 +58,7 @@
     <CompilerVisibleProperty Include="LucentLuiProjectEpoch" />
     <CompilerVisibleProperty Include="LucentLuiCompilerOptions" />
     <CompilerVisibleProperty Include="LucentLuiLangVersion" />
+    <CompilerVisibleProperty Include="LucentLuiPreparedAuthoring" />
   </ItemGroup>
   <Target Name="PrepareLucentLuiProjectContext" BeforeTargets="CoreCompile">
     <PropertyGroup>
@@ -68,4 +72,5 @@
     <LucentAssetToolDirectory>$(MSBuildProjectDirectory)\..\..\src\Lucent.Lui.Tooling\bin\$(Configuration)\net10.0</LucentAssetToolDirectory>
   </PropertyGroup>
   <Import Project="../../src/Lucent.Lui.Sdk/Sdk/Assets.targets" />
+  <Import Project="../../eng/LuiSourcePreparation.targets" />
 </Project>

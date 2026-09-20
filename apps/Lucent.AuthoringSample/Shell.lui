@@ -1,0 +1,56 @@
+namespace Lucent.AuthoringSample;
+using Lucent.Core;
+
+style ShellLayout {
+    Axis: LayoutAxis.Column;
+    Spacing: 14;
+    MinWidth: 0;
+    MinHeight: 0;
+}
+
+style ShellNavigation {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+public component AuthoringShell() {
+    context RouteContext<ShellRoute> route;
+    context NavigationSession navigation;
+    context AuthoringHostContext host;
+
+    string HostServicesSummary() => host.PlatformName + " host ready.";
+
+    void ShowCounter() {
+        navigation.Navigate(AuthoringRoutes.Counter(7));
+    }
+
+    void ShowJson() {
+        navigation.Navigate(AuthoringRoutes.Json(42));
+    }
+
+    void GoBack() {
+        navigation.Back();
+    }
+
+    void GoForward() {
+        navigation.Forward();
+    }
+
+    <Layout style={ShellLayout}>
+        <Text>Lucent application authoring</Text>
+        <Text>One .lui root, typed routes, reactive state, and generated JSON.</Text>
+        <Status content={HostServicesSummary} />
+        <Layout style={ShellNavigation}>
+            <Button onInvoke={ShowCounter} name="authoring.shell.counter">
+                Counter and editor
+            </Button>
+            <Button onInvoke={ShowJson} name="authoring.shell.json">Generated JSON</Button>
+            <Button onInvoke={GoBack} name="authoring.shell.back">Back</Button>
+            <Button onInvoke={GoForward} name="authoring.shell.forward">Forward</Button>
+        </Layout>
+        <Text content={() => "Shell route: " + route.Definition.Id.Value} />
+        <RouterOutlet />
+    </Layout>
+}

@@ -1,4 +1,6 @@
 using Lucent.Lui.Compiler;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Lucent.Lui.Compiler.Tests;
 
@@ -45,5 +47,66 @@ public sealed class ProjectedFormattingTests
         Assert.AreEqual(LuiFormattingStatus.Unavailable, result.Status);
         Assert.AreEqual(source, result.Text);
         Assert.IsTrue(result.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI6003"));
+    }
+
+    [TestMethod]
+    public void OrdinaryDeclarationRangeFormatsOnlyCompleteSelectedTypes()
+    {
+        const string source = """
+            namespace Sample;
+            public record Person( string Name );
+            public static class Helper{public static int Read( int value ){return value+1;}}
+            public component Card() { <Text>{Helper.Read(1).ToString()}</Text> }
+            """;
+        var prefix = LuiAuthoredSourceProjection.Project(source).DeclarationsSource;
+        var root = CSharpSyntaxTree.ParseText(prefix).GetCompilationUnitRoot();
+        var helper = ((FileScopedNamespaceDeclarationSyntax)root.Members[0]).Members[1];
+        var result = LuiFormatter.FormatSelection(
+            source,
+            new LuiSpan(helper.SpanStart, helper.Span.Length)
+        );
+
+        Assert.AreEqual(
+            LuiFormattingStatus.Changed,
+            result.Status,
+            String.Join(" | ", result.Diagnostics.Select(static item => item.Message))
+        );
+        StringAssert.Contains(result.Text, "public record Person( string Name );");
+        StringAssert.Contains(result.Text, "public static class Helper {");
+        StringAssert.Contains(result.Text, "return value + 1;");
+        StringAssert.Contains(
+            result.Text,
+            "public component Card() { <Text>{Helper.Read(1).ToString()}</Text> }"
+        );
+        Assert.AreEqual(
+            LuiSourceComparison.StructuralKey(source),
+            LuiSourceComparison.StructuralKey(result.Text)
+        );
+    }
+
+    [TestMethod]
+    public void WholeDocumentFormattingPreservesDeclarationsStylesAndNamedComponent()
+    {
+        const string source = """
+            namespace Sample;
+            public record Model( string Name );
+            style RootStyle{MainGrow:1;}
+            public component Card(Model model){<Text style={RootStyle}>{model.Name}</Text>}
+            """;
+
+        var result = LuiFormatter.FormatDocument(source);
+
+        Assert.AreEqual(
+            LuiFormattingStatus.Changed,
+            result.Status,
+            String.Join(" | ", result.Diagnostics.Select(static item => item.Message))
+        );
+        StringAssert.Contains(result.Text, "public record Model(string Name);");
+        StringAssert.Contains(result.Text, "style RootStyle {");
+        StringAssert.Contains(result.Text, "public component Card(Model model) {");
+        Assert.AreEqual(
+            LuiSourceComparison.StructuralKey(source),
+            LuiSourceComparison.StructuralKey(result.Text)
+        );
     }
 }

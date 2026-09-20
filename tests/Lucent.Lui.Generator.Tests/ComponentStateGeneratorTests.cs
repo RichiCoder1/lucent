@@ -240,6 +240,24 @@ using Lucent.Core;
     }
 
     [TestMethod]
+    public void DuplicateStateAttributesProduceAnAuthoredDiagnosticWithoutCrashing()
+    {
+        const string source = """
+            using Lucent.Core;
+            [ComponentState]
+            public sealed partial class DuplicateState {
+                [State, State] public partial int Count { get; set; }
+            }
+            """;
+
+        var (run, _) = Generate(source);
+
+        Assert.IsTrue(run.Diagnostics.Any(static diagnostic => diagnostic.Id == "LUI4102"));
+        Assert.IsNull(run.Results.Single().Exception);
+        Assert.AreEqual(0, run.Results.Single().GeneratedSources.Length);
+    }
+
+    [TestMethod]
     public void StandaloneStateMayExposeAnImplementedLucentComponentFactory()
     {
         const string source = """

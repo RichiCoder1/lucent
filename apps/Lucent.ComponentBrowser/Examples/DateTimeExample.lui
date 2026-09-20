@@ -6,7 +6,8 @@ style DateTimeExampleStyle {
     MinWidth: 0;
 }
 
-public component DateTimeExample(ComponentBrowserState browser) {
+public component DateTimeExample() {
+    context ComponentBrowserState browser;
     [Once]
     DateOnly? dateValue = new DateOnly(2024, 6, 15);
     [Once]

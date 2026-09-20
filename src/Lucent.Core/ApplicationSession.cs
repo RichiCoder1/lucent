@@ -270,6 +270,8 @@ public sealed class ApplicationSession
             }
             ArgumentNullException.ThrowIfNull(recipe);
             _ = Composition.Mount(Composition.Root, Theme, recipe);
+            if (_lifecycle is IApplicationLifecycleMounted mountedLifecycle)
+                await mountedLifecycle.NotifyMountedAsync(this);
             if (!PublishStatus(ApplicationPhase.Running, null))
             {
                 await FinishCoreAsync();

@@ -17,7 +17,13 @@ public sealed class BrowserNavigationTests
         var shell = composition.Mount(
             composition.Root,
             theme,
-            Components.ComponentBrowser(browser, theme)
+            Lucent.Core.Components.Router(
+                ComponentContent.Create([
+                    Context.Provide(browser, ComponentBrowser.Create(browser, theme)),
+                ]),
+                ComponentBrowserRoutes.Bundle,
+                session: browser.Navigation
+            )
         );
         composition.Flush();
         var search = Nodes(composition).Single(node => node.Name == "Search components").Identity;
@@ -82,7 +88,17 @@ public sealed class BrowserNavigationTests
         composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         var browser = new ComponentBrowserState(composition.Root.Scope);
-        composition.Mount(composition.Root, theme, Components.ComponentBrowser(browser, theme));
+        composition.Mount(
+            composition.Root,
+            theme,
+            Lucent.Core.Components.Router(
+                ComponentContent.Create([
+                    Context.Provide(browser, ComponentBrowser.Create(browser, theme)),
+                ]),
+                ComponentBrowserRoutes.Bundle,
+                session: browser.Navigation
+            )
+        );
         composition.Flush();
         var entry = browser.Navigation.Current!.EntryId;
         var apply = Nodes(composition)
@@ -93,11 +109,11 @@ public sealed class BrowserNavigationTests
         Assert.AreEqual(entry, browser.Navigation.Current!.EntryId);
         Assert.IsFalse(browser.Navigation.CanGoBack);
         var rejected = browser.Navigation.Navigate(
-            ComponentBrowserRoutes.Example("not-in-catalog")
+            RouteLocation.Parse("/examples/not-in-catalog").Location!
         );
         composition.Flush();
         Assert.IsTrue(rejected.Completion.IsCompletedSuccessfully);
-        Assert.AreEqual(NavigationOutcomeKind.Failed, rejected.Completion.Result.Kind);
+        Assert.AreEqual(NavigationOutcomeKind.RejectedActivation, rejected.Completion.Result.Kind);
         Assert.IsFalse(browser.Navigation.IsTerminated);
         Assert.AreEqual(entry, browser.Navigation.Current!.EntryId);
         Assert.AreEqual(

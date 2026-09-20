@@ -42,4 +42,9 @@ Typed artwork and binary resources: [packaged assets](docs/ASSETS.md).
 Owned setup, generated state, fluent styles and accessibility metadata:
 [C# authoring](docs/CSHARP-AUTHORING.md). `.lui` and C# share the retained runtime.
 
+Named `.lui` components, supporting declarations, optional companions, deferred application
+roots and generated routing: [application authoring](docs/APPLICATION-AUTHORING.md).
+The [authoring sample](apps/Lucent.AuthoringSample/README.md) keeps its application
+behavior in `.lui` with only bootstrap C#, and has an equivalent optional companion variant.
+
 [Light Notes](https://github.com/RichiCoder1/light-notes) is the first independent package consumer, with a `.lui` inbox/editor, local persistence, autosave, recoverable drafts and collection continuity. Issue Browser remains the maintained stock-theme example and deterministic framework exercise.

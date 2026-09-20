@@ -21,31 +21,6 @@ public readonly record struct ShellRoute();
 [LucentRoute(typeof(Routes), "/items/{id}", Id = "item", Parent = typeof(ShellRoute), Component = typeof(Item))]
 public readonly record struct ItemRoute(int Id);
 
-public static class Routing {
-    public static RouteTable Table { get; } = RouteTable.Create(Routes.Module.Patterns);
-    public static RouteDescriptorSet Descriptors { get; } = RouteDescriptorSet.Create(
-        Table,
-        [Routes.Module]
-    );
-
-    public static ComponentRecipe Root(RouteOutletHandle handle) => ComponentRecipe.Defer(
-        "router",
-        scope => {
-            var navigation = new NavigationSession(scope, Table, Routes.Shell().Location);
-            Acceptance.Navigation = navigation;
-            return Context.Provide(
-                navigation,
-                RouteOutlet.Create(Descriptors, Routes.CreateComponent, handle)
-            );
-        }
-    );
-
-    public static ComponentRecipe Child() => RouteOutlet.CreateChild(
-        Descriptors,
-        Routes.CreateComponent
-    );
-}
-
 public static class Acceptance {
     public static NavigationSession Navigation { get; set; } = null!;
     public static RouteOutletHandle Outlet { get; set; } = null!;
@@ -124,6 +99,7 @@ public static class Acceptance {
                 Roots.Count == 2 && ShellMounts == 2 && ItemMounts == 4,
                 "Named root or route mount counts were incorrect."
             );
+            LifecycleAcceptance.Run();
             Console.WriteLine(
                 "ROUTED PACKAGE PASS: bootstrap-only C#, support-only LUI, generated JSON and routes, typed contexts, retained shell, replacement and disposal."
             );

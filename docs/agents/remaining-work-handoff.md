@@ -9,14 +9,17 @@ repository convention of falling back to `dotnet` on PATH. Both wrappers pass fr
 isolated source tree without a local SDK: routed NativeAOT publish/execution and the
 production SDK positive/negative cases use the system SDK 10.0.401. Logs are under
 `artifacts/a0-path-sdk-routed-retry.log` and `artifacts/a0-path-sdk-negatives.log`.
-Remote CI for the correction must be checked before treating package publication as restored.
-A1 (#303) remains the next authoring slice; it has not started.
+Remote [CI 35532769554](https://github.com/RichiCoder1/lucent/actions/runs/35532769554)
+passes managed, package verification, and publication at `ec3749ba`.
+The owner authorized completing A1–A7. Compiler/companion, lifecycle, routing, and editor
+implementation are active; consumer migrations follow the tested APIs. The historical
+September 14 pause below is superseded. See the execution map for slice dependencies.
 
 ## Application and component authoring — September 14, 2026
 
 [A0 #302](https://github.com/RichiCoder1/lucent/issues/302) is complete under
-[parent #301](https://github.com/RichiCoder1/lucent/issues/301). **Pause here at the owner's
-request; do not start A1–A7 until resumed.** Their dependencies and remaining product scope
+[parent #301](https://github.com/RichiCoder1/lucent/issues/301). The owner paused after A0
+at this historical checkpoint and resumed on September 20. Dependencies and remaining product scope
 are in the [execution map](../plans/application-routing-component-authoring-execution.md).
 
 The [A0 record](../plans/application-routing-component-authoring-a0.md) selects Roslyn 5.9.0

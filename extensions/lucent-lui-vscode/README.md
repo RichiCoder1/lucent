@@ -29,6 +29,13 @@ identify their lint rule and resolve against the current document/project before
 providing edits. See [formatting and linting](../../docs/LUI-FORMATTING.md) for
 supported configuration, safe content conversions and scoped exceptions.
 
+Named-component projects also support ordinary declarations and support-only `.lui`
+files. Models and component companions participate in hover, completion, signature help,
+definition, references, and cross-language rename against current unsaved text. Enable
+`LucentLuiNamedComponents` through the matching SDK; see
+[application authoring](../../docs/APPLICATION-AUTHORING.md). No generated C# source files
+need to be checked in for these editor features.
+
 ## Development
 
 Run the extension tests from the repository root:

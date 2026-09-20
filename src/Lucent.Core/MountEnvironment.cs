@@ -123,6 +123,8 @@ internal sealed class MountEnvironment
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(parent);
+        if (typeof(T) == typeof(ThemeContext))
+            return (T)(object)Theme;
         for (var frame = _contexts; frame is not null; frame = frame.Parent)
             if (ReferenceEquals(frame.Identity, ContextIdentity<T>.Value))
                 return (T)frame.Value;
@@ -153,6 +155,17 @@ internal sealed class MountEnvironment
                 $"Requirement '{source.Member}' for exact type '{source.TypeName}' at {source.Location} has no application service binding at mount {mountPath}."
             );
         return binding.Resolve<T>(source, mountPath);
+    }
+
+    internal T? OptionalService<T>(ComponentRequirementSource source, Element parent)
+        where T : class
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(parent);
+        var binding = Services;
+        return binding is null
+            ? null
+            : binding.ResolveOptional<T>(source, DescribeMountPath(parent));
     }
 
     internal ThemeContext Theme =>

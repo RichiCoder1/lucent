@@ -1,14 +1,13 @@
 <Project>
   <PropertyGroup Condition="'$(LucentLuiPreparedAuthoring)' == 'true'">
-    <_LucentPreparationTools>$(MSBuildThisFileDirectory)..\tools\preparation\net10.0</_LucentPreparationTools>
-    <_LucentPreparationHost>$(_LucentPreparationTools)\Lucent.Lui.Sdk.PreparationHost.dll</_LucentPreparationHost>
-    <_LucentPreparationTasks>$(_LucentPreparationTools)\Lucent.Lui.Sdk.PreparationTasks.dll</_LucentPreparationTasks>
-    <_LucentPreparationDotNet>$(MSBuildToolsPath)\..\..\dotnet.exe</_LucentPreparationDotNet>
-    <_LucentPreparationRoot>$(IntermediateOutputPath)lucent-preparation</_LucentPreparationRoot>
-    <_LucentPreparationManifest>$(_LucentPreparationRoot)\manifest.json</_LucentPreparationManifest>
-    <_LucentPreparationEmitterPath>$(_LucentPreparationRoot)\emitter-path.txt</_LucentPreparationEmitterPath>
-    <_LucentPreparationGlobals>$(_LucentPreparationRoot)\global-properties.json</_LucentPreparationGlobals>
-    <_LucentPreparationEmitterRoot>$(BaseIntermediateOutputPath)lucent-preparation-cache\emitter</_LucentPreparationEmitterRoot>
+    <_LucentPreparationTools Condition="'$(LucentLuiPreparationTools)' != ''">$(LucentLuiPreparationTools)</_LucentPreparationTools>
+    <_LucentPreparationTools Condition="'$(_LucentPreparationTools)' == ''">$(MSBuildThisFileDirectory)..\tools\preparation\net10.0</_LucentPreparationTools>
+    <_LucentPreparationHost Condition="'$(LucentLuiPreparationHost)' != ''">$(LucentLuiPreparationHost)</_LucentPreparationHost>
+    <_LucentPreparationHost Condition="'$(_LucentPreparationHost)' == ''">$(_LucentPreparationTools)\Lucent.Lui.Sdk.PreparationHost.dll</_LucentPreparationHost>
+    <_LucentPreparationTasks Condition="'$(LucentLuiPreparationTasks)' != ''">$(LucentLuiPreparationTasks)</_LucentPreparationTasks>
+    <_LucentPreparationTasks Condition="'$(_LucentPreparationTasks)' == ''">$(_LucentPreparationTools)\Lucent.Lui.Sdk.PreparationTasks.dll</_LucentPreparationTasks>
+    <_LucentPreparationDotNet Condition="'$(LucentLuiPreparationDotNet)' != ''">$(LucentLuiPreparationDotNet)</_LucentPreparationDotNet>
+    <_LucentPreparationDotNet Condition="'$(_LucentPreparationDotNet)' == ''">$(MSBuildToolsPath)\..\..\dotnet.exe</_LucentPreparationDotNet>
   </PropertyGroup>
 
   <UsingTask
@@ -22,6 +21,13 @@
     BeforeTargets="CoreCompile"
     Condition="'$(LucentLuiPreparedAuthoring)' == 'true' and '$(LucentLuiSkipPreparation)' != 'true' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(TargetFramework)' != ''"
   >
+    <PropertyGroup>
+      <_LucentPreparationRoot>$(IntermediateOutputPath)lucent-preparation</_LucentPreparationRoot>
+      <_LucentPreparationManifest>$(_LucentPreparationRoot)\manifest.json</_LucentPreparationManifest>
+      <_LucentPreparationEmitterPath>$(_LucentPreparationRoot)\emitter-path.txt</_LucentPreparationEmitterPath>
+      <_LucentPreparationGlobals>$(_LucentPreparationRoot)\global-properties.json</_LucentPreparationGlobals>
+      <_LucentPreparationEmitterRoot>$(BaseIntermediateOutputPath)lucent-preparation-cache\emitter</_LucentPreparationEmitterRoot>
+    </PropertyGroup>
     <Delete Files="$(TargetPath);@(IntermediateAssembly);$(IntermediateOutputPath)ref\$(TargetFileName);$(IntermediateOutputPath)refint\$(TargetFileName)" />
     <Error Condition="!Exists('$(_LucentPreparationDotNet)')" Text="Lucent preparation dotnet host was not found: $(_LucentPreparationDotNet)" />
     <Error Condition="!Exists('$(_LucentPreparationHost)')" Text="Lucent preparation host was not found: $(_LucentPreparationHost)" />

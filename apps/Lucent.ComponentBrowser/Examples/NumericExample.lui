@@ -12,7 +12,8 @@ style NumericExampleFieldStyle {
     MinWidth: 220;
 }
 
-public component NumericExample(ComponentBrowserState browser) {
+public component NumericExample() {
+    context ComponentBrowserState browser;
     decimal numberValue = 12.5m;
     double sliderValue = 64d;
     readonly NumericEditOptions numberOptions = new(

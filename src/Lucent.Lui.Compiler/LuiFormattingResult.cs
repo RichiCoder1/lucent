@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Lucent.Lui.Compiler;
 
@@ -254,43 +256,101 @@ public static partial class LuiFormatter
         if (range is { } selected)
         {
             if (selected.Start < prefix.Length)
-                return new LuiFormattingResult(
-                    LuiFormattingStatus.Unavailable,
-                    source,
-                    source,
-                    new[]
-                    {
-                        new LuiDiagnostic(
-                            "LUI6002",
-                            "Select a complete component boundary, or format the whole file to include ordinary declarations.",
-                            selected
-                        ),
-                    }
-                );
-            var component = FormatSafely(
-                componentSource,
-                new LuiSpan(selected.Start - prefix.Length, selected.Length),
-                options,
-                cancellationToken
-            );
-            if (component.Status is LuiFormattingStatus.Failed or LuiFormattingStatus.Unavailable)
-                return new LuiFormattingResult(
-                    component.Status,
-                    source,
-                    source,
-                    component
-                        .Diagnostics.Select(diagnostic => new LuiDiagnostic(
-                            diagnostic.Id,
-                            diagnostic.Message,
-                            new LuiSpan(
-                                diagnostic.Span.Start + prefix.Length,
-                                diagnostic.Span.Length
+            {
+                if (selected.End > prefix.Length)
+                    return new LuiFormattingResult(
+                        LuiFormattingStatus.Unavailable,
+                        source,
+                        source,
+                        new[]
+                        {
+                            new LuiDiagnostic(
+                                "LUI6002",
+                                "Select complete ordinary declarations or a complete component boundary.",
+                                selected
                             ),
-                            diagnostic.Severity
-                        ))
-                        .ToArray()
+                        }
+                    );
+                var root = CSharpSyntaxTree
+                    .ParseText(
+                        prefix,
+                        new CSharpParseOptions(LanguageVersion.Preview),
+                        cancellationToken: cancellationToken
+                    )
+                    .GetCompilationUnitRoot(cancellationToken);
+                var declarations = root
+                    .Members.SelectMany(static member =>
+                        member is FileScopedNamespaceDeclarationSyntax @namespace
+                            ? @namespace.Members
+                            : [member]
+                    )
+                    .Where(member =>
+                        member.SpanStart >= selected.Start && member.Span.End <= selected.End
+                    )
+                    .ToArray();
+                if (declarations.Length == 0)
+                    return new LuiFormattingResult(
+                        LuiFormattingStatus.Unavailable,
+                        source,
+                        source,
+                        new[]
+                        {
+                            new LuiDiagnostic(
+                                "LUI6002",
+                                "The selected range contains no complete ordinary declaration.",
+                                selected
+                            ),
+                        }
+                    );
+                var declarationsText = prefix;
+                var layout = new LuiCSharpLayout(options);
+                var newline = options.Newline(source);
+                foreach (
+                    var declaration in declarations.OrderByDescending(static item => item.SpanStart)
+                )
+                {
+                    var replacement = layout
+                        .Declaration(declaration)
+                        .Render(options, newline)
+                        .TrimEnd();
+                    declarationsText =
+                        declarationsText.Substring(0, declaration.SpanStart)
+                        + replacement
+                        + declarationsText.Substring(declaration.Span.End);
+                }
+                formatted = declarationsText + componentSource;
+            }
+            else
+            {
+                var component = FormatSafely(
+                    componentSource,
+                    new LuiSpan(selected.Start - prefix.Length, selected.Length),
+                    options,
+                    cancellationToken
                 );
-            formatted = prefix + component.Text;
+                if (
+                    component.Status
+                    is LuiFormattingStatus.Failed
+                        or LuiFormattingStatus.Unavailable
+                )
+                    return new LuiFormattingResult(
+                        component.Status,
+                        source,
+                        source,
+                        component
+                            .Diagnostics.Select(diagnostic => new LuiDiagnostic(
+                                diagnostic.Id,
+                                diagnostic.Message,
+                                new LuiSpan(
+                                    diagnostic.Span.Start + prefix.Length,
+                                    diagnostic.Span.Length
+                                ),
+                                diagnostic.Severity
+                            ))
+                            .ToArray()
+                    );
+                formatted = prefix + component.Text;
+            }
         }
         else
         {

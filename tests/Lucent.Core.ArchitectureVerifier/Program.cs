@@ -167,6 +167,8 @@ static void VerifyLuiMetadata(
         ["MenuSeparator"] = 1,
         ["NavigationBoundary"] = 1,
         ["NavigationTarget"] = 1,
+        ["Router"] = 1,
+        ["RouterOutlet"] = 1,
     };
     var actual = annotated
         .GroupBy(method => metadata.GetString(method.Name))

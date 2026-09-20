@@ -10,6 +10,20 @@ namespace Lucent.Lui.Preparation;
 
 public static class LuiPreparationEngine
 {
+    /// <summary>Gets the deterministic generated hint name for one document's ordinary declarations.</summary>
+    public static string DeclarationsHintName(string logicalPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalPath);
+        return Hint("Declarations", logicalPath);
+    }
+
+    /// <summary>Gets the deterministic generated hint name for one document's early named-component declaration.</summary>
+    public static string ComponentDeclarationsHintName(string logicalPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalPath);
+        return Hint("Component", logicalPath);
+    }
+
     public static LuiPreparationResult Prepare(
         LuiPreparationRequest request,
         CancellationToken cancellationToken = default
@@ -188,7 +202,7 @@ public static class LuiPreparationEngine
                 );
             refinedComponentSources.Add(
                 new LuiPreparedSource(
-                    Hint("Component", item.Document.LogicalPath),
+                    ComponentDeclarationsHintName(item.Document.LogicalPath),
                     MapComponentSource(
                         lowered.PreparedComponentDeclaration!,
                         item.Document.PhysicalPath,
@@ -276,7 +290,7 @@ public static class LuiPreparationEngine
     {
         if (!String.IsNullOrWhiteSpace(item.Projection.DeclarationsSource))
             yield return new LuiPreparedSource(
-                Hint("Declarations", item.Document.LogicalPath),
+                DeclarationsHintName(item.Document.LogicalPath),
                 MapAuthoredSource(
                     item.Projection.DeclarationsSource,
                     item.Document.PhysicalPath,
@@ -286,7 +300,7 @@ public static class LuiPreparationEngine
             );
         if (!String.IsNullOrWhiteSpace(item.Projection.EarlyComponentDeclaration))
             yield return new LuiPreparedSource(
-                Hint("Component", item.Document.LogicalPath),
+                ComponentDeclarationsHintName(item.Document.LogicalPath),
                 MapComponentSource(
                     item.Projection.EarlyComponentDeclaration!,
                     item.Document.PhysicalPath,

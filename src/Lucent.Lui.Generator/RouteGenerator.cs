@@ -60,6 +60,16 @@ public sealed class RouteGenerator : IIncrementalGenerator
         "Invalid route component",
         "Route '{0}' component must expose exactly one accessible, non-generic static Create method callable without arguments and returning ComponentRecipe"
     );
+    private static readonly DiagnosticDescriptor MissingComponent = Error(
+        "LUI4209",
+        "Missing route component",
+        "Route '{0}' must declare Component because route module '{1}' uses generated component mappings"
+    );
+    private static readonly DiagnosticDescriptor GeneratedMemberCollision = Error(
+        "LUI4210",
+        "Route module member collision",
+        "Route module '{0}' cannot generate member '{1}' because that name is already declared or generated"
+    );
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -374,6 +384,26 @@ public sealed class RouteGenerator : IIncrementalGenerator
                 .ToArray();
             if (owned.Length == 0)
                 continue;
+            if (owned.Any(route => route.Component is not null))
+                foreach (var route in owned.Where(route => route.Component is null))
+                    output.ReportDiagnostic(
+                        Diagnostic.Create(
+                            MissingComponent,
+                            route.Location,
+                            route.Type.Name,
+                            module.Type.Name
+                        )
+                    );
+            var memberCollisions = MemberCollisions(module, owned).ToArray();
+            foreach (var collision in memberCollisions)
+                output.ReportDiagnostic(
+                    Diagnostic.Create(
+                        GeneratedMemberCollision,
+                        collision.Location,
+                        module.Type.Name,
+                        collision.Name
+                    )
+                );
             var parsed = new Dictionary<RouteModel, TemplateModel>();
             foreach (var route in owned)
             {
@@ -424,9 +454,11 @@ public sealed class RouteGenerator : IIncrementalGenerator
             if (output.CancellationToken.IsCancellationRequested)
                 return;
             if (
-                owned.Any(route =>
+                memberCollisions.Length != 0
+                || owned.Any(route =>
                     !parsed.ContainsKey(route)
                     || !route.ComponentValid
+                    || (owned.Any(item => item.Component is not null) && route.Component is null)
                     || route.Parameters.Any(parameter =>
                         parameter.Kind == ParameterKind.Unsupported
                     )
@@ -457,6 +489,45 @@ public sealed class RouteGenerator : IIncrementalGenerator
                     "the owning module is missing or invalid"
                 )
             );
+    }
+
+    private static IEnumerable<(string Name, Location Location)> MemberCollisions(
+        ModuleModel module,
+        RouteModel[] routes
+    )
+    {
+        var generated = new List<(string Name, Location Location)> { ("Module", module.Location) };
+        foreach (var route in routes)
+        {
+            generated.Add((route.FactoryName, route.Location));
+            generated.Add((route.FactoryName + "Definition", route.Location));
+            generated.Add(("Create" + route.FactoryName + "Definition", route.Location));
+        }
+        if (routes.Any(route => route.Component is not null))
+            generated.Add(("CreateComponent", module.Location));
+        if (routes.All(route => route.Component is not null))
+        {
+            generated.Add(("Bundle", module.Location));
+            generated.Add(("CreateDestination", module.Location));
+        }
+
+        foreach (var group in generated.GroupBy(item => item.Name, StringComparer.Ordinal))
+        {
+            var entries = group.ToArray();
+            if (entries.Length > 1)
+                foreach (var entry in entries)
+                    yield return entry;
+        }
+        var generatedNames = new HashSet<string>(
+            generated.Select(item => item.Name),
+            StringComparer.Ordinal
+        );
+        foreach (
+            var member in module
+                .Type.GetMembers()
+                .Where(member => generatedNames.Contains(member.Name))
+        )
+            yield return (member.Name, member.Locations.FirstOrDefault() ?? module.Location);
     }
 
     private static bool TryTemplate(RouteModel route, out TemplateModel model, out string error)
@@ -784,6 +855,41 @@ public sealed class RouteGenerator : IIncrementalGenerator
             );
             source.AppendLine("    }");
         }
+        if (routes.All(route => route.Component is not null))
+        {
+            source.AppendLine(
+                "    public static global::Lucent.Core.RouteBundle Bundle { get; } = global::Lucent.Core.RouteBundle.Create(new global::Lucent.Core.RouteModuleDescriptor[] { Module }, CreateDestination);"
+            );
+            source.AppendLine(
+                "    private static global::Lucent.Core.RouteDestination CreateDestination(global::Lucent.Core.RouteLevelDescriptor level)"
+            );
+            source.AppendLine("    {");
+            foreach (var route in routes)
+            {
+                var chain = Ancestors(route, routes).Reverse().Concat(new[] { route }).ToArray();
+                for (var index = 0; index < chain.Length; index++)
+                {
+                    var component = chain[index].Component!;
+                    source
+                        .Append("        if (global::System.Object.ReferenceEquals(level, ")
+                        .Append(DefinitionProperty(route))
+                        .Append(".Branch[")
+                        .Append(index)
+                        .AppendLine("]))")
+                        .Append(
+                            "            return new global::Lucent.Core.RouteDestination(typeof("
+                        )
+                        .Append(component.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
+                        .Append("), ")
+                        .Append(component.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
+                        .AppendLine(".Create());");
+                }
+            }
+            source.AppendLine(
+                "        throw new global::System.ArgumentException(\"The route level has no component mapping in this module.\", nameof(level));"
+            );
+            source.AppendLine("    }");
+        }
         source.AppendLine("}");
         output.AddSource(
             "Lucent.Routes." + Hash(module.Type.ToDisplayString()) + ".g.cs",
@@ -908,7 +1014,7 @@ public sealed class RouteGenerator : IIncrementalGenerator
                 .Append(", ")
                 .Append(level.Source.Column)
                 .Append(
-                    "), static (definition, match, content, live) => global::Lucent.Core.Context.Provide(new global::Lucent.Core.RouteContext<"
+                    "), static (definition, match, live) => new global::Lucent.Core.RouteContext<"
                 )
                 .Append(level.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
                 .Append(">(definition, new ")
@@ -922,7 +1028,11 @@ public sealed class RouteGenerator : IIncrementalGenerator
                         )
                     )
                 )
-                .AppendLine("), live), content)),");
+                .Append(
+                    "), live), static (context, content) => global::Lucent.Core.Context.Provide((global::Lucent.Core.RouteContext<"
+                )
+                .Append(level.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat))
+                .AppendLine(">)context, content)),");
             previous = level;
         }
         source.AppendLine("        });");

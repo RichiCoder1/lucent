@@ -65,6 +65,16 @@ output. They invoke the actual packaged host and targets. Logs and candidate has
 are retained under `artifacts/a0-routed-package` and
 `artifacts/a0-production-sdk-negatives`; neither check takes desktop focus.
 
+`./tools/Test-ApplicationAuthoringPackage.ps1 -Feed <local-package-directory>
+-Version <exact-prerelease-version>` checks the Windows all-`.lui` authoring sample
+against candidate packages in an isolated restore. It builds and executes the managed
+app, publishes and executes NativeAOT, and requires the app's positive smoke marker.
+Repeat with `-Companion` to verify the equivalent partial C# companion, independent
+mounts, and setup/cleanup behavior through the same package-only path.
+This check briefly opens windows, so run it during an authorized desktop testing window.
+Its evidence and package hashes are under `artifacts/aw`; it is separate from the
+non-interactive everyday managed suite.
+
 ## Additional suites
 
 Presentation motion uses deterministic `MotionContracts`, `StockMotionContracts` and `MotionProjectionContracts` in Core, real-pixel `MotionPaintTests` in Skia, and the headless and Windows scheduling contracts. They cover retargeting, cancellation, retained geometry/shaping, image ownership, reduced motion and accessibility snapshot reuse. The opt-in `MotionPerformanceTests` compares 1, 100 and 1,000 active tracks with `Motion.None`; set `LUCENT_MOTION_CHARACTERIZATION` to an artifact directory to write phase/allocations reports. Issue Browser's `StockRowHoverUsesRetainedPaintAndKeepsSelectionImmediate` adds its 10,000-item virtualized source as a consumer. These measurements characterize the current machine rather than imposing a universal timing threshold.

@@ -6,7 +6,8 @@ style MenusExampleStyle {
     MinWidth: 0;
 }
 
-public component MenusExample(ComponentBrowserState browser) {
+public component MenusExample() {
+    context ComponentBrowserState browser;
     int activationCount = 0;
     string menuMessage = "No menu command invoked yet.";
     void ActivateExample() {
@@ -21,7 +22,7 @@ public component MenusExample(ComponentBrowserState browser) {
             The button keeps its primary action. The context menu adds secondary commands and a nested branch without making the menu part of the ordinary tab sequence.
         </Text>
         <ContextMenu
-            menu={() => MenusExampleMenu(SetMenuMessage)}
+            menu={() => MenusExampleMenu.Create(SetMenuMessage)}
             name="component-browser.menus.context"
         >
             <Button

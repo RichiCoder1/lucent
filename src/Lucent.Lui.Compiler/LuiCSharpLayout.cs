@@ -28,6 +28,8 @@ internal sealed class LuiCSharpLayout
                 .GetRoot()
         );
 
+    internal D Declaration(MemberDeclarationSyntax declaration) => Format(declaration);
+
     internal D Requirement(LuiRequirementSyntax requirement) =>
         D.Concat(
             D.Text(requirement.Keyword.Text + " "),

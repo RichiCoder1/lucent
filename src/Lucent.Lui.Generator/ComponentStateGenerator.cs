@@ -178,9 +178,18 @@ public sealed class ComponentStateGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var attribute = property
+            var attributes = property
                 .GetAttributes()
-                .Single(item => item.AttributeClass?.ToDisplayString() == StateAttributeName);
+                .Where(item => item.AttributeClass?.ToDisplayString() == StateAttributeName)
+                .ToArray();
+            if (attributes.Length != 1)
+            {
+                diagnostics.Add(
+                    Diagnostic.Create(InvalidProperty, location, type.Name + "." + property.Name)
+                );
+                continue;
+            }
+            var attribute = attributes[0];
             var hasConstant = attribute.ConstructorArguments.Length == 1;
             var initializer = attribute
                 .NamedArguments.FirstOrDefault(pair => pair.Key == "Initializer")

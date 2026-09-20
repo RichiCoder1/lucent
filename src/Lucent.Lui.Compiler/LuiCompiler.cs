@@ -269,7 +269,9 @@ public static partial class LuiCompiler
                 document,
                 identity,
                 contentContributions,
-                diagnostics
+                diagnostics,
+                namedComponent,
+                namedPlan
             )
             .ToDictionary(pair => pair.Key, pair => pair.Value);
         var nullStyleExpressions = new HashSet<int>();
@@ -292,7 +294,9 @@ public static partial class LuiCompiler
                 document,
                 identity,
                 contentContributions,
-                implicitComponentDiagnostics
+                implicitComponentDiagnostics,
+                namedComponent,
+                namedPlan
             )
         )
             contentPlans[pair.Key] = pair.Value;
@@ -1484,6 +1488,7 @@ public static partial class LuiCompiler
                         ?? Enumerable.Empty<IMethodSymbol>()
                     : Enumerable.Empty<IMethodSymbol>()
             )
+            .Concat(NamedComponentMethods(model, invocation.Expression))
             .Where(method => method is not null && IsComponent(model.Compilation, method!))
             .Cast<IMethodSymbol>()
             .GroupBy(
@@ -1494,6 +1499,29 @@ public static partial class LuiCompiler
             )
             .Select(group => group.First())
             .ToArray();
+    }
+
+    private static IEnumerable<IMethodSymbol> NamedComponentMethods(
+        SemanticModel model,
+        ExpressionSyntax expression
+    )
+    {
+        var info = model.GetSymbolInfo(expression);
+        return new[] { info.Symbol as INamedTypeSymbol }
+            .Concat(info.CandidateSymbols.OfType<INamedTypeSymbol>())
+            .Concat(
+                expression is IdentifierNameSyntax identifier
+                    ? model
+                        .LookupNamespacesAndTypes(
+                            expression.SpanStart,
+                            name: identifier.Identifier.ValueText
+                        )
+                        .OfType<INamedTypeSymbol>()
+                    : Enumerable.Empty<INamedTypeSymbol>()
+            )
+            .Where(type => type is not null)
+            .Cast<INamedTypeSymbol>()
+            .SelectMany(static type => type.GetMembers("Create").OfType<IMethodSymbol>());
     }
 
     private static string ComponentName(IMethodSymbol method) =>
@@ -2006,7 +2034,9 @@ public static partial class LuiCompiler
         LuiDocumentSyntax document,
         LuiFreshnessIdentity identity,
         IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
-        List<LuiDiagnostic> diagnostics
+        List<LuiDiagnostic> diagnostics,
+        bool namedComponent,
+        NamedComponentPlan? namedPlan
     )
     {
         var plans = new Dictionary<int, ContentPlan>();
@@ -2120,7 +2150,10 @@ public static partial class LuiCompiler
                             identity,
                             mapped.Source.Start,
                             candidate,
-                            contentContributions
+                            contentContributions,
+                            true,
+                            namedComponent,
+                            namedPlan
                         )
                     )
                     .ToArray();
@@ -2193,7 +2226,9 @@ public static partial class LuiCompiler
                             mapped.Source.Start,
                             item.Candidate,
                             contentContributions,
-                            item.WrapLiveReader
+                            item.WrapLiveReader,
+                            namedComponent,
+                            namedPlan
                         )
                     )
                     .ToArray();
@@ -2211,7 +2246,10 @@ public static partial class LuiCompiler
                         identity,
                         mapped.Source.Start,
                         candidate,
-                        contentContributions
+                        contentContributions,
+                        true,
+                        namedComponent,
+                        namedPlan
                     )
                 )
                 .ToArray();
@@ -2288,7 +2326,9 @@ public static partial class LuiCompiler
         int elementStart,
         IParameterSymbol parameter,
         IReadOnlyDictionary<int, ContentContributionKind> contentContributions,
-        bool wrapLiveReader = true
+        bool wrapLiveReader,
+        bool namedComponent,
+        NamedComponentPlan? namedPlan
     )
     {
         var candidate = ContentPlan.For(parameter, wrapLiveReader);
@@ -2309,7 +2349,9 @@ public static partial class LuiCompiler
                 new HashSet<int>()
             ),
             [parameter.ContainingSymbol.ContainingType.ToDisplayString()],
-            suppressDefaultContentAttribute: true
+            suppressDefaultContentAttribute: true,
+            namedComponent: namedComponent,
+            namedPlan: namedPlan
         );
         var diagnostics = new List<LuiDiagnostic>();
         writer.Document(diagnostics);
@@ -2901,6 +2943,20 @@ public static partial class LuiCompiler
         internal bool HasTrackedDependencies { get; set; }
     }
 
+    private sealed class RequirementPlan
+    {
+        internal RequirementPlan(string type, string metadataType, bool optional)
+        {
+            Type = type;
+            MetadataType = metadataType;
+            Optional = optional;
+        }
+
+        internal string Type { get; }
+        internal string MetadataType { get; }
+        internal bool Optional { get; }
+    }
+
     private sealed class BindingPlans
     {
         internal BindingPlans(
@@ -2916,7 +2972,7 @@ public static partial class LuiCompiler
             HashSet<int> nullChecks,
             IReadOnlyDictionary<string, StatePlan>? states = null,
             HashSet<int>? liveValues = null,
-            IReadOnlyDictionary<int, string>? requirementTypes = null,
+            IReadOnlyDictionary<int, RequirementPlan>? requirementTypes = null,
             IReadOnlyDictionary<int, string>? providerTypes = null
         )
         {
@@ -2932,12 +2988,12 @@ public static partial class LuiCompiler
             NullChecks = nullChecks;
             States = states ?? new Dictionary<string, StatePlan>();
             LiveValues = liveValues ?? [];
-            RequirementTypes = requirementTypes ?? new Dictionary<int, string>();
+            RequirementTypes = requirementTypes ?? new Dictionary<int, RequirementPlan>();
             ProviderTypes = providerTypes ?? new Dictionary<int, string>();
         }
 
         internal IReadOnlyDictionary<int, string> Components { get; }
-        internal IReadOnlyDictionary<int, string> RequirementTypes { get; }
+        internal IReadOnlyDictionary<int, RequirementPlan> RequirementTypes { get; }
         internal IReadOnlyDictionary<int, string> ProviderTypes { get; }
         internal IReadOnlyDictionary<int, ContentPlan> Content { get; }
         internal IReadOnlyDictionary<int, StylePropertyPlan> Properties { get; }
@@ -3583,7 +3639,12 @@ public static partial class LuiCompiler
                     && method.Identifier.ValueText == "owner"
                 )
             )
-                Hidden("            var owner = " + stateOwner + ";\n");
+                Hidden(
+                    "            var owner = "
+                        + stateOwner
+                        + (namedComponent ? ".MountOwner" : String.Empty)
+                        + ";\n"
+                );
             foreach (var field in fields)
                 EmitStateInitializer(
                     component,

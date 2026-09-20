@@ -23,6 +23,18 @@ public sealed class ComponentRequirementAttribute : Attribute
         int line,
         int column
     )
+        : this(exactType, kind, member, projectRelativePath, line, column, optional: false) { }
+
+    /// <summary>Creates immutable metadata for one declared requirement with explicit optionality.</summary>
+    public ComponentRequirementAttribute(
+        Type exactType,
+        ComponentRequirementKind kind,
+        string member,
+        string projectRelativePath,
+        int line,
+        int column,
+        bool optional
+    )
     {
         ArgumentNullException.ThrowIfNull(exactType);
         if (!Enum.IsDefined(kind))
@@ -39,6 +51,7 @@ public sealed class ComponentRequirementAttribute : Attribute
         ArgumentOutOfRangeException.ThrowIfLessThan(column, 1);
         Line = line;
         Column = column;
+        Optional = optional;
     }
 
     /// <summary>Gets the exact closed required type.</summary>
@@ -58,6 +71,9 @@ public sealed class ComponentRequirementAttribute : Attribute
 
     /// <summary>Gets the one-based source column.</summary>
     public int Column { get; }
+
+    /// <summary>Gets whether a missing application service is accepted as <see langword="null"/>.</summary>
+    public bool Optional { get; }
 }
 
 /// <summary>Identifies one generated component requirement at its authored source location.</summary>
@@ -143,6 +159,10 @@ public static class ComponentRequirements
     /// <summary>Starts a plan with one exact borrowed application service.</summary>
     public static ComponentRequirementPlan<T> Service<T>(ComponentRequirementSource source)
         where T : class => ComponentRequirementPlan<T>.StartService<T>(source);
+
+    /// <summary>Starts a plan with one optional exact borrowed application service.</summary>
+    public static ComponentRequirementPlan<T?> OptionalService<T>(ComponentRequirementSource source)
+        where T : class => ComponentRequirementPlan<T?>.StartOptionalService<T>(source);
 }
 
 /// <summary>An opaque closed typed plan resolved once at a component's mount position.</summary>
@@ -219,6 +239,32 @@ public sealed class ComponentRequirementPlan<TValues>
         );
     }
 
+    /// <summary>Adds one optional exact borrowed application service after all contextual values.</summary>
+    public ComponentRequirementPlan<(
+        TValues Previous,
+        TService? Value
+    )> AndOptionalService<TService>(ComponentRequirementSource source)
+        where TService : class
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ThrowIfSelected();
+        var identity = new RequirementIdentity(
+            ContextIdentity<TService>.Value,
+            ComponentRequirementKind.Inject,
+            source
+        );
+        ValidateDistinct(identity);
+        return new ComponentRequirementPlan<(TValues, TService?)>(
+            (environment, parent) =>
+                (
+                    _resolve(environment, parent),
+                    environment.OptionalService<TService>(source, parent)
+                ),
+            Append(identity),
+            true
+        );
+    }
+
     /// <summary>Maps the fully resolved values to a generated component-specific bundle.</summary>
     public ComponentRequirementPlan<TResult> Select<TResult>(Func<TValues, TResult> selector)
     {
@@ -275,6 +321,24 @@ public sealed class ComponentRequirementPlan<TValues>
         );
         return new ComponentRequirementPlan<TService>(
             (environment, parent) => environment.RequireService<TService>(source, parent),
+            [identity],
+            true
+        );
+    }
+
+    internal static ComponentRequirementPlan<TService?> StartOptionalService<TService>(
+        ComponentRequirementSource source
+    )
+        where TService : class
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var identity = new RequirementIdentity(
+            ContextIdentity<TService>.Value,
+            ComponentRequirementKind.Inject,
+            source
+        );
+        return new ComponentRequirementPlan<TService?>(
+            (environment, parent) => environment.OptionalService<TService>(source, parent),
             [identity],
             true
         );

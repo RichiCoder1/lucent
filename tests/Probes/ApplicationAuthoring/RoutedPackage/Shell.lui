@@ -3,8 +3,10 @@ using Lucent.Core;
 
 public component Shell() {
     context RouteContext<ShellRoute> route;
+    context NavigationSession navigation;
 
     Setup(owner) {
+        Acceptance.Navigation = navigation;
         Acceptance.Require(route.Definition.Id.Value == "shell", "Shell context was not supplied.");
         Acceptance.ShellMounts++;
         owner.OnDispose(() => Acceptance.ShellDisposals++);
@@ -12,6 +14,6 @@ public component Shell() {
 
     <Column>
         <Text>routed shell</Text>
-        {Routing.Child()}
+        <RouterOutlet />
     </Column>
 }

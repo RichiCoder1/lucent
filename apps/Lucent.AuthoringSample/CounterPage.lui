@@ -1,0 +1,62 @@
+namespace Lucent.AuthoringSample;
+using Lucent.Core;
+
+style CounterPageLayout {
+    Axis: LayoutAxis.Column;
+    Spacing: 12;
+    MinWidth: 0;
+}
+
+style CounterActions {
+    Axis: LayoutAxis.Row;
+    Spacing: 8;
+    CrossAlignment: LayoutAlignment.Center;
+    Wrap: true;
+}
+
+style CounterEditor {
+    Height: 144;
+    MinHeight: 120;
+}
+
+public component CounterPage() {
+    context RouteContext<CounterRoute> route;
+    int count = 0;
+    [Owned]
+    readonly EditorSession notes = new(
+        owner,
+        "authoring-counter-notes",
+        "The editor session belongs to this mounted route.",
+        multiline: true
+    );
+
+    string CountSummary() => "Count: " + count;
+
+    string NotesSummary() => "Draft characters: " + notes.Text.Length;
+
+    void Increment() {
+        count += 1;
+    }
+
+    void Reset() {
+        count = 0;
+    }
+
+    <Layout style={CounterPageLayout}>
+        <Text>Counter and editor</Text>
+        <Text content={() => "Counter route: " + route.Parameters.Id} />
+        <Status content={CountSummary} />
+        <Layout style={CounterActions}>
+            <Button onInvoke={Increment} name="authoring.counter.increment">Increment</Button>
+            <Button onInvoke={Reset} name="authoring.counter.reset">Reset</Button>
+        </Layout>
+        <TextArea
+            session={notes}
+            label="Counter notes"
+            placeholder="Write a short note"
+            style={CounterEditor}
+            name="authoring.counter.notes"
+        />
+        <Status content={NotesSummary} />
+    </Layout>
+}

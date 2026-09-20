@@ -13,7 +13,8 @@ style FeedbackActionsStyle {
     Wrap: true;
 }
 
-public component FeedbackExample(ComponentBrowserState browser) {
+public component FeedbackExample() {
+    context ComponentBrowserState browser;
     float progress = 0.38f;
     void AdvanceProgress() {
         var next = progress + 0.16f;

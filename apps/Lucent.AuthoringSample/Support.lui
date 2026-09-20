@@ -1,0 +1,102 @@
+namespace Lucent.AuthoringSample;
+using System.Linq;
+using System.Text.Json.Serialization;
+using Lucent.Core;
+
+[LucentRouteModule(RouteFallbackPolicy.Reject)]
+public static partial class AuthoringRoutes {
+}
+
+[LucentRoute(typeof(AuthoringRoutes), "/", Id = "shell", Component = typeof(AuthoringShell))]
+public readonly record struct ShellRoute();
+
+[LucentRoute(typeof(AuthoringRoutes), "/counter/{id}", Id = "counter", Parent = typeof(ShellRoute), Component = typeof(CounterPage))]
+public readonly record struct CounterRoute(int Id);
+
+[LucentRoute(typeof(AuthoringRoutes), "/json/{id}", Id = "json", Parent = typeof(ShellRoute), Component = typeof(JsonPage))]
+public readonly record struct JsonRoute(int Id);
+
+public sealed record SamplePayload(int Id, string Name);
+
+public sealed record AuthoringHostContext(string PlatformName);
+
+[JsonSerializable(typeof(SamplePayload))]
+public partial class AppJsonContext : JsonSerializerContext {
+}
+
+public static class AuthoringSampleChecks {
+    public static void Require(bool condition, string message) {
+        if (!condition)
+            throw new InvalidOperationException(message);
+    }
+
+    public static void RequireContent(Composition composition, string expected) {
+        composition.Flush();
+        Require(
+            AuthoringSampleSmoke.Flatten(composition.SemanticSnapshot()!).Any(
+                node => node.Name == expected
+            ),
+            $"The mounted application did not expose '{expected}'."
+        );
+    }
+}
+
+public static partial class AuthoringSampleCompanion {
+    public static void Verify() {
+        VerifyCore();
+    }
+
+    static partial void VerifyCore();
+}
+
+public static class AuthoringSampleSmoke {
+    public static void Verify(ApplicationSession session) {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var composition = session.Composition;
+        AuthoringSampleChecks.RequireContent(composition, "Shell route: shell");
+        AuthoringSampleChecks.RequireContent(composition, "Windows host ready.");
+        AuthoringSampleChecks.RequireContent(composition, "Counter route: 7");
+        AuthoringSampleChecks.RequireContent(composition, "Count: 0");
+
+        Invoke(composition, "Increment");
+        AuthoringSampleChecks.RequireContent(composition, "Count: 1");
+
+        Invoke(composition, "Generated JSON");
+        AuthoringSampleChecks.RequireContent(composition, "JSON route: 42");
+        AuthoringSampleChecks.RequireContent(
+            composition,
+            "Generated JSON: {\"Id\":42,\"Name\":\"Ada\"}"
+        );
+
+        Invoke(composition, "Rename generated data");
+        AuthoringSampleChecks.RequireContent(
+            composition,
+            "Generated JSON: {\"Id\":42,\"Name\":\"Grace\"}"
+        );
+
+        AuthoringSampleCompanion.Verify();
+        Console.WriteLine(
+            "AUTHORING SAMPLE PASS: routed counter/editor, typed contexts, generated JSON, and host wiring."
+        );
+    }
+
+    private static void Invoke(Composition composition, string label) {
+        var button = Flatten(composition.SemanticSnapshot()!).Single(
+            node => node is { Role: SemanticRole.Button, Name: var buttonName }
+                && buttonName == label
+                && node.Actions.HasFlag(SemanticAction.Invoke)
+        );
+        AuthoringSampleChecks.Require(
+            composition.ExecuteSemanticCommand(button.Identity, new(SemanticCommandKind.Invoke))
+                == SemanticCommandResult.Applied,
+            $"The '{label}' application command did not run."
+        );
+        composition.Flush();
+    }
+
+    public static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot snapshot) => new[]
+    {
+        snapshot,
+    }.Concat(snapshot.Children.SelectMany(Flatten));
+}

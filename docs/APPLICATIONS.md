@@ -1,8 +1,10 @@
 # Applications and services
 
-Lucent applications keep a synchronous `[STAThread]` entry point. The Windows adapter pumps asynchronous lifecycle work while retaining the window for pending close preparation. The simple `Build().Run(recipe)` form remains available for applications without services.
+Lucent applications keep a synchronous `[STAThread]` entry point. The Windows adapter pumps asynchronous lifecycle work while retaining the window for pending close preparation. Pass a generated root factory to `Build(Application.Create).Run()` or `Build().Run(Application.Create)` to defer root creation until startup completes. Fixed recipes and the lower-level lifecycle interface remain supported.
 
-For services, reference `Lucent.Hosting` and use `HostedApplication` at the composition root:
+For services, reference `Lucent.Hosting` and add `UseHosting` to the application builder.
+The [application authoring guide](APPLICATION-AUTHORING.md) covers additive lifecycle hooks,
+named components, supporting `.lui` declarations and optional companions.
 
 ```csharp
 using Lucent.Core;
@@ -13,8 +15,10 @@ using Microsoft.Extensions.DependencyInjection;
 [STAThread]
 static int Main()
 {
-    var lifecycle = new HostedApplication(
-        session =>
+    return LucentApplication.CreateBuilder()
+        .UseWindows()
+        .SetTitle("Links and notes")
+        .UseHosting(session =>
         {
             var host = HostedApplication.CreateBuilder();
             host.Services.AddSingleton(session);
@@ -22,27 +26,23 @@ static int Main()
             host.Services.AddScoped<InboxModel>();
             // Add configuration sources and logging providers here if needed.
             return host.Build();
-        },
-        (services, session) => Notes.Components.Inbox(
-            services.GetRequiredService<InboxModel>(), session),
-        (services, cancellationToken) => services
+        }, prepareClose: (services, cancellationToken) => services
             .GetRequiredService<InboxModel>()
-            .PrepareCloseAsync(cancellationToken));
-
-    return LucentApplication.CreateBuilder()
-        .UseWindows()
-        .SetTitle("Links and notes")
-        .Build()
-        .Run(lifecycle);
+            .PrepareCloseAsync(cancellationToken))
+        .Build(Notes.Inbox.Create)
+        .Run();
 }
 ```
 
-`InboxModel` and `SaveService` above are application-owned types, not built-in persistence APIs. Register services with constructors or explicit factories; the host validates scope usage. A singleton service owns application-wide work. One application DI scope owns scoped models, and transient dependencies follow normal Microsoft DI ownership. The explicit-parameter example remains useful for invocation-specific models. A feature component can instead declare `inject InboxModel model;` to borrow from that same application scope; `HostedApplication` installs the binding automatically. Use `context` for ancestry-scoped capabilities such as a navigation session, and ordinary parameters for values specific to a particular invocation.
+`InboxModel` and `SaveService` above are application-owned types, not built-in persistence APIs. Register services with constructors or explicit factories; the host validates scope usage. A singleton service owns application-wide work. One application DI scope owns scoped models, and transient dependencies follow normal Microsoft DI ownership. Components declare `inject` to borrow from that scope; `UseHosting` installs the binding automatically. Use `context` for ancestry-scoped capabilities such as a navigation session, and ordinary parameters for values specific to a particular invocation.
 
 ```lui
 namespace Notes;
 using Lucent.Core;
-internal component Inbox(InboxModel model, ApplicationSession session) {
+internal component Inbox() {
+    inject InboxModel model;
+    inject ApplicationSession session;
+
     <Column>
         <Text content={() => model.Title} />
         <Text content={() => session.Status.Error?.Message ?? session.Status.Phase.ToString()} />
@@ -51,7 +51,10 @@ internal component Inbox(InboxModel model, ApplicationSession session) {
 }
 ```
 
-The example illustrates the authoring boundary, not the planned application's final visual design. The executable [lifecycle fixture](../tests/Lucent.Platform.Windows.TestHost/Lifecycle.lui) exercises the same public path.
+Enable `LucentLuiNamedComponents` for this named factory form. Existing applications may
+keep `HostedApplication` and `IApplicationLifecycle`; they share the same service ownership
+and shutdown contracts. The executable [lifecycle fixture](../tests/Lucent.Platform.Windows.TestHost/Lifecycle.lui)
+covers the lower-level path.
 
 ## Closing without losing accepted work
 

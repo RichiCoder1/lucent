@@ -1,13 +1,17 @@
 # Routed package acceptance
 
-This consumer is the combined A0 package check. `Program.cs` passes the named
+This maintained package check began as the A0 feasibility consumer. `Program.cs` passes the named
 `Application.Create` method group; all component, model, route, JSON context and
 acceptance logic lives in `.lui`. It exercises generated route-to-component
 associations, a real navigation session, a retained shell and nested outlet,
 typed route context, JSON generated from a LUI-authored model, two independent
-root mounts, child replacement, stale-command rejection and teardown. Navigation
-is created through the public deferred-recipe scope API; the component context
-does not expose a raw reactive scope.
+root mounts, child replacement, stale-command rejection and teardown. The A1–A7
+integration uses `Router`, `RouterOutlet`, and the generated `Routes.Bundle` directly.
+The shell borrows the router's `NavigationSession`; no handwritten table/descriptor
+pair or outlet factory remains.
+
+The same executable runs deferred-root lifecycle success and factory-failure cases,
+checking mounted notifications, reverse resource cleanup and the recorded startup outcome.
 
 `Test-Package.ps1 -Feed <candidate-directory> -Version <candidate-version>` copies
 the sources into a fresh isolated consumer and performs its first build as a
@@ -17,5 +21,5 @@ hashes are saved under `artifacts/a0-routed-package`. The disposable package cac
 is removed after each run; pass `-KeepPackageCache` when debugging package files.
 
 This fixture requires the named-component SDK pipeline. Its source alone is not
-passing evidence; the A0 record must cite an executed candidate and commands.
+passing evidence; the execution record must cite an executed candidate and commands.
 The separate companion fixture covers C# partial state and initialization.

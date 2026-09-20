@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Lucent.Core;
 using Lucent.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +25,20 @@ public sealed class HostingTests
         "service-stop",
         "component-dispose",
         "bound-service-dispose",
+        "service-dispose",
+    ];
+    private static readonly string[] LifecycleBuilderEvents =
+    [
+        "service-start",
+        "root-factory",
+        "bound-service-create",
+        "component-setup",
+        "root-mount",
+        "prepare",
+        "service-stop",
+        "ui-dispose",
+        "bound-service-dispose",
+        "async-scope-dispose",
         "service-dispose",
     ];
 
@@ -101,6 +116,223 @@ public sealed class HostingTests
             events,
             "The official host, composition, async scope, and root provider did not release in order."
         );
+    }
+
+    [TestMethod]
+    public void BuilderLifecycleCreatesRootAfterHostReadinessAndReleasesUiBeforeAsyncScope()
+    {
+        var owner = Environment.CurrentManagedThreadId;
+        var events = new List<string>();
+        var hostBuilder = HostedApplication.CreateBuilder();
+        hostBuilder.Services.AddSingleton(events);
+        hostBuilder.Services.AddSingleton<IHostedService>(_ => new RecordingHostedService(events));
+        hostBuilder.Services.AddScoped(_ => new AsyncScopedResource(events));
+        hostBuilder.Services.AddScoped(services =>
+        {
+            _ = services.GetRequiredService<AsyncScopedResource>();
+            return new BoundScopedService(events);
+        });
+
+        BoundScopedService? borrowed = null;
+        var rootFactoryCalls = 0;
+        var root = ComponentRecipe.Defer(
+            "builder-bound-service-consumer",
+            ComponentRequirements.Service<BoundScopedService>(
+                new("service", typeof(BoundScopedService).FullName!, "HostingBuilder.lui", 1, 1)
+            ),
+            (_, service) =>
+            {
+                borrowed = service;
+                Assert.AreEqual(owner, Environment.CurrentManagedThreadId);
+                Assert.IsFalse(service.IsDisposed);
+                events.Add("component-setup");
+                return ComponentRecipe.Create(
+                    "builder-mounted-root",
+                    (_, mounted) =>
+                    {
+                        events.Add("root-mount");
+                        mounted.Scope.OnDispose(() => events.Add("ui-dispose"));
+                    }
+                );
+            }
+        );
+        var app = LucentApplication
+            .CreateBuilder()
+            .UseHost(new PumpingHost(session => session.RequestClose()))
+            .UseHosting(
+                () => hostBuilder.Build(),
+                (services, cancellationToken) =>
+                {
+                    Assert.AreEqual(owner, Environment.CurrentManagedThreadId);
+                    Assert.IsTrue(cancellationToken.CanBeCanceled);
+                    Assert.IsNotNull(borrowed);
+                    Assert.IsFalse(borrowed.IsDisposed);
+                    Assert.AreSame(borrowed, services.GetRequiredService<BoundScopedService>());
+                    events.Add("prepare");
+                    return ValueTask.FromResult(true);
+                }
+            )
+            .Build(() =>
+            {
+                rootFactoryCalls++;
+                Assert.AreEqual(owner, Environment.CurrentManagedThreadId);
+                Assert.AreEqual("service-start", events[^1]);
+                events.Add("root-factory");
+                return root;
+            });
+
+        Assert.AreEqual(0, app.Run());
+        Assert.AreEqual(1, rootFactoryCalls);
+        Assert.IsNotNull(borrowed);
+        Assert.IsTrue(borrowed.IsDisposed);
+        CollectionAssert.AreEqual(LifecycleBuilderEvents, events);
+    }
+
+    [TestMethod]
+    public void BuilderHostingStartupFailureStillStopsAndDisposesTheAcquiredHost()
+    {
+        var events = new List<string>();
+        var hostBuilder = HostedApplication.CreateBuilder();
+        hostBuilder.Services.AddSingleton(events);
+        hostBuilder.Services.AddSingleton<IHostedService>(_ => new FailingStartService(events));
+        var rootFactoryCalls = 0;
+        var app = LucentApplication
+            .CreateBuilder()
+            .UseHost(new PumpingHost())
+            .UseHosting(() => hostBuilder.Build())
+            .Build(() =>
+            {
+                rootFactoryCalls++;
+                return EmptyRecipe();
+            });
+
+        var failure = Assert.ThrowsExactly<InvalidOperationException>(() => app.Run());
+
+        Assert.AreEqual("start failed", failure.Message);
+        Assert.AreEqual(0, rootFactoryCalls);
+        CollectionAssert.AreEqual(
+            new List<string> { "service-start", "service-stop", "service-dispose" },
+            events
+        );
+    }
+
+    [TestMethod]
+    public void BuilderHostingPreservesStopUiScopeAndHostFailures()
+    {
+        var events = new List<string>();
+        var hostBuilder = HostedApplication.CreateBuilder();
+        hostBuilder.Services.AddSingleton(events);
+        hostBuilder.Services.AddSingleton<IHostedService>(_ => new FailingStopService(events));
+        hostBuilder.Services.AddScoped(_ => new FailingScopedResource(events));
+        var root = ComponentRecipe.Defer(
+            "builder-failing-scope",
+            ComponentRequirements.Service<FailingScopedResource>(
+                new("service", typeof(FailingScopedResource).FullName!, "HostingBuilder.lui", 1, 1)
+            ),
+            (_, _) =>
+                ComponentRecipe.Create(
+                    "builder-failing-root",
+                    (_, mounted) =>
+                        mounted.Scope.OnDispose(() =>
+                        {
+                            events.Add("ui-dispose");
+                            throw new InvalidOperationException("ui dispose failed");
+                        })
+                )
+        );
+        var app = LucentApplication
+            .CreateBuilder()
+            .UseHost(new PumpingHost(session => session.RequestClose()))
+            .UseHosting(() => new FailingDisposeHost(hostBuilder.Build(), events))
+            .Build(root);
+
+        var failure = Assert.ThrowsExactly<AggregateException>(() => app.Run());
+        var messages = Flatten(failure).Select(error => error.Message).ToArray();
+        foreach (
+            var expected in new List<string>
+            {
+                "stop failed",
+                "ui dispose failed",
+                "scope dispose failed",
+                "host dispose failed",
+            }
+        )
+            CollectionAssert.Contains(messages, expected, $"Cleanup lost '{expected}'.");
+        CollectionAssert.AreEqual(
+            new List<string>
+            {
+                "service-start",
+                "service-stop",
+                "ui-dispose",
+                "scope-dispose",
+                "host-dispose",
+                "service-dispose",
+            },
+            events,
+            "A failed cleanup boundary prevented later cleanup from running."
+        );
+    }
+
+    [TestMethod]
+    public void HostingBuilderSnapshotsKeepTheirServiceProvidersIsolated()
+    {
+        using var firstMounted = new ManualResetEventSlim();
+        using var secondMounted = new ManualResetEventSlim();
+        var providerByOwner = new ConcurrentDictionary<int, string>();
+        var builder = LucentApplication
+            .CreateBuilder()
+            .UseHost(new InterleavingPumpingHost(firstMounted, secondMounted))
+            .UseHosting(
+                session =>
+                {
+                    var hostBuilder = HostedApplication.CreateBuilder();
+                    hostBuilder.Services.AddSingleton(new HostingMarker(session.Title));
+                    return hostBuilder.Build();
+                },
+                (services, _) =>
+                {
+                    var marker = services.GetRequiredService<HostingMarker>();
+                    providerByOwner[Environment.CurrentManagedThreadId] = marker.Title;
+                    return ValueTask.FromResult(true);
+                }
+            )
+            .OnPrepareClose(
+                (context, _) =>
+                {
+                    Assert.IsTrue(
+                        providerByOwner.TryGetValue(
+                            Environment.CurrentManagedThreadId,
+                            out var providerTitle
+                        )
+                    );
+                    Assert.AreEqual(
+                        context.Session.Title,
+                        providerTitle,
+                        "Close preparation used another built application's service provider."
+                    );
+                    return ValueTask.FromResult(true);
+                }
+            );
+
+        var first = builder.SetTitle("first").Build(() => HostMarkerRoot("first"));
+        var second = builder.SetTitle("second").Build(() => HostMarkerRoot("second"));
+        var firstRun = Task.Factory.StartNew(
+            first.Run,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
+        var secondRun = Task.Factory.StartNew(
+            second.Run,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default
+        );
+
+        Task.WaitAll(firstRun, secondRun);
+
+        Assert.AreEqual(0, firstRun.Result);
+        Assert.AreEqual(0, secondRun.Result);
     }
 
     [TestMethod]
@@ -485,6 +717,19 @@ public sealed class HostingTests
 
     private static ComponentRecipe EmptyRecipe() => ComponentRecipe.Create("empty", (_, _) => { });
 
+    private static ComponentRecipe HostMarkerRoot(string expectedTitle) =>
+        ComponentRecipe.Defer(
+            "hosting-snapshot-root",
+            ComponentRequirements.Service<HostingMarker>(
+                new("service", typeof(HostingMarker).FullName!, "HostingTests.lui", 1, 1)
+            ),
+            (_, marker) =>
+            {
+                Assert.AreEqual(expectedTitle, marker.Title);
+                return EmptyRecipe();
+            }
+        );
+
     private static IEnumerable<Exception> Flatten(Exception error) =>
         error is AggregateException aggregate
             ? aggregate.InnerExceptions.SelectMany(Flatten)
@@ -523,6 +768,48 @@ public sealed class HostingTests
                 session.Composition.Flush();
         }
     }
+
+    private sealed class InterleavingPumpingHost(
+        ManualResetEventSlim firstMounted,
+        ManualResetEventSlim secondMounted
+    ) : IApplicationHost
+    {
+        public int Run(ApplicationSession session)
+        {
+            session.Start();
+            PumpingHost.WaitFor(
+                session,
+                () => session.IsCompleted || session.Status.Phase == ApplicationPhase.Running
+            );
+            if (session.IsCompleted)
+                return 0;
+
+            if (session.Title == "first")
+            {
+                firstMounted.Set();
+                if (!secondMounted.Wait(TimeSpan.FromSeconds(5)))
+                    throw new TimeoutException("The second application did not mount.");
+            }
+            else if (session.Title == "second")
+            {
+                if (!firstMounted.Wait(TimeSpan.FromSeconds(5)))
+                    throw new TimeoutException("The first application did not mount.");
+                secondMounted.Set();
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Unexpected test application '{session.Title}'."
+                );
+            }
+
+            session.RequestClose();
+            PumpingHost.WaitFor(session, () => session.IsCompleted);
+            return 0;
+        }
+    }
+
+    private sealed record HostingMarker(string Title);
 
     private sealed class RecordingHostedService(List<string> events) : IHostedService, IDisposable
     {

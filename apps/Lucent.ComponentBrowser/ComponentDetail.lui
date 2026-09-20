@@ -169,11 +169,10 @@ public component ComponentDetail(ComponentBrowserState browser, ComponentBrowser
                 <Divider />
                 <Text style={PresentationStyles.Caption}>INTERACTIVE EXAMPLE</Text>
                 <Layout style={ComponentExampleStyle}>
-                    {
-                        ComponentBrowserRouting.Outlet(browser.Interaction).Named(
-                            "component-browser.example"
-                        )
-                    }
+                    <RouterOutlet
+                        options={new RouteOutletOptions(interaction: browser.Interaction)}
+                        name="component-browser.example"
+                    />
                 </Layout>
                 <SourcePanel browser={browser} view={view} name="component-browser.source-panel" />
                 <Divider />

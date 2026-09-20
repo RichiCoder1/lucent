@@ -13,6 +13,7 @@ public sealed class ComponentBrowserState
 
     public ComponentBrowserState(
         ReactiveScope scope,
+        NavigationSession? navigation = null,
         IFilePicker? filePicker = null,
         IUriLauncher? uriLauncher = null
     )
@@ -28,11 +29,13 @@ public sealed class ComponentBrowserState
         SearchEditor = new(scope, "component-search", "");
         FilePicker = filePicker ?? new UnsupportedFilePicker();
         UriLauncher = uriLauncher;
-        Navigation = new(
-            scope,
-            ComponentBrowserRouting.Table,
-            ComponentBrowserRoutes.Example(ComponentCatalog.Items[0].Id).Location
-        );
+        Navigation =
+            navigation
+            ?? new NavigationSession(
+                scope,
+                ComponentBrowserRoutes.Bundle.Table,
+                ComponentBrowserRoutes.Buttons().Location
+            );
         Interaction = new(scope, Navigation);
         Navigation.RegisterCommitted(
             scope,
@@ -80,7 +83,7 @@ public sealed class ComponentBrowserState
         set => _search.Value = value.Trim();
     }
     public string SelectedId =>
-        Navigation.Current?.Match.GetValue(0).Text ?? ComponentCatalog.Items[0].Id;
+        Navigation.Current?.DefinitionId.Value ?? ComponentCatalog.Items[0].Id;
     public ComponentCatalogItem SelectedItem => ComponentCatalog.Find(SelectedId);
     public string SelectedSource => ComponentCatalog.ReadSource(SelectedItem.SourceFile);
     public BrowserDensity Density => _density.Value;
@@ -103,7 +106,7 @@ public sealed class ComponentBrowserState
     public void Select(string id)
     {
         if (id != SelectedId && ComponentCatalog.Items.Any(item => item.Id == id))
-            Navigation.Navigate(ComponentBrowserRoutes.Example(id));
+            Navigation.Navigate(ComponentCatalog.Find(id).Route);
     }
 
     public void Back() => Navigation.Back();

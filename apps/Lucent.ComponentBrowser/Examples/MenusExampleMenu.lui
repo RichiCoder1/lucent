@@ -7,6 +7,6 @@ public component MenusExampleMenu(Action<string> setMessage) {
         <MenuItem onInvoke={() => setMessage("The menu remains a normal stock command surface.")}>
             Inspect semantics
         </MenuItem>
-        <MenuSubmenu menu={() => MenusExampleSubmenu(setMessage)}>More actions</MenuSubmenu>
+        <MenuSubmenu menu={() => MenusExampleSubmenu.Create(setMessage)}>More actions</MenuSubmenu>
     </Menu>
 }

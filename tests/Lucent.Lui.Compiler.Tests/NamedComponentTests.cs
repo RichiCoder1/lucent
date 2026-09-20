@@ -223,6 +223,196 @@ public sealed class NamedComponentTests
     }
 
     [TestMethod]
+    public void ProjectionSeparatesOrdinaryDeclarationsFromLeadingLuiStyles()
+    {
+        const string source = """
+            namespace Sample;
+            using Lucent.Core;
+            public sealed record Model(string Name);
+            style CardStyle {
+                MainGrow: 1;
+            }
+            public component Card(Model model) {
+                <Text style={CardStyle}>{model.Name}</Text>
+            }
+            """;
+
+        var projection = LuiAuthoredSourceProjection.Project(source);
+
+        Assert.IsTrue(
+            projection.Success,
+            String.Join(" | ", projection.Diagnostics.Select(static item => item.Message))
+        );
+        StringAssert.Contains(projection.DeclarationsSource, "public sealed record Model");
+        Assert.IsFalse(
+            projection.DeclarationsSource.Contains("style CardStyle", StringComparison.Ordinal)
+        );
+        Assert.AreEqual(1, projection.Document.Styles.Count);
+        Assert.AreEqual(
+            source.IndexOf("public component", StringComparison.Ordinal),
+            projection.Document.Component!.Span.Start
+        );
+        var compilation = Compilation(
+            projection.DeclarationsSource,
+            projection.EarlyComponentDeclaration
+        );
+        var result = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            compilation,
+            Identity(),
+            "Card.lui"
+        );
+        Assert.IsTrue(
+            result.Success,
+            String.Join(" | ", result.Diagnostics.Select(static item => item.Message))
+        );
+    }
+
+    [TestMethod]
+    public void NamedComponentTagsLowerToTheirGeneratedCreateFactory()
+    {
+        var view = LuiAuthoredSourceProjection.Project(
+            """
+            namespace Sample;
+            using Lucent.Core;
+            public component View(string model) { <Text>{model}</Text> }
+            """
+        );
+        var host = LuiAuthoredSourceProjection.Project(
+            """
+            namespace Sample;
+            using Lucent.Core;
+            public component Host() { <View model="ready" /> }
+            """
+        );
+        var compilation = Compilation(String.Empty, host.EarlyComponentDeclaration)
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    view.EarlyComponentDeclaration!,
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    "View.lui.early.g.cs"
+                )
+            );
+
+        var result = LuiCompiler.CompileNamedComponent(
+            host.Document,
+            compilation,
+            Identity(),
+            "Host.lui"
+        );
+
+        Assert.IsTrue(
+            result.Success,
+            String.Join(" | ", result.Diagnostics.Select(item => item.Id + ": " + item.Message))
+        );
+        StringAssert.Contains(result.Source, "global::Sample.View.Create(");
+    }
+
+    [TestMethod]
+    public void NamedInitializersPreserveTheReactiveScopeOwnerAlias()
+    {
+        var projection = LuiAuthoredSourceProjection.Project(
+            """
+            namespace Sample;
+            using Lucent.Core;
+            public component Card() {
+                readonly EditorSession editor = new(owner, "card", "ready");
+                readonly Model model = new(owner);
+                <Text>{editor.Text + model.Value}</Text>
+            }
+            """
+        );
+        var compilation = Compilation(
+            """
+            namespace Sample;
+            public sealed class Model(Lucent.Core.ReactiveScope owner) {
+                private readonly Lucent.Core.Signal<string> value = owner.Signal("!", "model.value");
+                public string Value => value.Value;
+            }
+            """,
+            projection.EarlyComponentDeclaration
+        );
+
+        var result = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            compilation,
+            Identity(),
+            "Card.lui"
+        );
+
+        Assert.IsTrue(
+            result.Success,
+            String.Join(" | ", result.Diagnostics.Select(item => item.Id + ": " + item.Message))
+        );
+        StringAssert.Contains(result.Source, ".MountOwner;");
+        var generated = CSharpSyntaxTree.ParseText(
+            result.Source,
+            new CSharpParseOptions(LanguageVersion.Preview),
+            result.Identity.HintName
+        );
+        Assert.IsFalse(
+            compilation
+                .AddSyntaxTrees(generated)
+                .GetDiagnostics()
+                .Any(static item => item.Severity == DiagnosticSeverity.Error)
+        );
+    }
+
+    [TestMethod]
+    public void CompanionHandlerMethodGroupsParticipateInComponentOverloadBinding()
+    {
+        var projection = LuiAuthoredSourceProjection.Project(
+            """
+            namespace Sample;
+            using Lucent.Core;
+            public component CounterPage() {
+                <Column>
+                    <Button onInvoke={IncrementFromCompanion}>Increment</Button>
+                    <Button onInvoke={ResetFromCompanion}>Reset</Button>
+                </Column>
+            }
+            """
+        );
+        var compilation = Compilation(
+            """
+            namespace Sample;
+            public sealed partial class CounterPage {
+                [Lucent.Core.State(0)] public partial int Count { get; set; }
+                public void IncrementFromCompanion() => Count += 1;
+                public void ResetFromCompanion() => Count = 0;
+            }
+            """,
+            projection.EarlyComponentDeclaration
+        );
+
+        var result = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            compilation,
+            Identity(),
+            "CounterPage.lui"
+        );
+
+        Assert.IsTrue(
+            result.Success,
+            String.Join(" | ", result.Diagnostics.Select(item => item.Id + ": " + item.Message))
+        );
+        StringAssert.Contains(result.Source, "IncrementFromCompanion");
+        StringAssert.Contains(result.Source, "ResetFromCompanion");
+        StringAssert.Contains(result.Source, "content: \"Increment\"");
+        var generated = CSharpSyntaxTree.ParseText(
+            result.Source!,
+            new CSharpParseOptions(LanguageVersion.Preview),
+            result.Identity.HintName
+        );
+        var errors = compilation
+            .AddSyntaxTrees(generated)
+            .GetDiagnostics()
+            .Where(static item => item.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        Assert.AreEqual(0, errors.Length, String.Join(Environment.NewLine, errors));
+    }
+
+    [TestMethod]
     public void NamedLuiSetupPreservesItsOwnerParameterInTheDefiningDeclaration()
     {
         const string source = """
@@ -360,6 +550,51 @@ public sealed class NamedComponentTests
     }
 
     [TestMethod]
+    public void RefinedDeclarationPreservesAnExplicitNullableStateType()
+    {
+        var projection = LuiAuthoredSourceProjection.Project(
+            """
+            namespace Sample;
+            using Lucent.Core;
+            public component Card() {
+                [Once]
+                System.DateOnly? date = new System.DateOnly(2026, 9, 20);
+                <Text>{date?.ToString() ?? "none"}</Text>
+            }
+            """
+        );
+        var result = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            Compilation(String.Empty, projection.EarlyComponentDeclaration),
+            Identity(),
+            "Card.lui"
+        );
+
+        Assert.IsTrue(
+            result.Success,
+            String.Join(" | ", result.Diagnostics.Select(item => item.Id + ": " + item.Message))
+        );
+        StringAssert.Contains(result.PreparedComponentDeclaration, "System.DateOnly? date");
+        var finalCompilation = Compilation(
+                String.Empty,
+                result.PreparedComponentDeclaration,
+                "Card.lui.refined.g.cs"
+            )
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    result.Source!,
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    result.Identity.HintName
+                )
+            );
+        var errors = finalCompilation
+            .GetDiagnostics()
+            .Where(static item => item.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        Assert.AreEqual(0, errors.Length, String.Join(Environment.NewLine, errors));
+    }
+
+    [TestMethod]
     public void ProjectionAcceptsSupportOnlyDocumentWithoutInventingAComponent()
     {
         const string source = """
@@ -383,6 +618,136 @@ public sealed class NamedComponentTests
         Assert.IsNull(result.EarlyComponentDeclaration);
         Assert.AreEqual(source, result.DeclarationsSource);
         Assert.AreEqual(source.Length, result.Document.Source.Length);
+    }
+
+    [TestMethod]
+    public void ProjectionPreservesOrdinaryDeclarationShapesAndCrossFilePartials()
+    {
+        const string support = """
+            namespace Sample;
+            [System.AttributeUsage(System.AttributeTargets.Class)]
+            public sealed class MarkerAttribute : System.Attribute { }
+            [Marker]
+            public partial class Box<T> where T : new() {
+                public Box() { Value = new T(); }
+                public T Value { get; }
+                public sealed record Nested(string Name);
+            }
+            public readonly record struct Key<T>(T Value);
+            public interface ISource<out T> { T Read(); }
+            public enum Mode { First, Second }
+            public delegate Box<T> BoxFactory<T>() where T : new();
+            """;
+        const string view = """
+            namespace Sample;
+            using Lucent.Core;
+            public partial class Box<T> { public Mode Mode => Mode.First; }
+            public component View(Box<Key<int>> model) {
+                <Text>{model.Value.Value.ToString()}</Text>
+            }
+            """;
+
+        var supportProjection = LuiAuthoredSourceProjection.Project(support);
+        var viewProjection = LuiAuthoredSourceProjection.Project(view);
+        Assert.IsTrue(supportProjection.Success);
+        Assert.IsTrue(viewProjection.Success);
+        var compilation = Compilation(
+                String.Empty,
+                viewProjection.EarlyComponentDeclaration,
+                "View.lui.early.g.cs"
+            )
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    supportProjection.DeclarationsSource,
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    "Support.lui.declarations.g.cs"
+                ),
+                CSharpSyntaxTree.ParseText(
+                    viewProjection.DeclarationsSource,
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    "View.lui.declarations.g.cs"
+                )
+            );
+        Assert.IsFalse(
+            compilation
+                .GetDiagnostics()
+                .Any(static diagnostic =>
+                    diagnostic.Severity == DiagnosticSeverity.Error
+                    && diagnostic.Id is not "CS8795" and not "CS9248"
+                ),
+            String.Join(Environment.NewLine, compilation.GetDiagnostics())
+        );
+
+        var result = LuiCompiler.CompileNamedComponent(
+            viewProjection.Document,
+            compilation,
+            Identity(),
+            "View.lui"
+        );
+        Assert.IsTrue(
+            result.Success,
+            String.Join(" | ", result.Diagnostics.Select(static item => item.Message))
+        );
+    }
+
+    [TestMethod]
+    public void DuplicateProjectedTypesRemainOrdinaryCompilerErrors()
+    {
+        var first = LuiAuthoredSourceProjection.Project(
+            "namespace Sample; public sealed record Duplicate(int Value);"
+        );
+        var second = LuiAuthoredSourceProjection.Project(
+            "namespace Sample; public sealed record Duplicate(string Value);"
+        );
+        Assert.IsTrue(first.Success);
+        Assert.IsTrue(second.Success);
+        var compilation = Compilation(String.Empty)
+            .AddSyntaxTrees(
+                CSharpSyntaxTree.ParseText(
+                    first.DeclarationsSource,
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    "First.lui.declarations.g.cs"
+                ),
+                CSharpSyntaxTree.ParseText(
+                    second.DeclarationsSource,
+                    new CSharpParseOptions(LanguageVersion.Preview),
+                    "Second.lui.declarations.g.cs"
+                )
+            );
+        Assert.IsTrue(
+            compilation.GetDiagnostics().Any(static diagnostic => diagnostic.Id == "CS0101")
+        );
+    }
+
+    [TestMethod]
+    public void ProjectionRejectsMoreThanOneComponentPerFileAtTheSecondDeclaration()
+    {
+        const string source = """
+            namespace Sample;
+            public component First() { <Column /> }
+            internal component Second() { <Column /> }
+            """;
+
+        var projection = LuiAuthoredSourceProjection.Project(source);
+        var diagnostic = projection.Diagnostics.Single(item => item.Id == "LUI1029");
+
+        Assert.IsFalse(projection.Success);
+        Assert.AreEqual(
+            source.IndexOf("internal component", StringComparison.Ordinal),
+            diagnostic.Span.Start
+        );
+    }
+
+    [TestMethod]
+    public void MalformedSupportOnlySourceStopsBeforeComponentLowering()
+    {
+        const string source = "namespace Sample; public sealed class Broken {";
+
+        var projection = LuiAuthoredSourceProjection.Project(source);
+
+        Assert.IsFalse(projection.Success);
+        Assert.IsNull(projection.EarlyComponentDeclaration);
+        Assert.IsTrue(projection.Diagnostics.Any(static item => item.Id == "LUI1027"));
     }
 
     [TestMethod]
@@ -441,6 +806,78 @@ public sealed class NamedComponentTests
             """,
             "LUI2059"
         );
+        AssertNamedDiagnostic(
+            """
+            namespace Sample;
+            public sealed class Card { }
+            """,
+            "LUI2060"
+        );
+        AssertNamedDiagnostic(
+            """
+            namespace Sample;
+            public sealed partial class Card {
+                [Lucent.Core.State(3)]
+                public partial int count { get; set; }
+            }
+            """,
+            "LUI2061"
+        );
+    }
+
+    [TestMethod]
+    public void NullableInjectLowersToOptionalExactServiceLookup()
+    {
+        const string source = """
+            namespace Sample;
+            using Lucent.Core;
+            public component Card() {
+                inject OptionalService? service;
+                <Text>{service is null ? "missing" : service.Name}</Text>
+            }
+            """;
+        const string companion = """
+            namespace Sample;
+            public sealed class OptionalService { public string Name => "ready"; }
+            public sealed partial class Card { }
+            """;
+        var projection = LuiAuthoredSourceProjection.Project(source);
+        var compilation = Compilation(companion, projection.EarlyComponentDeclaration);
+
+        var result = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            compilation,
+            Identity(),
+            "Card.lui"
+        );
+
+        Assert.IsTrue(
+            result.Success,
+            String.Join(
+                " | ",
+                result.Diagnostics.Select(static item => item.Id + ": " + item.Message)
+            )
+        );
+        StringAssert.Contains(result.Source, "OptionalService<global::Sample.OptionalService>");
+        StringAssert.Contains(result.Source, "typeof(global::Sample.OptionalService)");
+        StringAssert.Contains(result.Source, ", true)]");
+        Assert.IsFalse(
+            result.Source!.Contains(
+                "typeof(global::Sample.OptionalService?)",
+                StringComparison.Ordinal
+            )
+        );
+        var generated = CSharpSyntaxTree.ParseText(
+            result.Source,
+            new CSharpParseOptions(LanguageVersion.Preview),
+            result.Identity.HintName
+        );
+        var errors = compilation
+            .AddSyntaxTrees(generated)
+            .GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+        Assert.AreEqual(0, errors.Length, String.Join(Environment.NewLine, errors));
     }
 
     [TestMethod]
