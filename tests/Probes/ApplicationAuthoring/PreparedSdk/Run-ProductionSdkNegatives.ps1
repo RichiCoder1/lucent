@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $probeRoot = $PSScriptRoot
 $repositoryRoot = (Resolve-Path (Join-Path $probeRoot '../../../..')).Path
 $dotnet = Join-Path $repositoryRoot '.dotnet/dotnet.exe'
+if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $feedPath = (Resolve-Path -LiteralPath $Feed).Path
 foreach ($packageId in @('Lucent.Core', 'Lucent.Lui.Sdk')) {
     $package = Join-Path $feedPath "$packageId.$Version.nupkg"

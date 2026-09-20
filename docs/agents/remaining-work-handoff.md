@@ -1,5 +1,17 @@
 # Current work and follow-ups
 
+## Resume checkpoint — September 20, 2026
+
+The owner resumed work. A0's [CI run](https://github.com/RichiCoder1/lucent/actions/runs/34924315787)
+passed managed verification but failed package verification because the two new package
+wrappers assumed a repository-local `.dotnet/dotnet.exe`. They now use the existing
+repository convention of falling back to `dotnet` on PATH. Both wrappers pass from an
+isolated source tree without a local SDK: routed NativeAOT publish/execution and the
+production SDK positive/negative cases use the system SDK 10.0.401. Logs are under
+`artifacts/a0-path-sdk-routed-retry.log` and `artifacts/a0-path-sdk-negatives.log`.
+Remote CI for the correction must be checked before treating package publication as restored.
+A1 (#303) remains the next authoring slice; it has not started.
+
 ## Application and component authoring — September 14, 2026
 
 [A0 #302](https://github.com/RichiCoder1/lucent/issues/302) is complete under

@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../../..')).Path
 $dotnet = Join-Path $repo '.dotnet/dotnet.exe'
+if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 $feedPath = (Resolve-Path -LiteralPath $Feed).Path
 $packages = @('Lucent.Core', 'Lucent.Lui.Sdk') | ForEach-Object {
     $package = Join-Path $feedPath "$_.$Version.nupkg"
