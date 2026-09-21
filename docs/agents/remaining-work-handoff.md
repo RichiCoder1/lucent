@@ -1,5 +1,49 @@
 # Current work and follow-ups
 
+## A1–A7 verification resumed — September 21, 2026
+
+The owner resumed non-interactive work. The last editor map-completeness fix passes all
+six focused checks, including linked-project rename rejection, ordinary declaration
+editing, and requirement hover compatibility. The final full editor suite passes 40/40,
+including a second fix that preserves referenced projects' LUI-generated stock factories
+during named-project preparation. Package-only editor fixtures pass 3/3. Locked solution
+restore, a warning-clean full build, formatting, and architecture checks also pass.
+Candidate `0.3.0-dev.a1a7.20260921.1` packs all nine packages from `d9cf2db` and passes
+the isolated authoring managed/NativeAOT, routed lifecycle, and SDK negative proofs.
+The Windows samples are prepared with `-BuildOnly`; managed and NativeAOT compilation
+passes for both variants, but execution remains deferred until focus-taking tests are
+authorized. Their exact directories and current evidence are in the
+[execution record](../plans/application-routing-component-authoring-execution.md).
+The September 20 pause below is historical. Publication/CI and tracker closeout follow
+the verified editor commit; A7 remains open until its desktop proof runs.
+
+## A1–A7 source checkpoint — September 20, 2026
+
+`d9cf2db` saves the named-component/compiler, lifecycle/Hosting, declarative routing,
+Component Browser migration, and inline/companion sample work. The owner explicitly
+requested a full pause at this checkpoint while gaming. No A1–A7 ticket has been closed
+yet, and the checkpoint has not been pushed. Resume only at the owner's request; keep
+focus-taking verification paused unless separately authorized.
+
+Current source checks pass: Compiler 144, Generator 51, Core 654, Hosting 12, Tooling
+eight, and Component Browser 20 tests; VS Code client 15 tests; full locked solution
+restore; authored formatting; and Core architecture checks including negative fixtures.
+Before the focus pause, the actual-window Browser history/state check and both managed
+Windows sample smoke runs passed. These are not packaged NativeAOT execution evidence.
+
+Remaining closeout: finish the editor rename/map regression and full LSP suite, verify
+the integrated solution build, consume the candidate packages (including editor and
+NativeAOT), then run the two Windows package smoke variants after focus testing resumes.
+Update the execution record and tracker, commit the editor/evidence changes, push and
+verify CI. Do not attribute the earlier A0 package or CI result to this source checkpoint.
+
+Candidate `0.3.0-dev.a1a7.20260920.1` is incomplete: packing reached the SDK but failed
+because idle MSBuild nodes held `Lucent.Lui.Sdk.PreparationTasks.dll` open. The supported
+`dotnet build-server shutdown --msbuild` command completed after the failed run; packing
+was not retried before the pause. Preserve `artifacts/a1a7-pack.log` as failure evidence.
+Use a fresh candidate version when resuming from a later source commit, and disable
+MSBuild node reuse for the pack session if the task assembly remains locked after builds.
+
 ## Resume checkpoint — September 20, 2026
 
 The owner resumed work. A0's [CI run](https://github.com/RichiCoder1/lucent/actions/runs/34924315787)

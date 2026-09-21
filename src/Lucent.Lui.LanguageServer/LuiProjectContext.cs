@@ -283,16 +283,50 @@ internal sealed partial class LuiProjectContext : IDisposable
             var diagnostic in snapshot.GeneratorDiagnostics.Where(item =>
                 item.Location != Location.None
                 && String.Equals(
-                    Path.GetFullPath(item.Location.GetLineSpan().Path),
+                    Path.GetFullPath(item.Location.GetMappedLineSpan().Path),
                     Path.GetFullPath(snapshot.Document.Path),
                     StringComparison.OrdinalIgnoreCase
                 )
             )
         )
         {
-            var editor = EditorDiagnostic(diagnostic, snapshot.Document.Path);
+            var editor = MappedEditorDiagnostic(diagnostic, snapshot.Document.Path, snapshot.Text);
             if (editor is not null)
                 diagnostics.Add(editor);
+        }
+        if (
+            snapshot.NamedComponents
+            && DeclarationTree(snapshot.Compilation, snapshot.Document.LogicalPath)
+                is { } declarations
+        )
+        {
+            foreach (
+                var diagnostic in snapshot
+                    .Compilation.GetSemanticModel(declarations)
+                    .GetDiagnostics(cancellationToken: cancellationToken)
+            )
+            {
+                if (
+                    diagnostic.Severity
+                        is not (DiagnosticSeverity.Error or DiagnosticSeverity.Warning)
+                    || AuthoredSpan(
+                        diagnostic.Location.GetMappedLineSpan(),
+                        snapshot.Document.Path,
+                        snapshot.Text
+                    )
+                        is not { } span
+                )
+                    continue;
+                diagnostics.Add(
+                    new LuiEditorDiagnostic(
+                        diagnostic.Id,
+                        diagnostic.GetMessage(System.Globalization.CultureInfo.InvariantCulture),
+                        span,
+                        diagnostic.Severity == DiagnosticSeverity.Error ? 1 : 2,
+                        "C#"
+                    )
+                );
+            }
         }
         diagnostics.AddRange(
             configuration.Diagnostics.Select(diagnostic => new LuiEditorDiagnostic(
@@ -331,10 +365,12 @@ internal sealed partial class LuiProjectContext : IDisposable
     )
     {
         long captured;
+        bool namedComponents;
         lock (gate)
         {
             ThrowIfDisposed();
             captured = epoch;
+            namedComponents = NamedComponentsEnabled(Project());
         }
         if (!Owns(uri))
             return [];
@@ -342,8 +378,20 @@ internal sealed partial class LuiProjectContext : IDisposable
         if (text is null)
             return [];
         // Outline symbols depend on authored syntax, not C# binding or generators.
-        var syntax = LuiParser.Parse(text);
+        var projection = namedComponents ? LuiAuthoredSourceProjection.Project(text) : null;
+        var syntax = projection?.Document ?? LuiParser.Parse(text);
         var symbols = new List<LuiDocumentSymbol>();
+        if (projection is not null)
+            symbols.AddRange(
+                DeclarationSymbols(
+                    CSharpSyntaxTree
+                        .ParseText(
+                            projection.DeclarationsSource,
+                            cancellationToken: cancellationToken
+                        )
+                        .GetRoot(cancellationToken)
+                )
+            );
         if (syntax.Component is { } component)
         {
             var children = component
@@ -408,11 +456,19 @@ internal sealed partial class LuiProjectContext : IDisposable
                 .OfType<CSharpParseOptions>()
                 .FirstOrDefault()
             ?? CSharpParseOptions.Default;
-        var tree = CSharpSyntaxTree.ParseText(
-            result.ProjectionSource,
-            options,
-            cancellationToken: cancellationToken
-        );
+        var declarations = snapshot.NamedComponents
+            ? DeclarationTree(snapshot.Compilation, snapshot.Document.LogicalPath)
+            : null;
+        var tree =
+            snapshot.NamedComponents
+            && snapshot.Syntax.Component is null
+            && declarations is not null
+                ? declarations
+                : CSharpSyntaxTree.ParseText(
+                    result.ProjectionSource,
+                    options,
+                    cancellationToken: cancellationToken
+                );
         using var classificationWorkspace = CreateClassificationWorkspace(
             snapshot.Compilation,
             tree,
@@ -425,7 +481,38 @@ internal sealed partial class LuiProjectContext : IDisposable
                 cancellationToken
             )
             .ConfigureAwait(false);
+        var declarationSpans = new List<LuiSemanticSpan>();
+        if (declarations is not null && !ReferenceEquals(tree, declarations))
+        {
+            var declaration = DeclarationResult(
+                declarations,
+                snapshot.Document.Path,
+                snapshot.Text.ToString(),
+                snapshot.Identity
+            );
+            using var workspace = CreateClassificationWorkspace(
+                snapshot.Compilation,
+                declarations,
+                declaration.ProjectionSource!
+            );
+            var classifications = await Classifier
+                .GetClassifiedSpansAsync(
+                    workspace.Document,
+                    new TextSpan(0, declaration.ProjectionSource!.Length),
+                    cancellationToken
+                )
+                .ConfigureAwait(false);
+            declarationSpans.AddRange(
+                ProjectClassifications(
+                    declaration.Map,
+                    classifications,
+                    snapshot.Text,
+                    declaration.ProjectionSource
+                )
+            );
+        }
         var spans = SyntaxSemanticSpans(snapshot.Syntax)
+            .Concat(declarationSpans)
             .Concat(
                 ProjectClassifications(
                     result.Map,
@@ -949,7 +1036,12 @@ internal sealed partial class LuiProjectContext : IDisposable
             return null;
         var element = ElementAt(semantic.Document.Syntax, offset);
         if (element is null)
-            return null;
+        {
+            var ordinaryHelp = OrdinarySignatureHelp(semantic);
+            return await CanPublishAsync(semantic.Document, cancellationToken).ConfigureAwait(false)
+                ? ordinaryHelp
+                : null;
+        }
         var invocation = InvocationAt(semantic);
         var bound = invocation is null
             ? null
@@ -1348,6 +1440,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                 .Documents.Where(document => document.FilePath is not null)
                 .Select(document => Path.GetFullPath(document.FilePath!))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var preparationDocuments = new Dictionary<string, DocumentId>(StringComparer.Ordinal);
             foreach (var tree in evaluation.Compilation.SyntaxTrees)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -1368,6 +1461,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                     filePath: tree.FilePath
                 );
                 generatedPreparationPaths.Add(path);
+                preparationDocuments[tree.FilePath] = documentId;
                 trees[tree] = current.Id;
             }
             var namedComponents = evaluation.NamedComponents;
@@ -1382,12 +1476,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                 )
                     ? projected
                     : null;
-                if (
-                    namedComponents
-                    && (
-                        namedDocument is null || namedDocument.Projection.Document.Component is null
-                    )
-                )
+                if (namedComponents && namedDocument is null)
                     continue;
                 var syntax = namedDocument?.Projection.Document ?? document.Syntax;
                 var compilation = namedComponents
@@ -1429,6 +1518,72 @@ internal sealed partial class LuiProjectContext : IDisposable
                     ),
                     compilation
                 );
+                if (
+                    namedComponents
+                    && DeclarationTree(compilation, document.LogicalPath) is { } declarationTree
+                    && preparationDocuments.TryGetValue(
+                        declarationTree.FilePath,
+                        out var declarationId
+                    )
+                )
+                {
+                    var declaration = DeclarationResult(
+                        declarationTree,
+                        document.Path,
+                        document.Source,
+                        identity
+                    );
+                    generatedDocuments.Add(
+                        (
+                            declarationId,
+                            new RenameGeneratedDocument(
+                                current.Id,
+                                new Uri(document.Path),
+                                document.Source,
+                                syntax,
+                                declaration.Map,
+                                identity,
+                                true,
+                                false
+                            )
+                        )
+                    );
+                }
+                if (
+                    namedComponents
+                    && syntax.Component is not null
+                    && ComponentDeclarationTree(compilation, document.LogicalPath)
+                        is { } componentDeclarationTree
+                    && preparationDocuments.TryGetValue(
+                        componentDeclarationTree.FilePath,
+                        out var componentDeclarationId
+                    )
+                )
+                {
+                    var componentDeclaration = ComponentDeclarationResult(
+                        componentDeclarationTree,
+                        document.Source,
+                        syntax,
+                        identity
+                    );
+                    generatedDocuments.Add(
+                        (
+                            componentDeclarationId,
+                            new RenameGeneratedDocument(
+                                current.Id,
+                                new Uri(document.Path),
+                                document.Source,
+                                syntax,
+                                componentDeclaration.Map,
+                                identity,
+                                false,
+                                true
+                            )
+                        )
+                    );
+                }
+                if (namedComponents && syntax.Component is null)
+                    continue;
                 Interlocked.Increment(ref graphCompilationCount);
                 var result =
                     namedComponents && prepared is not null
@@ -1467,7 +1622,9 @@ internal sealed partial class LuiProjectContext : IDisposable
                             document.Source,
                             syntax,
                             result.Map,
-                            result.Identity
+                            result.Identity,
+                            false,
+                            false
                         )
                     )
                 );
@@ -1625,7 +1782,9 @@ internal sealed partial class LuiProjectContext : IDisposable
                             document.Source,
                             document.Syntax,
                             result.Map,
-                            result.Identity
+                            result.Identity,
+                            false,
+                            false
                         )
                     )
                 );
@@ -1702,6 +1861,23 @@ internal sealed partial class LuiProjectContext : IDisposable
         bool expandOwnerDeclarations = true
     )
     {
+        // Early declaration trees identify named types but cannot replace an incomplete
+        // primary lowering map, including a linked file's other project ownership.
+        if (
+            snapshot.Generated.Values.Any(document =>
+                !document.AuthoredDeclarations
+                && !document.ComponentDeclaration
+                && document.Syntax.Component is { } component
+                && !document
+                    .Map.FromSource(component.Name.Span)
+                    .Any(entry =>
+                        !entry.Hidden
+                        && entry.Kind == LuiMapKind.Symbol
+                        && entry.Source.Equals(component.Name.Span)
+                    )
+            )
+        )
+            return null;
         if (
             snapshot.CSharp.FirstOrDefault(pair => SameFile(pair.Value.LocalPath, uri)) is
             { Key: { } csharpTree, Value: { } csharpUri }
@@ -1728,11 +1904,36 @@ internal sealed partial class LuiProjectContext : IDisposable
                 : await ExpandOwnerComponentTargetAsync(snapshot, target, cancellationToken)
                     .ConfigureAwait(false);
         }
+        if (
+            await NamedComponentTypeTargetAsync(snapshot, uri, offset, cancellationToken)
+                .ConfigureAwait(false) is
+            { } componentType
+        )
+            return componentType;
         var ownerTargets = new List<(RenameTarget Target, bool IsComponentDeclaration)>();
         foreach (var pair in snapshot.Generated)
         {
             if (!SameFile(pair.Value.Uri.LocalPath, uri))
                 continue;
+            if (pair.Value.ComponentDeclaration)
+                continue;
+            if (pair.Value.AuthoredDeclarations)
+            {
+                var declarations = CSharpSyntaxTree
+                    .ParseText(
+                        LuiAuthoredSourceProjection.Project(pair.Value.Source).DeclarationsSource,
+                        cancellationToken: cancellationToken
+                    )
+                    .GetRoot(cancellationToken);
+                var declarationToken = declarations.FindToken(
+                    Math.Clamp(offset, 0, Math.Max(0, declarations.FullSpan.End - 1))
+                );
+                if (
+                    declarationToken.Parent is null
+                    || !IsDeclarationIdentifier(declarationToken.Parent, declarationToken)
+                )
+                    continue;
+            }
             var entries = pair
                 .Value.Map.FromSource(new LuiSpan(offset, 0))
                 .Where(entry => !entry.Hidden && entry.Generated.Length != 0)
@@ -1740,7 +1941,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                 .ThenBy(entry => entry.Generated.Length)
                 .ToArray();
             if (entries.Length == 0)
-                return null;
+                continue;
             var root = pair.Key.GetRoot(cancellationToken);
             var model = await SemanticModelAsync(snapshot, pair.Key, cancellationToken)
                 .ConfigureAwait(false);
@@ -1780,6 +1981,12 @@ internal sealed partial class LuiProjectContext : IDisposable
                     : (LuiSpan?)null;
                 if (symbol is null || span is null)
                     return null;
+                if (
+                    pair.Value.Syntax.Component is { } authoredComponent
+                    && authoredComponent.Name.Span.Equals(span.Value)
+                    && symbol is IMethodSymbol { Name: "Create" } factory
+                )
+                    symbol = factory.ContainingType;
                 targets.Add(
                     new RenameTarget(
                         pair.Value.Uri,
@@ -1835,21 +2042,89 @@ internal sealed partial class LuiProjectContext : IDisposable
                 .ConfigureAwait(false);
     }
 
+    private static async Task<RenameTarget?> NamedComponentTypeTargetAsync(
+        RenameSnapshot snapshot,
+        Uri uri,
+        int offset,
+        CancellationToken cancellationToken
+    )
+    {
+        var declarations = snapshot
+            .Generated.Where(pair =>
+                pair.Value.ComponentDeclaration
+                && pair.Value.Syntax.Component is { } component
+                && SameFile(pair.Value.Uri.LocalPath, uri)
+                && offset >= component.Name.Span.Start
+                && offset <= component.Name.Span.End
+            )
+            .ToArray();
+        foreach (var declaration in declarations)
+        {
+            var component = declaration.Value.Syntax.Component!;
+            if (
+                !snapshot.Generated.Any(pair =>
+                    pair.Value.ProjectId == declaration.Value.ProjectId
+                    && !pair.Value.AuthoredDeclarations
+                    && !pair.Value.ComponentDeclaration
+                    && SameFile(pair.Value.Uri.LocalPath, declaration.Value.Uri)
+                    && pair.Value.Map.FromSource(component.Name.Span)
+                        .Any(item =>
+                            !item.Hidden
+                            && item.Kind == LuiMapKind.Symbol
+                            && item.Source.Equals(component.Name.Span)
+                        )
+                )
+            )
+                return null;
+        }
+        foreach (var pair in declarations)
+        {
+            var component = pair.Value.Syntax.Component!;
+            var entry = pair
+                .Value.Map.FromSource(component.Name.Span)
+                .FirstOrDefault(item =>
+                    !item.Hidden
+                    && item.Kind == LuiMapKind.Symbol
+                    && item.Source.Equals(component.Name.Span)
+                    && item.Generated.Length == component.Name.Span.Length
+                );
+            if (entry is null)
+                continue;
+            var root = pair.Key.GetRoot(cancellationToken);
+            var token = root.FindToken(entry.Generated.Start);
+            var declaration = token
+                .Parent?.AncestorsAndSelf()
+                .OfType<ClassDeclarationSyntax>()
+                .FirstOrDefault(item => item.Identifier == token);
+            if (declaration is null)
+                continue;
+            var model = await SemanticModelAsync(snapshot, pair.Key, cancellationToken)
+                .ConfigureAwait(false);
+            var symbol = model?.GetDeclaredSymbol(declaration, cancellationToken);
+            if (symbol is not null)
+                return new RenameTarget(pair.Value.Uri, component.Name.Span, [symbol], null);
+        }
+        return null;
+    }
+
     private static async Task<RenameTarget?> ExpandOwnerComponentTargetAsync(
         RenameSnapshot snapshot,
         RenameTarget target,
         CancellationToken cancellationToken
     )
     {
-        if (
-            target.Symbols.Count != 1
-            || target.LocalDeclaration is not null
-            || target.Symbol is not IMethodSymbol method
-            || !IsComponent(method)
-        )
+        if (target.Symbols.Count != 1 || target.LocalDeclaration is not null)
+            return target;
+        var componentOwner = target.Symbol switch
+        {
+            IMethodSymbol method when IsComponent(method) => (ISymbol)method,
+            INamedTypeSymbol type => type,
+            _ => null,
+        };
+        if (componentOwner is null)
             return target;
         var definition = await SymbolFinder
-            .FindSourceDefinitionAsync(target.Symbol, snapshot.Solution, cancellationToken)
+            .FindSourceDefinitionAsync(componentOwner, snapshot.Solution, cancellationToken)
             .ConfigureAwait(false);
         if (definition is null)
             return target;
@@ -1862,12 +2137,15 @@ internal sealed partial class LuiProjectContext : IDisposable
             var component = generated.Syntax.Component;
             if (component is null)
                 return null;
-            var token = location
-                .SourceTree.GetRoot(cancellationToken)
-                .FindToken(location.SourceSpan.Start);
-            var spans = RenameSourceSpans(generated, token);
-            if (spans.Length != 1 || !spans[0].Equals(component.Name.Span))
-                return null;
+            if (
+                componentOwner is INamedTypeSymbol type
+                && !String.Equals(
+                    type.Name,
+                    component.Name.Text.TrimStart('@'),
+                    StringComparison.Ordinal
+                )
+            )
+                continue;
             var owners = await ResolveRenameTargetAsync(
                     snapshot,
                     generated.Uri,
@@ -2016,9 +2294,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             var model = await SemanticModelAsync(snapshot, tree, cancellationToken)
                 .ConfigureAwait(false);
             if (model is null)
-            {
                 return null;
-            }
             var token = tree.GetRoot(cancellationToken).FindToken(location.SourceSpan.Start);
             if (!token.Span.IntersectsWith(location.SourceSpan))
                 return null;
@@ -2043,11 +2319,29 @@ internal sealed partial class LuiProjectContext : IDisposable
                 spans = [new LuiSpan(token.SpanStart, token.Span.Length)];
             }
             else
-            {
                 return null;
-            }
             if (spans.Length == 0)
             {
+                if (
+                    TryGenerated(snapshot, tree, out var generatedDefinition)
+                    && generatedDefinition.Syntax.Component is { } component
+                    && (
+                        symbol is INamedTypeSymbol namedType
+                            && String.Equals(
+                                namedType.Name,
+                                component.Name.Text.TrimStart('@'),
+                                StringComparison.Ordinal
+                            )
+                        || symbol
+                            is IMethodSymbol { MethodKind: MethodKind.Constructor } constructor
+                            && String.Equals(
+                                constructor.ContainingType.Name,
+                                component.Name.Text.TrimStart('@'),
+                                StringComparison.Ordinal
+                            )
+                    )
+                )
+                    continue;
                 return null;
             }
             foreach (var span in spans)
@@ -2683,7 +2977,17 @@ internal sealed partial class LuiProjectContext : IDisposable
                 return cached;
         }
         var result =
-            snapshot.NamedComponents && snapshot.PreparedCompilation is { } prepared
+            snapshot.NamedComponents
+            && snapshot.Syntax.Component is null
+            && DeclarationTree(snapshot.Compilation, snapshot.Document.LogicalPath)
+                is { } declarations
+                ? DeclarationResult(
+                    declarations,
+                    snapshot.Document.Path,
+                    snapshot.Text.ToString(),
+                    snapshot.Identity
+                )
+            : snapshot.NamedComponents && snapshot.PreparedCompilation is { } prepared
                 ? RebindCompilationResult(prepared, snapshot.Identity)
             : snapshot.NamedComponents
                 ? LuiCompiler.CompileNamedComponent(
@@ -3023,12 +3327,14 @@ internal sealed partial class LuiProjectContext : IDisposable
         {
             solution = solution.WithProjectAnalyzerReferences(
                 current.Id,
-                EditorAnalyzerReferences(current, namedComponents)
+                EditorAnalyzerReferences(current, namedComponents && current.Id == project.Id)
             );
             // Diagnostics manually project only the requested project. Referenced projects
-            // still need their generators to expose components authored in .lui. Rename
-            // supplies projections for the whole graph and therefore omits all LUI inputs.
-            if (preserveReferencedLui && !namedComponents && current.Id != project.Id)
+            // still need their generators to expose components authored in .lui. Named
+            // preparation likewise owns only the requested project; referenced projects
+            // retain their evaluated LUI inputs and generators. Rename supplies projections
+            // for the whole graph and therefore omits all LUI inputs.
+            if ((preserveReferencedLui || namedComponents) && current.Id != project.Id)
                 continue;
             foreach (
                 var document in current.AdditionalDocuments.Where(document =>
@@ -3197,6 +3503,10 @@ internal sealed partial class LuiProjectContext : IDisposable
         var snapshot = await SnapshotAsync(uri, cancellationToken).ConfigureAwait(false);
         if (snapshot.MetadataDiagnostic is not null)
             return null;
+        if (DeclarationSemantic(snapshot, offset) is { } declarationSemantic)
+            return await CanPublishAsync(snapshot, cancellationToken).ConfigureAwait(false)
+                ? declarationSemantic
+                : null;
         var result = CompileSnapshot(snapshot, cancellationToken);
         Track(result, snapshot);
         if (
@@ -3553,7 +3863,9 @@ internal sealed partial class LuiProjectContext : IDisposable
                 metadataReferences: compilation.References
             )
         );
-        foreach (var source in compilation.SyntaxTrees)
+        foreach (
+            var source in compilation.SyntaxTrees.Where(source => !ReferenceEquals(source, tree))
+        )
         {
             solution = solution.AddDocument(
                 DocumentId.CreateNewId(projectId),
@@ -4091,7 +4403,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             .Where(attribute =>
                 attribute.AttributeClass?.ToDisplayString()
                     == "Lucent.Core.ComponentRequirementAttribute"
-                && attribute.ConstructorArguments.Length == 6
+                && attribute.ConstructorArguments.Length is 6 or 7
                 && attribute.ConstructorArguments[0].Value is ITypeSymbol
                 && attribute.ConstructorArguments[1].Value is int
                 && attribute.ConstructorArguments[2].Value is string
@@ -4218,6 +4530,11 @@ internal sealed partial class LuiProjectContext : IDisposable
     {
         if (symbol is IAliasSymbol alias)
             symbol = alias.Target;
+        if (
+            document.NamedComponents
+            && NamedComponentDeclaration(document, symbol) is { } namedDeclaration
+        )
+            return namedDeclaration;
         if (symbol is IMethodSymbol method)
         {
             var identity =
@@ -4258,6 +4575,21 @@ internal sealed partial class LuiProjectContext : IDisposable
         }
         if (String.IsNullOrWhiteSpace(location.SourceTree?.FilePath))
             return null;
+        var mappedLocation = location.GetMappedLineSpan();
+        if (
+            document.AuthoredSources is { } authoredSources
+            && authoredSources.TryGetValue(
+                Path.GetFullPath(mappedLocation.Path),
+                out var authoredText
+            )
+            && AuthoredSpan(mappedLocation, mappedLocation.Path, SourceText.From(authoredText))
+                is { } authoredSpan
+        )
+            return new LuiNavigationTarget(
+                new Uri(mappedLocation.Path),
+                authoredSpan,
+                authoredText
+            );
         var path = location.SourceTree.FilePath;
         return new LuiNavigationTarget(
             new Uri(path),
@@ -4525,7 +4857,9 @@ internal sealed class RenameGeneratedDocument(
     string source,
     LuiDocumentSyntax syntax,
     LuiSourceMap map,
-    LuiFreshnessIdentity identity
+    LuiFreshnessIdentity identity,
+    bool authoredDeclarations,
+    bool componentDeclaration
 )
 {
     internal ProjectId ProjectId { get; } = projectId;
@@ -4534,6 +4868,8 @@ internal sealed class RenameGeneratedDocument(
     internal LuiDocumentSyntax Syntax { get; } = syntax;
     internal LuiSourceMap Map { get; } = map;
     internal LuiFreshnessIdentity Identity { get; } = identity;
+    internal bool AuthoredDeclarations { get; } = authoredDeclarations;
+    internal bool ComponentDeclaration { get; } = componentDeclaration;
     internal LuiFreshnessTarget Freshness { get; } = new(projectId, uri, identity);
 }
 

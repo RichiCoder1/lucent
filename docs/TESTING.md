@@ -72,6 +72,9 @@ app, publishes and executes NativeAOT, and requires the app's positive smoke mar
 Repeat with `-Companion` to verify the equivalent partial C# companion, independent
 mounts, and setup/cleanup behavior through the same package-only path.
 This check briefly opens windows, so run it during an authorized desktop testing window.
+Use `-BuildOnly` while focus testing is paused to prepare both binaries without opening
+windows. Its manifest records execution as deferred; that result does not establish a
+successful desktop smoke run.
 Its evidence and package hashes are under `artifacts/aw`; it is separate from the
 non-interactive everyday managed suite.
 

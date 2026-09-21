@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory)] [string] $Feed,
     [Parameter(Mandatory)] [ValidatePattern('^0\.3\.0-dev\.[0-9A-Za-z.-]+$')] [string] $Version,
     [string] $OutputRoot,
-    [switch] $Companion
+    [switch] $Companion,
+    [switch] $BuildOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,7 +118,7 @@ try {
     "managed build exit=$LASTEXITCODE" | Add-Content -LiteralPath (Join-Path $run 'commands-and-exits.txt')
     if ($LASTEXITCODE -ne 0) { throw "Package-only application build failed; see $run/managed-build.log" }
     $managed = Join-Path $fixture 'bin/Release/net10.0-windows10.0.26100.0/win-x64/Lucent.AuthoringSample.dll'
-    Invoke-ApplicationSmoke $dotnet @($managed, '--smoke') 'managed-execution'
+    if (-not $BuildOnly) { Invoke-ApplicationSmoke $dotnet @($managed, '--smoke') 'managed-execution' }
 
     $arguments = @('publish', $project, '-c', 'Release', '--nologo', '-p:PublishAot=true', '-o', $publish, "-p:RestoreConfigFile=$config")
     "dotnet $($arguments -join ' ')" | Add-Content -LiteralPath (Join-Path $run 'commands-and-exits.txt')
@@ -125,13 +126,18 @@ try {
     "native publish exit=$LASTEXITCODE" | Add-Content -LiteralPath (Join-Path $run 'commands-and-exits.txt')
     if ($LASTEXITCODE -ne 0) { throw "Package-only NativeAOT publication failed; see $run/native-publish.log" }
     $executable = Join-Path $publish 'Lucent.AuthoringSample.exe'
-    Invoke-ApplicationSmoke $executable @('--smoke') 'native-execution'
-    $hashes = [ordered]@{ version = $Version; variant = $variant; executable = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash }
+    if (-not $BuildOnly) { Invoke-ApplicationSmoke $executable @('--smoke') 'native-execution' }
+    $hashes = [ordered]@{
+        version = $Version
+        variant = $variant
+        execution = $(if ($BuildOnly) { 'deferred' } else { 'passed' })
+        executable = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
+    }
     foreach ($name in $requiredPackages) {
         $hashes[$name] = (Get-FileHash -LiteralPath (Join-Path $feedPath "$name.$Version.nupkg") -Algorithm SHA256).Hash
     }
     $hashes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $run 'candidate.json')
-    Write-Output "Windows $variant application authoring package evidence: $run"
+    Write-Output "Windows $variant application authoring package evidence: $run (execution: $($hashes.execution))"
 }
 finally {
     $env:NUGET_PACKAGES = $previousPackages

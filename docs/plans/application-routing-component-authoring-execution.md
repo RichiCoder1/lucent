@@ -1,11 +1,13 @@
 # Application, routing, and component authoring execution
 
-Status: A1–A7 implementation resumed at owner request, 2026-09-20. The accepted design is tracked by
+Status: resumed at the owner's request on 2026-09-21 for final verification and delivery. The accepted design is tracked by
 [parent issue #301](https://github.com/RichiCoder1/lucent/issues/301). The [A0 evidence](application-routing-component-authoring-a0.md) selects the bounded pipeline.
 A0's SDK-wrapper repair also passed managed, package verification, and publication CI
 ([run 35532769554](https://github.com/RichiCoder1/lucent/actions/runs/35532769554)).
-Compiler/companion, lifecycle, and routing work proceeds in parallel with editor integration;
-each slice still closes only after its prerequisites and acceptance checks pass.
+Compiler/companion, lifecycle, routing, and consumer changes are saved in `d9cf2db`.
+Editor integration and package acceptance still need final closeout; each slice closes
+only after its prerequisites and acceptance checks pass. The [handoff](../agents/remaining-work-handoff.md)
+records verified checks and the remaining desktop-testing boundary.
 
 ## Issue map
 
@@ -42,7 +44,7 @@ where the issue explicitly calls for them.
 
 - Road to 1.0 [#223](https://github.com/RichiCoder1/lucent/issues/223) now places #301 after
   completed formatting/linting #295-#300 and before the previously ordered remaining backlog.
-- #302 is complete. #301 remains In Progress. The owner authorized completion of #303–#309 on 2026-09-20; the earlier pause no longer applies.
+- #302 is complete. #301 and #303–#309 remain In Progress. The owner resumed on September 21; focus-taking verification remains paused and no dependent acceptance has been waived.
 - GitHub accepted all parent/sub-issue and blocked-by mutations. The current GraphQL API
   required global issue node IDs for `addBlockedBy`; numeric database IDs were rejected.
 - Ticket bodies contain the implementation and acceptance contracts without copying the
@@ -51,3 +53,44 @@ where the issue explicitly calls for them.
 The detailed product and architecture contract remains in
 `docs/plans/application-routing-component-authoring.md`; ADR 0011 records the accepted
 identity and ownership decision.
+
+## Implementation and verification — September 21
+
+`d9cf2db` implements ordinary LUI declarations, named partial components and optional
+companions, borrowed optional services, additive application lifecycle hooks, generated
+route bundles, and reactive destination replacement. Component Browser uses the generated
+root and router; `apps/Lucent.AuthoringSample` and its companion variant exercise the
+bootstrap-only application model. The [authoring guide](../APPLICATION-AUTHORING.md)
+documents the supported API and ownership boundaries.
+
+Editor integration maps ordinary and component declarations back to authored source,
+including cross-language rename and unsaved changes. It preserves linked-project
+fail-closed maps and retains referenced projects' LUI generators during named-project
+preparation. This fixes the real Browser `PasswordField` diagnostic rather than hiding it.
+
+| Check | Result |
+| --- | --- |
+| Source suites for the unchanged implementation checkpoint | Compiler 144, Generator 51, Core 654, Hosting 12, Tooling 8, Component Browser 20 passed |
+| Editor focused regressions | Linked-project rename, declarations, and requirement hover 6/6; referenced stock factory 1/1; freshness/named/diamond graph 3/3 passed |
+| Final full editor suite | 40/40 passed, including real Issue Browser and Component Browser projects |
+| Integrated solution | Locked restore and Release build passed with zero warnings/errors |
+| Formatting and architecture | Authored C# and all 115 LUI files passed; Core metadata/dependency checks and negative fixtures passed |
+| VS Code client | 15 tests passed; VSIX 0.3.4 packaged, not installed by this work |
+| Candidate packages | All nine packages packed as `0.3.0-dev.a1a7.20260921.1` from `d9cf2db` |
+| Isolated authoring consumers | Managed and NativeAOT C#/LUI integration, lint/configuration checks, routed lifecycle execution, and production SDK negatives passed |
+| Package-backed editor | Ordinary class, mixed component/class, and positional record fixtures passed 3/3 with isolated package restore |
+| Windows package samples | Inline and companion variants built in managed and NativeAOT modes; desktop execution deferred |
+
+The final cold package editor measurements were 0.83–3.24 seconds for project load plus first
+hover, 0.1–3.0 ms for warm hover, 101–195 ms for declaration edits and 63–88 ms for body
+edits. These local measurements are diagnostic and ran alongside other checks; they are
+not performance thresholds. Fixtures cover authored navigation, references, rename,
+completion, signature help, symbols, diagnostics, tokens, and unsaved invalidation.
+
+The Windows candidates are retained under `artifacts/aw/17fd7275bd81` (inline) and
+`artifacts/aw/2dd7d8c8a9b3` (companion), with package/executable hashes in `candidate.json`.
+Their `execution` value is `deferred`: `-BuildOnly` does not count as a desktop pass.
+Before the September 20 focus pause, the source-built Browser history/state smoke and
+both managed sample smoke runs passed. Those results do not replace execution of the
+new package-only NativeAOT candidates. A7 and its parent remain open until that proof
+and final delivery are complete.

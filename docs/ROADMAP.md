@@ -13,8 +13,8 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 The approved [application roots, routing and component authoring design](plans/application-routing-component-authoring.md)
 is tracked by [#301](https://github.com/RichiCoder1/lucent/issues/301). A0 #302 is complete:
 the bounded compiler/editor pipeline and packaged NativeAOT path passed their acceptance
-checks. A1–A7 resumed on September 20 for production authoring, lifecycle, routing,
-editor integration and consumer migration. The
+checks. A1–A7 implementation is saved at the September 20 source checkpoint; final
+verification and delivery resumed on September 21. Focus-taking checks remain paused. The
 [execution map](plans/application-routing-component-authoring-execution.md) records #302–309
 and their prerequisites. This follows completed formatting/linting; it is not yet delivered support.
 
