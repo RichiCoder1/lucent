@@ -40,21 +40,55 @@ public static class LuiPreparationEngine
                 );
             })
             .ToArray();
+        var configurations = projections
+            .Select(item => ResolveConfiguration(request, item.Document))
+            .ToArray();
         var projectionDiagnostics = projections
             .SelectMany(item =>
                 item.Projection.Diagnostics.Select(diagnostic => new LuiPreparationDiagnostic(
-                    item.Document.PhysicalPath,
+                    diagnostic.FilePath ?? item.Document.PhysicalPath,
                     diagnostic
                 ))
             )
             .ToImmutableArray();
+        var configurationDiagnostics = configurations
+            .SelectMany(resolution => resolution.Diagnostics)
+            .GroupBy(
+                diagnostic =>
+                    diagnostic.FilePath
+                    + "\0"
+                    + diagnostic.Line
+                    + "\0"
+                    + diagnostic.Id
+                    + "\0"
+                    + diagnostic.Message,
+                StringComparer.Ordinal
+            )
+            .Select(group =>
+            {
+                var diagnostic = group.First();
+                return new LuiPreparationDiagnostic(
+                    diagnostic.FilePath,
+                    new LuiDiagnostic(
+                        diagnostic.Id,
+                        diagnostic.Message,
+                        new LuiSpan(0, 0),
+                        DiagnosticSeverity.Error,
+                        filePath: diagnostic.FilePath
+                    ),
+                    diagnostic.Line,
+                    1
+                );
+            })
+            .ToImmutableArray();
+        var initialDiagnostics = projectionDiagnostics.AddRange(configurationDiagnostics);
         if (projections.Any(item => !item.Projection.Success))
             return new LuiPreparationResult(
                 false,
                 new LuiPreparedPayload([], []),
                 [],
                 [],
-                projectionDiagnostics,
+                initialDiagnostics,
                 request.Compilation,
                 projections
                     .Select(item => new LuiPreparedDocumentResult(
@@ -158,9 +192,10 @@ public static class LuiPreparationEngine
         var refinedComponentSources = ImmutableArray.CreateBuilder<LuiPreparedSource>();
         var loweringDiagnostics = ImmutableArray.CreateBuilder<LuiPreparationDiagnostic>();
         var documents = ImmutableArray.CreateBuilder<LuiPreparedDocumentResult>();
-        foreach (var item in projections)
+        for (var index = 0; index < projections.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var item = projections[index];
             if (item.Projection.Document.Component is null)
             {
                 documents.Add(new LuiPreparedDocumentResult(item.Document, item.Projection, null));
@@ -187,11 +222,22 @@ public static class LuiPreparationEngine
                 identity,
                 item.Document.PhysicalPath
             );
+            var lint = LuiLintAnalyzer.AnalyzeCompiled(
+                item.Projection.Document,
+                bindingCompilation,
+                identity,
+                lowered,
+                new LuiLintOptions(configurations[index].DeclarationOrder),
+                cancellationToken
+            );
             loweringDiagnostics.AddRange(
-                lowered.Diagnostics.Select(diagnostic => new LuiPreparationDiagnostic(
-                    item.Document.PhysicalPath,
-                    diagnostic
-                ))
+                ApplyConfiguredSeverities(lint.Diagnostics, configurations[index].DiagnosticSeverities)
+                    .Select(diagnostic =>
+                        new LuiPreparationDiagnostic(
+                            diagnostic.FilePath ?? item.Document.PhysicalPath,
+                            diagnostic
+                        )
+                    )
             );
             documents.Add(new LuiPreparedDocumentResult(item.Document, item.Projection, lowered));
             if (!lowered.Success || lowered.Source is null)
@@ -219,7 +265,7 @@ public static class LuiPreparationEngine
                 )
             );
         }
-        var allLuiDiagnostics = projectionDiagnostics.AddRange(loweringDiagnostics);
+        var allLuiDiagnostics = initialDiagnostics.AddRange(loweringDiagnostics);
         var success = !allLuiDiagnostics.Any(item =>
             item.Diagnostic.Severity == DiagnosticSeverity.Error
         );
@@ -275,6 +321,51 @@ public static class LuiPreparationEngine
         )
             return false;
         return true;
+    }
+
+    private static LuiEditorConfigResolution ResolveConfiguration(
+        LuiPreparationRequest request,
+        LuiPreparationDocument document
+    ) => request.EditorConfigs.IsDefault
+        ? LuiEditorConfigResolver.Resolve(document.PhysicalPath)
+        : LuiEditorConfigResolver.Resolve(document.PhysicalPath, request.EditorConfigs);
+
+    private static IEnumerable<LuiDiagnostic> ApplyConfiguredSeverities(
+        IEnumerable<LuiDiagnostic> diagnostics,
+        IReadOnlyDictionary<string, ReportDiagnostic> configuredSeverities
+    )
+    {
+        foreach (var diagnostic in diagnostics)
+        {
+            if (
+                !configuredSeverities.TryGetValue(diagnostic.Id, out var configured)
+                || configured == ReportDiagnostic.Default
+            )
+            {
+                yield return diagnostic;
+                continue;
+            }
+            if (configured == ReportDiagnostic.Suppress)
+                continue;
+            var severity = configured switch
+            {
+                ReportDiagnostic.Error => DiagnosticSeverity.Error,
+                ReportDiagnostic.Warn => DiagnosticSeverity.Warning,
+                ReportDiagnostic.Info => DiagnosticSeverity.Info,
+                ReportDiagnostic.Hidden => DiagnosticSeverity.Hidden,
+                _ => diagnostic.Severity,
+            };
+            yield return severity == diagnostic.Severity
+                ? diagnostic
+                : new LuiDiagnostic(
+                    diagnostic.Id,
+                    diagnostic.Message,
+                    diagnostic.Span,
+                    severity,
+                    diagnostic.Source,
+                    diagnostic.FilePath
+                );
+        }
     }
 
     private static string GeneratorIdentity(LuiPreparationGenerator generator) =>

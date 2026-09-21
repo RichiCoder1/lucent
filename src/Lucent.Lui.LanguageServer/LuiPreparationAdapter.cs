@@ -13,6 +13,118 @@ namespace Lucent.Lui.LanguageServer;
 
 internal sealed partial class LuiProjectContext
 {
+    private async Task<(
+        CSharpCompilation Compilation,
+        LuiPreparationResult Preparation
+    )> PrepareNamedProjectGraphAsync(
+        Project project,
+        long captured,
+        CancellationToken cancellationToken
+    )
+    {
+        var editorSolution = EditorSolution(project, namedComponents: true);
+        var compilations = new Dictionary<ProjectId, CSharpCompilation>();
+        var preparations = new Dictionary<ProjectId, LuiPreparationResult>();
+        foreach (var graphProject in ProjectGraph(project))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = editorSolution.GetProject(graphProject.Id)
+                ?? throw new InvalidOperationException(
+                    "The named-component editor graph lost project '"
+                        + (graphProject.FilePath ?? graphProject.Name)
+                        + "'."
+                );
+            var compilation =
+                await current.GetCompilationAsync(cancellationToken).ConfigureAwait(false)
+                    as CSharpCompilation
+                ?? throw new InvalidOperationException(
+                    "The named-component editor project did not produce a C# compilation."
+                );
+            foreach (var reference in current.ProjectReferences)
+            {
+                if (!compilations.TryGetValue(reference.ProjectId, out var dependency))
+                    continue;
+                var referencedProject = editorSolution.GetProject(reference.ProjectId);
+                var stale = compilation
+                    .References.OfType<CompilationReference>()
+                    .SingleOrDefault(item =>
+                        String.Equals(
+                            item.Compilation.AssemblyName,
+                            referencedProject?.AssemblyName,
+                            StringComparison.Ordinal
+                        )
+                    );
+                if (stale is null)
+                    throw new InvalidOperationException(
+                        "Named-component preparation could not replace the current editor reference to '"
+                            + (referencedProject?.FilePath ?? referencedProject?.Name ?? "unknown")
+                            + "'."
+                    );
+                compilation = compilation
+                    .RemoveReferences(stale)
+                    .AddReferences(
+                        dependency.ToMetadataReference(
+                            reference.Aliases,
+                            reference.EmbedInteropTypes
+                        )
+                    );
+            }
+
+            if (NamedComponentsEnabled(current))
+            {
+                var documents = await CurrentNamedDocumentsAsync(current, cancellationToken)
+                    .ConfigureAwait(false);
+                var preparation = PrepareNamedProject(
+                    current,
+                    compilation,
+                    documents,
+                    captured,
+                    cancellationToken
+                );
+                preparations.Add(current.Id, preparation);
+                compilation = preparation.BindingCompilation;
+            }
+            compilations.Add(current.Id, compilation);
+        }
+
+        if (!preparations.TryGetValue(project.Id, out var rootPreparation))
+            throw new InvalidOperationException(
+                "The requested named-component project was not prepared."
+            );
+        return (compilations[project.Id], rootPreparation);
+    }
+
+    private static async Task<IReadOnlyList<LuiProjectDocument>> CurrentNamedDocumentsAsync(
+        Project project,
+        CancellationToken cancellationToken
+    )
+    {
+        var documents = new List<LuiProjectDocument>();
+        foreach (
+            var document in project.AdditionalDocuments.Where(item =>
+                item.FilePath!.EndsWith(".lui", StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = (
+                await document.GetTextAsync(cancellationToken).ConfigureAwait(false)
+            ).ToString();
+            var logicalPath = LogicalPath(project, document);
+            if (!LuiDocumentIdentity.TryCreate(logicalPath, out var identity))
+                continue;
+            documents.Add(
+                new LuiProjectDocument(
+                    document.FilePath!,
+                    identity!.LogicalPath,
+                    source,
+                    DocumentVersion(project, document, source)
+                )
+            );
+        }
+        return documents;
+    }
+
     private LuiPreparationResult PrepareNamedProject(
         Project project,
         CSharpCompilation compilation,

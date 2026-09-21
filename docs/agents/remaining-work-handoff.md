@@ -5,12 +5,20 @@
 The owner requested a computer restart during #310. Pause all work at this checkpoint;
 resume the correction batch when requested. Do not start roadmap #205.
 
-- Routing R1/R2/R3/R7 is source-complete: Core **674/674** and architecture checks,
-  including negative fixtures, pass. Issue Browser builds without warnings; its attempted
-  no-build test invocation discovered zero tests, so no application test pass is claimed.
-- R4/R5 editor corrections and R8/R6 lint/companion diagnostics remain in progress.
-  Worker checkpoint notes under `artifacts/review310-*-checkpoint.md` record exact
-  saved files, test failures and remaining steps. Do not treat this checkpoint as delivery.
+- Routing R1/R2/R3/R7 is saved in local commit `1553813`: Core **674/674** and
+  architecture checks, including negative fixtures, pass. Issue Browser builds without
+  warnings and its direct MTP run passes **22/22**; the earlier zero-discovery invocation
+  was corrected. Consumer notes: `artifacts/reviews/310-consumers-checkpoint.md`.
+- R4 exact method maps pass a compiler regression and a public LSP operation regression,
+  one each. R5's cold graph case passes; its stale-emitter case completes behavior but
+  fails cleanup because Windows retains the loaded emitter DLL. Fix fixture cleanup and
+  strengthen stale-symbol assertions, wire editor configuration snapshots/freshness, then
+  run affected suites. Details: `artifacts/review310-editor-checkpoint.md`.
+- R8 preparation-engine/configuration wiring and named package lint cases are saved but
+  incomplete and uncompiled. SDK host snapshot/logging integration remains. R6's companion
+  regression reproduces the generic LUI2000; the validator fix remains. Details:
+  `artifacts/review310-diagnostics-checkpoint.md`. These edits are a local work-in-progress
+  checkpoint, not a verified integration or delivery.
 - Light Notes has three pending consumer migrations: `src/LightNotes/Routes.cs`,
   `tests/LightNotes.Tests/ShellPresentationTests.cs`, and
   `tests/LightNotes.Tests/WorkspaceTests.cs`. Its existing `79.1` package pin lacks the

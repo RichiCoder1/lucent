@@ -751,6 +751,50 @@ public sealed class NamedComponentTests
     }
 
     [TestMethod]
+    public void CompanionStateRejectsAccessorModifiersAndRequiredPropertiesAtTheirDeclaration()
+    {
+        const string component = """
+            namespace Sample;
+            using Lucent.Core;
+            public component Card() { <Text>Ready</Text> }
+            """;
+        const string accessorModifier = """
+            namespace Sample;
+            public sealed partial class Card {
+                [Lucent.Core.State(0)]
+                public partial int Count { get; private set; }
+            }
+            """;
+        const string requiredProperty = """
+            namespace Sample;
+            public sealed partial class Card {
+                [Lucent.Core.State(0)]
+                public required partial int Count { get; set; }
+            }
+            """;
+
+        var accessorDiagnostic = AssertCompanionStateShapeDiagnostic(
+            component,
+            accessorModifier
+        );
+        var requiredDiagnostic = AssertCompanionStateShapeDiagnostic(
+            component,
+            requiredProperty
+        );
+
+        Assert.AreEqual(
+            accessorModifier.IndexOf("Count", StringComparison.Ordinal),
+            accessorDiagnostic.Span.Start
+        );
+        Assert.AreEqual(
+            requiredProperty.IndexOf("Count", StringComparison.Ordinal),
+            requiredDiagnostic.Span.Start
+        );
+        StringAssert.Contains(accessorDiagnostic.Message, "required or accessor modifiers");
+        StringAssert.Contains(requiredDiagnostic.Message, "required or accessor modifiers");
+    }
+
+    [TestMethod]
     public void NamedCompanionMisuseFailsBeforePublishingGeneratedSource()
     {
         AssertNamedDiagnostic(
@@ -937,6 +981,30 @@ public sealed class NamedComponentTests
             result.Diagnostics.Any(diagnostic => diagnostic.Id == diagnosticId),
             String.Join(" | ", result.Diagnostics.Select(diagnostic => diagnostic.Id))
         );
+    }
+
+    private static LuiDiagnostic AssertCompanionStateShapeDiagnostic(
+        string component,
+        string companion
+    )
+    {
+        var projection = LuiAuthoredSourceProjection.Project(component);
+        var result = LuiCompiler.CompileNamedComponent(
+            projection.Document,
+            Compilation(companion, projection.EarlyComponentDeclaration),
+            Identity(),
+            "Card.lui"
+        );
+        Assert.IsFalse(result.Success);
+        var diagnostic = result.Diagnostics.FirstOrDefault(static item => item.Id == "LUI2053");
+        Assert.IsNotNull(
+            diagnostic,
+            String.Join(
+                " | ",
+                result.Diagnostics.Select(static item => item.Id + ": " + item.Message)
+            )
+        );
+        return diagnostic!;
     }
 
     private static CSharpCompilation Compilation(

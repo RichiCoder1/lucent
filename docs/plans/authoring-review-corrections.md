@@ -53,3 +53,20 @@ Evidence: `artifacts/authoring-review-routing-red.log`,
 `artifacts/authoring-review-routing-second-red.log` and
 `artifacts/authoring-review-core-final.log`. Editor/build corrections and independent
 package/application verification are still in progress; no new package is claimed here.
+
+## Restart handoff
+
+The owner requested a restart before the remaining corrections were complete. Routing
+is saved in local `1553813`; Issue Browser subsequently completed its 22-test managed
+run and architecture checks pass. R4's exact compiler mapping and public LSP operations
+each have one passing regression. R5's cold dependency graph passes; the old-emitter
+variant still fails fixture cleanup on a loaded DLL, and its stale-symbol assertions
+need strengthening. EditorConfig snapshots still need wiring into editor preparation
+and freshness.
+
+R8 preparation model/engine edits and named package lint cases are partial, uncompiled
+work. SDK host configuration snapshots and authored diagnostic logging remain. R6's
+new test reproduces generic LUI2000; the companion validator has not yet been fixed.
+No worker build/test process remains active. Resume from the current working tree and
+the three worker notes linked in the current handoff; preserve unrelated dirty files.
+Do not push or close #310 until the full correction batch is verified.

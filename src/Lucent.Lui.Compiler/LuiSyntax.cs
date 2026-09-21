@@ -71,7 +71,8 @@ public sealed class LuiDiagnostic
         string message,
         LuiSpan span,
         DiagnosticSeverity severity = DiagnosticSeverity.Error,
-        string source = "Lucent.Lui"
+        string source = "Lucent.Lui",
+        string? filePath = null
     )
     {
         Id = id;
@@ -79,6 +80,7 @@ public sealed class LuiDiagnostic
         Span = span;
         Severity = severity;
         Source = source;
+        FilePath = filePath;
     }
 
     /// <summary>Stable diagnostic identifier such as <c>LUI1000</c>.</summary>
@@ -95,6 +97,9 @@ public sealed class LuiDiagnostic
 
     /// <summary>Diagnostic source/category retained by editor transport.</summary>
     public string Source { get; }
+
+    /// <summary>Optional authored source file when a diagnostic belongs to a companion C# declaration.</summary>
+    public string? FilePath { get; }
 }
 
 /// <summary>Base for immutable parsed nodes, including recovered nodes with missing child tokens.</summary>

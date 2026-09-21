@@ -205,10 +205,28 @@ internal sealed partial class LuiProjectContext
         LuiFreshnessIdentity identity
     )
     {
-        var text = tree.GetText();
         var entries = new List<LuiMapEntry>();
         if (syntax.Component is { } component)
         {
+            void AddSymbol(LuiSpan authored, SyntaxToken generated)
+            {
+                if (
+                    authored.Start >= 0
+                    && authored.End <= source.Length
+                    && authored.Length == generated.Span.Length
+                    && source.AsSpan(authored.Start, authored.Length)
+                        .SequenceEqual(generated.Text.AsSpan())
+                )
+                    entries.Add(
+                        new(
+                            authored,
+                            new LuiSpan(generated.SpanStart, generated.Span.Length),
+                            LuiMapKind.Symbol,
+                            false
+                        )
+                    );
+            }
+
             foreach (
                 var declaration in tree.GetRoot()
                     .DescendantNodes()
@@ -216,23 +234,67 @@ internal sealed partial class LuiProjectContext
                     .Where(item => item.Identifier.ValueText == component.Name.Text.TrimStart('@'))
             )
             {
-                var generated = declaration.Identifier.Span;
-                if (
-                    component.Name.Span.Start >= 0
-                    && component.Name.Span.End <= source.Length
-                    && component.Name.Span.Length == generated.Length
-                    && source
-                        .AsSpan(component.Name.Span.Start, component.Name.Span.Length)
-                        .SequenceEqual(text.ToString(generated).AsSpan())
-                )
-                    entries.Add(
-                        new(
-                            component.Name.Span,
-                            new LuiSpan(generated.Start, generated.Length),
-                            LuiMapKind.Symbol,
-                            false
-                        )
+                AddSymbol(component.Name.Span, declaration.Identifier);
+
+                var authoredMethods = component
+                    .Body.OfType<LuiMemberSyntax>()
+                    .Where(item => item.Kind == LuiMemberKind.Method)
+                    .Select(item =>
+                        (Member: item, Method: (MethodDeclarationSyntax)item.Declaration)
+                    )
+                    .ToArray();
+                foreach (var method in declaration.Members.OfType<MethodDeclarationSyntax>())
+                {
+                    var authored = authoredMethods.SingleOrDefault(item =>
+                        item.Method.Identifier.ValueText == method.Identifier.ValueText
+                        && item.Method.ParameterList.Parameters.Count
+                            == method.ParameterList.Parameters.Count
                     );
+                    if (authored.Member is null)
+                        continue;
+                    AddSymbol(
+                        new LuiSpan(
+                            authored.Member.Span.Start + authored.Method.Identifier.SpanStart,
+                            authored.Method.Identifier.Span.Length
+                        ),
+                        method.Identifier
+                    );
+                    for (var index = 0; index < method.ParameterList.Parameters.Count; index++)
+                    {
+                        var sourceParameter = authored.Method.ParameterList.Parameters[index];
+                        AddSymbol(
+                            new LuiSpan(
+                                authored.Member.Span.Start + sourceParameter.Identifier.SpanStart,
+                                sourceParameter.Identifier.Span.Length
+                            ),
+                            method.ParameterList.Parameters[index].Identifier
+                        );
+                    }
+                }
+
+                var authoredProperties = component
+                    .Parameters.Select(parameter => (parameter.Name.Text, parameter.Name.Span))
+                    .Concat(
+                        component
+                            .Body.OfType<LuiMemberSyntax>()
+                            .Where(item => item.Kind == LuiMemberKind.Field)
+                            .SelectMany(item =>
+                                ((FieldDeclarationSyntax)item.Declaration).Declaration.Variables.Select(
+                                    variable =>
+                                        (
+                                            variable.Identifier.ValueText,
+                                            new LuiSpan(
+                                                item.Span.Start + variable.Identifier.SpanStart,
+                                                variable.Identifier.Span.Length
+                                            )
+                                        )
+                                )
+                            )
+                    )
+                    .ToLookup(item => item.Item1, item => item.Item2, StringComparer.Ordinal);
+                foreach (var property in declaration.Members.OfType<PropertyDeclarationSyntax>())
+                foreach (var authored in authoredProperties[property.Identifier.ValueText])
+                    AddSymbol(authored, property.Identifier);
             }
         }
         return new(identity, source, new LuiSourceMap(identity, entries), []);

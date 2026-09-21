@@ -3188,25 +3188,16 @@ internal sealed partial class LuiProjectContext : IDisposable
         // The legacy editor builds its own LUI projection below. Running the build-time LUI
         // generator first duplicates that work; keep all other project generators. Named
         // components use the shared bounded preparation pass instead.
-        var compilation =
-            await EditorProject(project, namedComponents)
-                .GetCompilationAsync(cancellationToken)
-                .ConfigureAwait(false)
-            ?? throw new InvalidOperationException("The evaluated project has no compilation.");
         LuiPreparationResult? preparation = null;
+        Compilation compilation;
         if (namedComponents)
         {
-            if (compilation is not Microsoft.CodeAnalysis.CSharp.CSharpCompilation csharp)
-                throw new InvalidOperationException(
-                    "The named-component editor project did not produce a C# compilation."
-                );
-            preparation = PrepareNamedProject(
+            var prepared = await PrepareNamedProjectGraphAsync(
                 project,
-                csharp,
-                namedInputs,
                 captured,
                 cancellationToken
-            );
+            ).ConfigureAwait(false);
+            preparation = prepared.Preparation;
             compilation = preparation.BindingCompilation;
             var projections = preparation.Documents.ToDictionary(
                 item => Path.GetFullPath(item.Document.PhysicalPath),
@@ -3224,6 +3215,12 @@ internal sealed partial class LuiProjectContext : IDisposable
                 })
                 .ToArray();
         }
+        else
+            compilation =
+                await EditorProject(project)
+                    .GetCompilationAsync(cancellationToken)
+                    .ConfigureAwait(false)
+                ?? throw new InvalidOperationException("The evaluated project has no compilation.");
         var index = LuiProjectComponentIndex.Build(
             compilation,
             namedComponents ? Array.Empty<LuiProjectDocument>() : validDocuments,
@@ -3327,14 +3324,15 @@ internal sealed partial class LuiProjectContext : IDisposable
         {
             solution = solution.WithProjectAnalyzerReferences(
                 current.Id,
-                EditorAnalyzerReferences(current, namedComponents && current.Id == project.Id)
+                EditorAnalyzerReferences(
+                    current,
+                    namedComponents && NamedComponentsEnabled(current)
+                )
             );
-            // Diagnostics manually project only the requested project. Referenced projects
-            // still need their generators to expose components authored in .lui. Named
-            // preparation likewise owns only the requested project; referenced projects
-            // retain their evaluated LUI inputs and generators. Rename supplies projections
-            // for the whole graph and therefore omits all LUI inputs.
-            if ((preserveReferencedLui || namedComponents) && current.Id != project.Id)
+            // Named preparation reads the current AdditionalFiles for every graph project and
+            // has removed the ordinary Lucent generators above. Keep those editor snapshots;
+            // legacy diagnostics and rename retain their existing input policy.
+            if (namedComponents || preserveReferencedLui && current.Id != project.Id)
                 continue;
             foreach (
                 var document in current.AdditionalDocuments.Where(document =>
@@ -4553,14 +4551,18 @@ internal sealed partial class LuiProjectContext : IDisposable
                     AuthoredSource(document, declaration.Document.Path, declaration.Document.Source)
                 );
         }
-        var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
-        if (location is null)
-            return null;
-        if (location.SourceTree?.FilePath == document.GeneratedUri.AbsoluteUri)
+        var generatedLocation = symbol.Locations.FirstOrDefault(candidate =>
+            candidate.IsInSource
+            && candidate.SourceTree?.FilePath == document.GeneratedUri.AbsoluteUri
+        );
+        if (generatedLocation is not null)
         {
             var mapped = document
                 .Result.Map.FromGenerated(
-                    new LuiSpan(location.SourceSpan.Start, location.SourceSpan.Length)
+                    new LuiSpan(
+                        generatedLocation.SourceSpan.Start,
+                        generatedLocation.SourceSpan.Length
+                    )
                 )
                 .Where(item => !item.Hidden)
                 .OrderBy(item => item.Source.Length)
@@ -4573,29 +4575,37 @@ internal sealed partial class LuiProjectContext : IDisposable
                     document.SourceText.ToString()
                 );
         }
-        if (String.IsNullOrWhiteSpace(location.SourceTree?.FilePath))
-            return null;
-        var mappedLocation = location.GetMappedLineSpan();
-        if (
-            document.AuthoredSources is { } authoredSources
-            && authoredSources.TryGetValue(
-                Path.GetFullPath(mappedLocation.Path),
-                out var authoredText
+        foreach (var location in symbol.Locations.Where(candidate => candidate.IsInSource))
+        {
+            if (String.IsNullOrWhiteSpace(location.SourceTree?.FilePath))
+                continue;
+            var mappedLocation = location.GetMappedLineSpan();
+            if (
+                document.AuthoredSources.TryGetValue(
+                    Path.GetFullPath(mappedLocation.Path),
+                    out var authoredText
+                )
+                && AuthoredSpan(
+                    mappedLocation,
+                    mappedLocation.Path,
+                    SourceText.From(authoredText)
+                )
+                    is { } authoredSpan
             )
-            && AuthoredSpan(mappedLocation, mappedLocation.Path, SourceText.From(authoredText))
-                is { } authoredSpan
-        )
-            return new LuiNavigationTarget(
-                new Uri(mappedLocation.Path),
-                authoredSpan,
-                authoredText
-            );
-        var path = location.SourceTree.FilePath;
-        return new LuiNavigationTarget(
-            new Uri(path),
-            new LuiSpan(location.SourceSpan.Start, location.SourceSpan.Length),
-            location.SourceTree.GetText().ToString()
-        );
+                return new LuiNavigationTarget(
+                    new Uri(mappedLocation.Path),
+                    authoredSpan,
+                    authoredText
+                );
+            var path = location.SourceTree.FilePath;
+            if (Path.IsPathFullyQualified(path))
+                return new LuiNavigationTarget(
+                    new Uri(path),
+                    new LuiSpan(location.SourceSpan.Start, location.SourceSpan.Length),
+                    location.SourceTree.GetText().ToString()
+                );
+        }
+        return null;
     }
 
     private static string AuthoredSource(

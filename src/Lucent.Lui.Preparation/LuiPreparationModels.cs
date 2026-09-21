@@ -35,7 +35,8 @@ public sealed record LuiPreparationRequest(
     string Defines,
     string RootNamespace,
     LuiPreparationDriverState? PreviousDriverState = null,
-    GeneratorDriverOptions DriverOptions = default
+    GeneratorDriverOptions DriverOptions = default,
+    ImmutableArray<LuiEditorConfigSnapshot> EditorConfigs = default
 );
 
 public sealed record LuiPreparedSource(string HintName, string Source, string SourcePath);
@@ -62,7 +63,12 @@ public sealed record LuiPreparationResult(
     LuiPreparationDriverState? DriverState
 );
 
-public sealed record LuiPreparationDiagnostic(string PhysicalPath, LuiDiagnostic Diagnostic);
+public sealed record LuiPreparationDiagnostic(
+    string PhysicalPath,
+    LuiDiagnostic Diagnostic,
+    int? Line = null,
+    int? Column = null
+);
 
 public sealed record LuiPreparedDocumentResult(
     LuiPreparationDocument Document,

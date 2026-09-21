@@ -48,4 +48,93 @@ Invoke-Expected @($Tooling, '--lint', '--project', $Project, $source) 2 'LUI5003
 Set-Content $configuration "root = true`n[*.lui]`ndotnet_diagnostic.LUI5003.severity = none"
 Invoke-Expected @('build', $Project, '-c', 'Release', '--no-restore', '-warnaserror') 0 ''
 Invoke-Expected @($Tooling, '--lint', '--project', $Project, $source) 0 ''
+
+$namedFixture = Join-Path $projectDirectory 'named-lint-policy'
+$null = New-Item -ItemType Directory -Path $namedFixture -Force
+$namedVersionPath = Split-Path (Split-Path (Split-Path $Tooling -Parent) -Parent) -Parent
+$namedVersion = Split-Path $namedVersionPath -Leaf
+$namedProject = Join-Path $namedFixture 'NamedLintPolicy.csproj'
+$namedSource = Join-Path $namedFixture 'PolicyProbe.lui'
+$namedConfiguration = Join-Path $namedFixture '.editorconfig'
+$namedCompanion = Join-Path $namedFixture 'PolicyProbe.lui.cs'
+@"
+<Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/$namedVersion">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>14.0</LangVersion><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><LucentLuiNamedComponents>true</LucentLuiNamedComponents><TreatWarningsAsErrors>false</TreatWarningsAsErrors></PropertyGroup>
+  <ItemGroup><PackageReference Include="Lucent.Core" Version="[$namedVersion]" /></ItemGroup>
+</Project>
+"@ | Set-Content -LiteralPath $namedProject
+@'
+namespace LintPolicyProbe;
+using Lucent.Core;
+public static class Factory
+{
+    [LucentComponent]
+    public static ComponentRecipe Caption([DefaultContent] string label) => null!;
+}
+'@ | Set-Content (Join-Path $namedFixture 'Factory.cs')
+$namedSourceText = @'
+namespace LintPolicyProbe;
+using static LintPolicyProbe.Factory;
+public component PolicyProbe(string[] items) {
+    foreach (var item in items) keyed by System.Guid.NewGuid() { <Caption>{item}</Caption> }
+}
+'@
+Set-Content -LiteralPath $namedSource -Value $namedSourceText
+Set-Content -LiteralPath $namedConfiguration "root = true`n[*.lui]`ndotnet_diagnostic.LUI5001.severity = warning"
+$namedNuGetConfig = Join-Path (Split-Path $projectDirectory -Parent) 'NuGet.config'
+Invoke-Expected @('restore', $namedProject, '--configfile', $namedNuGetConfig) 0 ''
+
+function Set-NamedLintSeverity([string] $Severity) {
+    Set-Content -LiteralPath $namedConfiguration "root = true`n[*.lui]`ndotnet_diagnostic.LUI5001.severity = $Severity"
+}
+
+function Invoke-NamedBuild([int] $ExpectedExit, [string] $Required, [string] $Forbidden) {
+    $arguments = @('build', $namedProject, '-c', 'Release', '--no-restore', '-p:TreatWarningsAsErrors=false')
+    $output = (& $Dotnet @arguments 2>&1) -join "`n"
+    $actualExit = $LASTEXITCODE
+    if (
+        $actualExit -ne $ExpectedExit
+        -or ($Required -and $output -notmatch [regex]::Escape($Required))
+        -or ($Forbidden -and $output -match [regex]::Escape($Forbidden))
+    ) {
+        throw "Expected named build exit $ExpectedExit with '$Required' and without '$Forbidden', got $actualExit.`n$output"
+    }
+    return $output
+}
+
+$warningOutput = Invoke-NamedBuild 0 'warning LUI5001' ''
+Set-NamedLintSeverity 'error'
+Invoke-NamedBuild 1 'error LUI5001' '' | Out-Null
+Set-NamedLintSeverity 'none'
+Invoke-NamedBuild 0 '' 'LUI5001' | Out-Null
+
+Set-NamedLintSeverity 'warning'
+$lintLine = '    foreach (var item in items) keyed by System.Guid.NewGuid() { <Caption>{item}</Caption> }'
+$suppressedSource = $namedSourceText.Replace(
+    $lintLine,
+    '    // lui-lint-disable-next LUI5001: This package probe checks authored suppression.'
+        + [Environment]::NewLine
+        + $lintLine
+)
+Set-Content -LiteralPath $namedSource -Value $suppressedSource
+Invoke-NamedBuild 0 '' 'LUI5001' | Out-Null
+Set-Content -LiteralPath $namedSource -Value $namedSourceText
+
+Set-NamedLintSeverity 'fatal'
+Invoke-NamedBuild 1 'LUI6102' '' | Out-Null
+
+Set-NamedLintSeverity 'none'
+try {
+    @'
+namespace LintPolicyProbe;
+[Lucent.Core.ComponentState]
+public sealed partial class PolicyProbe { }
+'@ | Set-Content -LiteralPath $namedCompanion
+    Invoke-NamedBuild 1 'LUI4108' 'LUI5001' | Out-Null
+}
+finally {
+    Remove-Item -LiteralPath $namedCompanion -Force -ErrorAction SilentlyContinue
+}
+
 Write-Output 'Packaged lint severity, LUI-only configuration and generated-symbol preservation: PASS'
+Write-Output 'Packaged named lint warning, error, configuration and suppression parity: PASS'

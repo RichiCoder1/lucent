@@ -11,6 +11,169 @@ namespace Lucent.Lui.LanguageServer.Tests;
 public sealed class NamedComponentLanguageServerContracts
 {
     [TestMethod]
+    public async Task NamedMethodTokensSupportPublicLspOperationsAfterUnsavedFormatting()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-named-method-map-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        var projectPath = Path.Combine(root, "Sample.csproj");
+        var luiPath = Path.Combine(root, "Card.lui");
+        const string source = """
+            namespace Sample;
+            using Lucent.Core;
+            public component Card() {
+                int Count = 1;
+
+                string Describe( string prefix = "count:" ) =>
+                    prefix + Count.ToString();
+
+                <Text content={Describe()} />
+            }
+            """;
+        try
+        {
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>"
+                    + "<TargetFramework>net10.0</TargetFramework>"
+                    + "<RootNamespace>Sample</RootNamespace>"
+                    + "<LangVersion>preview</LangVersion>"
+                    + "<LucentLuiNamedComponents>true</LucentLuiNamedComponents>"
+                    + "<LucentLuiPreparedAuthoring>true</LucentLuiPreparedAuthoring>"
+                    + "</PropertyGroup><ItemGroup>"
+                    + LanguageServerTests.CoreMetadataReference
+                    + "<AdditionalFiles Include=\"Card.lui\" />"
+                    + "<CompilerVisibleProperty Include=\"LucentLuiNamedComponents\" />"
+                    + "<CompilerVisibleProperty Include=\"LucentLuiPreparedAuthoring\" />"
+                    + "</ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(
+                luiPath,
+                source.Replace("string Describe( string", "string Describe(string", StringComparison.Ordinal)
+            );
+
+            using var lsp = ProtocolClient.Start();
+            using var initialize = await lsp.RequestAsync(
+                "initialize",
+                new
+                {
+                    initializationOptions = new { projectUri = new Uri(projectPath).AbsoluteUri },
+                    capabilities = new { },
+                }
+            );
+            await lsp.NotifyAsync("initialized", new { });
+            await lsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri = new Uri(luiPath).AbsoluteUri,
+                        languageId = "lui",
+                        version = 1,
+                        text = source,
+                    },
+                }
+            );
+            using var diagnostics = await lsp.WaitForDiagnosticsAsync(
+                new Uri(luiPath).AbsoluteUri,
+                1
+            );
+            Assert.AreEqual(
+                0,
+                diagnostics.RootElement.GetProperty("params").GetProperty("diagnostics")
+                    .GetArrayLength(),
+                diagnostics.RootElement.GetRawText()
+            );
+
+            var countUse = source.IndexOf("Count.ToString", StringComparison.Ordinal);
+            using var hover = await lsp.RequestAsync(
+                "textDocument/hover",
+                new
+                {
+                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
+                    position = Position(source, countUse + 1),
+                }
+            );
+            Assert.AreNotEqual(JsonValueKind.Null, hover.RootElement.GetProperty("result").ValueKind);
+            StringAssert.Contains(hover.RootElement.GetRawText(), "Count");
+
+            using var definition = await lsp.RequestAsync(
+                "textDocument/definition",
+                new
+                {
+                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
+                    position = Position(source, countUse + 1),
+                }
+            );
+            Assert.IsTrue(
+                definition.RootElement.TryGetProperty("result", out var definitionResult)
+                    && definitionResult.ValueKind != JsonValueKind.Null,
+                definition.RootElement.GetRawText()
+            );
+            StringAssert.Contains(definition.RootElement.GetRawText(), new Uri(luiPath).AbsoluteUri);
+
+            using var references = await lsp.RequestAsync(
+                "textDocument/references",
+                new
+                {
+                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
+                    position = Position(source, countUse + 1),
+                    context = new { includeDeclaration = true },
+                }
+            );
+            var referenceResult = references.RootElement.GetProperty("result");
+            Assert.IsTrue(
+                referenceResult.ValueKind == JsonValueKind.Array
+                    && referenceResult.GetArrayLength() >= 2,
+                references.RootElement.GetRawText()
+            );
+
+            using var rename = await lsp.RequestAsync(
+                "textDocument/rename",
+                new
+                {
+                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
+                    position = Position(source, countUse + 1),
+                    newName = "Total",
+                }
+            );
+            var edits = rename.RootElement.GetProperty("result").GetProperty("changes")
+                .GetProperty(new Uri(luiPath).AbsoluteUri);
+            Assert.IsTrue(
+                edits.EnumerateArray().Count(item => item.GetProperty("newText").GetString() == "Total")
+                    >= 2,
+                rename.RootElement.GetRawText()
+            );
+
+            using var completion = await lsp.RequestAsync(
+                "textDocument/completion",
+                new
+                {
+                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
+                    position = Position(source, countUse + "Count.".Length),
+                }
+            );
+            Assert.AreNotEqual(
+                JsonValueKind.Null,
+                completion.RootElement.GetProperty("result").ValueKind,
+                completion.RootElement.GetRawText()
+            );
+
+            using var shutdown = await lsp.RequestAsync("shutdown", new { });
+            await lsp.NotifyAsync("exit", new { });
+            Assert.AreEqual(0, await lsp.WaitForExitAsync());
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task NamedPreparationSupportsUnsavedLspNavigationRenameDiagnosticsAndDeletion()
     {
         var root = Path.Combine(

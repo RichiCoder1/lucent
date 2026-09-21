@@ -3663,16 +3663,10 @@ public static partial class LuiCompiler
             {
                 Hidden(LineDirective(member.Span));
                 Hidden("        ");
-                Mapped(
-                    namedComponent
-                        ? LuiAuthoredSourceProjection.NamedPartialMethod(
-                            (MethodDeclarationSyntax)member.Declaration,
-                            definition: false
-                        )
-                        : member.Text,
-                    member.Span,
-                    LuiMapKind.Symbol
-                );
+                if (namedComponent)
+                    NamedPartialMethod(member);
+                else
+                    Mapped(member.Text, member.Span, LuiMapKind.Symbol);
                 Hidden("\n#line hidden");
                 Hidden("\n\n");
             }
@@ -3708,6 +3702,102 @@ public static partial class LuiCompiler
                 .WithDefault(null)
                 .NormalizeWhitespace()
                 .ToFullString();
+        }
+
+        private void NamedPartialMethod(LuiMemberSyntax member)
+        {
+            var authored = (MethodDeclarationSyntax)member.Declaration;
+            var projectedText = LuiAuthoredSourceProjection.NamedPartialMethod(
+                authored,
+                definition: false
+            );
+            var projected = SyntaxFactory.ParseMemberDeclaration(
+                projectedText,
+                options: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
+                consumeFullText: true
+            );
+            if (projected is null || projected.ContainsDiagnostics)
+            {
+                Mapped(projectedText, member.Span, LuiMapKind.Symbol);
+                return;
+            }
+
+            var sourceTokens = authored.DescendantTokens().Where(TokenHasText).ToArray();
+            var generatedTokens = projected.DescendantTokens().Where(TokenHasText).ToArray();
+            var matches = TokenMatches(sourceTokens, generatedTokens);
+            var cursor = 0;
+            for (var generatedIndex = 0; generatedIndex < generatedTokens.Length; generatedIndex++)
+            {
+                var token = generatedTokens[generatedIndex];
+                if (token.SpanStart > cursor)
+                    Hidden(projectedText.Substring(cursor, token.SpanStart - cursor));
+                if (matches.TryGetValue(generatedIndex, out var sourceIndex))
+                {
+                    var sourceToken = sourceTokens[sourceIndex];
+                    Mapped(
+                        token.Text,
+                        new LuiSpan(
+                            member.Span.Start + sourceToken.SpanStart,
+                            sourceToken.Span.Length
+                        ),
+                        sourceToken.IsKind(SyntaxKind.IdentifierToken)
+                            ? LuiMapKind.Symbol
+                            : LuiMapKind.Expression
+                    );
+                }
+                else
+                    Hidden(token.Text);
+                cursor = token.Span.End;
+            }
+            if (cursor < projectedText.Length)
+                Hidden(projectedText.Substring(cursor));
+
+            static bool TokenHasText(SyntaxToken token) =>
+                !token.IsMissing && token.Span.Length != 0;
+        }
+
+        private static IReadOnlyDictionary<int, int> TokenMatches(
+            IReadOnlyList<SyntaxToken> source,
+            IReadOnlyList<SyntaxToken> generated
+        )
+        {
+            var lengths = new int[source.Count + 1, generated.Count + 1];
+            for (var sourceIndex = source.Count - 1; sourceIndex >= 0; sourceIndex--)
+            for (var generatedIndex = generated.Count - 1; generatedIndex >= 0; generatedIndex--)
+                lengths[sourceIndex, generatedIndex] = TokensEqual(
+                    source[sourceIndex],
+                    generated[generatedIndex]
+                )
+                    ? lengths[sourceIndex + 1, generatedIndex + 1] + 1
+                    : Math.Max(
+                        lengths[sourceIndex + 1, generatedIndex],
+                        lengths[sourceIndex, generatedIndex + 1]
+                    );
+
+            var matches = new Dictionary<int, int>();
+            var sourceCursor = 0;
+            var generatedCursor = 0;
+            while (sourceCursor < source.Count && generatedCursor < generated.Count)
+            {
+                if (TokensEqual(source[sourceCursor], generated[generatedCursor]))
+                {
+                    matches.Add(generatedCursor, sourceCursor);
+                    sourceCursor++;
+                    generatedCursor++;
+                }
+                else if (
+                    lengths[sourceCursor + 1, generatedCursor]
+                    >= lengths[sourceCursor, generatedCursor + 1]
+                )
+                    sourceCursor++;
+                else
+                    generatedCursor++;
+            }
+            return matches;
+
+            static bool TokensEqual(SyntaxToken left, SyntaxToken right) =>
+                left.RawKind == right.RawKind
+                && String.Equals(left.Text, right.Text, StringComparison.Ordinal);
         }
 
         private string StateType(FieldDeclarationSyntax field, string name)
