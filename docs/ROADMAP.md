@@ -11,12 +11,16 @@ Execution work lives in GitHub Issues and the Lucent Native Project 4. Issue acc
 ## Current execution
 
 The approved [application roots, routing and component authoring design](plans/application-routing-component-authoring.md)
-is tracked by [#301](https://github.com/RichiCoder1/lucent/issues/301). A0 #302 is complete:
-the bounded compiler/editor pipeline and packaged NativeAOT path passed their acceptance
-checks. A1–A7 implementation is saved at the September 20 source checkpoint; final
-verification and delivery resumed on September 21. Focus-taking checks remain paused. The
-[execution map](plans/application-routing-component-authoring-execution.md) records #302–309
-and their prerequisites. This follows completed formatting/linting; it is not yet delivered support.
+is delivered under [#301](https://github.com/RichiCoder1/lucent/issues/301) and #302–309.
+Named LUI components, ordinary supporting declarations, optional companions, composable
+application lifecycle hooks and declarative routing are published as `0.3.0-dev.85.1`
+from `e15a43c`. [CI 85](https://github.com/RichiCoder1/lucent/actions/runs/35635336874)
+passed managed and package/NativeAOT verification before publication. Component Browser
+uses generated roots and route mappings; both inline and companion Windows sample apps
+passed managed and NativeAOT execution. The [authoring guide](APPLICATION-AUTHORING.md)
+documents the supported surface, and the [execution record](plans/application-routing-component-authoring-execution.md)
+records exact evidence and limitations. The next ordered parent is navigation restoration
+and Windows activation [#205](https://github.com/RichiCoder1/lucent/issues/205).
 
 Whole-file `.lui` formatting and linting [#295–300](plans/lui-formatting-and-linting.md)
 implement the accepted source policy across the compiler, CLI, editor and SDK.

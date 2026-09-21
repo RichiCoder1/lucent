@@ -1,11 +1,12 @@
 # Application roots, routing and component companions
 
 Status: owner-approved and refined after Claude Code Fable High adversarial review,
-2026-09-14. A0 passed; the owner resumed A1–A7 implementation on 2026-09-20.
+2026-09-14. A0–A7 are delivered as `0.3.0-dev.85.1` on 2026-09-21; the
+[execution record](application-routing-component-authoring-execution.md) records acceptance and publication.
 The [review and dispositions](application-routing-component-authoring-fable-review.md)
 record what changed during design. The [A0 acceptance record](application-routing-component-authoring-a0.md)
-now supplies executed compiler, editor and package evidence. Dependent runtime and consumer
-migrations are underway. The selected pipeline combines early authored projection, one foreign-generator
+supplies executed compiler, editor and package evidence. Runtime and consumer
+migrations are complete. The selected pipeline combines early authored projection, one foreign-generator
 preparation pass and semantic signature refinement with exact final-output comparison on
 Roslyn 5.9.0 and SDK 10.0.401. Unsupported generator graphs fail without convergence.
 

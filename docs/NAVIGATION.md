@@ -8,6 +8,9 @@ For the `.lui`-first application path, use generated `AppRoutes.Bundle`, `<Route
 `<RouterOutlet>`. The [application authoring guide](APPLICATION-AUTHORING.md#declarative-routing)
 covers default component mappings, shared shell navigation and reactive destination
 selection. The APIs below also support applications that compose navigation explicitly.
+Both paths share the same matching, session and transactional outlet runtime. Explicit
+outlets consume current generated module descriptors too; choosing generated mappings
+does not require a separate navigation engine or a different route-context contract.
 
 ## Declare routes
 

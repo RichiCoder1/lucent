@@ -1,27 +1,34 @@
 # Current work and follow-ups
 
-## A1–A7 verification resumed — September 21, 2026
+## A0–A7 delivered — September 21, 2026
 
-The owner resumed work and subsequently authorized UI/focus tests. The last editor map-completeness fix passes all
-six focused checks, including linked-project rename rejection, ordinary declaration
-editing, and requirement hover compatibility. The final full editor suite passes 40/40,
-including a second fix that preserves referenced projects' LUI-generated stock factories
-during named-project preparation. Package-only editor fixtures pass 3/3. Locked solution
-restore, a warning-clean full build, formatting, and architecture checks also pass.
-Candidate `0.3.0-dev.a1a7.20260921.1` packs all nine packages from `d9cf2db` and passes
-the isolated authoring managed/NativeAOT, routed lifecycle, and SDK negative proofs.
-The inline and companion Windows package samples both pass managed and NativeAOT
-execution: four smoke runs verify routed state and orderly cleanup, and the companion
-runs also verify two independent mounts. These are automated desktop checks, not a
-manual visual walkthrough. Their exact directories and current evidence are in the
+Parent #301 and children #302–309 are complete. `d9cf2db`, `f36f9f6` and `e15a43c`
+deliver ordinary LUI declarations, named partial components with optional companions,
+composable application lifecycle hooks, declarative routing, reactive destinations,
+editor integration and reference-app adoption. All nine packages are published as
+`0.3.0-dev.85.1` after [CI 85](https://github.com/RichiCoder1/lucent/actions/runs/35635336874)
+passed managed, NativeAOT/package verification and publication.
+
+Full managed CI reports 1,222 passes and three existing opt-in renderer skips; the
+extension's 15 tests pass separately. This includes Core 656, Issue Browser 22,
+Component Browser 20 and the full editor suite's 40 tests. Local isolated package
+editor fixtures pass 3/3; formatting, warning-clean builds and architecture checks pass.
+CI caught a generated-descriptor dispatch gap in explicit navigation composition;
+`e15a43c` fixes both public provider overloads, with regression and NativeAOT proof.
+
+The inline and companion Windows package samples passed managed and NativeAOT
+execution: four smoke runs verify routed state and cleanup, and the companion runs
+also verify two independent mounts. These are automated desktop checks, not a manual
+visual walkthrough. Exact candidates and evidence are in the
 [execution record](../plans/application-routing-component-authoring-execution.md).
-The September 20 pause below is historical. Implementation and editor integration are
-pushed as `d9cf2db` and `f36f9f6`; publication CI and tracker closeout remain in progress.
-CI `35633695200` found a generated-route provider dispatch gap in existing explicit
-composition paths. Both public overloads are corrected, with two regressions first
-reproducing the crash. Core 656/656, Issue Browser 22/22, Component Browser 20/20,
-affected builds, formatting and architecture checks pass after the fix. The failed CI
-run did not publish packages; a fresh run must verify delivery before closure.
+The [authoring guide](../APPLICATION-AUTHORING.md) describes the supported API.
+VSIX 0.3.4 was packaged; this work did not install it or restart the user's editor.
+The prior pause records below are historical and superseded by this delivery.
+
+The next ordered roadmap parent is [#205](https://github.com/RichiCoder1/lucent/issues/205),
+with opt-in location/journal restoration (#221) and explicit Windows activation (#222).
+Their application-policy decisions remain separate from this authoring batch; do not
+infer authorization for optional multi-window or custom routing work from this closeout.
 
 ## A1–A7 source checkpoint — September 20, 2026
 
