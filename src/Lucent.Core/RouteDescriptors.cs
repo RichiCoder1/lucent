@@ -254,7 +254,7 @@ public sealed class RouteLevelDescriptor
         ArgumentNullException.ThrowIfNull(content);
         return _provider is { } provider
             ? provider(this, match, content)
-            : _liveProvider!(this, match, content, new RouteContextLiveState());
+            : ProvideContext(match, content, new RouteContextLiveState());
     }
 
     /// <summary>
@@ -269,6 +269,8 @@ public sealed class RouteLevelDescriptor
         ArgumentNullException.ThrowIfNull(match);
         ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(live);
+        if (_contextFactory is not null)
+            return ProvideContext(CreateContext(match, live), content);
         return _liveProvider is { } liveProvider
             ? liveProvider(this, match, content, live)
             : _provider!(this, match, content);

@@ -68,9 +68,18 @@ including cross-language rename and unsaved changes. It preserves linked-project
 fail-closed maps and retains referenced projects' LUI generators during named-project
 preparation. This fixes the real Browser `PasswordField` diagnostic rather than hiding it.
 
+The first integrated CI run (`35633695200`) exposed a separate provider-dispatch gap:
+new generated route descriptors worked through `Router` but failed through the existing
+explicit `RouteOutlet` path and standalone `ProvideContext` overload. Both overloads now
+use the generated typed context/provider pair when present. Two regression cases first
+reproduced the null-reference failures; the existing Issue Browser suite and packaged
+navigation probe also cover the affected public paths. This fixes current explicit
+composition support rather than adding a legacy implementation or migration shim.
+
 | Check | Result |
 | --- | --- |
 | Source suites for the unchanged implementation checkpoint | Compiler 144, Generator 51, Core 654, Hosting 12, Tooling 8, Component Browser 20 passed |
+| CI-discovered route-provider fix | Core 656/656, Issue Browser 22/22, Component Browser 20/20, formatting, warning-clean affected builds and architecture negative fixtures passed |
 | Editor focused regressions | Linked-project rename, declarations, and requirement hover 6/6; referenced stock factory 1/1; freshness/named/diamond graph 3/3 passed |
 | Final full editor suite | 40/40 passed, including real Issue Browser and Component Browser projects |
 | Integrated solution | Locked restore and Release build passed with zero warnings/errors |
@@ -79,7 +88,7 @@ preparation. This fixes the real Browser `PasswordField` diagnostic rather than 
 | Candidate packages | All nine packages packed as `0.3.0-dev.a1a7.20260921.1` from `d9cf2db` |
 | Isolated authoring consumers | Managed and NativeAOT C#/LUI integration, lint/configuration checks, routed lifecycle execution, and production SDK negatives passed |
 | Package-backed editor | Ordinary class, mixed component/class, and positional record fixtures passed 3/3 with isolated package restore |
-| Windows package samples | Inline and companion variants built in managed and NativeAOT modes; desktop execution deferred |
+| Windows package samples | Inline and companion variants built and executed in managed and NativeAOT modes; all four desktop smoke checks passed |
 
 The final cold package editor measurements were 0.83–3.24 seconds for project load plus first
 hover, 0.1–3.0 ms for warm hover, 101–195 ms for declaration edits and 63–88 ms for body
@@ -89,8 +98,10 @@ completion, signature help, symbols, diagnostics, tokens, and unsaved invalidati
 
 The Windows candidates are retained under `artifacts/aw/17fd7275bd81` (inline) and
 `artifacts/aw/2dd7d8c8a9b3` (companion), with package/executable hashes in `candidate.json`.
-Their `execution` value is `deferred`: `-BuildOnly` does not count as a desktop pass.
-Before the September 20 focus pause, the source-built Browser history/state smoke and
-both managed sample smoke runs passed. Those results do not replace execution of the
-new package-only NativeAOT candidates. A7 and its parent remain open until that proof
-and final delivery are complete.
+After the owner resumed focus-taking tests on September 21, all four prepared binaries
+exited successfully with `AUTHORING SAMPLE PASS` and `AUTHORING SAMPLE CLEANUP`.
+Both companion runs also emitted `AUTHORING COMPANION PASS`, proving isolated state
+across two mounts and cleanup of both setups. Their `execution` value is now `passed`;
+managed/native execution logs and exits are retained beside each manifest. This is
+automated desktop execution, not a manual visual walkthrough. Before the September 20
+pause, the source-built Browser history/state smoke also passed.

@@ -412,6 +412,55 @@ public sealed class RouteMatchingContracts
         Assert.IsNull(supplied!.Child);
     }
 
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void GeneratedDescriptorSupportsExistingContextProviderOverloads(bool explicitLive)
+    {
+        var pattern = Pattern(
+            "issue",
+            Literal("issues"),
+            Parameter("number", 0, RouteValueShape.Signed32)
+        );
+        var match = Match(RouteTable.Create([pattern]), "/issues/42");
+        var live = new RouteContextLiveState();
+        RouteContextLiveState? receivedLive = null;
+        RouteContext<RouteParameters>? created = null;
+        object? provided = null;
+        var level = new RouteLevelDescriptor(
+            new("issue"),
+            [0],
+            new("Routes.cs", 1, 1),
+            (definition, matched, currentLive) =>
+            {
+                receivedLive = currentLive;
+                return created = new RouteContext<RouteParameters>(
+                    definition,
+                    new RouteParameters(matched.GetValue(0).Signed32),
+                    currentLive
+                );
+            },
+            (context, content) =>
+            {
+                provided = context;
+                return content;
+            }
+        );
+        var content = ComponentRecipe.Create("content", static (_, _) => { });
+
+        var result = explicitLive
+            ? level.ProvideContext(match, content, live)
+            : level.ProvideContext(match, content);
+
+        Assert.AreSame(content, result);
+        Assert.IsNotNull(created);
+        Assert.AreEqual(42, created.Parameters.Number);
+        Assert.AreSame(created, provided);
+        Assert.IsNotNull(receivedLive);
+        if (explicitLive)
+            Assert.AreSame(live, receivedLive);
+    }
+
     private static RouteSegmentPattern Literal(string value) =>
         RouteSegmentPattern.LiteralSegment(value);
 
