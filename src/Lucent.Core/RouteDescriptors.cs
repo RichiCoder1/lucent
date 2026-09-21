@@ -133,23 +133,6 @@ public sealed class RouteContext<T>(
     public RouteOutletSnapshot? Child => _live.Child;
 }
 
-/// <summary>Wraps a recipe with one statically closed generated RouteContext provider.</summary>
-public delegate ComponentRecipe RouteContextProviderFactory(
-    RouteLevelDescriptor definition,
-    RouteMatch match,
-    ComponentRecipe content
-);
-
-/// <summary>
-/// Wraps content with a generated RouteContext provider that receives its live outlet state.
-/// </summary>
-public delegate ComponentRecipe RouteContextLiveProviderFactory(
-    RouteLevelDescriptor definition,
-    RouteMatch match,
-    ComponentRecipe content,
-    RouteContextLiveState live
-);
-
 /// <summary>Creates the exact generated typed route context used by render selection.</summary>
 public delegate object RouteContextFactory(
     RouteLevelDescriptor definition,
@@ -167,28 +150,8 @@ public delegate ComponentRecipe RouteContextInstanceProviderFactory(
 public sealed class RouteLevelDescriptor
 {
     private readonly ReadOnlyCollection<int> _ownedCaptureSlots;
-    private readonly RouteContextProviderFactory? _provider;
-    private readonly RouteContextLiveProviderFactory? _liveProvider;
-    private readonly RouteContextFactory? _contextFactory;
-    private readonly RouteContextInstanceProviderFactory? _instanceProvider;
-
-    /// <summary>Creates immutable route-level metadata and its closed provider factory.</summary>
-    public RouteLevelDescriptor(
-        RouteDefinitionId id,
-        IReadOnlyList<int> ownedCaptureSlots,
-        RouteDeclarationSource source,
-        RouteContextProviderFactory provider
-    )
-        : this(id, ownedCaptureSlots, source, provider, null, null, null) { }
-
-    /// <summary>Creates metadata with a closed provider that consumes live outlet state.</summary>
-    public RouteLevelDescriptor(
-        RouteDefinitionId id,
-        IReadOnlyList<int> ownedCaptureSlots,
-        RouteDeclarationSource source,
-        RouteContextLiveProviderFactory provider
-    )
-        : this(id, ownedCaptureSlots, source, null, provider, null, null) { }
+    private readonly RouteContextFactory _contextFactory;
+    private readonly RouteContextInstanceProviderFactory _instanceProvider;
 
     /// <summary>Creates generated metadata with an exact typed context factory.</summary>
     public RouteLevelDescriptor(
@@ -198,31 +161,12 @@ public sealed class RouteLevelDescriptor
         RouteContextFactory contextFactory,
         RouteContextInstanceProviderFactory instanceProvider
     )
-        : this(id, ownedCaptureSlots, source, null, null, contextFactory, instanceProvider) { }
-
-    private RouteLevelDescriptor(
-        RouteDefinitionId id,
-        IReadOnlyList<int> ownedCaptureSlots,
-        RouteDeclarationSource source,
-        RouteContextProviderFactory? provider,
-        RouteContextLiveProviderFactory? liveProvider,
-        RouteContextFactory? contextFactory,
-        RouteContextInstanceProviderFactory? instanceProvider
-    )
     {
         ArgumentNullException.ThrowIfNull(id);
         ArgumentNullException.ThrowIfNull(ownedCaptureSlots);
         ArgumentNullException.ThrowIfNull(source);
-        var legacyProviderCount = (provider is null ? 0 : 1) + (liveProvider is null ? 0 : 1);
-        var generatedPair = contextFactory is not null && instanceProvider is not null;
-        if (
-            legacyProviderCount + (generatedPair ? 1 : 0) != 1
-            || (contextFactory is null) != (instanceProvider is null)
-        )
-            throw new ArgumentException(
-                "Exactly one route context provider must be supplied.",
-                nameof(provider)
-            );
+        ArgumentNullException.ThrowIfNull(contextFactory);
+        ArgumentNullException.ThrowIfNull(instanceProvider);
         var slots = ownedCaptureSlots.ToArray();
         if (slots.Any(slot => slot < 0) || slots.Distinct().Count() != slots.Length)
             throw new ArgumentException(
@@ -232,8 +176,6 @@ public sealed class RouteLevelDescriptor
         Id = id;
         _ownedCaptureSlots = Array.AsReadOnly(slots);
         Source = source;
-        _provider = provider;
-        _liveProvider = liveProvider;
         _contextFactory = contextFactory;
         _instanceProvider = instanceProvider;
     }
@@ -248,41 +190,27 @@ public sealed class RouteLevelDescriptor
     public RouteDeclarationSource Source { get; }
 
     /// <summary>Wraps content in the statically closed typed context provider.</summary>
-    public ComponentRecipe ProvideContext(RouteMatch match, ComponentRecipe content)
-    {
-        ArgumentNullException.ThrowIfNull(match);
-        ArgumentNullException.ThrowIfNull(content);
-        return _provider is { } provider
-            ? provider(this, match, content)
-            : ProvideContext(match, content, new RouteContextLiveState());
-    }
+    public ComponentRecipe ProvideContext(RouteMatch match, ComponentRecipe content) =>
+        ProvideContext(match, content, new RouteContextLiveState());
 
-    /// <summary>
-    /// Wraps content with this definition and the live entry/child capability for its mount.
-    /// </summary>
+    /// <summary>Wraps content with this definition and the live capability for its mount.</summary>
     public ComponentRecipe ProvideContext(
         RouteMatch match,
         ComponentRecipe content,
         RouteContextLiveState live
     )
     {
-        ArgumentNullException.ThrowIfNull(match);
         ArgumentNullException.ThrowIfNull(content);
-        ArgumentNullException.ThrowIfNull(live);
-        if (_contextFactory is not null)
-            return ProvideContext(CreateContext(match, live), content);
-        return _liveProvider is { } liveProvider
-            ? liveProvider(this, match, content, live)
-            : _provider!(this, match, content);
+        return ProvideContext(CreateContext(match, live), content);
     }
 
     internal object CreateContext(RouteMatch match, RouteContextLiveState live)
     {
         ArgumentNullException.ThrowIfNull(match);
         ArgumentNullException.ThrowIfNull(live);
-        return _contextFactory?.Invoke(this, match, live)
+        return _contextFactory(this, match, live)
             ?? throw new InvalidOperationException(
-                $"Route level '{Id}' was not generated with typed render-context metadata."
+                $"Route level '{Id}' returned a null typed context."
             );
     }
 
@@ -290,9 +218,9 @@ public sealed class RouteLevelDescriptor
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(content);
-        return _instanceProvider?.Invoke(context, content)
+        return _instanceProvider(context, content)
             ?? throw new InvalidOperationException(
-                $"Route level '{Id}' cannot provide a preconstructed typed route context."
+                $"Route level '{Id}' returned a null context provider."
             );
     }
 

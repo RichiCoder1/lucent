@@ -9,8 +9,8 @@ For the `.lui`-first application path, use generated `AppRoutes.Bundle`, `<Route
 covers default component mappings, shared shell navigation and reactive destination
 selection. The APIs below also support applications that compose navigation explicitly.
 Both paths share the same matching, session and transactional outlet runtime. Explicit
-outlets consume current generated module descriptors too; choosing generated mappings
-does not require a separate navigation engine or a different route-context contract.
+composition builds a `RouteBundle` from current generated module descriptors; it does
+not require a separate navigation engine or a different route-context contract.
 
 ## Declare routes
 
@@ -34,13 +34,13 @@ record parameters; do not write `{number:int}`. Zero-capture records still need
 is nested under a persistent route shell. Parentage is explicit, not inferred
 from common path text.
 
-Build one `RouteTable` from the generated module patterns and one
-`RouteDescriptorSet` from that same table and modules. The table is the matching
-authority. A reference from a different pattern instance is rejected even if
-its text looks equivalent. Locations are bounded and canonicalized; malformed
+Build one `RouteBundle` from the generated modules and destination mapping. The bundle
+creates and retains the exact `RouteTable` and `RouteDescriptorSet` pairing. Its table
+is the matching authority. A reference from a different pattern instance is rejected
+even if its text looks equivalent. Locations are bounded and canonicalized; malformed
 input, unmatched routes and ambiguous tables are rejected.
 
-## Own and provide the session
+## Own and place the session
 
 ```lui
 public component Browser() {
@@ -48,22 +48,52 @@ public component Browser() {
         BrowserRoutes.Issues().Location);
     readonly NavigationInteraction interaction = new(owner, navigation);
 
-    <Provide value={navigation}>
-        <NavigationBoundary interaction={interaction} label="Issue navigation">
-            {BrowserRouting.Outlet(interaction)}
-        </NavigationBoundary>
-    </Provide>
+    <NavigationBoundary interaction={interaction} label="Issue navigation">
+        {BrowserRouting.Router(navigation, interaction)}
+    </NavigationBoundary>
 }
 ```
 
-Both constructors are already scope-owned; do not add `[Owned]`. Alternatively,
-an application model can own the session and provide it at the feature boundary.
-Do not inject a navigation session from DI: placement determines its authority.
+Both constructors are already scope-owned; do not add `[Owned]`. An application model
+can own the session and pass it to the Router at the feature boundary. Do not inject a
+navigation session from DI: placement determines its authority.
 
-The app's `BrowserRouting.Outlet` calls `RouteOutlet.Create(descriptors,
-levelFactory, options: new RouteOutletOptions(interaction: interaction))`.
-The factory maps each known route definition to its component recipe. Descendant
-components declare exact requirements:
+The app's `BrowserRouting.Bundle` is created once with
+`RouteBundle.Create([BrowserRoutes.Module], destinationFactory)`. The factory maps
+each known route level to a stable `RouteDestination`. `BrowserRouting.Router` places
+that bundle with `Components.Router([Components.RouterOutlet(options)], Bundle,
+session: navigation)`. Passing `session` borrows the application's existing session;
+disposing the Router does not dispose it. Descendant components declare exact requirements:
+
+```csharp
+internal static class BrowserRouting
+{
+    internal static RouteBundle Bundle { get; } = RouteBundle.Create(
+        [BrowserRoutes.Module],
+        static level => level.Id.Value switch
+        {
+            "issues" => new(typeof(IssuesRoute), Components.IssuesPage()),
+            "issue" => new(typeof(IssueRoute), Components.IssuePage()),
+            _ => throw new InvalidOperationException("Unknown browser route."),
+        }
+    );
+
+    internal static RouteTable Table => Bundle.Table;
+
+    internal static ComponentRecipe Router(
+        NavigationSession navigation,
+        NavigationInteraction interaction
+    ) => Lucent.Core.Components.Router(
+        [
+            Lucent.Core.Components.RouterOutlet(
+                options: new RouteOutletOptions(interaction: interaction)
+            ),
+        ],
+        Bundle,
+        session: navigation
+    );
+}
+```
 
 ```lui
 public component IssueDetails() {
@@ -76,10 +106,10 @@ public component IssueDetails() {
 }
 ```
 
-A nested route shell mounts `RouteOutlet.CreateChild` with the same descriptors
-and level factory. This consumes its private child cursor, not a second session
-participant. Each session permits one active root outlet. Declaring a child route
-without mounting a child outlet fails instead of silently flattening the branch.
+A nested route shell mounts `Components.RouterOutlet()`. It consumes the nearest
+Router's private child cursor, bundle and session rather than creating a second
+session participant. Each session permits one active root outlet. Declaring a child
+route without mounting a child outlet fails instead of silently flattening the branch.
 
 Matching prefixes retain their elements, component state and resolved service
 references. Changed suffixes mount again. Typed `Parameters` stay fixed for a

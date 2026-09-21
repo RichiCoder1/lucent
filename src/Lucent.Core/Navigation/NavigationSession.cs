@@ -11,7 +11,7 @@ namespace Lucent.Core;
 /// route staging, and publication have succeeded. The retained outlet joins through the private
 /// participant seam; route parsing and matching remain owned by <see cref="RouteTable"/>.
 /// </remarks>
-public sealed class NavigationSession : IDisposable
+public sealed partial class NavigationSession : IDisposable
 {
     /// <summary>The initial retention bound used when an application does not choose one.</summary>
     public const int DefaultMaximumEntries = 64;
@@ -550,7 +550,7 @@ public sealed class NavigationSession : IDisposable
         operation.TryComplete(
             new NavigationOutcome(operation.Id, NavigationOutcomeKind.Superseded)
         );
-        if (!_preparationInvocationActive)
+        if (!_preparationInvocationActive && _replacement is null)
         {
             _phase = NavigationPhase.Idle;
             _pending = null;
@@ -634,7 +634,7 @@ public sealed class NavigationSession : IDisposable
         SetPhase(
             _current is null ? NavigationPhase.PreparingEnter : NavigationPhase.PreparingLeave
         );
-        if (_preparationInvocationActive)
+        if (_preparationInvocationActive || _replacement is not null)
         {
             _deferredAttempt = attempt;
             return;
@@ -1042,7 +1042,7 @@ public sealed class NavigationSession : IDisposable
 
     private void StartDeferredPreparation()
     {
-        if (_preparationInvocationActive)
+        if (_preparationInvocationActive || _replacement is not null || _disposed || _terminated)
             return;
         if (_deferredAttempt is not { } deferred)
         {

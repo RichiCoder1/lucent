@@ -21,12 +21,21 @@ internal sealed class ReactiveCollector
         ReferenceEqualityComparer.Instance
     );
     private bool _changedDuringRun;
+    private HashSet<ReactiveNode>? _repeatedReads;
     internal IReadOnlyList<ReactiveRead> Reads => _reads;
+
+    // Transactional readers must retain evidence of an earlier consumed value even when
+    // a later read refreshes a lazy derived value. Ordinary effects keep final-read semantics.
+    internal void PreserveEarlierReads() =>
+        _repeatedReads ??= new HashSet<ReactiveNode>(ReferenceEqualityComparer.Instance);
 
     internal void Add(ReactiveNode node)
     {
         if (_indices.ContainsKey(node))
+        {
+            _repeatedReads?.Add(node);
             return;
+        }
         _indices.Add(node, _reads.Count);
         _reads.Add(new(node, node.Version));
     }
@@ -34,7 +43,11 @@ internal sealed class ReactiveCollector
     internal void Refresh(ReactiveNode node)
     {
         if (_indices.TryGetValue(node, out var index))
+        {
+            if (_repeatedReads?.Contains(node) == true && _reads[index].Version != node.Version)
+                _changedDuringRun = true;
             _reads[index] = new(node, node.Version);
+        }
     }
 
     internal void MarkChanged() => _changedDuringRun = true;

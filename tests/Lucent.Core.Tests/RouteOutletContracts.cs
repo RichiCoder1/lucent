@@ -3,7 +3,7 @@ using Lucent.Core;
 namespace Lucent.Core.Tests;
 
 [TestClass]
-public sealed class RouteOutletContracts
+public sealed partial class RouteOutletContracts
 {
     private static readonly string[] EnterInitialCalls = ["Enter:project", "Enter:issue"];
     private static readonly string[] LeaveAndBlockedEnterCalls =
@@ -29,12 +29,12 @@ public sealed class RouteOutletContracts
             theme,
             author: Style.Empty.Axis(LayoutAxis.Column).Width(160).Height(80)
         );
-        var outlet = RouteOutlet.Create(
-            fixture.Descriptors,
-            level => BuildLevel(level, fixture),
+        var outlet = Router(
+            session,
+            Bundle(fixture.Descriptors, level => BuildLevel(level, fixture)),
             handle
         );
-        _ = composition.Mount(composition.Root, theme, Context.Provide(session, outlet));
+        _ = composition.Mount(composition.Root, theme, outlet);
 
         var first = session.Navigate(Location("/projects/7"));
         Assert.AreEqual(NavigationOutcomeKind.Committed, Completed(first).Kind);
@@ -90,12 +90,12 @@ public sealed class RouteOutletContracts
         using var session = new NavigationSession(sessionOwner, fixture.Table);
         using var handle = new RouteOutletHandle();
         composition.Root.Present(theme, author: Style.Empty.Width(160).Height(80));
-        var outlet = RouteOutlet.Create(
-            fixture.Descriptors,
-            level => BuildLevel(level, fixture),
+        var outlet = Router(
+            session,
+            Bundle(fixture.Descriptors, level => BuildLevel(level, fixture)),
             handle
         );
-        _ = composition.Mount(composition.Root, theme, Context.Provide(session, outlet));
+        _ = composition.Mount(composition.Root, theme, outlet);
 
         Assert.AreEqual(
             NavigationOutcomeKind.Committed,
@@ -153,13 +153,13 @@ public sealed class RouteOutletContracts
                 );
             }
         );
-        var outlet = RouteOutlet.Create(
-            fixture.Descriptors,
-            level => BuildLevel(level, fixture),
+        var outlet = Router(
+            session,
+            Bundle(fixture.Descriptors, level => BuildLevel(level, fixture)),
             handle,
-            options: options
+            options
         );
-        _ = composition.Mount(composition.Root, theme, Context.Provide(session, outlet));
+        _ = composition.Mount(composition.Root, theme, outlet);
 
         Assert.AreEqual(
             NavigationOutcomeKind.Committed,
@@ -230,13 +230,13 @@ public sealed class RouteOutletContracts
                 return new ValueTask<NavigationPreparationResult>(gate.Task);
             }
         );
-        var outlet = RouteOutlet.Create(
-            fixture.Descriptors,
-            level => BuildLevel(level, fixture),
+        var outlet = Router(
+            session,
+            Bundle(fixture.Descriptors, level => BuildLevel(level, fixture)),
             handle,
-            options: options
+            options
         );
-        _ = composition.Mount(composition.Root, theme, Context.Provide(session, outlet));
+        _ = composition.Mount(composition.Root, theme, outlet);
 
         var first = session.Navigate(Location("/projects/1"));
         var second = session.Navigate(Location("/projects/2"));
@@ -264,8 +264,8 @@ public sealed class RouteOutletContracts
         using var sessionOwner = graph.CreateScope("route-session");
         using var session = new NavigationSession(sessionOwner, fixture.Table);
         using var handle = new RouteOutletHandle();
-        var outlet = RouteOutlet.Create(fixture.Descriptors, BuildLevelWithoutChild, handle);
-        _ = composition.Mount(composition.Root, theme, Context.Provide(session, outlet));
+        var outlet = Router(session, Bundle(fixture.Descriptors, BuildLevelWithoutChild), handle);
+        _ = composition.Mount(composition.Root, theme, outlet);
 
         Assert.AreEqual(
             NavigationOutcomeKind.Committed,
@@ -292,12 +292,13 @@ public sealed class RouteOutletContracts
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
         using var sessionOwner = graph.CreateScope("route-session");
         using var session = new NavigationSession(sessionOwner, fixture.Table);
-        var first = RouteOutlet.Create(fixture.Descriptors, level => BuildLevel(level, fixture));
-        _ = composition.Mount(composition.Root, theme, Context.Provide(session, first));
+        var bundle = Bundle(fixture.Descriptors, level => BuildLevel(level, fixture));
+        var first = Router(session, bundle);
+        _ = composition.Mount(composition.Root, theme, first);
 
-        var second = RouteOutlet.Create(fixture.Descriptors, level => BuildLevel(level, fixture));
+        var second = Router(session, bundle);
         Assert.ThrowsExactly<InvalidOperationException>(() =>
-            composition.Mount(composition.Root, theme, Context.Provide(session, second))
+            composition.Mount(composition.Root, theme, second)
         );
     }
 
@@ -599,6 +600,26 @@ public sealed class RouteOutletContracts
         StringAssert.Contains(error.Message, "Configure options on the root RouterOutlet");
     }
 
+    private static RouteBundle Bundle(
+        RouteDescriptorSet descriptors,
+        Func<RouteLevelDescriptor, ComponentRecipe> destination
+    ) =>
+        RouteBundle.Create(
+            descriptors,
+            level => new RouteDestination(
+                typeof(RouteOutletContracts),
+                destination(level),
+                level.Id
+            )
+        );
+
+    private static ComponentRecipe Router(
+        NavigationSession session,
+        RouteBundle bundle,
+        RouteOutletHandle? handle = null,
+        RouteOutletOptions? options = null
+    ) => Components.Router([Components.RouterOutlet(options, handle)], bundle, session: session);
+
     private static (RouteBundle Bundle, RouteLevelDescriptor Level) CreateAuthoringBundle()
     {
         var pattern = RoutePattern.Create(
@@ -750,13 +771,7 @@ public sealed class RouteOutletContracts
                             "route-live-context-derived-observer"
                         );
                     }
-                    context.Mount(
-                        root,
-                        RouteOutlet.CreateChild(
-                            fixture.Descriptors,
-                            child => BuildLevel(child, fixture)
-                        )
-                    );
+                    context.Mount(root, Components.RouterOutlet());
                 }
             ),
             "issue" => ComponentRecipe.Create(
@@ -860,30 +875,34 @@ public sealed class RouteOutletContracts
                 new RouteDefinitionId("project"),
                 [0],
                 source,
-                (definition, match, content, live) =>
-                {
-                    var context = new RouteContext<ProjectRoute>(
+                static (definition, match, live) =>
+                    new RouteContext<ProjectRoute>(
                         definition,
                         new ProjectRoute(match.GetValue(0).Signed32),
                         live
-                    );
-                    contexts.Add(context);
-                    return Context.Provide(context, content);
+                    ),
+                (context, content) =>
+                {
+                    var typed = (RouteContext<ProjectRoute>)context;
+                    contexts.Add(typed);
+                    return Context.Provide(typed, content);
                 }
             );
             var issueLevel = new RouteLevelDescriptor(
                 new RouteDefinitionId("issue"),
                 [1],
                 source,
-                (definition, match, content, live) =>
-                {
-                    var context = new RouteContext<IssueRoute>(
+                static (definition, match, live) =>
+                    new RouteContext<IssueRoute>(
                         definition,
                         new IssueRoute(match.GetValue(0).Signed32, match.GetValue(1).Signed32),
                         live
-                    );
-                    issueContexts.Add(context);
-                    return Context.Provide(context, content);
+                    ),
+                (context, content) =>
+                {
+                    var typed = (RouteContext<IssueRoute>)context;
+                    issueContexts.Add(typed);
+                    return Context.Provide(typed, content);
                 }
             );
             var project = new RouteDefinitionDescriptor(projectPattern, [projectLevel]);

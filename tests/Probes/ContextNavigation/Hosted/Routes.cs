@@ -13,35 +13,31 @@ public readonly record struct ItemRoute(int Id);
 
 internal static class ProbeRouting
 {
-    internal static RouteTable Table { get; } = RouteTable.Create(ProbeRoutes.Module.Patterns);
-
-    internal static RouteDescriptorSet Descriptors { get; } =
-        RouteDescriptorSet.Create(Table, [ProbeRoutes.Module]);
-
-    internal static ComponentRecipe Root(ProbeWorkspace workspace) =>
-        Context.Provide(
-            workspace.Navigation,
-            RouteOutlet.Create(
-                Descriptors,
-                static level =>
-                    level.Id.Value switch
-                    {
-                        "shell" => Components.HostedShell(),
-                        _ => throw new InvalidOperationException("Unknown root route."),
-                    },
-                workspace.Outlet,
-                options: new RouteOutletOptions(workspace.PrepareRoute)
-            )
-        );
-
-    internal static ComponentRecipe Child() =>
-        RouteOutlet.CreateChild(
-            Descriptors,
+    internal static RouteBundle Bundle { get; } =
+        RouteBundle.Create(
+            [ProbeRoutes.Module],
             static level =>
                 level.Id.Value switch
                 {
-                    "item" => Components.HostedLeaf(),
-                    _ => throw new InvalidOperationException("Unknown child route."),
+                    "shell" => new(typeof(ShellRoute), Components.HostedShell()),
+                    "item" => new(typeof(ItemRoute), Components.HostedLeaf()),
+                    _ => throw new InvalidOperationException("Unknown probe route."),
                 }
         );
+
+    internal static RouteTable Table => Bundle.Table;
+
+    internal static ComponentRecipe Root(ProbeWorkspace workspace) =>
+        Lucent.Core.Components.Router(
+            [
+                Lucent.Core.Components.RouterOutlet(
+                    new RouteOutletOptions(workspace.PrepareRoute),
+                    workspace.Outlet
+                ),
+            ],
+            Bundle,
+            session: workspace.Navigation
+        );
+
+    internal static ComponentRecipe Child() => Lucent.Core.Components.RouterOutlet();
 }

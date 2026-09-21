@@ -379,6 +379,8 @@ public sealed class ReactiveGraph
         _collecting?.MarkChanged();
     }
 
+    internal ReactiveCollector? CurrentCollection => _collecting;
+
     internal T Untracked<T>(Func<T> callback)
     {
         CheckThread();

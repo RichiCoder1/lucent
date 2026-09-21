@@ -334,7 +334,13 @@ public sealed class RouteMatchingContracts
         );
         var source = new RouteDeclarationSource("Routes.cs", 1, 1);
         RouteLevelDescriptor Level(string id, params int[] slots) =>
-            new(new(id), slots, source, static (_, _, content) => content);
+            new(
+                new(id),
+                slots,
+                source,
+                static (_, _, _) => new object(),
+                static (_, content) => content
+            );
 
         Assert.ThrowsExactly<ArgumentException>(() =>
             new RouteDefinitionDescriptor(pattern, [Level("project", 0), Level("issue", 0)])
@@ -357,7 +363,8 @@ public sealed class RouteMatchingContracts
             new("home"),
             [],
             new("Routes.cs", 1, 1),
-            static (_, _, content) => content
+            static (_, _, _) => new object(),
+            static (_, content) => content
         );
         var definition = new RouteDefinitionDescriptor(pattern, [level]);
         var module = new RouteModuleDescriptor(
@@ -393,15 +400,16 @@ public sealed class RouteMatchingContracts
             new("issue"),
             [0],
             new("Routes.cs", 1, 1),
-            (definition, matched, content, live) =>
+            (definition, matched, live) =>
             {
                 supplied = new RouteContext<RouteParameters>(
                     definition,
                     new RouteParameters(matched.GetValue(0).Signed32),
                     live
                 );
-                return content;
-            }
+                return supplied;
+            },
+            static (_, content) => content
         );
 
         _ = level.ProvideContext(match, ComponentRecipe.Create("content", static (_, _) => { }));

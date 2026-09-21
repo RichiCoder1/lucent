@@ -24,7 +24,7 @@ public sealed class NavigationInteractionContracts
                 session = ownedSession;
                 interaction = ownedInteraction;
                 var focus = new FocusTarget(owner, "component-owned-focus");
-                var outlet = RouteOutlet.Create(
+                var routes = Bundle(
                     descriptors,
                     _ =>
                         Components.NavigationTarget(
@@ -34,11 +34,20 @@ public sealed class NavigationInteractionContracts
                             "First",
                             focus,
                             NavigationTargetKind.Heading
-                        ),
-                    options: new RouteOutletOptions(interaction: ownedInteraction)
+                        )
                 );
                 return Components.NavigationBoundary(
-                    [Context.Provide(ownedSession, outlet)],
+                    [
+                        Components.Router(
+                            [
+                                Components.RouterOutlet(
+                                    options: new RouteOutletOptions(interaction: ownedInteraction)
+                                ),
+                            ],
+                            routes,
+                            session: ownedSession
+                        ),
+                    ],
                     ownedInteraction
                 );
             }
@@ -90,17 +99,23 @@ public sealed class NavigationInteractionContracts
                 viewport
             );
         }
-        var outlet = RouteOutlet.Create(
-            descriptors,
-            Level,
-            handle: outletHandle,
-            options: new RouteOutletOptions(interaction: interaction)
-        );
+        var routes = Bundle(descriptors, Level);
         composition.Mount(
             composition.Root,
             theme,
             Components.NavigationBoundary(
-                [Context.Provide(session, outlet)],
+                [
+                    Components.Router(
+                        [
+                            Components.RouterOutlet(
+                                new RouteOutletOptions(interaction: interaction),
+                                outletHandle
+                            ),
+                        ],
+                        routes,
+                        session: session
+                    ),
+                ],
                 interaction,
                 "Workspace"
             )
@@ -302,15 +317,24 @@ public sealed class NavigationInteractionContracts
                 viewport
             );
         }
-        var outlet = RouteOutlet.Create(
-            descriptors,
-            Level,
-            options: new RouteOutletOptions(interaction: interaction)
-        );
+        var routes = Bundle(descriptors, Level);
         composition.Mount(
             composition.Root,
             theme,
-            Components.NavigationBoundary([Context.Provide(session, outlet)], interaction)
+            Components.NavigationBoundary(
+                [
+                    Components.Router(
+                        [
+                            Components.RouterOutlet(
+                                options: new RouteOutletOptions(interaction: interaction)
+                            ),
+                        ],
+                        routes,
+                        session: session
+                    ),
+                ],
+                interaction
+            )
         );
 
         firstViewport.Offset = new(13, 21);
@@ -362,16 +386,25 @@ public sealed class NavigationInteractionContracts
                     Target("Second", secondFocus),
                     Target("Duplicate", duplicateFocus),
                 ]);
-        var outlet = RouteOutlet.Create(
-            descriptors,
-            Level,
-            handle,
-            options: new RouteOutletOptions(interaction: interaction)
-        );
+        var routes = Bundle(descriptors, Level);
         composition.Mount(
             composition.Root,
             theme,
-            Components.NavigationBoundary([Context.Provide(session, outlet)], interaction)
+            Components.NavigationBoundary(
+                [
+                    Components.Router(
+                        [
+                            Components.RouterOutlet(
+                                new RouteOutletOptions(interaction: interaction),
+                                handle
+                            ),
+                        ],
+                        routes,
+                        session: session
+                    ),
+                ],
+                interaction
+            )
         );
         graph.Drain();
         var committedRoot = handle.Snapshot.Levels.Single().ElementId;
@@ -435,9 +468,10 @@ public sealed class NavigationInteractionContracts
             new RouteDefinitionId("shell"),
             [],
             source,
-            (definition, _, content, live) =>
+            static (definition, _, live) => new RouteContext<string>(definition, "shell", live),
+            (context, content) =>
             {
-                parentContext = new RouteContext<string>(definition, "shell", live);
+                parentContext = (RouteContext<string>)context;
                 return Context.Provide(parentContext, content);
             }
         );
@@ -445,13 +479,15 @@ public sealed class NavigationInteractionContracts
             firstPattern.Id,
             [],
             source,
-            static (_, _, content, _) => content
+            static (_, _, _) => new object(),
+            static (_, content) => content
         );
         var second = new RouteLevelDescriptor(
             secondPattern.Id,
             [],
             source,
-            static (_, _, content, _) => content
+            static (_, _, _) => new object(),
+            static (_, content) => content
         );
         var descriptors = RouteDescriptorSet.Create(
             table,
@@ -518,7 +554,7 @@ public sealed class NavigationInteractionContracts
                             },
                             "retained-persistent-shell-focus"
                         );
-                        context.Mount(root, RouteOutlet.CreateChild(descriptors, Level));
+                        context.Mount(root, Components.RouterOutlet());
                     }
                 )
                 : ComponentRecipe.Create(
@@ -526,18 +562,22 @@ public sealed class NavigationInteractionContracts
                     (context, root) =>
                         root.Present(context.Theme, author: Style.Empty.Width(20).Height(20))
                 );
-        var outlet = RouteOutlet.Create(
-            descriptors,
-            Level,
-            options: new RouteOutletOptions(interaction: interaction)
-        );
+        var routes = Bundle(descriptors, Level);
         composition.Mount(
             composition.Root,
             theme,
             Components.NavigationBoundary(
                 [
                     Components.Button("Persistent shell", focusTarget: shellFocus),
-                    Context.Provide(session, outlet),
+                    Components.Router(
+                        [
+                            Components.RouterOutlet(
+                                options: new RouteOutletOptions(interaction: interaction)
+                            ),
+                        ],
+                        routes,
+                        session: session
+                    ),
                 ],
                 interaction
             )
@@ -589,8 +629,7 @@ public sealed class NavigationInteractionContracts
         using var composition = new Composition(graph, "partial-publication");
         var mount = new RouteOutletMount(
             session,
-            descriptors,
-            static _ => Components.Text("unused"),
+            Bundle(descriptors, static _ => Components.Text("unused")),
             composition.Root,
             cursor: null,
             handle: null,
@@ -710,6 +749,19 @@ public sealed class NavigationInteractionContracts
 
     private static RouteLocation Location(string text) => RouteLocation.Parse(text).Location!;
 
+    private static RouteBundle Bundle(
+        RouteDescriptorSet descriptors,
+        Func<RouteLevelDescriptor, ComponentRecipe> destination
+    ) =>
+        RouteBundle.Create(
+            descriptors,
+            level => new RouteDestination(
+                typeof(NavigationInteractionContracts),
+                destination(level),
+                level.Id
+            )
+        );
+
     private static RouteDescriptorSet Descriptors(RouteTable table)
     {
         var source = new RouteDeclarationSource("Routes.cs", 1, 1);
@@ -720,7 +772,8 @@ public sealed class NavigationInteractionContracts
                     pattern.Id,
                     [],
                     source,
-                    static (_, _, content) => content
+                    static (_, _, _) => new object(),
+                    static (_, content) => content
                 );
                 return new RouteDefinitionDescriptor(pattern, [level]);
             })

@@ -11,7 +11,7 @@ namespace Lucent.Core;
 /// the level recipe. A root outlet owns the session participant. A nested outlet consumes the
 /// private cursor provided by its parent level and never attaches another session participant.
 /// </remarks>
-public static class RouteOutlet
+internal static class RouteOutlet
 {
     private static readonly ComponentRequirementSource PlacementSource = new(
         "RouterPlacement",
@@ -23,92 +23,6 @@ public static class RouteOutlet
 
     private static readonly ComponentRequirementPlan<RouterPlacement> PlacementRequirements =
         ComponentRequirements.Context<RouterPlacement>(PlacementSource);
-
-    private static readonly ComponentRequirementSource NavigationSource = new(
-        "NavigationSession",
-        "Lucent.Core.NavigationSession",
-        "<framework>",
-        1,
-        1
-    );
-
-    private static readonly ComponentRequirementSource CursorSource = new(
-        "RouteOutletCursor",
-        "Lucent.Core.RouteOutletCursor",
-        "<framework>",
-        1,
-        1
-    );
-
-    private static readonly ComponentRequirementPlan<NavigationSession> RootRequirements =
-        ComponentRequirements.Context<NavigationSession>(NavigationSource);
-
-    private static readonly ComponentRequirementPlan<ChildInputs> ChildRequirements =
-        ComponentRequirements
-            .Context<RouteOutletCursor>(CursorSource)
-            .AndContext<NavigationSession>(NavigationSource)
-            .Select(values => new ChildInputs(values.Previous, values.Value));
-
-    /// <summary>
-    /// Creates a root outlet recipe. The recipe requires the exact nearest
-    /// <see cref="NavigationSession"/> provider at its mount site.
-    /// </summary>
-    public static ComponentRecipe Create(
-        RouteDescriptorSet descriptors,
-        Func<RouteLevelDescriptor, ComponentRecipe> levelFactory,
-        RouteOutletHandle? handle = null,
-        string? name = null,
-        RouteOutletOptions? options = null
-    )
-    {
-        ValidateInputs(descriptors, levelFactory);
-        var kind = name ?? "route-outlet";
-        return ComponentRecipe.Defer(
-            kind,
-            RootRequirements,
-            (owner, session) =>
-                MountedRecipe(
-                    kind,
-                    owner,
-                    session,
-                    descriptors,
-                    levelFactory,
-                    cursor: null,
-                    handle,
-                    options
-                )
-        );
-    }
-
-    /// <summary>
-    /// Creates a nested outlet recipe. It consumes the exact cursor provided by its matched
-    /// parent route level and verifies that the supplied session is the same session.
-    /// </summary>
-    public static ComponentRecipe CreateChild(
-        RouteDescriptorSet descriptors,
-        Func<RouteLevelDescriptor, ComponentRecipe> levelFactory,
-        RouteOutletHandle? handle = null,
-        string? name = null
-    )
-    {
-        ValidateInputs(descriptors, levelFactory);
-        var kind = name ?? "route-outlet";
-        return ComponentRecipe.Defer(
-            kind,
-            ChildRequirements,
-            (owner, inputs) =>
-                MountedRecipe(
-                    kind,
-                    owner,
-                    inputs.Value,
-                    descriptors,
-                    levelFactory,
-                    inputs.Previous,
-                    handle,
-                    options: null
-                )
-        );
-    }
 
     internal static ComponentRecipe CreateFromRouter(
         RouteOutletHandle? handle = null,
@@ -130,12 +44,10 @@ public static class RouteOutlet
                     kind,
                     owner,
                     placement.Session,
-                    placement.Routes.Descriptors,
-                    level => placement.Routes.ResolveDefault(level).Content,
+                    placement.Routes,
                     placement.Cursor,
                     handle,
-                    options,
-                    placement.Routes
+                    options
                 );
             }
         );
@@ -145,12 +57,10 @@ public static class RouteOutlet
         string kind,
         ReactiveScope owner,
         NavigationSession session,
-        RouteDescriptorSet descriptors,
-        Func<RouteLevelDescriptor, ComponentRecipe> levelFactory,
+        RouteBundle routes,
         RouteOutletCursor? cursor,
         RouteOutletHandle? handle,
-        RouteOutletOptions? options,
-        RouteBundle? routes = null
+        RouteOutletOptions? options
     ) =>
         ComponentRecipe.Create(
             kind,
@@ -164,13 +74,11 @@ public static class RouteOutlet
                 );
                 var outlet = new RouteOutletMount(
                     session,
-                    descriptors,
-                    levelFactory,
+                    routes,
                     host,
                     cursor,
                     handle,
-                    cursor?.Owner.Options ?? options,
-                    routes ?? cursor?.Owner.Routes
+                    cursor?.Owner.Options ?? options
                 );
                 owner.OnDispose(outlet.Dispose);
                 if (handle is not null)
@@ -178,17 +86,6 @@ public static class RouteOutlet
                 outlet.Initialize();
             }
         );
-
-    private static void ValidateInputs(
-        RouteDescriptorSet descriptors,
-        Func<RouteLevelDescriptor, ComponentRecipe> levelFactory
-    )
-    {
-        ArgumentNullException.ThrowIfNull(descriptors);
-        ArgumentNullException.ThrowIfNull(levelFactory);
-    }
-
-    private sealed record ChildInputs(RouteOutletCursor Previous, NavigationSession Value);
 }
 
 /// <summary>Internal retained state for one route level and its optional nested outlet.</summary>
@@ -226,14 +123,31 @@ internal sealed class RouteOutletBuildNode
 
     internal void DisposeProvisional()
     {
-        ChildOutlet?.DisposeProvisional();
+        List<Exception>? errors = null;
+        var child = ChildOutlet;
         ChildOutlet = null;
+        try
+        {
+            child?.DisposeProvisional();
+        }
+        catch (Exception error)
+        {
+            (errors ??= []).Add(error);
+        }
         if (Context is { } context)
         {
             Context = null;
-            context.Dispose();
+            try
+            {
+                context.Dispose();
+            }
+            catch (Exception error)
+            {
+                (errors ??= []).Add(error);
+            }
         }
         Live.Clear();
+        Composition.ThrowAll(errors, "Candidate route cleanup failed.");
     }
 }
 
@@ -241,14 +155,14 @@ internal sealed class RouteOutletBuildNode
 internal sealed class RouteOutletLevelKey
 {
     private readonly RouteValue[] _values;
-    private readonly Type? _componentType;
+    private readonly Type _componentType;
     private readonly object? _destinationKey;
 
     internal RouteOutletLevelKey(
         RouteDefinitionId definition,
         IReadOnlyList<RouteValue> values,
-        Type? componentType = null,
-        object? destinationKey = null
+        Type componentType,
+        object? destinationKey
     )
     {
         Definition = definition;
@@ -362,12 +276,11 @@ internal sealed class RouteOutletStage : NavigationStage
 internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDisposable
 {
     private readonly RouteDescriptorSet _descriptors;
-    private readonly Func<RouteLevelDescriptor, ComponentRecipe> _levelFactory;
     private readonly Element _host;
     private readonly RouteOutletCursor? _cursor;
     private readonly RouteOutletHandle? _handle;
     private readonly RouteOutletOptions? _options;
-    private readonly RouteBundle? _routes;
+    private readonly RouteBundle _routes;
     private readonly NavigationInteraction? _interaction;
     private readonly Composition _composition;
     private readonly bool _isRoot;
@@ -384,31 +297,28 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
 
     internal RouteOutletMount(
         NavigationSession session,
-        RouteDescriptorSet descriptors,
-        Func<RouteLevelDescriptor, ComponentRecipe> levelFactory,
+        RouteBundle routes,
         Element host,
         RouteOutletCursor? cursor,
         RouteOutletHandle? handle,
-        RouteOutletOptions? options,
-        RouteBundle? routes = null
+        RouteOutletOptions? options
     )
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
-        _descriptors = descriptors ?? throw new ArgumentNullException(nameof(descriptors));
-        _levelFactory = levelFactory ?? throw new ArgumentNullException(nameof(levelFactory));
+        _routes = routes ?? throw new ArgumentNullException(nameof(routes));
+        _descriptors = routes.Descriptors;
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _cursor = cursor;
         _handle = handle;
         _options = options;
-        _routes = routes;
         _interaction = cursor is null ? options?.Interaction : null;
         _composition = host.Composition;
         _isRoot = cursor is null;
         _startLevel = cursor?.StartLevel ?? 0;
-        if (!ReferenceEquals(Session.RouteTable, descriptors.Table))
+        if (!ReferenceEquals(Session.RouteTable, routes.Table))
             throw new ArgumentException(
                 "A route outlet descriptor set must use the session's exact RouteTable instance.",
-                nameof(descriptors)
+                nameof(routes)
             );
         if (cursor is not null && !ReferenceEquals(cursor.Session, Session))
             throw new InvalidOperationException(
@@ -423,8 +333,6 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
     internal NavigationSession Session { get; }
 
     internal RouteOutletOptions? Options => _options;
-
-    internal RouteBundle? Routes => _routes;
 
     internal RouteOutletSnapshot Snapshot => _snapshot;
 
@@ -452,65 +360,44 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
             return;
 
         _registration = Session.AttachParticipant(this);
-        var current = Session.Current;
-        if (current is null)
-        {
-            StartReactiveSelection();
-            return;
-        }
-
-        RouteOutletStage? stage = null;
-        try
-        {
-            stage = PrepareInitial(current);
-            var publication = new NavigationPublication(
-                0,
-                0,
-                null,
-                current,
-                Session.Journal,
-                NavigationHistoryAction.Replace,
-                NavigationOrigin.Application
-            );
-            stage.Apply(publication);
-            stage.Retire();
-            UpdateSnapshot(current, 0);
-            _interaction?.AfterPublish(publication, _snapshot);
-            StartReactiveSelection();
-        }
-        catch
-        {
-            stage?.Dispose();
-            throw;
-        }
+        StartReactiveSelection();
     }
 
     private void StartReactiveSelection()
     {
-        if (_routes is null || _options?.Resolve is null || _refreshSignal is not null)
+        if (_refreshSignal is not null)
             return;
         _refreshSignal = _host.Scope.Signal(0L, _host.Name + ".route-selection-refresh");
         _idleRegistration = Session.RegisterIdle(
             _host.Scope,
             () => _refreshSignal.Value = checked(_refreshSignal.Value + 1)
         );
-        _ = _host.Scope.Effect(RefreshDestinations, _host.Name + ".route-selection");
+        var selection = _host.Scope.Effect(RefreshDestinations, _host.Name + ".route-selection");
+        // Preserve synchronous initial mounting and its rollback boundary, while collecting
+        // the same freshness dependencies used by subsequent replacement runs.
+        selection.Run();
     }
 
-    private ResolvedRouteDestination[]? ResolveBranch(NavigationSnapshot target)
+    private ResolvedRouteDestination[] ResolveBranch(NavigationSnapshot target)
     {
-        if (_routes is null)
-            return null;
         var terminal = _descriptors.GetDefinition(target.Match);
         var result = new ResolvedRouteDestination[terminal.Branch.Count];
         for (var index = 0; index < terminal.Branch.Count; index++)
         {
             var level = terminal.Branch[index];
-            var live = ActiveAt(index)?.Live ?? new RouteContextLiveState(target);
-            var context = level.CreateContext(target.Match, live);
             var fallback = _routes.ResolveDefault(level);
             var destination = _options?.Resolve is { } resolve
-                ? resolve(new RouteDestinationRequest(level, target.Match, context, fallback))
+                ? resolve(
+                    new RouteDestinationRequest(
+                        level,
+                        target.Match,
+                        level.CreateContext(
+                            target.Match,
+                            ActiveAt(index)?.Live ?? new RouteContextLiveState(target)
+                        ),
+                        fallback
+                    )
+                )
                 : fallback;
             if (destination is null)
                 throw new InvalidOperationException(
@@ -545,26 +432,59 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
             || Session.Current is not { } current
         )
             return;
-        var destinations = ResolveBranch(current)!;
-        _composition.Graph.Untracked(() =>
+        var reservation = Session.TryReserveReplacement(this, current);
+        if (reservation is null)
+            return;
+        var graph = _composition.Graph;
+        var reads = graph.CurrentCollection;
+        reads?.PreserveEarlierReads();
+        try
         {
-            ReplaceDestinations(current, destinations);
-            return true;
-        });
+            var destinations = ResolveBranch(current);
+            if (SelectionChanged(reads) || !reservation.IsCurrent)
+                return;
+            graph.Untracked(() =>
+            {
+                ReplaceDestinations(current, destinations, reservation, reads);
+                return true;
+            });
+        }
+        catch (Exception error)
+        {
+            // Rollback has already retained the committed branch and collected cleanup
+            // errors. Abort queued navigation before releasing the shared staged slot.
+            reservation.Abort(error);
+            throw;
+        }
+        finally
+        {
+            graph.Untracked(() =>
+            {
+                reservation.Dispose();
+                return true;
+            });
+        }
     }
 
     private void ReplaceDestinations(
         NavigationSnapshot current,
-        IReadOnlyList<ResolvedRouteDestination> destinations
+        IReadOnlyList<ResolvedRouteDestination> destinations,
+        NavigationSession.ReplacementReservation reservation,
+        ReactiveCollector? reads
     )
     {
         var stage = new RouteOutletStage(this);
         try
         {
             _ = PrepareFor(current, stage, destinations);
-            if (!HasStagedChange())
+            if (
+                _disposed
+                || SelectionChanged(reads)
+                || !reservation.IsCurrent
+                || !HasStagedChange()
+            )
             {
-                DiscardStaged();
+                stage.Dispose();
                 return;
             }
             var publication = new NavigationPublication(
@@ -576,16 +496,47 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
                 NavigationHistoryAction.Replace,
                 NavigationOrigin.Application
             );
-            stage.Apply(publication);
-            stage.MarkPublished();
-            UpdateSnapshot(current, 0);
-            _interaction?.AfterPublish(publication, _snapshot);
-            Retire(new NavigationRetirement(0, 0, current, []));
+            reservation.Publish(
+                () =>
+                {
+                    stage.Apply(publication);
+                    stage.MarkPublished();
+                    UpdateSnapshot(current, 0);
+                    _interaction?.AfterPublish(publication, _snapshot);
+                },
+                () => Retire(new NavigationRetirement(0, 0, current, []))
+            );
         }
-        catch
+        catch (Exception error)
+        {
+            RollbackStage(stage, error);
+            throw;
+        }
+    }
+
+    private bool SelectionChanged(ReactiveCollector? reads)
+    {
+        if (reads is null)
+            return false;
+        // A lazy derived value may be invalidated without changing its version yet.
+        // Validate without refreshing the resolver's captured versions or tracking setup reads.
+        return _composition.Graph.Untracked(() =>
+        {
+            foreach (var read in reads.Reads)
+                read.Node.EnsureCurrent();
+            return reads.Changed();
+        });
+    }
+
+    private static void RollbackStage(RouteOutletStage stage, Exception original)
+    {
+        try
         {
             stage.Dispose();
-            throw;
+        }
+        catch (Exception cleanup)
+        {
+            throw new AggregateException("Route staging and rollback failed.", original, cleanup);
         }
     }
 
@@ -671,9 +622,9 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
             _ = PrepareFor(request.Target, stage, ResolveBranch(request.Target));
             return stage;
         }
-        catch
+        catch (Exception error)
         {
-            DiscardStaged();
+            RollbackStage(stage, error);
             throw;
         }
     }
@@ -746,25 +697,10 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
         _handle?.Detach(this);
     }
 
-    private RouteOutletStage PrepareInitial(NavigationSnapshot target)
-    {
-        var stage = new RouteOutletStage(this);
-        try
-        {
-            _ = PrepareFor(target, stage, ResolveBranch(target));
-            return stage;
-        }
-        catch
-        {
-            DiscardStaged();
-            throw;
-        }
-    }
-
     private RouteOutletBuildNode? PrepareFor(
         NavigationSnapshot target,
         RouteOutletStage stage,
-        IReadOnlyList<ResolvedRouteDestination>? destinations = null
+        IReadOnlyList<ResolvedRouteDestination> destinations
     )
     {
         var definition = _descriptors.GetDefinition(target.Match);
@@ -786,12 +722,12 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
         NavigationSnapshot target,
         RouteOutletStage stage,
         RouteOutletBuildNode? active,
-        IReadOnlyList<ResolvedRouteDestination>? destinations
+        IReadOnlyList<ResolvedRouteDestination> destinations
     )
     {
         var match = target.Match;
         var definition = terminal.Branch[_startLevel];
-        var destination = destinations is null ? null : destinations[_startLevel].Destination;
+        var destination = destinations[_startLevel].Destination;
         var key = CreateKey(definition, match, destination);
         RouteOutletBuildNode node;
         if (active is not null && active.Key.Matches(key))
@@ -803,6 +739,8 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
             node = MountNode(target, definition, destination);
         }
 
+        // Rollback must own the acquired parent before child preparation can fail.
+        _staged = node;
         var hasChild = terminal.Branch.Count > _startLevel + 1;
         if (node.ChildOutlet is null)
         {
@@ -817,14 +755,13 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
         {
             _ = node.ChildOutlet.PrepareFor(target, stage, destinations);
         }
-        _staged = node;
         return node;
     }
 
     private RouteOutletBuildNode MountNode(
         NavigationSnapshot target,
         RouteLevelDescriptor definition,
-        RouteDestination? destination
+        RouteDestination destination
     )
     {
         var match = target.Match;
@@ -846,19 +783,12 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
         {
             placeholder.Live.Attach(liveOwner);
             var cursor = new RouteOutletCursor(this, _startLevel + 1, placeholder);
-            var recipe = destination?.Content ?? _levelFactory(definition);
-            ArgumentNullException.ThrowIfNull(recipe);
-            recipe = Context.Provide(cursor, recipe);
-            if (_routes is not null)
-            {
-                recipe = Context.Provide(new RouterPlacement(_routes, Session, cursor), recipe);
-                var typedContext = definition.CreateContext(match, placeholder.Live);
-                recipe = definition.ProvideContext(typedContext, recipe);
-            }
-            else
-            {
-                recipe = definition.ProvideContext(match, recipe, placeholder.Live);
-            }
+            var recipe = Context.Provide(
+                new RouterPlacement(_routes, Session, cursor),
+                destination.Content
+            );
+            var typedContext = definition.CreateContext(match, placeholder.Live);
+            recipe = definition.ProvideContext(typedContext, recipe);
             var environment =
                 _host.MountEnvironment
                 ?? throw new InvalidOperationException(
@@ -907,13 +837,13 @@ internal sealed class RouteOutletMount : INavigationTransactionParticipant, IDis
     private static RouteOutletLevelKey CreateKey(
         RouteLevelDescriptor definition,
         RouteMatch match,
-        RouteDestination? destination = null
+        RouteDestination destination
     ) =>
         new(
             definition.Id,
             definition.OwnedCaptureSlots.Select(match.GetValue).ToArray(),
-            destination?.ComponentType,
-            destination?.Key
+            destination.ComponentType,
+            destination.Key
         );
 
     internal void PublishStaged(RouteOutletStage stage, NavigationPublication publication)

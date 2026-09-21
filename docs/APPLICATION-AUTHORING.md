@@ -183,6 +183,14 @@ component type and author key are unchanged; a changed identity replaces only th
 branch. This does not navigate, run navigation guards, or create history entries. Selection
 waits while navigation is pending and reevaluates on return to idle, including veto and
 cancellation. Resolver or staging failures must leave the previously committed branch intact.
+During idle replacement, navigation requested from a resolver or mount callback takes precedence: the candidate
+is discarded before navigation preparation starts. Selection is checked again after
+mounting, including lazy derived dependencies. Initial mounting uses this same boundary.
+Publication and retirement are synchronous owner phases; reentering navigation there
+is a terminal programming error, just as during ordinary navigation publication.
+Ordinary failed selection remains retryable after rollback. If that failed callback also
+queued navigation, the session terminates with the original error and cancels the intent;
+it cannot publish new content while the failure is unwinding.
 
 ## Build and editor ownership
 

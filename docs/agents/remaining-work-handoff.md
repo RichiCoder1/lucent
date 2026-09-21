@@ -1,5 +1,41 @@
 # Current work and follow-ups
 
+## Restart checkpoint — September 21, 2026
+
+The owner requested a computer restart during #310. Pause all work at this checkpoint;
+resume the correction batch when requested. Do not start roadmap #205.
+
+- Routing R1/R2/R3/R7 is source-complete: Core **674/674** and architecture checks,
+  including negative fixtures, pass. Issue Browser builds without warnings; its attempted
+  no-build test invocation discovered zero tests, so no application test pass is claimed.
+- R4/R5 editor corrections and R8/R6 lint/companion diagnostics remain in progress.
+  Worker checkpoint notes under `artifacts/review310-*-checkpoint.md` record exact
+  saved files, test failures and remaining steps. Do not treat this checkpoint as delivery.
+- Light Notes has three pending consumer migrations: `src/LightNotes/Routes.cs`,
+  `tests/LightNotes.Tests/ShellPresentationTests.cs`, and
+  `tests/LightNotes.Tests/WorkspaceTests.cs`. Its existing `79.1` package pin lacks the
+  new routing API. Validate against a fresh candidate and then pin the corrected official
+  package after Lucent publication. Preserve its other preexisting dirty files.
+- No correction package has been packed/published and no correction desktop check has
+  run. Finish affected editor/compiler/app tests, formatting and package/NativeAOT proofs,
+  then commit/push and verify CI/publication before closing #310. UI tests were authorized
+  before the restart request; the current checkpoint pauses work altogether.
+
+Use `MSBUILDDISABLENODEREUSE=1` with SDK 10.0.401. Coordinate builds sharing compiler
+outputs. Source app projects own their RIDs; do not pass a global RID through the graph.
+The local review report is `artifacts/reviews/authoring-247c87e-20260921/review.md`.
+Unrelated untracked advisor/research/sandbox-plan files and `.dotnet-home/` stay untouched.
+
+## Authoring review corrections — September 21, 2026
+
+The owner accepted all eight adversarial findings against `247c87e`. Work is tracked
+in [#310](https://github.com/RichiCoder1/lucent/issues/310) and the
+[correction plan](../plans/authoring-review-corrections.md): routing transaction and
+rollback safety first, consolidation on Router/RouterOutlet and typed descriptors,
+then exact editor mappings, dependency preparation, lint parity and companion diagnostics.
+The prior A0–A7 delivery evidence below remains tied to its original source and packages.
+Finish and verify these corrections before starting roadmap #205.
+
 ## A0–A7 delivered — September 21, 2026
 
 Parent #301 and children #302–309 are complete. `d9cf2db`, `f36f9f6` and `e15a43c`

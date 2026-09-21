@@ -11,23 +11,30 @@ public readonly record struct IssueRoute(int Number);
 
 internal static class IssueBrowserRouting
 {
-    internal static RouteTable Table { get; } =
-        RouteTable.Create(IssueBrowserRoutes.Module.Patterns);
-    internal static RouteDescriptorSet Descriptors { get; } =
-        RouteDescriptorSet.Create(Table, [IssueBrowserRoutes.Module]);
-
-    internal static ComponentRecipe Outlet(NavigationInteraction interaction) =>
-        RouteOutlet.Create(
-            Descriptors,
+    internal static RouteBundle Bundle { get; } =
+        RouteBundle.Create(
+            [IssueBrowserRoutes.Module],
             static level =>
                 level.Id.Value switch
                 {
-                    "issues" => Components.IssuesRouteView(),
-                    "issue" => Components.IssueRouteView(),
+                    "issues" => new(typeof(IssuesRoute), Components.IssuesRouteView()),
+                    "issue" => new(typeof(IssueRoute), Components.IssueRouteView()),
                     _ => throw new InvalidOperationException(
                         "Unknown Issue Browser route definition."
                     ),
-                },
-            options: new RouteOutletOptions(interaction: interaction)
+                }
+        );
+
+    internal static RouteTable Table => Bundle.Table;
+
+    internal static ComponentRecipe Outlet(NavigationInteraction interaction) =>
+        Lucent.Core.Components.Router(
+            [
+                Lucent.Core.Components.RouterOutlet(
+                    options: new RouteOutletOptions(interaction: interaction)
+                ),
+            ],
+            Bundle,
+            session: interaction.Session
         );
 }
