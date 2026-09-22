@@ -32,8 +32,15 @@ internal component PolicyProbe() { <Caption label="Lint policy" /> }
 '@ | Set-Content $source
 
 function Invoke-Expected([string[]] $Arguments, [int] $ExpectedExit, [string] $Diagnostic) {
-    $output = (& $Dotnet @Arguments 2>&1) -join "`n"
-    $actualExit = $LASTEXITCODE
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = (& $Dotnet @Arguments 2>&1) -join "`n"
+        $actualExit = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     if ($actualExit -ne $ExpectedExit -or ($Diagnostic -and $output -notmatch [regex]::Escape($Diagnostic))) {
         throw "Expected exit $ExpectedExit and diagnostic '$Diagnostic', got $actualExit.`n$output"
     }
@@ -49,7 +56,9 @@ Set-Content $configuration "root = true`n[*.lui]`ndotnet_diagnostic.LUI5003.seve
 Invoke-Expected @('build', $Project, '-c', 'Release', '--no-restore', '-warnaserror') 0 ''
 Invoke-Expected @($Tooling, '--lint', '--project', $Project, $source) 0 ''
 
-$namedFixture = Join-Path $projectDirectory 'named-lint-policy'
+# Keep the named project outside the consumer's default Compile glob. Its
+# generated intermediate files must not become inputs to the later AOT build.
+$namedFixture = Join-Path (Split-Path $projectDirectory -Parent) 'named-lint-policy'
 $null = New-Item -ItemType Directory -Path $namedFixture -Force
 $namedInput = Join-Path $namedFixture 'lui-input'
 $null = New-Item -ItemType Directory -Path $namedInput -Force
@@ -66,7 +75,7 @@ $namedCompanion = Join-Path $namedFixture 'PolicyProbe.lui.cs'
 </Project>
 "@ | Set-Content -LiteralPath $namedProject
 @'
-namespace LintPolicyProbe;
+namespace LintPolicyNamedProbe;
 using Lucent.Core;
 public static class Factory
 {
@@ -75,10 +84,15 @@ public static class Factory
 }
 '@ | Set-Content (Join-Path $namedFixture 'Factory.cs')
 $namedSourceText = @'
-namespace LintPolicyProbe;
-using static LintPolicyProbe.Factory;
+namespace LintPolicyNamedProbe;
+using static LintPolicyNamedProbe.Factory;
+using static Lucent.Core.Components;
 public component PolicyProbe(string[] items) {
-    foreach (var item in items) keyed by System.Guid.NewGuid() { <Caption>{item}</Caption> }
+    <Column>
+        foreach (var item in items) keyed by System.Guid.NewGuid() {
+            <Caption>{item}</Caption>
+        }
+    </Column>
 }
 '@
 Set-Content -LiteralPath $namedSource -Value $namedSourceText
@@ -92,13 +106,16 @@ function Set-NamedLintSeverity([string] $Severity) {
 
 function Invoke-NamedBuild([int] $ExpectedExit, [string] $Required, [string] $Forbidden) {
     $arguments = @('build', $namedProject, '-c', 'Release', '--no-restore', '-p:TreatWarningsAsErrors=false')
-    $output = (& $Dotnet @arguments 2>&1) -join "`n"
-    $actualExit = $LASTEXITCODE
-    if (
-        $actualExit -ne $ExpectedExit
-        -or ($Required -and $output -notmatch [regex]::Escape($Required))
-        -or ($Forbidden -and $output -match [regex]::Escape($Forbidden))
-    ) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $output = (& $Dotnet @arguments 2>&1) -join "`n"
+        $actualExit = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+    if (($actualExit -ne $ExpectedExit) -or ($Required -and $output -notmatch [regex]::Escape($Required)) -or ($Forbidden -and $output -match [regex]::Escape($Forbidden))) {
         throw "Expected named build exit $ExpectedExit with '$Required' and without '$Forbidden', got $actualExit.`n$output"
     }
     return $output
@@ -111,13 +128,8 @@ Set-NamedLintSeverity 'none'
 Invoke-NamedBuild 0 '' 'LUI5001' | Out-Null
 
 Set-NamedLintSeverity 'warning'
-$lintLine = '    foreach (var item in items) keyed by System.Guid.NewGuid() { <Caption>{item}</Caption> }'
-$suppressedSource = $namedSourceText.Replace(
-    $lintLine,
-    '    // lui-lint-disable-next LUI5001: This package probe checks authored suppression.'
-        + [Environment]::NewLine
-        + $lintLine
-)
+$lintLine = '        foreach (var item in items) keyed by System.Guid.NewGuid() {'
+$suppressedSource = $namedSourceText.Replace($lintLine, '    // lui-lint-disable-next LUI5001: This package probe checks authored suppression.' + [Environment]::NewLine + $lintLine)
 Set-Content -LiteralPath $namedSource -Value $suppressedSource
 Invoke-NamedBuild 0 '' 'LUI5001' | Out-Null
 Set-Content -LiteralPath $namedSource -Value $namedSourceText
@@ -127,7 +139,7 @@ Set-Content -LiteralPath $namedSource -Value $namedSourceText
 $unusedNamedSource = Join-Path $namedInput 'UnusedBroken.lui'
 try {
     @'
-namespace LintPolicyProbe;
+namespace LintPolicyNamedProbe;
 using Lucent.Core;
 using static Lucent.Core.Components;
 public component UnusedBroken() { <Text content={MissingValue} /> }
@@ -145,7 +157,7 @@ Invoke-NamedBuild 1 'LUI6102' '' | Out-Null
 Set-NamedLintSeverity 'none'
 try {
     @'
-namespace LintPolicyProbe;
+namespace LintPolicyNamedProbe;
 [Lucent.Core.ComponentState]
 public sealed partial class PolicyProbe { }
 '@ | Set-Content -LiteralPath $namedCompanion

@@ -9,8 +9,8 @@ Routing R1/R2/R3/R7 is saved in local `1553813`: Core **674/674**, Issue Browser
 **22/22**, and architecture checks including negative fixtures pass. Editor/build
 corrections now pass Compiler **146/146**, Generator **52/52**, LanguageServer
 **45/45**, and VS Code client **15/15**. Repository formatting passes **595 C#**
-and **115 LUI** files. The client is packaged as VSIX **0.3.5**; installation and
-updated server deployment are still pending.
+and **115 LUI** files. VSIX **0.3.5** and its matching versioned language server are
+installed; the deployed server's protocol smoke passes. Open VS Code windows need reload.
 
 The independent source follow-up identified and rechecked four additional cases:
 same-arity method overload maps, real client synchronization of unsaved configuration,
@@ -18,12 +18,17 @@ AdditionalFiles-only configuration for linked LUI, and structural failure hidden
 diagnostic suppression. Those corrections have focused regressions; the reviewer found
 no remaining concrete blocker in the bounded source follow-up and did not run tests.
 
-Remaining delivery: finish affected downstream checks, commit the integrated corrections,
-pack one fresh candidate set, run package lint/NativeAOT and Windows sample proofs,
-validate the Light Notes migration against that set, then push and verify publication.
-Pin Light Notes to the corrected official package, preserving unrelated changes. Its
-three routing migration files remain uncommitted; the isolated candidate fixture is
-`artifacts/review310-light-notes`. Do not close #310 before delivery is verified.
+Integrated source is committed as `a2e74ac`. Local candidate
+`0.3.0-dev.review310.20260922.1` passes all nine package inventories, package lint/SDK
+and NativeAOT proofs, generated navigation and scoped Hosting consumers, four Windows
+sample smoke runs, four package editor contracts, and three Issue Browser desktop checks.
+Light Notes passes 44 managed checks with one intentional skip, Storage 22/22, NativeAOT
+publication and two desktop route/focus/draft checks against that candidate.
+
+Remaining delivery: push and verify CI publication, then pin Light Notes to the corrected
+official package, preserving unrelated changes. Its three routing migration files remain
+uncommitted; the isolated candidate fixture is `artifacts/review310-light-notes`.
+Do not close #310 before delivery is verified.
 
 PowerShell startup was blocked by Windows volume queries against the external Samsung
 T7 on F:. After the owner's repair action, fresh PowerShell and C:/D:/F: metadata probes
@@ -35,6 +40,18 @@ outputs. Source app projects own their RIDs; do not pass a global RID through th
 Worker evidence is in `artifacts/review310-editor-checkpoint.md` and
 `artifacts/review310-diagnostics-checkpoint.md`. Preserve unrelated advisor/research
 and sandbox-plan files, `.dotnet-home/`, and the diagnostic-time `%SystemDrive%/` folder.
+
+## Queued after #310 — test quality
+
+The Code Review task relayed the owner's request to implement the Fable-reviewed
+recommendations after the current closeout. Read `advisor-plans/README.md`, then
+`005-agent-test-authoring-guidance.md`, `003-existing-test-cleanup.md`,
+`004-test-harness-improvements.md`, and
+`reviews/test-quality-fable-disposition.md`. Required scope is 005, C1–C5 and H1–H3;
+record proceed/defer decisions for C6 and optional H4. Preserve distinct compiler,
+editor, package/NativeAOT, UIA, cleanup and stale-work evidence. No new coverage gates,
+headless migration or stress opt-in system is authorized by those plans. Keep the
+unrelated security plan001 and research untouched. Do not start roadmap #205.
 
 ## Authoring review corrections — September 21, 2026
 

@@ -72,3 +72,34 @@ was source-only. Package/application evidence and publication are still pending.
 The September 21 restart checkpoint is superseded. Complete the remaining downstream,
 package, application and publication checks before closing #310; preserve the earlier
 source and package evidence boundaries.
+
+## Local candidate verification
+
+Source commit `a2e74acd448b488c22ecb71ec5b12d6de436110a` produced all nine packages
+as `0.3.0-dev.review310.20260922.1`. The package inventory and source-identity check
+passed. This is a local candidate, not a published dependency version.
+
+- Additional affected suites: Component Browser 20/20, Hosting 12/12 and Tooling 8/8,
+  with warning-clean builds.
+- Package-backed editor contracts: 4/4, using an isolated NuGet cache.
+- Published Issue Browser: three desktop checks pass for styled/native context-menu
+  navigation and responsive route/focus continuity.
+- Inline and companion Windows sample apps: managed and NativeAOT execution pass
+  for both variants, four automated smoke runs against the candidate packages.
+- Isolated Light Notes consumer: 44 managed passes with one intentional projection
+  probe skip, Storage 22/22, and a successful NativeAOT publish. Two desktop checks
+  pass for responsive focus continuity and incomplete-draft navigation/recovery.
+- VSIX 0.3.5 is installed with a matching, versioned language-server deployment.
+  Deployment hashes match and a real initialize/shutdown protocol smoke passes.
+  Existing VS Code windows must reload to use the new client and server.
+
+The named lint package fixture needed a valid element root and a sibling project
+directory so its generated C# could not enter the main consumer's compile glob.
+These are verification-harness corrections; the runtime/compiler candidate is unchanged.
+Authoring/SDK verification passes, including managed/NativeAOT execution, lint/config
+parity, structural-error suppression negatives and production SDK failure cases.
+Generated navigation passes under NativeAOT; the scoped Hosting navigation consumer
+passes managed and NativeAOT execution. Logs are `artifacts/review310-authoring-packages.log`,
+`artifacts/review310-navigation-package.log` and
+`artifacts/review310-context-navigation-package.log`.
+Official publication and the final Light Notes package pin remain pending.
