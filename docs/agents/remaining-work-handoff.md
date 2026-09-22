@@ -1,5 +1,32 @@
 # Current work and follow-ups
 
+## Paused delivery checkpoint — September 22, 2026
+
+The owner requested a pause at the next valid checkpoint. All local #310 checks
+are complete and Lucent is pushed through `6c4573b8`. [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
+was still running its managed and package-verification jobs when work paused.
+Publication of `0.3.0-dev.86.1` has **not** been confirmed. Recheck that exact run
+before changing consumer pins; keep #310 open until delivery is verified.
+
+Light Notes still has its three coherent routing migration edits in `Routes.cs`,
+`ShellPresentationTests.cs`, and `WorkspaceTests.cs`. Its official pins, lockfiles
+and validation document have not been changed; preserve the unrelated dirty files.
+On explicit resume: verify publication, adopt the official version and SDK 10.0.401,
+verify/commit/push Light Notes, then close #310 and update the roadmap.
+
+The queued test-quality package remains unimplemented. H1 editor helper design is
+prepared read-only. Baseline asset verification against the existing local candidate
+passed in 108.36 seconds (`artifacts/test-quality-assets-before-detail.log` and
+`test-quality-assets-before-result.json`). The 11 reactive scaling tests passed;
+the two 10,000-node cases took 51.93 ms and 21.39 ms respectively, excluding build.
+Keep their coverage. Defer optional multi-suite orchestration absent demonstrated
+benefit. The baseline TRX is `artifacts/test-quality-baseline/scaling.trx` and an
+unpublished execution-ticket draft is `artifacts/test-quality-issue.md`.
+
+Do not start the queued implementation or roadmap #205 until the owner resumes.
+No active local build or UI test remains at this checkpoint; remote CI may finish
+independently. The older resumed-work instructions below are superseded by this pause.
+
 ## Review correction verification — September 22, 2026
 
 The owner resumed #310 and asked to finish verification and delivery. Do not start
@@ -25,7 +52,7 @@ sample smoke runs, four package editor contracts, and three Issue Browser deskto
 Light Notes passes 44 managed checks with one intentional skip, Storage 22/22, NativeAOT
 publication and two desktop route/focus/draft checks against that candidate.
 
-Remaining delivery: push and verify CI publication, then pin Light Notes to the corrected
+Remaining delivery: verify CI publication, then pin Light Notes to the corrected
 official package, preserving unrelated changes. Its three routing migration files remain
 uncommitted; the isolated candidate fixture is `artifacts/review310-light-notes`.
 Do not close #310 before delivery is verified.
