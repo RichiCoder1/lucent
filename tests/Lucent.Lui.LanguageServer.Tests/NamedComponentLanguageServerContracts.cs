@@ -28,8 +28,10 @@ public sealed class NamedComponentLanguageServerContracts
 
                 string Describe( string prefix = "count:" ) =>
                     prefix + Count.ToString();
+                string Format(int value) => value.ToString();
+                string Format(string value) => value;
 
-                <Text content={Describe()} />
+                <Text content={Describe() + Format(Count) + Format("!")} />
             }
             """;
         try
@@ -51,7 +53,11 @@ public sealed class NamedComponentLanguageServerContracts
             );
             await File.WriteAllTextAsync(
                 luiPath,
-                source.Replace("string Describe( string", "string Describe(string", StringComparison.Ordinal)
+                source.Replace(
+                    "string Describe( string",
+                    "string Describe(string",
+                    StringComparison.Ordinal
+                )
             );
 
             using var lsp = ProtocolClient.Start();
@@ -83,7 +89,9 @@ public sealed class NamedComponentLanguageServerContracts
             );
             Assert.AreEqual(
                 0,
-                diagnostics.RootElement.GetProperty("params").GetProperty("diagnostics")
+                diagnostics
+                    .RootElement.GetProperty("params")
+                    .GetProperty("diagnostics")
                     .GetArrayLength(),
                 diagnostics.RootElement.GetRawText()
             );
@@ -97,7 +105,10 @@ public sealed class NamedComponentLanguageServerContracts
                     position = Position(source, countUse + 1),
                 }
             );
-            Assert.AreNotEqual(JsonValueKind.Null, hover.RootElement.GetProperty("result").ValueKind);
+            Assert.AreNotEqual(
+                JsonValueKind.Null,
+                hover.RootElement.GetProperty("result").ValueKind
+            );
             StringAssert.Contains(hover.RootElement.GetRawText(), "Count");
 
             using var definition = await lsp.RequestAsync(
@@ -113,7 +124,10 @@ public sealed class NamedComponentLanguageServerContracts
                     && definitionResult.ValueKind != JsonValueKind.Null,
                 definition.RootElement.GetRawText()
             );
-            StringAssert.Contains(definition.RootElement.GetRawText(), new Uri(luiPath).AbsoluteUri);
+            StringAssert.Contains(
+                definition.RootElement.GetRawText(),
+                new Uri(luiPath).AbsoluteUri
+            );
 
             using var references = await lsp.RequestAsync(
                 "textDocument/references",
@@ -140,11 +154,14 @@ public sealed class NamedComponentLanguageServerContracts
                     newName = "Total",
                 }
             );
-            var edits = rename.RootElement.GetProperty("result").GetProperty("changes")
+            var edits = rename
+                .RootElement.GetProperty("result")
+                .GetProperty("changes")
                 .GetProperty(new Uri(luiPath).AbsoluteUri);
             Assert.IsTrue(
-                edits.EnumerateArray().Count(item => item.GetProperty("newText").GetString() == "Total")
-                    >= 2,
+                edits
+                    .EnumerateArray()
+                    .Count(item => item.GetProperty("newText").GetString() == "Total") >= 2,
                 rename.RootElement.GetRawText()
             );
 
@@ -170,6 +187,151 @@ public sealed class NamedComponentLanguageServerContracts
         {
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task AdditionalFileEditorConfigRefreshesPublicDiagnosticsWhileUnsaved()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-named-config-protocol-" + Guid.NewGuid().ToString("N")
+        );
+        var projectRoot = Path.Combine(root, "project");
+        var sourceRoot = Path.Combine(root, "linked");
+        Directory.CreateDirectory(projectRoot);
+        Directory.CreateDirectory(sourceRoot);
+        var projectPath = Path.Combine(projectRoot, "Sample.csproj");
+        var luiPath = Path.Combine(sourceRoot, "Card.lui");
+        var editorConfigPath = Path.Combine(sourceRoot, ".editorconfig");
+        const string source =
+            "namespace Sample; using Lucent.Core; using static Sample.Custom; "
+            + "public component Card() { <Caption label=\"Ready\" /> }";
+        const string warning =
+            "root = true\n[*.lui]\ndotnet_diagnostic.LUI5003.severity = warning\n";
+        const string suppressed =
+            "root = true\n[*.lui]\ndotnet_diagnostic.LUI5003.severity = none\n";
+        const string error = "root = true\n[*.lui]\ndotnet_diagnostic.LUI5003.severity = error\n";
+        try
+        {
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>"
+                    + "<TargetFramework>net10.0</TargetFramework>"
+                    + "<LangVersion>preview</LangVersion>"
+                    + "<LucentLuiNamedComponents>true</LucentLuiNamedComponents>"
+                    + "<LucentLuiPreparedAuthoring>true</LucentLuiPreparedAuthoring>"
+                    + "</PropertyGroup><ItemGroup>"
+                    + LanguageServerTests.CoreMetadataReference
+                    + "<AdditionalFiles Include=\"../linked/Card.lui\" LucentLuiLogicalPath=\"Card.lui\" />"
+                    + "<AdditionalFiles Include=\"../linked/.editorconfig\" />"
+                    + "<CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" />"
+                    + "<CompilerVisibleProperty Include=\"LucentLuiNamedComponents\" />"
+                    + "<CompilerVisibleProperty Include=\"LucentLuiPreparedAuthoring\" />"
+                    + "</ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(
+                Path.Combine(projectRoot, "Custom.cs"),
+                "namespace Sample; using Lucent.Core; public static class Custom { "
+                    + "[LucentComponent] public static ComponentRecipe Caption("
+                    + "[DefaultContent] string label) => null!; }"
+            );
+            await File.WriteAllTextAsync(luiPath, source);
+            await File.WriteAllTextAsync(editorConfigPath, warning);
+
+            using var lsp = ProtocolClient.Start();
+            using var initialize = await lsp.RequestAsync(
+                "initialize",
+                new
+                {
+                    initializationOptions = new { projectUri = new Uri(projectPath).AbsoluteUri },
+                    capabilities = new { },
+                }
+            );
+            await lsp.NotifyAsync("initialized", new { });
+            await lsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri = new Uri(luiPath).AbsoluteUri,
+                        languageId = "lui",
+                        version = 1,
+                        text = source,
+                    },
+                }
+            );
+            using (
+                var diagnostics = await lsp.WaitForDiagnosticsAsync(new Uri(luiPath).AbsoluteUri, 1)
+            )
+                AssertSeverity(diagnostics, 2);
+
+            await lsp.NotifyAsync(
+                "textDocument/didOpen",
+                new
+                {
+                    textDocument = new
+                    {
+                        uri = new Uri(editorConfigPath).AbsoluteUri,
+                        languageId = "editorconfig",
+                        version = 1,
+                        text = suppressed,
+                    },
+                }
+            );
+            using (
+                var diagnostics = await lsp.WaitForDiagnosticsAsync(new Uri(luiPath).AbsoluteUri, 1)
+            )
+                AssertSeverity(diagnostics, null);
+
+            await lsp.NotifyAsync(
+                "textDocument/didChange",
+                new
+                {
+                    textDocument = new { uri = new Uri(editorConfigPath).AbsoluteUri, version = 2 },
+                    contentChanges = new[] { new { text = error } },
+                }
+            );
+            using (
+                var diagnostics = await lsp.WaitForDiagnosticsAsync(new Uri(luiPath).AbsoluteUri, 1)
+            )
+                AssertSeverity(diagnostics, 1);
+
+            await lsp.NotifyAsync(
+                "textDocument/didClose",
+                new { textDocument = new { uri = new Uri(editorConfigPath).AbsoluteUri } }
+            );
+            using (
+                var diagnostics = await lsp.WaitForDiagnosticsAsync(new Uri(luiPath).AbsoluteUri, 1)
+            )
+                AssertSeverity(diagnostics, 2);
+
+            using var shutdown = await lsp.RequestAsync("shutdown", new { });
+            await lsp.NotifyAsync("exit", new { });
+            Assert.AreEqual(0, await lsp.WaitForExitAsync());
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+
+        static void AssertSeverity(JsonDocument message, int? expected)
+        {
+            var diagnostics = message
+                .RootElement.GetProperty("params")
+                .GetProperty("diagnostics")
+                .EnumerateArray()
+                .Where(item => item.GetProperty("code").GetString() == "LUI5003")
+                .ToArray();
+            if (expected is null)
+                Assert.AreEqual(0, diagnostics.Length, message.RootElement.GetRawText());
+            else
+                Assert.IsTrue(
+                    diagnostics.Any(item => item.GetProperty("severity").GetInt32() == expected),
+                    message.RootElement.GetRawText()
+                );
         }
     }
 

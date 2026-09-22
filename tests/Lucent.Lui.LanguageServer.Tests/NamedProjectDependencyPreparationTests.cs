@@ -37,7 +37,7 @@ public sealed class NamedProjectDependencyPreparationTests
         const string shared = """
             namespace Shared;
             using Lucent.Core;
-            public static class StaleMarker { }
+            public static partial class StaleMarker { }
             public record SharedModel(string Label);
             public component SharedCard(SharedModel model) {
                 string Read() => model.Label;
@@ -77,12 +77,12 @@ public sealed class NamedProjectDependencyPreparationTests
                             [
                                 new LuiPreparedSource(
                                     "Old.Shared.g.cs",
-                                    "namespace Shared; public static class StaleMarker { }",
+                                    "namespace Shared; public static partial class StaleMarker { }",
                                     sharedLui
                                 ),
                             ]
                         ),
-                        Path.Combine(root, "old-emitter")
+                        Path.Combine(Path.GetTempPath(), "lucent-lui-test-old-emitters")
                     )
                     .Path;
 
@@ -93,9 +93,7 @@ public sealed class NamedProjectDependencyPreparationTests
                         + (
                             emitter is null
                                 ? ""
-                                : "<Analyzer Include=\""
-                                    + SecurityElement.Escape(emitter)
-                                    + "\" />"
+                                : "<Analyzer Include=\"" + SecurityElement.Escape(emitter) + "\" />"
                         )
                 )
             );
@@ -134,7 +132,30 @@ public sealed class NamedProjectDependencyPreparationTests
             await AssertCleanAsync(context, leftLui);
             await AssertCleanAsync(context, rightLui);
 
-            var renamedShared = shared.Replace("SharedModel", "RenamedModel", StringComparison.Ordinal);
+            var withoutMarker = shared.Replace(
+                "public static partial class StaleMarker { }",
+                "",
+                StringComparison.Ordinal
+            );
+            context.ReplaceText(new Uri(sharedLui), withoutMarker);
+            context.ReplaceText(
+                new Uri(leftLui),
+                left.Replace(
+                    "public component",
+                    "public sealed class UsesStale : StaleMarker { }\npublic component",
+                    StringComparison.Ordinal
+                )
+            );
+            await AssertDiagnosticAsync(context, leftLui, "StaleMarker");
+            context.ReplaceText(new Uri(sharedLui), shared);
+            context.ReplaceText(new Uri(leftLui), left);
+            await AssertCleanAsync(context, leftLui);
+
+            var renamedShared = shared.Replace(
+                "SharedModel",
+                "RenamedModel",
+                StringComparison.Ordinal
+            );
             context.ReplaceText(new Uri(sharedLui), renamedShared);
             await AssertDiagnosticAsync(context, leftLui, "SharedModel");
             context.ReplaceText(
@@ -158,11 +179,19 @@ public sealed class NamedProjectDependencyPreparationTests
             await AssertDiagnosticAsync(context, rightLui, "string");
             context.ReplaceText(
                 new Uri(leftLui),
-                left.Replace("new SharedModel(\"left\")", "new SharedModel(1)", StringComparison.Ordinal)
+                left.Replace(
+                    "new SharedModel(\"left\")",
+                    "new SharedModel(1)",
+                    StringComparison.Ordinal
+                )
             );
             context.ReplaceText(
                 new Uri(rightLui),
-                right.Replace("new SharedModel(\"right\")", "new SharedModel(2)", StringComparison.Ordinal)
+                right.Replace(
+                    "new SharedModel(\"right\")",
+                    "new SharedModel(2)",
+                    StringComparison.Ordinal
+                )
             );
             await AssertCleanAsync(context, hostLui);
 
@@ -194,6 +223,74 @@ public sealed class NamedProjectDependencyPreparationTests
             + "<CompilerVisibleProperty Include=\"LucentLuiNamedComponents\" />"
             + "<CompilerVisibleProperty Include=\"LucentLuiPreparedAuthoring\" />"
             + "</ItemGroup></Project>";
+    }
+
+    [TestMethod]
+    public async Task UnsavedEditorConfigChangesNamedPreparationGeneration()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-named-editorconfig-" + Guid.NewGuid().ToString("N")
+        );
+        var projectRoot = Path.Combine(root, "project");
+        var sourceRoot = Path.Combine(root, "linked");
+        Directory.CreateDirectory(projectRoot);
+        Directory.CreateDirectory(sourceRoot);
+        var projectPath = Path.Combine(projectRoot, "Sample.csproj");
+        var luiPath = Path.Combine(sourceRoot, "Card.lui");
+        var editorConfigPath = Path.Combine(sourceRoot, ".editorconfig");
+        const string source = """
+            namespace Sample;
+            using Lucent.Core;
+            public component Card() { <Text content={"ready"} /> }
+            """;
+        try
+        {
+            await File.WriteAllTextAsync(
+                projectPath,
+                "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>"
+                    + "<TargetFramework>net10.0</TargetFramework>"
+                    + "<LangVersion>preview</LangVersion>"
+                    + "<LucentLuiNamedComponents>true</LucentLuiNamedComponents>"
+                    + "<LucentLuiPreparedAuthoring>true</LucentLuiPreparedAuthoring>"
+                    + "</PropertyGroup><ItemGroup>"
+                    + LanguageServerTests.CoreMetadataReference
+                    + "<AdditionalFiles Include=\"../linked/Card.lui\" LucentLuiLogicalPath=\"Card.lui\" />"
+                    + "<AdditionalFiles Include=\"../linked/.editorconfig\" />"
+                    + "<CompilerVisibleItemMetadata Include=\"AdditionalFiles\" MetadataName=\"LucentLuiLogicalPath\" />"
+                    + "<CompilerVisibleProperty Include=\"LucentLuiNamedComponents\" />"
+                    + "<CompilerVisibleProperty Include=\"LucentLuiPreparedAuthoring\" />"
+                    + "</ItemGroup></Project>"
+            );
+            await File.WriteAllTextAsync(luiPath, source);
+            await File.WriteAllTextAsync(
+                editorConfigPath,
+                "root = true\n\n[*.lui]\nlucent_lui_declaration_order = none\n"
+            );
+
+            using var context = await LuiProjectContext.LoadAsync(
+                projectPath,
+                CancellationToken.None
+            );
+            var initial = await context.CompileAsync(new Uri(luiPath), CancellationToken.None);
+            Assert.IsNotNull(initial);
+            context.ReplaceText(
+                new Uri(editorConfigPath),
+                "root = true\n\n[*.lui]\nlucent_lui_declaration_order = component_first\n"
+            );
+            var changed = await context.CompileAsync(new Uri(luiPath), CancellationToken.None);
+            Assert.IsNotNull(changed);
+            Assert.AreNotEqual(
+                initial.Result.Identity.SiblingIndexGeneration,
+                changed.Result.Identity.SiblingIndexGeneration,
+                "An unsaved EditorConfig change did not invalidate named preparation freshness."
+            );
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     private static async Task AssertCleanAsync(LuiProjectContext context, string path)

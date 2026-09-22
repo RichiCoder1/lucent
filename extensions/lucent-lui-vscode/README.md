@@ -28,6 +28,8 @@ embedded C#. Format-on-save follows your VS Code setting. Semantic quick fixes
 identify their lint rule and resolve against the current document/project before
 providing edits. See [formatting and linting](../../docs/LUI-FORMATTING.md) for
 supported configuration, safe content conversions and scoped exceptions.
+Open `.editorconfig` buffers are synchronized with the language server, so unsaved
+policy changes apply to editor diagnostics and actions.
 
 Named-component projects also support ordinary declarations and support-only `.lui`
 files. Models and component companions participate in hover, completion, signature help,

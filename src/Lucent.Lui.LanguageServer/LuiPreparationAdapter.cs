@@ -15,7 +15,8 @@ internal sealed partial class LuiProjectContext
 {
     private async Task<(
         CSharpCompilation Compilation,
-        LuiPreparationResult Preparation
+        LuiPreparationResult Preparation,
+        ImmutableArray<LuiEditorConfigSnapshot> EditorConfigs
     )> PrepareNamedProjectGraphAsync(
         Project project,
         long captured,
@@ -25,10 +26,12 @@ internal sealed partial class LuiProjectContext
         var editorSolution = EditorSolution(project, namedComponents: true);
         var compilations = new Dictionary<ProjectId, CSharpCompilation>();
         var preparations = new Dictionary<ProjectId, LuiPreparationResult>();
+        var editorConfigs = new Dictionary<ProjectId, ImmutableArray<LuiEditorConfigSnapshot>>();
         foreach (var graphProject in ProjectGraph(project))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var current = editorSolution.GetProject(graphProject.Id)
+            var current =
+                editorSolution.GetProject(graphProject.Id)
                 ?? throw new InvalidOperationException(
                     "The named-component editor graph lost project '"
                         + (graphProject.FilePath ?? graphProject.Name)
@@ -74,14 +77,18 @@ internal sealed partial class LuiProjectContext
             {
                 var documents = await CurrentNamedDocumentsAsync(current, cancellationToken)
                     .ConfigureAwait(false);
+                var configurations = await CurrentEditorConfigsAsync(current, cancellationToken)
+                    .ConfigureAwait(false);
                 var preparation = PrepareNamedProject(
                     current,
                     compilation,
                     documents,
+                    configurations,
                     captured,
                     cancellationToken
                 );
                 preparations.Add(current.Id, preparation);
+                editorConfigs.Add(current.Id, configurations);
                 compilation = preparation.BindingCompilation;
             }
             compilations.Add(current.Id, compilation);
@@ -91,7 +98,50 @@ internal sealed partial class LuiProjectContext
             throw new InvalidOperationException(
                 "The requested named-component project was not prepared."
             );
-        return (compilations[project.Id], rootPreparation);
+        return (compilations[project.Id], rootPreparation, editorConfigs[project.Id]);
+    }
+
+    private static async Task<ImmutableArray<LuiEditorConfigSnapshot>> CurrentEditorConfigsAsync(
+        Project project,
+        CancellationToken cancellationToken
+    )
+    {
+        var snapshots = new Dictionary<string, LuiEditorConfigSnapshot>(
+            StringComparer.OrdinalIgnoreCase
+        );
+        var documents = project
+            .AnalyzerConfigDocuments.Cast<TextDocument>()
+            .Concat(
+                project.AdditionalDocuments.Where(item =>
+                    String.Equals(
+                        Path.GetFileName(item.FilePath),
+                        ".editorconfig",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+            );
+        foreach (
+            var document in documents.Where(item =>
+                String.Equals(
+                    Path.GetFileName(item.FilePath),
+                    ".editorconfig",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (String.IsNullOrWhiteSpace(document.FilePath))
+                continue;
+            var path = Path.GetFullPath(document.FilePath);
+            snapshots[path] = new LuiEditorConfigSnapshot(
+                path,
+                (await document.GetTextAsync(cancellationToken).ConfigureAwait(false)).ToString()
+            );
+        }
+        return snapshots
+            .Values.OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+            .ToImmutableArray();
     }
 
     private static async Task<IReadOnlyList<LuiProjectDocument>> CurrentNamedDocumentsAsync(
@@ -129,6 +179,7 @@ internal sealed partial class LuiProjectContext
         Project project,
         CSharpCompilation compilation,
         IReadOnlyList<LuiProjectDocument> documents,
+        ImmutableArray<LuiEditorConfigSnapshot> editorConfigs,
         long captured,
         CancellationToken cancellationToken
     )
@@ -163,7 +214,8 @@ internal sealed partial class LuiProjectContext
                 options ?? "",
                 defines ?? "",
                 project.DefaultNamespace ?? "",
-                previous
+                previous,
+                EditorConfigs: editorConfigs
             ),
             cancellationToken
         );
@@ -217,13 +269,7 @@ internal sealed partial class LuiProjectContext
                         + reference.Display
                         + "'."
                 );
-            if (
-                String.Equals(
-                    Path.GetFileName(reference.FullPath ?? reference.Display),
-                    "Lucent.Lui.Compiler.dll",
-                    StringComparison.OrdinalIgnoreCase
-                )
-            )
+            if (IsLucentBuildToolAnalyzer(reference))
                 continue;
             var loadFailures = new ConcurrentQueue<string>();
             if (reference is AnalyzerFileReference fileReference)
@@ -297,7 +343,9 @@ internal sealed partial class LuiProjectContext
                 fileName,
                 "Lucent.Lui.Generator.dll",
                 StringComparison.OrdinalIgnoreCase
-            );
+            )
+            || fileName.StartsWith("Lucent.PreparedEmitter.", StringComparison.OrdinalIgnoreCase)
+                && fileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class SnapshotAdditionalText(string path, SourceText text) : AdditionalText

@@ -3,12 +3,14 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Lucent.Lui.Compiler;
 using Lucent.Lui.Preparation;
 using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.MSBuild;
+using Microsoft.CodeAnalysis.Text;
 
 if (args.Length == 0)
     return Fail("Usage: Lucent.Lui.Sdk.PreparationHost <prepare|compare> ...");
@@ -124,6 +126,7 @@ static async Task<int> PrepareAsync(string[] args)
         throw new InvalidOperationException(
             "Prepared authoring requires at least one evaluated .lui input."
         );
+    var editorConfigs = await SnapshotEditorConfigsAsync(project).ConfigureAwait(false);
     var global = project.AnalyzerOptions.AnalyzerConfigOptionsProvider.GlobalOptions;
     var prepared = LuiPreparationEngine.Prepare(
         new LuiPreparationRequest(
@@ -138,9 +141,15 @@ static async Task<int> PrepareAsync(string[] args)
             Global(global, "LucentLuiLangVersion", "preview"),
             Global(global, "LucentLuiCompilerOptions"),
             Global(global, "LucentLuiDefines"),
-            Global(global, "RootNamespace")
+            Global(global, "RootNamespace"),
+            EditorConfigs: editorConfigs
         )
     );
+    foreach (var diagnostic in prepared.LuiDiagnostics)
+        Console.Error.WriteLine(FormatPreparedDiagnostic(diagnostic, documents, compilation));
+    foreach (var diagnostic in prepared.GeneratorDiagnostics)
+        if (diagnostic.Severity >= DiagnosticSeverity.Warning)
+            Console.Error.WriteLine(diagnostic.ToString());
     var errors = prepared.GeneratorDiagnostics.Where(diagnostic =>
         diagnostic.Severity == DiagnosticSeverity.Error
     );
@@ -184,6 +193,8 @@ static async Task<int> PrepareAsync(string[] args)
             .ToImmutableArray(),
         project
             .AnalyzerConfigDocuments.Select(document => document.FilePath ?? document.Name)
+            .Concat(editorConfigs.Select(snapshot => snapshot.Path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .Order(StringComparer.OrdinalIgnoreCase)
             .ToImmutableArray(),
         compilation
@@ -210,6 +221,97 @@ static async Task<int> PrepareAsync(string[] args)
         $"prepared emitter={emitter.Path}; foreign-generators={loaded.Count}; foreign-outputs={foreignOutputs.Length}; input={manifest.ProjectInputSha256}"
     );
     return 0;
+}
+
+static async Task<ImmutableArray<LuiEditorConfigSnapshot>> SnapshotEditorConfigsAsync(
+    Project project
+)
+{
+    var documents = project
+        .AnalyzerConfigDocuments.Where(document =>
+            !String.IsNullOrWhiteSpace(document.FilePath)
+            && String.Equals(
+                Path.GetFileName(document.FilePath),
+                ".editorconfig",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        .ToDictionary(
+            document => Path.GetFullPath(document.FilePath!),
+            StringComparer.OrdinalIgnoreCase
+        );
+    var paths = project
+        .AnalyzerOptions.AdditionalFiles.Where(file =>
+            String.Equals(
+                Path.GetFileName(file.Path),
+                ".editorconfig",
+                StringComparison.OrdinalIgnoreCase
+            )
+        )
+        .Select(file => Path.GetFullPath(file.Path))
+        .Concat(documents.Keys)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    var snapshots = ImmutableArray.CreateBuilder<LuiEditorConfigSnapshot>(paths.Length);
+    foreach (var path in paths)
+    {
+        var source = documents.TryGetValue(path, out var document)
+            ? (await document.GetTextAsync().ConfigureAwait(false)).ToString()
+            : await File.ReadAllTextAsync(path).ConfigureAwait(false);
+        snapshots.Add(new LuiEditorConfigSnapshot(path, source));
+    }
+    return snapshots.ToImmutable();
+}
+
+static string FormatPreparedDiagnostic(
+    LuiPreparationDiagnostic prepared,
+    IReadOnlyList<LuiPreparationDocument> documents,
+    CSharpCompilation compilation
+)
+{
+    var path = prepared.Diagnostic.FilePath ?? prepared.PhysicalPath;
+    var line = prepared.Line;
+    var column = prepared.Column;
+    if (!line.HasValue || !column.HasValue)
+    {
+        var tree = compilation.SyntaxTrees.FirstOrDefault(item =>
+            String.Equals(item.FilePath, path, StringComparison.OrdinalIgnoreCase)
+        );
+        if (tree is not null)
+        {
+            var text = tree.GetText();
+            var start = Math.Clamp(prepared.Diagnostic.Span.Start, 0, text.Length);
+            var position = text.Lines.GetLinePosition(start);
+            line ??= position.Line + 1;
+            column ??= position.Character + 1;
+        }
+        else
+        {
+            var document = documents.FirstOrDefault(item =>
+                String.Equals(item.PhysicalPath, path, StringComparison.OrdinalIgnoreCase)
+            );
+            if (document is not null)
+            {
+                var text = SourceText.From(document.Source);
+                var start = Math.Clamp(prepared.Diagnostic.Span.Start, 0, text.Length);
+                var position = text.Lines.GetLinePosition(start);
+                line ??= position.Line + 1;
+                column ??= position.Character + 1;
+            }
+        }
+    }
+    var location =
+        line.HasValue && column.HasValue ? $"({line.Value},{column.Value})" : String.Empty;
+    var severity = prepared.Diagnostic.Severity switch
+    {
+        DiagnosticSeverity.Error => "error",
+        DiagnosticSeverity.Warning => "warning",
+        DiagnosticSeverity.Info => "info",
+        DiagnosticSeverity.Hidden => "hidden",
+        _ => "info",
+    };
+    return $"{path}{location}: {severity} {prepared.Diagnostic.Id}: {prepared.Diagnostic.Message}";
 }
 
 static int Compare(string[] args)
@@ -401,6 +503,33 @@ static async Task<string> ProjectInputHashAsync(
                 document.FilePath ?? document.Name,
                 (await document.GetTextAsync()).ToString()
             );
+        var analyzerConfigPaths = current
+            .AnalyzerConfigDocuments.Where(document =>
+                !String.IsNullOrWhiteSpace(document.FilePath)
+            )
+            .Select(document => Path.GetFullPath(document.FilePath!))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (
+            var file in current.AnalyzerOptions.AdditionalFiles.Where(file =>
+                String.Equals(
+                    Path.GetFileName(file.Path),
+                    ".editorconfig",
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
+        )
+        {
+            var path = Path.GetFullPath(file.Path);
+            if (analyzerConfigPaths.Contains(path))
+                continue;
+            Append(
+                hash,
+                "config",
+                path,
+                file.GetText()?.ToString()
+                    ?? (File.Exists(path) ? File.ReadAllText(path) : String.Empty)
+            );
+        }
         foreach (var reference in current.ProjectReferences)
         {
             var referenced = current.Solution.GetProject(reference.ProjectId);
@@ -521,6 +650,17 @@ static ImmutableArray<PreparedInputFile> SnapshotInputFiles(
         .Documents.Select(document => document.FilePath)
         .Concat(project.AdditionalDocuments.Select(document => document.FilePath))
         .Concat(project.AnalyzerConfigDocuments.Select(document => document.FilePath))
+        .Concat(
+            project
+                .AnalyzerOptions.AdditionalFiles.Where(file =>
+                    String.Equals(
+                        Path.GetFileName(file.Path),
+                        ".editorconfig",
+                        StringComparison.OrdinalIgnoreCase
+                    )
+                )
+                .Select(file => file.Path)
+        )
         .Concat(compilation.References.Select(reference => reference.Display))
         .Where(path => path is not null && File.Exists(path))
         .Select(path => Path.GetFullPath(path!))

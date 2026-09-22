@@ -213,6 +213,10 @@ public static partial class LuiCompiler
             var syntax =
                 property.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax()
                 as PropertyDeclarationSyntax;
+            var propertySpan = syntax is null
+                ? component.Name.Span
+                : new LuiSpan(syntax.Identifier.SpanStart, syntax.Identifier.Span.Length);
+            var propertyPath = syntax?.SyntaxTree.FilePath;
             var valid =
                 syntax is not null
                 && syntax.Modifiers.Any(SyntaxKind.PartialKeyword)
@@ -221,9 +225,25 @@ public static partial class LuiCompiler
                 && property.GetMethod is not null
                 && property.SetMethod is not null
                 && !property.SetMethod.IsInitOnly
+                && !property.IsRequired
                 && syntax.AccessorList is { Accessors.Count: 2 }
+                && syntax.AccessorList.Accessors.Any(static accessor =>
+                    accessor.IsKind(SyntaxKind.GetAccessorDeclaration)
+                )
+                && syntax.AccessorList.Accessors.Any(static accessor =>
+                    accessor.IsKind(SyntaxKind.SetAccessorDeclaration)
+                )
                 && syntax.AccessorList.Accessors.All(static accessor =>
-                    accessor.Body is null && accessor.ExpressionBody is null
+                    accessor.Body is null
+                    && accessor.ExpressionBody is null
+                    && accessor.Modifiers.Count == 0
+                )
+                && syntax.Modifiers.All(static modifier =>
+                    modifier.IsKind(SyntaxKind.PartialKeyword)
+                    || modifier.IsKind(SyntaxKind.PublicKeyword)
+                    || modifier.IsKind(SyntaxKind.InternalKeyword)
+                    || modifier.IsKind(SyntaxKind.PrivateKeyword)
+                    || modifier.IsKind(SyntaxKind.ProtectedKeyword)
                 );
             if (!valid)
             {
@@ -232,8 +252,10 @@ public static partial class LuiCompiler
                         "LUI2053",
                         "Companion [State] property '"
                             + property.Name
-                            + "' must be a non-static partial auto-property with get and set accessors.",
-                        component.Name.Span
+                            + "' must be a non-static partial auto-property with get and set accessors; "
+                            + "required or accessor modifiers, and property modifiers other than accessibility are unsupported.",
+                        propertySpan,
+                        filePath: propertyPath
                     )
                 );
                 continue;

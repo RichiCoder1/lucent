@@ -1,38 +1,40 @@
 # Current work and follow-ups
 
-## Restart checkpoint — September 21, 2026
+## Review correction verification — September 22, 2026
 
-The owner requested a computer restart during #310. Pause all work at this checkpoint;
-resume the correction batch when requested. Do not start roadmap #205.
+The owner resumed #310 and asked to finish verification and delivery. Do not start
+roadmap #205. The earlier restart pause is superseded.
 
-- Routing R1/R2/R3/R7 is saved in local commit `1553813`: Core **674/674** and
-  architecture checks, including negative fixtures, pass. Issue Browser builds without
-  warnings and its direct MTP run passes **22/22**; the earlier zero-discovery invocation
-  was corrected. Consumer notes: `artifacts/reviews/310-consumers-checkpoint.md`.
-- R4 exact method maps pass a compiler regression and a public LSP operation regression,
-  one each. R5's cold graph case passes; its stale-emitter case completes behavior but
-  fails cleanup because Windows retains the loaded emitter DLL. Fix fixture cleanup and
-  strengthen stale-symbol assertions, wire editor configuration snapshots/freshness, then
-  run affected suites. Details: `artifacts/review310-editor-checkpoint.md`.
-- R8 preparation-engine/configuration wiring and named package lint cases are saved but
-  incomplete and uncompiled. SDK host snapshot/logging integration remains. R6's companion
-  regression reproduces the generic LUI2000; the validator fix remains. Details:
-  `artifacts/review310-diagnostics-checkpoint.md`. These edits are a local work-in-progress
-  checkpoint, not a verified integration or delivery.
-- Light Notes has three pending consumer migrations: `src/LightNotes/Routes.cs`,
-  `tests/LightNotes.Tests/ShellPresentationTests.cs`, and
-  `tests/LightNotes.Tests/WorkspaceTests.cs`. Its existing `79.1` package pin lacks the
-  new routing API. Validate against a fresh candidate and then pin the corrected official
-  package after Lucent publication. Preserve its other preexisting dirty files.
-- No correction package has been packed/published and no correction desktop check has
-  run. Finish affected editor/compiler/app tests, formatting and package/NativeAOT proofs,
-  then commit/push and verify CI/publication before closing #310. UI tests were authorized
-  before the restart request; the current checkpoint pauses work altogether.
+Routing R1/R2/R3/R7 is saved in local `1553813`: Core **674/674**, Issue Browser
+**22/22**, and architecture checks including negative fixtures pass. Editor/build
+corrections now pass Compiler **146/146**, Generator **52/52**, LanguageServer
+**45/45**, and VS Code client **15/15**. Repository formatting passes **595 C#**
+and **115 LUI** files. The client is packaged as VSIX **0.3.5**; installation and
+updated server deployment are still pending.
+
+The independent source follow-up identified and rechecked four additional cases:
+same-arity method overload maps, real client synchronization of unsaved configuration,
+AdditionalFiles-only configuration for linked LUI, and structural failure hidden by
+diagnostic suppression. Those corrections have focused regressions; the reviewer found
+no remaining concrete blocker in the bounded source follow-up and did not run tests.
+
+Remaining delivery: finish affected downstream checks, commit the integrated corrections,
+pack one fresh candidate set, run package lint/NativeAOT and Windows sample proofs,
+validate the Light Notes migration against that set, then push and verify publication.
+Pin Light Notes to the corrected official package, preserving unrelated changes. Its
+three routing migration files remain uncommitted; the isolated candidate fixture is
+`artifacts/review310-light-notes`. Do not close #310 before delivery is verified.
+
+PowerShell startup was blocked by Windows volume queries against the external Samsung
+T7 on F:. After the owner's repair action, fresh PowerShell and C:/D:/F: metadata probes
+all pass. No agent device restart was performed. Details are in
+`artifacts/shell-diagnosis/diagnosis.md`.
 
 Use `MSBUILDDISABLENODEREUSE=1` with SDK 10.0.401. Coordinate builds sharing compiler
 outputs. Source app projects own their RIDs; do not pass a global RID through the graph.
-The local review report is `artifacts/reviews/authoring-247c87e-20260921/review.md`.
-Unrelated untracked advisor/research/sandbox-plan files and `.dotnet-home/` stay untouched.
+Worker evidence is in `artifacts/review310-editor-checkpoint.md` and
+`artifacts/review310-diagnostics-checkpoint.md`. Preserve unrelated advisor/research
+and sandbox-plan files, `.dotnet-home/`, and the diagnostic-time `%SystemDrive%/` folder.
 
 ## Authoring review corrections — September 21, 2026
 

@@ -131,6 +131,13 @@
       },
       "lucent.lui.generator": {
         "type": "Project"
+      },
+      "lucent.lui.preparation": {
+        "type": "Project",
+        "dependencies": {
+          "Lucent.Lui.Compiler": "[0.2.0, )",
+          "Microsoft.CodeAnalysis.CSharp": "[5.9.0, )"
+        }
       }
     }
   }

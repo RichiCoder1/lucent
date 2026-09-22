@@ -177,7 +177,7 @@ public static class LuiPreparationEngine
                 new LuiPreparedPayload(earlySources, []),
                 foreignOutputs,
                 run.Diagnostics,
-                projectionDiagnostics,
+                initialDiagnostics,
                 bindingCompilation,
                 projections
                     .Select(item => new LuiPreparedDocumentResult(
@@ -192,6 +192,7 @@ public static class LuiPreparationEngine
         var refinedComponentSources = ImmutableArray.CreateBuilder<LuiPreparedSource>();
         var loweringDiagnostics = ImmutableArray.CreateBuilder<LuiPreparationDiagnostic>();
         var documents = ImmutableArray.CreateBuilder<LuiPreparedDocumentResult>();
+        var structuralFailure = false;
         for (var index = 0; index < projections.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -230,14 +231,22 @@ public static class LuiPreparationEngine
                 new LuiLintOptions(configurations[index].DeclarationOrder),
                 cancellationToken
             );
+            if (
+                !lowered.Success
+                || lowered.Source is null
+                || lint.Status != LuiLintAnalysisStatus.Complete
+            )
+                structuralFailure = true;
             loweringDiagnostics.AddRange(
-                ApplyConfiguredSeverities(lint.Diagnostics, configurations[index].DiagnosticSeverities)
-                    .Select(diagnostic =>
-                        new LuiPreparationDiagnostic(
-                            diagnostic.FilePath ?? item.Document.PhysicalPath,
-                            diagnostic
-                        )
+                ApplyConfiguredSeverities(
+                        lint.Diagnostics,
+                        configurations[index].DiagnosticSeverities,
+                        lowered.Diagnostics
                     )
+                    .Select(diagnostic => new LuiPreparationDiagnostic(
+                        diagnostic.FilePath ?? item.Document.PhysicalPath,
+                        diagnostic
+                    ))
             );
             documents.Add(new LuiPreparedDocumentResult(item.Document, item.Projection, lowered));
             if (!lowered.Success || lowered.Source is null)
@@ -266,9 +275,9 @@ public static class LuiPreparationEngine
             );
         }
         var allLuiDiagnostics = initialDiagnostics.AddRange(loweringDiagnostics);
-        var success = !allLuiDiagnostics.Any(item =>
-            item.Diagnostic.Severity == DiagnosticSeverity.Error
-        );
+        var success =
+            !structuralFailure
+            && !allLuiDiagnostics.Any(item => item.Diagnostic.Severity == DiagnosticSeverity.Error);
         var publishedEarlySources = success
             ? earlySources
                 .Where(source =>
@@ -326,17 +335,32 @@ public static class LuiPreparationEngine
     private static LuiEditorConfigResolution ResolveConfiguration(
         LuiPreparationRequest request,
         LuiPreparationDocument document
-    ) => request.EditorConfigs.IsDefault
-        ? LuiEditorConfigResolver.Resolve(document.PhysicalPath)
-        : LuiEditorConfigResolver.Resolve(document.PhysicalPath, request.EditorConfigs);
+    ) =>
+        request.EditorConfigs.IsDefault
+            ? LuiEditorConfigResolver.Resolve(document.PhysicalPath)
+            : LuiEditorConfigResolver.Resolve(document.PhysicalPath, request.EditorConfigs);
 
     private static IEnumerable<LuiDiagnostic> ApplyConfiguredSeverities(
         IEnumerable<LuiDiagnostic> diagnostics,
-        IReadOnlyDictionary<string, ReportDiagnostic> configuredSeverities
+        IReadOnlyDictionary<string, ReportDiagnostic> configuredSeverities,
+        IReadOnlyList<LuiDiagnostic> structuralDiagnostics
     )
     {
+        var structuralErrors = structuralDiagnostics
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToHashSet(ReferenceEqualityComparer.Instance);
         foreach (var diagnostic in diagnostics)
         {
+            if (
+                structuralErrors.Contains(diagnostic)
+                || diagnostic.Id
+                    is LuiLintCatalog.AnalysisUnavailable
+                        or LuiLintCatalog.AnalysisFailed
+            )
+            {
+                yield return diagnostic;
+                continue;
+            }
             if (
                 !configuredSeverities.TryGetValue(diagnostic.Id, out var configured)
                 || configured == ReportDiagnostic.Default

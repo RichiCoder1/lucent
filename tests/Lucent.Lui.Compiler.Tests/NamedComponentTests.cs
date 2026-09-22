@@ -773,14 +773,8 @@ public sealed class NamedComponentTests
             }
             """;
 
-        var accessorDiagnostic = AssertCompanionStateShapeDiagnostic(
-            component,
-            accessorModifier
-        );
-        var requiredDiagnostic = AssertCompanionStateShapeDiagnostic(
-            component,
-            requiredProperty
-        );
+        var accessorDiagnostic = AssertCompanionStateShapeDiagnostic(component, accessorModifier);
+        var requiredDiagnostic = AssertCompanionStateShapeDiagnostic(component, requiredProperty);
 
         Assert.AreEqual(
             accessorModifier.IndexOf("Count", StringComparison.Ordinal),
@@ -790,6 +784,8 @@ public sealed class NamedComponentTests
             requiredProperty.IndexOf("Count", StringComparison.Ordinal),
             requiredDiagnostic.Span.Start
         );
+        Assert.AreEqual("Card.lui.cs", accessorDiagnostic.FilePath);
+        Assert.AreEqual("Card.lui.cs", requiredDiagnostic.FilePath);
         StringAssert.Contains(accessorDiagnostic.Message, "required or accessor modifiers");
         StringAssert.Contains(requiredDiagnostic.Message, "required or accessor modifiers");
     }

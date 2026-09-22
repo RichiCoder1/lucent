@@ -54,19 +54,21 @@ Evidence: `artifacts/authoring-review-routing-red.log`,
 `artifacts/authoring-review-core-final.log`. Editor/build corrections and independent
 package/application verification are still in progress; no new package is claimed here.
 
-## Restart handoff
+## Integrated source verification — September 22
 
-The owner requested a restart before the remaining corrections were complete. Routing
-is saved in local `1553813`; Issue Browser subsequently completed its 22-test managed
-run and architecture checks pass. R4's exact compiler mapping and public LSP operations
-each have one passing regression. R5's cold dependency graph passes; the old-emitter
-variant still fails fixture cleanup on a loaded DLL, and its stale-symbol assertions
-need strengthening. EditorConfig snapshots still need wiring into editor preparation
-and freshness.
+R4/R5 exact maps and current dependency preparation, R8 configured lint, and R6
+companion diagnostics are implemented. Compiler **146/146**, Generator **52/52**,
+LanguageServer **45/45**, and client **15/15** tests pass. Repository formatting
+passes 595 C# and 115 LUI files. The VS Code client package is version 0.3.5.
 
-R8 preparation model/engine edits and named package lint cases are partial, uncompiled
-work. SDK host configuration snapshots and authored diagnostic logging remain. R6's
-new test reproduces generic LUI2000; the companion validator has not yet been fixed.
-No worker build/test process remains active. Resume from the current working tree and
-the three worker notes linked in the current handoff; preserve unrelated dirty files.
-Do not push or close #310 until the full correction batch is verified.
+A bounded independent source follow-up caught four further cases, now corrected:
+same-arity overload identity, client synchronization of unsaved configuration,
+configuration supplied only through additional files for linked LUI, and a structural
+lowering failure incorrectly hidden by diagnostic suppression. Focused regressions
+exercise public editor operations, configuration open/change/close and failed preparation.
+The reviewer found no remaining concrete blocker in the corrected paths; that review
+was source-only. Package/application evidence and publication are still pending.
+
+The September 21 restart checkpoint is superseded. Complete the remaining downstream,
+package, application and publication checks before closing #310; preserve the earlier
+source and package evidence boundaries.

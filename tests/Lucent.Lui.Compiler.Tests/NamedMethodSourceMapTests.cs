@@ -64,15 +64,17 @@ public sealed class NamedMethodSourceMapTests
         void AssertExactToken(string token, int start)
         {
             var authored = source.IndexOf(token, start, StringComparison.Ordinal);
-            var entry = result.Map.FromSource(new LuiSpan(authored, token.Length)).SingleOrDefault(
-                item =>
+            var entry = result
+                .Map.FromSource(new LuiSpan(authored, token.Length))
+                .SingleOrDefault(item =>
                     !item.Hidden
                     && item.Kind == LuiMapKind.Symbol
                     && item.Source.Equals(new LuiSpan(authored, token.Length))
                     && item.Generated.Length == token.Length
-                    && result.Source.AsSpan(item.Generated.Start, item.Generated.Length)
+                    && result
+                        .Source.AsSpan(item.Generated.Start, item.Generated.Length)
                         .SequenceEqual(token.AsSpan())
-            );
+                );
             Assert.IsNotNull(entry, $"'{token}' at {authored} did not retain an exact symbol map.");
         }
     }

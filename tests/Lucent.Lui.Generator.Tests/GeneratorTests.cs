@@ -3,6 +3,7 @@ using System.Reflection;
 using Lucent.Core;
 using Lucent.Lui.Compiler;
 using Lucent.Lui.Generator;
+using Lucent.Lui.Preparation;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -298,6 +299,61 @@ public static class Custom
                     .SourceText.ToString()
                     .Contains("Widget"),
             "an invalid component suppressed another document's output."
+        );
+    }
+
+    [TestMethod]
+    public void ConfiguredStructuralErrorCannotPublishPreparedPayload()
+    {
+        const string source = """
+            namespace Sample;
+            using Lucent.Core;
+            using static Lucent.Core.Components;
+            public component Broken() { <Text content={MissingValue} /> }
+            """;
+        var physicalPath = "C:/consumer/views/Broken.lui";
+        var result = LuiPreparationEngine.Prepare(
+            new LuiPreparationRequest(
+                CSharpCompilation.Create("prepared", references: References()),
+                [new LuiPreparationDocument(physicalPath, "views/Broken.lui", source, "1")],
+                [],
+                [],
+                new CSharpParseOptions(LanguageVersion.Preview),
+                new OptionsProvider([], null),
+                "epoch",
+                "project",
+                "preview",
+                "",
+                "",
+                "",
+                EditorConfigs:
+                [
+                    new LuiEditorConfigSnapshot(
+                        "C:/consumer/.editorconfig",
+                        "root = true\n[*.lui]\ndotnet_diagnostic.LUI2000.severity = none\n"
+                            + "dotnet_diagnostic.LUI5006.severity = none\n"
+                    ),
+                ]
+            )
+        );
+
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsFalse(result.Success);
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+            result.LuiDiagnostics.Any(item => item.Diagnostic.Id == "LUI2000"),
+            String.Join(
+                " | ",
+                result.LuiDiagnostics.Select(item =>
+                    item.Diagnostic.Id + ": " + item.Diagnostic.Message
+                )
+            )
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+            result.LuiDiagnostics.Any(item => item.Diagnostic.Id == "LUI5006"),
+            "The unavailable-analysis diagnostic was hidden by its configured severity."
+        );
+        Microsoft.VisualStudio.TestTools.UnitTesting.Assert.AreEqual(
+            0,
+            result.Payload.FinalSources.Length
         );
     }
 

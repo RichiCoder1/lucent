@@ -95,6 +95,10 @@ test("activates only Lucent workspaces and registers C# cross-language selectors
 test("activation preserves current diagnostics and clears closed documents", async () => {
     const diagnostics = { deleted: [], delete(uri) { this.deleted.push(uri.toString()); }, dispose() {} };
     const patterns = [];
+    const watchers = [];
+    let onDidOpenTextDocument;
+    let onDidChangeTextDocument;
+    let onDidCloseTextDocument;
     let semanticProvider;
     let semanticLegend;
     let referenceProvider;
@@ -118,12 +122,18 @@ test("activation preserves current diagnostics and clears closed documents", asy
         languageId: "csharp",
         getText: () => "class Helpers {}"
     };
+    const editorConfigDocument = {
+        uri: { scheme: "file", fsPath: path.resolve("workspace", ".editorconfig"), toString: () => "file:///workspace/.editorconfig" },
+        version: 1,
+        languageId: "properties",
+        getText: () => "root = true"
+    };
     const vscode = {
         Diagnostic: class { constructor() {} },
         DiagnosticSeverity: { Error: 1, Warning: 2, Information: 3, Hint: 4 },
         Location: class { constructor(uri, range) { this.uri = uri; this.range = range; } },
         Range: class { constructor() {} },
-        RelativePattern: class { constructor(base, pattern) { patterns.push([base, pattern]); } },
+        RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; patterns.push([base, pattern]); } },
         SemanticTokens: class { constructor(data) { this.data = data; } },
         SemanticTokensLegend: class { constructor(types, modifiers) { this.types = types; this.modifiers = modifiers; } },
         Uri: {
@@ -161,14 +171,24 @@ test("activation preserves current diagnostics and clears closed documents", asy
         window: { createOutputChannel: () => ({ info() {}, warn() {}, error() {}, dispose() {} }), showErrorMessage() {}, showInputBox: async () => "Renamed" },
         workspace: {
             applyEdit: async () => true,
-            createFileSystemWatcher: () => ({ onDidCreate: disposable, onDidChange: disposable, onDidDelete: disposable, dispose() {} }),
+            createFileSystemWatcher: pattern => {
+                const watcher = {
+                    pattern,
+                    onDidCreate(callback) { this.create = callback; return disposable(); },
+                    onDidChange(callback) { this.change = callback; return disposable(); },
+                    onDidDelete(callback) { this.delete = callback; return disposable(); },
+                    dispose() {}
+                };
+                watchers.push(watcher);
+                return watcher;
+            },
             workspaceFolders: [{ uri: { fsPath: path.resolve("workspace") } }],
             getConfiguration: () => ({ get: key => key === "projectPath" ? "host/Host.csproj" : "server.dll" }),
-            onDidChangeTextDocument: disposable,
-            onDidCloseTextDocument: disposable,
-            onDidOpenTextDocument: disposable,
+            onDidChangeTextDocument: callback => { onDidChangeTextDocument = callback; return disposable(); },
+            onDidCloseTextDocument: callback => { onDidCloseTextDocument = callback; return disposable(); },
+            onDidOpenTextDocument: callback => { onDidOpenTextDocument = callback; return disposable(); },
             registerTextDocumentContentProvider: disposable,
-            textDocuments: [openDocument, csharpDocument]
+            textDocuments: [openDocument, csharpDocument, editorConfigDocument]
         }
     };
     const extension = loadExtension(vscode, process, options => spawnOptions = options);
@@ -177,6 +197,39 @@ test("activation preserves current diagnostics and clears closed documents", asy
     assert.ok(process.notifications.some(notification =>
         notification.method === "textDocument/didOpen"
         && notification.params.textDocument.uri === "file:///Helpers.cs"
+    ));
+    assert.ok(process.notifications.some(notification =>
+        notification.method === "textDocument/didOpen"
+        && notification.params.textDocument.uri === "file:///workspace/.editorconfig"
+        && notification.params.textDocument.text === "root = true"
+    ));
+    const nestedEditorConfig = {
+        uri: { scheme: "file", fsPath: path.resolve("workspace", "features", ".editorconfig"), toString: () => "file:///workspace/features/.editorconfig" },
+        version: 1,
+        languageId: "properties",
+        getText: () => "[*.lui]\nlucent_lui_default_content = error"
+    };
+    onDidOpenTextDocument(nestedEditorConfig);
+    nestedEditorConfig.version = 2;
+    nestedEditorConfig.getText = () => "[*.lui]\nlucent_lui_default_content = warning";
+    onDidChangeTextDocument({ document: nestedEditorConfig });
+    onDidCloseTextDocument(nestedEditorConfig);
+    assert.deepEqual(process.notifications.filter(notification =>
+        notification.params?.textDocument?.uri === "file:///workspace/features/.editorconfig"
+    ).map(notification => notification.method), [
+        "textDocument/didOpen", "textDocument/didChange", "textDocument/didClose"
+    ]);
+    assert.equal(process.notifications.find(notification =>
+        notification.method === "textDocument/didChange"
+        && notification.params.textDocument.uri === "file:///workspace/features/.editorconfig"
+    ).params.contentChanges[0].text, "[*.lui]\nlucent_lui_default_content = warning");
+    const nestedEditorConfigWatcher = watchers.find(watcher => watcher.pattern.pattern === "*/**/.editorconfig");
+    assert.ok(nestedEditorConfigWatcher);
+    nestedEditorConfigWatcher.change({ toString: () => "file:///workspace/features/.editorconfig" });
+    assert.ok(process.notifications.some(notification =>
+        notification.method === "workspace/didChangeWatchedFiles"
+        && notification.params.changes[0].uri === "file:///workspace/features/.editorconfig"
+        && notification.params.changes[0].type === 2
     ));
     process.send({ jsonrpc: "2.0", method: "textDocument/publishDiagnostics", params: {
         uri: "file:///missing.lui", version: 999, diagnostics: []

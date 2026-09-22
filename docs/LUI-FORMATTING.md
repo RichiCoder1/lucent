@@ -81,6 +81,10 @@ The SDK supplies applicable configuration files as incremental generator inputs,
 including configurations in directories containing only `.lui` source. The
 generator does not read arbitrary project files behind Roslyn's cache. Changing
 configuration updates subsequent build diagnostics without requiring a source edit.
+Named-component preparation follows the same policy, including linked `.lui` files and
+configuration outside the C# source directories. The editor uses current unsaved
+configuration buffers; builds use the saved files. Diagnostic severity settings cannot
+turn failed compilation or incomplete analysis into a successful prepared component.
 
 ## Lints and explicit fixes
 

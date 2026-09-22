@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Xml.Linq;
@@ -247,7 +248,9 @@ internal sealed partial class LuiProjectContext : IDisposable
                 : null;
         }
         var result = CompileSnapshot(snapshot, cancellationToken);
-        var configuration = LuiEditorConfigResolver.Resolve(snapshot.Document.Path);
+        var configuration = snapshot.EditorConfigs.IsDefaultOrEmpty
+            ? LuiEditorConfigResolver.Resolve(snapshot.Document.Path)
+            : LuiEditorConfigResolver.Resolve(snapshot.Document.Path, snapshot.EditorConfigs);
         var lint = LintSnapshot(
             snapshot,
             result,
@@ -2701,10 +2704,18 @@ internal sealed partial class LuiProjectContext : IDisposable
                     var next = project.Solution;
                     foreach (var document in documents)
                     {
-                        next =
-                            document is AdditionalDocument
-                                ? next.WithAdditionalDocumentText(document.Id, text)
-                                : next.WithDocumentText(document.Id, text);
+                        next = document switch
+                        {
+                            AdditionalDocument => next.WithAdditionalDocumentText(
+                                document.Id,
+                                text
+                            ),
+                            AnalyzerConfigDocument => next.WithAnalyzerConfigDocumentText(
+                                document.Id,
+                                text
+                            ),
+                            _ => next.WithDocumentText(document.Id, text),
+                        };
                     }
                     project = next.GetProject(project.Id)!;
                 }
@@ -2787,10 +2798,15 @@ internal sealed partial class LuiProjectContext : IDisposable
             if (documents.Length == 0)
                 throw new ArgumentException("An evaluated document is required.", nameof(uri));
             foreach (var document in documents)
-                solution =
-                    document is AdditionalDocument
-                        ? solution.WithAdditionalDocumentText(document.Id, text)
-                        : solution.WithDocumentText(document.Id, text);
+                solution = document switch
+                {
+                    AdditionalDocument => solution.WithAdditionalDocumentText(document.Id, text),
+                    AnalyzerConfigDocument => solution.WithAnalyzerConfigDocumentText(
+                        document.Id,
+                        text
+                    ),
+                    _ => solution.WithDocumentText(document.Id, text),
+                };
             if (overlay)
                 overlays[FilePath(uri)] = text;
             else
@@ -3130,7 +3146,8 @@ internal sealed partial class LuiProjectContext : IDisposable
             evaluation.Preparation?.LuiDiagnostics ?? [],
             evaluation.Preparation?.GeneratorDiagnostics ?? [],
             preparedCompilation,
-            evaluation.AuthoredSources
+            evaluation.AuthoredSources,
+            evaluation.EditorConfigs
         );
     }
 
@@ -3189,15 +3206,14 @@ internal sealed partial class LuiProjectContext : IDisposable
         // generator first duplicates that work; keep all other project generators. Named
         // components use the shared bounded preparation pass instead.
         LuiPreparationResult? preparation = null;
+        ImmutableArray<LuiEditorConfigSnapshot> namedEditorConfigs = [];
         Compilation compilation;
         if (namedComponents)
         {
-            var prepared = await PrepareNamedProjectGraphAsync(
-                project,
-                captured,
-                cancellationToken
-            ).ConfigureAwait(false);
+            var prepared = await PrepareNamedProjectGraphAsync(project, captured, cancellationToken)
+                .ConfigureAwait(false);
             preparation = prepared.Preparation;
+            namedEditorConfigs = prepared.EditorConfigs;
             compilation = preparation.BindingCompilation;
             var projections = preparation.Documents.ToDictionary(
                 item => Path.GetFullPath(item.Document.PhysicalPath),
@@ -3227,7 +3243,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             cancellationToken
         );
         var generation = namedComponents
-            ? NamedPreparationGeneration(preparation!, allDocuments)
+            ? NamedPreparationGeneration(preparation!, allDocuments, namedEditorConfigs)
             : index.Generation;
         var evaluation = new ProjectEvaluation(
             captured,
@@ -3241,7 +3257,8 @@ internal sealed partial class LuiProjectContext : IDisposable
                 StringComparer.OrdinalIgnoreCase
             ),
             preparation,
-            generation
+            generation,
+            namedEditorConfigs
         );
         lock (gate)
         {
@@ -3281,7 +3298,8 @@ internal sealed partial class LuiProjectContext : IDisposable
 
     private static string NamedPreparationGeneration(
         LuiPreparationResult preparation,
-        IReadOnlyList<LuiProjectDocument> documents
+        IReadOnlyList<LuiProjectDocument> documents,
+        ImmutableArray<LuiEditorConfigSnapshot> editorConfigs
     ) =>
         LuiDocumentIdentity.Hash(
             String.Join(
@@ -3289,6 +3307,11 @@ internal sealed partial class LuiProjectContext : IDisposable
                 documents
                     .OrderBy(item => item.LogicalPath, StringComparer.Ordinal)
                     .Select(item => item.LogicalPath + "\0" + item.Version)
+                    .Concat(
+                        editorConfigs
+                            .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+                            .Select(item => item.Path + "\0" + item.Source)
+                    )
                     .Concat(
                         preparation.Payload.EarlyDeclarations.Select(item =>
                             item.HintName + "\0" + item.Source
@@ -3434,6 +3457,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                     graphProject
                         .Documents.Cast<TextDocument>()
                         .Concat(graphProject.AdditionalDocuments)
+                        .Concat(graphProject.AnalyzerConfigDocuments)
                 )
                 .Where(document => SameFile(document.FilePath, uri));
 
@@ -4585,11 +4609,7 @@ internal sealed partial class LuiProjectContext : IDisposable
                     Path.GetFullPath(mappedLocation.Path),
                     out var authoredText
                 )
-                && AuthoredSpan(
-                    mappedLocation,
-                    mappedLocation.Path,
-                    SourceText.From(authoredText)
-                )
+                && AuthoredSpan(mappedLocation, mappedLocation.Path, SourceText.From(authoredText))
                     is { } authoredSpan
             )
                 return new LuiNavigationTarget(
@@ -4660,7 +4680,8 @@ internal sealed partial class LuiProjectContext : IDisposable
         bool namedComponents,
         IReadOnlyDictionary<string, LuiNamedDocument> namedDocuments,
         LuiPreparationResult? preparation,
-        string generation
+        string generation,
+        ImmutableArray<LuiEditorConfigSnapshot> editorConfigs
     )
     {
         internal long Epoch { get; } = epoch;
@@ -4674,6 +4695,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             namedDocuments;
         internal LuiPreparationResult? Preparation { get; } = preparation;
         internal string Generation { get; } = generation;
+        internal ImmutableArray<LuiEditorConfigSnapshot> EditorConfigs { get; } = editorConfigs;
         internal IReadOnlyDictionary<string, string> AuthoredSources { get; } =
             documents.ToDictionary(
                 item => Path.GetFullPath(item.Path),
@@ -4697,7 +4719,8 @@ internal sealed partial class LuiProjectContext : IDisposable
         IReadOnlyList<LuiPreparationDiagnostic> preparationDiagnostics,
         IReadOnlyList<Diagnostic> generatorDiagnostics,
         LuiCompilationResult? preparedCompilation,
-        IReadOnlyDictionary<string, string> authoredSources
+        IReadOnlyDictionary<string, string> authoredSources,
+        ImmutableArray<LuiEditorConfigSnapshot> editorConfigs
     )
     {
         internal long Epoch { get; } = epoch;
@@ -4716,6 +4739,7 @@ internal sealed partial class LuiProjectContext : IDisposable
         internal IReadOnlyList<Diagnostic> GeneratorDiagnostics { get; } = generatorDiagnostics;
         internal LuiCompilationResult? PreparedCompilation { get; } = preparedCompilation;
         internal IReadOnlyDictionary<string, string> AuthoredSources { get; } = authoredSources;
+        internal ImmutableArray<LuiEditorConfigSnapshot> EditorConfigs { get; } = editorConfigs;
     }
 
     internal sealed class PublishedDocument(

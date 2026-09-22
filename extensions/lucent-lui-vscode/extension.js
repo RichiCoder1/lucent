@@ -293,6 +293,7 @@ async function activate(context) {
             }
             const watchers = [
                 vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(projectDirectory, "**/*.{lui,cs,csproj,props,targets,dll,winmd}")),
+                vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(projectDirectory, "*/**/.editorconfig")),
                 ...projectAncestors.map(directory => vscode.workspace.createFileSystemWatcher(
                     new vscode.RelativePattern(directory, "{global.json,.editorconfig,Directory.Build.props,Directory.Build.targets,Directory.Packages.props}")
                 ))
@@ -319,24 +320,26 @@ async function activate(context) {
     rpc.notify("initialized", {});
     const completionData = new WeakMap();
     const isLucentDocument = document => document.languageId === "lui" || document.languageId === "csharp";
+    const isSynchronizedDocument = document => isLucentDocument(document)
+        || document.uri.scheme === "file" && path.basename(document.uri.fsPath).toLowerCase() === ".editorconfig";
     const rename = async (document, position, newName) => toWorkspaceEdit(
         await rpc.request("textDocument/rename", {
             textDocument: { uri: document.uri.toString() }, position, newName
         })
     );
-    const update = document => isLucentDocument(document) && rpc.notify("textDocument/didChange", {
+    const update = document => isSynchronizedDocument(document) && rpc.notify("textDocument/didChange", {
         textDocument: { uri: document.uri.toString(), version: document.version }, contentChanges: [{ text: document.getText() }]
     });
-    for (const document of vscode.workspace.textDocuments.filter(isLucentDocument)) rpc.notify("textDocument/didOpen", {
+    for (const document of vscode.workspace.textDocuments.filter(isSynchronizedDocument)) rpc.notify("textDocument/didOpen", {
         textDocument: { uri: document.uri.toString(), version: document.version, text: document.getText() }
     });
     if (stopped) return;
     subscriptions.push(
-        vscode.workspace.onDidOpenTextDocument(document => isLucentDocument(document) && rpc.notify("textDocument/didOpen", {
+        vscode.workspace.onDidOpenTextDocument(document => isSynchronizedDocument(document) && rpc.notify("textDocument/didOpen", {
             textDocument: { uri: document.uri.toString(), version: document.version, text: document.getText() }
         })),
         vscode.workspace.onDidChangeTextDocument(event => update(event.document)),
-        vscode.workspace.onDidCloseTextDocument(document => isLucentDocument(document) && rpc.notify("textDocument/didClose", { textDocument: { uri: document.uri.toString() } })),
+        vscode.workspace.onDidCloseTextDocument(document => isSynchronizedDocument(document) && rpc.notify("textDocument/didClose", { textDocument: { uri: document.uri.toString() } })),
         vscode.workspace.registerTextDocumentContentProvider("lucent-lui", {
             provideTextDocumentContent: uri => rpc.request("lucent/generatedText", { uri: uri.toString() })
         }),

@@ -51,11 +51,13 @@ Invoke-Expected @($Tooling, '--lint', '--project', $Project, $source) 0 ''
 
 $namedFixture = Join-Path $projectDirectory 'named-lint-policy'
 $null = New-Item -ItemType Directory -Path $namedFixture -Force
+$namedInput = Join-Path $namedFixture 'lui-input'
+$null = New-Item -ItemType Directory -Path $namedInput -Force
 $namedVersionPath = Split-Path (Split-Path (Split-Path $Tooling -Parent) -Parent) -Parent
 $namedVersion = Split-Path $namedVersionPath -Leaf
 $namedProject = Join-Path $namedFixture 'NamedLintPolicy.csproj'
-$namedSource = Join-Path $namedFixture 'PolicyProbe.lui'
-$namedConfiguration = Join-Path $namedFixture '.editorconfig'
+$namedSource = Join-Path $namedInput 'PolicyProbe.lui'
+$namedConfiguration = Join-Path $namedInput '.editorconfig'
 $namedCompanion = Join-Path $namedFixture 'PolicyProbe.lui.cs'
 @"
 <Project Sdk="Microsoft.NET.Sdk;Lucent.Lui.Sdk/$namedVersion">
@@ -119,6 +121,23 @@ $suppressedSource = $namedSourceText.Replace(
 Set-Content -LiteralPath $namedSource -Value $suppressedSource
 Invoke-NamedBuild 0 '' 'LUI5001' | Out-Null
 Set-Content -LiteralPath $namedSource -Value $namedSourceText
+
+# An invalid component that is not referenced by C# must still fail preparation
+# when its structural diagnostics are downgraded or suppressed.
+$unusedNamedSource = Join-Path $namedInput 'UnusedBroken.lui'
+try {
+    @'
+namespace LintPolicyProbe;
+using Lucent.Core;
+using static Lucent.Core.Components;
+public component UnusedBroken() { <Text content={MissingValue} /> }
+'@ | Set-Content -LiteralPath $unusedNamedSource
+    Set-Content -LiteralPath $namedConfiguration "root = true`n[*.lui]`ndotnet_diagnostic.LUI2000.severity = none`ndotnet_diagnostic.LUI5006.severity = none"
+    Invoke-NamedBuild 1 'LUI2000' '' | Out-Null
+}
+finally {
+    Remove-Item -LiteralPath $unusedNamedSource -Force -ErrorAction SilentlyContinue
+}
 
 Set-NamedLintSeverity 'fatal'
 Invoke-NamedBuild 1 'LUI6102' '' | Out-Null

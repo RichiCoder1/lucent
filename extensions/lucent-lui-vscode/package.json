@@ -1,7 +1,7 @@
 {
   "name": "lucent-lui",
   "displayName": "Lucent .lui",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "publisher": "lucent",
   "description": "Language support and cross-language tooling for Lucent .lui files.",
   "license": "MIT",

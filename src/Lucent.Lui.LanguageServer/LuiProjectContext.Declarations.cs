@@ -214,7 +214,8 @@ internal sealed partial class LuiProjectContext
                     authored.Start >= 0
                     && authored.End <= source.Length
                     && authored.Length == generated.Span.Length
-                    && source.AsSpan(authored.Start, authored.Length)
+                    && source
+                        .AsSpan(authored.Start, authored.Length)
                         .SequenceEqual(generated.Text.AsSpan())
                 )
                     entries.Add(
@@ -246,9 +247,7 @@ internal sealed partial class LuiProjectContext
                 foreach (var method in declaration.Members.OfType<MethodDeclarationSyntax>())
                 {
                     var authored = authoredMethods.SingleOrDefault(item =>
-                        item.Method.Identifier.ValueText == method.Identifier.ValueText
-                        && item.Method.ParameterList.Parameters.Count
-                            == method.ParameterList.Parameters.Count
+                        SameMethodIdentity(item.Method, method)
                     );
                     if (authored.Member is null)
                         continue;
@@ -272,6 +271,26 @@ internal sealed partial class LuiProjectContext
                     }
                 }
 
+                static bool SameMethodIdentity(
+                    MethodDeclarationSyntax authored,
+                    MethodDeclarationSyntax generated
+                ) =>
+                    authored.Identifier.ValueText == generated.Identifier.ValueText
+                    && authored.TypeParameterList?.Parameters.Count
+                        == generated.TypeParameterList?.Parameters.Count
+                    && authored.ParameterList.Parameters.Count
+                        == generated.ParameterList.Parameters.Count
+                    && authored
+                        .ParameterList.Parameters.Zip(generated.ParameterList.Parameters)
+                        .All(pair =>
+                            SyntaxFactory.AreEquivalent(pair.First.Type, pair.Second.Type)
+                            && pair.First.Modifiers.Select(token => token.ValueText)
+                                .SequenceEqual(
+                                    pair.Second.Modifiers.Select(token => token.ValueText),
+                                    StringComparer.Ordinal
+                                )
+                        );
+
                 var authoredProperties = component
                     .Parameters.Select(parameter => (parameter.Name.Text, parameter.Name.Span))
                     .Concat(
@@ -279,15 +298,16 @@ internal sealed partial class LuiProjectContext
                             .Body.OfType<LuiMemberSyntax>()
                             .Where(item => item.Kind == LuiMemberKind.Field)
                             .SelectMany(item =>
-                                ((FieldDeclarationSyntax)item.Declaration).Declaration.Variables.Select(
-                                    variable =>
-                                        (
-                                            variable.Identifier.ValueText,
-                                            new LuiSpan(
-                                                item.Span.Start + variable.Identifier.SpanStart,
-                                                variable.Identifier.Span.Length
-                                            )
+                                (
+                                    (FieldDeclarationSyntax)item.Declaration
+                                ).Declaration.Variables.Select(variable =>
+                                    (
+                                        variable.Identifier.ValueText,
+                                        new LuiSpan(
+                                            item.Span.Start + variable.Identifier.SpanStart,
+                                            variable.Identifier.Span.Length
                                         )
+                                    )
                                 )
                             )
                     )

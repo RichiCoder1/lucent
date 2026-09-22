@@ -199,11 +199,17 @@ once for binding, then refines and lowers components. Final foreign-generator ou
 match preparation exactly. This is a bounded pipeline, with no retry-until-stable generation.
 Generated C# is build-owned; never copy it into the application as source.
 
-The language server uses the same inputs, including unsaved `.lui` and companion text.
+The language server uses the same inputs, including unsaved `.lui`, companion and
+applicable `.editorconfig` text. Named project dependencies are prepared from the current
+editor graph before their consumers; previously built emitters do not supply stale symbols.
 Hover, completion, signature help, definitions, references, rename, diagnostics and symbols
 map back to authored locations. Support-only files participate in the same project graph.
 Changing or removing a declaration invalidates dependent views and generated APIs. Stale
 or canceled work cannot replace a newer editor snapshot.
+
+Companion `[State]` properties follow the standalone state generator's supported shape.
+Unsupported property or accessor modifiers, including `required` and a private setter,
+report `LUI2053` at the companion declaration instead of a generated partial-member error.
 
 See [LUI formatting](LUI-FORMATTING.md) for formatting and safe fixes, and
 [the execution record](plans/application-routing-component-authoring-execution.md) for

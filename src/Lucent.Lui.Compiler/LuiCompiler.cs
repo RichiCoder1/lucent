@@ -119,6 +119,13 @@ public static partial class LuiCompiler
             .ToArray();
         var diagnostics = new List<LuiDiagnostic>(document.Diagnostics);
         var namedPlan = namedComponent ? NamedPlan(document, compilation, diagnostics) : null;
+        if (namedComponent && diagnostics.Any(static item => item.Id == "LUI2053"))
+            return new LuiCompilationResult(
+                identity,
+                null,
+                new LuiSourceMap(identity, Array.Empty<LuiMapEntry>()),
+                diagnostics
+            );
         var writer = new Writer(
             document,
             identity,
