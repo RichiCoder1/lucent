@@ -1,10 +1,13 @@
 # Current work and follow-ups
 
-## Test-quality delivery — September 23, 2026
+## #311/#312 delivered — September 23, 2026
 
-#310 and Light Notes official 86.1 adoption are delivered. #311 implementation is
-complete locally; exact editor state-definition correction #312 is committed as
-`c367351`. Compiler 145, Core 674, Tooling 8, LanguageServer 46 and Renderer 93
+#310 and Light Notes official 86.1 adoption are delivered. #311 is delivered as
+`0951b92`; exact editor state-definition correction #312 is committed as
+`c367351`. [CI 87](https://github.com/RichiCoder1/lucent/actions/runs/35835516837) passed
+managed, package/NativeAOT and publication checks; all nine packages are published
+as `0.3.0-dev.87.1`. Both issues are closed/Done.
+Compiler 145, Core 674, Tooling 8, LanguageServer 46 and Renderer 93
 pass (three existing opt-in renderer skips). Published passes its complete runner,
 including 25 desktop checks and two existing physical mixed-DPI skips. The pointer
 check's synchronized movement/click sequence also passes a focused run plus 12
@@ -15,8 +18,8 @@ The corrected editor backend is installed at
 `C:/Users/richa/.lucent/lui/review312-20260923/server`; global and local settings are
 backed up and updated, and protocol startup/shutdown passes. VS Code needs reload.
 
-Remaining delivery: commit/push test cleanup, verify CI and close #311/#312. #313
-separately tracks the older Performance benchmark's workload/resource boundaries;
+No delivery work remains for #310–312. #313 is Todo and separately tracks the older
+Performance benchmark's workload/resource boundaries;
 do not claim it passes or loosen budgets to close the setup cleanup. Preserve the
 unrelated security/Sandbox/research drafts and Light Notes status-only changes.
 Do not start #205 as part of this batch. Earlier progress/pause sections are historical.

@@ -1,5 +1,11 @@
 # Test-quality execution
 
+Delivered in `0951b92d49dd82e89f6cfee679aa22a942408484`, with the editor correction in
+`c367351`. [CI 87](https://github.com/RichiCoder1/lucent/actions/runs/35835516837) passed
+managed and package/NativeAOT verification and published all nine packages as
+`0.3.0-dev.87.1`. #311 and #312 are closed/Done. Benchmark follow-up #313 remains Todo;
+the failed Performance boundary is recorded below rather than counted as a pass.
+
 Tracked in [#311](https://github.com/RichiCoder1/lucent/issues/311), following the
 delivered authoring corrections #310. Scope follows advisory plans
 [003](../../advisor-plans/003-existing-test-cleanup.md),

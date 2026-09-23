@@ -9,10 +9,12 @@ consumes the official package, with [its CI](https://github.com/RichiCoder1/ligh
 and focused desktop checks passing. The [correction record](plans/authoring-review-corrections.md)
 keeps the source and package evidence boundaries explicit.
 
-The [test-quality implementation #311](plans/test-quality-execution.md) is complete
-locally: stronger behavioral assertions, retained coverage ownership and less repeated
+The [test-quality implementation #311](plans/test-quality-execution.md) is delivered
+in `0951b92`: stronger behavioral assertions, retained coverage ownership and less repeated
 setup. Exact editor checks exposed and corrected state Go to Definition [#312](https://github.com/RichiCoder1/lucent/issues/312).
-CI delivery is pending. Existing benchmark workload/budget drift is tracked separately
+[CI 87](https://github.com/RichiCoder1/lucent/actions/runs/35835516837) passed managed,
+package/NativeAOT and publication checks, delivering `0.3.0-dev.87.1`; #311/#312 are
+closed. Existing benchmark workload/budget drift is tracked separately
 in [#313](https://github.com/RichiCoder1/lucent/issues/313); no Performance suite pass
 is claimed. Navigation restoration/Windows activation #205 follows separately.
 
