@@ -409,20 +409,38 @@ public sealed partial class PublishedInputTests
                 var textBounds = isMultiline
                     ? editor.Patterns.Text.Pattern.DocumentRange.GetBoundingRectangles()[0]
                     : editor.BoundingRectangle;
-                Mouse.LeftClick(
-                    new Point(textBounds.Left + 1, textBounds.Top + textBounds.Height / 2)
+                var clickPoint = new Point(
+                    textBounds.Left + 1,
+                    textBounds.Top + textBounds.Height / 2
                 );
+                // Keep cursor movement and button injection ordered; the point-click
+                // overload can inject the button before movement has settled.
+                Mouse.MoveTo(clickPoint);
+                Wait.UntilInputIsProcessed();
+                Mouse.LeftClick();
+                Wait.UntilInputIsProcessed();
                 WaitUntil(
                     process,
                     () => editor.Properties.HasKeyboardFocus.Value,
                     $"{label} lost native keyboard focus after the physical click."
                 );
                 Keyboard.Type("X");
-                WaitUntil(
-                    process,
-                    () => editor.Patterns.Value.Pattern.Value.Value.StartsWith('X'),
-                    $"{label} physical click did not place the caret near the start of the line."
-                );
+                try
+                {
+                    WaitUntil(
+                        process,
+                        () => editor.Patterns.Value.Pattern.Value.Value.StartsWith('X'),
+                        $"{label} physical click did not place the caret near the start of the line."
+                    );
+                }
+                catch (TimeoutException error)
+                {
+                    var currentBounds = editor.BoundingRectangle;
+                    throw new TimeoutException(
+                        $"{error.Message} foreground={GetForegroundWindow() == window}; focus={editor.Properties.HasKeyboardFocus.Value}; value='{editor.Patterns.Value.Pattern.Value.Value}'; clicked={clickPoint}; cursor={Mouse.Position}; original-bounds={textBounds}; current-bounds={currentBounds}.",
+                        error
+                    );
+                }
 
                 textBounds = isMultiline
                     ? editor.Patterns.Text.Pattern.DocumentRange.GetBoundingRectangles()[0]

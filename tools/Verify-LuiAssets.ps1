@@ -546,13 +546,26 @@ try {
         @{ Name='svg-one-axis'; Bytes=$svgOneAxis; File='icon.svg'; Path='icon.svg'; Density=$null; Expected=@{ Path='icon.svg'; Format='Svg'; Width=40; Height=20; Density=1 } },
         @{ Name='svg-percent-axes'; Bytes=$svgPercent; File='icon.svg'; Path='icon.svg'; Density=$null; Expected=@{ Path='icon.svg'; Format='Svg'; Width=300; Height=150; Density=1; RelativeWidth=.5; RelativeHeight=.25 } }
     )
+    $metadataFiles = @{}
+    $metadataItems = foreach ($case in $metadataCases) {
+        $file = $case.Name + '-' + $case.File
+        $metadataFiles.Add($file, $case.Bytes)
+        $densityAttribute = if ($null -eq $case.Density) { '' } else { ' Density="' + $case.Density + '"' }
+        '<LucentAsset Include="' + $file + '" Path="' + $case.Name + '/' + $case.Path + '"' + $densityAttribute + ' />'
+    }
+    $positiveMetadataRoot = Join-Path $metadataRoot 'positive'
+    $metadataProject = New-CaseProject $positiveMetadataRoot 'PositiveMetadata' ($metadataItems -join "`n") $metadataFiles
+    Build-Probe $positiveMetadataRoot $metadataProject 'positive-metadata' | Out-Null
+    $metadataInventory = Get-Inventory $positiveMetadataRoot
+    Assert-That (@($metadataInventory.assets).Count -eq 9) 'Positive metadata inventory must contain exactly nine assets.'
+    $metadataPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($asset in $metadataInventory.assets) {
+        Assert-That ($metadataPaths.Add($asset.path)) "Duplicate metadata inventory path: $($asset.path)"
+    }
     foreach ($case in $metadataCases) {
-        $caseRoot = Join-Path $metadataRoot $case.Name
-        $caseProject = New-AssetProbeProject $caseRoot $case.Name $case.File $case.Bytes $case.Path $case.Density
-        Build-Probe $caseRoot $caseProject $case.Name | Out-Null
-        $caseInventory = Get-Inventory $caseRoot
         $expected = $case.Expected
-        Assert-InventoryAsset $caseInventory $expected.Path $expected.Format $expected.Width $expected.Height $expected.Density $expected.RelativeWidth $expected.RelativeHeight | Out-Null
+        $expectedPath = $case.Name + '/' + $expected.Path
+        Assert-InventoryAsset $metadataInventory $expectedPath $expected.Format $expected.Width $expected.Height $expected.Density $expected.RelativeWidth $expected.RelativeHeight | Out-Null
     }
     $invalidMetadata = @(
         @{ Name='jpeg-malformed-exif-offset'; Bytes=(New-JpegWithExif $asymmetricJpeg $true $true); File='bad.jpg'; Path='bad.jpg'; Density='2' },

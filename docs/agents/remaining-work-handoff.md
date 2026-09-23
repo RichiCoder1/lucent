@@ -1,5 +1,26 @@
 # Current work and follow-ups
 
+## Test-quality delivery — September 23, 2026
+
+#310 and Light Notes official 86.1 adoption are delivered. #311 implementation is
+complete locally; exact editor state-definition correction #312 is committed as
+`c367351`. Compiler 145, Core 674, Tooling 8, LanguageServer 46 and Renderer 93
+pass (three existing opt-in renderer skips). Published passes its complete runner,
+including 25 desktop checks and two existing physical mixed-DPI skips. The pointer
+check's synchronized movement/click sequence also passes a focused run plus 12
+comparison runs. Repository formatting passes. The [execution record](../plans/test-quality-execution.md)
+maps retained coverage, measured setup changes and discarded diagnostic attempts.
+
+The corrected editor backend is installed at
+`C:/Users/richa/.lucent/lui/review312-20260923/server`; global and local settings are
+backed up and updated, and protocol startup/shutdown passes. VS Code needs reload.
+
+Remaining delivery: commit/push test cleanup, verify CI and close #311/#312. #313
+separately tracks the older Performance benchmark's workload/resource boundaries;
+do not claim it passes or loosen budgets to close the setup cleanup. Preserve the
+unrelated security/Sandbox/research drafts and Light Notes status-only changes.
+Do not start #205 as part of this batch. Earlier progress/pause sections are historical.
+
 ## #310 delivered; #311 active — September 23, 2026
 
 Lucent #310 is closed/Done. CI 86 verified and published all nine packages as

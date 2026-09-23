@@ -42,24 +42,33 @@ public sealed class WholeFileFormattingTests
     {
         const string source = """"
 internal component Example() {
-string Read(int value) {
+string Read(int value,string prefix) {
 var raw="""
     first "quoted" line
       indentation
     """;
-if(value>0){return $"value {value+1, 8:X} {raw}";}
+// Keep this explanation.
+if(value>0){return $"{prefix}: {value+1, 8:X}\n" + raw;}
 return @"literal
 spacing";
 }
-<Text>{Read(2)}</Text>
+<Text>{Read(2, "example")}</Text>
 }
 """";
         var input = source.Replace("\r\n", "\n", StringComparison.Ordinal);
-        var formatted = Format(input, 40);
+        var formatted = Format(input, 60);
+        StringAssert.Contains(formatted, "Read(int value, string prefix) {");
+        StringAssert.Contains(formatted, "if (value > 0) {");
+        StringAssert.Contains(formatted, "// Keep this explanation.");
+        var originalRead = Compile(input);
+        var formattedRead = Compile(formatted);
         foreach (var value in new[] { -1, 7 })
-            Assert.AreEqual(Evaluate(input, value), Evaluate(formatted, value));
+            Assert.AreEqual(
+                originalRead(value, "Unicode 日本語"),
+                formattedRead(value, "Unicode 日本語")
+            );
 
-        static string Evaluate(string input, int value)
+        static Func<int, string, string> Compile(string input)
         {
             var member = LuiParser.Parse(input).Component!.Body.OfType<LuiMemberSyntax>().Single();
             var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
@@ -78,12 +87,11 @@ spacing";
             using var stream = new MemoryStream();
             var emitted = compilation.Emit(stream);
             Assert.IsTrue(emitted.Success, string.Join(" | ", emitted.Diagnostics));
-            return (string)
-                System
-                    .Reflection.Assembly.Load(stream.ToArray())
-                    .GetType("Specimen")!
-                    .GetMethod("Read")!
-                    .Invoke(null, [value])!;
+            var read = System
+                .Reflection.Assembly.Load(stream.ToArray())
+                .GetType("Specimen")!
+                .GetMethod("Read")!;
+            return (value, prefix) => (string)read.Invoke(null, [value, prefix])!;
         }
     }
 

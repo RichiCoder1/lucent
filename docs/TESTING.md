@@ -2,6 +2,8 @@
 
 Use the smallest meaningful check for the behavior you changed. The repository uses MSTest and Microsoft.Testing.Platform for named tests, filtering, and failure reports. CI and local development share [Test-Repository.ps1](../tools/Test-Repository.ps1).
 
+When adding, changing or removing tests, follow the [test-authoring and coverage-ownership policy](agents/verification.md#test-authoring-and-coverage-ownership).
+
 ## Everyday checks
 
 ```powershell
@@ -105,10 +107,10 @@ The `Assets` suite also compares multiple-APP1 JPEG and PNG eXIf orientation met
 | Suite | Use it for |
 | --- | --- |
 | `Native` | Existing Core, R3, renderer and Windows contract executables under NativeAOT, without visible desktop interaction. Also runs in package CI. |
-| `Published` | NativeAOT packaging, startup/close, presentation, desktop interaction, and UI Automation behavior. |
+| `Published` | Published NativeAOT applications/TestHost: packaging, startup/close, presentation, desktop interaction, and UI Automation. Full Native contract executables are a separate `Native` invocation. |
 | `Sdk` | SDK package consumers, MSBuild integration, and generated NativeAOT applications. |
 | `Assets` | Focus-free packaged asset generation, cold editor symbols, invalidation, project/package references and console NativeAOT byte access. |
-| `Performance` | Runtime and tooling operation measurements when investigating performance. |
+| `Performance` | Runtime and tooling operation measurements; publishes Issue Browser and its verifier, without the unused Windows TestHost. |
 | `Accessibility` | Automated Windows accessibility rule scans against the published application. |
 
 ```powershell

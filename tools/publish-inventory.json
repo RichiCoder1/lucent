@@ -4,6 +4,7 @@
   "files": [
     { "path": "Artwork/Lucide-LICENSE.txt", "kind": "notice" },
     { "path": "Lucent.Core.pdb", "kind": "managed-symbol" },
+    { "path": "Lucent.Hosting.pdb", "kind": "managed-symbol" },
     { "path": "Lucent.Icons.Lucide.pdb", "kind": "managed-symbol" },
     { "path": "Lucent.IssueBrowser.exe", "kind": "native-aot-executable" },
     { "path": "Lucent.IssueBrowser.pdb", "kind": "symbol" },
@@ -20,6 +21,8 @@
     { "path": "notices/HarfBuzzSharp-NOTICES.txt", "kind": "notice" },
     { "path": "notices/Lucide-LICENSE.txt", "kind": "notice" },
     { "path": "notices/Microsoft-VCRuntime.txt", "kind": "notice" },
+    { "path": "notices/Microsoft.Extensions-LICENSE.txt", "kind": "notice" },
+    { "path": "notices/Microsoft.Extensions.Hosting-NOTICES.txt", "kind": "notice" },
     { "path": "notices/SDL3-CS.txt", "kind": "notice" },
     { "path": "notices/SDL-LICENSE.txt", "kind": "notice" },
     { "path": "notices/SkiaSharp-LICENSE.txt", "kind": "notice" },

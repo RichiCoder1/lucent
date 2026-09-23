@@ -68,22 +68,95 @@ public sealed class DrawingRendererContracts
             canvas.Clear(SKColors.Transparent);
             renderer.Render(scene, canvas);
 
-            var red = Pixel(bitmap, scale, 2, 2);
-            var green = Pixel(bitmap, scale, 7, 2);
-            var clipped = Pixel(bitmap, scale, 10, 0);
-            var line = Pixel(bitmap, scale, 3, 10);
-            Assert.IsTrue(red.Red > 100 && red.Green < 10 && red.Alpha is >= 126 and <= 130);
-            Assert.IsTrue(green.Green > 100 && green.Red < 10 && green.Alpha is >= 126 and <= 130);
-            Assert.AreEqual(
-                (byte)0,
-                clipped.Alpha,
-                "Clip or transform was applied more than once."
-            );
-            Assert.IsTrue(line.Alpha > 100 && line.Red < 20 && line.Green < 20 && line.Blue < 20);
-            Assert.IsTrue(
-                bitmap.Bytes.Count(value => value != 0) > size,
-                "The frozen drawing produced no bounded shape/path/arc pixels."
-            );
+            AssertPixel(bitmap, scale, 2, 2, new(255, 0, 0, 128), "rectangle opacity");
+            AssertPixel(bitmap, scale, 7, 2, new(0, 255, 0, 128), "clipped translation");
+            AssertPixel(bitmap, scale, 10, 0, new(0, 0, 0, 0), "outside clip");
+            AssertPixel(bitmap, scale, 3, 10, new(0, 0, 0, 128), "line opacity");
+        }
+    }
+
+    [TestMethod]
+    [DataRow("filled-ellipse", 10f, 10f, 4f, 4f)]
+    [DataRow("stroked-ellipse", 15f, 10f, 10f, 10f)]
+    [DataRow("arc", 15f, 10f, 5f, 10f)]
+    [DataRow("filled-rounded-rectangle", 10f, 10f, 4f, 4f)]
+    [DataRow("stroked-rounded-rectangle", 10f, 4f, 10f, 10f)]
+    [DataRow("filled-path", 10f, 8f, 4f, 14f)]
+    [DataRow("stroked-path", 10f, 4f, 10f, 10f)]
+    public void EachPrimitivePaintsItsOwnGeometryAtEveryScale(
+        string primitive,
+        float paintedX,
+        float paintedY,
+        float clearX,
+        float clearY
+    )
+    {
+        foreach (var scale in new[] { 1f, 1.5f, 2f })
+        {
+            using var scene = Scene(scale, recorder => RecordPrimitive(recorder, primitive));
+            var size = (int)MathF.Ceiling(20 * scale);
+            using var bitmap = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Premul);
+            using var canvas = new SKCanvas(bitmap);
+            using var renderer = new SkiaSceneRenderer();
+            canvas.Clear(SKColors.Transparent);
+            renderer.Render(scene, canvas);
+
+            AssertPixel(bitmap, scale, paintedX, paintedY, new(51, 102, 153, 255), primitive);
+            AssertPixel(bitmap, scale, clearX, clearY, new(0, 0, 0, 0), primitive);
+            AssertPixel(bitmap, scale, 1, 1, new(0, 0, 0, 0), primitive + " exterior");
+            if (primitive == "arc")
+                AssertPixel(bitmap, scale, 10, 10, new(0, 0, 0, 0), "arc interior");
+        }
+    }
+
+    private static void RecordPrimitive(DrawingRecorder recorder, string primitive)
+    {
+        var color = Color.Parse("#336699");
+        switch (primitive)
+        {
+            case "filled-ellipse":
+                recorder.FillEllipse(new(4, 4, 12, 12), color);
+                break;
+            case "stroked-ellipse":
+                recorder.StrokeEllipse(new(4, 4, 12, 12), color, 4);
+                break;
+            case "arc":
+                recorder.Arc(new(4, 4, 12, 12), -90, 180, color, 4);
+                break;
+            case "filled-rounded-rectangle":
+                recorder.FillRoundedRectangle(new(4, 4, 12, 12), 4, color);
+                break;
+            case "stroked-rounded-rectangle":
+                recorder.StrokeRoundedRectangle(new(4, 4, 12, 12), 4, color, 4);
+                break;
+            case "filled-path":
+                recorder.FillPath(
+                    recorder.Path(path =>
+                    {
+                        path.MoveTo(new(4, 4));
+                        path.LineTo(new(16, 4));
+                        path.LineTo(new(10, 16));
+                        path.Close();
+                    }),
+                    color
+                );
+                break;
+            case "stroked-path":
+                recorder.StrokePath(
+                    recorder.Path(path =>
+                    {
+                        path.MoveTo(new(4, 4));
+                        path.LineTo(new(16, 4));
+                        path.LineTo(new(16, 16));
+                        path.LineTo(new(4, 16));
+                        path.Close();
+                    }),
+                    color,
+                    4
+                );
+                break;
+            default:
+                throw new ArgumentException("Unknown primitive.", nameof(primitive));
         }
     }
 
@@ -179,9 +252,28 @@ public sealed class DrawingRendererContracts
         return scene;
     }
 
-    private static SKColor Pixel(SKBitmap bitmap, float scale, float x, float y) =>
-        bitmap.GetPixel(
-            Math.Clamp((int)MathF.Floor(x * scale), 0, bitmap.Width - 1),
-            Math.Clamp((int)MathF.Floor(y * scale), 0, bitmap.Height - 1)
+    private static void AssertPixel(
+        SKBitmap bitmap,
+        float scale,
+        float x,
+        float y,
+        SKColor expected,
+        string context
+    )
+    {
+        var physicalX = (int)MathF.Floor(x * scale);
+        var physicalY = (int)MathF.Floor(y * scale);
+        Assert.IsTrue(physicalX >= 0 && physicalX < bitmap.Width);
+        Assert.IsTrue(physicalY >= 0 && physicalY < bitmap.Height);
+        var actual = bitmap.GetPixel(physicalX, physicalY);
+        Assert.IsTrue(
+            Math.Abs(actual.Red - expected.Red) <= 2
+                && Math.Abs(actual.Green - expected.Green) <= 2
+                && Math.Abs(actual.Blue - expected.Blue) <= 2
+                && Math.Abs(actual.Alpha - expected.Alpha) <= 2,
+            $"{context}: logical ({x}, {y}), physical ({physicalX}, {physicalY}), scale {scale}: "
+                + $"expected RGBA ({expected.Red}, {expected.Green}, {expected.Blue}, {expected.Alpha}) ±2; "
+                + $"actual ({actual.Red}, {actual.Green}, {actual.Blue}, {actual.Alpha})."
         );
+    }
 }

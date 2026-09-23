@@ -12,22 +12,23 @@ public sealed class ToolingCommandTests
     [TestMethod]
     public void AtomicReplacementPreservesEncodingAndBom()
     {
+        const string original = "Original café, 日本語 and 😀.";
+        const string replacement = "Replacement crème, Ελληνικά and 🧭.";
         foreach (var encoding in Encodings())
         {
             using var files = new ToolingFixture();
             var path = files.Path("View.lui");
-            ToolingFixture.Write(path, "original", encoding);
+            ToolingFixture.Write(path, original, encoding);
             var before = SourceFileSnapshot.Read(path);
 
             Assert.AreEqual(
                 SourceFileWriteStatus.Updated,
-                SourceFileTransaction.Replace(path, before, "replacement")
+                SourceFileTransaction.Replace(path, before, replacement)
             );
 
             var after = File.ReadAllBytes(path);
-            var preamble = encoding.GetPreamble();
-            CollectionAssert.AreEqual(preamble, after[..preamble.Length]);
-            Assert.AreEqual("replacement", SourceFileSnapshot.Read(path).Text);
+            var expected = encoding.GetPreamble().Concat(encoding.GetBytes(replacement)).ToArray();
+            CollectionAssert.AreEqual(expected, after);
         }
     }
 

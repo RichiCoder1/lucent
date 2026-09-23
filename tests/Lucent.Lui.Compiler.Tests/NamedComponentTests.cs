@@ -105,12 +105,10 @@ public sealed class NamedComponentTests
         );
         StringAssert.Contains(result.Source, "public sealed partial class Card");
         StringAssert.Contains(result.Source, "ComponentRecipe Create()");
-        StringAssert.Contains(result.Source, "new Card(");
         StringAssert.Contains(result.Source, "Signal<int>");
         StringAssert.Contains(result.Source, "Derived<int>");
         StringAssert.Contains(result.Source, "IComponentState<Card>");
         StringAssert.Contains(result.Source, "Component.Define<Card>");
-        StringAssert.Contains(result.Source, "__luiCompanionState_CompanionCount");
         StringAssert.Contains(result.Source, "Setup(");
         Assert.IsTrue(
             result.Source.IndexOf("Card.Alpha", StringComparison.Ordinal)

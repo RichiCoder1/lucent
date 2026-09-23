@@ -276,6 +276,11 @@ static void MeasureVirtualization(
             scene.Boxes.Single(box => box.Identity.ElementId == node.Identity.ElementId).Bounds
         )
         .ToArray();
+    if (rows.Any(row => row.Height != 30f))
+        throw new InvalidOperationException(
+            "The fixed 30-pixel virtualization fixture has mismatched row heights: "
+                + String.Join(", ", rows.Select(row => row.Height))
+        );
     realizedMaximum = Math.Max(realizedMaximum, rows.Length);
     visibleMaximum = Math.Max(
         visibleMaximum,
@@ -338,7 +343,12 @@ static Composition CreateVirtualizationFixture(ReactiveGraph graph, out ThemeCon
         (value, factory) =>
         {
             var row = factory.Element("row");
-            Controls.Selectable(row, context, "Issue " + value.Value);
+            Controls.Selectable(
+                row,
+                context,
+                "Issue " + value.Value,
+                style: Style.Empty.Set(LayoutProperties.MinHeight, 30f)
+            );
             return row;
         },
         30f

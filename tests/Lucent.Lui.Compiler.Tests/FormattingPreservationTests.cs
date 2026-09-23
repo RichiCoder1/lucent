@@ -1,7 +1,4 @@
 using Lucent.Lui.Compiler;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Lucent.Lui.Compiler.Tests;
@@ -51,81 +48,6 @@ public sealed class FormattingPreservationTests
             )
         );
         StringAssert.Contains(comment.Render(100), "// keep\n");
-    }
-
-    [TestMethod]
-    public void SyntaxOnlyCSharpAdapterCanPreserveRuntimeLiteralsAndChooseSameLineBraces()
-    {
-        const string source = """"
-public static class Specimen {
-    public static string Read(int value,string prefix) {
-        var raw = """
-            first "quoted" line
-              indented line
-            """;
-        // Keep this explanation.
-        if(value>0){return $"{prefix}: {value}\n" + raw;}
-        return @"literal
-spacing";
-    }
-}
-"""";
-        var original = SyntaxFactory.ParseCompilationUnit(source);
-        var normalized = original.NormalizeWhitespace(indentation: "    ", eol: "\n");
-        var tokens = normalized.DescendantTokens().ToArray();
-        var replacements = new Dictionary<SyntaxToken, SyntaxToken>();
-        foreach (
-            var brace in tokens.Where(token =>
-                token.IsKind(SyntaxKind.OpenBraceToken)
-                && token.Parent is BlockSyntax or BaseTypeDeclarationSyntax
-            )
-        )
-        {
-            var previous = brace.GetPreviousToken();
-            if (
-                previous
-                    .TrailingTrivia.Concat(brace.LeadingTrivia)
-                    .All(trivia =>
-                        trivia.IsKind(SyntaxKind.WhitespaceTrivia)
-                        || trivia.IsKind(SyntaxKind.EndOfLineTrivia)
-                    )
-            )
-            {
-                replacements[previous] = previous.WithTrailingTrivia(SyntaxFactory.Space);
-                replacements[brace] = brace.WithLeadingTrivia(default(SyntaxTriviaList));
-            }
-        }
-        var formatted = normalized
-            .ReplaceTokens(replacements.Keys, (token, _) => replacements[token])
-            .ToFullString();
-        StringAssert.Contains(formatted, "Read(int value, string prefix) {");
-        StringAssert.Contains(formatted, "if (value > 0) {");
-        StringAssert.Contains(formatted, "// Keep this explanation.");
-        Assert.IsFalse(SyntaxFactory.ParseCompilationUnit(formatted).ContainsDiagnostics);
-        foreach (var value in new[] { -1, 7 })
-            Assert.AreEqual(Evaluate(source, value), Evaluate(formatted, value));
-
-        static string Evaluate(string code, int value)
-        {
-            var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-                .Split(Path.PathSeparator)
-                .Select(path => MetadataReference.CreateFromFile(path));
-            var compilation = CSharpCompilation.Create(
-                "FormatSpecimen" + Guid.NewGuid().ToString("N"),
-                [CSharpSyntaxTree.ParseText(code)],
-                references,
-                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
-            );
-            using var stream = new MemoryStream();
-            var result = compilation.Emit(stream);
-            Assert.IsTrue(result.Success, string.Join(" | ", result.Diagnostics));
-            var assembly = System.Reflection.Assembly.Load(stream.ToArray());
-            return (string)
-                assembly
-                    .GetType("Specimen")!
-                    .GetMethod("Read")!
-                    .Invoke(null, [value, "Unicode 日本語"])!;
-        }
     }
 
     [TestMethod]

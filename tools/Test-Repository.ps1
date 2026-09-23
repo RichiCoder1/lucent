@@ -97,22 +97,26 @@ function Reset-ArtifactDirectory([string] $RelativePath) {
     $path
 }
 
-function Publish-DesktopFixtures {
+function Publish-DesktopFixtures([switch] $IncludeHost) {
     $appPublish = Reset-ArtifactDirectory 'artifacts/test/issue-browser'
-    $hostPublish = Reset-ArtifactDirectory 'artifacts/test/windows-test-host'
     Invoke-Dotnet @('restore', 'apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj', '--locked-mode') | Out-Host
     Invoke-Dotnet @('publish', 'apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj', '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $appPublish) | Out-Host
-    Invoke-Dotnet @('restore', 'tests/Lucent.Platform.Windows.TestHost/Lucent.Platform.Windows.TestHost.csproj', '--locked-mode') | Out-Host
-    Invoke-Dotnet @('publish', 'tests/Lucent.Platform.Windows.TestHost/Lucent.Platform.Windows.TestHost.csproj', '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $hostPublish) | Out-Host
+    $hostExe = $null
+    if ($IncludeHost) {
+        $hostPublish = Reset-ArtifactDirectory 'artifacts/test/windows-test-host'
+        Invoke-Dotnet @('restore', 'tests/Lucent.Platform.Windows.TestHost/Lucent.Platform.Windows.TestHost.csproj', '--locked-mode') | Out-Host
+        Invoke-Dotnet @('publish', 'tests/Lucent.Platform.Windows.TestHost/Lucent.Platform.Windows.TestHost.csproj', '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $hostPublish) | Out-Host
+        $hostExe = Join-Path $hostPublish 'Lucent.Platform.Windows.TestHost.exe'
+    }
     @{
         AppDirectory = $appPublish
         AppExe = Join-Path $appPublish 'Lucent.IssueBrowser.exe'
-        HostExe = Join-Path $hostPublish 'Lucent.Platform.Windows.TestHost.exe'
+        HostExe = $hostExe
     }
 }
 
 function Invoke-Published {
-    $published = Publish-DesktopFixtures
+    $published = Publish-DesktopFixtures -IncludeHost
     $componentPublish = Reset-ArtifactDirectory 'artifacts/test/component-browser'
     Invoke-Dotnet @('restore', 'apps/Lucent.ComponentBrowser/Lucent.ComponentBrowser.csproj', '--locked-mode')
     Invoke-Dotnet @('publish', 'apps/Lucent.ComponentBrowser/Lucent.ComponentBrowser.csproj', '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $componentPublish)
@@ -129,7 +133,6 @@ function Invoke-Published {
     & (Join-Path $PSScriptRoot 'Test-WindowsSettingsListener.ps1') -Executable $published.HostExe
     if ($LASTEXITCODE) { throw 'Windows settings listener proof failed.' }
     Invoke-DesktopTests $published 'FullyQualifiedName~FlaUi|FullyQualifiedName~PublishedFilePickerTests'
-    Invoke-Native
 }
 
 function Invoke-Native {
@@ -171,7 +174,7 @@ function Invoke-DesktopTests([hashtable] $Published, [string] $TestFilter) {
 }
 
 function Invoke-Accessibility {
-    $published = Publish-DesktopFixtures
+    $published = Publish-DesktopFixtures -IncludeHost
     & (Join-Path $PSScriptRoot 'Test-UiaContracts.ps1') -HostExe $published.HostExe
     if ($LASTEXITCODE) { throw 'UIA provider contract proof failed.' }
     & (Join-Path $PSScriptRoot 'Test-PublishedAccessibility.ps1') -AppExe $published.AppExe -HostExe $published.HostExe

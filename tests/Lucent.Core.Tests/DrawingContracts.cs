@@ -58,7 +58,7 @@ public sealed class DrawingContracts
         var graph = new ReactiveGraph();
         using var composition = new Composition(graph, "drawing-tracking");
         using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
-        var value = composition.Root.Scope.Signal(1f, "drawing-value");
+        var input = composition.Root.Scope.Signal(1f, "drawing-input");
         var reads = 0;
         var root = composition.Mount(
             composition.Root,
@@ -69,7 +69,8 @@ public sealed class DrawingContracts
                     recorder =>
                     {
                         reads++;
-                        recorder.Line(Vector2.Zero, new(value.Value, 1), Color.Parse("#000000"), 1);
+                        var endpoint = input.Value > 0 ? 1 : 0;
+                        recorder.Line(Vector2.Zero, new(endpoint, 1), Color.Parse("#000000"), 1);
                     }
                 )
             )
@@ -81,12 +82,14 @@ public sealed class DrawingContracts
         Assert.AreEqual(1, reads);
         Assert.AreSame(initial, root.Drawing.Current);
 
-        value.Value = 1;
+        input.Value = 2;
         graph.Drain();
-        Assert.AreEqual(1, reads, "An equality-suppressed signal write rerecorded the drawing.");
-        value.Value = 2;
+        Assert.AreEqual(2, reads, "The distinct input did not rerecord the drawing.");
+        Assert.AreSame(initial, root.Drawing.Current, "Equal drawing commands changed identity.");
+
+        input.Value = -1;
         graph.Drain();
-        Assert.AreEqual(2, reads);
+        Assert.AreEqual(3, reads);
         Assert.AreNotSame(initial, root.Drawing.Current);
         Assert.IsFalse(initial.IsDisposed, "The prior retained scene lost its drawing resource.");
     }

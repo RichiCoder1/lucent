@@ -328,7 +328,7 @@ public sealed class ApplicationTests
     }
 
     [TestMethod]
-    public void SessionContextMarshalsCallbacksBoundsDrainsAndDropsLatePosts()
+    public void SessionContextMarshalsContinuationsRejectsForeignSendAndDropsLatePosts()
     {
         var priorContext = SynchronizationContext.Current;
         SynchronizationContext? captured = null;
@@ -372,18 +372,6 @@ public sealed class ApplicationTests
                 foreignThread.Start();
                 foreignThread.Join();
                 Assert.IsInstanceOfType<NotSupportedException>(sendFailure);
-
-                var callbackCount = 0;
-                SendOrPostCallback callback = null!;
-                callback = _ =>
-                {
-                    callbackCount++;
-                    if (callbackCount < 3)
-                        captured.Post(callback, null);
-                };
-                captured.Post(callback, null);
-                Assert.IsTrue(session.ProcessEvents());
-                Assert.AreEqual(3, callbackCount);
             }
             Assert.AreSame(priorContext, SynchronizationContext.Current);
 

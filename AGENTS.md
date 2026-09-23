@@ -23,3 +23,5 @@ Use a single-context glossary at `CONTEXT.md` and decisions under `docs/adr/`. S
 ### Verification
 
 For pre-release work, choose checks by affected behavior and risk. Read docs/TESTING.md for repository test scope and docs/agents/verification.md for the selection policy; release checks are reserved for release decisions and risks that focused checks cannot contain.
+
+When adding, changing or removing tests, read `docs/agents/verification.md` for the test-authoring bar and coverage ownership. Prefer independent assertions at the cheapest adequate layer; extend existing coverage before adding overlapping tests.
