@@ -1,6 +1,6 @@
 # Authoring review corrections
 
-Status: implementation in progress under [#310](https://github.com/RichiCoder1/lucent/issues/310),
+Status: delivered and closed under [#310](https://github.com/RichiCoder1/lucent/issues/310),
 authorized September 21, 2026. This corrects the adversarial
 review of `247c87e`; the earlier A0–A7 delivery and its recorded evidence remain historical.
 
@@ -102,4 +102,12 @@ Generated navigation passes under NativeAOT; the scoped Hosting navigation consu
 passes managed and NativeAOT execution. Logs are `artifacts/review310-authoring-packages.log`,
 `artifacts/review310-navigation-package.log` and
 `artifacts/review310-context-navigation-package.log`.
-Official publication and the final Light Notes package pin remain pending.
+Official publication is complete: [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
+passed managed, package/NativeAOT verification and publication for `6c4573b8`,
+publishing all nine packages as `0.3.0-dev.86.1`. Light Notes `82c349a` adopts that
+version and SDK 10.0.401; [its CI](https://github.com/RichiCoder1/light-notes/actions/runs/35831222420)
+passed. Official-consumer checks pass: 44 managed tests with one intentional opt-in
+skip, Storage 22/22, locked solution restore, formatting, NativeAOT publication and
+two desktop tests for responsive focus and invalid-draft recovery/navigation/discard.
+Its validation document preserves older package evidence separately. #310 is closed;
+the test-quality follow-up is tracked independently in #311.

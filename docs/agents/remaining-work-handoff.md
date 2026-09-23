@@ -1,5 +1,27 @@
 # Current work and follow-ups
 
+## #310 delivered; #311 active — September 23, 2026
+
+Lucent #310 is closed/Done. CI 86 verified and published all nine packages as
+`0.3.0-dev.86.1` from `6c4573b8`. Light Notes `82c349a` is committed/pushed with
+the official package and SDK 10.0.401; CI 35831222420 passed. Official local consumer
+evidence: 44 managed passes plus one intentional skip, Storage 22/22, locked restore,
+formatting, NativeAOT publish and two focused desktop passes. Its older 76.1 evidence
+remains separately identified. Unrelated Light Notes status-only dirt was not staged.
+
+The owner resumed all work. Execute test-quality #311 from plans 003–005; plan 005
+policy is applied and the independent test/harness changes are in progress. Retain
+the C6 stress tests (73.32 ms combined baseline) and defer optional H4 orchestration.
+Do not start roadmap #205. The pause and pending-delivery notes below are historical.
+
+## Resumed delivery — September 23, 2026
+
+The owner resumed all work. CI 86 completed successfully: managed, package
+verification and publication passed for `6c4573b8`, publishing all nine packages
+as `0.3.0-dev.86.1`. The pause below is historical. Finish the official Light Notes
+upgrade and #310 closeout, then execute the queued test-quality package. Roadmap
+#205 remains outside this batch.
+
 ## Paused delivery checkpoint — September 22, 2026
 
 The owner requested a pause at the next valid checkpoint. All local #310 checks

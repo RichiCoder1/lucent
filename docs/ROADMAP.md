@@ -2,9 +2,16 @@
 
 ## Current direction
 
-The current batch is [authoring review corrections #310](https://github.com/RichiCoder1/lucent/issues/310).
-The [ordered plan](plans/authoring-review-corrections.md) addresses transaction safety,
-one canonical routing surface, and editor/build diagnostic parity before roadmap #205.
+Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
+are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
+passed managed, package/NativeAOT and publication checks. Light Notes `82c349a`
+consumes the official package, with [its CI](https://github.com/RichiCoder1/light-notes/actions/runs/35831222420)
+and focused desktop checks passing. The [correction record](plans/authoring-review-corrections.md)
+keeps the source and package evidence boundaries explicit.
+
+The current batch is [test quality #311](https://github.com/RichiCoder1/lucent/issues/311):
+stronger behavioral assertions, retained coverage ownership and less repeated setup.
+Navigation restoration/Windows activation #205 follows separately.
 
 Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.
 
