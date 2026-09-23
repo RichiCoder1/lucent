@@ -1,5 +1,30 @@
 # Current work and follow-ups
 
+## Performance planning received; implementation queued — September 23, 2026
+
+Design and UI handed off [#313](https://github.com/RichiCoder1/lucent/issues/313)
+and four Project 4 Todo children. Plans [006](../../advisor-plans/006-performance-benchmark-methodology.md)
+and [007](../../advisor-plans/007-performance-opportunity-experiments.md) are retained
+in this checkout; the child issue bodies also contain the complete designs.
+
+1. #314: preserve failure evidence, assert fixture endpoints and fix setup-scene ownership.
+2. #315: version native workloads and define lifecycle resource budgets.
+3. #316: measure reuse of unchanged Grid/Flex arrangements.
+4. #317: measure avoiding discarded paint construction during geometry discovery.
+
+#315 and #316 depend on #314; #317 depends on #316. #316 may proceed after #314
+without waiting for #315. Runtime experiments require a measured retain/defer
+decision, not a promised speedup. This receipt does not start implementation.
+#254 retains broader developer diagnostics; navigation #205 and live compilation
+remain outside this scope. #310–312 remain delivered.
+
+Evidence correction: the earlier issue narrative mislabeled projection timings as
+raster. In the archived isolated trace, projection p95 is 6.1528/5.4655 ms and raster
+p95 is 0.5390/0.9614 ms for input/resize. Producer and verifier fields agree; this
+was a reporting error, not a runtime timing defect. See the execution record for
+trace identity and reconstructed-corpus limitations. UIA lifetime 22 versus 18
+remains unresolved; a new fixture passing must not erase that historical failure.
+
 ## #311/#312 delivered — September 23, 2026
 
 #310 and Light Notes official 86.1 adoption are delivered. #311 is delivered as

@@ -16,7 +16,11 @@ setup. Exact editor checks exposed and corrected state Go to Definition [#312](h
 package/NativeAOT and publication checks, delivering `0.3.0-dev.87.1`; #311/#312 are
 closed. Existing benchmark workload/budget drift is tracked separately
 in [#313](https://github.com/RichiCoder1/lucent/issues/313); no Performance suite pass
-is claimed. Navigation restoration/Windows activation #205 follows separately.
+is claimed. Design and UI's [benchmark plan](../advisor-plans/006-performance-benchmark-methodology.md)
+and [projection experiments](../advisor-plans/007-performance-opportunity-experiments.md)
+are queued as #314–317, in that suggested order. #315/#316 depend on #314 and #317
+depends on #316; measured defer is a valid outcome for either runtime experiment.
+Navigation restoration/Windows activation #205 follows separately.
 
 Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.
 

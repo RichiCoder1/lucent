@@ -115,3 +115,15 @@ Its remaining failure is the full-lifetime UIA peak 22 versus 18 (steady-state 1
 post-close zero). Other native resource bounds pass. Thus the earlier concurrent
 resize result is not treated as an established regression. The isolated trace is
 `artifacts/test-quality-performance-isolated-diagnostics.log`.
+
+Design and UI subsequently corrected the isolated metric labels: projection p95 is
+6.1528/5.4655 ms; raster p95 is 0.5390/0.9614 ms for input/resize. The earlier #313
+narrative incorrectly called projection raster; the producer and verifier agree
+on fields 5 and 6. The trace SHA-256 is
+`604f3202062b8cb6f7d2a95cdb3f84e4f4773c4983dddd7f1e66f056dca1a1af`.
+Input frames 20–519 and resize frames 520–1019 are reconstructed delimiters, not
+preserved verifier output: the failed run suppressed its structured report.
+Resize Present p95 15.6898 ms does not establish a vsync defect, and phase
+percentiles must not be added. Plans [006](../../advisor-plans/006-performance-benchmark-methodology.md)
+and [007](../../advisor-plans/007-performance-opportunity-experiments.md) queue
+#314–317; no new timings, production changes or speedups are claimed by that review.
