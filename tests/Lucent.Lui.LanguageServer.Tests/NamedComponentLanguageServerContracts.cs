@@ -20,20 +20,23 @@ public sealed class NamedComponentLanguageServerContracts
         Directory.CreateDirectory(root);
         var projectPath = Path.Combine(root, "Sample.csproj");
         var luiPath = Path.Combine(root, "Card.lui");
-        const string source = """
+        var fixture = AuthoredFixture.Parse(
+            """
             namespace Sample;
             using Lucent.Core;
             public component Card() {
-                int Count = 1;
+                int /*<count.declaration>*/Count/*</count.declaration>*/ = 1;
 
-                string Describe( string prefix = "count:" ) =>
-                    prefix + Count.ToString();
-                string Format(int value) => value.ToString();
-                string Format(string value) => value;
+                string /*<describe.declaration>*/Describe/*</describe.declaration>*/( string /*<prefix.declaration>*/prefix/*</prefix.declaration>*/ = "count:" ) =>
+                    /*<prefix.use>*/prefix/*</prefix.use>*/ + /* 🧭 */ /*<count.member>*/Count/*</count.member>*/./*<count.completion>*//*</count.completion>*/ToString();
+                string /*<format.int.declaration>*/Format/*</format.int.declaration>*/(int value) => value.ToString();
+                string /*<format.string.declaration>*/Format/*</format.string.declaration>*/(string value) => value;
 
-                <Text content={Describe() + Format(Count) + Format("!")} />
+                <Text content={/*<describe.call>*/Describe/*</describe.call>*/() + /*<format.int.call>*/Format/*</format.int.call>*/(/*<count.argument>*/Count/*</count.argument>*/) + /*<format.string.call>*/Format/*</format.string.call>*/("!")} />
             }
-            """;
+            """.ReplaceLineEndings("\r\n")
+        );
+        var source = fixture.Source;
         try
         {
             await File.WriteAllTextAsync(
@@ -96,13 +99,76 @@ public sealed class NamedComponentLanguageServerContracts
                 diagnostics.RootElement.GetRawText()
             );
 
-            var countUse = source.IndexOf("Count.ToString", StringComparison.Ordinal);
+            var uri = new Uri(luiPath).AbsoluteUri;
+
+            async Task AssertSymbolAsync(
+                string queryMarker,
+                string declarationMarker,
+                params string[] referenceMarkers
+            )
+            {
+                var position = fixture.Position(queryMarker, 1);
+                using var definition = await lsp.RequestAsync(
+                    "textDocument/definition",
+                    new
+                    {
+                        textDocument = new { uri },
+                        position = new { line = position.Line, character = position.Character },
+                    }
+                );
+                AuthoredProtocolAssertions.Locations(
+                    definition.RootElement.GetProperty("result"),
+                    fixture.Location(uri, declarationMarker)
+                );
+
+                using var references = await lsp.RequestAsync(
+                    "textDocument/references",
+                    new
+                    {
+                        textDocument = new { uri },
+                        position = new { line = position.Line, character = position.Character },
+                        context = new { includeDeclaration = true },
+                    }
+                );
+                AuthoredProtocolAssertions.Locations(
+                    references.RootElement.GetProperty("result"),
+                    referenceMarkers.Select(marker => fixture.Location(uri, marker)).ToArray()
+                );
+            }
+
+            async Task AssertRenameAsync(
+                string queryMarker,
+                string newName,
+                params string[] editMarkers
+            )
+            {
+                var position = fixture.Position(queryMarker, 1);
+                using var rename = await lsp.RequestAsync(
+                    "textDocument/rename",
+                    new
+                    {
+                        textDocument = new { uri },
+                        position = new { line = position.Line, character = position.Character },
+                        newName,
+                    }
+                );
+                AuthoredProtocolAssertions.WorkspaceEdits(
+                    rename.RootElement.GetProperty("result"),
+                    editMarkers.Select(marker => fixture.Edit(uri, marker, newName)).ToArray()
+                );
+            }
+
+            var countPosition = fixture.Position("count.member", 1);
             using var hover = await lsp.RequestAsync(
                 "textDocument/hover",
                 new
                 {
-                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
-                    position = Position(source, countUse + 1),
+                    textDocument = new { uri },
+                    position = new
+                    {
+                        line = countPosition.Line,
+                        character = countPosition.Character,
+                    },
                 }
             );
             Assert.AreNotEqual(
@@ -111,72 +177,69 @@ public sealed class NamedComponentLanguageServerContracts
             );
             StringAssert.Contains(hover.RootElement.GetRawText(), "Count");
 
-            using var definition = await lsp.RequestAsync(
-                "textDocument/definition",
-                new
-                {
-                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
-                    position = Position(source, countUse + 1),
-                }
+            await AssertSymbolAsync(
+                "count.member",
+                "count.declaration",
+                "count.declaration",
+                "count.member",
+                "count.argument"
             );
-            Assert.IsTrue(
-                definition.RootElement.TryGetProperty("result", out var definitionResult)
-                    && definitionResult.ValueKind != JsonValueKind.Null,
-                definition.RootElement.GetRawText()
+            await AssertSymbolAsync(
+                "describe.call",
+                "describe.declaration",
+                "describe.declaration",
+                "describe.call"
             );
-            StringAssert.Contains(
-                definition.RootElement.GetRawText(),
-                new Uri(luiPath).AbsoluteUri
+            await AssertSymbolAsync(
+                "prefix.use",
+                "prefix.declaration",
+                "prefix.declaration",
+                "prefix.use"
             );
-
-            using var references = await lsp.RequestAsync(
-                "textDocument/references",
-                new
-                {
-                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
-                    position = Position(source, countUse + 1),
-                    context = new { includeDeclaration = true },
-                }
+            await AssertSymbolAsync(
+                "format.int.call",
+                "format.int.declaration",
+                "format.int.declaration",
+                "format.int.call"
             );
-            var referenceResult = references.RootElement.GetProperty("result");
-            Assert.IsTrue(
-                referenceResult.ValueKind == JsonValueKind.Array
-                    && referenceResult.GetArrayLength() >= 2,
-                references.RootElement.GetRawText()
+            await AssertSymbolAsync(
+                "format.string.call",
+                "format.string.declaration",
+                "format.string.declaration",
+                "format.string.call"
             );
 
-            using var rename = await lsp.RequestAsync(
-                "textDocument/rename",
-                new
-                {
-                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
-                    position = Position(source, countUse + 1),
-                    newName = "Total",
-                }
+            await AssertRenameAsync(
+                "count.member",
+                "Total",
+                "count.declaration",
+                "count.member",
+                "count.argument"
             );
-            var edits = rename
-                .RootElement.GetProperty("result")
-                .GetProperty("changes")
-                .GetProperty(new Uri(luiPath).AbsoluteUri);
-            Assert.IsTrue(
-                edits
-                    .EnumerateArray()
-                    .Count(item => item.GetProperty("newText").GetString() == "Total") >= 2,
-                rename.RootElement.GetRawText()
+            await AssertRenameAsync(
+                "format.int.call",
+                "FormatNumber",
+                "format.int.declaration",
+                "format.int.call"
             );
 
+            var completionPosition = fixture.Position("count.completion");
             using var completion = await lsp.RequestAsync(
                 "textDocument/completion",
                 new
                 {
-                    textDocument = new { uri = new Uri(luiPath).AbsoluteUri },
-                    position = Position(source, countUse + "Count.".Length),
+                    textDocument = new { uri },
+                    position = new
+                    {
+                        line = completionPosition.Line,
+                        character = completionPosition.Character,
+                    },
                 }
             );
-            Assert.AreNotEqual(
-                JsonValueKind.Null,
-                completion.RootElement.GetProperty("result").ValueKind,
-                completion.RootElement.GetRawText()
+            AuthoredProtocolAssertions.CompletionContains(
+                completion.RootElement.GetProperty("result"),
+                "ToString",
+                2
             );
 
             using var shutdown = await lsp.RequestAsync("shutdown", new { });

@@ -4557,6 +4557,42 @@ internal sealed partial class LuiProjectContext : IDisposable
             && NamedComponentDeclaration(document, symbol) is { } namedDeclaration
         )
             return namedDeclaration;
+        if (
+            document.NamedComponents
+            && document.Syntax.Component is not null
+            && ComponentDeclarationTree(
+                document.Compilation,
+                document.Result.Identity.Document.LogicalPath
+            )
+                is { } componentDeclarationTree
+            && symbol.Locations.FirstOrDefault(candidate =>
+                candidate.IsInSource && candidate.SourceTree == componentDeclarationTree
+            )
+                is { } componentDeclarationLocation
+        )
+        {
+            var mapped = ComponentDeclarationResult(
+                componentDeclarationTree,
+                document.SourceText.ToString(),
+                document.Syntax,
+                document.Result.Identity
+            )
+                .Map.FromGenerated(
+                    new LuiSpan(
+                        componentDeclarationLocation.SourceSpan.Start,
+                        componentDeclarationLocation.SourceSpan.Length
+                    )
+                )
+                .Where(item => !item.Hidden)
+                .OrderBy(item => item.Source.Length)
+                .FirstOrDefault();
+            if (mapped is not null)
+                return new LuiNavigationTarget(
+                    document.SourceUri,
+                    mapped.Source,
+                    document.SourceText.ToString()
+                );
+        }
         if (symbol is IMethodSymbol method)
         {
             var identity =
