@@ -6,6 +6,48 @@ namespace Lucent.Core.Tests;
 public sealed class FocusTargetContracts
 {
     [TestMethod]
+    public void TabSkipsUnclippedElementBeyondWindowViewport()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "viewport-focus");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        Controls.Column(composition.Root, theme, "root");
+        var first = composition.Child(composition.Root, "first");
+        Controls.Button(
+            first,
+            theme,
+            "First",
+            style: Style.Empty.Set(LayoutProperties.Height, 60f)
+        );
+        var partial = composition.Child(composition.Root, "partial");
+        Controls.Button(
+            partial,
+            theme,
+            "Partial",
+            style: Style.Empty.Set(LayoutProperties.Height, 40f)
+        );
+        var outside = composition.Child(composition.Root, "outside");
+        Controls.Button(
+            outside,
+            theme,
+            "Outside",
+            style: Style.Empty.Set(LayoutProperties.Height, 40f)
+        );
+
+        using var scene = Install(composition, composition.Input);
+        Assert.IsTrue(
+            scene.Input.Single(item => item.Identity.ElementId == outside.Id).Bounds.Y >= 80,
+            "The third control must be outside the un-clipped window viewport."
+        );
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(first.Id, composition.Input.FocusedElement?.ElementId);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(partial.Id, composition.Input.FocusedElement?.ElementId);
+        Assert.IsTrue(composition.Input.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(first.Id, composition.Input.FocusedElement?.ElementId);
+    }
+
+    [TestMethod]
     public void CollapsedPaneRecoversToVisibleTabStopWithoutReplayingOnReveal()
     {
         var graph = new ReactiveGraph();

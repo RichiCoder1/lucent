@@ -9,18 +9,26 @@ namespace Lucent.Platform.Windows.Tests;
 public sealed unsafe partial class UiaLifecycleContracts
 {
     [TestMethod]
-    public void ApplicationNameAndClippedPointLookup()
+    public void ApplicationNameClippedPointLookupAndOffscreenState()
     {
         Assert(SDL.Init(SDL.InitFlags.Video), "SDL_Init(UIA geometry) failed.");
         var window = CreateWindow("Links and notes");
         try
         {
             var hwnd = Hwnd(window);
-            using var composition = new Composition(new ReactiveGraph(), "uia-geometry");
-            var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+            var graph = new ReactiveGraph();
+            using var composition = new Composition(graph, "uia-geometry");
+            using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
             Controls.Column(composition.Root, theme, "Root", Size(200, 200));
             var clipper = composition.Child(composition.Root, "presentation-clip");
-            clipper.Present(theme, author: Size(40, 20).Set(LayoutProperties.Clip, true));
+            var clipHeight = graph.Signal(20f, "clip-height");
+            clipper.Present(
+                theme,
+                author: Style
+                    .Empty.Width(40)
+                    .Bind(LayoutProperties.Height, () => (float?)clipHeight.Value)
+                    .Set(LayoutProperties.Clip, true)
+            );
             var partial = composition.Child(clipper, "partial");
             Controls.Button(partial, theme, "Partly clipped", () => { }, Size(60, 30));
             var full = composition.Child(clipper, "overscan");
@@ -43,7 +51,11 @@ public sealed unsafe partial class UiaLifecycleContracts
             Assert(deviceScale > 0, "Window DPI was unavailable.");
             foreach (var layoutScale in new[] { 1f, 1.25f, 1.5f, 2f })
             {
-                var scene = SceneLayout.Project(composition, new(200, 200, layoutScale), renderer);
+                using var scene = SceneLayout.Project(
+                    composition,
+                    new(200, 200, layoutScale),
+                    renderer
+                );
                 Assert(composition.Input.SetScene(scene), "UIA geometry scene was rejected.");
                 provider.Refresh(scene);
                 var partialBounds = scene
@@ -80,6 +92,40 @@ public sealed unsafe partial class UiaLifecycleContracts
                     At(fullBounds.X + 5, fullBounds.Y + 5) != "Fully clipped",
                     "Point lookup hit a fully clipped overscan child."
                 );
+                AssertOffscreen("Partly clipped", false);
+                AssertOffscreen("Fully clipped", true);
+            }
+
+            clipHeight.Value = 80;
+            graph.Drain();
+            using var revealed = SceneLayout.Project(composition, new(200, 200, 1), renderer);
+            provider.Refresh(revealed);
+            AssertOffscreen("Fully clipped", false);
+            using var shortViewport = SceneLayout.Project(composition, new(200, 25, 1), renderer);
+            provider.Refresh(shortViewport);
+            AssertOffscreen("Partly clipped", false);
+            AssertOffscreen("Fully clipped", true);
+
+            void AssertOffscreen(string name, bool expected)
+            {
+                var fragment = FindStockProviderByName(provider.InterfacePointer, name);
+                Assert(fragment != 0, $"Missing retained provider for {name}.");
+                var simple = Query(fragment, UiaWrappers.Simple);
+                try
+                {
+                    WindowsUiaProvider.RawVariant value = default;
+                    Assert(
+                        Simple(simple, 5, 30022, &value) == WindowsUiaProvider.Ok
+                            && value.Type == 11
+                            && (value.Value != 0) == expected,
+                        $"IsOffscreen for {name} did not reflect its visible intersection."
+                    );
+                }
+                finally
+                {
+                    Release(simple);
+                    Release(fragment);
+                }
             }
 
             string? At(double x, double y)

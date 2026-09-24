@@ -373,6 +373,7 @@ public static class WindowsBootstrap
 
             liveResize = new WindowsLiveResize(
                 SDL.GetWindowID(window),
+                hwnd,
                 () =>
                 {
                     popup?.Dismiss();

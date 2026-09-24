@@ -228,6 +228,8 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 RaiseProperty(node, 30159, FullDescription(old), FullDescription(node));
             if (old.Enabled != node.Enabled)
                 RaiseProperty(node, 30010, old.Enabled, node.Enabled);
+            if (old.IsOffscreen != node.IsOffscreen)
+                RaiseProperty(node, 30022, old.IsOffscreen, node.IsOffscreen);
             if (old.Expanded != node.Expanded)
                 RaiseProperty(
                     node,
@@ -351,7 +353,12 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                     textScene?.Shape,
                     textScene?.Bounds ?? bounds.GetValueOrDefault(key),
                     textScene?.Clip
-                        ?? PointBounds(elementIdentity, bounds.GetValueOrDefault(key), input)
+                        ?? PointBounds(
+                            elementIdentity,
+                            bounds.GetValueOrDefault(key),
+                            input,
+                            scene.Viewport
+                        )
                 );
             // Preserve the legacy confidential-editor surface: without SetValue it exposed no
             // ValuePattern, while an explicit read-only nonconfidential value still does.
@@ -372,7 +379,12 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 snapshot.Selected,
                 snapshot.Actions,
                 bounds.GetValueOrDefault(key),
-                PointBounds(new(key.Epoch, key.Element), bounds.GetValueOrDefault(key), input),
+                PointBounds(
+                    new(key.Epoch, key.Element),
+                    bounds.GetValueOrDefault(key),
+                    input,
+                    scene.Viewport
+                ),
                 scroll,
                 textSnapshot,
                 snapshot.Expanded,
@@ -402,27 +414,34 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
     private static LayoutRect PointBounds(
         ElementIdentity identity,
         LayoutRect bounds,
-        Dictionary<ElementIdentity, RetainedInputElement> input
+        Dictionary<ElementIdentity, RetainedInputElement> input,
+        LayoutViewport viewport
     )
     {
         if (!input.TryGetValue(identity, out var current))
             return default;
+        bounds = Intersect(bounds, new(0, 0, viewport.Width, viewport.Height));
         while (current.Parent is { } parent)
         {
             if (!input.TryGetValue(parent, out current))
                 return default;
             if (current.ChildClipBounds is not { } clip)
                 continue;
+            bounds = Intersect(bounds, clip);
+        }
+        return bounds;
+
+        static LayoutRect Intersect(LayoutRect bounds, LayoutRect clip)
+        {
             var x = Math.Max(bounds.X, clip.X);
             var y = Math.Max(bounds.Y, clip.Y);
-            bounds = new(
+            return new(
                 x,
                 y,
                 Math.Max(0, Math.Min(bounds.X + bounds.Width, clip.X + clip.Width) - x),
                 Math.Max(0, Math.Min(bounds.Y + bounds.Height, clip.Y + clip.Height) - y)
             );
         }
-        return bounds;
     }
 
     private bool Try<T>(string callback, Func<T> action, out T value) =>
@@ -573,6 +592,9 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
                 break;
             case 30019:
                 Bool(value, node.IsPassword);
+                break;
+            case 30022:
+                Bool(value, node.IsOffscreen);
                 break;
             case 30152 when node.PositionInSet is { } position:
                 I4(value, position);
@@ -1468,7 +1490,10 @@ internal sealed unsafe partial class WindowsUiaProvider : IDisposable
         SemanticGridSnapshot? Grid,
         SemanticGridItemSnapshot? GridItem,
         SemanticAnnouncement Announcement
-    );
+    )
+    {
+        internal bool IsOffscreen => PointBounds.Width <= 0 || PointBounds.Height <= 0;
+    }
 
     // Immutable after construction: COM readers use one snapshot for every navigation step.
     private sealed class Snapshot

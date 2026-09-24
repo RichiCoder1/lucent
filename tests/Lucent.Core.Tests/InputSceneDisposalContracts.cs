@@ -110,6 +110,48 @@ public sealed class InputSceneDisposalContracts
         Assert.AreEqual(1, pointerCalls);
     }
 
+    [TestMethod]
+    public void StaleKeyReleaseRejectsRemovedFocusOwnerUntilFreshSceneReconciles()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "stale-key-release");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var participation = composition.Root.Scope.Signal(
+            ElementParticipation.Visible,
+            "key-release-participation"
+        );
+        Present(composition.Root, theme, 80, 40);
+        var target = composition.Child(composition.Root, "target");
+        Present(target, theme, 80, 40, Style.Empty.Participation(() => participation.Value));
+        var delivered = 0;
+        target.AttachBehaviors(new Probe("target", key: _ => delivered++));
+
+        var router = composition.Input;
+        using var first = SceneLayout.Project(composition, new(80, 40, 1), new EmptyShaper());
+        Assert.IsTrue(router.SetScene(first));
+        Assert.IsTrue(router.MoveFocus(FocusTraversalDirection.Next));
+        Assert.AreEqual(target.Id, router.FocusedElement?.ElementId);
+
+        participation.Value = ElementParticipation.Collapsed;
+        graph.Drain();
+        var release = router.DispatchKey(new(KeyCommandKind.Up, Key.Tab));
+        Assert.AreEqual(InputRejection.StaleScene, release.Rejection);
+        Assert.AreEqual(0, delivered, "A stale key release reached its removed target.");
+
+        RetainedScene? installed = null;
+        for (var attempt = 0; attempt < 4 && installed is null; attempt++)
+        {
+            var candidate = SceneLayout.Project(composition, new(80, 40, 1), new EmptyShaper());
+            if (router.SetScene(candidate))
+                installed = candidate;
+            else
+                candidate.Dispose();
+        }
+        using var fresh = installed;
+        Assert.IsNotNull(fresh, "A fresh scene did not reconcile the removed focus owner.");
+        Assert.IsNull(router.FocusedElement, "The removed focus owner survived a fresh scene.");
+    }
+
     private static void Present(
         Element element,
         ThemeContext theme,
@@ -128,7 +170,8 @@ public sealed class InputSceneDisposalContracts
     private sealed class Probe(
         string name,
         Action<FocusRoute>? focus = null,
-        Action<PointerRoute>? pointer = null
+        Action<PointerRoute>? pointer = null,
+        Action<KeyRoute>? key = null
     ) : Behavior
     {
         public override string Name => name;
@@ -142,6 +185,8 @@ public sealed class InputSceneDisposalContracts
             context.MakeFocusable();
             context.OnFocus(focus ?? (_ => { }));
             context.OnPointer(pointer ?? (_ => { }));
+            if (key is not null)
+                context.OnKey(key);
         }
     }
 

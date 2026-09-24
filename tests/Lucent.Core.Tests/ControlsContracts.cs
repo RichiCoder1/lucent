@@ -1010,8 +1010,38 @@ public sealed class ControlsContracts
         Assert(
             router.SetScene(SceneLayout.Project(composition, new(100, 20, 1), new EmptyShaper()))
                 && router.MoveFocus(FocusTraversalDirection.Next)
+                && router.FocusedElement?.ElementId == viewport.Id,
+            "A fully clipped child displaced its visible scroll viewport from Tab traversal."
+        );
+        Assert(
+            router.FocusSemantic(new(composition.Epoch, focusable.Id)),
+            "Explicit focus rejected the clipped viewport child."
+        );
+        RetainedScene? revealed = null;
+        for (var attempt = 0; attempt < 4 && revealed is null; attempt++)
+        {
+            var candidate = SceneLayout.Project(composition, new(100, 20, 1), new EmptyShaper());
+            if (router.SetScene(candidate))
+                revealed = candidate;
+            else
+                candidate.Dispose();
+        }
+        using var installed =
+            revealed
+            ?? throw new InvalidOperationException(
+                "Explicit focus did not settle the revealed child scene."
+            );
+        var clip = installed
+            .Input.Single(item => item.Identity.ElementId == viewport.Id)
+            .ChildClipBounds;
+        var bounds = installed.Input.Single(item => item.Identity.ElementId == focusable.Id).Bounds;
+        Assert(
+            clip is { } viewportClip
+                && bounds.Y < viewportClip.Y + viewportClip.Height
+                && bounds.Y + bounds.Height > viewportClip.Y
+                && router.MoveFocus(FocusTraversalDirection.Next)
                 && router.FocusedElement?.ElementId == focusable.Id,
-            "Viewport displaced its focusable descendant from deterministic traversal order."
+            "The revealed child did not regain deterministic Tab traversal."
         );
     }
 

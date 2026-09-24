@@ -338,6 +338,11 @@ public sealed partial class PublishedInputTests
             using var automation = new UIA3Automation();
             var root = automation.FromHandle(window);
             root.SetForeground();
+            WaitUntil(
+                process,
+                () => GetForegroundWindow() == window,
+                "The live-resize fixture could not gain foreground focus."
+            );
             bool HasWideCapture() =>
                 root.FindAllDescendants(condition => condition.ByControlType(ControlType.Text))
                     .Any(element =>
@@ -349,10 +354,18 @@ public sealed partial class PublishedInputTests
             );
             Assert.IsTrue(GetWindowRect(window, out var bounds));
             var y = bounds.Top + (bounds.Bottom - bounds.Top) / 2;
-            Mouse.MoveTo(new Point(bounds.Right - 2, y));
+            var startPoint = new Point(bounds.Right - 2, y);
+            Mouse.MoveTo(startPoint);
+            Wait.UntilInputIsProcessed();
+            WaitUntil(
+                process,
+                () => Mouse.Position == startPoint && WindowFromPoint(startPoint) == window,
+                "The resize border is occluded or the desktop cursor is captured by another application."
+            );
             Mouse.Down(MouseButton.Left);
             try
             {
+                Wait.UntilInputIsProcessed();
                 Mouse.MoveTo(new Point(bounds.Left + 620, y));
                 WaitUntil(
                     process,
@@ -538,6 +551,9 @@ public sealed partial class PublishedInputTests
 
     [LibraryImport("user32.dll")]
     private static partial nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(Point point);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

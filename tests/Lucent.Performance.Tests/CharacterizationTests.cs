@@ -252,6 +252,37 @@ public sealed class CharacterizationTests
     }
 
     [TestMethod]
+    public void SchemaOneCharacterizationJournalIsRejected()
+    {
+        using var fixture = new CharacterizationFixture();
+        using var journal = fixture.Create(schemaVersion: 1);
+        var evidence = new PerformanceEvidence(
+            fixture.App,
+            fixture.Raw,
+            "issue-browser-characterization-v1"
+        );
+        evidence.CollectCharacterization(journal.RootElement);
+        using var stream = new MemoryStream();
+        evidence.Write(stream);
+        using var report = JsonDocument.Parse(stream.ToArray());
+        Assert.IsFalse(report.RootElement.GetProperty("ok").GetBoolean());
+        Assert.IsTrue(
+            report
+                .RootElement.GetProperty("failures")
+                .EnumerateArray()
+                .Any(failure =>
+                    failure
+                        .GetProperty("message")
+                        .GetString()!
+                        .Contains(
+                            "Unsupported characterization schema version",
+                            StringComparison.Ordinal
+                        )
+                )
+        );
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public void MissingOrMalformedJournalKeepsAdjacentRawLogDiscoverable(bool malformed)
@@ -304,7 +335,8 @@ public sealed class CharacterizationTests
             bool missingCleanup = false,
             bool invalidTimings = false,
             bool scrollPairFrames = false,
-            bool growingScrollReturn = false
+            bool growingScrollReturn = false,
+            int schemaVersion = 2
         )
         {
             var names = new[]
@@ -324,7 +356,7 @@ public sealed class CharacterizationTests
             using var stream = new MemoryStream();
             using var writer = new Utf8JsonWriter(stream);
             writer.WriteStartObject();
-            writer.WriteNumber("schemaVersion", 1);
+            writer.WriteNumber("schemaVersion", schemaVersion);
             writer.WriteString("workload", "issue-browser-characterization-v1");
             writer.WriteString("app", App);
             writer.WriteString(
@@ -418,9 +450,10 @@ public sealed class CharacterizationTests
                         writer.WriteNumber("clientActionMs", 1);
                     if (!(invalidTimings && index == 0 && name == names[1]))
                         writer.WriteNumber(
-                            "requestToFirstFrameMs",
+                            "clientEndpointAndFrameMs",
                             invalidTimings && index == 0 && name == names[2] ? .5 : 2
                         );
+                    writer.WriteNull("failureElapsedMs");
                     writer.WriteNumber(
                         "settleDrainMs",
                         invalidTimings && index == 0 && name == names[3] ? -1 : 1

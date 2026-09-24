@@ -6,16 +6,28 @@
 are implemented. #316 retains exact-height Grid/Flex/intrinsic arrangement reuse;
 #317 is a measured defer. See the [execution record](../plans/performance-execution.md)
 for baseline/candidate series, contract migration and verification boundaries.
-Core 674, Skia 93 (three existing opt-in skips) and Issue Browser 22 pass. The
-focused reporting checks and final NativeAOT publication are recorded in the
-execution record.
+Commit `719fca1` is published as `0.3.0-dev.88.1`; CI 88 passed. The subsequent
+native corrections pass Core 676, Issue Browser 23, Windows UIA 29 and reporting
+31 checks. Windows live-resize contracts pass 4/4. Fresh NativeAOT TestHost and
+Issue Browser publications are warning-clean; follow-up package publication is
+still in progress.
 
-Performance remains failed at the unchanged native resize p95 limit. The fresh
-final-verifier corpus completed 500 inputs and 500 resizes, with idle zero and
-all resource/managed/cleanup checks passing. [#318](https://github.com/RichiCoder1/lucent/issues/318)
-owns presentation-tail investigation. #315 and #313 remain open: incomplete app
-characterization does not establish full application coverage. Local diagnostic
-follow-ups await disposition; preserve the ignored evidence directories.
+The historical failed native resize results remain retained. Instrumentation
+attributes #318's directional presentation tail to an extra exposed-event draw
+before the normal scheduled frame. The modal-size-loop gate passes both candidate
+runs in the predeclared ABBA comparison (resize p95 4.24/4.53 ms versus baseline
+16.17/16.71 ms; one baseline passes, one fails). Real held-border resizing must also
+remain functional. [#319](https://github.com/RichiCoder1/lucent/issues/319) owns
+the reproduced stale-key-release focus loss and clipped Tab/UIA visibility
+corrections. The app driver also waits for responsive presentation before querying
+its replaced accessibility tree. Full Issue Browser characterization now passes
+all five 500-operation scenarios, with zero repeated provider growth and zero
+owned resources after close. #315's workload migration is recorded explicitly;
+its retired 18-provider diagnostic remains failed, separate from the topology-based
+84-provider app contract. #318 and #313 stay open for the physical held-border
+check: the game owned the foreground and cursor, so neither attempt exercised
+resizing. Physical input is paused pending desktop availability. Preserve all
+ignored evidence directories, including first failures and every comparison run.
 Do not start navigation #205 or live
 compilation as part of this batch. Older queued/paused sections below are historical.
 

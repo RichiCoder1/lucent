@@ -182,7 +182,7 @@ internal sealed class PerformanceEvidence(
         _identity = PublishedIdentity.Read(app);
         if (_identity.Status == "invalid")
             Failures.Add(new("identity", _identity.Error!));
-        if (!journal.TryGetProperty("schemaVersion", out var version) || version.GetInt32() != 1)
+        if (!journal.TryGetProperty("schemaVersion", out var version) || version.GetInt32() != 2)
         {
             Failures.Add(new("characterization", "Unsupported characterization schema version."));
             return;
@@ -370,16 +370,16 @@ internal sealed class PerformanceEvidence(
                     !operation.TryGetProperty("clientActionMs", out var actionElement)
                     || actionElement.ValueKind != JsonValueKind.Number
                     || !operation.TryGetProperty(
-                        "requestToFirstFrameMs",
-                        out var firstFrameTimeElement
+                        "clientEndpointAndFrameMs",
+                        out var endpointAndFrameElement
                     )
-                    || firstFrameTimeElement.ValueKind != JsonValueKind.Number
+                    || endpointAndFrameElement.ValueKind != JsonValueKind.Number
                     || !operation.TryGetProperty("settleDrainMs", out var settleElement)
                     || settleElement.ValueKind != JsonValueKind.Number
                     || !double.IsFinite(actionElement.GetDouble())
                     || actionElement.GetDouble() < 0
-                    || !double.IsFinite(firstFrameTimeElement.GetDouble())
-                    || firstFrameTimeElement.GetDouble() < actionElement.GetDouble()
+                    || !double.IsFinite(endpointAndFrameElement.GetDouble())
+                    || endpointAndFrameElement.GetDouble() < actionElement.GetDouble()
                     || !double.IsFinite(settleElement.GetDouble())
                     || settleElement.GetDouble() < 0
                 )
@@ -949,7 +949,7 @@ internal sealed class PerformanceEvidence(
                     value(peak),
                     18,
                     "count",
-                    "historical Issue Browser compatibility limit; diagnostic pending migration disposition",
+                    "retired Issue Browser compatibility limit; retained diagnostic only",
                     phase == "lifetime" ? PhaseFor(frameNumber) : phase,
                     frameNumber
                 );

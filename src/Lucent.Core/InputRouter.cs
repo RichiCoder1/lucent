@@ -49,7 +49,7 @@ public sealed partial class InputRouter
         _composition = composition ?? throw new ArgumentNullException(nameof(composition));
     }
 
-    /// <summary>Gets the currently focused retained identity, if its installed scene still has one.</summary>
+    /// <summary>Gets the retained focus intent, reconciled against each newly installed scene.</summary>
     public ElementIdentity? FocusedElement
     {
         get
@@ -428,7 +428,13 @@ public sealed partial class InputRouter
         {
             command.Validate();
             var errors = new List<Exception>();
-            if (EnsureScene(errors) is { } rejection)
+            if (
+                EnsureScene(
+                    errors,
+                    preserveFocusForReprojection: command.Kind == KeyCommandKind.Up
+                ) is
+                { } rejection
+            )
                 return Reject(rejection, "Key/" + command.Kind, errors);
             if (command.Kind == KeyCommandKind.Down)
                 SetModality(InputModality.Keyboard, errors);
@@ -720,7 +726,7 @@ public sealed partial class InputRouter
         }
     }
 
-    /// <summary>Focuses one current retained semantic target without exposing platform focus transport.</summary>
+    /// <summary>Focuses a current semantic target and reveals it in its nearest scroll viewport.</summary>
     public bool FocusSemantic(ElementIdentity identity)
     {
         Enter();
@@ -738,6 +744,8 @@ public sealed partial class InputRouter
             }
             SetModality(InputModality.Keyboard, errors);
             RequestFocus(identity, FocusChangeReason.Traversal, errors);
+            if (_focused?.Identity == identity)
+                RevealFocusInNearestViewport(identity);
             Throw(errors);
             return _focused?.Identity == identity;
         }
@@ -1367,6 +1375,7 @@ public sealed partial class InputRouter
                 Eligible(item.Identity)
                 && _focusable.TryGetValue(item.Identity.ElementId, out var focusable)
                 && focusable.TabStop
+                && IntersectsEffectiveClips(item)
                 && (
                     !_scrollable.ContainsKey(item.Identity.ElementId)
                     || !HasFocusableDescendant(item.Identity)
@@ -1401,6 +1410,7 @@ public sealed partial class InputRouter
                     && Eligible(candidate.Identity)
                     && _focusable.TryGetValue(candidate.Identity.ElementId, out var focusable)
                     && focusable.TabStop
+                    && IntersectsEffectiveClips(candidate)
                 )
                     return true;
                 if (!_input.TryGetValue(current.ElementId, out var retained))
@@ -1409,6 +1419,64 @@ public sealed partial class InputRouter
             }
         }
         return false;
+    }
+
+    private bool IntersectsEffectiveClips(RetainedInputElement item)
+    {
+        // Tab only visits controls with visible geometry. Explicit semantic focus
+        // may still target an overscan item and reveal it through its scroll viewport.
+        var left = Math.Max(item.Bounds.X, 0);
+        var top = Math.Max(item.Bounds.Y, 0);
+        var right = Math.Min(item.Bounds.X + item.Bounds.Width, _scene!.Viewport.Width);
+        var bottom = Math.Min(item.Bounds.Y + item.Bounds.Height, _scene.Viewport.Height);
+        if (_effectiveClips.TryGetValue(item.Identity.ElementId, out var clips))
+            foreach (var clip in clips)
+            {
+                left = Math.Max(left, clip.Bounds.X);
+                top = Math.Max(top, clip.Bounds.Y);
+                right = Math.Min(right, clip.Bounds.X + clip.Bounds.Width);
+                bottom = Math.Min(bottom, clip.Bounds.Y + clip.Bounds.Height);
+            }
+        return right > left && bottom > top;
+    }
+
+    private void RevealFocusInNearestViewport(ElementIdentity identity)
+    {
+        if (!_input.TryGetValue(identity.ElementId, out var target))
+            return;
+        for (var parent = target.Parent; parent is { } ancestor; )
+        {
+            if (!_input.TryGetValue(ancestor.ElementId, out var viewport))
+                return;
+            if (_scrollable.TryGetValue(ancestor.ElementId, out var scrollable))
+            {
+                var clip = viewport.ChildClipBounds ?? viewport.Bounds;
+                var bounds = target.Bounds;
+                var x =
+                    bounds.Width > clip.Width || bounds.X < clip.X ? bounds.X - clip.X
+                    : bounds.X + bounds.Width > clip.X + clip.Width
+                        ? bounds.X + bounds.Width - clip.X - clip.Width
+                    : 0;
+                var y =
+                    bounds.Height > clip.Height || bounds.Y < clip.Y ? bounds.Y - clip.Y
+                    : bounds.Y + bounds.Height > clip.Y + clip.Height
+                        ? bounds.Y + bounds.Height - clip.Y - clip.Height
+                    : 0;
+                if (x != 0 || y != 0)
+                {
+                    var offset = scrollable.State.Offset;
+                    _ = SetScroll(
+                        ancestor,
+                        scrollable,
+                        offset.X + x,
+                        offset.Y + y,
+                        scrollable.InstalledOffset
+                    );
+                }
+                return;
+            }
+            parent = viewport.Parent;
+        }
     }
 
     private void SetModality(InputModality modality, List<Exception> errors)
@@ -1621,7 +1689,10 @@ public sealed partial class InputRouter
                 Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
     }
 
-    private InputRejection? EnsureScene(List<Exception> errors)
+    private InputRejection? EnsureScene(
+        List<Exception> errors,
+        bool preserveFocusForReprojection = false
+    )
     {
         if (_composition.IsInteractionSuspended)
             return InputRejection.Ineligible;
@@ -1633,7 +1704,10 @@ public sealed partial class InputRouter
             element.ReconcileSemanticStateForInput();
         foreach (var capture in _captures.ToArray())
             Release(capture.Key, CaptureReason(capture.Value.Owner), errors);
-        if (_focused is { } focus)
+        // A key release can arrive before the frame requested by its key down.
+        // Keep its focus intent until SetScene can reconcile against fresh input;
+        // the stale release itself remains rejected and is never routed.
+        if (!preserveFocusForReprojection && _focused is { } focus)
             LoseSceneFocus(FocusReason(focus.Identity), errors);
         ClearHover(errors);
         UpdateScrollBarHover(null);

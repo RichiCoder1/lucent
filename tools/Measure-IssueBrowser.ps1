@@ -86,7 +86,7 @@ if ($dotnetCommand) {
     catch { $dotnetSdk = 'unknown'; $dotnetRuntimes = @() }
 }
 $report = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     status = 'running'
     currentStage = 'initialization'
     currentScenario = $null
@@ -113,7 +113,7 @@ $report = [ordered]@{
         scope = 'sampled on emitted frames; between-frame peaks may be missed'
         phaseRows = 'Application emits pre after its first frame and post during normal shutdown; the shared verifier should evaluate both'
     }
-    instrumentation = 'Per-frame file diagnostics. Each client operation records action time and time through the first attributed frame; client action/wait values include synchronous UIA and frame-log polling. App frame latency excludes client dispatch and diagnostic file I/O. Extra frames and settle-drain time remain recorded separately.'
+    instrumentation = 'Per-frame file diagnostics. Each client operation records clientActionMs through endpoint validation and clientEndpointAndFrameMs through endpoint validation plus observation of the first attributed frame; both can include synchronous UIA and frame-log polling. Failed operations leave clientEndpointAndFrameMs null and record failureElapsedMs. App frame latency excludes client dispatch and diagnostic file I/O. Extra frames and settle-drain time remain recorded separately.'
     uiAutomation = [ordered]@{
         clientMode = 'PowerShell UIAutomationClient control-tree queries and patterns'
         runnerEventSubscriptions = 'none'
@@ -297,6 +297,7 @@ function Scroll-Pattern {
 function Set-Size([int] $width, [int] $height, [switch] $AllowUnchanged) {
     # Convert desired client DIPs to an outer physical size, preserving the window's monitor and position.
     $before = Client-Geometry
+    $beforeFrames = Frames
     $client = [IssueBenchmarkInput+Rect]::new()
     $outer = [IssueBenchmarkInput+Rect]::new()
     if (-not [IssueBenchmarkInput]::GetClientRect($window, [ref] $client)) { throw 'GetClientRect failed.' }
@@ -315,6 +316,12 @@ function Set-Size([int] $width, [int] $height, [switch] $AllowUnchanged) {
     } "Window client size did not reach ${width}x${height} DIPs."
     if (-not $AllowUnchanged -and [Math]::Abs($script:requestedGeometry.clientWidthDip - $before.clientWidthDip) -lt 1) {
         throw "Resize to ${width} client DIPs was a no-op; actual client width remained $($script:requestedGeometry.clientWidthDip) DIPs."
+    }
+    if ($script:requestedGeometry.clientWidthPixels -ne $before.clientWidthPixels -or $script:requestedGeometry.clientHeightPixels -ne $before.clientHeightPixels) {
+        # SetWindowPos acknowledges native geometry before Lucent projects the new tree.
+        # Query the endpoint after that presentation; removed providers must remain stale.
+        # The request and every frame still belong to the original measured operation.
+        Wait-Until { (Frames) -gt $beforeFrames } 'Resize produced no presented frame.'
     }
     [ordered]@{
         requestedClientWidthDip = $width
@@ -363,7 +370,8 @@ function Measure-Scenario([string] $name, [scriptblock] $operation) {
             lastFrame = $null
             attributedFrameCount = 0
             clientActionMs = $null
-            requestToFirstFrameMs = $null
+            clientEndpointAndFrameMs = $null
+            failureElapsedMs = $null
             settleDrainMs = $null
             endpoint = $null
             failure = $null
@@ -376,7 +384,7 @@ function Measure-Scenario([string] $name, [scriptblock] $operation) {
             $sample.endpoint = & $operation $index
             $sample.clientActionMs = [Diagnostics.Stopwatch]::GetElapsedTime($started).TotalMilliseconds
             Wait-Until { (Frames) -gt $before } "$name operation $index produced no frame."
-            $sample.requestToFirstFrameMs = [Diagnostics.Stopwatch]::GetElapsedTime($started).TotalMilliseconds
+            $sample.clientEndpointAndFrameMs = [Diagnostics.Stopwatch]::GetElapsedTime($started).TotalMilliseconds
             $firstFrameObserved = Frames
             $sample.firstFrame = $before + 1
             # Keep every frame attributed to this operation, including frames during settle drain.
@@ -394,9 +402,8 @@ function Measure-Scenario([string] $name, [scriptblock] $operation) {
             $sample.status = 'failed'
             $sample.failure = $_.Exception.Message
             $sample.errorDetails = Error-Details $_
-            $sample.requestToFirstFrameMs = if ($null -eq $sample.requestToFirstFrameMs) {
-                [Diagnostics.Stopwatch]::GetElapsedTime($started).TotalMilliseconds
-            } else { $sample.requestToFirstFrameMs }
+            $sample.clientEndpointAndFrameMs = $null
+            $sample.failureElapsedMs = [Diagnostics.Stopwatch]::GetElapsedTime($started).TotalMilliseconds
             try { $after = Frames }
             catch {
                 $after = $before

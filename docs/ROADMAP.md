@@ -21,9 +21,18 @@ resource-contract migration remain in the [execution record](plans/performance-e
 The [projection experiments](../advisor-plans/007-performance-opportunity-experiments.md)
 retain #316's exact-height arrangement reuse for about 4–7% lower app projection
 allocations; #317 is a measured defer. Neither claims a consistent latency win.
-Native validation still has failures: [#318](https://github.com/RichiCoder1/lucent/issues/318)
-tracks resize presentation timing against the unchanged limit. No Performance
-suite pass or complete real-app characterization is claimed.
+These changes are published as `0.3.0-dev.88.1` after
+[CI 88](https://github.com/RichiCoder1/lucent/actions/runs/35974075357) passed.
+The native follow-ups correct duplicate resize presentation and
+[#319](https://github.com/RichiCoder1/lucent/issues/319)'s focus continuity and
+clipped-row accessibility. Both candidate fixed-workload runs pass unchanged
+limits; resize p95 is 4.24–4.53 ms versus 16.17–16.71 ms in the paired baselines.
+Issue Browser now completes all five 500-operation scenarios with bounded resources
+and zero owned resources after close. Historical failed results remain retained.
+[#318](https://github.com/RichiCoder1/lucent/issues/318) and parent #313 remain open
+for physical held-border verification: a game captured the foreground/cursor, so
+that check has not exercised candidate live resizing. Follow-up package publication
+is pending; see the execution record for evidence and environment limits.
 Navigation restoration/Windows activation #205 follows separately.
 
 Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.
