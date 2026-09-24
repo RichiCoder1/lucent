@@ -9,8 +9,9 @@ for baseline/candidate series, contract migration and verification boundaries.
 Commit `719fca1` is published as `0.3.0-dev.88.1`; CI 88 passed. The subsequent
 native corrections pass Core 676, Issue Browser 23, Windows UIA 29 and reporting
 31 checks. Windows live-resize contracts pass 4/4. Fresh NativeAOT TestHost and
-Issue Browser publications are warning-clean; follow-up package publication is
-still in progress.
+Issue Browser publications are warning-clean. The follow-ups are published as
+`0.3.0-dev.89.1` from `48feed95`; CI 89 passed managed, package verification and
+publication, delivering all nine packages. #315 and #319 are complete.
 
 The historical failed native resize results remain retained. Instrumentation
 attributes #318's directional presentation tail to an extra exposed-event draw

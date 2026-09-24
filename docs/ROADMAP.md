@@ -31,8 +31,11 @@ Issue Browser now completes all five 500-operation scenarios with bounded resour
 and zero owned resources after close. Historical failed results remain retained.
 [#318](https://github.com/RichiCoder1/lucent/issues/318) and parent #313 remain open
 for physical held-border verification: a game captured the foreground/cursor, so
-that check has not exercised candidate live resizing. Follow-up package publication
-is pending; see the execution record for evidence and environment limits.
+that check has not exercised candidate live resizing. #315 and #319 are delivered
+as `0.3.0-dev.89.1` from `48feed95` after
+[CI 89](https://github.com/RichiCoder1/lucent/actions/runs/36049540126) passed managed,
+package verification and publication; see the execution record for evidence and
+environment limits.
 Navigation restoration/Windows activation #205 follows separately.
 
 Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.

@@ -8,9 +8,12 @@ Native follow-ups start from `719fca1` plus the recorded corrections below.
 Measurement date: September 24, 2026. The corrected real-app characterization
 completes all five scenarios. #318 and parent #313 retain the physical held-border
 verification boundary described below; no successful physical drag is claimed yet.
-The implementation is published as `0.3.0-dev.88.1` from `719fca1`;
+The initial implementation is published as `0.3.0-dev.88.1` from `719fca1`;
 [CI 88](https://github.com/RichiCoder1/lucent/actions/runs/35974075357)
 passed managed, package verification and publication jobs.
+Native corrections and reporting closeout are published as `0.3.0-dev.89.1`
+from `48feed95`; [CI 89](https://github.com/RichiCoder1/lucent/actions/runs/36049540126)
+passed all three jobs and published all nine packages. #315 and #319 are complete.
 
 ## Evidence and workloads
 
@@ -231,6 +234,13 @@ scenario completed on its first attempt in this run, without side-effect retries
 The earlier selection error at index 372 did not recur in the full sequence; its
 root cause remains unidentified and its failed evidence is preserved.
 
+The app report verifies executable/native-binary hashes and records `719fca1`
+with dirty source. The driver explicitly marks exact source binding as unknown:
+its dirty-path list is not a cryptographic snapshot of compiler inputs. Local
+publication logs and `artifacts/native-followup-source.patch` retain the observed
+build history, but this run is not proof from a clean, commit-bound app artifact.
+Clean package CI is separate evidence and does not replace native interaction.
+
 ### Native follow-up diagnosis
 
 [#319](https://github.com/RichiCoder1/lucent/issues/319) tracks the confirmed focus
@@ -339,8 +349,9 @@ corrected to update a bound style instead of presenting the element twice. Final
 coverage includes partial/full clipping, revealing retained content and a smaller
 viewport. Fresh TestHost and Issue Browser NativeAOT publications are warning-clean;
 the five-scenario application run above passes. The final desktop test preconditions
-compile without warnings, but physical execution is pending. Package publication
-of these follow-ups is the remaining delivery step.
+compile without warnings, but physical execution is pending. CI 89 independently
+passes managed and package/NativeAOT checks on clean commit `48feed95` and publishes
+`0.3.0-dev.89.1`. It does not replace the outstanding physical held-border proof.
 
 The initial layout experiments did not alter UIA, accessibility exposure or the
 native scheduler. The separately tracked native corrections above address focus,
