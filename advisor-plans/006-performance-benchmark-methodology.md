@@ -1,16 +1,24 @@
 # Plan 006: Make performance evidence complete and workloads reproducible
 
-Status: planned, not implemented. Priority P1; effort M for B1 and M–L for B2;
+Status: B1 implemented and verified September 24, 2026. B2's workload/reporting
+implementation is present; #315 remains open for native characterization follow-ups
+and disposition.
+See the [execution record](../docs/plans/performance-execution.md) for durable
+reporting, the two workloads, the historical gate disposition and current results.
+The fixed workload's resize timing remains a failure, tracked in
+[#318](https://github.com/RichiCoder1/lucent/issues/318); it is not waived.
+The design below records the original acceptance contract.
+Priority P1; effort M for B1 and M–L for B2;
 maintenance risk low for reporting and medium for changing workload ownership.
 Parent: [#313](https://github.com/RichiCoder1/lucent/issues/313).
 Children: [B1 #314](https://github.com/RichiCoder1/lucent/issues/314) and
-[B2 #315](https://github.com/RichiCoder1/lucent/issues/315), both Project 4 Todo.
+[B2 #315](https://github.com/RichiCoder1/lucent/issues/315).
 Source baseline: `6604eaf02f5686c14203762f4ce584dbd4002dff`, September 23, 2026,
 in `D:/src/richicoder1/lucent`. Prepared in a separate, older design worktree and
 received into main as a queued plan; use the reviewed source as the baseline.
 
-This is investigation and implementation planning only. No new benchmark, build,
-UI run, or production change was performed. Preserve unrelated changes. Recheck
+The original review was investigation and implementation planning only. It did not
+perform benchmarks, builds, UI runs or production changes. Preserve unrelated changes. Recheck
 in-scope files against this SHA before execution. Coordinate with Implementation;
 do not reopen delivered #310–312 or start navigation #205 or live compilation.
 

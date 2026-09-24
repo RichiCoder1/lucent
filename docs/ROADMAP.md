@@ -14,12 +14,16 @@ in `0951b92`: stronger behavioral assertions, retained coverage ownership and le
 setup. Exact editor checks exposed and corrected state Go to Definition [#312](https://github.com/RichiCoder1/lucent/issues/312).
 [CI 87](https://github.com/RichiCoder1/lucent/actions/runs/35835516837) passed managed,
 package/NativeAOT and publication checks, delivering `0.3.0-dev.87.1`; #311/#312 are
-closed. Existing benchmark workload/budget drift is tracked separately
-in [#313](https://github.com/RichiCoder1/lucent/issues/313); no Performance suite pass
-is claimed. Design and UI's [benchmark plan](../advisor-plans/006-performance-benchmark-methodology.md)
-and [projection experiments](../advisor-plans/007-performance-opportunity-experiments.md)
-are queued as #314–317, in that suggested order. #315/#316 depend on #314 and #317
-depends on #316; measured defer is a valid outcome for either runtime experiment.
+closed. [Performance #313](https://github.com/RichiCoder1/lucent/issues/313) now has
+durable failure reports, a versioned fixed native fixture and a separate Issue
+Browser characterization driver. The old app gate's failed result and explicit
+resource-contract migration remain in the [execution record](plans/performance-execution.md).
+The [projection experiments](../advisor-plans/007-performance-opportunity-experiments.md)
+retain #316's exact-height arrangement reuse for about 4–7% lower app projection
+allocations; #317 is a measured defer. Neither claims a consistent latency win.
+Native validation still has failures: [#318](https://github.com/RichiCoder1/lucent/issues/318)
+tracks resize presentation timing against the unchanged limit. No Performance
+suite pass or complete real-app characterization is claimed.
 Navigation restoration/Windows activation #205 follows separately.
 
 Lucent is a Windows-first, NativeAOT-compatible desktop UI stack. The Issue Browser remains a maintained reference application. [Light Notes](https://github.com/RichiCoder1/light-notes) is the independently consumed links-and-notes application that expands and refines the framework surface through daily use. It now has app-owned SQLite persistence, capture, multiline draft editing, archive/restore, save retry, orderly close, and backup/export. Focused NativeAOT checks cover startup, durable save/reopen and maintenance commands. The responsive shell and component-local .lui state are implemented. Daily-use capture/edit/open flows, safe restoration and focused design/accessibility refinement are delivered. The desktop refinement adds durable incomplete drafts with explicit discard, per-collection browsing continuity, pointer editing, live sizing and accessible popup menus.

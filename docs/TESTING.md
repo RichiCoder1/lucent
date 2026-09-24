@@ -110,8 +110,54 @@ The `Assets` suite also compares multiple-APP1 JPEG and PNG eXIf orientation met
 | `Published` | Published NativeAOT applications/TestHost: packaging, startup/close, presentation, desktop interaction, and UI Automation. Full Native contract executables are a separate `Native` invocation. |
 | `Sdk` | SDK package consumers, MSBuild integration, and generated NativeAOT applications. |
 | `Assets` | Focus-free packaged asset generation, cold editor symbols, invalidation, project/package references and console NativeAOT byte access. |
-| `Performance` | Runtime and tooling operation measurements; publishes Issue Browser and its verifier, without the unused Windows TestHost. |
+| `Performance` | Tooling measurements and the versioned fixed NativeAOT fixture. Opt-in Issue Browser characterization is separate; no unused Windows TestHost is published. |
 | `Accessibility` | Automated Windows accessibility rule scans against the published application. |
+
+### Performance workloads
+
+```powershell
+# Fixed native gate plus separately labeled tooling measurements.
+./tools/Test-Repository.ps1 -Suite Performance
+
+# Five real-app scenarios, 500 operations each; characterization has no latency gate.
+./tools/Test-Repository.ps1 -Suite Performance -PerformanceWorkload IssueBrowser
+
+# Historical app contract, retained explicitly for migration/comparison.
+./tools/Test-Repository.ps1 -Suite Performance -PerformanceWorkload LegacyIssueBrowser
+
+# Deterministic report, identity, endpoint and workload-topology contracts; no focus.
+./tools/Test-Repository.ps1 -Project Lucent.Performance.Tests
+```
+
+Native workloads open windows. Prepare before timing and reserve a quiet window:
+do not overlap agent builds, tests or other measurements. The runner preserves each
+invocation under a unique `artifacts/test/performance/<timestamp>-<id>` directory,
+with JSON, separate stderr, raw diagnostics and phase/operation journals, including
+failures. Do not rerun an unchanged failure until it passes. Set
+`LUCENT_PERFORMANCE_ENVIRONMENT` and `LUCENT_PERFORMANCE_ISOLATION` to describe known
+conditions; unknown power, external load, refresh and UIA listeners remain unknown.
+
+The fixed fixture keeps the existing 500-input/500-resize, idle, resource and
+managed-growth limits. Issue Browser has its own versioned semantic-topology
+resource contract and verified focus/scroll/selection/resize endpoints; its legacy
+18-provider diagnostic remains visible without replacing that contract. The
+driver stops a failed corpus without retrying its operations, then continues
+independent scenarios after verifying their preparation. Any failed/incomplete
+scenario keeps the overall result failed. Setup failures that prevent verified
+continuation still stop the run. Both native drivers drain extra frames before
+dispatching the next measured request; extra frames remain in their raw traces.
+The [execution record](plans/performance-execution.md) explains the explicit migration,
+unchanged cleanup requirements, local comparisons and retain/defer decisions.
+
+For attribution, build the verifier first, then run its executable with
+`--input-dispatch` or `--scene-projection` without an overlapping build. Input has
+12 observations of 64 dispatches; projection has eight scenarios with 10 warmups
+and 40 raw samples, plus five semantic scenarios. Both use schema 1 and preserve
+completed/partial work on failure. Projection reports the actual build configuration
+and final geometry/semantic fingerprints; those fingerprints are not a substitute
+for independent geometry, pixel, input and ownership tests. Native frame timing,
+projection-only timing, allocations and UIA client-operation latency are distinct
+measurements.
 
 ```powershell
 ./tools/Test-Repository.ps1 -Suite Native

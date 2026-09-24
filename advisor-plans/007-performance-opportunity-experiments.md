@@ -1,12 +1,17 @@
 # Plan 007: Test two narrow reductions in repeated projection work
 
-Status: planned experiments, no demonstrated speedup. Parent:
+Status: experiments completed September 24, 2026. P1 is retained for lower
+allocation/work counts (about 4–7% in Issue Browser); no consistent latency win is
+claimed. P2 is deferred after its small safe saving did not justify the branch.
+See the [execution record](../docs/plans/performance-execution.md) for all paired
+series, attribution and correctness evidence. The design below is preserved as
+the experiment contract. Parent:
 [#313](https://github.com/RichiCoder1/lucent/issues/313).
 Children: [P1 #316](https://github.com/RichiCoder1/lucent/issues/316) and
-[P2 #317](https://github.com/RichiCoder1/lucent/issues/317), both Project 4 Todo.
+[P2 #317](https://github.com/RichiCoder1/lucent/issues/317).
 Reviewed source: `6604eaf02f5686c14203762f4ce584dbd4002dff`, September 23, 2026,
 in `D:/src/richicoder1/lucent`. The separate design worktree is not the source
-baseline. No production edits, builds or measurements were made during this review.
+baseline. No production edits, builds or measurements were made during the original review.
 
 Preserve Windows-first/NativeAOT support, portable Core boundaries, accessibility,
 retained-scene ownership, input freshness and exact layout semantics. Keep source

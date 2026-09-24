@@ -2,20 +2,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Lucent.Core;
 using Lucent.Renderer.Skia;
 
 const int Samples = 500;
-const double P95Limit = 16.7,
-    P99Limit = 33.3,
-    RasterP95Limit = 8.3;
 const long ManagedGrowthLimit = 16L * 1024 * 1024;
-const int SurfaceLimit = 1,
-    TextureLimit = 1,
-    TextBlobLimit = 256,
-    UiaProviderLimit = 18,
-    HandleGrowthLimit = 128;
 
 if (args.Length == 1 && args[0] == "--input-dispatch")
     return InputDispatchProbe.Run();
@@ -23,54 +16,131 @@ if (args.Length == 1 && args[0] == "--input-dispatch")
 if (args.Length == 1 && args[0] == "--scene-projection")
     return SceneProjectionProbe.Run();
 
-if (args.Length != 2 || args[0] != "--app")
-    return Fail("usage: --app <published-exe> | --input-dispatch | --scene-projection");
+if (args.Length == 2 && args[0] == "--characterization")
+    return CharacterizationEvidence.Run(args[1]);
+
+if (args.Length != 2 || args[0] is not ("--app" or "--fixed-app"))
+    return Fail(
+        "usage: --app <published-exe> | --fixed-app <published-exe> | --characterization <journal.json> | --input-dispatch | --scene-projection"
+    );
 var app = Path.GetFullPath(args[1]);
-if (!File.Exists(app))
-    return Fail("missing published app: " + app);
 var diagnostics = Path.Combine(
     Path.GetTempPath(),
     "lucent-performance-" + Guid.NewGuid().ToString("N") + ".log"
 );
 Process? process = null;
+var evidence = new PerformanceEvidence(
+    app,
+    diagnostics,
+    args[0] == "--fixed-app" ? "fixed-native-v1" : "issue-browser-compat-v1"
+);
+var launchTimestamp = Stopwatch.GetTimestamp();
 try
 {
+    if (!File.Exists(app))
+        throw new FileNotFoundException("Missing published app", app);
+    evidence.MarkPhase("launch", "start", 0);
     process = Start(app, diagnostics);
     var window = WaitForWindow(process);
+    if (
+        Native.GetClientRect(window, out var client)
+        && Native.GetDpiForWindow(window) is var dpi
+        && dpi > 0
+    )
+    {
+        evidence.WindowDpi = (int)dpi;
+        evidence.ClientWidthPixels = client.Right - client.Left;
+        evidence.ClientHeightPixels = client.Bottom - client.Top;
+    }
     WaitForInitialFrame(diagnostics);
+    evidence.LaunchToReadyMs = Stopwatch.GetElapsedTime(launchTimestamp).TotalMilliseconds;
+    evidence.MarkPhase("firstReady", "complete", FrameCount(diagnostics));
     DrainFrames(diagnostics);
+    evidence.MarkPhase("warmup", "start", FrameCount(diagnostics));
     Warmup(window, diagnostics);
-    var managed = ManagedCycles();
-    var input = RunCorpus(window, diagnostics, "input");
-    var resize = RunCorpus(window, diagnostics, "resize");
+    evidence.MarkPhase("warmup", "complete", FrameCount(diagnostics));
+    evidence.MarkPhase("managed", "start", FrameCount(diagnostics));
+    evidence.Managed = ManagedCycles(evidence);
+    evidence.MarkPhase("managed", "complete", FrameCount(diagnostics));
+    RunCorpus(window, diagnostics, "input", evidence);
+    RunCorpus(window, diagnostics, "resize", evidence);
+    evidence.MarkPhase("idle", "start", FrameCount(diagnostics));
     var beforeIdle = FrameCount(diagnostics);
     Thread.Sleep(TimeSpan.FromSeconds(10));
     var afterIdle = FrameCount(diagnostics);
+    evidence.IdleFrames = afterIdle - beforeIdle;
+    evidence.MarkPhase("idle", "complete", afterIdle);
     if (beforeIdle != afterIdle)
         throw new InvalidOperationException(
             $"Idle scheduled {afterIdle - beforeIdle} frames in ten seconds."
         );
+    evidence.MarkPhase("close", "start", FrameCount(diagnostics));
     Close(process, window);
     process = null;
-    var frames = ReadFrames(diagnostics);
-    var resources = ReadResources(diagnostics);
-    CheckCorpus("input", input.Frames);
-    CheckCorpus("resize", resize.Frames);
-    var resource = CheckResources(frames, resources);
-    WriteResult(input, resize, managed, resource);
-    return 0;
+    evidence.MarkPhase("close", "complete", FrameCount(diagnostics));
 }
 catch (Exception error)
 {
-    return Fail(error.Message);
+    evidence.Failures.Add(new("operation", error.ToString()));
+    try
+    {
+        evidence.MarkPhase("operation", "failed");
+    }
+    catch (Exception journalError)
+    {
+        evidence.Failures.Add(new("journal", journalError.ToString()));
+    }
 }
 finally
 {
+    try
+    {
+        evidence.MarkPhase("cleanup", "start");
+    }
+    catch (Exception journalError)
+    {
+        evidence.Failures.Add(new("journal", journalError.ToString()));
+    }
     if (process is not null)
-        Close(process, process.MainWindowHandle);
+    {
+        try
+        {
+            Close(process, process.MainWindowHandle);
+        }
+        catch (Exception error)
+        {
+            evidence.Failures.Add(new("cleanup", error.ToString()));
+        }
+        finally
+        {
+            process.Dispose();
+        }
+    }
+    try
+    {
+        evidence.MarkPhase("cleanup", "complete");
+    }
+    catch (Exception journalError)
+    {
+        evidence.Failures.Add(new("journal", journalError.ToString()));
+    }
+    try
+    {
+        evidence.CollectAndEvaluate();
+    }
+    catch (Exception error)
+    {
+        evidence.Failures.Add(new("evidence", error.ToString()));
+    }
     if (File.Exists(diagnostics))
         Console.Error.WriteLine("Lucent performance diagnostics: " + diagnostics);
+    evidence.Write(Console.OpenStandardOutput());
 }
+return evidence.Passed
+    ? 0
+    : Fail(
+        evidence.Failures.Count > 0 ? evidence.Failures[0].Message : "Evidence or bounds failed."
+    );
 
 static Process Start(string app, string diagnostics)
 {
@@ -126,10 +196,15 @@ static void WaitForInitialFrame(string diagnostics)
     throw new InvalidOperationException("Published app did not present its initial frame.");
 }
 
-static Corpus RunCorpus(nint window, string diagnostics, string expected)
+static void RunCorpus(
+    nint window,
+    string diagnostics,
+    string expected,
+    PerformanceEvidence evidence
+)
 {
     var first = FrameCount(diagnostics);
-    var frames = new List<Frame>(Samples);
+    evidence.BeginCorpus(expected, first + 1);
     for (var index = 0; index < Samples; index++)
     {
         var prior = FrameCount(diagnostics);
@@ -141,14 +216,18 @@ static Corpus RunCorpus(nint window, string diagnostics, string expected)
             if (!Native.SetWindowPos(window, 0, 0, 0, size, 501, 0x0014))
                 throw new InvalidOperationException("SetWindowPos failed.");
         }
-        frames.Add(
-            WaitForExpectedFrame(diagnostics, prior, expected, expected + " sample " + index)
+        var frame = WaitForExpectedFrame(
+            diagnostics,
+            prior,
+            expected,
+            expected + " sample " + index
         );
-        if (expected == "resize")
-            DrainFrames(diagnostics);
+        evidence.AddCorpusFrame(expected, frame, prior + 1);
+        // Extra frames belong to this request, never to the next Tab or resize.
+        DrainFrames(diagnostics);
     }
     var last = FrameCount(diagnostics);
-    return new Corpus(frames.ToArray(), new(first + 1, last, frames.Count));
+    evidence.CompleteCorpus(expected, last);
 }
 
 static Frame WaitForExpectedFrame(
@@ -195,7 +274,7 @@ static void DrainFrames(string diagnostics)
     );
 }
 
-static ManagedObservation ManagedCycles()
+static ManagedObservation ManagedCycles(PerformanceEvidence evidence)
 {
     const int sourceRows = 10_000;
     PrimeManagedBaseline();
@@ -204,55 +283,71 @@ static ManagedObservation ManagedCycles()
         peak = baseline;
     var visibleMaximum = 0;
     var realizedMaximum = 0;
+    var completedCycles = 0;
     for (var cycle = 0; cycle < 20; cycle++)
     {
-        var graph = new ReactiveGraph();
-        using var composition = CreateVirtualizationFixture(graph, out _);
-        using var renderer = new SkiaSceneRenderer();
-        WaitForIssues(graph, composition, renderer);
-        var viewport = new LayoutViewport(800, 500, 1);
-        using var first = SceneLayout.Project(composition, viewport, renderer);
-        if (!composition.Input.SetScene(first))
-            throw new InvalidOperationException("Managed performance baseline scene was rejected.");
-        var list = Flatten(composition.SemanticSnapshot()!)
-            .Single(node => node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll));
-        MeasureVirtualization(
-            first,
-            composition.SemanticSnapshot()!,
-            list,
-            ref visibleMaximum,
-            ref realizedMaximum
-        );
-        if (
-            !composition.Input.ScrollSemantic(
-                new(list.Identity.CompositionEpoch, list.Identity.ElementId),
-                new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)
+        try
+        {
+            var graph = new ReactiveGraph();
+            using var composition = CreateVirtualizationFixture(graph, out _);
+            using var renderer = new SkiaSceneRenderer();
+            using var ready = WaitForIssues(graph, composition, renderer);
+            var viewport = new LayoutViewport(800, 500, 1);
+            using var first = SceneLayout.Project(composition, viewport, renderer);
+            if (!composition.Input.SetScene(first))
+                throw new InvalidOperationException(
+                    "Managed performance baseline scene was rejected."
+                );
+            ready.Dispose();
+            var list = Flatten(composition.SemanticSnapshot()!)
+                .Single(node =>
+                    node.Name == "Issues" && node.Actions.HasFlag(SemanticAction.Scroll)
+                );
+            MeasureVirtualization(
+                first,
+                composition.SemanticSnapshot()!,
+                list,
+                ["Issue 1", "Issue 2"],
+                ref visibleMaximum,
+                ref realizedMaximum
+            );
+            if (
+                !composition.Input.ScrollSemantic(
+                    new(list.Identity.CompositionEpoch, list.Identity.ElementId),
+                    new(SemanticCommandKind.Scroll, Endpoint: SemanticScrollEndpoint.End)
+                )
             )
-        )
-            throw new InvalidOperationException("10,000-row semantic scroll to end was rejected.");
-        graph.Drain();
-        using var last = SceneLayout.Project(composition, viewport, renderer);
-        if (!composition.Input.SetScene(last))
-            throw new InvalidOperationException("Managed performance end scene was rejected.");
-        MeasureVirtualization(
-            last,
-            composition.SemanticSnapshot()!,
-            list,
-            ref visibleMaximum,
-            ref realizedMaximum
-        );
-        peak = Math.Max(peak, GC.GetTotalMemory(false));
+                throw new InvalidOperationException(
+                    "10,000-row semantic scroll to end was rejected."
+                );
+            graph.Drain();
+            using var last = SceneLayout.Project(composition, viewport, renderer);
+            if (!composition.Input.SetScene(last))
+                throw new InvalidOperationException("Managed performance end scene was rejected.");
+            first.Dispose();
+            MeasureVirtualization(
+                last,
+                composition.SemanticSnapshot()!,
+                list,
+                ["Issue 9999", "Issue 10000"],
+                ref visibleMaximum,
+                ref realizedMaximum
+            );
+            peak = Math.Max(peak, GC.GetTotalMemory(false));
+            completedCycles++;
+        }
+        finally
+        {
+            // Retain completed work even when a later endpoint or setup fails.
+            // Post-GC growth is unknown until the final collection actually runs.
+            evidence.Managed = new(
+                new(completedCycles, baseline, peak, null, null, ManagedGrowthLimit),
+                new(sourceRows, visibleMaximum, realizedMaximum)
+            );
+        }
     }
     CompactCollect();
     var post = GC.GetTotalMemory(false);
-    if (post - baseline > ManagedGrowthLimit)
-        throw new InvalidOperationException(
-            $"Managed post-GC growth {post - baseline} exceeds {ManagedGrowthLimit} bytes after 20 cycles."
-        );
-    if (visibleMaximum > 2 || realizedMaximum > 6)
-        throw new InvalidOperationException(
-            $"10k virtualization exceeded frozen bounds: visible={visibleMaximum}, realized={realizedMaximum}."
-        );
     return new ManagedObservation(
         new(20, baseline, peak, post, post - baseline, ManagedGrowthLimit),
         new(sourceRows, visibleMaximum, realizedMaximum)
@@ -263,6 +358,7 @@ static void MeasureVirtualization(
     RetainedScene scene,
     SemanticSnapshot snapshot,
     SemanticSnapshot list,
+    string[] expectedVisible,
     ref int visibleMaximum,
     ref int realizedMaximum
 )
@@ -270,7 +366,8 @@ static void MeasureVirtualization(
     var viewport = scene
         .Boxes.Single(box => box.Identity.ElementId == list.Identity.ElementId)
         .Bounds;
-    var rows = Flatten(snapshot)
+    var items = Flatten(snapshot).Where(node => node.Role == SemanticRole.ListItem).ToArray();
+    var rows = items
         .Where(node => node.Role == SemanticRole.ListItem)
         .Select(node =>
             scene.Boxes.Single(box => box.Identity.ElementId == node.Identity.ElementId).Bounds
@@ -281,11 +378,17 @@ static void MeasureVirtualization(
             "The fixed 30-pixel virtualization fixture has mismatched row heights: "
                 + String.Join(", ", rows.Select(row => row.Height))
         );
+    var visible = items
+        .Zip(rows)
+        .Where(pair =>
+            pair.Second.Y < viewport.Y + viewport.Height
+            && pair.Second.Y + pair.Second.Height > viewport.Y
+        )
+        .Select(pair => pair.First.Name)
+        .ToArray();
     realizedMaximum = Math.Max(realizedMaximum, rows.Length);
-    visibleMaximum = Math.Max(
-        visibleMaximum,
-        rows.Count(row => row.Y < viewport.Y + viewport.Height && row.Y + row.Height > viewport.Y)
-    );
+    visibleMaximum = Math.Max(visibleMaximum, visible.Length);
+    VirtualizationEndpoint.Verify(expectedVisible, visible, rows.Length);
 }
 
 static void PrimeManagedBaseline()
@@ -293,8 +396,7 @@ static void PrimeManagedBaseline()
     var graph = new ReactiveGraph();
     using var composition = CreateVirtualizationFixture(graph, out _);
     using var renderer = new SkiaSceneRenderer();
-    WaitForIssues(graph, composition, renderer);
-    using var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+    using var scene = WaitForIssues(graph, composition, renderer);
 }
 
 static void CompactCollect()
@@ -356,24 +458,54 @@ static Composition CreateVirtualizationFixture(ReactiveGraph graph, out ThemeCon
     return composition;
 }
 
-static void WaitForIssues(ReactiveGraph graph, Composition composition, SkiaSceneRenderer renderer)
+static RetainedScene WaitForIssues(
+    ReactiveGraph graph,
+    Composition composition,
+    SkiaSceneRenderer renderer
+)
 {
     var until = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 5;
-    while (Stopwatch.GetTimestamp() < until)
+    RetainedScene? installed = null;
+    try
     {
-        graph.Drain();
-        using var scene = SceneLayout.Project(composition, new(800, 500, 1), renderer);
-        if (
-            composition.Input.SetScene(scene)
-            && composition.SemanticSnapshot() is { } snapshot
-            && Flatten(snapshot).Any(node => node.Role == SemanticRole.ListItem)
-        )
-            return;
-        Thread.Sleep(1);
+        while (Stopwatch.GetTimestamp() < until)
+        {
+            graph.Drain();
+            var candidate = SceneLayout.Project(composition, new(800, 500, 1), renderer);
+            var accepted = false;
+            try
+            {
+                accepted = composition.Input.SetScene(candidate);
+                if (accepted)
+                {
+                    var replaced = installed;
+                    installed = candidate;
+                    replaced?.Dispose();
+                    if (
+                        composition.SemanticSnapshot() is { } snapshot
+                        && Flatten(snapshot).Any(node => node.Role == SemanticRole.ListItem)
+                    )
+                    {
+                        installed = null;
+                        return candidate;
+                    }
+                }
+            }
+            finally
+            {
+                if (!accepted)
+                    candidate.Dispose();
+            }
+            Thread.Sleep(1);
+        }
+        throw new InvalidOperationException(
+            "Fixture issues did not load for managed performance cycles."
+        );
     }
-    throw new InvalidOperationException(
-        "Fixture issues did not load for managed performance cycles."
-    );
+    finally
+    {
+        installed?.Dispose();
+    }
 }
 
 static IEnumerable<SemanticSnapshot> Flatten(SemanticSnapshot node)
@@ -389,11 +521,6 @@ static Frame[] ReadFrames(string path) =>
     ReadDiagnosticLines(path)
         .Where(line => line.StartsWith("frame|", StringComparison.Ordinal))
         .Select(Frame.Parse)
-        .ToArray();
-static Resource[] ReadResources(string path) =>
-    ReadDiagnosticLines(path)
-        .Where(line => line.StartsWith("resources|", StringComparison.Ordinal))
-        .Select(Resource.Parse)
         .ToArray();
 static string[] ReadDiagnosticLines(string path)
 {
@@ -412,158 +539,6 @@ static string[] ReadDiagnosticLines(string path)
     {
         return [];
     }
-}
-static void CheckCorpus(string name, Frame[] frames)
-{
-    if (frames.Length != Samples)
-        throw new InvalidOperationException(
-            $"{name} corpus has {frames.Length} samples, requires exactly {Samples}."
-        );
-    var summary = Summary(frames);
-    if (
-        summary.p95Ms > P95Limit
-        || summary.p99Ms > P99Limit
-        || summary.rendererP95Ms > RasterP95Limit
-    )
-        throw new InvalidOperationException(
-            $"{name} bounds failed: p95={summary.p95Ms:F3} p99={summary.p99Ms:F3} raster-p95={summary.rendererP95Ms:F3}."
-        );
-}
-static ResourceObservation CheckResources(Frame[] frames, Resource[] resources)
-{
-    if (
-        frames.Length == 0
-        || resources.Length != 2
-        || resources[0].Phase != "pre"
-        || resources[1].Phase != "post"
-    )
-        throw new InvalidOperationException(
-            "Performance lifecycle resource observations were incomplete."
-        );
-    var pre = resources[0];
-    var post = resources[1];
-    var surfaces = frames.Max(frame => frame.Surfaces);
-    var textures = frames.Max(frame => frame.Textures);
-    var blobs = frames.Max(frame => frame.TextBlobs);
-    var providers = frames.Max(frame => frame.UiaProviders);
-    var handles = frames
-        .Select(frame => frame.Handles)
-        .Append(pre.Handles)
-        .Append(post.Handles)
-        .ToArray();
-    var handlePeak = handles.Max();
-    if (
-        surfaces > SurfaceLimit
-        || textures > TextureLimit
-        || blobs > TextBlobLimit
-        || providers > UiaProviderLimit
-        || handlePeak - pre.Handles > HandleGrowthLimit
-    )
-        throw new InvalidOperationException("A predeclared native resource bound was exceeded.");
-    if (post.Surfaces != 0 || post.Textures != 0 || post.TextBlobs != 0 || post.UiaProviders != 0)
-        throw new InvalidOperationException(
-            "Native/UIA resources did not return to their post-GC lifecycle baseline."
-        );
-    return new(surfaces, textures, blobs, providers, pre, handlePeak, post);
-}
-static Statistics Summary(Frame[] frames) =>
-    new(
-        frames.Length,
-        Percentile(frames.Select(frame => frame.EndToEnd).ToArray(), .95),
-        Percentile(frames.Select(frame => frame.EndToEnd).ToArray(), .99),
-        Percentile(frames.Select(frame => frame.Raster).ToArray(), .95)
-    );
-static double Percentile(double[] values, double percentile)
-{
-    Array.Sort(values);
-    return values[(int)Math.Ceiling(values.Length * percentile) - 1];
-}
-static void WriteResult(
-    Corpus input,
-    Corpus resize,
-    ManagedObservation managed,
-    ResourceObservation resources
-)
-{
-    var inputStats = Summary(input.Frames);
-    var resizeStats = Summary(resize.Frames);
-    using var output = Console.OpenStandardOutput();
-    using var writer = new Utf8JsonWriter(output);
-    writer.WriteStartObject();
-    writer.WriteBoolean("ok", true);
-    WriteStatistics(writer, "input", inputStats);
-    WriteStatistics(writer, "resize", resizeStats);
-    writer.WriteStartObject("corpusDelimiters");
-    WriteDelimiter(writer, "input", input.Delimiters);
-    WriteDelimiter(writer, "resize", resize.Delimiters);
-    writer.WriteEndObject();
-    writer.WriteNumber("idleFrames", 0);
-    writer.WriteStartObject("virtualization");
-    writer.WriteNumber("sourceRows", managed.Virtualization.SourceRows);
-    writer.WriteNumber("visibleRowsMaximum", managed.Virtualization.VisibleRowsMaximum);
-    writer.WriteNumber("realizedMaximum", managed.Virtualization.RealizedMaximum);
-    writer.WriteEndObject();
-    writer.WriteStartObject("managed");
-    writer.WriteNumber("cycles", managed.Memory.Cycles);
-    writer.WriteNumber("baselineBytes", managed.Memory.BaselineBytes);
-    writer.WriteNumber("peakBytes", managed.Memory.PeakBytes);
-    writer.WriteNumber("postGcBytes", managed.Memory.PostGcBytes);
-    writer.WriteNumber("growthBytes", managed.Memory.GrowthBytes);
-    writer.WriteNumber("limitBytes", managed.Memory.LimitBytes);
-    writer.WriteEndObject();
-    writer.WriteStartObject("resources");
-    writer.WriteNumber("surfaceMaximum", resources.SurfaceMaximum);
-    writer.WriteNumber("textureMaximum", resources.TextureMaximum);
-    writer.WriteNumber("textBlobMaximum", resources.TextBlobMaximum);
-    writer.WriteNumber("uiaProviderMaximum", resources.UiaProviderMaximum);
-    writer.WriteStartObject("handles");
-    writer.WriteNumber("baseline", resources.Pre.Handles);
-    writer.WriteNumber("peak", resources.HandlePeak);
-    writer.WriteNumber("final", resources.Post.Handles);
-    writer.WriteNumber("peakDelta", (long)resources.HandlePeak - resources.Pre.Handles);
-    writer.WriteNumber("finalDelta", (long)resources.Post.Handles - resources.Pre.Handles);
-    writer.WriteEndObject();
-    writer.WriteStartObject("lifecycle");
-    WriteResource(writer, "pre", resources.Pre);
-    writer.WriteStartObject("peak");
-    writer.WriteNumber("surfaces", resources.SurfaceMaximum);
-    writer.WriteNumber("textures", resources.TextureMaximum);
-    writer.WriteNumber("textBlobs", resources.TextBlobMaximum);
-    writer.WriteNumber("uiaProviders", resources.UiaProviderMaximum);
-    writer.WriteEndObject();
-    WriteResource(writer, "post", resources.Post);
-    writer.WriteEndObject();
-    writer.WriteEndObject();
-    writer.WriteEndObject();
-    writer.Flush();
-    Console.WriteLine();
-}
-static void WriteStatistics(Utf8JsonWriter writer, string name, Statistics value)
-{
-    writer.WriteStartObject(name);
-    writer.WriteNumber("samples", value.samples);
-    writer.WriteNumber("p95Ms", value.p95Ms);
-    writer.WriteNumber("p99Ms", value.p99Ms);
-    writer.WriteNumber("rendererP95Ms", value.rendererP95Ms);
-    writer.WriteEndObject();
-}
-static void WriteDelimiter(Utf8JsonWriter writer, string name, CorpusDelimiter value)
-{
-    writer.WriteStartObject(name);
-    writer.WriteNumber("firstFrame", value.FirstFrame);
-    writer.WriteNumber("lastFrame", value.LastFrame);
-    writer.WriteNumber("samples", value.Samples);
-    writer.WriteEndObject();
-}
-static void WriteResource(Utf8JsonWriter writer, string name, Resource value)
-{
-    writer.WriteStartObject(name);
-    writer.WriteNumber("surfaces", value.Surfaces);
-    writer.WriteNumber("textures", value.Textures);
-    writer.WriteNumber("textBlobs", value.TextBlobs);
-    writer.WriteNumber("uiaProviders", value.UiaProviders);
-    writer.WriteNumber("handles", value.Handles);
-    writer.WriteEndObject();
 }
 static void Close(Process process, nint window)
 {
@@ -593,10 +568,6 @@ static void SendTab(nint window)
         throw new InvalidOperationException("PostMessage(Tab) failed.");
 }
 
-readonly record struct Corpus(Frame[] Frames, CorpusDelimiter Delimiters);
-
-readonly record struct CorpusDelimiter(int FirstFrame, int LastFrame, int Samples);
-
 readonly record struct ManagedObservation(
     MemoryObservation Memory,
     VirtualizationObservation Virtualization
@@ -606,8 +577,8 @@ readonly record struct MemoryObservation(
     int Cycles,
     long BaselineBytes,
     long PeakBytes,
-    long PostGcBytes,
-    long GrowthBytes,
+    long? PostGcBytes,
+    long? GrowthBytes,
     long LimitBytes
 );
 
@@ -617,22 +588,15 @@ readonly record struct VirtualizationObservation(
     int RealizedMaximum
 );
 
-readonly record struct Statistics(int samples, double p95Ms, double p99Ms, double rendererP95Ms);
-
-readonly record struct ResourceObservation(
-    int SurfaceMaximum,
-    int TextureMaximum,
-    int TextBlobMaximum,
-    int UiaProviderMaximum,
-    Resource Pre,
-    uint HandlePeak,
-    Resource Post
-);
-
 readonly record struct Frame(
     string Operation,
+    long RequestTimestamp,
+    long PresentedTimestamp,
     double EndToEnd,
+    double Projection,
     double Raster,
+    double Upload,
+    double Present,
     int Surfaces,
     int Textures,
     int TextBlobs,
@@ -645,16 +609,40 @@ readonly record struct Frame(
         var fields = line.Split('|');
         if (fields.Length != 14)
             throw new InvalidOperationException("Malformed performance diagnostic row.");
-        return new(
+        var parsed = new Frame(
             fields[1],
+            long.Parse(fields[2], CultureInfo.InvariantCulture),
+            long.Parse(fields[3], CultureInfo.InvariantCulture),
             double.Parse(fields[4], CultureInfo.InvariantCulture),
+            double.Parse(fields[5], CultureInfo.InvariantCulture),
             double.Parse(fields[6], CultureInfo.InvariantCulture),
+            double.Parse(fields[7], CultureInfo.InvariantCulture),
+            double.Parse(fields[8], CultureInfo.InvariantCulture),
             int.Parse(fields[9], CultureInfo.InvariantCulture),
             int.Parse(fields[10], CultureInfo.InvariantCulture),
             int.Parse(fields[11], CultureInfo.InvariantCulture),
             int.Parse(fields[12], CultureInfo.InvariantCulture),
             uint.Parse(fields[13], CultureInfo.InvariantCulture)
         );
+        if (
+            parsed.Operation is not ("startup" or "input" or "resize" or "other")
+            || parsed.RequestTimestamp < 0
+            || parsed.PresentedTimestamp < parsed.RequestTimestamp
+            || new[]
+            {
+                parsed.EndToEnd,
+                parsed.Projection,
+                parsed.Raster,
+                parsed.Upload,
+                parsed.Present,
+            }.Any(value => !double.IsFinite(value) || value < 0)
+            || parsed.Surfaces < 0
+            || parsed.Textures < 0
+            || parsed.TextBlobs < 0
+            || parsed.UiaProviders < 0
+        )
+            throw new FormatException("Invalid performance frame values.");
+        return parsed;
     }
 }
 
@@ -672,7 +660,7 @@ readonly record struct Resource(
         var fields = line.Split('|');
         if (fields.Length != 7)
             throw new InvalidOperationException("Malformed performance resource row.");
-        return new(
+        var parsed = new Resource(
             fields[1],
             int.Parse(fields[2], CultureInfo.InvariantCulture),
             int.Parse(fields[3], CultureInfo.InvariantCulture),
@@ -680,11 +668,35 @@ readonly record struct Resource(
             int.Parse(fields[5], CultureInfo.InvariantCulture),
             uint.Parse(fields[6], CultureInfo.InvariantCulture)
         );
+        if (
+            parsed.Phase is not ("pre" or "post")
+            || parsed.Surfaces < 0
+            || parsed.Textures < 0
+            || parsed.TextBlobs < 0
+            || parsed.UiaProviders < 0
+        )
+            throw new FormatException("Invalid performance resource values.");
+        return parsed;
     }
 }
 
 static class Native
 {
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Rect
+    {
+        internal int Left,
+            Top,
+            Right,
+            Bottom;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool GetClientRect(nint window, out Rect rect);
+
+    [DllImport("user32.dll")]
+    internal static extern uint GetDpiForWindow(nint window);
+
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern bool SetWindowPos(
         nint window,

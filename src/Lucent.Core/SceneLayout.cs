@@ -895,6 +895,7 @@ public static partial class SceneLayout
                     style.CrossAlignment
                 );
                 var assignmentsByIndex = assignments.ToDictionary(value => value.Index);
+                var correctionChanged = false;
                 var corrected = specs
                     .Select(spec =>
                     {
@@ -912,7 +913,7 @@ public static partial class SceneLayout
                             cache,
                             assignment.Bounds.Width
                         );
-                        return spec with
+                        var updated = spec with
                         {
                             Height = Constrain(
                                 constrained.Height,
@@ -920,18 +921,22 @@ public static partial class SceneLayout
                                 childStyle.MaxHeight
                             ),
                         };
+                        // Height is the only input replaced by this correction.
+                        correctionChanged |= updated.Height != spec.Height;
+                        return updated;
                     })
                     .ToArray();
-                assignments = ManagedLayout.ArrangeGrid(
-                    corrected,
-                    style.Columns,
-                    style.Rows,
-                    inner.Width,
-                    inner.Height,
-                    style.ColumnGap,
-                    style.RowGap,
-                    style.CrossAlignment
-                );
+                if (correctionChanged)
+                    assignments = ManagedLayout.ArrangeGrid(
+                        corrected,
+                        style.Columns,
+                        style.Rows,
+                        inner.Width,
+                        inner.Height,
+                        style.ColumnGap,
+                        style.RowGap,
+                        style.CrossAlignment
+                    );
             }
             else
             {
@@ -947,6 +952,7 @@ public static partial class SceneLayout
                     style.CrossAlignment
                 );
                 var assignmentsByIndex = assignments.ToDictionary(value => value.Index);
+                var correctionChanged = false;
                 var corrected = specs
                     .Select(spec =>
                     {
@@ -964,7 +970,7 @@ public static partial class SceneLayout
                             cache,
                             assignment.Bounds.Width
                         );
-                        return spec with
+                        var updated = spec with
                         {
                             Height = Constrain(
                                 constrained.Height,
@@ -972,19 +978,23 @@ public static partial class SceneLayout
                                 childStyle.MaxHeight
                             ),
                         };
+                        // Height is the only input replaced by this correction.
+                        correctionChanged |= updated.Height != spec.Height;
+                        return updated;
                     })
                     .ToArray();
-                assignments = ManagedLayout.ArrangeFlex(
-                    corrected,
-                    style.Axis,
-                    inner.Width,
-                    inner.Height,
-                    style.Spacing,
-                    style.RowGap,
-                    style.Wrap,
-                    style.MainAlignment,
-                    style.CrossAlignment
-                );
+                if (correctionChanged)
+                    assignments = ManagedLayout.ArrangeFlex(
+                        corrected,
+                        style.Axis,
+                        inner.Width,
+                        inner.Height,
+                        style.Spacing,
+                        style.RowGap,
+                        style.Wrap,
+                        style.MainAlignment,
+                        style.CrossAlignment
+                    );
             }
 
             var byIndex = assignments.ToDictionary(value => value.Index);
@@ -1602,6 +1612,7 @@ public static partial class SceneLayout
                     style.CrossAlignment
                 );
                 var byIndex = wrapped.ToDictionary(assignment => assignment.Index);
+                var correctionChanged = false;
                 specs = specs
                     .Select(spec =>
                     {
@@ -1619,7 +1630,7 @@ public static partial class SceneLayout
                             cache,
                             assignedWidth
                         );
-                        return spec with
+                        var updated = spec with
                         {
                             Height = Constrain(
                                 childIntrinsic.Height,
@@ -1627,19 +1638,23 @@ public static partial class SceneLayout
                                 childStyle.MaxHeight
                             ),
                         };
+                        // Height is the only input replaced by this correction.
+                        correctionChanged |= updated.Height != spec.Height;
+                        return updated;
                     })
                     .ToArray();
-                wrapped = ManagedLayout.ArrangeFlex(
-                    specs,
-                    LayoutAxis.Row,
-                    wrapWidth,
-                    0,
-                    style.Spacing,
-                    style.RowGap,
-                    true,
-                    style.MainAlignment,
-                    style.CrossAlignment
-                );
+                if (correctionChanged)
+                    wrapped = ManagedLayout.ArrangeFlex(
+                        specs,
+                        LayoutAxis.Row,
+                        wrapWidth,
+                        0,
+                        style.Spacing,
+                        style.RowGap,
+                        true,
+                        style.MainAlignment,
+                        style.CrossAlignment
+                    );
                 foreach (var assignment in wrapped)
                     height = Math.Max(
                         height,

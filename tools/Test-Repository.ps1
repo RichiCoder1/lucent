@@ -2,7 +2,9 @@ param(
     [ValidateSet('Managed', 'Native', 'Published', 'Sdk', 'Assets', 'Performance', 'Accessibility')]
     [string] $Suite = 'Managed',
     [string[]] $Project = @(),
-    [string] $Filter
+    [string] $Filter,
+    [ValidateSet('Fixed', 'IssueBrowser', 'LegacyIssueBrowser')]
+    [string] $PerformanceWorkload = 'Fixed'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +24,7 @@ $managedProjects = @(
     'tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj',
     'tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj',
     'tests/Lucent.ComponentBrowser.Tests/Lucent.ComponentBrowser.Tests.csproj',
+    'tests/Lucent.Performance.Tests/Lucent.Performance.Tests.csproj',
     'tests/Lucent.Lui.Compiler.Tests/Lucent.Lui.Compiler.Tests.csproj',
     'tests/Lucent.Lui.Tooling.Tests/Lucent.Lui.Tooling.Tests.csproj',
     'tests/Lucent.Lui.Generator.Tests/Lucent.Lui.Generator.Tests.csproj',
@@ -84,6 +87,9 @@ function Invoke-Managed {
         & (Join-Path $PSScriptRoot 'Verify-CoreArchitecture.ps1') -Configuration $configuration -Negative
         if ($LASTEXITCODE) { throw 'Core architecture proof failed.' }
     }
+}
+if ($Suite -ne 'Performance' -and $PSBoundParameters.ContainsKey('PerformanceWorkload')) {
+    throw '-PerformanceWorkload applies only to the Performance suite.'
 }
 
 function Reset-ArtifactDirectory([string] $RelativePath) {
@@ -182,15 +188,64 @@ function Invoke-Accessibility {
     Invoke-DesktopTests $published 'FullyQualifiedName~AxeScan'
 }
 function Invoke-Performance {
-    & (Join-Path $PSScriptRoot 'Measure-LuiTooling.ps1') -Verify
-    if ($LASTEXITCODE) { throw 'LUI tooling performance proof failed.' }
-    $published = Publish-DesktopFixtures
+    # Publish before measurement. Keep every invocation's evidence, including failures.
+    $run = Join-Path $root ('artifacts/test/performance/' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $run -Force
+    Write-Output "Performance $PerformanceWorkload evidence: $run"
+    $preparationLog = Join-Path $run 'preparation.log'
+    if ($PerformanceWorkload -eq 'Fixed') {
+        $appPublish = Reset-ArtifactDirectory 'artifacts/test/performance-fixture'
+        $appProject = 'tests/Lucent.Performance.Fixture/Lucent.Performance.Fixture.csproj'
+        $appName = 'Lucent.Performance.Fixture.exe'
+    }
+    else {
+        $appPublish = Reset-ArtifactDirectory 'artifacts/test/issue-browser'
+        $appProject = 'apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj'
+        $appName = 'Lucent.IssueBrowser.exe'
+    }
+    Invoke-Dotnet @('restore', $appProject, '--locked-mode') | Tee-Object -FilePath $preparationLog -Append
+    Invoke-Dotnet @('publish', $appProject, '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $appPublish) | Tee-Object -FilePath $preparationLog -Append
+    & (Join-Path $PSScriptRoot 'Write-PerformanceIdentity.ps1') -PublishDirectory $appPublish -Executable $appName -DotnetPath $dotnet
     $verifierPublish = Reset-ArtifactDirectory 'artifacts/test/performance-verifier'
-    Invoke-Dotnet @('restore', 'tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj', '--locked-mode')
-    Invoke-Dotnet @('publish', 'tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj', '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $verifierPublish)
+    Invoke-Dotnet @('restore', 'tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj', '--locked-mode') | Tee-Object -FilePath $preparationLog -Append
+    Invoke-Dotnet @('publish', 'tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj', '--no-restore', '-c', $configuration, '-r', 'win-x64', '-o', $verifierPublish) | Tee-Object -FilePath $preparationLog -Append
     $verifier = Join-Path $verifierPublish 'Lucent.Performance.Verifier.exe'
-    & $verifier --app $published.AppExe
-    if ($LASTEXITCODE) { throw 'Performance verifier failed.' }
+    $appExe = Join-Path $appPublish $appName
+    if ($PerformanceWorkload -eq 'Fixed') {
+        & (Join-Path $PSScriptRoot 'Measure-LuiTooling.ps1') -Verify -ResultsPath (Join-Path $run 'tooling.json')
+        if ($LASTEXITCODE) { throw "LUI tooling performance proof failed; evidence: $run" }
+        $arguments = @('--fixed-app', $appExe)
+    }
+    elseif ($PerformanceWorkload -eq 'IssueBrowser') {
+        try {
+            & (Join-Path $PSScriptRoot 'Measure-IssueBrowser.ps1') -AppExe $appExe -OutputDirectory $run
+        }
+        catch { Write-Warning $_.Exception.Message }
+        # Even an interrupted corpus is evaluated, with its partial observations retained.
+        $arguments = @('--characterization', (Join-Path $run 'characterization.json'))
+    }
+    else { $arguments = @('--app', $appExe) }
+    $reportPath = Join-Path $run 'report.json'
+    & $verifier @arguments 1> $reportPath 2> (Join-Path $run 'verifier.log')
+    $verifierExit = $LASTEXITCODE
+    Write-Output "Performance $PerformanceWorkload evidence: $run"
+    if ($PerformanceWorkload -ne 'IssueBrowser' -and (Test-Path -LiteralPath $reportPath)) {
+        $rawLog = $null
+        try { $rawLog = (Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json).rawLog }
+        catch {
+            Write-Warning "Verifier output was not valid JSON; original streams remain in $run."
+            $verifierExit = 1
+            $marker = Get-Content -LiteralPath (Join-Path $run 'verifier.log') | Where-Object { $_.StartsWith('Lucent performance diagnostics: ') } | Select-Object -Last 1
+            if ($marker) { $rawLog = $marker.Substring('Lucent performance diagnostics: '.Length) }
+        }
+        if ($rawLog -and (Test-Path -LiteralPath $rawLog)) {
+            Copy-Item -LiteralPath $rawLog -Destination (Join-Path $run 'frames.log')
+            if (Test-Path -LiteralPath ($rawLog + '.phases.jsonl')) {
+                Copy-Item -LiteralPath ($rawLog + '.phases.jsonl') -Destination (Join-Path $run 'phases.jsonl')
+            }
+        }
+    }
+    if ($verifierExit) { throw "Performance $PerformanceWorkload verifier failed ($verifierExit); evidence: $run" }
 }
 
 Push-Location $root

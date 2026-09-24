@@ -8,7 +8,7 @@
     <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../apps/Lucent.IssueBrowser/Lucent.IssueBrowser.csproj" />
-    <ProjectReference Include="../../src/Lucent.Renderer.Skia/Lucent.Renderer.Skia.csproj" />
+    <ProjectReference Include="../../src/Lucent.Core/Lucent.Core.csproj" />
+    <ProjectReference Include="../../src/Lucent.Platform.Windows/Lucent.Platform.Windows.csproj" />
   </ItemGroup>
 </Project>

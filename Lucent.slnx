@@ -34,6 +34,8 @@
   <Project Path="tests/Lucent.IssueBrowser.Tests/Lucent.IssueBrowser.Tests.csproj" />
   <Project Path="tests/Lucent.ComponentBrowser.Tests/Lucent.ComponentBrowser.Tests.csproj" />
   <Project Path="tests/Lucent.Performance.Verifier/Lucent.Performance.Verifier.csproj" />
+  <Project Path="tests/Lucent.Performance.Fixture/Lucent.Performance.Fixture.csproj" />
+  <Project Path="tests/Lucent.Performance.Tests/Lucent.Performance.Tests.csproj" />
   <Project Path="tests/Lucent.Platform.Windows.Tests/Lucent.Platform.Windows.Tests.csproj" />
   <Project Path="tests/Lucent.Platform.Windows.TestHost/Lucent.Platform.Windows.TestHost.csproj" />
   <Project Path="tests/Lucent.Renderer.Skia.Tests/Lucent.Renderer.Skia.Tests.csproj" />

@@ -1,5 +1,24 @@
 # Current work and follow-ups
 
+## Performance implementation and native validation — September 24, 2026
+
+#314's reporting/ownership corrections and #315's separate versioned workloads
+are implemented. #316 retains exact-height Grid/Flex/intrinsic arrangement reuse;
+#317 is a measured defer. See the [execution record](../plans/performance-execution.md)
+for baseline/candidate series, contract migration and verification boundaries.
+Core 674, Skia 93 (three existing opt-in skips) and Issue Browser 22 pass. The
+focused reporting checks and final NativeAOT publication are recorded in the
+execution record.
+
+Performance remains failed at the unchanged native resize p95 limit. The fresh
+final-verifier corpus completed 500 inputs and 500 resizes, with idle zero and
+all resource/managed/cleanup checks passing. [#318](https://github.com/RichiCoder1/lucent/issues/318)
+owns presentation-tail investigation. #315 and #313 remain open: incomplete app
+characterization does not establish full application coverage. Local diagnostic
+follow-ups await disposition; preserve the ignored evidence directories.
+Do not start navigation #205 or live
+compilation as part of this batch. Older queued/paused sections below are historical.
+
 ## Performance planning received; implementation queued — September 23, 2026
 
 Design and UI handed off [#313](https://github.com/RichiCoder1/lucent/issues/313)

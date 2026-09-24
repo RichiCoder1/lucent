@@ -11,44 +11,71 @@ internal static class InputDispatchProbe
     internal static int Run()
     {
         var observations = new List<Observation>();
-        foreach (
-            var scenario in new[]
-            {
-                (Shape: "flat", Count: 101),
-                (Shape: "flat", Count: FlatElementCount),
-                (Shape: "deep", Count: 21),
-                (Shape: "deep", Count: DeepElementCount),
-            }
-        )
+        string? incompleteScenario = null;
+        Exception? failure = null;
+        try
         {
-            using var fixture = Fixture.Create(scenario.Shape, scenario.Count);
-            Measure(
-                fixture,
-                "pointer",
-                () =>
-                    fixture.Router.DispatchPointer(new(PointerCommandKind.Move, 1, 1, 1)).Status
-                    == InputDispatchStatus.Delivered,
-                observations
-            );
-            Measure(
-                fixture,
-                "key",
-                () =>
-                    fixture.Router.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Status
-                    == InputDispatchStatus.Delivered,
-                observations
-            );
-            Measure(
-                fixture,
-                "focus-same-target",
-                () => fixture.Router.FocusSemantic(fixture.FocusIdentity),
-                observations
-            );
+            foreach (
+                var scenario in new[]
+                {
+                    (Shape: "flat", Count: 101),
+                    (Shape: "flat", Count: FlatElementCount),
+                    (Shape: "deep", Count: 21),
+                    (Shape: "deep", Count: DeepElementCount),
+                }
+            )
+            {
+                incompleteScenario = $"{scenario.Shape}-{scenario.Count}/setup";
+                using var fixture = Fixture.Create(scenario.Shape, scenario.Count);
+                incompleteScenario = $"{scenario.Shape}-{scenario.Count}/pointer";
+                Measure(
+                    fixture,
+                    "pointer",
+                    () =>
+                        fixture.Router.DispatchPointer(new(PointerCommandKind.Move, 1, 1, 1)).Status
+                        == InputDispatchStatus.Delivered,
+                    observations
+                );
+                incompleteScenario = $"{scenario.Shape}-{scenario.Count}/key";
+                Measure(
+                    fixture,
+                    "key",
+                    () =>
+                        fixture.Router.DispatchKey(new(KeyCommandKind.Down, Key.Enter)).Status
+                        == InputDispatchStatus.Delivered,
+                    observations
+                );
+                incompleteScenario = $"{scenario.Shape}-{scenario.Count}/focus-same-target";
+                Measure(
+                    fixture,
+                    "focus-same-target",
+                    () => fixture.Router.FocusSemantic(fixture.FocusIdentity),
+                    observations
+                );
+                incompleteScenario = $"{scenario.Shape}-{scenario.Count}/teardown";
+            }
+        }
+        catch (Exception error)
+        {
+            failure = error;
+            Console.Error.WriteLine("Lucent input dispatch probe: FAIL: " + error);
         }
 
         using var output = Console.OpenStandardOutput();
         using var writer = new Utf8JsonWriter(output, new() { Indented = true });
         writer.WriteStartObject();
+        writer.WriteNumber("schemaVersion", 1);
+        writer.WriteString("status", failure is null ? "complete" : "failed");
+        if (failure is null)
+        {
+            writer.WriteNull("incompleteScenario");
+            writer.WriteNull("fatalError");
+        }
+        else
+        {
+            writer.WriteString("incompleteScenario", incompleteScenario);
+            writer.WriteString("fatalError", failure.ToString());
+        }
         writer.WriteNumber("samples", Samples);
         writer.WriteStartArray("observations");
         foreach (var observation in observations)
@@ -57,15 +84,25 @@ internal static class InputDispatchProbe
             writer.WriteString("shape", observation.Shape);
             writer.WriteString("operation", observation.Operation);
             writer.WriteNumber("elementCount", observation.ElementCount);
-            writer.WriteNumber("allocatedBytesPerDispatch", observation.AllocatedBytesPerDispatch);
-            writer.WriteNumber("nanosecondsPerDispatch", observation.NanosecondsPerDispatch);
+            if (observation.AllocatedBytesPerDispatch is { } allocated)
+                writer.WriteNumber("allocatedBytesPerDispatch", allocated);
+            else
+                writer.WriteNull("allocatedBytesPerDispatch");
+            if (observation.NanosecondsPerDispatch is { } nanoseconds)
+                writer.WriteNumber("nanosecondsPerDispatch", nanoseconds);
+            else
+                writer.WriteNull("nanosecondsPerDispatch");
+            writer.WriteNumber("completedDispatches", observation.CompletedDispatches);
+            writer.WriteBoolean("complete", observation.Complete);
+            writer.WriteNumber("batchAllocatedBytes", observation.BatchAllocatedBytes);
+            writer.WriteNumber("batchElapsedNanoseconds", observation.BatchElapsedNanoseconds);
             writer.WriteEndObject();
         }
         writer.WriteEndArray();
         writer.WriteEndObject();
         writer.Flush();
         Console.WriteLine();
-        return 0;
+        return failure is null ? 0 : 1;
     }
 
     private static void Measure(
@@ -80,20 +117,50 @@ internal static class InputDispatchProbe
                 throw new InvalidOperationException(operation + " warmup was rejected.");
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
-        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        var allocationStart = GC.GetAllocatedBytesForCurrentThread();
         var started = Stopwatch.GetTimestamp();
-        for (var index = 0; index < Samples; index++)
-            if (!dispatch())
-                throw new InvalidOperationException(operation + " sample was rejected.");
-        var elapsed = Stopwatch.GetElapsedTime(started);
-        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        var completed = 0;
+        try
+        {
+            for (var index = 0; index < Samples; index++)
+            {
+                if (!dispatch())
+                    throw new InvalidOperationException(operation + " sample was rejected.");
+                completed++;
+            }
+        }
+        catch
+        {
+            var partialElapsed = Stopwatch.GetElapsedTime(started).TotalNanoseconds;
+            var partialAllocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+            observations.Add(
+                new(
+                    fixture.Shape,
+                    operation,
+                    fixture.ElementCount,
+                    null,
+                    null,
+                    completed,
+                    false,
+                    partialAllocated,
+                    partialElapsed
+                )
+            );
+            throw;
+        }
+        var elapsed = Stopwatch.GetElapsedTime(started).TotalNanoseconds;
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
         observations.Add(
             new(
                 fixture.Shape,
                 operation,
                 fixture.ElementCount,
                 allocated / Samples,
-                elapsed.TotalNanoseconds / Samples
+                elapsed / Samples,
+                completed,
+                true,
+                allocated,
+                elapsed
             )
         );
     }
@@ -105,7 +172,8 @@ internal static class InputDispatchProbe
             int elementCount,
             Composition composition,
             InputRouter router,
-            ElementIdentity focusIdentity
+            ElementIdentity focusIdentity,
+            RetainedScene scene
         )
         {
             Shape = shape;
@@ -113,6 +181,7 @@ internal static class InputDispatchProbe
             Composition = composition;
             Router = router;
             FocusIdentity = focusIdentity;
+            Scene = scene;
         }
 
         internal string Shape { get; }
@@ -120,35 +189,60 @@ internal static class InputDispatchProbe
         internal Composition Composition { get; }
         internal InputRouter Router { get; }
         internal ElementIdentity FocusIdentity { get; }
+        private RetainedScene Scene { get; }
 
         internal static Fixture Create(string shape, int count)
         {
             var graph = new ReactiveGraph();
             var composition = new Composition(graph, "input-dispatch-" + shape);
-            var theme = new ThemeContext(composition.Root.Scope, new Theme("input-dispatch"));
-            Present(composition.Root, theme);
-            var parent = composition.Root;
-            Element focus = parent;
-            for (var index = 1; index < count; index++)
+            RetainedScene? scene = null;
+            try
             {
-                parent = composition.Child(
-                    shape == "flat" ? composition.Root : parent,
-                    "item-" + index
+                var theme = new ThemeContext(composition.Root.Scope, new Theme("input-dispatch"));
+                Present(composition.Root, theme);
+                var parent = composition.Root;
+                Element focus = parent;
+                for (var index = 1; index < count; index++)
+                {
+                    parent = composition.Child(
+                        shape == "flat" ? composition.Root : parent,
+                        "item-" + index
+                    );
+                    Present(parent, theme);
+                    focus = parent;
+                }
+                focus.AttachBehaviors(new DispatchBehavior());
+                var router = composition.Input;
+                scene = SceneLayout.Project(composition, new(10, 10, 1), new EmptyShaper());
+                if (
+                    !router.SetScene(scene)
+                    || !router.FocusSemantic(new(composition.Epoch, focus.Id))
+                )
+                    throw new InvalidOperationException(
+                        "Input dispatch fixture did not install or focus."
+                    );
+                return new(
+                    shape,
+                    count,
+                    composition,
+                    router,
+                    new(composition.Epoch, focus.Id),
+                    scene
                 );
-                Present(parent, theme);
-                focus = parent;
             }
-            focus.AttachBehaviors(new DispatchBehavior());
-            var router = composition.Input;
-            var scene = SceneLayout.Project(composition, new(10, 10, 1), new EmptyShaper());
-            if (!router.SetScene(scene) || !router.FocusSemantic(new(composition.Epoch, focus.Id)))
-                throw new InvalidOperationException(
-                    "Input dispatch fixture did not install or focus."
-                );
-            return new(shape, count, composition, router, new(composition.Epoch, focus.Id));
+            catch
+            {
+                scene?.Dispose();
+                composition.Dispose();
+                throw;
+            }
         }
 
-        public void Dispose() => Composition.Dispose();
+        public void Dispose()
+        {
+            Scene.Dispose();
+            Composition.Dispose();
+        }
 
         private static void Present(Element element, ThemeContext theme) =>
             element.Present(
@@ -184,7 +278,11 @@ internal static class InputDispatchProbe
         string Shape,
         string Operation,
         int ElementCount,
-        long AllocatedBytesPerDispatch,
-        double NanosecondsPerDispatch
+        long? AllocatedBytesPerDispatch,
+        double? NanosecondsPerDispatch,
+        int CompletedDispatches,
+        bool Complete,
+        long BatchAllocatedBytes,
+        double BatchElapsedNanoseconds
     );
 }
