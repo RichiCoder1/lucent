@@ -159,22 +159,21 @@ internal sealed unsafe partial class WindowsUiaTextRange
         var needle = Marshal.PtrToStringBSTR(text) ?? "";
         if (needle.Length == 0)
             return WindowsUiaProvider.InvalidArgument;
-        var comparison =
-            ignoreCase != 0
-                ? StringComparison.CurrentCultureIgnoreCase
-                : StringComparison.CurrentCulture;
-        var haystack = snapshot.Text.Substring(start, end - start);
+        var comparison = CultureInfo.CurrentCulture.CompareInfo;
+        var options = ignoreCase != 0 ? CompareOptions.IgnoreCase : CompareOptions.None;
+        var haystack = snapshot.Text.AsSpan(start, end - start);
+        int matchLength;
         var relative =
             backward != 0
-                ? haystack.LastIndexOf(needle, comparison)
-                : haystack.IndexOf(needle, comparison);
+                ? comparison.LastIndexOf(haystack, needle, options, out matchLength)
+                : comparison.IndexOf(haystack, needle, options, out matchLength);
         if (relative < 0)
             return WindowsUiaProvider.Ok;
         var found = start + relative;
         result = new WindowsUiaTextRange(
             _owner,
             found,
-            found + needle.Length
+            found + matchLength
         ).CreateInterfacePointer();
         return result == 0 ? WindowsUiaProvider.OutOfMemory : WindowsUiaProvider.Ok;
     }

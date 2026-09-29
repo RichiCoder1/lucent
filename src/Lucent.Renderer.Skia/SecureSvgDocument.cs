@@ -97,6 +97,7 @@ internal sealed record SecureSvgDocument(
             var references = new Dictionary<XElement, List<string>>();
             var rasterPixels = new Dictionary<XElement, long>();
             var transforms = new Dictionary<XElement, Matrix3x2>();
+            var localTransforms = new Dictionary<XElement, Matrix3x2>();
             long pathCharacters = 0;
             long embeddedPixels = 0;
             var filters = 0;
@@ -109,6 +110,13 @@ internal sealed record SecureSvgDocument(
                     );
                 if (node != root && node.Name.LocalName == "svg")
                     throw Unsupported("Nested SVG viewports are unsupported.");
+                if (
+                    node.Name.LocalName == "use"
+                    && node.Ancestors().Any(a => a.Name.LocalName is "clipPath" or "mask")
+                )
+                    throw Unsupported(
+                        "SVG use inside clip paths or masks requires a separate resource coordinate domain and is unsupported."
+                    );
                 if (node.Attribute("id") is { } id && !ids.TryAdd(id.Value, node))
                     throw Invalid($"Duplicate SVG id '{id.Value}'.");
                 if (
@@ -122,6 +130,7 @@ internal sealed record SecureSvgDocument(
                     );
                 var refs = references[node] = [];
                 var localTransform = ParseTransform(node.Attribute("transform")?.Value);
+                localTransforms[node] = localTransform;
                 var cumulativeTransform =
                     node.Parent is { } parent && transforms.TryGetValue(parent, out var inherited)
                         ? localTransform * inherited
@@ -249,6 +258,7 @@ internal sealed record SecureSvgDocument(
             if (width > 4096 || height > 4096)
                 throw Budget("SVG intrinsic viewport exceeds 4096 units per axis.");
             ValidateRootSize(root, metadata);
+            ValidateInstanceTransforms(root, ids, localTransforms, new(width, height), token);
             var filterExtent = ValidateFilterBounds(nodes, width, height, filters);
             // Resolve percentages from already-validated metadata, never from raster buckets.
             // Image layout resolves viewport-relative axes; vector drawing scales this logical viewport.
@@ -421,6 +431,178 @@ internal sealed record SecureSvgDocument(
         )
             if (!float.IsFinite(entry) || Math.Abs(entry) > 1_000_000)
                 throw Budget("SVG cumulative transform exceeds the finite matrix budget.");
+    }
+
+    private static void ValidateInstanceTransforms(
+        XElement root,
+        Dictionary<string, XElement> ids,
+        Dictionary<XElement, Matrix3x2> transforms,
+        Vector2 viewport,
+        CancellationToken token
+    )
+    {
+        // The structural walk has already bounded expansion and rejected cycles. This walk
+        // follows geometry instantiation only: paint-server hrefs are not cloned geometry.
+        // A use clone inherits its placement, never the original definition's ancestors.
+        void Visit(XElement node, Matrix3x2 inherited, Vector2 size, bool instance = false)
+        {
+            token.ThrowIfCancellationRequested();
+            if (
+                !instance
+                && node.Name.LocalName
+                    is "defs"
+                        or "symbol"
+                        or "clipPath"
+                        or "mask"
+                        or "linearGradient"
+                        or "radialGradient"
+                        or "filter"
+                        or "style"
+            )
+                return;
+            var current = transforms[node] * inherited;
+            CheckTransform(current);
+            if (node == root || node.Name.LocalName == "symbol")
+            {
+                current = ViewportTransform(node, size, out size) * current;
+                CheckTransform(current);
+            }
+            if (node.Name.LocalName == "use")
+            {
+                current =
+                    Matrix3x2.CreateTranslation(
+                        InstanceLength(node, "x", size.X, 0),
+                        InstanceLength(node, "y", size.Y, 0)
+                    ) * current;
+                CheckTransform(current);
+                foreach (var href in node.Attributes().Where(a => a.Name.LocalName == "href"))
+                {
+                    var target = ids[href.Value[1..]];
+                    var targetSize = size;
+                    if (target.Name.LocalName == "symbol")
+                    {
+                        targetSize = new(
+                            InstanceLength(node, "width", size.X, size.X),
+                            InstanceLength(node, "height", size.Y, size.Y)
+                        );
+                        if (targetSize.X < 0 || targetSize.Y < 0)
+                            throw Invalid("SVG use dimensions cannot be negative.");
+                        if (targetSize.X == 0 || targetSize.Y == 0)
+                            continue;
+                    }
+                    Visit(target, current, targetSize, instance: true);
+                }
+            }
+            foreach (var child in node.Elements())
+                Visit(child, current, size);
+        }
+        Visit(root, Matrix3x2.Identity, viewport);
+    }
+
+    private static float InstanceLength(XElement node, string name, float relative, float fallback)
+    {
+        var value = node.Attribute(name)?.Value.Trim();
+        if (value is null)
+            return fallback;
+        var factor = 1f;
+        if (value.EndsWith('%'))
+        {
+            value = value[..^1];
+            factor = relative / 100;
+        }
+        else
+        {
+            foreach (
+                var (unit, scale) in new[]
+                {
+                    ("px", 1f),
+                    ("pt", 96f / 72),
+                    ("pc", 16f),
+                    ("in", 96f),
+                    ("cm", 96f / 2.54f),
+                    ("mm", 96f / 25.4f),
+                    ("Q", 96f / 101.6f),
+                }
+            )
+            {
+                if (!value.EndsWith(unit, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                value = value[..^unit.Length];
+                factor = scale;
+                break;
+            }
+        }
+        if (
+            !float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
+        )
+            throw Unsupported(
+                "SVG use placement requires user units, absolute units or percentages."
+            );
+        var result = number * factor;
+        if (!float.IsFinite(result))
+            throw Budget("SVG use placement exceeds the finite matrix budget.");
+        return result;
+    }
+
+    private static Matrix3x2 ViewportTransform(
+        XElement node,
+        Vector2 viewport,
+        out Vector2 childViewport
+    )
+    {
+        childViewport = viewport;
+        if (node.Attribute("viewBox") is not { } attribute)
+            return Matrix3x2.Identity;
+        var values = attribute
+            .Value.Split([' ', ',', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(v => float.Parse(v, CultureInfo.InvariantCulture))
+            .ToArray();
+        if (
+            values.Length != 4
+            || values.Any(v => !float.IsFinite(v))
+            || values[2] <= 0
+            || values[3] <= 0
+        )
+            throw Invalid("SVG viewBox requires four finite numbers and positive dimensions.");
+        childViewport = new(values[2], values[3]);
+        var scale = viewport / childViewport;
+        var alignment = (node.Attribute("preserveAspectRatio")?.Value ?? "xMidYMid meet")
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .AsSpan();
+        if (alignment.Length > 0 && alignment[0] == "defer")
+            alignment = alignment[1..];
+        if (
+            alignment.Length is < 1 or > 2
+            || (alignment.Length == 2 && alignment[1] is not ("meet" or "slice"))
+        )
+            throw Unsupported("SVG preserveAspectRatio is unsupported.");
+        var offset = Vector2.Zero;
+        if (alignment[0] != "none")
+        {
+            var align = alignment[0];
+            if (align.Length != 8 || align[0] != 'x' || align[4] != 'Y')
+                throw Unsupported("SVG preserveAspectRatio alignment is unsupported.");
+            float Align(string value) =>
+                value switch
+                {
+                    "Min" => 0,
+                    "Mid" => .5f,
+                    "Max" => 1,
+                    _ => throw Unsupported("SVG preserveAspectRatio alignment is unsupported."),
+                };
+            var uniform =
+                alignment.Length == 2 && alignment[1] == "slice"
+                    ? Math.Max(scale.X, scale.Y)
+                    : Math.Min(scale.X, scale.Y);
+            scale = new(uniform);
+            offset =
+                (viewport - childViewport * scale)
+                * new Vector2(Align(align[1..4]), Align(align[5..]));
+        }
+        var translation = offset - new Vector2(values[0], values[1]) * scale;
+        var matrix = new Matrix3x2(scale.X, 0, 0, scale.Y, translation.X, translation.Y);
+        CheckTransform(matrix);
+        return matrix;
     }
 
     private static double ValidateFilterBounds(

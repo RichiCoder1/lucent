@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using Lucent.Core;
 using Lucent.Renderer.Skia;
@@ -21,7 +22,8 @@ public sealed unsafe partial class UiaLifecycleContracts
             var element = composition.Child(composition.Root, "editor");
             var source =
                 "A😀\nCafe\u0301\nlast\n"
-                + string.Join('\n', Enumerable.Range(4, 20).Select(line => $"line {line}"));
+                + string.Join('\n', Enumerable.Range(4, 20).Select(line => $"line {line}"))
+                + "\na\u00adb ab Café Cafe\u0301";
             using var session = new EditorSession(
                 composition.Root.Scope,
                 "uia-document",
@@ -150,6 +152,8 @@ public sealed unsafe partial class UiaLifecycleContracts
                     "GetCaretRange failed."
                 );
                 Assert(active == 0, "GetCaretRange returned a non-BOOL activity value.");
+                FindTextReturnsExactSourceRanges(document, session, source.Length - 17);
+                session.SetSelection(1, 3);
                 var comparison = 1;
                 Assert(
                     Range(caret, 5, 0, caret, 1, &comparison) == WindowsUiaProvider.Ok
@@ -292,6 +296,65 @@ public sealed unsafe partial class UiaLifecycleContracts
         }
     }
 
+    private static void FindTextReturnsExactSourceRanges(
+        nint document,
+        EditorSession session,
+        int offset
+    )
+    {
+        var previousCulture = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+        try
+        {
+            foreach (
+                var (needle, backward, ignoreCase, start, end, expected) in new[]
+                {
+                    ("ab", 0, 0, offset, offset + 3, "a\u00adb"),
+                    ("a\u00adb", 1, 0, offset + 4, offset + 6, "ab"),
+                    ("AB", 0, 1, offset, offset + 3, "a\u00adb"),
+                    ("CAFE\u0301", 1, 1, offset + 12, offset + 17, "Cafe\u0301"),
+                    ("Café", 1, 0, offset + 12, offset + 17, "Cafe\u0301"),
+                    ("\u00ad", 0, 0, 0, 0, ""),
+                    ("\u00ad", 1, 0, session.Text.Length, session.Text.Length, ""),
+                }
+            )
+            {
+                var query = Marshal.StringToBSTR(needle);
+                nint match = 0;
+                try
+                {
+                    Assert(
+                        FindRangeText(document, query, backward, ignoreCase, &match)
+                            == WindowsUiaProvider.Ok
+                            && match != 0,
+                        $"FindText failed for '{needle}' (backward={backward})."
+                    );
+                    Assert(
+                        ReadRange(match, -1) == expected,
+                        $"FindText returned the wrong text for '{needle}'."
+                    );
+                    Assert(
+                        Range(match, 16) == WindowsUiaProvider.Ok,
+                        "FindText range could not be selected."
+                    );
+                    Assert(
+                        session.Anchor == start && session.Caret == end,
+                        $"FindText returned [{session.Anchor}, {session.Caret}) instead of [{start}, {end})."
+                    );
+                }
+                finally
+                {
+                    Release(match);
+                    Marshal.FreeBSTR(query);
+                }
+            }
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+        }
+    }
+
     private static void ConcurrentRangeReadsRemainCoherent(nint range)
     {
         Parallel.For(
@@ -405,6 +468,21 @@ public sealed unsafe partial class UiaLifecycleContracts
         ((delegate* unmanaged[Stdcall]<nint, nint, int*, int>)(*(nint**)pointer)[slot])(
             pointer,
             target,
+            value
+        );
+
+    private static int FindRangeText(
+        nint pointer,
+        nint text,
+        int backward,
+        int ignoreCase,
+        nint* value
+    ) =>
+        ((delegate* unmanaged[Stdcall]<nint, nint, int, int, nint*, int>)(*(nint**)pointer)[8])(
+            pointer,
+            text,
+            backward,
+            ignoreCase,
             value
         );
 

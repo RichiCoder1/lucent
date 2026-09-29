@@ -58,6 +58,22 @@ Formatting and scoped whitespace checks pass. Evidence is retained under
 The repository's test wrapper discovered zero tests on this invocation; directly
 executing the freshly built test assembly ran the required cases. Package/CI
 delivery remains to be verified separately; no desktop walkthrough is claimed.
+Source and planning updates are pushed as `6bfb0a4e`; CI 90 is running.
+
+### Asset/UIA boundaries — #322
+
+SVG admission now carries geometry-instance transforms through `use` placement
+and root/symbol viewports, retaining the existing graph expansion limits. The
+bounded subset explicitly declines `use` inside clip/mask resources and
+font-relative placement; supported and rejected cases are documented in ASSETS.
+Culture-sensitive UIA FindText now uses the actual source match length.
+
+Before the fix, eight SVG admission cases and the soft-hyphen UIA match failed.
+The corrected Skia suite passes 103 cases with three existing opt-in skips.
+The noninteractive hidden-window UIA text contract passes, including seven exact
+range cases through the provider ABI. Both affected builds are warning-clean;
+formatting and scoped whitespace checks pass. Evidence is under
+`artifacts/review-c9-c10`. No app window or focus-taking input was used.
 
 ### Notes integrity — #11
 

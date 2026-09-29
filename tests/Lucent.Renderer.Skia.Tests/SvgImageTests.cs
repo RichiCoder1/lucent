@@ -170,6 +170,9 @@ public sealed class SvgImageTests
             "<rect style='animation: spin 1s'/>",
             "<filter id='f'><feGaussianBlur in='missing'/></filter><rect filter='url(#f)'/>",
             "<filter id='f'><feGaussianBlur/></filter><rect transform='scale(1000)' filter='url(#f)'/>",
+            "<defs><rect id='shape'/><clipPath id='clip'><use href='#shape'/></clipPath></defs><rect clip-path='url(#clip)'/>",
+            "<defs><rect id='shape'/><mask id='mask'><use href='#shape'/></mask></defs><rect mask='url(#mask)'/>",
+            "<defs><rect id='shape'/></defs><use href='#shape' x='1em'/>",
         ];
         foreach (var body in bodies)
         {
@@ -240,6 +243,71 @@ public sealed class SvgImageTests
     }
 
     [TestMethod]
+    [DataRow(
+        "<defs><rect id='shape' transform='scale(1000)'/><use id='instance' href='#shape' transform='scale(1000)'/></defs><use href='#instance' transform='scale(2)'/>"
+    )]
+    [DataRow(
+        "<defs><rect id='shape'/><use id='instance' href='#shape' x='600000'/></defs><use href='#instance' x='600000'/>"
+    )]
+    [DataRow(
+        "<defs><symbol id='shape' viewBox='0 0 0.00001 0.00001'><rect width='1' height='1'/></symbol></defs><use href='#shape' width='100' height='100'/>"
+    )]
+    [DataRow(
+        "<defs><symbol id='shape' viewBox='0 0 1 1'><rect width='1' height='1'/></symbol></defs><use href='#shape' width='2000' height='2000' transform='scale(1000)'/>"
+    )]
+    [DataRow("<rect transform='scale(2000)'/>", "0 0 0.1 0.1")]
+    [DataRow("<rect/>", "10000 0 0.1 0.1")]
+    [DataRow(
+        "<defs><symbol id='shape' viewBox='0 0 0.00001 0.00001'><rect/></symbol></defs><use href='#shape'/>"
+    )]
+    [DataRow(
+        "<defs><symbol id='small' viewBox='0 0 0.001 0.001'><rect/></symbol><symbol id='large' viewBox='0 0 1 1'><use href='#small' width='100%' height='100%'/></symbol></defs><use href='#large' width='2000' height='2000'/>"
+    )]
+    public void RenderedInstanceTransformsRespectMatrixBudget(string body, string? viewBox = null)
+    {
+        var header = viewBox is null ? Header : Header.Replace(">", $" viewBox='{viewBox}'>");
+        Assert.AreEqual(
+            ImageLoadFailureKind.BudgetDeclined,
+            Assert.ThrowsExactly<ImageLoadException>(() => Admit(header + body + Footer)).Kind
+        );
+    }
+
+    [TestMethod]
+    public void RenderedInstanceMatrixBoundaryRemainsAdmitted()
+    {
+        _ = Admit(
+            Header
+                + "<defs><rect id='shape' transform='scale(1000)'/></defs><use href='#shape' transform='scale(1000)'/>"
+                + Footer
+        );
+        _ = Admit(
+            Header
+                + "<defs><symbol id='shape' viewBox='0 0 1 1'><rect/></symbol></defs><use href='#shape' width='1000000' height='100'/>"
+                + Footer
+        );
+    }
+
+    [TestMethod]
+    public void RenderedInstancesUsePlacementTransformsAndSymbolViewport()
+    {
+        using var image = Prepare(
+            Header
+                + """
+                <defs transform="scale(1000000)"><rect id="shape" width="10" height="10" fill="red"/></defs>
+                <use href="#shape" x="5%" transform="scale(2)"/>
+                <symbol id="symbol" viewBox="0 0 20 10"><rect width="20" height="10" fill="blue"/></symbol>
+                <use href="#symbol" x="50" y="50" width="40px" height="40px"/>
+                """
+                + Footer
+        );
+        using var bitmap = Draw(image, 100);
+        Assert.AreEqual(SKColors.Red, bitmap.GetPixel(15, 5));
+        Assert.AreEqual((byte)0, bitmap.GetPixel(5, 5).Alpha);
+        Assert.AreEqual(SKColors.Blue, bitmap.GetPixel(60, 65));
+        Assert.AreEqual((byte)0, bitmap.GetPixel(60, 55).Alpha);
+    }
+
+    [TestMethod]
     public void EmbeddedRasterIsValidatedAndPainted()
     {
         var png = File.ReadAllBytes(
@@ -260,6 +328,15 @@ public sealed class SvgImageTests
             .AsTask()
             .GetAwaiter()
             .GetResult();
+
+    private static SecureSvgDocument Admit(string xml) =>
+        SecureSvgDocument.Read(
+            Encoding.UTF8.GetBytes(xml),
+            new(100, 100),
+            false,
+            _ => throw new InvalidOperationException("This fixture has no embedded raster."),
+            default
+        );
 
     private static ImageSource Source(string xml, AssetImageMetadata? metadata = null)
     {
