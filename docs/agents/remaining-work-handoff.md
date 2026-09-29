@@ -1,5 +1,21 @@
 # Current work and follow-ups
 
+## Review corrections and remaining roadmap resumed — September 29, 2026
+
+The owner authorized all remaining review corrections, then the broader roadmap,
+with completed chunks pushed as needed. Follow the
+[execution record](../plans/comprehensive-review-execution.md). The prior
+performance batch remains complete and its evidence is preserved.
+
+Start with Notes #11 (revision/recovery/failure integrity), Lucent #320
+(navigation lifecycle), #321 (authoring), #322 (SVG/UIA), Notes #12
+(editing/maintenance), #323 (presentation/ergonomics), and #324 (measured work
+reduction). Notes' coherent editor-refresh correction is pushed as `a3a51e8`;
+replayed-write and multiple-failure corrections are being verified separately.
+After review corrections, continue the existing roadmap with issue dependencies
+and feasibility decisions intact. This supersedes the older batch-specific
+instruction not to start #205. Keep advisory/security/Sandbox drafts separate.
+
 ## Performance batch complete — September 29, 2026
 
 #314's reporting/ownership corrections and #315's separate versioned workloads

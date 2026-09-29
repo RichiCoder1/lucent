@@ -543,20 +543,8 @@ public sealed partial class NavigationSession : IDisposable
             EnterTerminal(error);
             throw error;
         }
-        var attempt = _activeAttempt;
-        _activeAttempt = null;
-        _deferredAttempt = null;
-        RequestCancellation(attempt);
-        operation.TryComplete(
-            new NavigationOutcome(operation.Id, NavigationOutcomeKind.Superseded)
-        );
-        if (!_preparationInvocationActive && _replacement is null)
-        {
-            _phase = NavigationPhase.Idle;
-            _pending = null;
-            _pendingSignal.Value = null;
-            PublishIdle();
-        }
+        SupersedeActive();
+        StartDeferredPreparation();
     }
 
     private NavigationOperation CreateOperation()
@@ -593,7 +581,7 @@ public sealed partial class NavigationSession : IDisposable
         return true;
     }
 
-    private static bool TryGetMatch(RouteMatchResult result, NavigationOperation operation)
+    private bool TryGetMatch(RouteMatchResult result, NavigationOperation operation)
     {
         if (result.Status == RouteMatchStatus.Matched && result.Match is not null)
             return true;
@@ -650,16 +638,13 @@ public sealed partial class NavigationSession : IDisposable
         if (_activeAttempt is not { } superseded)
             return;
         _activeAttempt = null;
+        _deferredAttempt = null;
         RequestCancellation(superseded);
         superseded.Operation.TryComplete(
             new NavigationOutcome(superseded.Operation.Id, NavigationOutcomeKind.Superseded)
         );
-        if (!_preparationInvocationActive)
-        {
-            _phase = NavigationPhase.Idle;
-            _pending = null;
-            _pendingSignal.Value = null;
-        }
+        // The caller either starts a new intent or finishes the request. Keep the
+        // preparation phase until that boundary can safely publish idle.
     }
 
     private void BeginPreparation(
@@ -1010,11 +995,15 @@ public sealed partial class NavigationSession : IDisposable
         PublishIdle();
     }
 
-    private static void Complete(
+    private void Complete(
         NavigationOperation operation,
         NavigationOutcomeKind kind,
         NavigationFailureKind failureKind
-    ) => operation.TryComplete(new NavigationOutcome(operation.Id, kind, failureKind));
+    )
+    {
+        operation.TryComplete(new NavigationOutcome(operation.Id, kind, failureKind));
+        StartDeferredPreparation();
+    }
 
     private void SetPhase(NavigationPhase phase)
     {
@@ -1192,6 +1181,8 @@ public sealed partial class NavigationSession : IDisposable
         }
         _participant = EmptyNavigationParticipant.Instance;
         _participantAttached = false;
+        SupersedeActive();
+        StartDeferredPreparation();
     }
 
     private void CheckOwner() => _graph.CheckThread();

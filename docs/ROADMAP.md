@@ -2,6 +2,12 @@
 
 ## Current direction
 
+The owner resumed the remaining review corrections and then the broader roadmap
+on September 29. [The execution record](plans/comprehensive-review-execution.md)
+tracks Notes data integrity, navigation lifecycle, authoring, SVG/UIA hardening,
+presentation, and measured repeated-work follow-ups before new roadmap features.
+The completed performance evidence below remains tied to its original source.
+
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)
 passed managed, package/NativeAOT and publication checks. Light Notes `82c349a`

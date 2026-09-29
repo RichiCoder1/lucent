@@ -5,6 +5,298 @@ namespace Lucent.Core.Tests;
 public sealed partial class RouteOutletContracts
 {
     [TestMethod]
+    public void RootDetachSupersedesPendingPreparationBeforeReplacementAttaches()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "detached-route-preparation");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var (bundle, _) = CreateAuthoringBundle();
+        using var owner = graph.CreateScope("session");
+        using var session = new NavigationSession(owner, bundle.Table, Location("/items/1"));
+        using var handle = new RouteOutletHandle();
+        var gate = new TaskCompletionSource<NavigationPreparationResult>();
+        var enters = 0;
+        var constructed = new List<int>();
+        var options = new RouteOutletOptions(
+            prepare: (_, request, _) =>
+            {
+                if (request.Phase == NavigationPreparationPhase.Leave)
+                    return new(gate.Task);
+                enters++;
+                return ValueTask.FromResult(NavigationPreparationResult.Allow);
+            },
+            resolve: request =>
+            {
+                constructed.Add(request.GetContext<ItemRoute>().Parameters.Id);
+                return request.Default;
+            }
+        );
+        var root = composition.Mount(
+            composition.Root,
+            theme,
+            Components.Router([Components.RouterOutlet(options)], bundle, session: session)
+        );
+        graph.Drain();
+        constructed.Clear();
+        var current = session.Current;
+        var journal = session.Journal;
+        var pending = session.Navigate(Location("/items/2"));
+        Assert.AreEqual(NavigationPhase.PreparingLeave, session.Phase);
+
+        root.Dispose();
+
+        Assert.AreEqual(NavigationOutcomeKind.Superseded, Completed(pending).Kind);
+        Assert.AreEqual(NavigationPhase.Idle, session.Phase);
+        Assert.IsNull(session.Pending);
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Router([Components.RouterOutlet(options, handle)], bundle, session: session)
+        );
+        graph.Drain();
+        var replacement = handle.Snapshot.Levels.Single().ElementId;
+        gate.SetResult(NavigationPreparationResult.Allow);
+        graph.Drain();
+
+        Assert.AreSame(current, session.Current);
+        Assert.AreSame(journal, session.Journal);
+        Assert.AreEqual(0, enters);
+        Assert.HasCount(1, constructed);
+        Assert.AreEqual(1, constructed[0]);
+        Assert.AreEqual(replacement, handle.Snapshot.Levels.Single().ElementId);
+        Assert.IsFalse(session.IsDisposed);
+    }
+
+    [TestMethod]
+    [DataRow("back")]
+    [DataRow("forward")]
+    [DataRow("unmatched")]
+    [DataRow("activation")]
+    [DataRow("foreign-reference")]
+    public void RejectedSupersedingRequestRefreshesTheCommittedDestination(string requestKind)
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "rejected-navigation-refresh");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var (bundle, _) = CreateAuthoringBundle();
+        using var owner = graph.CreateScope("session");
+        using var session = new NavigationSession(owner, bundle.Table, Location("/items/1"));
+        using var handle = new RouteOutletHandle();
+        var alternate = graph.Signal(false, "alternate");
+        var gate = new TaskCompletionSource<NavigationPreparationResult>();
+        var options = new RouteOutletOptions(
+            prepare: (_, _, _) => new(gate.Task),
+            resolve: request =>
+                alternate.Value
+                    ? new RouteDestination(
+                        typeof(AlternatePage),
+                        ComponentRecipe.Create("alternate", static (_, _) => { })
+                    )
+                    : request.Default
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Router([Components.RouterOutlet(options, handle)], bundle, session: session)
+        );
+        graph.Drain();
+        var current = session.Current;
+        var journal = session.Journal;
+        var original = handle.Snapshot.Levels.Single().ElementId;
+        var pending = session.Navigate(Location("/items/2"));
+        alternate.Value = true;
+        graph.Drain();
+        Assert.AreEqual(original, handle.Snapshot.Levels.Single().ElementId);
+
+        var rejected = requestKind switch
+        {
+            "back" => session.Back(),
+            "forward" => session.Forward(),
+            "unmatched" => session.Navigate(Location("/missing")),
+            "activation" => session.Activate("not-an-in-app-location"),
+            _ => session.Navigate(
+                RouteReference.Create(
+                    RoutePattern.Create(
+                        new RouteDefinitionId("foreign"),
+                        [
+                            RouteSegmentPattern.LiteralSegment("items"),
+                            RouteSegmentPattern.LiteralSegment("1"),
+                        ]
+                    ),
+                    []
+                )
+            ),
+        };
+        Assert.AreEqual(NavigationOutcomeKind.Superseded, Completed(pending).Kind);
+        Assert.AreEqual(
+            requestKind is "back" or "forward"
+                ? NavigationOutcomeKind.Stayed
+                : NavigationOutcomeKind.RejectedActivation,
+            Completed(rejected).Kind
+        );
+        graph.Drain();
+
+        Assert.AreEqual(NavigationPhase.Idle, session.Phase);
+        Assert.IsNull(session.Pending);
+        Assert.AreSame(current, session.Current);
+        Assert.AreSame(journal, session.Journal);
+        Assert.AreNotEqual(original, handle.Snapshot.Levels.Single().ElementId);
+        gate.SetResult(NavigationPreparationResult.Allow);
+        graph.Drain();
+        Assert.AreSame(current, session.Current);
+    }
+
+    [TestMethod]
+    public void ValidSupersedingRequestDoesNotPublishAnIntermediateIdleReplacement()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "superseding-navigation-refresh");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var (bundle, _) = CreateAuthoringBundle();
+        using var owner = graph.CreateScope("session");
+        using var session = new NavigationSession(owner, bundle.Table, Location("/items/1"));
+        using var handle = new RouteOutletHandle();
+        var alternate = graph.Signal(false, "alternate");
+        var gate = new TaskCompletionSource<NavigationPreparationResult>();
+        var mounts = 0;
+        var options = new RouteOutletOptions(
+            prepare: (_, _, _) => new(gate.Task),
+            resolve: request =>
+                alternate.Value
+                    ? new RouteDestination(
+                        typeof(AlternatePage),
+                        ComponentRecipe.Create("alternate", (_, _) => mounts++)
+                    )
+                    : request.Default
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Router([Components.RouterOutlet(options, handle)], bundle, session: session)
+        );
+        graph.Drain();
+        var original = handle.Snapshot.Levels.Single().ElementId;
+        var pending = session.Navigate(Location("/items/2"));
+        alternate.Value = true;
+        graph.Drain();
+        var idleNotifications = 0;
+        using var idle = session.RegisterIdle(owner, () => idleNotifications++);
+
+        var replacement = session.Navigate(Location("/items/3"));
+        graph.Drain();
+
+        Assert.AreEqual(NavigationOutcomeKind.Superseded, Completed(pending).Kind);
+        Assert.IsFalse(replacement.IsCompleted);
+        Assert.AreEqual(NavigationPhase.PreparingLeave, session.Phase);
+        Assert.AreEqual(0, idleNotifications);
+        Assert.AreEqual(0, mounts);
+        Assert.AreEqual(original, handle.Snapshot.Levels.Single().ElementId);
+        replacement.Cancel();
+        graph.Drain();
+        Assert.AreEqual(1, idleNotifications);
+        Assert.AreEqual(1, mounts);
+        Assert.AreNotEqual(original, handle.Snapshot.Levels.Single().ElementId);
+        gate.SetResult(NavigationPreparationResult.Allow);
+        graph.Drain();
+        Assert.AreEqual(1, session.Current!.Match.GetValue(0).Signed32);
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void RejectedDeferredIntentPublishesIdleAfterPreparationOrReplacementReturns(
+        bool fromPreparation
+    )
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "rejected-deferred-navigation");
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var (bundle, _) = CreateAuthoringBundle();
+        using var owner = graph.CreateScope("session");
+        using var session = new NavigationSession(owner, bundle.Table, Location("/items/1"));
+        using var handle = new RouteOutletHandle();
+        var alternate = graph.Signal(false, "alternate");
+        var gate = new TaskCompletionSource<NavigationPreparationResult>();
+        var idleNotifications = 0;
+        var inCallback = false;
+        var mounts = 0;
+        NavigationOperation? deferred = null;
+        NavigationOperation? rejected = null;
+        void SupersedeAndReject()
+        {
+            inCallback = true;
+            deferred = session.Navigate(Location("/items/3"));
+            alternate.Value = true;
+            rejected = session.Back();
+            Assert.AreEqual(0, idleNotifications);
+            Assert.AreEqual(0, mounts);
+            Assert.AreEqual(NavigationPhase.PreparingLeave, session.Phase);
+            inCallback = false;
+        }
+        var options = new RouteOutletOptions(
+            prepare: (_, _, _) =>
+            {
+                if (fromPreparation && deferred is null)
+                    SupersedeAndReject();
+                return new(gate.Task);
+            },
+            resolve: request =>
+            {
+                if (!alternate.Value)
+                    return request.Default;
+                if (!fromPreparation && deferred is null)
+                    SupersedeAndReject();
+                return new RouteDestination(
+                    typeof(AlternatePage),
+                    ComponentRecipe.Create("alternate", (_, _) => mounts++)
+                );
+            }
+        );
+        composition.Mount(
+            composition.Root,
+            theme,
+            Components.Router([Components.RouterOutlet(options, handle)], bundle, session: session)
+        );
+        graph.Drain();
+        var current = session.Current;
+        var journal = session.Journal;
+        var original = handle.Snapshot.Levels.Single().ElementId;
+        using var idle = session.RegisterIdle(
+            owner,
+            () =>
+            {
+                Assert.IsFalse(inCallback);
+                Assert.IsTrue(rejected!.IsCompleted);
+                idleNotifications++;
+            }
+        );
+
+        if (fromPreparation)
+            Assert.AreEqual(
+                NavigationOutcomeKind.Superseded,
+                Completed(session.Navigate(Location("/items/2"))).Kind
+            );
+        else
+            alternate.Value = true;
+        graph.Drain();
+
+        Assert.IsNotNull(deferred);
+        Assert.IsNotNull(rejected);
+        Assert.AreEqual(NavigationOutcomeKind.Superseded, Completed(deferred).Kind);
+        Assert.AreEqual(NavigationFailureKind.HistoryBoundary, Completed(rejected).FailureKind);
+        Assert.AreEqual(1, idleNotifications);
+        Assert.AreEqual(1, mounts);
+        Assert.AreEqual(NavigationPhase.Idle, session.Phase);
+        Assert.IsNull(session.Pending);
+        Assert.AreSame(current, session.Current);
+        Assert.AreSame(journal, session.Journal);
+        Assert.AreNotEqual(original, handle.Snapshot.Levels.Single().ElementId);
+        gate.SetResult(NavigationPreparationResult.Allow);
+        graph.Drain();
+        Assert.AreSame(current, session.Current);
+    }
+
+    [TestMethod]
     [DataRow("resolver")]
     [DataRow("setup")]
     [DataRow("cleanup")]
