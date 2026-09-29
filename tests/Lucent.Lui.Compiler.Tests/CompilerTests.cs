@@ -13,6 +13,34 @@ namespace Lucent.Lui.Compiler.Tests;
 public sealed class CompilerTests
 {
     [TestMethod]
+    public void PredefinedTypesWorkInExpressionReceiversAndTypeOperators()
+    {
+        const string source = """
+namespace Sample;
+using Lucent.Core;
+style Limit { MaxWidth: float.PositiveInfinity; }
+internal component Builtins(object value, string query) {
+    <Column style={Limit}>
+        <Text>{string.IsNullOrEmpty(query) ? string.Empty : query}</Text>
+        <Text>{value is string ? (value as string ?? string.Empty) : string.Empty}</Text>
+    </Column>
+}
+""";
+        var result = LuiCompiler.Compile(
+            LuiParser.Parse(source),
+            CSharpCompilation.Create("predefined-types", references: References()),
+            new LuiFreshnessIdentity(
+                "predefined-types",
+                "predefined-types",
+                new LuiDocumentIdentity("Builtins.lui"),
+                "v1",
+                "preview"
+            )
+        );
+        Assert(result.Success, string.Join(" | ", result.Diagnostics.Select(item => item.Message)));
+    }
+
+    [TestMethod]
     public void StockIconControlOverloadsCompileWithDefaultContentAndLiveReaders()
     {
         const string source = """

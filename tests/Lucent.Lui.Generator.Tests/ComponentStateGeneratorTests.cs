@@ -29,11 +29,14 @@ using System.Collections.Generic;
 using System.Threading;
 using Lucent.Core;
 
+public enum SignedDefault { Negative = -1 }
+
 [ComponentState]
 public sealed partial class CounterState
 {
     [State(2)] public partial int Count { get; set; }
     [State(3)] public partial int @class { get; set; }
+    [State(SignedDefault.Negative)] public partial SignedDefault Signed { get; set; }
     [State(float.NaN)] public partial float SingleNaN { get; set; }
     [State(float.PositiveInfinity)] public partial float SinglePositiveInfinity { get; set; }
     [State(float.NegativeInfinity)] public partial float SingleNegativeInfinity { get; set; }
@@ -100,7 +103,7 @@ public static class Harness
         var before = TestComponents.Snapshots[0] + ":" + TestComponents.Live[0]();
         States[0].Name = "changed";
         var after = TestComponents.Snapshots[0] + ":" + TestComponents.Live[0]();
-        if (States[0].Count != 4 || States[1].Count != 4 || States[0].@class != 3 || States[0].Optional is not null)
+        if (States[0].Count != 4 || States[1].Count != 4 || States[0].@class != 3 || States[0].Optional is not null || States[0].Signed != SignedDefault.Negative)
             throw new Exception("generated initialization was incorrect");
         if (!float.IsNaN(States[0].SingleNaN)
             || !float.IsPositiveInfinity(States[0].SinglePositiveInfinity)

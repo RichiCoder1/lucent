@@ -6,6 +6,8 @@ The owner authorized all remaining review corrections, then the broader roadmap,
 with completed chunks pushed as needed. Follow the
 [execution record](../plans/comprehensive-review-execution.md). The prior
 performance batch remains complete and its evidence is preserved.
+The owner is gaming: all visible UI/focus-taking tests are paused until explicit
+resume. Noninteractive code, build, test, review and push work may continue.
 
 Start with Notes #11 (revision/recovery/failure integrity), Lucent #320
 (navigation lifecycle), #321 (authoring), #322 (SVG/UIA), Notes #12

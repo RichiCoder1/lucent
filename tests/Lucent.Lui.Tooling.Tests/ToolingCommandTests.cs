@@ -10,6 +10,17 @@ namespace Lucent.Lui.Tooling.Tests;
 public sealed class ToolingCommandTests
 {
     [TestMethod]
+    public void FormattingDiagnosticsUseOneBasedLineAndColumn()
+    {
+        using var files = new ToolingFixture();
+        files.WriteText("Broken.lui", "internal component Broken() {\n    <Text title=wrong />\n}");
+        var path = files.Path("Broken.lui");
+        var result = Run(["--check", path]);
+        Assert.AreEqual(2, result.ExitCode);
+        StringAssert.Contains(result.Error, path + "(2,17): LUI1011:");
+    }
+
+    [TestMethod]
     public void AtomicReplacementPreservesEncodingAndBom()
     {
         const string original = "Original café, 日本語 and 😀.";

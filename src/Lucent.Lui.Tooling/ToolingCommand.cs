@@ -50,7 +50,7 @@ internal static class ToolingCommand
                     failed = true;
                     foreach (var diagnostic in result.Diagnostics)
                         error.WriteLine(
-                            $"{path}({diagnostic.Span.Start}): {diagnostic.Id}: {diagnostic.Message}"
+                            $"{DiagnosticLocation(path, snapshot.Text, diagnostic.Span)}: {diagnostic.Id}: {diagnostic.Message}"
                         );
                     continue;
                 }
@@ -142,11 +142,13 @@ internal static class ToolingCommand
                         .AnalyzeAsync(path, snapshot.Text, configuration.DeclarationOrder)
                         .GetAwaiter()
                         .GetResult();
+                    var diagnosticSource = snapshot.Text;
                     if (result.Status != LuiLintAnalysisStatus.Complete)
                     {
                         failed = true;
                         WriteLintDiagnostics(
                             path,
+                            diagnosticSource,
                             result.Diagnostics,
                             configuration,
                             context,
@@ -168,6 +170,7 @@ internal static class ToolingCommand
                             failed = true;
                             WriteLintDiagnostics(
                                 path,
+                                fixedSource,
                                 verified.Diagnostics,
                                 configuration,
                                 context,
@@ -190,10 +193,12 @@ internal static class ToolingCommand
                         }
 
                         result = verified;
+                        diagnosticSource = fixedSource;
                     }
 
                     WriteLintDiagnostics(
                         path,
+                        diagnosticSource,
                         result.Diagnostics,
                         configuration,
                         context,
@@ -254,6 +259,7 @@ internal static class ToolingCommand
 
     private static void WriteLintDiagnostics(
         string path,
+        string source,
         IReadOnlyList<LuiDiagnostic> diagnostics,
         LuiEditorConfigResolution configuration,
         LuiLintProjectContext context,
@@ -277,9 +283,17 @@ internal static class ToolingCommand
             if (severity == Microsoft.CodeAnalysis.ReportDiagnostic.Error)
                 failed = true;
             error.WriteLine(
-                $"{path}({diagnostic.Span.Start}): {SeverityName(severity)} {diagnostic.Id}: {diagnostic.Message}"
+                $"{DiagnosticLocation(path, source, diagnostic.Span)}: {SeverityName(severity)} {diagnostic.Id}: {diagnostic.Message}"
             );
         }
+    }
+
+    private static string DiagnosticLocation(string path, string source, LuiSpan span)
+    {
+        var position = Microsoft
+            .CodeAnalysis.Text.SourceText.From(source)
+            .Lines.GetLinePosition(Math.Clamp(span.Start, 0, source.Length));
+        return $"{path}({position.Line + 1},{position.Character + 1})";
     }
 
     private static string SeverityName(Microsoft.CodeAnalysis.ReportDiagnostic severity) =>

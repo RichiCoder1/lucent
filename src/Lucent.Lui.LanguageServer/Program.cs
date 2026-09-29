@@ -790,24 +790,7 @@ internal static class Program
         }
         if (text.Length == 0)
             return null;
-        var line = position.GetProperty("line").GetInt32();
-        var character = position.GetProperty("character").GetInt32();
-        var start = 0;
-        for (var current = 0; current < line; current++)
-        {
-            start = text.IndexOf('\n', start);
-            if (start < 0)
-                throw new ArgumentOutOfRangeException(nameof(position));
-            start++;
-        }
-        var end = text.IndexOf('\n', start);
-        if (end < 0)
-            end = text.Length;
-        else if (end > start && text[end - 1] == '\r')
-            end--;
-        if (line < 0 || character < 0 || character > end - start)
-            throw new ArgumentOutOfRangeException(nameof(position));
-        return start + character;
+        return FormattingOffset(text, position);
     }
 
     private static async Task PublishOpenDiagnosticsAsync(
@@ -933,27 +916,15 @@ internal static class Program
         return new { changes };
     }
 
-    private static (int Line, int Character) Position(string text, int offset)
-    {
-        if (offset < 0 || offset > text.Length)
-            throw new ArgumentOutOfRangeException(nameof(offset));
-        var position = Microsoft
-            .CodeAnalysis.Text.SourceText.From(text)
-            .Lines.GetLinePosition(offset);
-        return (position.Line, position.Character);
-    }
+    private static (int Line, int Character) Position(string text, int offset) =>
+        new ProtocolLineIndex(text).Position(offset);
 
     private static int FormattingOffset(string text, JsonElement position)
     {
-        var lines = Microsoft.CodeAnalysis.Text.SourceText.From(text).Lines;
-        var line = position.GetProperty("line").GetInt32();
-        var character = position.GetProperty("character").GetInt32();
-        if (line < 0 || line >= lines.Count || character < 0 || character > lines[line].Span.Length)
-            throw new ArgumentOutOfRangeException(
-                nameof(position),
-                "The formatting position is outside the document."
-            );
-        return lines[line].Start + character;
+        return new ProtocolLineIndex(text).Offset(
+            position.GetProperty("line").GetInt32(),
+            position.GetProperty("character").GetInt32()
+        );
     }
 
     private sealed record FormattingDocument(int Version, string Text);

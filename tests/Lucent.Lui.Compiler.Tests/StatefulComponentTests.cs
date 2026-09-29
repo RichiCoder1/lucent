@@ -28,6 +28,7 @@ public component Trial(Func<string> initial) {
 
     Setup(owner) {
         Harness.Setups++;
+        owner.Effect(() => { }, "setup-effect");
         owner.OnDispose(() => Harness.Cleanups++);
     }
 

@@ -410,8 +410,9 @@ public sealed class ComponentStateGenerator : IIncrementalGenerator
             literal =
                 "("
                 + target.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
-                + ")"
-                + Numeric(value, underlying.SpecialType);
+                + ")("
+                + Numeric(value, underlying.SpecialType)
+                + ")";
         }
         else if (value is string text)
             literal = SymbolDisplay.FormatLiteral(text, true);

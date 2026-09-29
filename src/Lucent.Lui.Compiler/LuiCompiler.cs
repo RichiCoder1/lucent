@@ -3673,7 +3673,10 @@ public static partial class LuiCompiler
                 if (namedComponent)
                     NamedPartialMethod(member);
                 else
+                {
                     Mapped(member.Text, member.Span, LuiMapKind.Symbol);
+                    MissingMemberTerminators(member.Declaration);
+                }
                 Hidden("\n#line hidden");
                 Hidden("\n\n");
             }
@@ -3723,7 +3726,7 @@ public static partial class LuiCompiler
                 options: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview),
                 consumeFullText: true
             );
-            if (projected is null || projected.ContainsDiagnostics)
+            if (projected is null)
             {
                 Mapped(projectedText, member.Span, LuiMapKind.Symbol);
                 return;
@@ -3758,6 +3761,7 @@ public static partial class LuiCompiler
             }
             if (cursor < projectedText.Length)
                 Hidden(projectedText.Substring(cursor));
+            MissingMemberTerminators(authored);
 
             static bool TokenHasText(SyntaxToken token) =>
                 !token.IsMissing && token.Span.Length != 0;
@@ -4098,11 +4102,22 @@ public static partial class LuiCompiler
         private void SetupMethod(LuiMemberSyntax setup, string stateOwner)
         {
             var declaration = (MethodDeclarationSyntax)setup.Declaration;
-            Hidden(
-                namedComponent
-                    ? "        partial void Setup(global::Lucent.Core.ComponentContext "
-                    : "        private void Setup(global::Lucent.Core.ReactiveScope "
-            );
+            var methodName = "Setup";
+            if (namedComponent)
+            {
+                methodName = UniqueGeneratedName("__luiSetup");
+                var parameter = setup.SetupOwner?.Text ?? "context";
+                Hidden(
+                    "        partial void Setup(global::Lucent.Core.ComponentContext "
+                        + parameter
+                        + ") { "
+                        + methodName
+                        + "("
+                        + parameter
+                        + ".MountOwner); }\n"
+                );
+            }
+            Hidden("        private void " + methodName + "(global::Lucent.Core.ReactiveScope ");
             if (setup.SetupOwner is { } owner)
                 Mapped(owner.Text, owner.Span, LuiMapKind.Symbol);
             else
@@ -4117,9 +4132,25 @@ public static partial class LuiCompiler
                     source,
                     LuiMapKind.Expression
                 );
+                MissingMemberTerminators(declaration);
                 Hidden("\n#line hidden");
             }
             Hidden("\n\n");
+        }
+
+        private void MissingMemberTerminators(SyntaxNode declaration)
+        {
+            if (
+                declaration is MethodDeclarationSyntax
+                {
+                    ExpressionBody: not null,
+                    SemicolonToken.IsMissing: true
+                }
+            )
+                Hidden(";");
+            foreach (var token in declaration.DescendantTokens())
+                if (token.IsMissing && token.IsKind(SyntaxKind.CloseBraceToken))
+                    Hidden("}");
         }
 
         private static bool HasOnce(FieldDeclarationSyntax field) =>

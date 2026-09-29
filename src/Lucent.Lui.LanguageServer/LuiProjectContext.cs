@@ -3573,7 +3573,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             ?? document
                 .Result.Map.Entries.Where(item =>
                     !item.Hidden
-                    && item.Kind == LuiMapKind.Expression
+                    && item.Kind is LuiMapKind.Expression or LuiMapKind.Symbol
                     && item.Generated.Length != 0
                     && item.Source.End == offset
                 )
@@ -3594,7 +3594,7 @@ internal sealed partial class LuiProjectContext : IDisposable
         var compilation = ProjectionCompilation(document.Compilation, tree);
         var position =
             entry is null ? -1
-            : entry.Kind == LuiMapKind.Expression && offset == entry.Source.End
+            : entry.Kind is LuiMapKind.Expression or LuiMapKind.Symbol && offset == entry.Source.End
                 ? entry.Generated.End
             : entry.Kind is LuiMapKind.Symbol or LuiMapKind.Local
             && entry.Generated.Length > entry.Source.Length
@@ -4264,22 +4264,22 @@ internal sealed partial class LuiProjectContext : IDisposable
 
     private static int[] EncodeSemanticTokens(SourceText text, IEnumerable<LuiSemanticSpan> spans)
     {
+        var lines = new ProtocolLineIndex(text.ToString());
         var data = new List<int>();
         var previousLine = 0;
         var previousCharacter = 0;
         foreach (var span in spans)
         {
-            var line = text.Lines.GetLineFromPosition(span.Span.Start);
-            var character = span.Span.Start - line.Start;
+            var (line, character) = lines.Position(span.Span.Start);
             var type = Array.IndexOf(SemanticTokenTypes, span.Type);
-            if (type < 0 || span.Span.End > line.End)
+            if (type < 0 || span.Span.End > lines.LineEnd(line))
                 continue;
-            data.Add(line.LineNumber - previousLine);
-            data.Add(line.LineNumber == previousLine ? character - previousCharacter : character);
+            data.Add(line - previousLine);
+            data.Add(line == previousLine ? character - previousCharacter : character);
             data.Add(span.Span.Length);
             data.Add(type);
             data.Add(0);
-            previousLine = line.LineNumber;
+            previousLine = line;
             previousCharacter = character;
         }
         return data.ToArray();
@@ -4540,7 +4540,7 @@ internal sealed partial class LuiProjectContext : IDisposable
             if (info.Symbol is not null)
                 return info.Symbol;
             if (info.CandidateSymbols.Length != 0)
-                return info.CandidateSymbols[0];
+                return info.CandidateSymbols.Length == 1 ? info.CandidateSymbols[0] : null;
         }
         return null;
     }

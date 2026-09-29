@@ -417,15 +417,21 @@ public sealed class NamedComponentTests
             namespace Sample;
             using Lucent.Core;
             public component Card() {
-                Setup(owner) { owner.OnDispose(() => { }); }
+                Setup(owner) {
+                    Harness.Owner = owner;
+                    owner.Effect(() => Harness.Effects++, "setup-effect");
+                    owner.OnDispose(() => Harness.Cleanups++);
+                }
                 <Column />
             }
             """;
         var projection = LuiAuthoredSourceProjection.Project(source);
         StringAssert.Contains(projection.EarlyComponentDeclaration, "ComponentContext owner);");
+        const string harness =
+            "namespace Sample; public static class Harness { public static Lucent.Core.ReactiveScope Owner; public static int Effects; public static int Cleanups; }";
         var result = LuiCompiler.CompileNamedComponent(
             projection.Document,
-            Compilation(String.Empty, projection.EarlyComponentDeclaration),
+            Compilation(harness, projection.EarlyComponentDeclaration),
             Identity(),
             "Card.lui"
         );
@@ -434,7 +440,7 @@ public sealed class NamedComponentTests
             result.Success,
             String.Join(" | ", result.Diagnostics.Select(static item => item.Message))
         );
-        var compilation = Compilation(String.Empty, projection.EarlyComponentDeclaration)
+        var compilation = Compilation(harness, projection.EarlyComponentDeclaration)
             .AddSyntaxTrees(
                 CSharpSyntaxTree.ParseText(
                     result.Source!,
@@ -448,6 +454,22 @@ public sealed class NamedComponentTests
                 .Any(static item => item.Severity == DiagnosticSeverity.Error),
             String.Join(Environment.NewLine, compilation.GetDiagnostics())
         );
+        using var output = new MemoryStream();
+        var emitted = compilation.Emit(output);
+        Assert.IsTrue(emitted.Success, String.Join(Environment.NewLine, emitted.Diagnostics));
+        var assembly = System.Reflection.Assembly.Load(output.ToArray());
+        var type = assembly.GetType("Sample.Harness")!;
+        var recipe = (ComponentRecipe)
+            assembly.GetType("Sample.Card")!.GetMethod("Create")!.Invoke(null, null)!;
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "named-setup");
+        using var theme = new ThemeContext(composition.Root.Scope, new Theme("named-setup"));
+        var mounted = composition.Mount(composition.Root, theme, recipe);
+        graph.Drain();
+        Assert.AreSame(mounted.Scope, type.GetField("Owner")!.GetValue(null));
+        Assert.AreEqual(1, type.GetField("Effects")!.GetValue(null));
+        mounted.Dispose();
+        Assert.AreEqual(1, type.GetField("Cleanups")!.GetValue(null));
     }
 
     [TestMethod]

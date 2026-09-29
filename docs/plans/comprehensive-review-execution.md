@@ -58,7 +58,8 @@ Formatting and scoped whitespace checks pass. Evidence is retained under
 The repository's test wrapper discovered zero tests on this invocation; directly
 executing the freshly built test assembly ran the required cases. Package/CI
 delivery remains to be verified separately; no desktop walkthrough is claimed.
-Source and planning updates are pushed as `6bfb0a4e`; CI 90 is running.
+Source and planning updates are pushed as `6bfb0a4e`. CI 90 was superseded by
+the subsequent asset/UIA push; the combined source is being verified in CI 91.
 
 ### Asset/UIA boundaries — #322
 
@@ -74,6 +75,23 @@ The noninteractive hidden-window UIA text contract passes, including seven exact
 range cases through the provider ABI. Both affected builds are warning-clean;
 formatting and scoped whitespace checks pass. Evidence is under
 `artifacts/review-c9-c10`. No app window or focus-taking input was used.
+Source is pushed as `59bc11d2`.
+
+### Authoring reliability — #321
+
+Identifiable incomplete methods and Setup bodies now retain editor projection
+and useful diagnostics without absorbing following markup. Named authored Setup
+uses the documented ReactiveScope owner behind the ComponentContext bridge.
+The corrections also cover predefined C# receivers, negative enum defaults,
+one CR/LF/CRLF and UTF-16 protocol position policy, raw quoted highlighting,
+one-based CLI diagnostic positions and ambiguous symbol lookup.
+
+Focused regressions reproduced the reported failures before the fixes. Compiler
+147/147, generator 52/52, tooling 9/9, affected editor 8/8 and extension 16/16
+checks pass. Two additional named-method map/diagnostic cases pass after the broad
+compiler run, with no intervening production change. Affected builds are
+warning-clean, formatting and whitespace checks pass. The frozen package and
+console NativeAOT proof is next; no editor restart or desktop check is claimed.
 
 ### Notes integrity — #11
 

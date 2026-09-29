@@ -8,9 +8,11 @@ namespace Lucent.Lui.Compiler.Tests;
 public sealed class NamedMethodSourceMapTests
 {
     [TestMethod]
-    public void NamedMethodRewritePreservesExactIdentifierMaps()
+    [DataRow(false)]
+    [DataRow(true)]
+    public void NamedMethodRewritePreservesExactIdentifierMaps(bool incomplete)
     {
-        const string source = """
+        var source = """
             namespace Sample;
             using Lucent.Core;
             public component Card() {
@@ -19,6 +21,12 @@ public sealed class NamedMethodSourceMapTests
                 <Text>{Describe()}</Text>
             }
             """;
+        if (incomplete)
+            source = source.Replace(
+                "prefix + Count.ToString()",
+                "prefix.",
+                StringComparison.Ordinal
+            );
         var projection = LuiAuthoredSourceProjection.Project(source);
         Assert.IsNotNull(projection.EarlyComponentDeclaration);
         var compilation = CSharpCompilation.Create(
@@ -50,7 +58,8 @@ public sealed class NamedMethodSourceMapTests
             "Card.lui"
         );
 
-        Assert.IsTrue(
+        Assert.AreEqual(
+            !incomplete,
             result.Success,
             String.Join(" | ", result.Diagnostics.Select(item => item.Id + ": " + item.Message))
         );
@@ -58,8 +67,27 @@ public sealed class NamedMethodSourceMapTests
         AssertExactToken("Describe", methodStart);
         AssertExactToken("prefix", methodStart);
         AssertExactToken("prefix", source.IndexOf("=>", methodStart, StringComparison.Ordinal));
-        AssertExactToken("Count", methodStart);
-        AssertExactToken("ToString", methodStart);
+        if (!incomplete)
+        {
+            AssertExactToken("Count", methodStart);
+            AssertExactToken("ToString", methodStart);
+        }
+        else
+        {
+            var expected = new LuiSpan(
+                source.IndexOf("prefix.;", StringComparison.Ordinal) + "prefix.".Length,
+                1
+            );
+            Assert.IsTrue(
+                result.Diagnostics.Any(item => item.Id == "LUI2000" && item.Span.Equals(expected)),
+                string.Join(
+                    " | ",
+                    result.Diagnostics.Select(item =>
+                        item.Id + "@" + item.Span.Start + ":" + item.Span.Length
+                    )
+                )
+            );
+        }
 
         void AssertExactToken(string token, int start)
         {
@@ -72,7 +100,7 @@ public sealed class NamedMethodSourceMapTests
                     && item.Source.Equals(new LuiSpan(authored, token.Length))
                     && item.Generated.Length == token.Length
                     && result
-                        .Source.AsSpan(item.Generated.Start, item.Generated.Length)
+                        .ProjectionSource.AsSpan(item.Generated.Start, item.Generated.Length)
                         .SequenceEqual(token.AsSpan())
                 );
             Assert.IsNotNull(entry, $"'{token}' at {authored} did not retain an exact symbol map.");

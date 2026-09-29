@@ -4,7 +4,6 @@
   "scopeName": "source.lui",
   "patterns": [
     { "include": "#comments" },
-    { "include": "#strings" },
     { "include": "#expressions" },
     { "include": "#declarations" },
     { "include": "#tags" },
@@ -28,8 +27,7 @@
         {
           "name": "string.quoted.double.lui",
           "begin": "\"",
-          "end": "\"",
-          "patterns": [{ "name": "constant.character.escape.lui", "match": "\\\\." }]
+          "end": "\""
         }
       ]
     },
@@ -37,7 +35,7 @@
       "patterns": [
         {
           "name": "meta.embedded.expression.cs",
-          "begin": "(?<==)\\{",
+          "begin": "(?<==)\\s*\\{",
           "beginCaptures": { "0": { "name": "punctuation.section.embedded.begin.lui" } },
           "end": "\\}",
           "endCaptures": { "0": { "name": "punctuation.section.embedded.end.lui" } },
@@ -114,17 +112,22 @@
     "tags": {
       "patterns": [
         {
-          "match": "(</?)([A-Za-z_][A-Za-z0-9_.]*)(?=[\\s/>])",
-          "captures": {
+          "begin": "(</?)([A-Za-z_][A-Za-z0-9_.]*)(?=[\\s/>])",
+          "beginCaptures": {
             "1": { "name": "punctuation.definition.tag.lui" },
             "2": { "name": "entity.name.tag.lui" }
-          }
-        },
-        {
-          "name": "entity.other.attribute-name.lui",
-          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=)"
-        },
-        { "name": "punctuation.definition.tag.lui", "match": "/?>" }
+          },
+          "end": "/?>",
+          "endCaptures": { "0": { "name": "punctuation.definition.tag.lui" } },
+          "patterns": [
+            { "include": "#strings" },
+            { "include": "#expressions" },
+            {
+              "name": "entity.other.attribute-name.lui",
+              "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*=)"
+            }
+          ]
+        }
       ]
     },
     "style-properties": {

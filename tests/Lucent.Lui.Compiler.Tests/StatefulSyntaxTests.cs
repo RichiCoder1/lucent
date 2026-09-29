@@ -11,6 +11,59 @@ namespace Lucent.Lui.Compiler.Tests;
 public sealed class StatefulSyntaxTests
 {
     [TestMethod]
+    public void IncompleteMethodAndSetupBodiesRetainTheMarkupBoundary()
+    {
+        foreach (var header in new[] { "void Edit()", "Setup(owner)" })
+        foreach (var ending in new[] { " }", "" })
+        foreach (
+            var markup in new[]
+            {
+                "<Text />",
+                "<Text>{string.Empty}</Text>",
+                "<Text content=\"value\" />",
+            }
+        )
+        {
+            var memberText =
+                header
+                + " { System.Collections.Generic.List<string> values = new(); var items = System.Array.Empty<string>(); var model = \"value\"; model."
+                + ending;
+            var source = "internal component X() { " + memberText + "\n " + markup + " }";
+            var document = LuiParser.Parse(source);
+            var member = document.Component!.Body.OfType<LuiMemberSyntax>().Single();
+            Assert.AreEqual(memberText, member.Text);
+            var element = document.Component.Body.OfType<LuiElementSyntax>().Single();
+            Assert.AreEqual(markup, source.Substring(element.Span.Start, element.Span.Length));
+            Assert.IsFalse(document.Diagnostics.Any(diagnostic => diagnostic.Id == "LUI1004"));
+            Assert.IsTrue(member.Declaration.ContainsDiagnostics);
+            if (ending.Length == 0)
+                Assert.AreEqual(
+                    member.Span.End,
+                    document.Diagnostics.Single(item => item.Id == "LUI1020").Span.Start
+                );
+        }
+
+        foreach (var header in new[] { "void Edit()", "Setup(owner)" })
+        {
+            var source =
+                "internal component First() { "
+                + header
+                + " { var model = \"x\"; model.\ninternal component Second() { <Text /> }";
+            var components = LuiParser
+                .Parse(source)
+                .TopLevel.OfType<LuiComponentSyntax>()
+                .ToArray();
+            Assert.AreEqual(2, components.Length);
+            Assert.AreEqual("First", components[0].Name.Text);
+            Assert.AreEqual("Second", components[1].Name.Text);
+            Assert.AreEqual(
+                source.IndexOf("internal component Second", System.StringComparison.Ordinal),
+                components[1].Span.Start
+            );
+        }
+    }
+
+    [TestMethod]
     public void ParsesMembersBeforeTheSingleMarkupRootWithExactSpans()
     {
         const string source = """

@@ -385,7 +385,9 @@ public sealed class LanguageServerTests
     }
 
     [TestMethod]
-    public async Task StatefulDeclarationsExposeAuthoredEditorInformation()
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task StatefulDeclarationsExposeAuthoredEditorInformation(bool named)
     {
         var root = Path.Combine(
             Path.GetTempPath(),
@@ -398,7 +400,7 @@ public sealed class LanguageServerTests
             var path = Path.Combine(root, "Counter.lui");
             await File.WriteAllTextAsync(
                 project,
-                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Counter.lui\"/></ItemGroup></Project>"
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><LangVersion>preview</LangVersion><LucentLuiNamedComponents>{named}</LucentLuiNamedComponents></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Counter.lui\"/></ItemGroup></Project>"
             );
             const string source = """
 namespace StatefulEditor;
@@ -478,6 +480,165 @@ public component Counter() {
             );
             var tokens = await context.SemanticTokensAsync(uri, CancellationToken.None);
             Assert(tokens is { Length: > 0 }, "Stateful source has no semantic highlighting.");
+            foreach (var header in new[] { "void Edit()", "Setup(owner)" })
+            foreach (var ending in new[] { " }", "" })
+            {
+                var incomplete =
+                    "namespace StatefulEditor; public component Counter() { "
+                    + header
+                    + " { var model = \"value\"; model."
+                    + ending
+                    + "\n <Text /> }";
+                context.ReplaceText(uri, incomplete);
+                var members = await context.CompletionsAsync(
+                    uri,
+                    incomplete.IndexOf("model.", StringComparison.Ordinal) + "model.".Length,
+                    CancellationToken.None
+                );
+                Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+                    members.Any(item => item.Label == "Length"),
+                    incomplete
+                );
+                var diagnostics = await context.DiagnosticsAsync(uri, CancellationToken.None);
+                Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsFalse(
+                    diagnostics!.Any(item => item.Code is "LUI1004" or "LUI3000"),
+                    incomplete
+                );
+            }
+            foreach (var ending in new[] { ";", "" })
+            {
+                var incomplete =
+                    "namespace StatefulEditor; public component Counter(string model) { string Edit() => model."
+                    + ending
+                    + "\n <Text /> }";
+                context.ReplaceText(uri, incomplete);
+                var members = await context.CompletionsAsync(
+                    uri,
+                    incomplete.IndexOf("model.", StringComparison.Ordinal) + "model.".Length,
+                    CancellationToken.None
+                );
+                Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+                    members.Any(item => item.Label == "Length"),
+                    incomplete
+                );
+                var diagnostics = await context.DiagnosticsAsync(uri, CancellationToken.None);
+                Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsFalse(
+                    diagnostics!.Any(item => item.Code is "LUI1004" or "LUI3000"),
+                    incomplete
+                );
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task AmbiguousCallDoesNotChooseAnOverloadForHoverOrDefinition()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-ambiguous-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "Ambiguous.csproj");
+            var path = Path.Combine(root, "Counter.lui");
+            await File.WriteAllTextAsync(
+                project,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Counter.lui\"/></ItemGroup></Project>"
+            );
+            const string source = """
+namespace Ambiguous;
+public component Counter() {
+    string Pick(string value) => value;
+    string Pick(System.Uri value) => value.ToString();
+    <Text>{Pick(null)}</Text>
+}
+""";
+            await File.WriteAllTextAsync(path, source);
+            using var context = await LuiProjectContext.LoadAsync(project, CancellationToken.None);
+            var uri = new Uri(path);
+            var offset = source.IndexOf("{Pick", StringComparison.Ordinal) + 2;
+            Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsNull(
+                await context.HoverAsync(uri, offset, CancellationToken.None)
+            );
+            Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsNull(
+                await context.DefinitionAsync(uri, offset, CancellationToken.None)
+            );
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task ProtocolRenameUsesUtf16AndProtocolLineBreaks()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "lucent-line-lsp-" + Guid.NewGuid().ToString("N")
+        );
+        Directory.CreateDirectory(root);
+        try
+        {
+            var project = Path.Combine(root, "Lines.csproj");
+            var path = Path.Combine(root, "Counter.lui");
+            await File.WriteAllTextAsync(
+                project,
+                $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup><ItemGroup>{CoreMetadataReference}<AdditionalFiles Include=\"Counter.lui\"/></ItemGroup></Project>"
+            );
+            foreach (var newline in new[] { "\n", "\r", "\r\n" })
+            {
+                var source = string.Join(
+                    newline,
+                    "namespace Lines;",
+                    "public component Counter() {",
+                    "    /*😀\u2028\u2029\u0085*/ string label = \"x\"; <Text>{label}</Text>",
+                    "}"
+                );
+                await File.WriteAllTextAsync(path, source);
+                var uri = new Uri(path).AbsoluteUri;
+                using var lsp = LspClient.Start();
+                using var initialized = await lsp.RequestAsync(
+                    "initialize",
+                    new
+                    {
+                        initializationOptions = new { projectUri = new Uri(project).AbsoluteUri },
+                    }
+                );
+                Microsoft.VisualStudio.TestTools.UnitTesting.Assert.IsTrue(
+                    initialized.RootElement.TryGetProperty("result", out _)
+                );
+                await lsp.NotifyAsync("initialized", new { });
+                using var response = await lsp.RequestAsync(
+                    "textDocument/rename",
+                    new
+                    {
+                        textDocument = new { uri },
+                        position = new { line = 2, character = 43 },
+                        newName = "title",
+                    }
+                );
+                AuthoredProtocolAssertions.WorkspaceEdits(
+                    response.RootElement.GetProperty("result"),
+                    new ExpectedEdit(
+                        uri,
+                        new AuthoredRange(new(2, 21), new(2, 26)),
+                        "title",
+                        "string label = \"x\""
+                    ),
+                    new ExpectedEdit(
+                        uri,
+                        new AuthoredRange(new(2, 41), new(2, 46)),
+                        "title",
+                        "<Text>{label}</Text>"
+                    )
+                );
+            }
         }
         finally
         {

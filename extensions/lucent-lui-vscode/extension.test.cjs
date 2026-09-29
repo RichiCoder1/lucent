@@ -84,6 +84,16 @@ test("grammar marks declarative transition policies as keywords", () => {
     assert.ok(keywords.some(pattern => pattern.match.includes("transition")));
 });
 
+test("raw attribute strings stay inside tags and do not promise C# escapes", () => {
+    const grammar = JSON.parse(fs.readFileSync(path.join(__dirname, "syntaxes", "lui.tmLanguage.json"), "utf8"));
+    assert.ok(!grammar.patterns.some(pattern => pattern.include === "#strings"));
+    const tag = grammar.repository.tags.patterns.find(pattern => pattern.begin);
+    assert.ok(tag.patterns.some(pattern => pattern.include === "#strings"));
+    const quoted = grammar.repository.strings.patterns[0];
+    assert.equal(quoted.end, '"');
+    assert.deepEqual(quoted.patterns ?? [], []);
+});
+
 test("activates only Lucent workspaces and registers C# cross-language selectors", () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "package.json"), "utf8"));
     assert.deepEqual(manifest.activationEvents, ["onLanguage:lui", "workspaceContains:**/*.lui"]);

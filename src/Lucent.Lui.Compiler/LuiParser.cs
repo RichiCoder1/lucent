@@ -721,6 +721,50 @@ public static class LuiParser
                 consumeFullText: false
             );
             if (
+                declaration is MethodDeclarationSyntax method
+                && (method.Body is not null || method.ExpressionBody is not null)
+                && declaration.ContainsDiagnostics
+                && !method.Identifier.IsMissing
+                && !method.ParameterList.OpenParenToken.IsMissing
+            )
+            {
+                var end = MemberBodyEnd(
+                    start + (method.Body?.SpanStart ?? method.ExpressionBody!.SpanStart),
+                    start + declaration.Span.End
+                );
+                var authored = text.Substring(start, end - start).TrimEnd();
+                declaration = SyntaxFactory.ParseMemberDeclaration(
+                    authored,
+                    options: CSharpParseOptions.Default.WithLanguageVersion(
+                        LanguageVersion.Preview
+                    ),
+                    consumeFullText: true
+                );
+                if (declaration is MethodDeclarationSyntax recovered)
+                {
+                    position = start + authored.Length;
+                    if (recovered.Body?.CloseBraceToken.IsMissing == true)
+                        Error(
+                            "LUI1020",
+                            "Expected '}' after component member body.",
+                            new LuiSpan(position, 0)
+                        );
+                    if (recovered.ExpressionBody is not null && recovered.SemicolonToken.IsMissing)
+                        Error(
+                            "LUI1023",
+                            "Expected ';' after component member declaration.",
+                            new LuiSpan(position, 0)
+                        );
+                    member = new LuiMemberSyntax(
+                        LuiSpan.From(start, position),
+                        authored,
+                        LuiMemberKind.Method,
+                        recovered
+                    );
+                    return true;
+                }
+            }
+            if (
                 declaration == null
                 || declaration.ContainsDiagnostics
                 || declaration.SpanStart != 0
@@ -807,6 +851,97 @@ public static class LuiParser
             }
         }
 
+        private int MemberBodyEnd(int start, int proposedEnd)
+        {
+            var depth = 0;
+            var tokens = SyntaxFactory
+                .ParseTokens(text.Substring(start, proposedEnd - start))
+                .ToArray();
+            for (var index = 0; index < tokens.Length; index++)
+            {
+                var token = tokens[index];
+                var offset = start + token.SpanStart;
+                if (
+                    token.IsKind(SyntaxKind.LessThanToken)
+                    && IsMarkupBoundary(
+                        offset,
+                        index == 0 ? SyntaxKind.None : tokens[index - 1].Kind()
+                    )
+                )
+                    return offset;
+                if (
+                    (
+                        token.IsKind(SyntaxKind.PublicKeyword)
+                        || token.IsKind(SyntaxKind.InternalKeyword)
+                    )
+                    && index + 1 < tokens.Length
+                    && tokens[index + 1].ValueText == "component"
+                )
+                    return offset;
+                if (
+                    token.ValueText is "component" or "style"
+                    && index + 2 < tokens.Length
+                    && tokens[index + 1].IsKind(SyntaxKind.IdentifierToken)
+                    && (
+                        tokens[index + 2].IsKind(SyntaxKind.OpenParenToken)
+                        || tokens[index + 2].IsKind(SyntaxKind.OpenBraceToken)
+                    )
+                )
+                    return offset;
+                if (token.IsKind(SyntaxKind.OpenBraceToken))
+                    depth++;
+                else if (depth == 0 && token.IsKind(SyntaxKind.SemicolonToken))
+                    return start + token.Span.End;
+                else if (depth == 0 && token.IsKind(SyntaxKind.CloseBraceToken))
+                    return offset;
+                else if (token.IsKind(SyntaxKind.CloseBraceToken) && --depth == 0)
+                    return start + token.Span.End;
+            }
+            return proposedEnd;
+        }
+
+        private bool IsMarkupBoundary(int offset, SyntaxKind previous)
+        {
+            var cursor = offset + 1;
+            if (cursor >= text.Length || !(char.IsLetter(text[cursor]) || text[cursor] == '_'))
+                return false;
+            while (
+                cursor < text.Length
+                && (char.IsLetterOrDigit(text[cursor]) || text[cursor] is '_' or '.')
+            )
+                cursor++;
+            while (cursor < text.Length && char.IsWhiteSpace(text[cursor]))
+                cursor++;
+            if (cursor < text.Length && text[cursor] == '/')
+                return cursor + 1 < text.Length && text[cursor + 1] == '>';
+            if (cursor < text.Length && text[cursor] == '>')
+            {
+                if (
+                    previous
+                    is not (
+                        SyntaxKind.SemicolonToken
+                        or SyntaxKind.DotToken
+                        or SyntaxKind.OpenBraceToken
+                        or SyntaxKind.CloseBraceToken
+                    )
+                )
+                    return false;
+                cursor++;
+                while (cursor < text.Length && char.IsWhiteSpace(text[cursor]))
+                    cursor++;
+                // A generic receiver/call is still C#, even during recovery.
+                return cursor >= text.Length
+                    || text[cursor] is not ('(' or '.' or ';' or ',' or ')' or '[');
+            }
+            while (
+                cursor < text.Length && (char.IsLetterOrDigit(text[cursor]) || text[cursor] == '_')
+            )
+                cursor++;
+            while (cursor < text.Length && char.IsWhiteSpace(text[cursor]))
+                cursor++;
+            return cursor < text.Length && text[cursor] == '=';
+        }
+
         private bool TrySetup(int start, out LuiMemberSyntax member)
         {
             position += "Setup".Length;
@@ -860,7 +995,7 @@ public static class LuiParser
                     ),
                     consumeFullText: false
                 ) as BlockSyntax;
-            if (block == null || block.ContainsDiagnostics || block.CloseBraceToken.IsMissing)
+            if (block == null)
             {
                 Error(
                     "LUI1020",
@@ -871,7 +1006,11 @@ public static class LuiParser
                 position = start;
                 return false;
             }
-            position = blockStart + block.Span.End;
+            position = block.ContainsDiagnostics
+                ? MemberBodyEnd(blockStart, blockStart + block.Span.End)
+                : blockStart + block.Span.End;
+            while (position > blockStart && char.IsWhiteSpace(text[position - 1]))
+                position--;
             var raw = text.Substring(start, position - start);
             var headerLength = blockStart - start;
             var normalized =
@@ -886,7 +1025,7 @@ public static class LuiParser
                     ),
                     consumeFullText: true
                 ) as MethodDeclarationSyntax;
-            if (!validParameter || declaration == null || declaration.ContainsDiagnostics)
+            if (!validParameter || declaration == null)
                 Error(
                     "LUI1020",
                     "Setup requires Setup() or Setup(owner) followed by a synchronous block.",
@@ -898,6 +1037,8 @@ public static class LuiParser
                     "Setup"
                 )
                 .WithBody(block);
+            if (declaration.Body?.CloseBraceToken.IsMissing == true)
+                Error("LUI1020", "Expected '}' after Setup body.", new LuiSpan(position, 0));
             foreach (
                 var awaitExpression in declaration.DescendantNodes().OfType<AwaitExpressionSyntax>()
             )
@@ -1770,6 +1911,7 @@ public static class LuiParser
                 case LiteralExpressionSyntax _:
                 case IdentifierNameSyntax _:
                 case GenericNameSyntax _:
+                case PredefinedTypeSyntax _:
                 case ThisExpressionSyntax _:
                 case BaseExpressionSyntax _:
                 case TypeOfExpressionSyntax _:
