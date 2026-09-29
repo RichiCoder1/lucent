@@ -29,9 +29,11 @@ clipped-row accessibility. Both candidate fixed-workload runs pass unchanged
 limits; resize p95 is 4.24–4.53 ms versus 16.17–16.71 ms in the paired baselines.
 Issue Browser now completes all five 500-operation scenarios with bounded resources
 and zero owned resources after close. Historical failed results remain retained.
-[#318](https://github.com/RichiCoder1/lucent/issues/318) and parent #313 remain open
-for physical held-border verification: a game captured the foreground/cursor, so
-that check has not exercised candidate live resizing. #315 and #319 are delivered
+The physical held-border check passed on September 29 against a fresh NativeAOT
+build of the published source, completing
+[#318](https://github.com/RichiCoder1/lucent/issues/318) and parent #313. The layout
+switches while the resize border is still held; earlier blocked attempts remain
+recorded. #315 and #319 are delivered
 as `0.3.0-dev.89.1` from `48feed95` after
 [CI 89](https://github.com/RichiCoder1/lucent/actions/runs/36049540126) passed managed,
 package verification and publication; see the execution record for evidence and

@@ -6,8 +6,9 @@ and [007](../../advisor-plans/007-performance-opportunity-experiments.md).
 Initial source checkout: `85e4843df3bbf17664886a3f39bc3af69c8486da`.
 Native follow-ups start from `719fca1` plus the recorded corrections below.
 Measurement date: September 24, 2026. The corrected real-app characterization
-completes all five scenarios. #318 and parent #313 retain the physical held-border
-verification boundary described below; no successful physical drag is claimed yet.
+completes all five scenarios. Physical held-border verification passed on
+September 29, completing #318 and parent #313. No new timing series was run for
+that final interaction check.
 The initial implementation is published as `0.3.0-dev.88.1` from `719fca1`;
 [CI 88](https://github.com/RichiCoder1/lucent/actions/runs/35974075357)
 passed managed, package verification and publication jobs.
@@ -135,7 +136,7 @@ Input p95/p99 was 2.05/2.38 ms; resize was 20.46/23.38 ms, leaving the same p95
 limit failed. Lifetime resources were again 1/1/8/7, handle delta 5 and retained
 growth 33,184 bytes. The changed request pacing makes the two native timing runs
 different corpora; their input difference is not attributed to a runtime speedup.
-Both results remain retained, with #318 still open.
+Both results remain retained; #318's attribution and correction follow below.
 
 ### Presentation-tail attribution
 
@@ -187,17 +188,36 @@ not a claim that every baseline fails or that the improvement is universal.
 The separate attribution run establishes the duplicate work; the paired runs
 support retaining its removal without changing limits or presentation settings.
 
-The NativeAOT held-border regression has not yet established physical live-resize
-behavior for this candidate. Its first attempt failed to change the window width;
+The initial NativeAOT held-border attempts did not exercise live resizing. The
+first attempt failed to change the window width;
 an instrumented attempt found the game owned the foreground, the cursor did not
 move to the requested point, and the fixture's native bounds never changed. The
 point itself reported the expected right resize border. These failures remain in
 `artifacts/native-followup-held-border.log` and `-diagnostic.log`. The test now
 checks foreground ownership and an unobstructed, positioned cursor before pressing
-the border, and orders movement/button injection. Physical input is paused pending
-desktop availability. Four Windows live-resize contracts pass, including native
+the border, and orders movement/button injection. Four Windows live-resize
+contracts pass, including native
 enter/exit messages and collection of the subclass owner after destruction;
 they do not substitute for the held-border regression.
+
+On September 29 the physical regression passed against a fresh, warning-clean
+Release/win-x64 NativeAOT TestHost from `135e7beb` (runtime code unchanged from
+published `48feed95`). `FlaUiReprojectsResponsiveLayoutWhileNativeBorderIsHeld`
+confirmed foreground ownership, moved onto the unobstructed resize border,
+held the mouse button, changed the native width, and observed the compact layout
+before releasing the button. The single focused test passed;
+no production or test changes were needed.
+
+Evidence is retained under
+`artifacts/test/live-resize-closeout-20260929/verified`: the publication log,
+`source-before.json`, `publication.json`, and the held-border log/TRX. Tracked
+runtime/test/build inputs matched HEAD, their hashes were recorded before
+publication and checked unchanged afterward, and executable/native-library hashes
+are recorded alongside the result. The unrelated advisory drafts were preserved.
+A first source preflight stopped before building or taking focus because its
+broad untracked-file query included a local tool cache; that setup failure is
+recorded separately. This closes the outstanding physical boundary without
+discarding the earlier blocked desktop attempts or failed benchmark results.
 
 ## Application verification boundary
 
@@ -349,9 +369,10 @@ corrected to update a bound style instead of presenting the element twice. Final
 coverage includes partial/full clipping, revealing retained content and a smaller
 viewport. Fresh TestHost and Issue Browser NativeAOT publications are warning-clean;
 the five-scenario application run above passes. The final desktop test preconditions
-compile without warnings, but physical execution is pending. CI 89 independently
+compile without warnings, and the September 29 held-border check above passes.
+CI 89 independently
 passes managed and package/NativeAOT checks on clean commit `48feed95` and publishes
-`0.3.0-dev.89.1`. It does not replace the outstanding physical held-border proof.
+`0.3.0-dev.89.1`. Its unchanged checks were reused for the documentation-only closeout.
 
 The initial layout experiments did not alter UIA, accessibility exposure or the
 native scheduler. The separately tracked native corrections above address focus,

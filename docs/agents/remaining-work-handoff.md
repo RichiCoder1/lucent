@@ -1,6 +1,6 @@
 # Current work and follow-ups
 
-## Performance implementation and native validation — September 24, 2026
+## Performance batch complete — September 29, 2026
 
 #314's reporting/ownership corrections and #315's separate versioned workloads
 are implemented. #316 retains exact-height Grid/Flex/intrinsic arrangement reuse;
@@ -17,18 +17,22 @@ The historical failed native resize results remain retained. Instrumentation
 attributes #318's directional presentation tail to an extra exposed-event draw
 before the normal scheduled frame. The modal-size-loop gate passes both candidate
 runs in the predeclared ABBA comparison (resize p95 4.24/4.53 ms versus baseline
-16.17/16.71 ms; one baseline passes, one fails). Real held-border resizing must also
-remain functional. [#319](https://github.com/RichiCoder1/lucent/issues/319) owns
+16.17/16.71 ms; one baseline passes, one fails). The physical held-border check now
+also passes. [#319](https://github.com/RichiCoder1/lucent/issues/319) owns
 the reproduced stale-key-release focus loss and clipped Tab/UIA visibility
 corrections. The app driver also waits for responsive presentation before querying
 its replaced accessibility tree. Full Issue Browser characterization now passes
 all five 500-operation scenarios, with zero repeated provider growth and zero
 owned resources after close. #315's workload migration is recorded explicitly;
 its retired 18-provider diagnostic remains failed, separate from the topology-based
-84-provider app contract. #318 and #313 stay open for the physical held-border
-check: the game owned the foreground and cursor, so neither attempt exercised
-resizing. Physical input is paused pending desktop availability. Preserve all
-ignored evidence directories, including first failures and every comparison run.
+84-provider app contract. #318 and #313 are complete: a fresh NativeAOT TestHost
+from `135e7beb` passed the held-border check, changing to the compact layout before
+mouse release. Runtime/test/build source hashes and published binary hashes are
+retained with the log/TRX in `artifacts/test/live-resize-closeout-20260929/verified`.
+No runtime or test edits were needed. Preserve all ignored evidence directories,
+including the earlier blocked desktop attempts and every comparison run.
+No implementation work remains in #313–319. The comprehensive advisory review is
+a separate follow-up, and its unrelated local drafts remain untouched.
 Do not start navigation #205 or live
 compilation as part of this batch. Older queued/paused sections below are historical.
 
