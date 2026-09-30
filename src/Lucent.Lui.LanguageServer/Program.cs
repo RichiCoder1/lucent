@@ -10,7 +10,17 @@ internal static class Program
     private static readonly string[] signatureTriggers = ["(", ",", " "];
     private static readonly string[] completionTriggers = ["<", " ", ".", ":", "{"];
 
-    private static async Task<int> Main()
+    private static Task<int> Main(string[] args)
+    {
+        if (args.Length == 0)
+            return RunProtocolAsync();
+        if (args is ["--identity"])
+            return Task.FromResult(LuiServerIdentity.Write());
+        Console.Error.WriteLine("Usage: Lucent.Lui.LanguageServer [--identity]");
+        return Task.FromResult(2);
+    }
+
+    private static async Task<int> RunProtocolAsync()
     {
         LuiProjectContext? project = null;
         var openDocuments = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);

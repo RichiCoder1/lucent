@@ -1,0 +1,582 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Lucent compatible release set, version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "releaseSet",
+    "status",
+    "distribution",
+    "sdk",
+    "language",
+    "protocol",
+    "targets",
+    "server",
+    "extension",
+    "packages",
+    "inputManifestSha256",
+    "evidence",
+    "provenance"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "releaseSet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "sourceCommit",
+        "sourceState"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^0\\.3\\.0-dev\\.[0-9A-Za-z.-]+$"
+        },
+        "sourceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "sourceState": {
+          "enum": [
+            "clean",
+            "dirty-development"
+          ]
+        }
+      }
+    },
+    "status": {
+      "enum": [
+        "candidate",
+        "complete"
+      ]
+    },
+    "distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "policy"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "local-candidate",
+            "authenticated-ci-artifact"
+          ]
+        },
+        "policy": {
+          "$ref": "#/definitions/distributionPolicy"
+        }
+      }
+    },
+    "sdk": {
+      "$ref": "#/definitions/sdk"
+    },
+    "language": {
+      "$ref": "#/definitions/language"
+    },
+    "protocol": {
+      "$ref": "#/definitions/protocol"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "win-x64"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "rid",
+        "artifact"
+      ],
+      "properties": {
+        "identity": {
+          "$ref": "#/definitions/serverIdentity"
+        },
+        "rid": {
+          "const": "win-x64"
+        },
+        "artifact": {
+          "$ref": "#/definitions/artifact"
+        }
+      }
+    },
+    "extension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity",
+        "artifact"
+      ],
+      "properties": {
+        "identity": {
+          "$ref": "#/definitions/extensionIdentity"
+        },
+        "artifact": {
+          "$ref": "#/definitions/artifact"
+        }
+      }
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/package"
+      },
+      "minItems": 1
+    },
+    "inputManifestSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/evidence"
+      }
+    },
+    "provenance": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/definitions/provenance"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "complete"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "provenance": {
+            "$ref": "#/definitions/provenance"
+          },
+          "evidence": {
+            "minItems": 5,
+            "maxItems": 5
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "provenance": {
+            "type": "null"
+          },
+          "evidence": {
+            "maxItems": 0
+          },
+          "distribution": {
+            "properties": {
+              "kind": {
+                "const": "local-candidate"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fileName",
+        "bytes",
+        "sha256"
+      ],
+      "properties": {
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\\\:\\u0000-\\u001f]+$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 536870912
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "assembly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "informationalVersion",
+        "sha256"
+      ],
+      "properties": {
+        "informationalVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "language": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "featureLevel"
+      ],
+      "properties": {
+        "id": {
+          "const": "lui"
+        },
+        "version": {
+          "const": "preview"
+        },
+        "featureLevel": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "id": {
+          "const": "lucent-lui"
+        },
+        "major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "protocolNumber": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "major",
+        "minor"
+      ],
+      "properties": {
+        "major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "minor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tfm",
+        "framework"
+      ],
+      "properties": {
+        "tfm": {
+          "const": "net10.0"
+        },
+        "framework": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "version"
+          ],
+          "properties": {
+            "name": {
+              "const": "Microsoft.NETCore.App"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "rollForward": {
+          "type": "string",
+          "minLength": 1
+        },
+        "configProperties": {
+          "type": "object"
+        }
+      }
+    },
+    "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "rollForward"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rollForward": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowPrerelease": {
+          "type": "boolean"
+        }
+      }
+    },
+    "serverIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "sourceCommit",
+        "server",
+        "compiler",
+        "language",
+        "protocol",
+        "runtime"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "sourceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "server": {
+          "$ref": "#/definitions/assembly"
+        },
+        "compiler": {
+          "$ref": "#/definitions/assembly"
+        },
+        "language": {
+          "$ref": "#/definitions/language"
+        },
+        "protocol": {
+          "$ref": "#/definitions/protocol"
+        },
+        "runtime": {
+          "$ref": "#/definitions/runtime"
+        }
+      }
+    },
+    "extensionIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "vscodeEngine",
+        "protocol",
+        "serverDelivery",
+        "bundledServer"
+      ],
+      "properties": {
+        "id": {
+          "const": "lucent.lucent-lui"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vscodeEngine": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "minimum",
+            "maximumInclusive"
+          ],
+          "properties": {
+            "id": {
+              "const": "lucent-lui"
+            },
+            "minimum": {
+              "$ref": "#/definitions/protocolNumber"
+            },
+            "maximumInclusive": {
+              "$ref": "#/definitions/protocolNumber"
+            }
+          }
+        },
+        "serverDelivery": {
+          "const": "external-path"
+        },
+        "bundledServer": {
+          "type": "null"
+        }
+      }
+    },
+    "distributionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "packageFeed",
+        "requiresAuthentication",
+        "extensionId",
+        "automaticAcquisition"
+      ],
+      "properties": {
+        "repository": {
+          "const": "RichiCoder1/lucent"
+        },
+        "packageFeed": {
+          "const": "https://nuget.pkg.github.com/RichiCoder1/index.json"
+        },
+        "requiresAuthentication": {
+          "const": true
+        },
+        "extensionId": {
+          "const": "lucent.lucent-lui"
+        },
+        "automaticAcquisition": {
+          "const": false
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "sourceCommit",
+        "workflow",
+        "runId",
+        "runAttempt",
+        "artifactId",
+        "artifactDigest"
+      ],
+      "properties": {
+        "repository": {
+          "const": "RichiCoder1/lucent"
+        },
+        "sourceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "workflow": {
+          "const": ".github/workflows/tests.yml"
+        },
+        "runId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runAttempt": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "artifactId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "artifactDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "sourceCommit",
+        "inputManifestSha256",
+        "artifact"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "managed",
+            "native",
+            "packages",
+            "server",
+            "extension"
+          ]
+        },
+        "status": {
+          "const": "passed"
+        },
+        "sourceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "inputManifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifact": {
+          "$ref": "#/definitions/artifact"
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "repositoryCommit",
+        "artifact"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^Lucent\\.[A-Za-z0-9.]+$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^0\\.3\\.0-dev\\.[0-9A-Za-z.-]+$"
+        },
+        "repositoryCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "artifact": {
+          "$ref": "#/definitions/artifact"
+        }
+      }
+    }
+  }
+}

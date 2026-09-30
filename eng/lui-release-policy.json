@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "language": { "id": "lui", "version": "preview", "featureLevel": "preview-1" },
+  "protocol": { "id": "lucent-lui", "major": 1, "minor": 0 },
+  "supportedRids": ["win-x64"],
+  "serverFiles": [
+    "Lucent.Lui.LanguageServer.dll", "Lucent.Lui.Compiler.dll", "Lucent.Lui.Preparation.dll",
+    "Lucent.Lui.LanguageServer.deps.json", "Lucent.Lui.LanguageServer.runtimeconfig.json",
+    "BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.dll",
+    "BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.deps.json",
+    "BuildHost-netcore/Microsoft.CodeAnalysis.Workspaces.MSBuild.BuildHost.runtimeconfig.json"
+  ],
+  "serverNotices": [
+    "LICENSE", "notices/Roslyn-LICENSE.txt", "notices/dotnet-LICENSE.txt",
+    "notices/Roslyn-Common-NOTICES.rtf", "notices/Roslyn-CSharp-NOTICES.rtf",
+    "notices/Roslyn-Features-NOTICES.rtf", "notices/Roslyn-CSharp-Features-NOTICES.rtf",
+    "notices/Roslyn-CSharp-Workspaces-NOTICES.rtf", "notices/Roslyn-Workspaces-Common-NOTICES.rtf",
+    "notices/Roslyn-Workspaces-MSBuild-NOTICES.rtf", "notices/MSBuild-NOTICES.txt",
+    "notices/dotnet-Cryptography-NOTICES.txt"
+  ],
+  "distribution": {
+    "repository": "RichiCoder1/lucent",
+    "packageFeed": "https://nuget.pkg.github.com/RichiCoder1/index.json",
+    "requiresAuthentication": true,
+    "extensionId": "lucent.lucent-lui",
+    "automaticAcquisition": false
+  }
+}

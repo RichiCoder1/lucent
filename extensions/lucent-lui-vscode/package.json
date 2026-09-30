@@ -3,6 +3,11 @@
   "displayName": "Lucent .lui",
   "version": "0.3.5",
   "publisher": "lucent",
+  "lucentRelease": {
+    "schemaVersion": 1,
+    "protocol": { "id": "lucent-lui", "minimum": { "major": 1, "minor": 0 }, "maximumInclusive": { "major": 1, "minor": 0 } },
+    "serverDelivery": "external-path"
+  },
   "description": "Language support and cross-language tooling for Lucent .lui files.",
   "license": "MIT",
   "repository": {

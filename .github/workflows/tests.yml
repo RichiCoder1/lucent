@@ -16,6 +16,9 @@ jobs:
       cancel-in-progress: true
     runs-on: windows-2025
     timeout-minutes: 25
+    outputs:
+      verification-artifact-id: ${{ steps.upload-managed.outputs.artifact-id }}
+      verification-artifact-digest: ${{ steps.upload-managed.outputs.artifact-digest }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -31,7 +34,7 @@ jobs:
             **/packages.lock.json
       - name: Managed tests
         shell: pwsh
-        run: ./tools/Test-Repository.ps1 -Suite Managed
+        run: ./tools/Test-ReleaseChecks.ps1 -Suite Managed
       - name: Upload managed test reports
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -39,6 +42,15 @@ jobs:
           name: managed-trx-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/test/managed/**/*.trx
           if-no-files-found: warn
+          retention-days: 5
+          compression-level: 0
+      - name: Upload successful managed verification
+        id: upload-managed
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-managed-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/release-managed/
+          if-no-files-found: error
           retention-days: 5
           compression-level: 0
       - name: Summarize managed verification
@@ -61,6 +73,7 @@ jobs:
     timeout-minutes: 30
     outputs:
       package-artifact-id: ${{ steps.upload-packages.outputs.artifact-id }}
+      package-artifact-digest: ${{ steps.upload-packages.outputs.artifact-digest }}
     permissions:
       contents: read
     steps:
@@ -73,24 +86,17 @@ jobs:
           cache: true
           cache-dependency-path: |
             **/packages.lock.json
-      - name: Pack and consume prerelease packages
+      - name: Verify prerelease inputs and package consumers
         shell: pwsh
         run: |
           $version = "0.3.0-dev.${{ github.run_number }}.1"
-          ./tools/Test-Repository.ps1 -Suite Native
-          ./tools/Pack-Packages.ps1 -Version $version
-          ./tools/Test-AuthoringPackages.ps1 -Version $version -Feed "artifacts/packages/$version"
-          ./tests/Probes/Navigation/AotHost/Test-Package.ps1 -Version $version -Feed "artifacts/packages/$version"
-          ./tests/Probes/ContextNavigation/Hosted/Test-Package.ps1 -Version $version -Feed "artifacts/packages/$version"
-          ./tools/Verify-LuiAssets.ps1 -Version $version -Feed "artifacts/packages/$version"
-          ./tools/Test-HeadlessPackages.ps1 -Version $version -Feed "artifacts/packages/$version"
-          ./tools/Test-Packages.ps1 -Version $version -Feed "artifacts/packages/$version"
-      - name: Upload verified package set
+          ./tools/Test-ReleaseChecks.ps1 -Suite Packages -Version $version
+      - name: Upload verified release inputs
         id: upload-packages
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-packages-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/packages/0.3.0-dev.${{ github.run_number }}.1/*.nupkg
+          path: artifacts/packages/0.3.0-dev.${{ github.run_number }}.1/
           if-no-files-found: error
           retention-days: 5
           compression-level: 0
@@ -120,6 +126,35 @@ jobs:
           path: artifacts/packages/0.3.0-dev.${{ github.run_number }}.1
           merge-multiple: true
           digest-mismatch: error
+      - name: Download managed verification
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.managed.outputs.verification-artifact-id }}
+          path: artifacts/release-managed
+          merge-multiple: true
+          digest-mismatch: error
+      - name: Complete verified release descriptor
+        shell: pwsh
+        env:
+          INPUT_ARTIFACT_ID: ${{ needs.package-verify.outputs.package-artifact-id }}
+          INPUT_ARTIFACT_DIGEST: ${{ needs.package-verify.outputs.package-artifact-digest }}
+          MANAGED_ARTIFACT_ID: ${{ needs.managed.outputs.verification-artifact-id }}
+          MANAGED_ARTIFACT_DIGEST: ${{ needs.managed.outputs.verification-artifact-digest }}
+        run: |
+          $directory = "artifacts/packages/0.3.0-dev.${{ github.run_number }}.1"
+          ./tools/Complete-ReleaseSet.ps1 -CandidatePath "$directory/candidate.json" `
+            -ArtifactDirectory $directory -ManagedArtifactDirectory artifacts/release-managed `
+            -InputArtifactId $env:INPUT_ARTIFACT_ID -InputArtifactDigest $env:INPUT_ARTIFACT_DIGEST `
+            -ManagedArtifactId $env:MANAGED_ARTIFACT_ID -ManagedArtifactDigest $env:MANAGED_ARTIFACT_DIGEST `
+            -OutputPath "$directory/complete.json"
+      - name: Upload complete release descriptor and inputs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: complete-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/packages/0.3.0-dev.${{ github.run_number }}.1/
+          if-no-files-found: error
+          retention-days: 5
+          compression-level: 0
       - name: Publish immutable package set
         shell: pwsh
         env:

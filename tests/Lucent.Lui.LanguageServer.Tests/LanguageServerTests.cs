@@ -6122,22 +6122,32 @@ style MotionStyle {
             var built = Path.GetFullPath(
                 $"src/Lucent.Lui.LanguageServer/bin/{configuration}/net10.0/Lucent.Lui.LanguageServer.exe"
             );
+            var published = Environment.GetEnvironmentVariable("LUCENT_LSP_SERVER_DLL");
+            var start = new ProcessStartInfo(
+                File.Exists(built)
+                    ? built
+                    : Path.Combine(AppContext.BaseDirectory, "Lucent.Lui.LanguageServer.exe")
+            )
+            {
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            if (!string.IsNullOrWhiteSpace(published))
+            {
+                if (!File.Exists(published))
+                    throw new FileNotFoundException(
+                        "The configured published server is missing.",
+                        published
+                    );
+                var localDotnet = Path.Combine(RepositoryRoot, ".dotnet", "dotnet.exe");
+                start.FileName = File.Exists(localDotnet) ? localDotnet : "dotnet";
+                start.ArgumentList.Add(Path.GetFullPath(published));
+            }
             var process =
-                Process.Start(
-                    new ProcessStartInfo(
-                        File.Exists(built)
-                            ? built
-                            : Path.Combine(
-                                AppContext.BaseDirectory,
-                                "Lucent.Lui.LanguageServer.exe"
-                            )
-                    )
-                    {
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = true,
-                        UseShellExecute = false,
-                    }
-                ) ?? throw new InvalidOperationException("Could not start the LSP process.");
+                Process.Start(start)
+                ?? throw new InvalidOperationException("Could not start the LSP process.");
             return new LspClient(process);
         }
 
