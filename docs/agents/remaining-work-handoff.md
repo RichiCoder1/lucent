@@ -157,7 +157,7 @@ The owner approved deleting only the failed repository-local test cache; that
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
 | Templates #246 | Pushed in `ddeeadac`; template consumer checks passed in CI 102, but later package verification failed | Correct CI and confirm official template publication |
 | Editor lifecycle #247 | Pushed in `ddeeadac`; reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Correct CI and publish; visual VS Code sign-in remains part of the later onboarding journey |
-| Environment doctor #248 | Static CLI/VSIX proof passes; explicit editor project inspection, authoritative targets and read-only cache pass real-project/cache contracts and 99 Node tests; two Astra race findings corrected | Publish reviewed slices; finish CLI project parity, optional feed and native-prerequisite diagnostics before closing |
+| Environment doctor #248 | Static CLI/VSIX proof passes; explicit editor checks pass real-project/cache contracts and 99 Node tests; standalone project CLI passes 32 Tools contracts and real development invocation | Publish reviewed slices; finish optional feed and native-prerequisite diagnostics before closing |
 | Windows keypad #326 | Published in 101.1 and closed; three focused contracts pass in both managed and NativeAOT runs | No remaining issue work; no physical main-arrow claim |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
@@ -282,7 +282,13 @@ the extracted v2 doctor passed real invocation, and v3 changes only its README l
 and semantically equivalent package JSON serialization. Its C: evidence location
 and hashes are recorded in `artifacts/issue248-activation/final-producer-location.json`.
 Preserve those temporary directories and the original evidence. The [doctor plan](../plans/environment-doctor.md)
-owns the remaining trusted-project, feed and native-prerequisite work. #248 remains
+owns the remaining feed and native-prerequisite work. The standalone trusted-project
+CLI now passes 32 Tools contracts and a real coherent-server invocation with unchanged
+project/configuration/restore-input snapshots. Its forced-cancellation check verifies
+that the producer exited before returning; it makes no descendant-exit guarantee.
+The development server is an explicit unauthenticated override. Evidence is under
+`C:/Users/richa/AppData/Local/Temp/lucent-cli-trusted-project`, preserving earlier
+old-server, stale-restore and compiler-mismatch failures. #248 remains
 open; these local checks do not establish publication or a completed #249 journey.
 
 The local CI 103 reproduction exhausted its restore space with D: at about 145 MB

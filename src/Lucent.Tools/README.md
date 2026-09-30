@@ -9,3 +9,18 @@ workspace or install tooling.
 
 The VS Code extension also carries a byte-verified private copy of the doctor.
 That bundled copy is independent of any user-installed .NET tool.
+
+For an explicit trusted-project requirements check, supply both absolute paths:
+
+```text
+lucent doctor --trusted-project <absolute.csproj> --server <absolute.server.dll> [--json]
+```
+
+This separate action executes the caller-trusted language server and evaluates
+the project through its existing requirements operation; MSBuild may execute
+project-supplied tooling. It verifies server/compiler identity, compatibility and
+current input hashes, and reports the producer's target framework and effective
+runtime identifier when available. The explicit server override is unauthenticated
+as a release artifact. Semantic readiness, build, native publication and feed access
+remain `notChecked`. The command performs no installation or restore and cannot
+be combined with `--workspace`. Ctrl+C cancels the bounded evaluation.

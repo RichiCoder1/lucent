@@ -6,6 +6,14 @@
     <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="CancellationProducer/**/*.cs" />
+    <ProjectReference Include="CancellationProducer/CancellationProducer.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../src/Lucent.Tools/Lucent.Tools.csproj" />
   </ItemGroup>
+  <Target Name="CopyCancellationProducer" AfterTargets="Build">
+    <ItemGroup>
+      <ProducerFiles Include="CancellationProducer/bin/$(Configuration)/net10.0/CancellationProducer.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ProducerFiles)" DestinationFolder="$(OutDir)CancellationProducer" />
+  </Target>
 </Project>

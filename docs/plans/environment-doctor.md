@@ -11,8 +11,9 @@ selection, workspace/configuration cancellation, and report review/copy. The loc
 .NET tool and the private VSIX static doctor use the same result schema. The editor
 also has an explicit trusted-project report backed by the existing requirements
 producer, including authoritative target/tool identity and fresh active-evidence
-reuse. Standalone CLI parity, optional feed diagnostics and native-prerequisite
-observations still belong to #248; the fresh installed-editor journey remains #249.
+reuse. Standalone CLI parity is implemented and has a real development-project
+proof. Optional feed diagnostics and native-prerequisite observations still belong
+to #248; the fresh installed-editor journey remains #249.
 
 ## Boundaries
 
@@ -93,19 +94,13 @@ journey is tracked separately in [#249](https://github.com/RichiCoder1/lucent/is
 
 The remaining #248 work proceeds in this order:
 
-1. Complete standalone CLI parity for the editor's trusted-project check, using an
-   explicitly supplied trusted server rather than workspace executable discovery.
-   The producer's single-framework/effective-RID identity, editor command, active
-   evidence reuse and read-only cache inspection are implemented. Project
-   evaluation remains a separate action from static environment checks; the action
-   explains that MSBuild can execute project-supplied tooling.
-2. Add an optional NuGet adapter for effective configuration and bounded online
+1. Add an optional NuGet adapter for effective configuration and bounded online
    feed observations. Use official NuGet configuration/protocol APIs for hierarchy,
    disabled sources and source mapping. Keep these dependencies and network work
    outside the static doctor and normal editor activation. Validate authentication,
    redirects, cancellation and unavailable feeds with local fixtures; report neither
    credentials nor raw URLs. A probe proves only its own result, not a future restore.
-3. Add optional Windows native-toolchain observations through the installed Visual
+2. Add optional Windows native-toolchain observations through the installed Visual
    Studio discovery mechanism. Distinguish missing components from an inconclusive
    observation, and keep native readiness independent from managed editing. Actual
    NativeAOT consumer execution remains the end-to-end proof.
@@ -113,6 +108,17 @@ The remaining #248 work proceeds in this order:
 Each adapter must retain cancellation and workspace-generation checks, present its
 scope explicitly, and leave unperformed checks as `notChecked`. These are remaining
 implementation tasks, not capabilities established by the static or editor slices.
+
+Standalone CLI project inspection uses paired `--trusted-project <absolute.csproj>`
+and `--server <absolute.server.dll>` flags. It runs the existing requirements
+producer, verifies tool/input identity, and reports the producer's effective target.
+Explicit server overrides remain unauthenticated as release artifacts. The default
+static invocation is unchanged. Thirty-two Tools contracts cover classification,
+bounded output, privacy and cancellation, including forced producer termination.
+A real invocation against a coherent development server passes while leaving the
+fixture's project, NuGet configuration and restore assets unchanged. Offline restore
+was a separate test-preparation step. Older-server, stale-restore and mixed-compiler
+failures are retained; this does not claim official publication or semantic readiness.
 
 Use focused tests for capability classification, malformed/missing configuration,
 bounded process output, cancellation, stale results and seeded-secret redaction.

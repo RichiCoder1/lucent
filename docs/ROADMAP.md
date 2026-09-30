@@ -75,8 +75,10 @@ project inspection now adds evaluated target/tool identity and fresh evidence
 reuse. The real-project contract, 14 cache tests and 99 extension tests pass,
 including two corrected review races. Default checks preserve explicit unverified
 capabilities; the accepted issue is not yet complete. The
-[doctor plan](plans/environment-doctor.md) orders its remaining CLI project parity,
-optional feed and native-prerequisite checks.
+[doctor plan](plans/environment-doctor.md) orders its remaining optional feed and
+native-prerequisite checks. Standalone trusted-project CLI parity passes 32 Tools
+contracts and a real coherent development-server invocation; it remains separate
+from default static checks and does not claim release authentication or build readiness.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)

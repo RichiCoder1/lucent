@@ -7,10 +7,13 @@ namespace Lucent.Tools;
 public sealed class DotnetProcessProbe : IDotnetProbe
 {
     private const int MaximumOutputCharacters = 16 * 1024;
-    private readonly string host = Path.Combine(
-        Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..")),
-        OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"
-    );
+    internal static string HostPath { get; } =
+        Path.Combine(
+            Path.GetFullPath(
+                Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", "..")
+            ),
+            OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet"
+        );
 
     public async Task<DotnetProbeResult> RunAsync(
         string workingDirectory,
@@ -20,9 +23,9 @@ public sealed class DotnetProcessProbe : IDotnetProbe
     {
         if (argument is not ("--list-sdks" or "--list-runtimes"))
             throw new ArgumentException("Unsupported static .NET probe.", nameof(argument));
-        if (!File.Exists(host))
+        if (!File.Exists(HostPath))
             return new(false, "");
-        var start = new ProcessStartInfo(host)
+        var start = new ProcessStartInfo(HostPath)
         {
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
@@ -67,9 +70,10 @@ public sealed class DotnetProcessProbe : IDotnetProbe
         }
     }
 
-    private static async Task<string> ReadBoundedAsync(
+    internal static async Task<string> ReadBoundedAsync(
         StreamReader reader,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        int maximumOutputCharacters = MaximumOutputCharacters
     )
     {
         var buffer = new char[1024];
@@ -79,7 +83,7 @@ public sealed class DotnetProcessProbe : IDotnetProbe
             var count = await reader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
             if (count == 0)
                 return text.ToString();
-            if (text.Length + count > MaximumOutputCharacters)
+            if (text.Length + count > maximumOutputCharacters)
                 throw new IOException("The .NET probe returned too much output.");
             text.Append(buffer, 0, count);
         }
