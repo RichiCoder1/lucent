@@ -395,6 +395,67 @@ public sealed class ComponentBrowserTests
     }
 
     [TestMethod]
+    public void SelectionExamplePointerRadioRetainsArrowNavigationAfterLocalStateUpdate()
+    {
+        var graph = new ReactiveGraph();
+        using var composition = new Composition(graph, "component-browser-selection-keys");
+        composition.ConfigureImages(new ImageCache(new SkiaImagePreparer()));
+        using var theme = new ThemeContext(composition.Root.Scope, ControlThemes.Light);
+        var browser = new ComponentBrowserState(composition.Root.Scope);
+        composition.Mount(
+            composition.Root,
+            theme,
+            Context.Provide(browser, SelectionExample.Create())
+        );
+        composition.Flush();
+        using var renderer = new SkiaSceneRenderer();
+        using var firstScene = SceneLayout.Project(composition, new(800, 600, 1), renderer);
+        Assert.IsTrue(composition.Input.SetScene(firstScene));
+        var portable = Flatten(composition.SemanticSnapshot()!)
+            .Single(node => node is { Role: SemanticRole.RadioButton, Name: "Portable semantics" });
+        var bounds = firstScene
+            .Boxes.Single(box => box.Identity.ElementId == portable.Identity.ElementId)
+            .Bounds;
+        var x = bounds.X + bounds.Width / 2;
+        var y = bounds.Y + bounds.Height / 2;
+        Assert.IsTrue(
+            composition
+                .Input.DispatchPointer(new(PointerCommandKind.Down, 1, x, y, PointerButton.Primary))
+                .Handled
+        );
+        Assert.IsTrue(
+            composition.Input.DispatchPointer(new(PointerCommandKind.Up, 1, x, y)).Handled
+        );
+        composition.Flush();
+        Assert.IsTrue(
+            Flatten(composition.SemanticSnapshot()!)
+                .Any(node =>
+                    node
+                        is {
+                            Role: SemanticRole.Status,
+                            Name: "Radio: portable · selectable: Native rendering",
+                        }
+                )
+        );
+        Assert.AreEqual(portable.Identity.ElementId, composition.Input.FocusedElement?.ElementId);
+
+        using var secondScene = SceneLayout.Project(composition, new(800, 600, 1), renderer);
+        Assert.IsTrue(composition.Input.SetScene(secondScene));
+        Assert.IsTrue(composition.Input.DispatchKey(new(KeyCommandKind.Down, Key.Down)).Handled);
+        composition.Flush();
+        Assert.IsTrue(
+            Flatten(composition.SemanticSnapshot()!)
+                .Any(node =>
+                    node
+                        is {
+                            Role: SemanticRole.Status,
+                            Name: "Radio: a11y · selectable: Native rendering",
+                        }
+                )
+        );
+    }
+
+    [TestMethod]
     public void SelectingAnotherExampleResetsRetainedDetailAndSourceScroll()
     {
         var graph = new ReactiveGraph();
