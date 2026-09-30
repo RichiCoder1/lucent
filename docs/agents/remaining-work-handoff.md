@@ -10,10 +10,12 @@ records and issues.
 The owner explicitly resumed desktop walkthroughs after the app restart. Computer
 Use now launches and controls both browsers. Representative Component Browser and
 Issue Browser presentation checks ran, as did a real Issue Browser journal restart.
-Arrow-key delivery through Computer Use remains unresolved: arrows changed neither
-a radio selection nor a text caret, while typing, Backspace and Escape worked.
-Equivalent Core and compiled application pointer-to-arrow checks pass. Do not
-attribute this to the framework or claim native keyboard coverage yet.
+Computer Use's Down and Right commands arrived at SDL as keypad 2 and keypad 6,
+not the main arrow keys. Tab arrived correctly and moved focus. Equivalent Core
+and compiled application pointer-to-arrow checks pass. The diagnostic patch was
+removed after isolated NativeAOT builds; evidence is under `artifacts/issue245`.
+Do not claim physical main-arrow coverage from these injected commands. Standard
+Num Lock-off keypad navigation is being checked separately.
 Notes #12's real pending-save input and reopen proof now passes on the published
 93.1 consumer fixture. The prior offscreen substitution was declined during the
 gaming pause and is not part of that evidence.
@@ -21,6 +23,9 @@ gaming pause and is not part of that evidence.
 If the owner interrupts Computer Use after testing resumes, ask to continue while
 working on independent tasks. Do not interpret the interruption as cancellation of
 the whole implementation request.
+When a walkthrough finishes, close its test windows and end the Computer Use
+connection rather than leaving the owner to cancel it. The current helper exposes
+no explicit stop method; reset the Node session after the final interaction.
 
 ## Delivery and active work
 
@@ -39,8 +44,12 @@ Those corrections are committed. CI 97 passed formatting and produced all ten
 packages, server and VSIX, then exposed optional XML-item access in the architecture
 preflight and a wrong-thread test that allowed Task inlining. The preflight fix is
 committed as `a4b1ba96`; the dedicated-thread correction passes managed and
-NativeAOT execution in `e5bbada1`. The new batch
-is not published yet.
+NativeAOT execution in `e5bbada1`. CI 98 passed those package/native checks and the
+managed/NativeAOT journal consumers, then failed an optional expected-field access
+in asset verification. `4d25844c` handles both optional dimensions and application
+flags under strict PowerShell. The full asset proof passes against immutable 93.1
+packages under `artifacts/issue245/assets-strict-ci93`; this verifies the script
+correction, not publication of the new batch.
 
 | Work | Current boundary | Next action |
 | --- | --- | --- |
@@ -54,7 +63,7 @@ is not published yet.
 | Activation #222 | Optional adapter has 22 passing model contracts; reviewed fixture corrections committed as `7c4be47b` | Coherent package proof, then isolated native registration/foreground coverage |
 | Release identity #245 | Exact server/package/client compatibility, immutable descriptors and CI completion implemented; 63 rejection/integrity contracts pass | First coherent CI publication; complete does not mean NuGet upload succeeded |
 | Templates #246 | Four template generation variants pass; source remains outside package inventory | Validate real generated consumers against a coherent release bundle |
-| Editor lifecycle #247 | Trust, identity and restart slice under review; three review corrections in progress | Finish lifecycle review before bundled server and cache delivery |
+| Editor lifecycle #247 | Trust, identity and restart slice accepted by independent review and committed as `76bd62e9`; 25 Node contracts pass | Bundle and verify the server in the VSIX, then deliver cache/import and acquisition |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
 processes pass and registration/cleanup remain on the same thread. The initial
@@ -80,7 +89,7 @@ Calendar alignment, slider geometry, menu/submenu placement, bounded dialog widt
 password toggling, editable ComboBox reuse, table sorting and picker cancellation
 were exercised. This is representative desktop evidence, not every state, IME or
 screen-reader certification. Compact header wrapping and the narrow status-filter
-popup remain visual follow-ups; native arrow delivery remains unattributed.
+popup remain visual follow-ups; Computer Use main-arrow delivery is not verified.
 
 Pushed commit `c4373c2f` patches the VSIX packager's two vulnerable transitive
 dependencies. Locked packaging passes and its npm audit reports zero vulnerabilities;
@@ -90,8 +99,8 @@ authenticated distribution. The reported PowerShell escaping review finding was
 retracted after AST/file-byte confirmation and real producer execution; no speculative
 correction was applied. #246's four templates pass generation checks and await a
 coherent release bundle for real consumer validation. They are not yet part of
-the release inventory. #247's trust and lifecycle slice is being corrected after
-review; bundled distribution, immutable cache/import and authenticated acquisition
+the release inventory. #247's trust and lifecycle slice passed review; bundled
+distribution is in progress. Immutable cache/import and authenticated acquisition
 remain separate delivery work against that contract.
 
 After these corrections, continue navigation #205, onboarding #242, native

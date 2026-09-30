@@ -14,7 +14,9 @@ publication; Light Notes is integrating its presentation APIs. Measured
 repeated-work #324 is closed, with the final projection correction published.
 Presentation #323 has a further CommandScope/app shrink correction awaiting
 package delivery; representative browser walkthroughs resumed after the app restart.
-Native arrow-key delivery remains an unattributed test finding. Navigation #205 now has an
+Computer Use's arrow commands arrive as keypad events; physical main-arrow delivery
+is not claimed. Standard Num Lock-off keypad navigation is tracked in #326.
+Navigation #205 now has an
 [implementation plan](plans/navigation-restoration-activation.md): portable
 restoration first, then an optional Windows activation adapter. Its dependency
 probe is proven without a window; registered protocol and focus behavior remain
@@ -24,10 +26,12 @@ Issue Browser opt-in persistence is reviewed, passes 44 application contracts, a
 restores a saved route in a fresh NativeAOT process. The activation adapter passes
 22 model contracts; isolated transport fixtures are reviewed but not executed.
 Onboarding #245 implements the [release descriptor and project-free identity](RELEASE-SETS.md).
-CI 97 produced its artifacts but failed verification before publication; targeted
-corrections are in progress. Four standard templates #246 pass generation checks
-and await coherent package consumer proof. Editor trust/restart #247 is under review;
-bundled tooling, immutable cache/import and explicit authenticated acquisition follow.
+CI 98 passed the corrected native thread and package journal checks, then failed an
+asset fixture's optional-field access under strict PowerShell. The correction passes
+the full asset suite against existing immutable packages; publication is pending.
+Four standard templates #246 pass generation checks and await coherent package
+consumer proof. Editor trust/restart #247 passed independent review; bundled tooling
+is in progress, with immutable cache/import and explicit authenticated acquisition next.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)

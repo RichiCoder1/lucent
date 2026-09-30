@@ -329,11 +329,27 @@ Windows command-line batching. CI 97 passed formatting and produced all ten pack
 the server and VSIX, then failed architecture preflight and a NativeAOT wrong-thread
 test that allowed task inlining. The preflight correction is `a4b1ba96`; the
 dedicated-thread correction `e5bbada1` passes managed and NativeAOT execution.
-No new version is claimed published.
+CI 98 passed native checks and the managed/NativeAOT package journal consumers,
+then failed on optional fixture dimensions in `Verify-LuiAssets.ps1` under inherited
+strict PowerShell. `4d25844c` uses optional dictionary access for dimensions and the
+later application flag. The full asset suite passes against the unchanged 93.1
+package inputs: 16 metadata cases, nine named negative diagnostic cases, and both
+NativeAOT consumers after source/feed/cache removal. Evidence is under
+`artifacts/issue245/assets-strict-ci93`; the failed CI log is retained alongside it.
+This is script-correction proof, not publication of a new version.
 
 Templates #246 pass four generation variants and await actual consumer proof against
 a coherent bundle. They are not yet added to the release inventory. Editor #247's
-trust, selected-project isolation, identity and restart work is in independent review;
-the first review found hung-startup cancellation, late-notification disposal and an
-excluded-root document-symbol path needing corrections. Bundled server delivery,
-cache/import and authenticated acquisition remain separate planned work.
+trust, selected-project isolation, identity and restart work passed independent
+review after correcting hung-startup cancellation, late-notification disposal and
+an excluded-root document-symbol path. Commit `76bd62e9` passes 25 Node contracts;
+the review additionally exercised out-of-order identities and late callbacks.
+Bundled server delivery is in progress. Cache/import and authenticated acquisition
+remain separate planned work.
+
+The browser walkthrough's keyboard diagnostic found that Computer Use's Down and
+Right commands arrived as SDL keypad 2/6 events, while Tab mapped and moved focus.
+It does not establish physical main-arrow delivery. Temporary source tracing was
+removed after isolated NativeAOT publication, and exact artifact/source hashes are
+recorded in `artifacts/issue245/sdl-key-attribution.md`. The independent Windows
+Num Lock-off keypad mapping gap is tracked as #326.
