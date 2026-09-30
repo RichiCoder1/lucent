@@ -30,6 +30,46 @@ $registered = $false
 $verified = $false
 $cleanupError = $null
 $failure = $null
+$registration = $null
+$cleanup = $null
+function Get-FixtureRegistration {
+    # Discover the SDK's actual registration instead of reproducing its app-ID hash.
+    $applications = 'Registry::HKEY_CURRENT_USER\Software\RegisteredApplications'
+    $registrations = @()
+    if (Test-Path -LiteralPath $applications) {
+        $registeredApplications = Get-Item -LiteralPath $applications
+        foreach ($application in $registeredApplications.GetValueNames()) {
+            $relativePath = $registeredApplications.GetValue($application)
+            if ($relativePath -isnot [string] -or -not $relativePath.StartsWith('Software\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $capabilities = "Registry::HKEY_CURRENT_USER\$relativePath\URLAssociations"
+            if (-not (Test-Path -LiteralPath $capabilities)) { continue }
+            $key = Get-Item -LiteralPath $capabilities
+            $progId = $key.GetValue($scheme)
+            if ($null -eq $progId) { continue }
+            if ($progId -isnot [string] -or $progId -notmatch '^[A-Za-z0-9._-]+$') { throw 'The fixture has an unsupported handler identity.' }
+            $handler = "Registry::HKEY_CURRENT_USER\Software\Classes\$progId"
+            $commandKey = Join-Path $handler 'shell\open\command'
+            if (-not (Test-Path -LiteralPath $commandKey)) { throw 'The registered handler has no command.' }
+            $command = (Get-Item -LiteralPath $commandKey).GetValue('')
+            if ($command -isnot [string] -or -not ($command.StartsWith(($exe + ' '), [StringComparison]::OrdinalIgnoreCase) -or $command.StartsWith(('"' + $exe + '" '), [StringComparison]::OrdinalIgnoreCase))) { throw 'The registered handler does not target the exact fixture EXE.' }
+            $registrations += [ordered]@{ capabilities = $capabilities; progId = $progId; command = $command }
+        }
+    }
+    if ($registrations.Count -ne 1) { throw 'Expected exactly one registered handler for the unique fixture scheme.' }
+    return $registrations[0]
+}
+function Assert-RegistrationRemoved {
+    if ($null -eq $registration) { throw 'No verified registration is available for cleanup comparison.' }
+    if (Test-Path -LiteralPath $registration.capabilities) {
+        if ($null -ne (Get-Item -LiteralPath $registration.capabilities).GetValue($scheme)) { throw 'The fixture URL capability remains after Unregister.' }
+    }
+    foreach ($classes in @('Registry::HKEY_CURRENT_USER\Software\Classes', 'Registry::HKEY_CLASSES_ROOT')) {
+        if (Test-Path -LiteralPath (Join-Path $classes $registration.progId)) { throw 'The fixture handler ProgID remains after Unregister.' }
+        if (Test-Path -LiteralPath (Join-Path $classes "$scheme\shell")) { throw 'The fixture scheme retains shell commands after Unregister.' }
+    }
+    # Windows App SDK retains the shared protocol definition, without a handler.
+    return [ordered]@{ capabilityRemoved = $true; handlerRemoved = $true; schemeDefinitionRemains = (Test-Path -LiteralPath $association) }
+}
 function Invoke-Setup([string] $verb) {
     $process = Start-Process -FilePath $exe -ArgumentList $verb -PassThru -WindowStyle Hidden
     try {
@@ -125,6 +165,7 @@ try {
     $manifest | ConvertTo-Json | Set-Content -LiteralPath $manifestPath
     Invoke-Setup '--register'
     $registered = $true
+    $registration = Get-FixtureRegistration
     $coldUri = "${scheme}://navigation/notes/12?tab=one"
     $invalidUri = "${scheme}://navigation:9/notes/12"
     $warmUri = "${scheme}://navigation/notes/%2F?tab=two"
@@ -162,9 +203,11 @@ finally {
     if ($attempted) {
         try { Invoke-Setup '--unregister' } catch { $cleanupError = $_.Exception.Message }
     }
-    if ((Test-Path -LiteralPath $association) -or (Test-Path -LiteralPath $userAssociation)) { $cleanupError = 'The unique protocol association remains after Unregister.' }
+    if ($registered) {
+        try { $cleanup = Assert-RegistrationRemoved } catch { $cleanupError = $_.Exception.Message }
+    }
     foreach ($process in $ownedProcesses) { $process.Dispose() }
-    [ordered]@{ succeeded = ($verified -and $null -eq $failure -and $null -eq $cleanupError -and $registered); registered = $registered; failure = $failure; cleanupError = $cleanupError; scheme = $scheme; executableSha256 = $manifest.executableSha256 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $proof 'registered-evidence.json')
+    [ordered]@{ succeeded = ($verified -and $null -eq $failure -and $null -eq $cleanupError -and $registered); registered = $registered; failure = $failure; cleanupError = $cleanupError; registration = $registration; cleanup = $cleanup; scheme = $scheme; executableSha256 = $manifest.executableSha256 } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $proof 'registered-evidence.json')
     if ($null -ne $cleanupError) { Write-Error "Registered fixture cleanup failed: $cleanupError" }
 }
 if ($verified) { Write-Output "Isolated registered protocol transport: PASS ($proof)" }

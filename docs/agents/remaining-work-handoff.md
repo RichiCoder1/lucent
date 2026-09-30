@@ -126,8 +126,12 @@ still pending; these results do not complete the remaining #248 adapters.
 The timeout correction is pushed as `f2064144`. CI 105 passes the extension tests
 but its managed solution build exposed concurrent preparation processes writing
 the same referenced project's generated editorconfig. The original failure is
-retained in `artifacts/ci105-failure/managed.log`. Preparation-owned compiler-options
-files are being implemented; preserve project hooks and stable input identities.
+retained in `artifacts/ci105-failure/managed.log`. The editorconfig isolation
+prototype passed its narrow checks, but an actual parallel sample build exposed
+shared `AssemblyInfo.cs` and `AssemblyReference.cache` writes. Preserve that failed
+evidence. The replacement coordinates Lucent preparation processes with a stable
+per-user file lease through workspace-dependent reads/snapshots and Compare reads;
+validation is underway. It does not coordinate independent IDE/MSBuild writers.
 CI 105's package verification and artifact upload passed, but the job reached its
 30-minute limit during NuGet cache saving. The job budget is now 40 minutes to
 include cleanup overhead; verification requirements are unchanged. Publication
@@ -141,10 +145,10 @@ The owner approved deleting only the failed repository-local test cache; that
 | Authoring #321 | Published in 93.1, closed, Project Done | No new work required |
 | Default-content reader binding #325 | Published in 93.1, closed, Project Done | No new work required |
 | Notes #12 | Published correction and real delayed-write Ctrl+S/typing/reopen pass; closed and Project Done | Presentation adoption remains separate |
-| Presentation #323 | Base correction published in 101.1; additional Select scrollbar-gutter correction passes real-Skia and Windows smoke; header follow-up passes | Publish the gutter correction; verify the official Notes consumer, including the 520-pixel regression |
+| Presentation #323 | Official 101.1 Notes consumer passes the 520-pixel regression, native save/persistence and CI; additional Select scrollbar-gutter correction passes real-Skia and Windows smoke; header follow-up passes | Publish the gutter correction |
 | Repeated work #324 | All retained improvements published in 94.1; measured deferrals recorded; closed and Project Done | No new work required |
 | Restoration #221 | Published codec/journal ownership and reviewed app persistence; final official 101.1 package-only NativeAOT restart reopens issue #9999 in a new process | Complete; evidence under `artifacts/issue221-package101-replay` |
-| Activation #222 | Optional adapter has 22 passing model contracts; official 101.1 MSIX cold/warm/hostile protocol transport passes in a disposable Sandbox with verified cleanup | Unpackaged registration and visible host foreground coverage remain |
+| Activation #222 | Optional adapter has 22 passing model contracts; official 101.1 MSIX and unpackaged cold/warm/hostile protocol transport pass in disposable Sandboxes with verified cleanup | Visible host foreground coverage remains |
 | Release identity #245 | CI 101 passed all three jobs and published 101.1; actual complete artifact authenticated; closed | No remaining issue work |
 | Templates #246 | Pushed in `ddeeadac`; template consumer checks passed in CI 102, but later package verification failed | Correct CI and confirm official template publication |
 | Editor lifecycle #247 | Pushed in `ddeeadac`; reviewed requirements/cache/import and authenticated online acquisition pass final V6 development proof | Correct CI and publish; visual VS Code sign-in remains part of the later onboarding journey |
@@ -166,6 +170,14 @@ The September 30 guest run verified the exact installed executable, cold and war
 protocol delivery, invalid-secondary rejection, and package/certificate cleanup.
 The host stopped only its named Sandbox session. Signing and installation happened
 inside the disposable guest; the host received no certificate or registration.
+Unpackaged transport also passes with the same official executable. The original
+cleanup assertion incorrectly required the SDK's empty protocol definition to be
+deleted. The maintained probe now discovers the actual RegisteredApplications
+mapping, verifies its command targets the exact fixture EXE, and requires removal
+of the observed URL capability and handler ProgID with no residual shell commands.
+The successful guest run is recorded in `artifacts/issue222-unpackaged/evidence.md`;
+the original failures remain alongside it. The named Sandbox session stopped
+cleanly. This establishes registration/transport cleanup, not foreground policy.
 The package-only Issue Browser replay build is under
 `artifacts/issue221-package101-replay`, with exact package/executable hashes in
 `prepared.json`; its final two-process native replay is recorded beside it.
@@ -182,8 +194,8 @@ a native 480-by-520 editor check now keep all footer commands inside the frame;
 typed content persists in the isolated test database. All seven consumed Lucent
 packages match fresh official-feed downloads byte for byte. Evidence is under
 `artifacts/notes101-adoption`, including the native walkthrough and exact binary
-identity. Notes CI is running at
-https://github.com/RichiCoder1/light-notes/actions/runs/36776465450.
+identity. [Notes CI](https://github.com/RichiCoder1/light-notes/actions/runs/36776465450)
+passes formatting, managed tests and NativeAOT publication.
 Earlier diagnostic DLL substitution and the rejected write are preserved as
 separate attempts; neither is being relabeled as consumer proof.
 
@@ -269,11 +281,11 @@ owns the remaining trusted-project, feed and native-prerequisite work. #248 rema
 open; these local checks do not establish publication or a completed #249 journey.
 
 The local CI 103 reproduction exhausted its restore space with D: at about 145 MB
-free. Its failed log and partial repository-local `.nuget/packages` cache remain;
-automatic approval review rejected deleting that cache. Do not retry its removal
-without authorization. Use the existing absolute dependency cache, place substantial
-new evidence on C:, and serialize builds with packaging. The corrected VSIX uses
-C: temporary output; its small D: staging directory was cleaned by the packer.
+free. The owner subsequently authorized removing only the failed repository-local
+`.nuget/packages` cache; 710 MB was reclaimed. Failed logs and the normal C: cache
+remain. Use the existing absolute dependency cache, place substantial new evidence
+on C:, and serialize builds with packaging. The corrected VSIX uses C: temporary
+output; its small D: staging directory was cleaned by the packer.
 
 After these corrections, continue navigation #205, onboarding #242, native
 preview #224, diagnostics #243 and transfer #244 according to their technical

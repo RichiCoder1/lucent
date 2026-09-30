@@ -29,8 +29,13 @@ not an automated click-through.
 
 The run script always signals and, if necessary, stops only the verified fixture
 PID, calls the matching public unregister API after a registration attempt, and
-checks that the unique scheme is absent from the current user's merged class
-view. Evidence and cleanup failures remain in `registered-evidence.json`. If
+checks that the observed URL capability and its handler ProgID are removed from
+the current user's registration and merged class view. The SDK can retain an
+empty protocol definition; that is not an executable handler. The fixture also
+rejects leftover shell commands on that definition. See Microsoft's
+[registration implementation](https://github.com/microsoft/WindowsAppSDK/blob/main/dev/AppLifecycle/Association.cpp).
+Evidence records the actual registered command and cleanup observations in
+`registered-evidence.json`. If
 cleanup fails, retain the isolated fixture and inspect the exact scheme and
 executable before any manual repair. Do not delete broad class keys or change
 another application's defaults.

@@ -10,14 +10,15 @@ The completed performance evidence below remains tied to its original source.
 
 Notes data-integrity #11 and editing/maintenance #12, navigation lifecycle #320, SVG/UIA #322 and authoring
 #321/#325 are delivered. Lucent `0.3.0-dev.101.1` passed managed/package CI and
-publication; Light Notes is adopting that official package. Measured
+publication; Light Notes now consumes that official package at `8d5cdaa`, with
+green CI and a native minimum-window save/persistence check. Measured
 repeated-work #324 is closed, with the final projection correction published.
-Presentation #323's CommandScope correction is published; its app shrink fix still
-needs official consumer verification. Representative browser walkthroughs ran after
-the app restart. The owner reauthorized Computer Use, but another immediate Escape
-interruption leaves retry permission pending. Follow-up header and stock Select
-geometry fixes pass focused contracts and have fresh NativeAOT builds awaiting
-visual review.
+Presentation #323's CommandScope correction and app shrink fix pass the official
+consumer checks, including the unchanged 520-pixel regression. Browser header
+checks pass in dark/light themes. The additional Select scrollbar-gutter correction
+passes four real-Skia scale cases and a managed Windows browser walkthrough;
+publication remains. UI testing is authorized, and completed Computer Use sessions
+are closed after each walkthrough.
 Computer Use's arrow commands arrive as keypad events; physical main-arrow delivery
 is not claimed. Standard Num Lock-off keypad navigation is delivered in 101.1; #326 is closed.
 Navigation #205 now has an
@@ -27,8 +28,10 @@ probe is proven without a window; registered protocol and focus behavior remain
 separate work. Journal/interaction restoration and reviewed ownership corrections
 pass 210 affected contracts; package-only managed/AOT journal proof passes.
 Issue Browser opt-in persistence is reviewed, passes 44 application contracts, and
-restores a saved route in a fresh NativeAOT process. The activation adapter passes
-22 model contracts; isolated transport fixtures are reviewed but not executed.
+restores a saved route in a fresh NativeAOT process; #221 is closed. The activation
+adapter passes 22 model contracts and official-package MSIX and unpackaged
+cold/warm/hostile URI delivery in disposable Sandboxes, including handler cleanup.
+Visible host foreground checks remain under #222.
 Onboarding #245 implements the [release descriptor and project-free identity](RELEASE-SETS.md).
 CI 98 passed the corrected native thread and package journal checks, then failed an
 asset fixture's optional-field access under strict PowerShell. The correction passes
@@ -59,8 +62,12 @@ relative path; lossless cleanup now passes a focused reproduction and 15 checks.
 The formatting and environment cleanup fixes are pushed. CI 104 passed the
 published-server check, then exposed an unreferenced Node timeout; `f2064144`
 corrects it. CI 105 passes the editor suites but exposed a shared generated
-editorconfig write during parallel application preparation. Its ownership fix is
-underway. `101.1` remains the latest confirmed release.
+editorconfig write during parallel application preparation. A focused isolation
+prototype exposed additional shared assembly-info/cache writes, so the correction
+now coordinates Lucent preparation processes through one per-user lease. Its
+validation is underway. CI 105's package verification/upload passed but cache
+cleanup exhausted the job budget; that budget now includes cleanup time.
+`101.1` remains the latest confirmed release.
 Read-only environment doctor #248's static CLI, verified tool delivery and standard
 VS Code onboarding surfaces pass review and local package proof. Explicit editor
 project inspection now adds evaluated target/tool identity and fresh evidence
