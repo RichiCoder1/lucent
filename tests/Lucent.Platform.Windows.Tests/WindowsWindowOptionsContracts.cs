@@ -8,11 +8,32 @@ public sealed class WindowsWindowOptionsContracts
     [TestMethod]
     public void WindowAttentionRejectsWrongThreadAndExpiredHostLifetime()
     {
+        var ownerThread = Environment.CurrentManagedThreadId;
         var attention = new WindowsWindowAttention((nint)1);
-        var wrongThread = Task.Run(() =>
-            Assert.ThrowsExactly<InvalidOperationException>(attention.Invalidate)
+        var wrongThreadId = 0;
+        Exception? wrongThreadException = null;
+        var wrongThread = new Thread(() =>
+        {
+            wrongThreadId = Environment.CurrentManagedThreadId;
+            try
+            {
+                attention.Invalidate();
+            }
+            catch (Exception exception)
+            {
+                wrongThreadException = exception;
+            }
+        })
+        {
+            IsBackground = true,
+        };
+        wrongThread.Start();
+        Assert.IsTrue(
+            wrongThread.Join(TimeSpan.FromSeconds(5)),
+            "Wrong-thread probe did not finish."
         );
-        wrongThread.GetAwaiter().GetResult();
+        Assert.AreNotEqual(ownerThread, wrongThreadId);
+        Assert.AreEqual(typeof(InvalidOperationException), wrongThreadException?.GetType());
         attention.Invalidate();
         Assert.ThrowsExactly<ObjectDisposedException>(() => attention.Request());
     }
