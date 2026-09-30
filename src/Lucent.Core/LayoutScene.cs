@@ -2005,6 +2005,8 @@ public sealed class RetainedScene : IDisposable
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         write(writer);
         writer.Flush();
-        return Convert.ToHexString(SHA256.HashData(stream.ToArray()));
+        return Convert.ToHexString(
+            SHA256.HashData(stream.GetBuffer().AsSpan(0, checked((int)stream.Length)))
+        );
     }
 }

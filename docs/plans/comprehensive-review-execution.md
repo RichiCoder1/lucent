@@ -195,8 +195,17 @@ design that preserves complete freshness. All experimental compiler changes were
 restored and shared binaries rebuilt before subsequent work. Evidence is under
 `artifacts/review324-authoring-followup`.
 
-Post-presentation projection, UIA listener admission and Notes filtering still
-need their scoped retain/defer decisions before #324 can close.
+Projection now hashes the existing serialized buffer without copying it first.
+The mutation guard, serialized bytes and SHA-256 algorithm remain unchanged.
+Fixed 15-sample comparisons in both orders preserve exact scene-input, geometry
+and pixel hashes. Allocations fall from roughly 3.51–3.53 MB to 3.35 MB for 100
+stock rows and 90.80 MB to 89.16 MB for 1,000 rows. Timings are mixed; retain the
+small allocation change without a latency claim. Input/projection and
+layout/custom-algorithm checks pass 48 cases; build and formatting pass. Evidence
+is under `artifacts/review324-projection`. Broader hashing, tree-walk and scrollbar
+redesign is deferred: this bounded change avoids weakening equality or adding
+persistent ownership/cache complexity. UIA listener admission and Notes filtering
+still need their scoped decisions before #324 can close.
 
 ### Navigation restoration and activation — #205
 
