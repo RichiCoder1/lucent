@@ -49,7 +49,8 @@ foreach ($name in $names) {
         try { [xml]$spec = $reader.ReadToEnd() } finally { $reader.Dispose() }
         if ($spec.package.metadata.version -ne $Version -or $spec.package.metadata.repository.commit -ne $commit) { throw "Incorrect package identity: $name" }
         if ($name -eq 'Lucent.Core') {
-            $runtimeTooling = @($spec.package.metadata.dependencies.group.dependency.id) -match '^Lucent\.Lui\.(Compiler|Generator)$|^Microsoft\.CodeAnalysis'
+            $runtimeTooling = @($spec.SelectNodes('//*[local-name()="dependencies"]//*[local-name()="dependency"]') |
+                Where-Object { $_.GetAttribute('id') -match '^Lucent\.Lui\.(Compiler|Generator)$|^Microsoft\.CodeAnalysis' })
             $packedTooling = @($zip.Entries.FullName) -match '(^|/)(Lucent\.Lui\.(Compiler|Generator)|Microsoft\.CodeAnalysis).*\.dll$'
             if ($runtimeTooling -or $packedTooling) { throw 'Core package included build-time compiler, generator or Roslyn tooling.' }
         }
