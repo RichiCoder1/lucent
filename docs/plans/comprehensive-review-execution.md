@@ -167,10 +167,17 @@ affected builds and formatting pass. Headless light/dark/high-contrast images ar
 recorded under `artifacts/review-323`; they do not constitute a native walkthrough.
 Light Notes' exact package restore, locked restore, consumer build, contrast and
 multiline relationships pass. Its default-size native editing/save/reopen proof
-passes. One affected managed check still fails at minimum window height: the
-new Field group exposes a route-outlet sizing defect. Framework fix `9f3da89a`
-passes 41 outlet contracts, including two pre-fix failures; consumer verification
-waits for its published package. No app-specific height workaround is retained.
+passes. Minimum-height verification exposed a route-outlet sizing defect; `9f3da89a`
+passes 41 outlet contracts and is published in `0.3.0-dev.94.1`. The fresh consumer
+then isolated a second constraint: CommandScope and two application layout styles
+did not allow shrinking. `3c95e5f1` adds CommandScope shrink participation and passes
+all ten command contracts, including the independently failing 520-pixel regression.
+Notes needs only `MainShrink: 1` on its Shell and Workspace styles. The unchanged
+responsive contract passes against the corrected Core in an isolated diagnostic
+output; this is not public-package proof. The final package consumer check remains
+pending, with the original failed reports retained. No height threshold was changed.
+Both browsers publish as NativeAOT; their new walkthrough remains unperformed because
+Computer Use immediately reports Escape even after the authorized session reset.
 Heading semantics and broader system high-contrast palette mapping remain deferred;
 this slice preserves the existing stock high-contrast theme and optional minimal
 presentation mode. It does not claim those additional capabilities.
@@ -231,8 +238,9 @@ still reports real accessibility clients listening after the Computer Use sessio
 and fixture close. The experiment therefore exits before window creation with
 zero passed and one skipped check; no timing samples were collected. Preserve
 `artifacts/review324-uia/decision.md` and do not call this a measured speedup.
-All scoped performance decisions are now recorded; publication of the retained
-projection change is the remaining #324 delivery step.
+All scoped performance decisions are recorded. CI 94 passed managed, package and
+publication checks, delivering the retained projection change in `0.3.0-dev.94.1`.
+#324 is closed and marked Done.
 
 ### Navigation restoration and activation — #205
 
@@ -264,10 +272,41 @@ Back/Forward through `OnMounted`. Managed and NativeAOT runs pass against local
 candidate `0.3.0-dev.local.activation.2`; this candidate predates `cd625961`, so it
 establishes codec/distribution behavior rather than that final ownership correction.
 Evidence is under `artifacts/journal-package-review`; the normal package CI now
-runs the expanded fixture. Application persistence and native consumer checks
-remain outstanding for #221.
+runs the expanded fixture. CI 94 now publishes the final ownership corrections.
+Issue Browser's opt-in application persistence passes 43 managed contracts, including
+real hosted replay, startup readiness, atomic generation-fenced writes, close decline
+and fresh interaction capture. Captures use the application event queue because
+ReactiveScope.Post can execute during navigation retirement. Review then reproduced
+close-before-first-layout losing the pending imported scroll position (saved zero
+instead of 90). That ownership correction is in progress; the initial 43-case pass
+does not cover it. NativeAOT publication and physical restart evidence remain.
 #222's optional Foundation/C#/WinRT dependency probe has
 passed locked NativeAOT publication and hidden-process redirection without a
-window. It identified and now documents the requirement to register and release
+window. The optional adapter and its reviewed startup/close/reentrant-policy fixes
+are committed in `45d00d6f`; all 22 adapter model contracts and the focused host
+attention contract pass. `1b6d081a` adds isolated registered and MSIX preparation
+fixtures. The unsigned MSIX manifest validates with MakeAppx, but its old probe
+payload is only a packaging test. No registration, signing, installation or native
+foreground proof has run. Final coherent package proof is still required.
+The dependency probe identified the requirement to register and release
 AppInstance ownership on the same native STA thread. Actual OS protocol registration,
 MSIX delivery, application integration and foreground behavior remain unverified.
+
+### Compatible release sets — #245
+
+`3baa1827` adds project-free language-server identity, exact source/compiler/package
+and client compatibility validation, immutable candidate descriptors, and CI
+completion records tied to uploaded artifact IDs/digests. The
+[release contract](../RELEASE-SETS.md) keeps an available verified bundle distinct
+from successful NuGet publication and retains explicit application package pins.
+
+The packed/extracted language-server passes three affected contracts; 16 extension
+contracts and 63 structural/rejection/finalizer cases pass. The latter use explicitly
+synthetic package metadata and completion records, not real CI evidence. Independent
+review has no confirmed outstanding findings: a path-escaping report was retracted
+after inspecting literal AST values and file bytes. Actual producer-generated nested
+Windows paths pass as well. Evidence is under `artifacts/issue245`.
+
+The first coherent ten-package/server/VSIX candidate and CI completion/publication
+remain. Templates #246 are proceeding against this contract, without adding their
+package to this batch or claiming the full onboarding journey is delivered.

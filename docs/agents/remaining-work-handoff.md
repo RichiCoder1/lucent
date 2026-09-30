@@ -20,9 +20,12 @@ the whole implementation request.
 ## Delivery and active work
 
 The [review execution record](../plans/comprehensive-review-execution.md) owns the
-verification details. Main is pushed through `09ef196b2f136fe8fb6d5934bb1b61e6ab5eafef`;
+verification details. Main is pushed through `1cd168d73f429792cd4eaef909fbc204c564cb2f`;
 [CI 93](https://github.com/RichiCoder1/lucent/actions/runs/36653949217) passed managed,
 package verification and publication. `0.3.0-dev.93.1` is published.
+[CI 94](https://github.com/RichiCoder1/lucent/actions/runs/36660194305) passed all
+three jobs and published `0.3.0-dev.94.1`, including the outlet sizing, projection
+and final journal-ownership corrections. The next local batch is not published yet.
 
 | Work | Current boundary | Next action |
 | --- | --- | --- |
@@ -30,10 +33,11 @@ package verification and publication. `0.3.0-dev.93.1` is published.
 | Authoring #321 | Published in 93.1, closed, Project Done | No new work required |
 | Default-content reader binding #325 | Published in 93.1, closed, Project Done | No new work required |
 | Notes #12 | Published correction and real delayed-write Ctrl+S/typing/reopen pass; closed and Project Done | Presentation adoption remains separate |
-| Presentation #323 | New controls adopted in Notes against 93.1; default-size native proof passes; Field grouping exposed a route-outlet minimum-height defect | Publish framework sizing fix `9f3da89a`, update consumer, rerun constrained-size proof and finish browser walkthrough |
-| Repeated work #324 | Parser, protocol and font improvements published; projection buffer-copy removal committed; broader caches and Notes filtering deferred by measurements | Publish projection improvement; defer UIA change because real clients remain listening, with no production experiment retained |
-| Restoration #221 | Journal/state implementation and package-only journal startup proof pass; review corrections committed through `cd625961`, 210 affected cases pass | Publish, then app persistence and interaction proof |
-| Activation #222 | Optional adapter and lifecycle policy implemented locally; 16 model cases pass; first package restore exposed a transitive version gap, now explicitly pinned | Final candidate package proof and independent review, then native registration/foreground coverage |
+| Presentation #323 | Notes consumes 94.1; additional CommandScope sizing fix `3c95e5f1` and two app shrink declarations pass unchanged 520-pixel regression in isolated diagnostic output | Publish correction, verify actual package consumer and finish browser walkthrough |
+| Repeated work #324 | All retained improvements published in 94.1; measured deferrals recorded; closed and Project Done | No new work required |
+| Restoration #221 | Final journal ownership fixes published in 94.1; app opt-in persistence passes 43 contracts and is under independent review | Finish app review, NativeAOT publication and physical restart proof |
+| Activation #222 | Optional adapter committed with 22 passing model contracts; reviewed isolated registration/MSIX fixtures committed | Final coherent package proof, then native registration/foreground coverage |
+| Release identity #245 | Exact server/package/client compatibility, immutable descriptors and CI completion implemented; 63 rejection/integrity contracts pass | First coherent CI publication; complete does not mean NuGet upload succeeded |
 
 The activation probe now explicitly uses STA like Lucent applications. Both
 processes pass and registration/cleanup remain on the same thread. The initial
@@ -43,13 +47,29 @@ and [journal implementation design](../plans/navigation-journal-implementation.m
 define the next contracts. No protocol registration or runtime installation has
 been performed on the owner's machine.
 
-Light Notes restores, builds and publishes against `0.3.0-dev.93.1`. Its new
+Light Notes now restores and builds against `0.3.0-dev.94.1`. Its new
 command buttons, Field-aware TextArea, placeholder colors and metadata contrast
-were exercised with native typing and a real bounded SQLite writer delay. The
+were exercised on 93.1 with native typing and a real bounded SQLite writer delay. The
 latest text survived a new process. Evidence is in
 `artifacts/notes12-native/computer-use-proof.md` and Notes' consumer evidence.
 Its source update remains uncommitted until the next framework package fixes the
-known constrained-height failure; do not close #323 with that failure outstanding.
+known constrained-height failure. Diagnostic DLL substitution isolated the cause
+but is not consumer delivery proof; do not close #323 with that boundary outstanding.
+
+Fresh Component Browser and Issue Browser NativeAOT publications also pass, with
+binary identities under `artifacts/review323-native/build-proof.json`. Their
+walkthrough remains unperformed: Computer Use repeatedly reports a physical Escape
+interruption before any application action, including after an authorized JavaScript
+session reset. No alternative input mechanism was used. Owner permission remains
+granted, but the helper must recover before resuming desktop actions.
+
+Local commit `c4373c2f` patches the VSIX packager's two vulnerable transitive
+dependencies. Locked packaging passes and its npm audit reports zero vulnerabilities;
+this is not an audit of the framework's other dependency trees. It is queued for the
+next push. #245's [release contract](../RELEASE-SETS.md) preserves exact pins and
+authenticated distribution. The reported PowerShell escaping review finding was
+retracted after AST/file-byte confirmation and real producer execution; no speculative
+correction was applied. #246 template implementation is starting independently.
 
 After these corrections, continue navigation #205, onboarding #242, native
 preview #224, diagnostics #243 and transfer #244 according to their technical

@@ -4,8 +4,8 @@ Status: implementation plan for [#205](https://github.com/RichiCoder1/lucent/iss
 [#221](https://github.com/RichiCoder1/lucent/issues/221), and
 [#222](https://github.com/RichiCoder1/lucent/issues/222), September 29, 2026.
 This document selects defaults; it does not claim implementation or execution evidence.
-Finish the current correctness closeout before runtime work. Desktop/focus tests remain
-paused while the owner is gaming; build and console-only work can proceed.
+The current execution state and desktop-testing permission are recorded in the
+[handoff](../agents/remaining-work-handoff.md); this design is not a pause instruction.
 
 [#213 is closed](https://github.com/RichiCoder1/lucent/issues/213#issuecomment-5661455034)
 with package-only managed/NativeAOT and application evidence. Its

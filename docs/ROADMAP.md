@@ -9,19 +9,23 @@ presentation, and measured repeated-work follow-ups before new roadmap features.
 The completed performance evidence below remains tied to its original source.
 
 Notes data-integrity #11 and editing/maintenance #12, navigation lifecycle #320, SVG/UIA #322 and authoring
-#321/#325 are delivered. Lucent `0.3.0-dev.93.1` passed managed/package CI and
+#321/#325 are delivered. Lucent `0.3.0-dev.94.1` passed managed/package CI and
 publication; Light Notes is integrating its presentation APIs. Measured
-repeated-work decisions are complete; the final projection allocation correction
-awaits publication. Navigation #205 now has an
+repeated-work #324 is closed, with the final projection correction published.
+Presentation #323 has a further CommandScope/app shrink correction awaiting
+package delivery and the remaining native walkthrough. Navigation #205 now has an
 [implementation plan](plans/navigation-restoration-activation.md): portable
 restoration first, then an optional Windows activation adapter. Its dependency
 probe is proven without a window; registered protocol and focus behavior remain
 separate work. Journal/interaction restoration and reviewed ownership corrections
 pass 210 affected contracts; package-only managed/AOT journal proof passes.
-Application persistence and activation delivery proof remain. The owner has
-resumed UI/focus testing; coordinate desktop use. Onboarding #245 is starting with
-an explicit release descriptor and project-free server identity; automatic tooling
-acquisition and new publication channels are not enabled by that work.
+Issue Browser opt-in persistence passes 43 application contracts and is under review;
+the activation adapter passes 22 model contracts. Their native delivery proof remains.
+The owner has resumed UI/focus testing, but Computer Use currently stops before an
+application action despite an authorized reset. Onboarding #245 implements the
+[release descriptor and project-free identity](RELEASE-SETS.md), with its first full
+CI run pending. Standard templates #246 are next. Automatic tooling acquisition and
+new publication channels are not enabled by the descriptor work.
 
 Authoring review corrections [#310](https://github.com/RichiCoder1/lucent/issues/310)
 are delivered as `0.3.0-dev.86.1`; [CI 86](https://github.com/RichiCoder1/lucent/actions/runs/35785516739)

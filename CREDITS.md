@@ -247,3 +247,10 @@ release must stay on the same native thread. C#/WinRT's
 [URI projection](https://github.com/microsoft/CsWinRT/blob/master/src/WinRT.Runtime/Projections/Uri.cs)
 maps raw WinRT URI text to `System.Uri.OriginalString`. The probe independently
 checks both boundaries. No upstream implementation source is copied.
+
+## Standard developer templates
+
+The #246 starter templates use the MIT-licensed [.NET template engine](https://github.com/dotnet/templating)
+for standard `dotnet new` metadata, namespace/name transforms and template-package
+conventions, following Microsoft's [custom template documentation](https://learn.microsoft.com/dotnet/core/tools/custom-templates).
+Lucent adds no alternative scaffold engine or application runtime dependency.
