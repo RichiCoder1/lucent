@@ -5,6 +5,37 @@ $root = Split-Path $PSScriptRoot -Parent
 $dotnet = Join-Path $root '.dotnet/dotnet.exe'
 if (-not (Test-Path $dotnet -PathType Leaf)) { $dotnet = 'dotnet' }
 
+function Invoke-FileCheckBatches([string[]] $FixedArguments, [string[]] $Files) {
+    # Keep each native command comfortably below Windows' 32,767-character command-line limit.
+    $maxCommandCharacters = 24000
+    $fixedCharacters = [Math]::Max($dotnet.Length, 'dotnet'.Length) + 520
+    foreach ($argument in $FixedArguments) { $fixedCharacters += $argument.Length + 3 }
+
+    $batch = [System.Collections.Generic.List[string]]::new()
+    $batchCharacters = $fixedCharacters
+    foreach ($file in $Files) {
+        # Reserve a separator and quotes for every path, whether or not it needs quoting.
+        $fileCharacters = $file.Length + 3
+        if ($batch.Count -gt 0 -and $batchCharacters + $fileCharacters -gt $maxCommandCharacters) {
+            $batchArguments = @($FixedArguments) + $batch.ToArray()
+            & $dotnet @batchArguments
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            $batch.Clear()
+            $batchCharacters = $fixedCharacters
+        }
+        if ($batchCharacters + $fileCharacters -gt $maxCommandCharacters) {
+            throw "File path exceeds the safe command-line budget: $file"
+        }
+        $batch.Add($file)
+        $batchCharacters += $fileCharacters
+    }
+    if ($batch.Count -gt 0) {
+        $batchArguments = @($FixedArguments) + $batch.ToArray()
+        & $dotnet @batchArguments
+        if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    }
+}
+
 Push-Location $root
 try {
     & $dotnet tool restore
@@ -14,8 +45,8 @@ try {
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
     if ($files.Count -eq 0) { throw 'No authored C# files were found.' }
 
-    & $dotnet csharpier check @files
-    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    $csharpierArguments = @('csharpier', 'check')
+    Invoke-FileCheckBatches -FixedArguments $csharpierArguments -Files $files
 
     $luiFiles = @(& git ls-files --cached --others --exclude-standard '*.lui' | Where-Object { Test-Path -LiteralPath $_ } | Sort-Object -Unique)
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -28,9 +59,9 @@ try {
     }
     $tooling = Join-Path $root 'src/Lucent.Lui.Tooling/bin/Release/net10.0/Lucent.Lui.Tooling.dll'
     if (-not (Test-Path -LiteralPath $tooling -PathType Leaf)) { throw 'Build LUI tooling before using -NoBuild.' }
-    & $dotnet $tooling --check @luiFiles
     # Preserve drift (1) versus unavailable/invalid input or tool failure (2).
-    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    $luiArguments = @($tooling, '--check')
+    Invoke-FileCheckBatches -FixedArguments $luiArguments -Files $luiFiles
 }
 finally {
     Pop-Location
